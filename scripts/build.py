@@ -13,8 +13,11 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GS_ORDER = [
     'Config.gs', 'Seed.gs', 'Setup.gs', 'Auth.gs',
+    # foundations must load before the pipeline modules that call them
+    'SheetBridge.gs', 'Brain.gs',
     'Tasks.gs', 'Schedules.gs', 'Reports.gs', 'Messaging.gs',
     'Agenda.gs', 'Meetings.gs', 'RulesAck.gs',
+    'Hunting.gs', 'Listing.gs', 'CpcResearch.gs', 'PotentialCpc.gs',
     'Router.gs', 'Registry.gs',
 ]
 MARKER = '/* === PHASE 3 VIEW MODULES SPLICED HERE === */'

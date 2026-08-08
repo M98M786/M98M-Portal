@@ -28,6 +28,12 @@ function mergeActions_() {
     typeof ACTIONS_AGENDA     !== 'undefined' ? ACTIONS_AGENDA     : null,
     typeof ACTIONS_MEETINGS   !== 'undefined' ? ACTIONS_MEETINGS   : null,
     typeof ACTIONS_RULES      !== 'undefined' ? ACTIONS_RULES      : null,
+    typeof ACTIONS_BRIDGE     !== 'undefined' ? ACTIONS_BRIDGE     : null,
+    typeof ACTIONS_BRAIN      !== 'undefined' ? ACTIONS_BRAIN      : null,
+    typeof ACTIONS_HUNTING    !== 'undefined' ? ACTIONS_HUNTING    : null,
+    typeof ACTIONS_LISTING    !== 'undefined' ? ACTIONS_LISTING    : null,
+    typeof ACTIONS_CPC        !== 'undefined' ? ACTIONS_CPC        : null,
+    typeof ACTIONS_POTENTIALCPC !== 'undefined' ? ACTIONS_POTENTIALCPC : null,
   ];
   groups.forEach(function (g) {
     if (!g) return;

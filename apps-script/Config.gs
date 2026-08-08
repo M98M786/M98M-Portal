@@ -63,6 +63,9 @@ const CONFIG_DEFAULTS = {
   ai_max_tokens: '4096',
   email_digest: 'false',
   submission_escalation_hours: '12',
+  // §16.10 pilot gate: while this is anything but 'true', the pipeline never writes to a live
+  // business sheet — intended writes are logged as SHADOW_WRITE so they can be inspected first.
+  pipeline_write_external: 'false',
 };
 
 // §6 connection checklist: per active account ×4 + globals ×11.
