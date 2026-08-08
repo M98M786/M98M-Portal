@@ -38,6 +38,16 @@ Copy the LONG-CODE-HERE part and paste it to Claude (or into the portal's admin 
 3. In the Apps Script editor: **Project Settings (gear icon) → Script Properties → Add script property**.
    Property name: `ANTHROPIC_API_KEY` · Value: paste the key → **Save**.
 
+## Step 4b — Switch on staff sign-in (Google OAuth Client ID) — **the one thing blocking Phase 2**
+
+Claude has built the login screen and the whole backend; it cannot finish this step because Google asks *you* to accept its Terms of Service.
+
+1. In the **pane**, the Google Cloud page is already open (Google Auth Platform → Overview), signed in as m98m786.
+2. Tick the box **"I agree to the Google Cloud Platform Terms of Service"** (leave the emails box unticked if you prefer), then click **Agree and continue**.
+3. Say **"done"** — Claude does the rest itself: creates the project, configures the consent screen, creates the Web-app Client ID with `https://m98m786.github.io` as the allowed origin, and writes it into the portal's CONFIG.
+
+Nothing to copy or paste, and no payment: this is the free tier — creating a sign-in credential costs nothing.
+
 ## Step 5 — Approve staff and set the rota
 
 When the portal is live, sign in with your Google account, open **Admin → Approvals**, approve each staff member, and set their shift in the **Rota** screen. Claude will walk you through it on screen.
