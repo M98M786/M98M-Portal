@@ -1,0 +1,1067 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M98M eBay Defense Agent v1.8</title>
+<style>
+:root{
+  --ink:#16203e; --acc:#2e56c6; --acc-dark:#233f97; --mist:#f2f5fc;
+  --card:#ffffff; --line:#d9e1f4; --sub:#5b6a92; --amber:#b45309; --amber-bg:#fff7e6;
+  --tok-bg:#e3eafc; --tok-empty:#fde9c8; --danger:#b3402e;
+  --tip-bg:#ecf7f0; --tip-line:#c2e5cf; --tip-ink:#1d6b44;
+  --c-process:#2e56c6; --c-late:#d97a2b; --c-defect:#c2453a; --c-negfb:#b83d75; --c-viol:#6d5cd6; --c-cases:#0e7490; --c-dispute:#a16207; --c-appeal:#7c2d92; --c-custom:#0e9384;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--mist);color:var(--ink);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* header */
+header{background:var(--ink);color:#e9effc;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{background:var(--acc);color:#fff;font-weight:800;letter-spacing:.06em;border-radius:9px;padding:8px 11px;font-size:15px}
+.h-title{font-size:19px;font-weight:800;letter-spacing:.10em;text-transform:uppercase}
+.h-sub{font-family:var(--mono);font-size:12px;color:#a9c0f2}
+.wsbar{padding:10px 20px 0;display:flex;gap:8px;flex-wrap:wrap}
+.ws{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-weight:700;color:var(--sub);font-size:13.5px;display:flex;align-items:center;gap:7px;cursor:pointer}
+.ws .wdot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.ws.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.raildiv{padding:9px 12px 5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);border-bottom:1px solid #eef2fb;background:#f7f9fe}
+.chips[hidden]{display:none}
+.count-pill{margin-left:auto;font-family:var(--mono);font-size:12px;background:#223261;border:1px solid #31488c;color:#cdd9f7;border-radius:999px;padding:4px 12px}
+.rulesbtn{font-family:var(--mono);font-size:12px;background:#223261;border:1px solid #31488c;color:#cdd9f7;border-radius:999px;padding:4px 12px}
+.rulesbtn:hover{background:#2a3d75}
+.rules-list{margin:0;padding-left:20px}
+.rules-list li{margin:7px 0}
+.rules-h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:16px 0 6px}
+.rules-h:first-child{margin-top:0}
+
+/* toolbar */
+.toolbar{padding:14px 20px 4px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;border:1.5px solid var(--line);background:#fff;border-radius:10px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:9px 15px;font-weight:600;color:var(--sub)}
+.seg button.on{background:var(--acc);color:#fff}
+.searchwrap{flex:1;min-width:230px;position:relative}
+.searchwrap input{width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+.searchwrap input:focus{border-color:var(--acc);outline:none;box-shadow:0 0 0 3px #2e56c626}
+.slash{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:5px;padding:1px 7px;background:var(--mist)}
+.chips{padding:8px 20px 2px;display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:5px 13px;font-size:13px;font-weight:600;color:var(--sub)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.75;margin-left:4px}
+.recentbar{padding:6px 20px 2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+.recentbar[hidden]{display:none}
+.rchip{border:1px dashed var(--line);background:#fff;border-radius:8px;padding:3px 10px;font-size:12px;color:var(--ink)}
+
+/* layout */
+main{flex:1;display:grid;grid-template-columns:360px 1fr;gap:16px;padding:12px 20px 20px;align-items:start}
+aside{background:var(--card);border:1.5px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 210px);min-height:320px}
+#buyerBox{padding:12px;border-bottom:1.5px solid var(--line);background:#fbfcff}
+#buyerBox[hidden]{display:none}
+#buyerBox textarea{width:100%;min-height:96px;resize:vertical;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+.bbrow{display:flex;gap:8px;margin-top:8px}
+.bbrow button{flex:1;border:0;border-radius:10px;padding:10px;font-weight:700}
+#suggestBtn{background:var(--ink);color:#fff}
+#saveMsgBtn{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+.rail{overflow-y:auto;flex:1}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid #eef2fb;padding:11px 12px 11px 0;position:relative}
+.row{cursor:pointer}
+.row:hover{background:#f4f7fd}
+.row.sel{background:#e7edfb}
+.row .tab{width:5px;align-self:stretch;border-radius:0 4px 4px 0;flex:0 0 5px}
+.row .nm{font-weight:700;font-size:13.5px;letter-spacing:.02em}
+.row .meta{font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row .body{flex:1;min-width:0}
+.vpill{border:1px solid var(--line);border-radius:999px;padding:0 7px;font-size:10.5px}
+.warn-dot{color:var(--amber);font-size:13px}
+.spill{border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:700;color:#fff}
+.bar{height:5px;border-radius:99px;background:#e4eaf8;margin-top:5px;overflow:hidden;max-width:180px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.rail-empty{padding:26px 18px;color:var(--sub);font-size:13.5px;text-align:center}
+.addbtn{margin:10px 12px 6px;border:1.5px dashed var(--acc);color:var(--acc-dark);background:#f5f8ff;border-radius:10px;padding:10px;font-weight:700}
+.logtools{display:flex;gap:8px;padding:0 12px 12px}
+.logtools[hidden]{display:none}
+.logtools button{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:8px;font-weight:700;color:var(--sub);font-size:12.5px}
+.logtools button:hover{color:var(--ink)}
+.custbtns{display:flex;gap:6px}
+.mini{border:1px solid var(--line);background:#fff;border-radius:7px;padding:2px 8px;font-size:12px;color:var(--sub)}
+.mini:hover{color:var(--ink)}
+
+/* detail */
+#detail{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:18px 20px 20px;min-height:320px}
+.d-empty{color:var(--sub);text-align:center;padding:70px 20px;font-size:14.5px}
+.d-cat{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;align-items:center;gap:8px}
+.d-cat .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.d-name{font-size:21px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:4px 0 2px}
+.backbtn{display:none;margin-bottom:10px;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:700;color:var(--ink)}
+.flagbox{margin:10px 0;background:var(--amber-bg);border:1.5px solid #f2d49a;color:#7a4a08;border-radius:10px;padding:10px 13px;font-size:13.5px}
+.tipbox{margin:12px 0 2px;background:var(--tip-bg);border:1.5px solid var(--tip-line);color:var(--tip-ink);border-radius:10px;padding:10px 13px;font-size:13.5px}
+.vtabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+.vtabs button{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:600;font-size:13px;color:var(--sub)}
+.vtabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.fields{margin:12px 0 4px;background:#f7f9fe;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px}
+.fields h4{margin:0 0 8px;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;justify-content:space-between;align-items:center}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:9px}
+.fgrid label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--acc-dark);letter-spacing:.05em;margin-bottom:3px}
+.fgrid input{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+.fgrid input:focus{border-color:var(--acc);outline:none}
+.clearf{border:0;background:none;color:var(--sub);font-size:12px;text-decoration:underline;padding:0}
+.preview{margin-top:12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;padding:15px 16px;white-space:pre-wrap;font-size:14.5px;line-height:1.62;min-height:140px}
+.preview .tok{font-family:var(--mono);font-size:12.5px;border-radius:6px;padding:1px 6px}
+.preview .tok.f{background:var(--tok-bg);color:var(--acc-dark)}
+.preview .tok.e{background:var(--tok-empty);color:var(--amber);border:1px dashed #e7b264}
+#editArea{display:none;width:100%;min-height:260px;margin-top:12px;border:1.5px solid var(--acc);border-radius:12px;padding:14px;font:14.5px/1.62 inherit;resize:vertical}
+.d-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.copybtn{flex:1;min-width:190px;background:var(--acc);border:0;color:#fff;font-weight:800;font-size:15px;letter-spacing:.04em;border-radius:11px;padding:13px 18px}
+.copybtn:hover{background:var(--acc-dark)}
+.ghost{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:11px 15px;font-weight:600;color:var(--ink)}
+.chars{font-family:var(--mono);font-size:12px;color:var(--sub)}
+.chars.hot{color:var(--amber);font-weight:700}
+.editnote{font-size:12px;color:var(--amber);display:none}
+
+/* saved-message detail */
+.msglabel{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:16px 0 6px;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.msgpre{white-space:pre-wrap;background:#f7f9fe;border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.55;min-height:44px}
+#lNotes{width:100%;min-height:70px;resize:vertical;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit;margin-top:4px}
+#lStatus{padding:7px 10px;border:1.5px solid var(--line);border-radius:9px;font:inherit;background:#fff;font-weight:700}
+
+footer{padding:12px 20px 18px;color:var(--sub);font-size:12px;font-family:var(--mono)}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;border-radius:10px;padding:10px 20px;font-weight:700;opacity:0;pointer-events:none;transition:all .18s}
+#toast.show{opacity:1;transform:translateX(-50%)}
+
+/* modal */
+dialog{border:1.5px solid var(--line);border-radius:14px;padding:0;width:min(560px,94vw)}
+dialog::backdrop{background:#16203e66}
+dialog.fb[open]{display:block;position:fixed;inset:0;margin:auto;height:fit-content;z-index:60;box-shadow:0 12px 40px #16203e55}
+.m-head{background:var(--ink);color:#fff;padding:13px 18px;font-weight:800;letter-spacing:.06em}
+.m-body{padding:16px 18px;max-height:70vh;overflow-y:auto}
+.m-body label{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:10px 0 4px}
+.m-body input,.m-body select,.m-body textarea{width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:9px;font:inherit}
+.m-body textarea{min-height:120px;resize:vertical}
+.m-hint{font-size:12px;color:var(--sub);margin-top:5px}
+.m-hint code{font-family:var(--mono);background:var(--tok-bg);border-radius:5px;padding:0 5px;color:var(--acc-dark)}
+.m-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.m-actions{display:flex;gap:10px;justify-content:flex-end;padding:0 18px 16px}
+.m-actions .save{background:var(--acc);border:0;color:#fff;font-weight:800;border-radius:9px;padding:10px 20px}
+.m-actions .cancel{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:10px 16px}
+
+/* mobile */
+@media (max-width:880px){
+  main{grid-template-columns:1fr}
+  aside{max-height:none}
+  body.viewing aside, body.viewing .toolbar, body.viewing .chips, body.viewing .recentbar, body.viewing .wsbar{display:none}
+  body:not(.viewing) #detail{display:none}
+  .backbtn{display:inline-block}
+  .count-pill{margin-left:0}
+  .m-row2{grid-template-columns:1fr}
+}
+@media (min-width:881px){ body.viewing #detail{display:block} }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">M98M</span>
+  <div>
+    <div class="h-title">eBay Defense Agent</div>
+    <div class="h-sub">seller support chats · defects · negatives · late shipment · violations</div>
+  </div>
+  <span class="count-pill" id="countPill"></span>
+  <button class="rulesbtn" id="rulesBtn">📌 Rules</button>
+</header>
+
+<div class="wsbar" id="wsbar"></div>
+
+<div class="toolbar">
+  <div class="seg" role="tablist" aria-label="Mode">
+    <button id="modeCase" class="on">Templates</button>
+    <button id="modeMatch">Match eBay Msg</button>
+    <button id="modeLog">Saved Msgs</button>
+  </div>
+  <div class="searchwrap">
+    <input id="search" type="search" placeholder="Type case or keywords — e.g. late shipment, extortion, cancellation defect…" autocomplete="off">
+    <span class="slash">/</span>
+  </div>
+</div>
+
+<div class="chips" id="chips"></div>
+<div class="recentbar" id="recentWrap" hidden>Recent:&nbsp;<span id="recent"></span></div>
+
+<main>
+  <aside>
+    <div id="buyerBox" hidden>
+      <textarea id="buyerMsg" placeholder="Paste the eBay agent's or eBay system message here…"></textarea>
+      <div class="bbrow">
+        <button id="suggestBtn">Suggest replies</button>
+        <button id="saveMsgBtn">Save to log</button>
+      </div>
+    </div>
+    <div class="rail" id="rail" role="listbox" aria-label="Cases"></div>
+    <button class="addbtn" id="addBtn">＋ New template (My Templates)</button>
+    <div class="logtools" id="logTools" hidden>
+      <button id="backupBtn">⬇ Backup</button>
+      <button id="restoreBtn">⬆ Restore</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+    </div>
+  </aside>
+
+  <section id="detail">
+    <div class="d-empty" id="dEmpty">Search a case on the left, paste an eBay message under <b>Match eBay Msg</b>, or open <b>Saved Msgs</b> to review past threads.<br><br>Press <b>/</b> to jump to search.</div>
+
+    <div id="dBody" hidden>
+      <button class="backbtn" id="backBtn">← All cases</button>
+      <div class="d-cat"><span class="dot" id="dDot"></span><span id="dCat"></span><span id="dCustomTag" hidden style="color:var(--c-custom)">· MY TEMPLATE</span><span id="ovrTag" hidden style="color:#b8860b">· EDITED</span></div>
+      <div class="d-name" id="dName"></div>
+      <div class="flagbox" id="dFlag" hidden></div>
+      <div class="vtabs" id="vTabs"></div>
+      <div class="fields" id="fields" hidden>
+        <h4>Fill in details <button class="clearf" id="clearFields">clear fields</button></h4>
+        <div class="fgrid" id="fGrid"></div>
+      </div>
+      <div class="preview" id="preview"></div>
+      <textarea id="editArea" spellcheck="false"></textarea>
+      <div class="tipbox" id="dTip" hidden></div>
+      <div class="d-actions">
+        <button class="copybtn" id="copyBtn">Copy Reply</button>
+        <button class="ghost" id="saveLogBtn">Save to log</button>
+        <button class="ghost" id="editBtn">Edit template</button>
+        <button class="ghost" id="saveTplBtn" hidden style="border-color:var(--acc);color:var(--acc);font-weight:700">Save template</button>
+        <span class="chars" id="chars"></span>
+        <span class="editnote" id="editNote">editing — keep the [TOKENS] you want as fill-in fields · <a href="#" id="cancelEdit">cancel</a></span>
+        <span class="editnote" id="ovrNote" hidden>customised template · <a href="#" id="restoreOrig">restore original</a></span>
+      </div>
+    </div>
+
+    <div id="logBody" hidden>
+      <button class="backbtn" id="lBack">← All saved msgs</button>
+      <div class="d-cat"><span class="dot" id="lDot"></span><span>SAVED MESSAGE · <span id="lType"></span></span></div>
+      <div class="d-name" id="lOrder"></div>
+      <div class="d-cat" style="margin-top:4px;gap:12px"><span id="lDate"></span><select id="lStatus" aria-label="Status"></select></div>
+      <div class="d-cat" id="lMeta" style="margin-top:6px;text-transform:none;letter-spacing:.03em" hidden></div>
+      <div class="msglabel"><span>eBay's message</span><button class="mini" id="copyMsg">copy</button></div>
+      <div class="msgpre" id="lMsg"></div>
+      <div class="msglabel"><span>My reply</span><button class="mini" id="copyReply">copy</button></div>
+      <div class="msgpre" id="lReply"></div>
+      <div class="msglabel"><span>Notes (reference no · agent name · next step)</span></div>
+      <textarea id="lNotes" placeholder="e.g. Ref SR-482913 · agent Priya · follow up Tuesday if no email"></textarea>
+      <div class="d-actions">
+        <button class="ghost" id="lEdit">Edit entry</button>
+        <button class="ghost" id="lDel" style="color:var(--danger);border-color:#e8c2bc">Delete</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>M98M LTD · internal seller-defence tool · sources: EBAY_LIVE_CHAT_SCRIPTS.xlsx + Product_Policy_Violation.xlsx · pairs with CS Reply Agent v1.7 · v1.8</footer>
+<div id="toast">Copied ✓</div>
+
+<dialog id="modal">
+  <div class="m-head" id="mTitle">New Template</div>
+  <div class="m-body">
+    <label for="mName">Case name</label>
+    <input id="mName" maxlength="90" placeholder="e.g. DEFECT — COURIER STRIKE WEEK">
+    <label for="mCat">Category</label>
+    <select id="mCat"></select>
+    <label for="mText">Reply text</label>
+    <textarea id="mText" style="min-height:170px" placeholder="Hello, thank you for taking my chat. I'd like to request a review of…"></textarea>
+    <div class="m-hint">Tip: write fill-in fields in square brackets and CAPITALS, e.g. <code>[ORDER NUMBER]</code>, <code>[TRACKING NUMBER]</code> — the tool turns them into input boxes automatically.</div>
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="mCancel">Cancel</button>
+    <button class="save" id="mSave">Save template</button>
+  </div>
+</dialog>
+
+<dialog id="logModal">
+  <div class="m-head" id="gTitle">Save Message to Log</div>
+  <div class="m-body">
+    <div class="m-row2">
+      <div>
+        <label for="gOrder">Order / reference no.</label>
+        <input id="gOrder" maxlength="60" placeholder="e.g. 12-34567-89012 or SR-482913">
+      </div>
+      <div>
+        <label for="gType">Type</label>
+        <select id="gType"></select>
+      </div>
+    </div>
+    <div class="m-row2">
+      <div>
+        <label for="gAccount">Account</label>
+        <input id="gAccount" list="accList" maxlength="60" placeholder="which seller account">
+        <datalist id="accList">
+          <option value="perfectdealsm98m"></option><option value="nexgenm98m"></option>
+          <option value="Growmore786shop"></option><option value="Happyshopperhub"></option>
+          <option value="Hasibulllah"></option><option value="Zareenltd"></option>
+        </datalist>
+      </div>
+      <div>
+        <label for="gAgent">Agent name</label>
+        <input id="gAgent" maxlength="60" placeholder="e.g. Priya">
+      </div>
+    </div>
+    <div class="m-row2">
+      <div>
+        <label for="gRef">Reference no.</label>
+        <input id="gRef" maxlength="60" placeholder="e.g. SR-482913">
+      </div>
+      <div>
+        <label for="gStatus">Status</label>
+        <select id="gStatus"></select>
+      </div>
+    </div>
+    <label for="gMsg">eBay's message</label>
+    <textarea id="gMsg" placeholder="Paste what eBay / the agent wrote…"></textarea>
+    <label for="gReply">My reply</label>
+    <textarea id="gReply" placeholder="The reply you sent (or will send)…"></textarea>
+    <label for="gNotes">Notes</label>
+    <input id="gNotes" maxlength="300" placeholder="Reference no · agent name · outcome expected date">
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="gCancel">Cancel</button>
+    <button class="save" id="gSave">Save message</button>
+  </div>
+</dialog>
+
+<dialog id="rulesModal" style="width:min(680px,94vw)">
+  <div class="m-head">📌 Golden Rules — Har Chat Se Pehle</div>
+  <div class="m-body" style="font-size:14px;line-height:1.6">
+    <div class="rules-h">Golden rules</div>
+    <ol class="rules-list">
+      <li><b>Order of operations:</b> pehle WRITTEN APPEAL (FA-1 / appeal form / VA-series) → decline ho to phir chat — aur chat ka pehla block hamesha: appeal date + decline date + reference. Appeal ke baghair "removal" chat = "submit an appeal first" ka deflection.</li>
+      <li>Blocks <b>EK EK kar ke</b> bhejo — poora script kabhi paste nahi.</li>
+      <li>Sirf wohi facts jo tracking/records <b>genuinely support</b> karein — ek false claim poore account ke appeals kharab karta hai.</li>
+      <li>Har chat ka <b>CLOSE block mandatory</b> (U-6): written confirmation + reference number + "no defect" confirmation.</li>
+      <li>Max <b>~10 orders</b> per session. Strong cases pehle.</li>
+      <li><b>Teen-qadam ladder:</b> Ask 1 → fail → Ask 2 (usi evidence par narrow re-ask) → fail → Ask 3 (manual review + record + reference number). Ask 3 ke baad behes band — U-6 close karo; agla rasta written appeal ya 2-3 din baad naya agent, naye hook ke saath.</li>
+      <li>Written appeal pehle (FA-1 / VA-series), chat second opinion — <b>dono mein wohi ek hook</b>, kabhi contradict nahi. Ek appeal = ek strongest hook.</li>
+      <li>British English, polite, calm — agent se <b>kabhi behes nahi</b>. Agent rude ho to bhi tone same; politely close karo, new chat mein doosre agent se try karo.</li>
+      <li>Chat ke baad turant <b>Saved Msgs</b> mein log karo: date, account, agent name, reference number, orders, outcome — aur screenshot save karo.</li>
+    </ol>
+    <div class="rules-h">Kab submit nahi karna (late shipment)</div>
+    <ul class="rules-list">
+      <li>Tracking sirf upload hui, acceptance scan handling time ke andar <b>nahi</b>.</li>
+      <li>Delivery Latest EDD ke <b>baad</b> hui.</li>
+      <li>Koi scan record hi nahi. Upload date akela kisi path mein qualify nahi karta.</li>
+      <li>JJD-prefix tracking = usually Evri (Yodel nahi) — courier name confirm kar ke bolo.</li>
+    </ul>
+    <div class="rules-h">Kab chat / appeal bilkul nahi karni (violations)</div>
+    <ul class="rules-list">
+      <li>Signal/RFID copying devices, branded replica items, ya koi bhi clearly restricted product — appeal karne se account par review attention aati hai. Removal accept karo, delisted rakho, aage barho.</li>
+    </ul>
+    <div class="rules-h">Returns &amp; disputes</div>
+    <ul class="rules-list">
+      <li>Har return <b>kholte waqt photos/video</b> — box, label, contents. Return mein ghalat/khaali item aaye to CF-7, sirf documented facts ke saath.</li>
+      <li>Dispute khulte hi pehla kaam PD-1: <b>deadline + evidence list + upload route</b>. Deadline miss = automatic loss.</li>
+      <li>Chargeback (CF-6) ki <b>deadline pehle</b> — challenge submit karo, phir chat se evidence note karwao aur protection + fee waiver confirm karo.</li>
+    </ul>
+    <div class="rules-h">Reference number</div>
+    <ul class="rules-list">
+      <li>Bina reference number "removal" aksar account par reflect nahi hota. Har chat U-6 close ke sath khatam karo; 48 ghante baad update na ho to <b>FUP-1</b>.</li>
+    </ul>
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="rulesClose">Close</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const VERSION="1.8";
+const DB=[
+{"id": "u1-opening-block", "cat": "Openers & Process", "name": "U-1 · Opening Block (Universal)", "kw": ["opener", "opening", "start chat", "universal", "hello agent"], "flag": "", "tip": "Opener chhota rakho. Scene-setting nahi — agla block hamesha facts wala. Agent 'How can I help today?' bole to seedha relevant scenario ka Block 2 (facts) paste karo.", "variants": [{"label": "Opener", "text": "Hello, I hope you are having a good day. I would like assistance with [Topic — e.g. a defect / a feedback / a removed listing] on order [Order Number] (buyer: [Buyer Username])."}]},
+{"id": "u1b-appeal-first-gate", "cat": "Openers & Process", "name": "U-1B · Appeal-First Gate — 'Pehle Appeal Karo' Ka Jawab", "kw": ["appeal first", "submit an appeal", "seller help first", "appeal declined", "appeal rejected", "after appeal", "further review", "cannot see any appeal"], "flag": "Only say the appeal was submitted or declined when it truly was — the dates and reference must match the record. If no appeal exists yet, submit it first; never claim otherwise.", "tip": "eBay ka gate yehi hai: pehle written appeal, decline ke baad chat. Har chat appeal date + decline date + reference ke saath kholo — 'appeal first' deflection shuru mein hi khatam. Har appeal Saved Msgs mein log karo (status: Declined ✗) taake dates hamesha haath mein hon.", "variants": [{"label": "Opener — appeal declined", "text": "Hello, I hope you are having a good day. I am contacting you regarding order [Order Number]. We submitted a formal appeal for the [Defect / Feedback / Violation] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe a specific point was not assessed."}, {"label": "Opener — appeal pending, evidence add", "text": "Hello, I hope you are having a good day. We submitted an appeal on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it is currently under review. I am not asking you to pre-empt the outcome — I would like to make sure one piece of evidence is attached before the decision: [Evidence, with dates]."}, {"label": "If: \"Submit an appeal via Seller Help first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}, {"label": "If: \"I cannot see any appeal\"", "text": "The appeal was submitted on [Appeal Date] through [Route — Seller Help / the report option], and the outcome arrived on [Decline Date]. Could you please check under reference [Appeal Reference], or advise where the record would appear on your side?"}, {"label": "If: \"The appeal decision is final\"", "text": "I understand the first decision stands as issued. My request is for a review of a specific point that I do not believe was assessed: [New Point]. Could that point be reviewed, or could you advise the correct route to raise it after a declined appeal?"}, {"label": "Agar appeal ki hi nahi (honest)", "text": "Understood — I will submit the appeal first. So that it is done correctly, could you please confirm exactly what to include for this case type, and note today's chat on the account with a reference number?"}]},
+{"id": "u2-identity-check", "cat": "Openers & Process", "name": "U-2 · Account / Identity Check", "kw": ["account holder", "verify", "registered email", "identity", "account name"], "flag": "", "tip": "Jis account se chat khuli hai wohi naam do — perfectdealsm98m, nexgenm98m, Growmore786shop, Happyshopperhub, Hasibulllah, Zareenltd. Ghalat account name = wasted chat.", "variants": [{"label": "Details", "text": "Of course. The account is [Account Name], and the registered email is [Registered Email]. Please let me know if you need anything else to verify."}, {"label": "If: \"Are you the account holder?\"", "text": "Yes, I am contacting you from the [Account Name] seller account regarding this order."}]},
+{"id": "u3-polite-persistence", "cat": "Openers & Process", "name": "U-3 · Polite Persistence (Ek Dafa)", "kw": ["check again", "review once more", "persistence", "declined", "checked already"], "flag": "Only once, with evidence. If the agent declines again, go to U-4 escalation — never a third push.", "tip": "Persistence sirf ek dafa, evidence ke sath. Uske baad escalate ya Seller Help route. Teesri dafa push = behes, jiska koi faida nahi.", "variants": [{"label": null, "text": "I understand your position, and I appreciate you checking. However, could you please review the [Tracking Record / Message History / Refund Record] on the order once more? The evidence there directly supports this request."}]},
+{"id": "u4-escalation-request", "cat": "Openers & Process", "name": "U-4 · Escalation Request", "kw": ["escalate", "manual review", "appeal route", "no escalation", "relevant team", "affecting the account"], "flag": "", "tip": "Escalation na mile to kam az kam chat ko account par note karwao — future appeal mein kaam aata hai.", "variants": [{"label": "Ask", "text": "Thank you for checking. As this is affecting the account, could you please escalate this for a manual review by the relevant team, or advise the correct route to appeal it with the supporting evidence?"}, {"label": "If: \"There is no escalation\"", "text": "Understood. Could you please note this chat on the account with the details I have shared, and provide the reference number, so it is on record for any future review?"}]},
+{"id": "u5-transfer-specialist", "cat": "Openers & Process", "name": "U-5 · Transfer to Specialist Team", "kw": ["transfer", "specialist team", "department", "handles", "wrong team"], "flag": "", "tip": "Ghalat department mein time waste na karo — pehle 2 minutes mein hi transfer maang lo agar agent topic se unfamiliar lage.", "variants": [{"label": "Ask", "text": "Could you please transfer this chat to the team that handles [Defects / Feedback / Listings / Payments]? I believe they will be able to review this directly."}, {"label": "If: \"I can help with that here\"", "text": "Thank you, that is great. [Wapas scenario ke facts block par jao.]"}]},
+{"id": "u6-close-block", "cat": "Openers & Process", "name": "U-6 · Close Block (Mandatory — Har Chat)", "kw": ["close", "reference number", "confirm in writing", "end chat", "before we finish", "no reference"], "flag": "Rule: no chat ends without a reference number. If it doesn't reflect in 48 hours, use FUP-1.", "tip": "RULE: bina reference number chat band nahi hogi. 48 ghante baad update na ho to FUP-1 (follow-up chat) use karo.", "variants": [{"label": "Close", "text": "Thank you so much for your help. Before we finish: 1) Could you please confirm in writing that the [Defect / Feedback / Violation] has been removed and will no longer count on the account? 2) Could you please provide a reference number for this chat?"}, {"label": "If: \"It will update in 24-48 hours\"", "text": "Thank you. Could you please still provide the reference number now, so I can follow up if it does not update?"}, {"label": "If: \"No reference number available\"", "text": "Could you please share your agent name and the case/chat ID shown on your side, so I have something on record?"}, {"label": "Extra: request transcript", "text": "Could you please also send a copy of this chat transcript to the registered email address on the account, for our records?"}]},
+{"id": "u7-multiple-orders", "cat": "Openers & Process", "name": "U-7 · Multiple Orders — Same Session", "kw": ["more orders", "next order", "same situation", "multiple orders", "session"], "flag": "Max ~10 orders per session — strong cases first.", "tip": "Max ~10 per session. Har naye order ki facts line pehle se fill kar ke rakho taake chat fast chale.", "variants": [{"label": "Ask next", "text": "Thank you very much. I have a few more orders with the same situation and the same type of tracking evidence. May I share the next order number?"}, {"label": "If: \"Open a new chat for each\"", "text": "Understood, thank you. Could you please provide the reference number for the orders we have covered so far in this chat?"}]},
+{"id": "u8-seller-help-route", "cat": "Openers & Process", "name": "U-8 · Agent Says: Raise It via Seller Help", "kw": ["seller help", "dashboard", "raise it via", "submit through", "only route"], "flag": "", "tip": "Seller Help (ebay.co.uk/sellerhelp/defect) primary route hai; chat second opinion. Dono jagah same facts — kabhi contradict nahi.", "variants": [{"label": "Reply", "text": "Thank you — I will also submit it through the Seller Help dashboard. Could you please note this chat on the account so the reviewing team can see the details, and provide the reference number for this conversation?"}, {"label": "If: \"Seller Help is the only route\"", "text": "Understood. Just to confirm — is there anything specific I should include in the Seller Help submission for the best chance of a successful review?"}, {"label": "If already declined", "text": "The Seller Help appeal was already submitted on [Appeal Date] and declined on [Decline Date], reference [Appeal Reference]. Could you please advise the route that follows a declined appeal, and note this chat on the account?"}]},
+{"id": "u9-alternative-asks", "cat": "Openers & Process", "name": "U-9 · Alternative Asks (Jab Pehla Ask Ruk Jaye)", "kw": ["alternative ask", "stuck", "another way", "rephrase", "different angle", "does it qualify", "criteria"], "flag": "Use at most two of these in one chat — beyond that it reads as arguing. Pick the angle, not the volume.", "tip": "Jab agent ka jawab ruk jaye to naya argument nahi — naya ANGLE. Narrow yes/no, criteria, formal route, note-on-record, manual review, ya time-bound. Ek chat mein in mein se 2 se zyada nahi.", "variants": [{"label": "Narrow yes/no ask", "text": "May I put this more narrowly: on the specific point of [Specific Point], does this qualify for review under the policy — yes or no? If yes, could it please be actioned or escalated?"}, {"label": "Criteria ask", "text": "Could you please tell me the exact criteria this request is assessed against? If any criterion is not met, I would like to know which one, so that I can address it properly."}, {"label": "Formal route ask", "text": "If this cannot be actioned on this chat, could you please tell me the exact formal route — the form or the team — where this specific request is reviewed, and what evidence carries the most weight there?"}, {"label": "Note-on-record ask", "text": "Could you please note on the account, in today's chat record, that this request was raised with the evidence I have shared, so that any future reviewer can see it?"}, {"label": "Manual review ask", "text": "I appreciate your view. As outcomes can differ between reviews, could this please be submitted for a manual review by the specialist team, rather than decided on this chat alone?"}, {"label": "Time-bound ask", "text": "Understood. If I provide [Missing Item — e.g. the courier's proof of delivery] within [Timeframe], could this request then be reviewed? Could you please note that on the record with the reference number?"}]},
+{"id": "u10-tricky-questions", "cat": "Openers & Process", "name": "U-10 · Tricky Agent Questions — Ready Answers", "kw": ["why so many", "are you a bot", "reading from a script", "which policy", "screenshot", "already appealed", "waited so long", "have you contacted the buyer", "anything else"], "flag": "Answer honestly — never invent a policy name, a date, or contact that did not happen. One caught untruth ends the credibility of the whole chat and the account's appeals.", "tip": "Agent ke curveball sawalon ke ready jawab. Golden rule: har jawab sach. Policy ka naam pata na ho to maan lo aur agent se confirm karwao. Buyer-contact wali line sirf tab jab thread par waqai messages hon.", "variants": [{"label": "If: \"Why did you wait so long?\"", "text": "That is a fair question. I verify the tracking records properly and raise appeals in batches, so that every request I bring to you is accurate. The evidence itself is unchanged and is on the order."}, {"label": "If: \"Why are there so many requests?\"", "text": "We handle a high order volume, so even a small percentage appears as several cases. Each request is individually supported by its own record, and I am happy to go through them one at a time."}, {"label": "If: \"Are you reading from a script?\"", "text": "I prepare my wording in advance so that the details are accurate and your time is not wasted. You are speaking with the account holder, and I am happy to answer anything directly."}, {"label": "If: \"Which policy do you mean?\"", "text": "I mean the policy area covering [Specific Point — e.g. transactions where tracking shows on-time handling]. I do not have the internal policy name in front of me — could you please check the policy that covers this and confirm how the case is assessed under it?"}, {"label": "If: \"Can you send a screenshot?\"", "text": "Yes, of course. Could you please tell me where to upload or send it? The same records are also visible on the order itself: [Where — the tracking events / the messages dated [Date]]."}, {"label": "If: \"Have you contacted the buyer?\"", "text": "Where relevant, our contact with the buyer is on the order thread, dated [Date]. This request, however, is based on the order records rather than on the buyer's response."}, {"label": "If: \"You have appealed this before\"", "text": "That is correct — the earlier review considered [Earlier Point]. This request is on a different point, [New Point], which I do not believe was assessed. Could it be reviewed on that basis?"}, {"label": "If: \"The decision would not change\"", "text": "I understand that is your view. As outcomes can differ between reviews, could this please be submitted for a manual review by the specialist team, with the evidence noted, so that the decision is on record either way?"}, {"label": "If: \"Anything else?\" (kaam adhoora)", "text": "Yes, please — before we move on, could we complete the current request: [Pending Item]? Once that is confirmed with a reference number, I have one more order to raise."}]},
+{"id": "fup1-follow-up", "cat": "Openers & Process", "name": "FUP-1 · Follow-Up — Promised Removal Not Reflected", "kw": ["follow up", "still showing", "not removed", "promised", "previous chat", "no record of that", "declined after review"], "flag": "Only 48 hours after the promised removal — not before. The reference number is the whole case.", "tip": "Isi liye reference number zaroori hai. Yeh chat 48 ghante ke baad hi karo, pehle nahi.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I am following up on a previous chat regarding order [Order Number]."}, {"label": "2 · Facts", "text": "On [Date], I was advised that the [Defect / Feedback] on this order would be removed. The chat reference number is [Reference Number]."}, {"label": "3 · Ask 1", "text": "However, it is still showing on the account. Could you please check that chat and confirm the removal is completed today?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to check once more against the reference number [Reference Number] from [Date]? That chat records the confirmation that the removal would be completed, and the promise itself is the record here. On that basis, could the removal please be completed today?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the promised removal has not been honoured, could this please be escalated to the team that can action it, with the reference [Reference Number] and today's chat noted on the account? Could you please provide a new reference number for this escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"I have no record of that\"", "text": "The reference number I was given is [Reference Number], from [Date]. Could you please check the chat history on the account, or escalate this so the promised removal is honoured?"}, {"label": "If: \"It was declined after review\"", "text": "Thank you for letting me know. Could you please share the reason for the decline, so I can address it in a formal appeal?"}]},
+{"id": "provide-order-details", "cat": "Openers & Process", "name": "Provide Order & Tracking Details", "kw": ["order number", "details", "tracking details", "which order", "provide information"], "flag": "", "tip": "Chat start karne se pehle saari details ready rakhein — jitni der aap dhoondte hain, utna chance hai agent chat close kar de.", "variants": [{"label": null, "text": "Of course. Order number: [ORDER NUMBER]. Item: [ITEM NAME]. Order date: [ORDER DATE]. Dispatch date: [DISPATCH DATE]. Courier: [COURIER NAME], tracking: [TRACKING NUMBER]. Please let me know if you need anything else."}]},
+{"id": "agent-says-no", "cat": "Openers & Process", "name": "Agent Says No — Accept Gracefully", "kw": ["refused", "cannot remove", "unable to remove", "denied", "final decision", "not possible"], "flag": "", "tip": "Firm no par behas na karein — chat ka record account par rehta hai. Naya hook ya naya evidence ho to 2-3 din baad fresh chat try karein; wohi purana point dobara na dohrayein.", "variants": [{"label": null, "text": "I understand, and thank you for checking it so thoroughly — I appreciate your time. Could you please add a note on the account that I raised this in good faith with the details provided? If the [TEAM NAME] team is able to take another look at any point, I would be grateful. Thank you again, and have a good day."}]},
+{"id": "appeal-form-text", "cat": "Openers & Process", "name": "Appeal Form — 'Additional Info' Box", "kw": ["appeal form", "additional info", "written appeal", "request defect removal form", "report a problem"], "flag": "", "tip": "Form mein sirf facts + dates — koi kahani nahi. 3-4 lines kaafi hain; reviewer ko wohi chahiye jo system mein verify ho sake. Feedback ke written appeal ke liye FA-1 use karo.", "variants": [{"label": "Late shipment", "text": "Requesting removal of the late shipment defect on order [ORDER NUMBER]. Tracking [TRACKING NUMBER] ([COURIER NAME]) shows the acceptance scan on [ACCEPTANCE SCAN DATE], within my [HANDLING TIME] handling time, and delivery on [DELIVERY DATE], within the estimated delivery date. The tracking validates on-time handling, so the defect qualifies for removal under seller protections."}, {"label": "Defect (general)", "text": "Requesting removal of the defect on order [ORDER NUMBER], recorded on [DEFECT DATE]. Reason: [SPECIFIC REASON — one or two factual lines with dates]. Supporting details: [EVIDENCE — tracking event / message date / refund date]. Thank you for reviewing."}, {"label": "INR defect — delivered", "text": "Requesting removal of the defect on order [Order Number], relating to an Item Not Received case. Tracking [Tracking Number] ([Courier Name]) shows delivery on [Delivery Date] at [Delivery Time] to the buyer's address. As delivery is confirmed by the courier's record, the defect qualifies for removal. Thank you for reviewing."}, {"label": "Cancellation — buyer requested", "text": "Requesting removal of the cancellation defect on order [Order Number]. The buyer requested the cancellation on [Request Date] — their request is on the order — and the full refund was issued on [Refund Date]. As the cancellation was made at the buyer's request, I respectfully request that the defect be removed. Thank you for reviewing."}, {"label": "Case resolved before escalation", "text": "Requesting removal of the \"case closed without seller resolution\" defect on order [Order Number] (case [Case ID]). We responded on [Response Date] and issued a full refund on [Refund Date], before the case was escalated — the refund record is on the order. On that basis, the defect qualifies for review. Thank you for reviewing."}, {"label": "Address issue cancellation", "text": "Requesting removal of the cancellation defect on order [Order Number]. The delivery address provided was [Address Issue — incomplete / undeliverable]; we contacted the buyer on [Contact Date] and received no correction, and the messages are on the order. As the cancellation resulted from the address provided, I respectfully request removal. Thank you for reviewing."}, {"label": "Re-appeal (defect, decline ke baad)", "text": "Further to my appeal of [First Appeal Date] regarding the defect on order [Order Number], which was declined on [Decline Date] (reference [Appeal Reference]): I am requesting a further review on a specific point that I do not believe was assessed — [New Point or New Evidence, with dates]. The supporting record is on the order and can be verified there. Thank you for reviewing."}]},
+{"id": "lsc1-scan-within-handling", "cat": "Late Shipment", "name": "LSC-1 · Path A — Scan Within Handling Time", "kw": ["late shipment", "acceptance scan", "handling time", "tracking was uploaded late", "upload time", "sent on time"], "flag": "Acceptance scan = the courier's first physical scan. Label creation or tracking upload alone does NOT qualify.", "tip": "Acceptance scan = courier ka pehla physical scan. Sirf label create/upload qualify NAHI karta. Pehle Seller Hub par scan verify karo, phir chat.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the late shipment defect on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a late shipment defect on order [Order Number]."}, {"label": "2 · Facts", "text": "The parcel received its courier acceptance scan from [Courier Name] on [Acceptance Scan Date] at [Time] — within the handling time. Tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "As the courier's own scan confirms the parcel was handed over within the handling time, could you please review the scan record and remove this defect?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand your position. May I ask you to open the tracking events once more? The carrier acceptance scan is recorded on [Acceptance Scan Date] at [Time], and my handling time is [Handling Time] — on that single point, an on-time handover, does this defect qualify for removal, yes or no?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As we read the scan record differently, could this please be escalated for a manual review by the seller performance team, with the acceptance scan of [Acceptance Scan Date] noted on the record? I will also raise a further written appeal with the same evidence. Could you please provide the reference number for this escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The tracking was uploaded late\"", "text": "The upload time is separate from the shipment itself — the acceptance scan shows the parcel was physically handed over on [Acceptance Scan Date] at [Time], within the handling time. Could you please review the scan record rather than the upload time?"}, {"label": "If: \"I cannot remove it\"", "text": "I understand. Could you please advise the correct route to appeal this with the tracking evidence? I will submit it through Seller Help as well."}, {"label": "If: \"The buyer still received it late\"", "text": "I understand. The late shipment metric is assessed on handling, and the acceptance scan shows an on-time handover — the transit delay after handover sits with the courier. Could the scan record please be reviewed on that basis?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "lsc2-delivered-within-edd", "cat": "Late Shipment", "name": "LSC-2 · Path B — Delivered Within Latest EDD", "kw": ["latest edd", "estimated delivery", "delivered on time", "delivery window", "on or before"], "flag": "Verify the Latest EDD in Seller Hub — never guess. Delivery AFTER the latest EDD → do not submit.", "tip": "Latest EDD Seller Hub se verify karo, guess nahi. EDD ke baad delivery = submit mat karo.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the late shipment defect on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a late shipment defect on order [Order Number]."}, {"label": "2 · Facts", "text": "The parcel was delivered on [Delivery Date] at [Delivery Time] — on or before the latest estimated delivery date of [Latest EDD]. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "As the buyer received the parcel within the promised delivery window, could you please review the delivery record and remove this defect?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to compare the two dates once more: delivery on [Delivery Date], and the latest estimated delivery date of [Latest EDD]? The delivery falls on or before the latest estimate, so the buyer received the order within the promised window. On that specific point, does the defect qualify for removal?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the delivery date sits within the latest estimate, could this please be escalated for a manual review, with the delivery date of [Delivery Date] against the estimate of [Latest EDD] noted on the record? I will also raise a further written appeal with the same details. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The scan was after handling time\"", "text": "I understand — my request is under the delivery date itself: the parcel arrived on [Delivery Date], within the latest estimated delivery date of [Latest EDD], so the buyer experience was not affected. Could you please review it on that basis?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "lsc3-bulk-session", "cat": "Late Shipment", "name": "LSC-3 · Bulk Session — Multiple Orders (Max ~10)", "kw": ["bulk", "multiple orders", "few orders", "one by one", "late shipment defects on a few"], "flag": "Max ~10 orders, strong cases first — weak bulk submissions attract rejection flags. Every per-order line must be verified in Seller Hub before the chat.", "tip": "Strong pehle, phir EDD-upgraded Medium. Har order ki line chat se PEHLE fill karo taake flow fast rahe. 10 se zyada kabhi nahi — bulk weak submissions = rejection flags. JJD-prefix tracking = usually Evri (Yodel nahi) — courier confirm kar ke bolo.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted appeals for late shipment defects on several orders on [Appeal Date], and they were declined. Each order has supporting tracking evidence, and I would like to request a further review. May I share them one by one?"}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of late shipment defects on a few orders, all with supporting tracking evidence. May I share them one by one?"}, {"label": "Per-order (scan path)", "text": "Order [Order Number]: acceptance scan [Scan Date] at [Time], within handling time. Tracking: [Tracking Number] ([Courier Name])."}, {"label": "Per-order (EDD path)", "text": "Order [Order Number]: delivered [Delivery Date] at [Time], on or before the latest EDD of [Latest EDD]. Tracking: [Tracking Number] ([Courier Name])."}, {"label": "Final ask 1", "text": "That is all of them. Could you please review the tracking records and remove the late shipment defects for the orders above?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand a blanket removal may not be possible. Could each order above please be assessed individually, and could you list which qualify and which do not, with the reason for each? I will then appeal only the remaining ones through the correct route."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for going through them. For the orders that were declined, could the batch please be escalated for a manual review with the per-order tracking lines noted on the record, under one reference number? I will raise a further written appeal for the same orders as well."}, {"label": "Close ✓ (bulk)", "text": "Thank you so much. Could you please confirm the removal for each order above, and provide one reference number covering this chat? Could you also confirm no defects will remain on the account for these orders?"}, {"label": "If: \"Open a separate chat per order\"", "text": "Understood, thank you. Could you please provide the reference number for the orders we have already covered in this chat?"}, {"label": "If: \"Some qualify, some do not\"", "text": "Thank you — could you please list which orders were removed and which were declined, with the reason, so I can appeal the remaining ones correctly?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "lsc5-protection-window", "cat": "Late Shipment", "name": "LSC-5 · Ask About Active Protection Windows (Strikes / Weather)", "kw": ["protection window", "industrial action", "strike", "severe weather", "automatic protection", "carrier disruption", "royal mail strike"], "flag": "Ask first, claim second — where a protection window exists for the period, removals are often automatic and arguing individual orders is unnecessary.", "tip": "Strike ya storm week ke baad pehle YEH chat karo. Agar protection window active hai to defects khud hat jate hain — order-by-order behes ki zaroorat nahi. Window ke exact dates likh kar Saved Msgs mein rakho.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I have a question about seller protections for recent courier disruption."}, {"label": "2 · Ask (window)", "text": "Between [Start Date] and [End Date], deliveries in our area were affected by [Disruption — e.g. industrial action at the courier / severe weather]. Could you please confirm whether an automatic seller protection window applies to that period, and whether late shipment defects and related feedback from those dates will be removed?"}, {"label": "3 · Ask (orders)", "text": "If a protection window does apply, could you please confirm the exact qualifying dates, and check whether the following orders fall within it: [Order Numbers]?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check the courier disruption for [Start Date] to [End Date] against eBay's own announcements or protection records for that period? If a protection window was published for those dates, the affected orders would qualify automatically."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the protection-window question for [Start Date] to [End Date] please be escalated to the team that manages seller protections, with the dates and the order numbers noted on the record? Could you please provide the reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"No protection applies\"", "text": "Thank you for checking. In that case I will appeal the affected orders individually with their tracking evidence. Could you please provide the reference number for this chat?"}]},
+{"id": "late-carrier-delay", "cat": "Late Shipment", "name": "Late Shipment — Courier Delay / Disruption", "kw": ["courier delay", "carrier delay", "weather", "strike", "royal mail delay", "network disruption", "outside my control"], "flag": "Only use when the acceptance scan really is within your handling time — if you dispatched late, this appeal fails and weakens the chat.", "tip": "Agar scan late tha to yeh template use na karein — appeal wahan lagayein jahan saboot hai. Sach mein courier ka issue ho to disruption ka naam aur period bhi dein, appeal aur strong hoti hai.", "variants": [{"label": null, "text": "On order [ORDER NUMBER], I dispatched within my handling time — the acceptance scan is on [ACCEPTANCE SCAN DATE] ([TRACKING NUMBER], [COURIER NAME]). The delay after that point happened inside the courier network, during [DISRUPTION — e.g. the severe weather / industrial action] affecting deliveries in that period. As I met my dispatch obligations and the delay was outside my control, could this defect please be reviewed for removal under seller protections?"}]},
+{"id": "dc1-inr-defect-delivered", "cat": "Defects & Cases", "name": "DC-1 · INR Defect — Tracking Shows Delivered", "kw": ["inr defect", "item not received defect", "tracking delivered", "system generated", "recorded automatically"], "flag": "", "tip": "Chat = second opinion; primary route Seller Help dashboard. Dono jagah same exact facts.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the defect on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a defect on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The defect relates to an Item Not Received case. However, tracking shows the parcel was delivered on [Delivery Date] at [Delivery Time] to the buyer's address. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "As delivery is confirmed by the courier's own record, could you please review and remove this defect from the account?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand your position. May I ask you to open the tracking once more? The courier's record shows delivery on [Delivery Date] at [Delivery Time] to the address on the order. On that single point — confirmed delivery — does this defect qualify for removal, yes or no?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the courier's delivery record stands, could this please be escalated for a manual review with the delivery scan noted on the record? I will also raise a further written appeal with the same evidence. Could you please provide the reference number for this escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It is system-generated\"", "text": "I understand it was recorded automatically. However, the tracking evidence on the order shows confirmed delivery. Could you please escalate this for a manual review, or advise the correct appeal route?"}, {"label": "If: \"Submit via Seller Help\"", "text": "Thank you — I will also submit it through the Seller Help dashboard. Could you please note this chat on the account so the reviewing team can see the details, and provide the reference number for this conversation?"}, {"label": "If: \"The buyer says it never arrived\"", "text": "I understand the buyer's position. The courier's record, however, shows delivery on [Delivery Date] at [Delivery Time] to the address on the order, and that record is what the review should consider. Could the defect please be reviewed against the tracking?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "dc2-case-resolved-before", "cat": "Defects & Cases", "name": "DC-2 · Case Closed Without Resolution — We Resolved First", "kw": ["case closed without seller resolution", "resolved before escalation", "refund before case", "case defect", "still decided"], "flag": "WARNING: only when the dates genuinely support it. If the refund came AFTER escalation, do not run this chat — a false timeline risks the whole account.", "tip": "WARNING: sirf tab jab dates genuinely support karein. Refund escalation ke BAAD hua tha to yeh chat mat karo — false timeline poore account ko risk mein daalti hai.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the \"case closed without seller resolution\" defect on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a \"case closed without seller resolution\" defect on order [Order Number] (case [Case ID])."}, {"label": "2 · Facts (refund)", "text": "The buyer contacted us on [Contact Date] and we responded on [Response Date]. We issued a full refund on [Refund Date] — before the case was escalated. The message history and refund record are on the order."}, {"label": "2 · Facts (agreed)", "text": "The buyer contacted us on [Contact Date] and we responded on [Response Date]. We agreed a resolution with the buyer on [Agreement Date] — before the case was escalated. The message history is on the order."}, {"label": "3 · Ask 1", "text": "As we actively resolved this matter, could you please review the records and remove this defect?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to compare the dates on the order once more: our response on [Response Date] and the full refund on [Refund Date], both before the case escalated? On that timeline, the matter was actively resolved by us. Does the defect qualify for review on that point?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the refund record pre-dates the escalation, could this please be escalated for a manual review, with the response and refund dates noted on the record? I will also raise a further written appeal with the same timeline. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The case was still decided by eBay\"", "text": "I understand. However, the refund record shows the resolution was completed on [Refund Date], before the escalation. Could you please review those dates on the order and escalate this for a manual review?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "dc3-cancellation-buyer-requested", "cat": "Defects & Cases", "name": "DC-3 · Cancellation Defect — Buyer Requested It", "kw": ["cancellation defect", "buyer requested cancel", "buyer asked to cancel", "recorded against the seller"], "flag": "Strong only when the buyer's written request exists on the order. Future rule: cancellations ALWAYS buyer-initiated.", "tip": "Strong sirf jab buyer ka written request mojood ho. Future rule: cancellation HAMESHA buyer-initiated karwao.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the cancellation defect on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a cancellation defect on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts (request)", "text": "The buyer requested this cancellation on [Request Date] via an eBay cancellation request. We approved it promptly and refunded in full on [Refund Date]."}, {"label": "2 · Facts (messages)", "text": "The buyer requested this cancellation on [Request Date] in messages, writing: \"[Buyer's Exact Words]\". We approved it promptly and refunded in full on [Refund Date]."}, {"label": "3 · Ask 1", "text": "As the cancellation was made at the buyer's request, could you please review the record and remove this defect, so it is treated as a buyer-requested cancellation?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand how it was recorded. May I ask you to open the buyer's own request dated [Request Date] on the order once more? A cancellation made at the buyer's request should not be recorded against the seller. On that specific record, can the defect be corrected?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the buyer's written request of [Request Date] is on the order, could this please be escalated for a manual review with that request noted on the record? I will also raise a further written appeal with the same record. Could you please provide the reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It was recorded against the seller\"", "text": "I understand how it was recorded. However, the buyer's own request dated [Request Date] is on the order. Could you please review that message/request and correct or remove the defect?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "dc4-out-of-stock-skip", "cat": "Defects & Cases", "name": "DC-4 · Out-of-Stock Cancellation — Mostly Skip", "kw": ["out of stock", "seller cancellation", "stock defect", "cancellations stand"], "flag": "Removal odds are very low — this defect comes from the cancellation itself, not the reason. ONE soft attempt only, and only if the buyer wrote first.", "tip": "Time Strong cases par lagao. Is category par session slot waste nahi karna. Sirf ek soft attempt, aur sirf agar buyer ne pehle likha ho.", "variants": [{"label": "Single soft ask", "text": "Hello, regarding order [Order Number] — before we cancelled, the buyer had asked for the cancellation in messages on [Message Date]. Could you please review the buyer's message and advise whether this defect can be corrected?"}, {"label": "If: \"Seller cancellations stand\"", "text": "Understood, thank you for checking. Could you please provide the reference number for this chat?"}]},
+{"id": "dc5-account-health-check", "cat": "Defects & Cases", "name": "DC-5 · Account Health Check — Defect Status", "kw": ["service metrics", "account health", "still counting", "defect status", "recent removals"], "flag": "", "tip": "Removal sessions ke 48 ghante baad yeh check karo. Reflect na hua ho to FUP-1.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. Could you please help me check the service metrics on the account?"}, {"label": "2 · Ask 1", "text": "Could you please confirm whether the defect on order [Order Number] is still counting on the account, and what the current defect status looks like after the recent removals?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check this specific order against the earlier promise: the removal confirmed under reference [Reference Number]? If the dashboard and that promise do not match, I would like the discrepancy looked at rather than the dashboard alone."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the discrepancy between the promised removal (reference [Reference Number]) and the current dashboard please be escalated, with both noted on the record, and could you provide a new reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"You can see this in Seller Hub\"", "text": "Thank you, I have checked Seller Hub — I would just like to confirm the removal on order [Order Number] has been fully processed on your side as well, as it was promised in a previous chat (reference [Reference Number])."}]},
+{"id": "dc6-abusive-buyer", "cat": "Defects & Cases", "name": "DC-6 · Abusive Buyer — Report + Linked Removals", "kw": ["abusive buyer", "report a buyer", "threats", "harassment", "buyer broke policy", "misuse of returns", "demands outside listing"], "flag": "The abuse or policy breach must be visible in eBay messages or the case record. Report the behaviour factually — no characterisation beyond what the messages show.", "tip": "Jab buyer eBay ki buyer policy tordta hai (dhamki, abuse, returns ka misuse, listing se bahar demands) to report ke saath us transaction ke defects aur feedback bhi removal ke qualify karte hain — dono ek hi chat mein maango. Saboot sirf eBay thread ka.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to report a buyer on order [Order Number] (buyer: [Buyer Username]) and to ask about the related records on our account."}, {"label": "2 · Facts", "text": "In the eBay messages on this order, the buyer [What the Buyer Did — e.g. demanded a partial refund beyond the listing terms and threatened negative feedback]. Their message on [Message Date] shows this, and [What Followed — e.g. the negative feedback / the case] followed on [Date]."}, {"label": "3 · Ask 1", "text": "Could you please review the messages under the buyer policies, record a report against the buyer, and review the [Feedback / Defect] connected to this transaction for removal under the protections for reported buyers?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to read the exact message dated [Message Date] on the order once more, against the buyer policies? The words in that message are the record here. On that message alone, does this qualify as reportable behaviour, and do the linked [Feedback / Defect] qualify for review?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could this please be escalated to the team that handles buyer policy reports, with the message of [Message Date] noted on the record, and confirmation requested on the linked [Feedback / Defect]? I will also submit the Report a Buyer form. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Use the Report a Buyer form\"", "text": "Thank you — I will submit the report through the form as well. Could you please note the message evidence on the account now, and confirm whether the connected [Feedback / Defect] will be reviewed once the report is processed?"}]},
+{"id": "cancel-address-issue", "cat": "Defects & Cases", "name": "Cancellation — Buyer Address Problem", "kw": ["wrong address", "incomplete address", "undeliverable", "address issue cancellation", "invalid address"], "flag": "", "tip": "Address issue par pehle hamesha buyer ko eBay message bhej kar record banayein — wohi message baad mein appeal ka saboot hota hai.", "variants": [{"label": null, "text": "On order [ORDER NUMBER], I cancelled because the delivery address provided was [ADDRESS ISSUE — e.g. incomplete / undeliverable]. I messaged the buyer on [CONTACT DATE] asking for a correction and did not receive one. As the cancellation was due to a problem with the address the buyer provided, could the defect please be reviewed for removal?"}]},
+{"id": "case-decision-appeal", "cat": "Defects & Cases", "name": "eBay Case Decided for Buyer — Appeal", "kw": ["case appeal", "money back guarantee", "decision", "found in buyer favour", "appeal case", "case outcome"], "flag": "Appeals are time-limited (normally 30 days from the case closing) — check the date before starting.", "tip": "Appeal ka asal wazan naya ya overlooked evidence hai: tracking, POD, ya buyer ke messages. Bina evidence ke appeal mostly reject hoti hai — yeh sach hai, waqt wahan lagayein jahan saboot maujood ho.", "variants": [{"label": null, "text": "I would like to appeal the outcome of case [CASE NUMBER] on order [ORDER NUMBER]. Evidence I believe was overlooked: [EVIDENCE — e.g. tracking [TRACKING NUMBER] shows delivered on [DELIVERY DATE] to the buyer's address, with the courier's proof of delivery]. Could you please open an appeal on the case with this evidence, or point me to the correct route to submit it?"}]},
+{"id": "ebay-site-issue", "cat": "Defects & Cases", "name": "Defect Caused by eBay Site Issue", "kw": ["site error", "glitch", "label issue", "technical problem", "ebay outage", "system issue"], "flag": "Only when there genuinely was a documented eBay issue in that window.", "tip": "Jab bhi eBay par outage ho, usi din announcements/status page ka screenshot save kar lein — baad mein yehi appeal ki jaan hota hai.", "variants": [{"label": null, "text": "The defect on order [ORDER NUMBER] was caused by a technical issue on eBay's side: [ISSUE — e.g. the shipping label service was failing on [DATE] and I could not purchase a label]. eBay's own announcements confirmed the problem in that period. Could this be reviewed for removal under the protections for eBay-caused issues?"}]},
+{"id": "which-eligible", "cat": "Defects & Cases", "name": "Ask: Which Defects Are Eligible?", "kw": ["dashboard review", "eligible defects", "seller protections list", "check my defects", "go through defects"], "flag": "", "tip": "Mahine mein aik dafa yeh chat karna useful hai — kai dafa agent khud aisi removals bata deta hai jin ka aap ko pata nahi hota (jaise carrier disruption windows).", "variants": [{"label": null, "text": "Whilst we are on this chat, could you please review the defects currently on my seller dashboard and let me know which of them may be eligible for removal under seller protections? I am happy to go through them one by one with the order numbers."}]},
+{"id": "fb1-delivered-on-time", "cat": "Negative Feedback", "name": "FB-1 · Delivered on Time — Feedback Says Late / INR", "kw": ["feedback says late", "did not arrive", "not received feedback", "tracking shows delivered", "buyer opinions are allowed", "factually incorrect"], "flag": "Strongest category — copy dates and times exactly from the tracking, never approximate.", "tip": "Sab se strong category. Dates/time tracking se exact copy karo — approximate kabhi nahi.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a negative feedback on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The feedback states the item arrived late / did not arrive. However, tracking shows the parcel was delivered on [Delivery Date] at [Delivery Time], within the estimated delivery window shown at checkout. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "As the comment is contradicted by the courier's delivery record, could you please review this feedback for removal under the feedback policies?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand that opinions are protected. May I ask you to open the tracking once more? The comment states the item [Arrived Late / Did Not Arrive], whilst the courier's record shows delivery on [Delivery Date] at [Delivery Time], within the estimate. On that factual contradiction alone, does this entry qualify for review?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. As the comment and the courier's record cannot both be correct, could this please be escalated to the feedback team for a manual review, with the tracking contradiction noted on the record? I will also submit a written appeal with the same evidence. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Buyer opinions are allowed\"", "text": "I completely understand that opinions are protected. My request is based on the factual part — the tracking record contradicts the comment. Could you please check the tracking details on the order?"}, {"label": "If: \"Send a revision request instead\"", "text": "Thank you — we will use the revision request as well. However, as the comment is factually incorrect, I would be grateful if you could still review it for removal."}, {"label": "If: \"I cannot remove it\"", "text": "I understand. Could you please escalate it for a manual review, or advise the correct route to appeal with the tracking evidence?"}, {"label": "If: \"Only the buyer can remove it\"", "text": "I understand that buyers can revise their own feedback. However, entries that meet the policy criteria can also be removed on review, and a comment contradicted by the courier's tracking record is that kind of case. Could it please be checked against the criteria?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb2-buyer-admitted", "cat": "Negative Feedback", "name": "FB-2 · Buyer Admitted Fault in Messages", "kw": ["buyer admitted", "admission", "my mistake", "buyer wrote", "own statement"], "flag": "Quote the buyer's EXACT words — the agent opens the thread and matches them.", "tip": "Buyer ke EXACT words quote karo, paraphrase nahi — agent thread khol kar match karega.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a negative feedback on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "In the eBay messages on this order, the buyer wrote on [Date]: \"[Buyer's Exact Admission]\". This confirms the issue was not caused by the item or our service."}, {"label": "3 · Ask 1", "text": "The full thread is on the order. Could you please review the buyer's own statement and remove the feedback?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to open the order's message thread once more, at [Date]? The buyer's own words there — \"[Buyer's Exact Admission]\" — confirm the cause. On the buyer's own statement, does this entry qualify for review?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could this please be escalated to the feedback team with the buyer's message of [Date] quoted on the record? I will also submit a written appeal citing the same message. Could you please provide the reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"I cannot see the messages\"", "text": "The messages were sent through eBay on order [Order Number], so they should be visible in the order's message history. Could you please check the thread dated [Date]?"}, {"label": "If: \"An admission is not enough\"", "text": "Understood. Could you please note the buyer's statement on the record and advise the correct route to appeal this feedback formally?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb3-comment-rating-mismatch", "cat": "Negative Feedback", "name": "FB-3 · Comment Positive, Rating Negative", "kw": ["positive comment negative rating", "mistaken rating", "stars do not match", "accidental negative", "mismatch", "inconsistent"], "flag": "Only when the comment is genuinely positive ('great item, fast delivery') — don't force border cases.", "tip": "Sirf jab comment genuinely positive ho ('great item, fast delivery'). Border cases par force nahi karna.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to ask about a feedback on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The written comment says: \"[Buyer's Comment]\", which describes a positive/neutral experience — but the rating left is negative. The rating appears inconsistent with the buyer's own words."}, {"label": "3 · Ask 1", "text": "Could you please review this as a possible mistaken rating and consider it for removal?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the rating is the buyer's choice. May I ask you to read the comment once more: \"[Feedback Comment]\"? The words describe a positive experience whilst the rating is negative — the two cannot reasonably both be intended. On that inconsistency, does it qualify for review as a rating left in error?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the inconsistency between the comment and the rating please be escalated to the feedback team for a manual review, with the comment quoted on the record? I will also send the buyer a revision request in parallel. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The rating is the buyer's choice\"", "text": "Understood — however, as the comment itself describes a positive experience, could this be reviewed as a rating left in error? The buyer's words and the stars do not match."}, {"label": "If: \"Ask the buyer to revise\"", "text": "Thank you, we will send a revision request as well. Could you please still note the inconsistency on the record?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb4-abusive-content", "cat": "Negative Feedback", "name": "FB-4 · Abusive / Policy-Breaching Content", "kw": ["offensive language", "insults", "personal information", "abusive feedback", "content policy", "swearing"], "flag": "Only genuinely abusive or personal content — a rude tone alone counts as opinion.", "tip": "Sirf waqai abusive/personal content par. 'Rude tone' kaafi nahi hota — woh opinion count hota hai.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to report a feedback comment on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The comment contains [Offensive Language / Personal Insults / Personal Information]. Exact wording: \"[Quote the Relevant Words]\"."}, {"label": "3 · Ask 1", "text": "As this content breaches the feedback content policies, could you please review it for removal?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand that strong opinions are permitted. My concern is the specific wording: \"[Quote the Relevant Words]\". May I ask you to check that exact wording against the feedback content rules — does that content, on its own, qualify for removal?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the exact wording please be escalated to the feedback team for a content review, quoted on the record? I will also report the feedback through the reporting option with the same wording. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Strong language is allowed\"", "text": "I understand frustration is permitted. My concern is specifically the [Insults / Personal Information] in the comment, which I believe falls outside the content policy. Could you please review that exact wording?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb5-transit-delay-feedback", "cat": "Negative Feedback", "name": "FB-5 · Late Arrival — But Dispatched on Time", "kw": ["late feedback", "dispatched on time", "courier delay feedback", "transit delay", "reflects the buyer's experience", "after handover"], "flag": "Only when the acceptance scan is WITHIN handling time. No scan, or a late scan → resolve the buyer and use the revision route instead.", "tip": "Sirf jab acceptance scan handling time ke ANDAR ho. Scan na ho ya late ho to yeh route mat lo — buyer ko resolve karo, phir alag se revision request.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to ask about a negative feedback regarding delivery time on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The order received its courier acceptance scan on [Acceptance Scan Date] at [Time], within our handling time. The delay occurred within the courier network after handover. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "As the order was dispatched on time with tracked postage and the delay was outside our control, could you please review this feedback under the seller protections for transit delays?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the buyer's experience was a late arrival. May I ask you to open the tracking once more? The acceptance scan of [Acceptance Scan Date] at [Time] shows we met the handling time; the delay sits entirely within the courier network after handover. On the on-time handover alone, does this qualify under the transit-delay protections?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could this please be escalated for a manual review under the seller protections, with the acceptance scan of [Acceptance Scan Date] noted on the record? I will also raise a further written appeal with the same evidence. Could you please provide the reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It reflects the buyer's experience\"", "text": "I understand. However, the acceptance scan confirms we met our handling time — the delay was entirely within the courier network. Could you please review the scan record on the tracking?"}, {"label": "If: \"You do not qualify\"", "text": "Thank you for checking. Could you please confirm what the qualifying criteria are, so I know for future reference? And could you please provide the reference number for this chat?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb6-wrong-item-feedback", "cat": "Negative Feedback", "name": "FB-6 · Feedback Left for the Wrong Item / Transaction", "kw": ["wrong item feedback", "different product", "not what we sold", "mistaken transaction", "wrong seller", "never sold"], "flag": "Only when the feedback plainly describes a different product or transaction — the reviewer will compare it against the listing.", "tip": "Buyer kabhi kabhi do sellers ke orders mila deta hai. Feedback ke words aur aap ki listing ka farq clearly dikhao — 'yeh item is transaction mein tha hi nahi' se strong koi hook nahi.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the negative feedback on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to request a review of a feedback entry on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The feedback describes [What the Feedback Describes — e.g. a different product or issue], which does not correspond to this transaction. The item purchased was [Item Purchased], as shown on the order and the listing. It appears the feedback was intended for a different purchase or seller."}, {"label": "3 · Ask 1", "text": "As the comment does not relate to the item in this transaction, could you please review it for removal under the feedback policies?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. May I ask you to place the comment next to the order once more? The order shows [Item Purchased]; the comment describes [What the Feedback Describes]. The two do not match. On that comparison alone, does the entry qualify for review as unrelated to this transaction?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the comparison between the listing and the comment please be escalated to the feedback team, with both noted on the record? I will also submit a written appeal on the same point. Could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The buyer may still mean this order\"", "text": "I understand. However, the listing and the order record show [Item Purchased], whilst the comment refers to [What the Feedback Describes]. Could you please compare the two on the order and review it on that basis?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "fb7-revision-expired", "cat": "Negative Feedback", "name": "FB-7 · Revision Request Expired / Limit Reached", "kw": ["revision request", "expired", "limit reached", "cannot send revision", "buyer agreed to revise", "reissue revision"], "flag": "", "tip": "Revision requests limited hote hain aur expire bhi ho jate hain. Buyer razi ho chuka ho to uski written consent thread par honi chahiye — wohi line agent ke paas option kholti hai.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I need some help with a feedback revision on order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The buyer has agreed to revise their feedback — their message on [Date] in the order thread confirms this. However, I am unable to send a revision request because [Reason — the request has expired / the revision limit has been reached]."}, {"label": "3 · Ask 1", "text": "As the buyer has confirmed in writing that they wish to revise, could you please advise how this can be actioned — for example, by reissuing the revision request, or by reviewing the feedback with the buyer's consent on record?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the request itself has [Reason — expired / reached its limit]. May I ask you to open the buyer's message of [Date] once more? Their written agreement to revise is on the thread. With the buyer's own consent on record, is there any route on your side to action or review it?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the buyer's written agreement of [Date] please be escalated to the feedback team, quoted on the record, with the question of reissuing the revision request or reviewing the entry? Could you please provide the reference number for the escalation?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Nothing can be done once expired\"", "text": "I understand. Could you please note the buyer's written agreement on the account, and advise whether the feedback team can review the entry given the buyer's own confirmation?"}]},
+{"id": "fa1-written-feedback-appeal", "cat": "Negative Feedback", "name": "FA-1 · Written Appeal — Negative Feedback Removal", "kw": ["written appeal feedback", "feedback appeal", "report feedback", "appeal negative", "seller help feedback", "request feedback removal", "duplicate appeal", "courier delay appeal", "goodwill appeal", "report filed appeal"], "flag": "One hook per appeal — the strongest one. Use the same hook later in chat; the written appeal and the chat must never contradict each other.", "tip": "eBay par pehla qadam yehi written appeal hai — chat baad mein (U-1B gate). Har chat scenario ka appeal hook yahan maujood hai: FB-1→tracking, FB-2→admission, FB-3→mismatch, FB-4→abusive, FB-5→courier delay, FB-6→wrong transaction, FB-7→consent, extortion/report/duplicate/disclosed bhi. 🔴 refund-for-feedback ka KOI appeal nahi hota — us case mein removal request withdraw hoti hai. Jo hook yahan likha, chat mein WOHI hook.", "variants": [{"label": "Universal structure", "text": "I am requesting the removal of a negative feedback entry on order [Order Number], left on [Feedback Date]. The comment states: \"[Feedback Comment]\". Reason for removal: [Specific Hook — the policy point this feedback breaches]. Supporting record: [Evidence — dates, tracking events, or message dates the reviewer can verify on the order]. On that basis, I respectfully request that this entry be reviewed and removed. Thank you for your review."}, {"label": "Hook: tracking contradicts comment", "text": "I am requesting the removal of the negative feedback on order [Order Number], left on [Feedback Date]. The comment states the item [Arrived Late / Did Not Arrive]; however, tracking [Tracking Number] ([Courier Name]) shows delivery on [Delivery Date] at [Delivery Time], within the estimated delivery window shown at checkout. As the comment is contradicted by the courier's own delivery record, I respectfully request its removal under the feedback policies. Thank you for your review."}, {"label": "Hook: disclosed in listing", "text": "I am requesting the removal of the negative feedback on order [Order Number], left on [Feedback Date]. The comment complains about [Complaint Point]; that exact point was clearly disclosed in the listing before purchase — the [Title or Description] states: \"[Listing Wording]\". As the feedback penalises a disclosed characteristic of the item, I respectfully request that it be reviewed and removed. Thank you for your review."}, {"label": "Hook: threat in messages (extortion)", "text": "I am requesting the removal of the negative feedback on order [Order Number], left on [Feedback Date]. In the eBay messages on this order, the buyer demanded [Demand] and threatened negative feedback if refused — the message dated [Message Date] shows this, and the feedback followed on [Feedback Date]. This is feedback extortion under the buyer policies, and the full thread is on the order. I respectfully request removal. Thank you for your review."}, {"label": "Hook: comment–rating mismatch", "text": "I am requesting a review of the feedback on order [Order Number], left on [Feedback Date]. The written comment states: \"[Feedback Comment]\", which describes a positive experience, yet the rating posted is negative. As the rating is inconsistent with the buyer's own words and appears to have been left in error, I respectfully request that it be reviewed and removed. Thank you for your review."}, {"label": "Hook: buyer admission in messages", "text": "I am requesting the removal of the negative feedback on order [Order Number], left on [Feedback Date]. In the eBay messages on this order, the buyer wrote on [Date]: \"[Buyer's Exact Admission]\", confirming the issue was not caused by the item or our service. The full thread is on the order. On the basis of the buyer's own statement, I respectfully request removal. Thank you for your review."}, {"label": "Hook: wrong transaction", "text": "I am requesting the removal of the feedback on order [Order Number], left on [Feedback Date]. The comment describes [What the Feedback Describes], which does not correspond to this transaction — the item purchased was [Item Purchased], as shown on the order and the listing. As the comment does not relate to this transaction, I respectfully request its removal. Thank you for your review."}, {"label": "Hook: abusive / prohibited content", "text": "I am requesting the removal of the feedback on order [Order Number], left on [Feedback Date]. The comment contains [Content Issue — offensive language / personal information]; exact wording: \"[Quote the Relevant Words]\". As this content breaches the feedback content rules, I respectfully request its removal. Thank you for your review."}, {"label": "Hook: on-time dispatch, courier delay", "text": "I am requesting a review of the negative feedback on order [Order Number], left on [Feedback Date], which concerns delivery time. The order received its courier acceptance scan on [Acceptance Scan Date] at [Time], within our stated handling time — the delay occurred within the courier network after handover. Courier: [Courier Name], tracking: [Tracking Number]. As the order was dispatched on time with tracked postage and the delay was outside our control, I respectfully request that this feedback be reviewed under the seller protections for transit delays. Thank you for your review."}, {"label": "Hook: duplicate negatives", "text": "I am requesting the removal of a duplicate negative feedback entry. The buyer has left two negative entries for what is a single issue on a single transaction — orders [Order Numbers], both concerning [Complaint]. One complaint is being recorded as two negatives. I respectfully request that the duplicate entry be reviewed and removed. Thank you for your review."}, {"label": "Hook: buyer policy breach (report filed)", "text": "I am requesting the removal of the negative feedback on order [Order Number], left on [Feedback Date]. In the eBay messages on this order, the buyer [What the Buyer Did — e.g. demanded a partial refund beyond the listing terms / misused the returns process], shown in the message dated [Message Date]. A report against the buyer was submitted on [Report Date]. As the feedback arises from conduct that breaches the buyer policies, I respectfully request its removal under the protections for reported buyers. Thank you for your review."}, {"label": "Hook: buyer agreed to revise (consent on record)", "text": "I am requesting assistance with the negative feedback on order [Order Number], left on [Feedback Date]. The buyer has agreed in writing to revise it — their message dated [Date] on the order thread confirms this — but the revision request [Reason — has expired / the limit has been reached] and cannot be sent. With the buyer's own consent on record, I respectfully request that the revision be actioned or the entry reviewed. Thank you for your review."}, {"label": "Goodwill (no policy hook — low odds)", "text": "I am requesting a review of the negative feedback on order [Order Number], left on [Feedback Date]. The buyer's issue was fully resolved — [Resolution — e.g. a full refund on [Refund Date], within hours of the complaint]. I understand that a resolution by itself is not grounds for removal, and I am not claiming the buyer broke any rule. Given that the transaction was fully put right, I would respectfully ask whether this entry can be reviewed, or whether a revision request with the buyer is the appropriate route. Thank you for your consideration."}, {"label": "Re-appeal (decline ke baad)", "text": "Further to my appeal of [First Appeal Date] regarding the negative feedback on order [Order Number], which was declined on [Decline Date] (reference [Appeal Reference]): I am requesting a further review on a specific point that I do not believe was assessed in the first decision — [New Point or New Evidence, with dates]. The supporting record is on the order. I respectfully request that this point be reviewed. Thank you."}]},
+{"id": "fb-disclosed", "cat": "Negative Feedback", "name": "Feedback — Complaint Was Disclosed in Listing", "kw": ["disclosed in listing", "described in listing", "stated in description", "listing said", "clearly mentioned"], "flag": "", "tip": "Listing ka exact wording copy karein, apne lafzon mein na sunayein. Agent listing khol kar match karega — wording hoo-ba-hoo milni chahiye.", "variants": [{"label": null, "text": "On order [ORDER NUMBER], the feedback complains about [COMPLAINT POINT]. That exact point was clearly disclosed in the listing before purchase — the [TITLE OR DESCRIPTION] states: \"[LISTING WORDING]\". As the feedback penalises a disclosed characteristic of the item, could it please be reviewed under the feedback policies?"}]},
+{"id": "fb-extortion", "cat": "Negative Feedback", "name": "Feedback — Buyer Threat / Extortion", "kw": ["feedback extortion", "threatened negative", "demanded refund threat", "blackmail", "threat feedback", "or else negative"], "flag": "The threat must be visible in eBay messages. Off-eBay messages (WhatsApp etc.) usually can't be used.", "tip": "Extortion sab se powerful removal ground hai — lekin sirf tab jab dhamki eBay thread mein likhi ho. Buyer ko kabhi off-platform le jaane par razi na hon; saboot wahin banta hai.", "variants": [{"label": null, "text": "On order [ORDER NUMBER], the buyer demanded [DEMAND — e.g. a partial refund beyond the listing terms] and threatened negative feedback if I refused — their message on [MESSAGE DATE] in the order thread shows the threat, and the feedback followed on [FEEDBACK DATE]. This is feedback extortion under the buyer policies. Could you please review the messages and remove the feedback?"}]},
+{"id": "fb-duplicate", "cat": "Negative Feedback", "name": "Feedback — Duplicate Negatives, Same Issue", "kw": ["duplicate feedback", "two negatives", "same complaint twice", "double negative", "multiple feedback same issue"], "flag": "", "tip": "Multi-quantity ya combined orders par yeh hota rehta hai. Dono order numbers saath dein taake agent ko link foran nazar aaye.", "variants": [{"label": null, "text": "The buyer left two negative feedback entries for what is a single issue on a single transaction — orders [ORDER NUMBERS], both about [COMPLAINT]. One complaint is being recorded as two negatives. Could the duplicate please be reviewed for removal?"}]},
+{"id": "fb-pivot-new-hook", "cat": "Negative Feedback", "name": "Agent Refuses ('Buyer's Opinion') — Pivot", "kw": ["buyer opinion", "reflects their experience", "reflects the buyer", "genuine experience", "cannot remove opinion", "pivot", "wont contradict buyer"], "flag": "", "tip": "Jo point agent ne reject kiya usko dobara na dohrayein — sirf naya, un-assessed hook rakhein. Chat mein refund ya buyer ke saath kisi deal ka zikr bilkul na karein.", "variants": [{"label": null, "text": "I completely understand eBay will not contradict a buyer's opinion of the item, and I am not asking for that. My point is narrower: [NARROW HOOK — e.g. the comment itself is positive yet posted as a negative / the exact complaint was disclosed in the listing before purchase / one issue is recorded as two negatives]. That specific point does fall under the feedback removal criteria, and I do not believe it was assessed. Could it be reviewed on that point, or escalated to the feedback team?"}]},
+{"id": "fb-no-hook", "cat": "Negative Feedback", "name": "Feedback — No Policy Hook (Honest Ask)", "kw": ["resolved refund feedback", "courtesy removal", "goodwill removal", "refunded still negative"], "flag": "Low odds — a refund by itself is not a removal ground. Be ready for a no.", "tip": "Honest baat: yahan removal ke chances kam hain. Asal rasta buyer se revision request hai (CS Reply Agent ke feedback templates). Yeh chat sirf tab karein jab revision ka rasta fail ho chuka ho.", "variants": [{"label": null, "text": "On order [ORDER NUMBER], I fully resolved the buyer's issue — [RESOLUTION — e.g. a full refund on [REFUND DATE], within hours of the complaint]. I understand a refund by itself is not grounds for removal, and I am not claiming the buyer broke any rule. I would simply like to ask: given the transaction was fully put right, is there anything in the feedback policies this could be reviewed under, or is a revision request with the buyer my only route here?"}]},
+{"id": "fb-flagged-refund", "cat": "Negative Feedback", "name": "🔴 Agent Flags Refund-for-Feedback — Concede & Fix", "kw": ["feedback manipulation", "refund for feedback", "in exchange for revising", "policy warning", "flagged", "offering a refund in exchange"], "flag": "Account risk. Don't deny what's on record and don't argue. Send this, then actually process the refund and message the buyer confirming it's unconditional.", "tip": "Yeh 🔴 situation hai: aaj removal ki baat band, sirf damage control. Refund waqai process karein aur buyer ko likh kar dein ke unconditional hai. Golden rule aage ke liye: refund aur feedback kabhi ek message mein nahi.", "variants": [{"label": null, "text": "Thank you for raising that — I want to put it right rather than defend it. I am processing the buyer's full refund now, and it is unconditional: it stands whether or not the feedback is ever revised, and I will confirm exactly that to the buyer in writing. The earlier wording was my mistake and I apologise — it will not happen again. Please close my removal request; making this right for the buyer matters more."}]},
+{"id": "vc1-false-positive-item", "cat": "Violations & Restrictions", "name": "VC-1 · False Positive — Ordinary Item Flagged", "kw": ["flagged automatically", "keyword", "ordinary item", "false positive", "household item", "listing removed"], "flag": "Only clear false positives (nail clippers, egg slicer, shower head type). Restricted categories → VC-2 clarification only — and some items should never be appealed at all (see 📌 Rules).", "tip": "Sirf clear false positives par — nail clippers, egg slicer, shower head type items. Wording fix ka offer dena appeal ko strong banata hai.", "variants": [{"label": "1 · Opener — appeal reject ke baad", "text": "Hello, I hope you are having a good day. We submitted a formal appeal for the listing removal on order [Order Number] on [Appeal Date] (reference [Appeal Reference]), and it was declined on [Decline Date]. I would like to request a further review of that decision, as I believe the key evidence was not fully assessed."}, {"label": "1b · Direct opener", "text": "Hello, I hope you are having a good day. I would like to ask about a listing that was removed: item number [Item Number], \"[Listing Title]\"."}, {"label": "2 · Facts", "text": "The item is a standard household/personal care product: [Item Name]. It is an everyday consumer item widely sold on eBay, and we believe it may have been flagged automatically due to a keyword rather than the item itself."}, {"label": "3 · Ask 1", "text": "Could you please check the removal reason, and submit the listing for a manual review?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the removal reason stands for now. May I ask which exact element triggered it — a word in the title, the description, or an image? The item itself is an ordinary [Item Name], so if the flag is on wording, I can amend it immediately."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you for checking. Could the listing please be escalated for a manual review as a possible automated false positive, with the item's nature noted on the record? I will also submit the appeal through Seller Hub. Could you please provide the reference number for this chat?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It was removed for [policy]\"", "text": "Thank you for clarifying. As the item itself is an ordinary [Item Name], could the flag relate to wording in the title or description? We are very happy to amend the listing — could you please advise exactly what needs to change?"}, {"label": "If: \"Appeal via Seller Hub\"", "text": "Thank you — I will submit the appeal there. Could you please note this chat on the account and provide the reference number?"}, {"label": "If: \"Submit an appeal first\"", "text": "We have already submitted it — on [Appeal Date], reference [Appeal Reference] — and it was declined on [Decline Date]. That is why I am contacting you now, for the review that follows a declined appeal."}]},
+{"id": "vc2-sensitive-clarification", "cat": "Violations & Restrictions", "name": "VC-2 · Sensitive Category — Clarification Only", "kw": ["restricted category", "which part of the policy", "clarification", "permitted under conditions", "requirements"], "flag": "No compliance or safety claims — clarification only. Do not relist until eBay's guidance arrives.", "tip": "Car Seat Belt Adjuster (ABRT) type items ke liye YEHI script. Koi compliance ya safety claim assert nahi — sirf clarification. Guidance aane tak relist band.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to understand a listing removal: item number [Item Number], \"[Listing Title]\"."}, {"label": "2 · Ask (which part)", "text": "We want to make sure we fully comply with the policy. Could you please clarify which specific part of the policy this listing did not meet — the product itself, or the wording, images, or claims in the listing?"}, {"label": "3 · Ask (requirements)", "text": "If this category is permitted under certain conditions, could you please advise what those requirements are? We will not relist until we have your guidance."}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. So that we comply exactly, could you please state in this chat which specific part did not meet the policy — the product itself, or the wording, images, or claims? A written line here would let us act on it precisely."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. As I still do not have the specific detail, could this please be escalated to the policy team for a written clarification of what is required, with the listing kept down in the meantime, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The product is not allowed\"", "text": "Understood — thank you for confirming. We will keep it delisted. Could you please confirm whether this removal has any ongoing impact on the account status?"}]},
+{"id": "vc3-vero-response", "cat": "Violations & Restrictions", "name": "VC-3 · IP / VeRO Claim — Response", "kw": ["vero", "intellectual property", "rights owner", "ip removal", "infringing", "brand name"], "flag": "Never argue a VeRO notice. Acknowledge → ask which element → confirm account impact → reference number. No relist without written authorisation.", "tip": "VeRO par kabhi behes nahi. Acknowledge karo, element poochho, account impact confirm karo, reference lo. Relist sirf written authorisation ke baad — practically kabhi nahi.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to ask about an intellectual property removal: item number [Item Number], \"[Listing Title]\"."}, {"label": "2 · Facts", "text": "We have taken the notice seriously and the listing will remain down. We had no intention of infringing any rights. So we can prevent this in future, could you please confirm which element was reported — the product itself, a brand name in the title, or an image?"}, {"label": "3 · Ask 1", "text": "We will not relist this item without proper authorisation. Could you please also confirm whether this affects the account status?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the notice stands and the listing will remain down. May I ask once more, purely so that we can prevent a repeat: which element was reported — the product, a brand name in the title, or an image — and does the notice affect the account status?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could my request for the reported element and the rights owner's contact details from the notice please be escalated or directed to the correct team, noted on the record, with a reference number? The listing remains down in the meantime."}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Contact the rights owner\"", "text": "Thank you — could you please share the rights owner's contact details from the notice, and the reference number for this chat?"}]},
+{"id": "vc5-compliance-request", "cat": "Violations & Restrictions", "name": "VC-5 · Product Safety / Compliance Information Request", "kw": ["product safety", "compliance", "gpsr", "responsible person", "manufacturer information", "documents required", "listing blocked pending"], "flag": "Provide only genuine supplier and manufacturer details you actually hold. Never invent a manufacturer, an address, or a document.", "tip": "Compliance requests (GPSR type) mein adhoori submission sab se bara delay hai. Is chat mein exact list, exact format, exact upload jagah, aur deadline likho — phir ek hi dafa mukammal submit karo. Supplier se documents pehle mangwa lo.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like some guidance on a product compliance request affecting my listing: item number [Item Number], \"[Listing Title]\"."}, {"label": "2 · Ask (exact list)", "text": "So that I can complete this correctly in one submission, could you please confirm exactly which information and documents are required — for example manufacturer details, responsible person details, safety documentation, or labelling images — and the format and place where each should be submitted?"}, {"label": "3 · Ask (status)", "text": "Could you please also confirm the deadline for the submission, and whether the listing remains blocked or the account is affected in any way whilst the information is under review?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the submission is made in Seller Hub. Could you please list in this chat the complete set of required items — manufacturer details, responsible person, documents, images — so that I can verify my submission is complete before sending it?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. As I still need the complete list in writing, could this please be escalated to the compliance team for a written list of the required items and the deadline, noted on the record, with a reference number for this chat?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Upload via Seller Hub\"", "text": "Thank you — I will complete it there. Could you please confirm the full list of required items in this chat, so that I can check the submission is complete before sending it, and provide the reference number?"}]},
+{"id": "vc6-violation-impact", "cat": "Violations & Restrictions", "name": "VC-6 · Violation — Ask Impact & Expiry", "kw": ["how long", "violation stay", "expire", "impact on account", "affect visibility", "record period"], "flag": "", "tip": "Har violation ke baad yeh 2 sawal zaroor: record par kitne arsay rahegi, aur visibility/limits par asar hai ya nahi. Jawab Saved Msgs mein likho aur expiry date par verify karo.", "variants": [{"label": "1 · Ask", "text": "Thank you for your help with this. Could you please confirm two things for my records: how long this violation remains on the account before it expires, and whether it has any effect on the account status, listing visibility, or selling limits in the meantime?"}, {"label": "2 · Ask (after fix)", "text": "Now that the issue has been corrected, could you please confirm whether the correction shortens the record period, or whether a note of the same-day correction can be added to the account?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check the record itself and confirm the exact expiry date of this violation, rather than the general period? I would like the date on record."}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the expiry date and the account impact please be confirmed in writing here, or escalated to the team that can confirm them, with a reference number, so that I can verify on that date?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It expires automatically\"", "text": "Thank you — could you please confirm the exact expiry date, and provide the reference number for this chat so that I can verify it at that time?"}]},
+{"id": "va0-appeal-universal", "cat": "Violations & Restrictions", "name": "VA-0 · Written Appeal — Universal Structure", "kw": ["written appeal", "appeal letter", "seller help appeal", "appeal structure", "dear ebay team", "formal appeal"], "flag": "", "tip": "Har violation appeal ki winning skeleton (aap ke resolved appeals se): policy + error claim → verifiable facts → account history → respectful request → evidence offer. 5 short paragraphs se zyada nahi.", "variants": [{"label": null, "text": "I am appealing the [Policy Name] violation on my listing \"[Listing Title]\" (Item No. [Item Number or Case Ref]). I believe this was applied in error.\n\n[Factual Evidence — 2 to 5 short lines: what is true, with numbers and dates the reviewer can verify]\n\nThis account has been selling on eBay for [Account Age] with [Positive Feedback %] positive feedback. [One Line — why the flag appears to be automated or in error]\n\nI respectfully request that this violation be removed and the listing reinstated. I am happy to provide [Evidence You Can Provide — proof of postage / photos / invoices] or any further evidence required.\n\nThank you for your review."}]},
+{"id": "va1-appeal-item-location", "cat": "Violations & Restrictions", "name": "VA-1 · Written Appeal — Item Location Policy", "kw": ["item location", "location policy", "dispatched from", "dispatch location", "location violation", "glasgow"], "flag": "Evidence must be real — the reviewer checks every tracking number. Only list trackings that genuinely begin in the stated location.", "tip": "Yeh letter kaam kar chuka hai (Resolved ✓). Winning formula: policy naam + 3-4 real tracking proofs + 'only possible with genuine UK dispatch' + account history + respectful request. Screenshots: issue kommodo.ai/i/kJXIlgiC8Q6duP5kLHJf · resolved kommodo.ai/i/Ere0kxIOGEnw7BWrOInX", "variants": [{"label": "Template", "text": "Dear eBay Team,\n\nI am appealing the item location policy violation applied to my listing \"[Listing Title]\" (Item No. [Item Number]). I believe this flag was applied in error.\n\nThe item location on this listing is [City, Country (Postcode)] — and that is exactly where every order is dispatched from. Recent orders for this item were all posted from [City] via UK domestic couriers, with tracking to prove it:\n\n[Tracking Evidence — 3 to 4 lines: courier, tracking no, posted date, delivered date and time]\n\nNext-day deliveries and courier scans within a day of sale are only possible with genuine UK dispatch. All tracking records begin inside the UK courier network.\n\nThis account has been selling on eBay for [Account Age] with [Positive Feedback %] positive feedback, and thousands of orders have been dispatched from this same [City] location throughout. The item location stated on the listing is already accurate, so there is nothing to correct — the flag itself appears to be an automated error.\n\nI respectfully request that this violation be removed from my account and the affected listing reinstated. I am happy to provide proof of postage, courier collection receipts, or any further evidence required.\n\nThank you for your review."}, {"label": "Worked example (Jul 2026)", "text": "Dear eBay Team,\n\nI am appealing the item location policy violation applied to my listing \"Shockproof Phone Cover Case For Samsung S25 S24 S23 S22 S21 Plus Ultra S20 FE 5G\" (Item No. 136890912135). I believe this flag was applied in error.\n\nThe item location on this listing is Glasgow, United Kingdom (G64 1JE) — and that is exactly where every order is dispatched from. Recent orders for this item were all posted from Glasgow via UK domestic couriers, with tracking to prove it:\n\n- Royal Mail GV400536231GB — posted Thu 2 Jul, delivered Fri 3 Jul at 1:17pm in Aberdeen (next-day delivery)\n- Evri H06R4A0179262172 — delivered Mon 29 Jun at 6:26pm\n- Evri H06R4A0181716852 — order placed 29 Jun, tracking uploaded 30 Jun, arriving 2–7 Jul\n- Order 16-14822-31857 — sold 29 Jun, courier scan 30 Jun (tracking JJD0002234785564904)\n\nNext-day Royal Mail delivery and courier scans within a day of sale are only possible with genuine UK dispatch. All tracking records begin inside the UK courier network.\n\nThis account has been selling on eBay for 11 years with 99.2% positive feedback, and thousands of orders have been dispatched from this same Glasgow location throughout. The item location stated on the listing is already accurate, so there is nothing to correct — the flag itself appears to be an automated error.\n\nI respectfully request that this violation be removed from my account and the affected listing reinstated. I am happy to provide proof of postage, courier collection receipts, or any further evidence required.\n\nThank you for your review."}]},
+{"id": "va2-appeal-item-description", "cat": "Violations & Restrictions", "name": "VA-2 · Written Appeal — Item Description Policy", "kw": ["item description policy", "description removal", "misleading", "inaccurate", "factual specification"], "flag": "The 'support chat confirmed error' line only when that chat genuinely happened — save the reference number (U-6).", "tip": "Specs list bilkul factual rakhein — jo listing mein likha hai wohi, spec by spec. Agent-confirmed-error wali line appeal ko bohat strong karti hai, lekin sirf sach par.", "variants": [{"label": "Template", "text": "I am appealing the removal of my listing '[Listing Title]' (Case Ref [Case Ref]) under the Item Description Policy. I believe this removal is an error.\n\nEvery detail in the title and description is a factual product specification: [Spec List — each spec exactly as listed]. Buyers receive exactly the item shown and described. Nothing in the listing is inaccurate or misleading.\n\nI take eBay's policies seriously and keep all my listings accurate and compliant. I respectfully request a manual review and reinstatement of this listing, which has active sales history. If any specific wording was flagged, please identify the exact detail and I will revise it immediately. Thank you."}, {"label": "+ Support chat confirmed error", "text": "I am appealing the removal of my listing '[Listing Title]' (Case Ref [Case Ref]) under the Item Description Policy. I believe this removal is an error.\n\nEvery detail in the title and description is a factual product specification: [Spec List — each spec exactly as listed]. Buyers receive exactly the item shown and described. Nothing in the listing is inaccurate or misleading.\n\nI contacted eBay support on [Chat Date]; the agent reviewed the case, stated the removal appears to be an error, and advised me to submit this appeal.\n\nI take eBay's policies seriously and keep all my listings accurate and compliant. I respectfully request a manual review and reinstatement of this listing, which has active sales history. If any specific wording was flagged, please identify the exact detail and I will revise it immediately. Thank you."}, {"label": "Worked example (fan light)", "text": "I am appealing the removal of my listing 'E27 LED Ceiling Fan Light 42cm Blades with Remote 3 Color Dimmable 3000K-6500K' (Case Ref 2-106744197040) under the Item Description Policy. I believe this removal is an error.\n\nEvery detail in the title and description is a factual product specification: E27 fitting, LED light source, 42cm blades, remote control, 3 colour temperatures (3000K-6500K), dimmable. Buyers receive exactly the item shown and described. Nothing in the listing is inaccurate or misleading.\n\nI contacted eBay support today (4 July 2026); the agent reviewed the case, stated the removal appears to be an error, and advised me to submit this appeal.\n\nI take eBay's policies seriously and keep all my listings accurate and compliant. I respectfully request a manual review and reinstatement of this listing, which has active sales history. If any specific wording was flagged, please identify the exact detail and I will revise it immediately. Thank you."}]},
+{"id": "va3-appeal-misclassification", "cat": "Violations & Restrictions", "name": "VA-3 · Written Appeal — Misclassified Item (Not Bladed / Restricted)", "kw": ["misclassification", "knives", "bladed", "flagged category", "age verified", "not a knife", "wrong category flag"], "flag": "Only when the item truly is outside the flagged category — the photographs you attach must show it plainly.", "tip": "Yeh appeal 'worked' hai ✓. Formula: misclassification bolo → item kya HAI woh batao (kaise kaam karta hai) → kyun policy apply nahi hoti → title ke words ka asal matlab → photos attach. Photos ke baghair weak.", "variants": [{"label": "Template", "text": "I am appealing the [Flagged Policy — e.g. knives and bladed items] flag on my listing \"[Listing Title]\". This flag is a misclassification: the item is not [Flagged Category] of any kind. It is [What the Item Actually Is — plain description of how it works]. It contains [Why the Policy Does Not Apply — e.g. no blade, no cutting edge], so the [Policy Requirement — e.g. age-verified delivery] does not apply. The words \"[Flagged Words in Title]\" in the title refer to [True Meaning], not [Flagged Meaning]. I have attached current photographs of the actual item clearly showing [What the Photos Show]. This is a standard [Product Category] product sold widely on eBay. I respectfully request that this flag be removed and my listing reinstated as it was, without revision. Thank you for your review."}, {"label": "Worked example (callus file)", "text": "I am appealing the knives and bladed items flag on my listing \"Hard Skin Remover Electric Callus Foot File Rechargeable Cordless Heel Feet Care\". This flag is a misclassification: the item is not a knife or bladed item of any kind. It is a rechargeable electric pedicure device with a rotating micro-abrasive roller head that gently buffs hard skin on the heels, working like a motorised pumice stone. It contains no blade, no cutting edge and no sharp parts, so the age-verified delivery requirement for bladed items does not apply. The words \"Remover\" and \"File\" in the title refer to cosmetic foot care, not tools or blades. I have attached current photographs of the actual item clearly showing the roller head and the absence of any blade. This is a standard Health and Beauty product sold widely on eBay. I respectfully request that this flag be removed and my listing reinstated as it was, without revision. Thank you for your review."}]},
+{"id": "viol-ask-specifics", "cat": "Violations & Restrictions", "name": "Listing Removed — Ask What Triggered It", "kw": ["listing removed", "policy violation", "why removed", "mc message", "which part", "takedown"], "flag": "", "tip": "Guess kar ke relist na karein — pehle exact trigger poochein. Ghalat guess par dobara removal aayi to violation stack ho jati hai.", "variants": [{"label": null, "text": "My listing [ITEM ID OR LISTING TITLE] was removed under the [POLICY NAME] policy. Could you tell me exactly which part of the listing triggered the removal — the specific term, image, or claim — so I can correct it properly before relisting? I want to make sure I am fully compliant."}]},
+{"id": "viol-fixed", "cat": "Violations & Restrictions", "name": "Violation — Acknowledge, Fix, Request Review", "kw": ["violation appeal", "corrected listing", "reinstate", "fixed the issue", "compliance", "edited listing"], "flag": "If the violation is genuine, acknowledging and fixing is the strong route — arguing a real violation damages the account history.", "tip": "Genuine violation par sab se achha look yehi hai: maano, theek karo, confirmation lo. Behas karne wale sellers ke accounts par notes lag jate hain.", "variants": [{"label": null, "text": "I have reviewed the [POLICY NAME] policy and I understand the issue — [WHAT WAS WRONG]. I have now [FIX TAKEN — e.g. edited the listing to remove the term / withdrawn the listing / updated my process] so it fully complies. Could the violation record please be reviewed in light of the correction, or a note added to the account that it was fixed the same day? And could you confirm I am okay to relist the corrected version?"}]},
+{"id": "viol-error", "cat": "Violations & Restrictions", "name": "Violation Recorded in Error — Offer Evidence", "kw": ["violation error", "wrongly flagged", "authentic item", "false positive", "vero error", "not counterfeit"], "flag": "Only with real, truthful evidence you actually hold. Never submit altered or fabricated documents — that risks the whole account.", "tip": "Sirf sacha evidence — jo document aap ke paas waqai maujood hai. Banaya hua invoice account ka khatma hai; woh nuksan kisi bhi defect se bara hai.", "variants": [{"label": null, "text": "I believe the [POLICY NAME] violation on [ITEM ID OR LISTING TITLE] was recorded in error: [REASON — e.g. the item is genuine, purchased from [SUPPLIER NAME], and I hold the purchase invoice / the listing never contained the flagged term]. I can provide [EVIDENCE — e.g. the supplier invoice / screenshots of the original listing]. Could this be escalated for review with that evidence, and could you tell me where to submit it?"}]},
+{"id": "viol-restriction", "cat": "Violations & Restrictions", "name": "Account Restricted — Ask Requirements", "kw": ["account restriction", "suspended", "limited", "restricted", "reinstatement", "lift restriction"], "flag": "", "tip": "Restriction chat mein sab kuch note karein: kya chahiye, kahan submit hoga, kitne din. Saved Msgs mein record rakh kar exactly wohi provide karein — adhoora submission sab se bara delay hai.", "variants": [{"label": null, "text": "My account currently shows a restriction relating to [RESTRICTION REASON]. Could you tell me exactly what is required from me to have it reviewed and lifted — documents, actions, or changes — and the expected review timeline once I have provided everything? I would like to get fully compliant as quickly as possible."}]},
+{"id": "viol-track-record", "cat": "Violations & Restrictions", "name": "Goodwill Review — Strong Track Record", "kw": ["first violation", "good history", "goodwill", "clean account", "one off", "track record"], "flag": "Only quote numbers that are actually on your dashboard — the agent can see them.", "tip": "Numbers wahi bolein jo dashboard par likhe hain. Achhi history genuine leverage hai, lekin aik bhi ghalat number foran credibility khatam kar deta hai.", "variants": [{"label": null, "text": "This is the first [VIOLATION TYPE] recorded on my account in [ACCOUNT AGE OR PERIOD], across [ORDER VOLUME] orders with [METRIC — e.g. a 0.3% defect rate]. I have already [FIX TAKEN]. Given the overall record and the immediate correction, could the violation be reviewed as a one-off, or a goodwill note added to the account?"}]},
+{"id": "cf1-inr-case-delivered", "cat": "Cases & Funds", "name": "CF-1 · INR Case Open — Tracking Shows Delivered", "kw": ["inr case", "item not received case", "case open", "wait for the case timeline", "buyer insists"], "flag": "", "tip": "Decision se pehle evidence case par lagwana sab se important hai. Close mein 'no defect' confirmation zaroor maango.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like help with an Item Not Received case: case [Case ID], order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "Tracking shows the parcel was delivered on [Delivery Date] at [Delivery Time] to the buyer's address. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "3 · Ask 1", "text": "Could you please review the tracking record on the case, so it can be resolved on that basis without a defect on the account?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the case runs on its timeline. May I ask that the delivery scan — [Delivery Date] at [Delivery Time], to the address on the order — be attached to the case right now, so that it is in front of the decision-maker before any outcome?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could this please be escalated so that the tracking record is confirmed as attached to the case before the decision, noted on the record with a reference number? I would also ask that no defect results, given the delivery evidence."}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Wait for the case timeline\"", "text": "Understood — could you please note the tracking details on the case now, so they are considered at the decision stage, and provide the reference number?"}, {"label": "If: \"The buyer insists not received\"", "text": "We have asked the buyer to check with household members and neighbours, and we can request a courier investigation as well. In the meantime, could the delivery scan please be recorded on the case?"}]},
+{"id": "cf2-funds-hold", "cat": "Cases & Funds", "name": "CF-2 · Case Resolved — Funds Still on Hold", "kw": ["funds on hold", "hold", "release funds", "payment hold", "still holding"], "flag": "", "tip": "Release date + reference number dono likho. Date guzar jaye to FUP-1 with reference.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to check the funds on order [Order Number]."}, {"label": "2 · Facts", "text": "Case [Case ID] on this order was resolved on [Resolved Date], but the funds are still showing on hold."}, {"label": "3 · Ask 1", "text": "Could you please check the hold and confirm when the funds will be released?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand standard timelines apply. Could you please check this specific hold: the case was resolved on [Resolved Date], so could you confirm the exact reason the funds are still held, and the exact release date?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. As the exact date is not available here, could the release request please be escalated to the payments team, with the resolution date of [Resolved Date] noted on the record, and could you please provide the reference number so that I can follow up?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Standard processing time applies\"", "text": "Thank you — could you please confirm the exact release date, and provide the reference number for this chat so I can follow up if it passes?"}]},
+{"id": "cf3-return-damaged", "cat": "Cases & Funds", "name": "CF-3 · Return Received Damaged / Not Original Condition", "kw": ["return damaged", "returned it damaged", "not original condition", "inad return", "deduction", "report the buyer", "full refund is still required"], "flag": "WARNING: if we already accepted an issue in the case history (e.g. a partial refund offer), NEVER claim the item was correct. Talk only about the condition of the return — with photos.", "tip": "WARNING: agar case history mein hum pehle issue accept kar chuke hain (e.g. partial refund offer), to 'item was correct' type claim KABHI nahi. Sirf return ki condition par baat karo — photos ke sath.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like advice on a return: case [Case ID], order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The buyer has returned the item, and the return arrived [Damaged / Not in Its Original Condition]. We have clear photos of the return exactly as it was received."}, {"label": "3 · Ask 1", "text": "Could you please advise how to submit this evidence on the case, and whether a report or deduction route applies in this situation?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the case process. May I ask that the condition of the return — received [Damaged / Not in Its Original Condition], with our photographs — be recorded on the case itself now, so that it is part of the case record whatever the outcome?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the condition report and the photographs please be escalated to the team that assesses returns, noted on the case, with guidance on the report or deduction route, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"A full refund is still required\"", "text": "Understood. Could you please note on the case that the return was received damaged, and advise the correct route to report the condition of the return with our photos, for the record?"}, {"label": "If: \"Report the buyer\"", "text": "Thank you — could you please guide me to the exact reporting option, and confirm this note will stay on the case?"}]},
+{"id": "cf4-payout-hold", "cat": "Cases & Funds", "name": "CF-4 · Payout Hold / Payout Not Arrived", "kw": ["payout", "payout hold", "bank account", "not arrived", "verification is needed", "scheduled"], "flag": "", "tip": "Vague answers accept nahi karna — exact requirement, exact date, reference number. Har cheez likho.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to check a payout on the [Account Name] account."}, {"label": "2 · Facts", "text": "The payout scheduled for [Payout Date] is showing as on hold / has not arrived in the bank account."}, {"label": "3 · Ask 1", "text": "Could you please check the reason for the hold and advise exactly what is required to release it?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check this specific payout rather than the general policy: the payout scheduled for [Payout Date] — what exact requirement is holding it, and what is the exact release date once it is met?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the payout hold please be escalated to the payments team, with the scheduled date of [Payout Date] and the requirement noted on the record, and could you please provide the reference number so that I can follow up on the stated date?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Verification is needed\"", "text": "Thank you — could you please confirm exactly which document or step is required, where to submit it, and the reference number for this chat?"}, {"label": "If: \"It will release automatically\"", "text": "Could you please confirm the exact release date, so I can follow up with the reference number if it does not arrive?"}]},
+{"id": "cf5-decision-appeal-route", "cat": "Cases & Funds", "name": "CF-5 · Case Decided Against Us — Ask Appeal Route", "kw": ["decision is final", "appeal route", "case decided", "deadline", "evidence weight"], "flag": "", "tip": "Appeal file karne se pehle yeh chat karo — route, evidence weight, aur deadline confirm ho jati hai. Phir formal appeal Seller Help se, same facts ke sath.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to ask about the decision on case [Case ID], order [Order Number]."}, {"label": "2 · Facts", "text": "We have supporting evidence for this order: [Evidence — tracking / return photos / buyer messages]."}, {"label": "3 · Ask 1", "text": "Could you please advise the correct route to appeal this decision, what evidence carries the most weight, and the deadline for submitting the appeal?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the decision stands for now. Could you please confirm whether a formal appeal exists for this case type, the deadline for it, and which of our evidence — [Evidence — tracking / return photos / buyer messages] — carries the most weight in that review?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could our evidence please be noted on the case record now, and the appeal-route question escalated to the team that handles case appeals, with a reference number, so that the formal appeal is submitted correctly and in time?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The decision is final\"", "text": "I understand. Could you please confirm whether an appeal option exists on this case type at all, and note our evidence on the case record either way, with a reference number?"}]},
+{"id": "pd1-dispute-opened", "cat": "Payment Disputes", "name": "PD-1 · Dispute Opened — Deadline, Evidence & Route", "kw": ["dispute opened", "respond by", "deadline", "payment dispute opened", "what evidence", "challenge or accept"], "flag": "The response deadline is hard — confirm it first, respond in the console before it, and use chat only to verify.", "tip": "Dispute khulte hi pehla kaam: deadline confirm + evidence list + upload jagah. Console mein challenge/accept deadline se pehle — chat sirf verify ke liye. Deadline miss = automatic loss.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. A payment dispute has been opened on order [Order Number] (dispute [Dispute ID]), and I would like to confirm the details before I respond."}, {"label": "2 · Ask (deadline + evidence)", "text": "Could you please confirm the exact response deadline for this dispute, which types of evidence qualify for this dispute reason, and where the evidence should be uploaded so that it reaches the payment provider?"}, {"label": "3 · Ask 1 (protection)", "text": "Could you please also confirm the seller protection criteria for this dispute type, so that I know whether the transaction qualifies if I challenge it with the evidence?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check this specific dispute — [Dispute ID] — rather than the general policy, and confirm the deadline and the accepted evidence types recorded on it?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the questions on this dispute please be escalated to the payments disputes team, with the dispute ID noted on the record, and could you please provide the reference number so that I can respond before the deadline?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"Respond in Seller Hub\"", "text": "Thank you — I will respond there before the deadline. Could you please confirm the deadline date in this chat, and provide the reference number?"}]},
+{"id": "cf6-payment-dispute", "cat": "Payment Disputes", "name": "CF-6 · Payment Dispute (Chargeback) — Evidence + Protection", "kw": ["payment dispute", "chargeback", "bank dispute", "card issuer", "dispute fee", "challenge the dispute"], "flag": "Challenge only with genuine delivery or refund evidence. If the buyer was already refunded, lead with the refund record — never contest a dispute the records do not support.", "tip": "Chargeback ki deadline sakht hoti hai — pehle challenge submit karo (tracking/POD ya refund record ke saath), phir yeh chat kar ke evidence case par note karwao aur seller protection + dispute fee waiver confirm karo.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like help with a payment dispute on order [Order Number] (dispute [Dispute ID])."}, {"label": "2 · Facts (delivered)", "text": "The buyer has opened a dispute with their payment provider. However, tracking shows the parcel was delivered on [Delivery Date] at [Delivery Time] to the buyer's address. Courier: [Courier Name], tracking: [Tracking Number]."}, {"label": "2 · Facts (refunded)", "text": "The buyer has opened a dispute with their payment provider. However, this order was already refunded in full on [Refund Date], as shown on the order record."}, {"label": "3 · Ask 1", "text": "I have challenged the dispute with this evidence. Could you please confirm that the evidence has been received on the dispute, whether the transaction qualifies for seller protection, and whether the dispute fee will be waived if it qualifies?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the payment provider decides. Could you please confirm in this chat that the evidence — [Evidence — the delivery record / the refund record] — is attached to the dispute in full, and that it was submitted before the deadline?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the dispute please be escalated to the payments disputes team to confirm the evidence is complete on file, with the submission date noted on the record, along with the seller-protection and fee-waiver assessment, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The card issuer decides\"", "text": "I understand that the final decision rests with the payment provider. Could you please confirm that the evidence is attached to the dispute in full, and note on the account that it was submitted before the deadline, with a reference number?"}]},
+{"id": "pd4-dispute-inad", "cat": "Payment Disputes", "name": "PD-4 · Dispute Reason: Item Not As Described", "kw": ["dispute not as described", "inad dispute", "significantly not as described", "bank says not as described"], "flag": "Only evidence genuinely on record: the listing, the photographs, the messages. If a fault was already acknowledged on the order, do not claim the item was correct — lead with the resolution instead.", "tip": "INAD-type dispute mein evidence = listing accuracy + photos + order messages. Agar order par pehle fault maan chuke ho (partial refund waghera) to 'item was correct' claim KABHI nahi — resolution ke record se challenge karo ya accept karo. CF-3 wala rule yahan bhi.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like help with a payment dispute on order [Order Number] (dispute [Dispute ID]), where the reason given is that the item was not as described."}, {"label": "2 · Facts", "text": "The item dispatched matches the listing: [Item and Key Specs, exactly as listed]. The listing photographs and description show this, and the order messages [Messages Point — e.g. contain no fault report from the buyer prior to the dispute / show the matter was resolved on [Date]]."}, {"label": "3 · Ask 1", "text": "I have challenged the dispute with this evidence. Could you please confirm it has been attached in full for the payment provider, and whether the transaction qualifies for seller protection for this dispute reason?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please open the evidence on this dispute — [Dispute ID] — and confirm each item is on file: the listing record, the photographs, and the order messages?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could this please be escalated to the payments disputes team to confirm the evidence is complete before the provider's decision, with the dispute ID and submission date noted on the record, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The provider decides\"", "text": "I understand. My request is only that the full evidence reaches them before the decision, and that the seller-protection assessment is recorded. Could both please be confirmed?"}]},
+{"id": "pd5-dispute-lost", "cat": "Payment Disputes", "name": "PD-5 · Dispute Lost — Protection, Fee & Record", "kw": ["dispute lost", "dispute decided", "dispute fee charged", "provider decided", "dispute outcome"], "flag": "", "tip": "Dispute haar jao to teen confirmations: protection apply hui ya nahi (aur kaunsa criterion miss hua), dispute fee ka status, aur account par koi defect nahi. Sab Saved Msgs mein — pattern se agli disputes ka evidence behtar hota hai.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to review the outcome of the payment dispute on order [Order Number] (dispute [Dispute ID]), which was decided in the buyer's favour on [Decision Date]."}, {"label": "2 · Ask 1 (protection)", "text": "Could you please confirm whether the transaction was assessed for seller protection, and if it did not qualify, which specific criterion was not met — so that I can meet it on future disputes?"}, {"label": "3 · Ask (fee + record)", "text": "Could you please also confirm the status of the dispute fee for this case, and confirm that no defect has been recorded on the account from this dispute?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand. Could you please check this specific dispute record — [Dispute ID] — and state the protection assessment and the fee line recorded on it, rather than the general policy?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the protection assessment and the fee question please be escalated to the payments disputes team, noted on the record with the dispute ID, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"The fee stands\"", "text": "Understood. Could you please confirm the exact criterion that was not met for protection, in writing here, so that I can address it on future disputes, and provide the reference number?"}]},
+{"id": "cf7-return-wrong-empty", "cat": "Cases & Funds", "name": "CF-7 · Return Contains Wrong / Empty Item", "kw": ["empty box", "different item returned", "swapped item", "return fraud", "not the item we sent", "wrong item returned"], "flag": "State only what you can document — photographs of the return exactly as it was opened. Do not speculate about the buyer's intent; describe the contents factually.", "tip": "Return kholte waqt HAMESHA photos/video banao — box, label, andar ka saman. Wohi documentation poora case hai. Buyer par ilzaam nahi — sirf facts: 'return mein yeh mila'. Report + deduction/protection route dono poochho.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I need help with a return: case [Case ID], order [Order Number] (buyer: [Buyer Username])."}, {"label": "2 · Facts", "text": "The return has arrived, but the package did not contain the item we dispatched. It contained [What Was Received — e.g. a different item / an empty box]. We photographed the parcel and its contents exactly as it was opened, and the item we originally sent was [Item Sent], as shown on the listing."}, {"label": "3 · Ask 1", "text": "Could you please advise how to submit this evidence on the case, whether this qualifies for a report against the buyer, and which route applies here — a refund deduction or seller protection — so that it is handled correctly?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand the case process. May I ask that the contents of the return — [What Was Received], not the item dispatched — be recorded on the case now, with our photographs, so that the case record reflects what actually arrived?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the contents report and photographs please be escalated to the team that assesses returns, noted on the case, with confirmation of the buyer-report route and whether a deduction or protection applies, and could you please provide the reference number?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"A full refund is still required\"", "text": "I understand the case process. Could you please record on the case that the returned package did not contain the dispatched item, attach our photographs, and confirm the route to report this so that it is on the account record?"}]},
+{"id": "cf8-fee-credit", "cat": "Cases & Funds", "name": "CF-8 · Fee Credit Missing After Cancellation / Refund", "kw": ["final value fee", "fee credit", "fees not refunded", "credit missing", "charged fees", "cancelled order fees"], "flag": "", "tip": "Cancel/refund ke baad fee credit usually khud aata hai — na aaye to yeh chat. Exact amount aur date confirm karwa ke likho; agla payout check karo.", "variants": [{"label": "1 · Opener", "text": "Hello, I hope you are having a good day. I would like to check a fee credit on order [Order Number]."}, {"label": "2 · Facts", "text": "This order was [What Happened — cancelled and refunded in full / refunded through the case] on [Date], but the final value fee credit has not appeared on the account."}, {"label": "3 · Ask 1", "text": "Could you please check the fee credit for this order, confirm the amount due, and advise when it will be applied?"}, {"label": "Ask 2 · agar 1 fail", "text": "I understand credits usually apply automatically. Could you please open the fee lines on this order: the [What Happened — cancellation / refund] completed on [Date] — which credit line is missing, and for what amount?"}, {"label": "Ask 3 · agar 2 fail", "text": "Thank you. Could the missing fee credit please be escalated to the billing team, with the order, the date, and the amount noted on the record, and could you please provide the reference number so that I can check the next invoice or payout?"}, {"label": "Close ✓", "text": "Thank you so much for your help. Could you please confirm this in writing here in the chat, and provide a reference number for this conversation? Could you also confirm that no defect will remain on the account from this?"}, {"label": "If: \"It applies automatically\"", "text": "Thank you — could you please confirm the exact amount and the date on which it will appear, and provide the reference number so that I can follow up if it does not?"}]}
+];
+
+const CATS=["Openers & Process","Late Shipment","Defects & Cases","Negative Feedback","Violations & Restrictions","Cases & Funds","Payment Disputes","My Templates"];
+const CATCOLOR={"Openers & Process":"var(--c-process)","Late Shipment":"var(--c-late)","Defects & Cases":"var(--c-defect)","Negative Feedback":"var(--c-negfb)","Violations & Restrictions":"var(--c-viol)","Cases & Funds":"var(--c-cases)","Payment Disputes":"var(--c-dispute)","My Templates":"var(--c-custom)"};
+const TYPES=["Defect","Late shipment","Negative feedback","Violation","Case / appeal","Payment dispute","Other"];
+const TYPECOLOR={"Defect":"var(--c-defect)","Late shipment":"var(--c-late)","Negative feedback":"var(--c-negfb)","Violation":"var(--c-viol)","Case / appeal":"var(--c-process)","Payment dispute":"var(--c-dispute)","Other":"#5b6a92"};
+const CAT2TYPE={"Late Shipment":"Late shipment","Defects & Cases":"Defect","Negative Feedback":"Negative feedback","Violations & Restrictions":"Violation","Openers & Process":"Other","Cases & Funds":"Case / appeal","Payment Disputes":"Payment dispute","My Templates":"Other"};
+const STATUSES=["Pending","Promised","Escalated","Removed ✓","Declined ✗","Follow-up"];
+const WS_LIST=[["all","All"],["Defects & Cases","Defects"],["Late Shipment","Late Shipment"],["Negative Feedback","Negatives"],["appeals","Appeals ✍"],["Violations & Restrictions","Violations"],["Cases & Funds","Cases & Funds"],["Payment Disputes","Disputes"]];
+const APPEAL_IDS=["fa1-written-feedback-appeal","appeal-form-text","va0-appeal-universal","va1-appeal-item-location","va2-appeal-item-description","va3-appeal-misclassification"];
+const APPEAL_SET=new Set(APPEAL_IDS);
+const WS2TYPES={"Defects & Cases":["Defect"],"Late Shipment":["Late shipment"],"Negative Feedback":["Negative feedback"],"Violations & Restrictions":["Violation"],"Cases & Funds":["Case / appeal"],"Payment Disputes":["Payment dispute"]};
+const STATUSCOLOR={"Pending":"#b45309","Promised":"#2e56c6","Escalated":"#6d5cd6","Removed ✓":"#1d7a46","Declined ✗":"#b3402e","Follow-up":"#0e7490"};
+const STOP=new Set(["the","and","for","you","your","our","with","this","that","have","has","are","was","were","will","would","can","could","please","kindly","kind","regards","dear","valued","customer","customers","team","hope","doing","well","thank","thanks","very","much","from","not","but","item","order","ebay","sincerely","apologize","apologise","inconvenience","caused","support","satisfaction","priority","possible","solution","best","also","been","they","them","their","when","what","which","once","soon","just","like","need","want","know","let","message","further","assistance","contact","feel","free","understanding","cooperation","patience","hello","today","chat","agent","account","seller"]);
+
+const LS_CUSTOM="m98m_ebay_custom_v1", LS_RECENT="m98m_ebay_recent_v1", LS_OVR="m98m_ebay_ovr_v1", LS_LOG="m98m_ebay_log_v1";
+function loadJSON(k,f){try{const v=JSON.parse(localStorage.getItem(k));return v??f}catch(e){return f}}
+function saveJSON(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+let customs=loadJSON(LS_CUSTOM,[]);
+let recent=loadJSON(LS_RECENT,[]);
+let overrides=loadJSON(LS_OVR,{});
+let logEntries=loadJSON(LS_LOG,[]);
+logEntries.forEach(e=>{if(e&&e.status==="Denied ✗")e.status="Declined ✗"});
+
+function allCases(){return DB.concat(customs)}
+function byId(id){return allCases().find(c=>c.id===id)}
+function logById(id){return logEntries.find(e=>e.id===id)}
+function norm(s){return (s||"").toLowerCase().replace(/color/g,"colour").replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
+function tokens(s){return norm(s).split(" ").filter(w=>w.length>=3&&!STOP.has(w))}
+function fmtDate(ts){try{return new Date(ts).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}catch(e){return ""}}
+
+/* precompute body-token sets */
+const BODY=new Map();
+function bodyTokens(c){
+  if(BODY.has(c.id))return BODY.get(c.id);
+  const set=new Set();
+  c.variants.forEach(v=>tokens(v.text).forEach(w=>set.add(w)));
+  (c.kw||[]).forEach(k=>tokens(k).forEach(w=>set.add(w)));
+  BODY.set(c.id,set);return set;
+}
+
+/* ---------- state ---------- */
+let mode="case";            // "case" | "match" | "log"
+let ws="all";               // workspace: "all" | category
+let railDivs={};
+let catFilter="All";
+let logFilter="All";
+let selId=null, selVar=0;
+let selLogId=null;
+let fieldVals={};           // "caseId::TOKEN" -> value
+let edited={};              // "caseId::varIdx" -> string (manual edit)
+let railItems=[];           // current rendered list [{id,score?}]
+let hi=-1;                  // keyboard highlight index
+
+/* ---------- els ---------- */
+const $=id=>document.getElementById(id);
+const rail=$("rail"), searchEl=$("search");
+
+/* ---------- workspaces ---------- */
+function wsLabel(w){const f=WS_LIST.find(x=>x[0]===w);return f?f[1]:w}
+function renderWS(){
+  const bar=$("wsbar");bar.innerHTML="";
+  WS_LIST.forEach(([w,lb])=>{
+    const b=document.createElement("button");
+    b.className="ws"+(ws===w?" on":"");
+    const col=w==="all"?"var(--acc)":w==="appeals"?"var(--c-appeal)":(CATCOLOR[w]||"var(--acc)");
+    b.innerHTML='<span class="wdot" style="background:'+col+'"></span>'+esc(lb);
+    b.onclick=()=>{ws=w;catFilter="All";logFilter="All";renderWS();renderChips();refreshRail()};
+    bar.appendChild(b);
+  });
+}
+
+/* ---------- chips ---------- */
+function renderChips(){
+  const wrap=$("chips");wrap.innerHTML="";
+  wrap.hidden=(mode==="match"||ws!=="all");
+  if(wrap.hidden){$("countPill").textContent=allCases().length+" cases · "+logEntries.length+" saved · v"+VERSION;return}
+  if(mode==="log"){
+    const counts={All:logEntries.length};
+    logEntries.forEach(e=>counts[e.type]=(counts[e.type]||0)+1);
+    ["All",...TYPES].forEach(t=>{
+      if(t!=="All"&&!counts[t])return;
+      const b=document.createElement("button");
+      b.className="chip"+(logFilter===t?" on":"");
+      b.innerHTML=esc(t)+' <span class="n">'+(counts[t]||0)+"</span>";
+      b.onclick=()=>{logFilter=t;renderChips();refreshRail()};
+      wrap.appendChild(b);
+    });
+  }else{
+    const counts={All:allCases().length};
+    allCases().forEach(c=>counts[c.cat]=(counts[c.cat]||0)+1);
+    ["All",...CATS].forEach(cat=>{
+      if(cat!=="All"&&!counts[cat])return;
+      const b=document.createElement("button");
+      b.className="chip"+(catFilter===cat?" on":"");
+      b.innerHTML=esc(cat)+' <span class="n">'+(counts[cat]||0)+"</span>";
+      b.onclick=()=>{catFilter=cat;renderChips();refreshRail()};
+      wrap.appendChild(b);
+    });
+  }
+  $("countPill").textContent=allCases().length+" cases · "+logEntries.length+" saved · v"+VERSION;
+}
+
+/* ---------- search / match ---------- */
+function caseSearch(q){
+  const list=allCases().filter(c=>ws==="all"?(catFilter==="All"||c.cat===catFilter):ws==="appeals"?APPEAL_SET.has(c.id):(c.cat===ws||c.cat==="Openers & Process"));
+  if(!q.trim())return list.map(c=>({id:c.id}));
+  const nq=norm(q), qt=tokens(q);
+  const out=[];
+  for(const c of list){
+    const nn=norm(c.name), kws=(c.kw||[]).map(norm);
+    let s=0;
+    if(nn.startsWith(nq))s=100;
+    else if(nn.includes(nq))s=70;
+    else if(kws.some(k=>k.includes(nq)))s=50;
+    else if(qt.length&&qt.every(w=>nn.includes(w)||kws.some(k=>k.includes(w))||bodyTokens(c).has(w)))s=25;
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out;
+}
+function msgMatch(msg){
+  const list=allCases(); // suggestions always scan every case, ignoring the category chip
+  const nmsg=norm(msg), mt=new Set(tokens(msg));
+  const out=[];
+  for(const c of list){
+    let s=0;
+    if(ws==="appeals"){if(APPEAL_SET.has(c.id))s+=4}
+    else if(ws!=="all"&&c.cat===ws)s+=4;
+    (c.kw||[]).forEach(k=>{const nk=norm(k);
+      if(nk.includes(" ")){if(nmsg.includes(nk))s+=5;}
+      else if(mt.has(nk))s+=3;});
+    tokens(c.name).forEach(w=>{if(mt.has(w))s+=2});
+    let body=0;bodyTokens(c).forEach(w=>{if(mt.has(w))body++});
+    s+=Math.min(body,6);
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out.slice(0,8);
+}
+function logSearch(q){
+  let list=logEntries.filter(e=>(ws==="all"||ws==="appeals")?(logFilter==="All"||e.type===logFilter):WS2TYPES[ws].includes(e.type));
+  if(q.trim()){
+    const nq=norm(q);
+    list=list.filter(e=>norm([e.order,e.account,e.agent,e.ref,e.type,e.status,e.msg,e.reply,e.notes].join(" ")).includes(nq));
+  }
+  list=[...list].sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
+  return list.map(e=>({id:e.id}));
+}
+
+/* ---------- rail ---------- */
+function refreshRail(){
+  railDivs={};
+  if(mode==="case"){
+    railItems=caseSearch(searchEl.value);
+    if(ws==="appeals"&&!searchEl.value.trim()){
+      const order=APPEAL_IDS.filter(id=>railItems.some(r=>r.id===id));
+      railItems=order.map(id=>({id}));
+      const di={};
+      order.forEach((id,ix)=>{
+        if(id==="fa1-written-feedback-appeal")di[ix]="Feedback appeal";
+        else if(id==="appeal-form-text")di[ix]="Defect appeals";
+        else if(id==="va0-appeal-universal")di[ix]="Violation appeals";
+      });
+      railDivs=di;
+    }
+    else if(ws!=="all"&&!searchEl.value.trim()){
+      const a=[],b=[];
+      railItems.forEach(r=>{const c=byId(r.id);(c&&c.cat==="Openers & Process"?b:a).push(r)});
+      railItems=a.concat(b);
+      if(a.length)railDivs[0]=wsLabel(ws)+" — scripts & appeals";
+      if(b.length)railDivs[a.length]="Universal blocks — har chat";
+    }
+  }
+  else if(mode==="match")railItems=$("buyerMsg").value.trim()?msgMatch($("buyerMsg").value):[];
+  else railItems=logSearch(searchEl.value);
+  hi=-1;renderRail();
+}
+function renderRail(){
+  rail.innerHTML="";
+  if(!railItems.length){
+    const d=document.createElement("div");d.className="rail-empty";
+    if(mode==="match")d.textContent="Paste the eBay message above and press Suggest replies.";
+    else if(mode==="log")d.textContent=searchEl.value.trim()||logFilter!=="All"
+      ?"No saved messages match. Clear the search or the type filter."
+      :"No saved messages yet. After a chat, press Save to log so the thread, reference numbers, and outcomes stay searchable.";
+    else d.textContent="No case matches. Try fewer or different words — or add it under My Templates."
+      +(catFilter!=="All"?" You are filtering by \""+catFilter+"\" — click All to search everything.":"");
+    rail.appendChild(d);return;
+  }
+  if(mode==="log"){renderLogRows();return}
+  const max=Math.max(...railItems.map(r=>r.score||1));
+  railItems.forEach((r,i)=>{
+    if(railDivs[i]!=null){const dv=document.createElement("div");dv.className="raildiv";dv.textContent=railDivs[i];rail.appendChild(dv);}
+    const c=byId(r.id);if(!c)return;
+    const b=document.createElement("div");
+    b.tabIndex=0;
+    b.className="row"+(c.id===selId?" sel":"")+(i===hi?" sel":"");
+    b.setAttribute("role","option");
+    const tab='<span class="tab" style="background:'+(CATCOLOR[c.cat]||"var(--acc)")+'"></span>';
+    const warn=c.flag?'<span class="warn-dot" title="Account care — see note">⚠</span>':"";
+    const vp=c.variants.length>1?'<span class="vpill">×'+c.variants.length+"</span>":"";
+    const cust=c.custom?'<span style="color:var(--c-custom)">✎</span>':"";
+    let barHtml="";
+    if(mode==="match"&&r.score){const w=Math.max(8,Math.round(r.score/max*100));
+      barHtml='<div class="bar"><i style="width:'+w+'%"></i></div>';}
+    const btns=c.custom?'<span class="custbtns"><button class="mini" data-edit="'+c.id+'">edit</button><button class="mini" data-del="'+c.id+'">del</button></span>':"";
+    b.innerHTML=tab+'<span class="body"><span class="nm">'+esc(c.name)+' '+warn+'</span><span class="meta">'+esc(c.cat)+' '+vp+' '+cust+'</span>'+barHtml+'</span>'+btns;
+    const act=e=>{
+      const ed=e.target.getAttribute&&e.target.getAttribute("data-edit");
+      const dl=e.target.getAttribute&&e.target.getAttribute("data-del");
+      if(ed){openModal(byId(ed));return}
+      if(dl){delCustom(dl);return}
+      openCase(c.id);
+    };
+    b.onclick=act;
+    b.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act(e)}};
+    rail.appendChild(b);
+  });
+}
+function renderLogRows(){
+  railItems.forEach((r,i)=>{
+    const e=logById(r.id);if(!e)return;
+    const b=document.createElement("div");
+    b.tabIndex=0;
+    b.className="row"+(e.id===selLogId?" sel":"")+(i===hi?" sel":"");
+    b.setAttribute("role","option");
+    const tab='<span class="tab" style="background:'+(TYPECOLOR[e.type]||"var(--acc)")+'"></span>';
+    const pill='<span class="spill" style="background:'+(STATUSCOLOR[e.status]||"#5b6a92")+'">'+esc(e.status||"")+"</span>";
+    const snip=esc((e.msg||e.reply||"").slice(0,52));
+    b.innerHTML=tab+'<span class="body"><span class="nm">'+esc(e.order||"(no ref)")+'</span><span class="meta">'+esc(e.type)+' · '+esc(fmtDate(e.ts))+(e.ref?' · '+esc(e.ref):'')+' '+pill+'</span><span class="meta" style="font-family:inherit">'+snip+(snip.length>=52?"…":"")+'</span></span>';
+    const act=()=>openLog(e.id);
+    b.onclick=act;
+    b.onkeydown=ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();act()}};
+    rail.appendChild(b);
+  });
+}
+
+/* ---------- template detail ---------- */
+function openCase(id,varIdx=0){
+  const c=byId(id);if(!c)return;
+  selId=id;selVar=Math.min(varIdx,c.variants.length-1);
+  pushRecent(id);
+  $("dEmpty").hidden=true;$("logBody").hidden=true;$("dBody").hidden=false;
+  document.body.classList.add("viewing");
+  $("dCat").textContent=c.cat;
+  $("dDot").style.background=CATCOLOR[c.cat]||"var(--acc)";
+  $("dCustomTag").hidden=!c.custom;
+  $("dName").textContent=c.name;
+  $("dFlag").hidden=!c.flag;
+  if(c.flag)$("dFlag").textContent="⚠ Account care: "+c.flag;
+  const vt=$("vTabs");vt.innerHTML="";
+  if(c.variants.length>1){
+    c.variants.forEach((v,i)=>{
+      const b=document.createElement("button");
+      b.dataset.lb=v.label||("Variant "+(i+1));
+      b.className=i===selVar?"on":"";
+      b.onclick=()=>{selVar=i;renderVariant()};
+      vt.appendChild(b);
+    });
+  }
+  renderVariant();
+  renderRail();
+  if(window.innerWidth<=880)window.scrollTo({top:0});
+}
+function curCase(){return byId(selId)}
+function curText(){const ek=editKey();return overrides[ek]!=null?overrides[ek]:curCase().variants[selVar].text}
+function activeRaw(){const ek=editKey();return edited[ek]!=null?edited[ek]:curText()}
+function toksOf(t){const s=new Set();(t.match(/\[([^\]\n]{2,60})\]/g)||[]).forEach(m=>s.add(m.slice(1,-1)));return [...s]}
+function editKey(){return selId+"::"+selVar}
+function resolvedText(){
+  let t=activeRaw();
+  toksOf(t).forEach(tok=>{
+    const v=(fieldVals[selId+"::"+tok]||"").trim();
+    if(v)t=t.split("["+tok+"]").join(v);
+  });
+  return t;
+}
+function buildFields(tks){
+  const fg=$("fGrid");fg.innerHTML="";
+  tks.forEach(tok=>{
+    const w=document.createElement("div");
+    const inp=document.createElement("input");
+    inp.value=fieldVals[selId+"::"+tok]||"";
+    inp.placeholder=tok.toLowerCase();
+    inp.oninput=()=>{fieldVals[selId+"::"+tok]=inp.value;paint()};
+    const lb=document.createElement("label");lb.textContent="["+tok+"]";
+    w.appendChild(lb);w.appendChild(inp);fg.appendChild(w);
+  });
+  fg.dataset.sig=tks.join("|");
+}
+function renderVariant(){
+  const c=curCase(); if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  const tks=toksOf(activeRaw());
+  [...$("vTabs").children].forEach((b,i)=>{
+    b.className=i===selVar?"on":"";
+    b.textContent=b.dataset.lb+(overrides[selId+"::"+i]!=null?" •":"");
+  });
+  $("fields").hidden=!tks.length;
+  buildFields(tks);
+  $("preview").style.display=isEd?"none":"block";
+  $("editArea").style.display=isEd?"block":"none";
+  $("editNote").style.display=isEd?"inline":"none";
+  $("editBtn").hidden=isEd;
+  $("saveTplBtn").hidden=!isEd;
+  $("ovrTag").hidden=isEd||overrides[ek]==null;
+  $("ovrNote").hidden=isEd||overrides[ek]==null||!!c.custom;
+  $("dTip").hidden=!c.tip;
+  if(c.tip)$("dTip").innerHTML="<b>Meri tip:</b> "+esc(c.tip);
+  if(isEd&&document.activeElement!==$("editArea"))$("editArea").value=edited[ek];
+  paint();
+}
+function paint(){
+  const c=curCase();if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  if(!isEd){
+    let html=esc(curText());
+    toksOf(curText()).forEach(tok=>{
+      const v=(fieldVals[selId+"::"+tok]||"").trim();
+      const span=v?'<span class="tok f">'+esc(v)+"</span>"
+                  :'<span class="tok e">['+esc(tok)+"]</span>";
+      html=html.split(esc("["+tok+"]")).join(span);
+    });
+    $("preview").innerHTML=html;
+  }
+  const txt=resolvedText();
+  const missing=toksOf(activeRaw()).filter(t=>!(fieldVals[selId+"::"+t]||"").trim()).length;
+  const ch=$("chars");
+  ch.textContent=txt.length+" chars"+(missing?" · "+missing+" field"+(missing>1?"s":"")+" empty":"");
+  ch.className="chars"+(txt.length>=1900||missing?" hot":"");
+  ch.title=txt.length>=1900?"Very long — check it sends fully in the eBay chat window":"";
+}
+
+/* ---------- template actions ---------- */
+$("copyBtn").onclick=async()=>{copyText(resolvedText())};
+async function copyText(txt){
+  try{await navigator.clipboard.writeText(txt)}
+  catch(e){
+    const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);
+    ta.select();try{document.execCommand("copy")}catch(_){}
+    ta.remove();
+  }
+  toast("Copied ✓");
+}
+$("editBtn").onclick=()=>{
+  edited[editKey()]=curText();renderVariant();$("editArea").focus();
+};
+$("editArea").addEventListener("input",()=>{
+  const ek=editKey();edited[ek]=$("editArea").value;
+  const tks=toksOf(edited[ek]);
+  if($("fGrid").dataset.sig!==tks.join("|")){$("fields").hidden=!tks.length;buildFields(tks);}
+  paint();
+});
+$("cancelEdit").onclick=e=>{e.preventDefault();delete edited[editKey()];renderVariant()};
+$("saveTplBtn").onclick=()=>{
+  const ek=editKey(), val=$("editArea").value, c=curCase();
+  if(!val.trim()){toast("Template is empty");return}
+  if(c.custom){c.variants[selVar].text=val;saveJSON(LS_CUSTOM,customs);}
+  else{overrides[ek]=val;saveJSON(LS_OVR,overrides);}
+  delete edited[ek];renderVariant();toast("Template saved ✓");
+};
+$("restoreOrig").onclick=e=>{e.preventDefault();
+  if(!confirm("Restore the original template text? Your saved edit will be removed."))return;
+  delete overrides[editKey()];saveJSON(LS_OVR,overrides);renderVariant();toast("Original restored");
+};
+$("clearFields").onclick=()=>{
+  toksOf(curText()).forEach(t=>delete fieldVals[selId+"::"+t]);renderVariant();
+};
+$("backBtn").onclick=()=>{document.body.classList.remove("viewing")};
+$("lBack").onclick=()=>{document.body.classList.remove("viewing")};
+
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1400)}
+
+/* ---------- recent ---------- */
+function pushRecent(id){
+  recent=[id,...recent.filter(r=>r!==id)].slice(0,8);
+  saveJSON(LS_RECENT,recent);renderRecent();
+}
+function renderRecent(){
+  const ids=recent.filter(id=>byId(id));
+  $("recentWrap").hidden=!ids.length||mode==="log";
+  const w=$("recent");w.innerHTML="";
+  ids.forEach(id=>{
+    const b=document.createElement("button");b.className="rchip";
+    b.textContent=byId(id).name.slice(0,34);
+    b.onclick=()=>openCase(id);w.appendChild(b);
+  });
+}
+
+/* ---------- custom templates ---------- */
+let editingId=null;
+function openModal(c){
+  editingId=c?c.id:null;
+  $("mTitle").textContent=c?"Edit Template":"New Template";
+  const sel=$("mCat");sel.innerHTML="";
+  CATS.forEach(cat=>{const o=document.createElement("option");o.value=o.textContent=cat;sel.appendChild(o)});
+  $("mName").value=c?c.name:"";
+  sel.value=c?c.cat:(ws!=="all"&&CATS.includes(ws)?ws:"My Templates");
+  $("mText").value=c?c.variants[0].text:"";
+  showDlg($("modal"));
+}
+function showDlg(d){if(d.showModal)d.showModal();else{d.classList.add("fb");d.setAttribute("open","")}}
+function hideDlg(d){if(d.close&&!d.classList.contains("fb"))d.close();else{d.removeAttribute("open");d.classList.remove("fb")}}
+$("mCancel").onclick=()=>hideDlg($("modal"));
+$("mSave").onclick=()=>{
+  const name=$("mName").value.trim(), text=$("mText").value.trim();
+  if(!name||!text){toast("Name and text required");return}
+  if(editingId){
+    const c=byId(editingId);
+    c.name=name;c.cat=$("mCat").value;c.variants=[{label:null,text}];
+    BODY.delete(c.id);
+  }else{
+    customs.push({id:"custom-"+Date.now(),cat:$("mCat").value,name,kw:[],flag:"",tip:"",custom:true,
+      variants:[{label:null,text}]});
+  }
+  saveJSON(LS_CUSTOM,customs);
+  hideDlg($("modal"));renderChips();refreshRail();toast("Saved ✓");
+};
+function delCustom(id){
+  if(!confirm("Delete this template?"))return;
+  customs=customs.filter(c=>c.id!==id);
+  saveJSON(LS_CUSTOM,customs);
+  if(selId===id){selId=null;$("dBody").hidden=true;$("dEmpty").hidden=false;document.body.classList.remove("viewing")}
+  renderChips();refreshRail();renderRecent();
+}
+
+/* ---------- saved messages: detail ---------- */
+function openLog(id){
+  const e=logById(id);if(!e)return;
+  selLogId=id;
+  $("dEmpty").hidden=true;$("dBody").hidden=true;$("logBody").hidden=false;
+  document.body.classList.add("viewing");
+  $("lType").textContent=e.type;
+  $("lDot").style.background=TYPECOLOR[e.type]||"var(--acc)";
+  $("lOrder").textContent=e.order||"(no ref)";
+  $("lDate").textContent=fmtDate(e.ts);
+  const st=$("lStatus");st.innerHTML="";
+  STATUSES.forEach(s=>{const o=document.createElement("option");o.value=o.textContent=s;st.appendChild(o)});
+  st.value=e.status||"Pending";
+  st.style.color=STATUSCOLOR[st.value]||"var(--ink)";
+  const mp=[];
+  if(e.account)mp.push("Account: "+e.account);
+  if(e.agent)mp.push("Agent: "+e.agent);
+  if(e.ref)mp.push("Ref: "+e.ref);
+  $("lMeta").hidden=!mp.length;
+  $("lMeta").textContent=mp.join("  ·  ");
+  $("lMsg").textContent=e.msg||"—";
+  $("lReply").textContent=e.reply||"—";
+  $("lNotes").value=e.notes||"";
+  renderRail();
+  if(window.innerWidth<=880)window.scrollTo({top:0});
+}
+$("lStatus").addEventListener("change",()=>{
+  const e=logById(selLogId);if(!e)return;
+  e.status=$("lStatus").value;
+  $("lStatus").style.color=STATUSCOLOR[e.status]||"var(--ink)";
+  saveJSON(LS_LOG,logEntries);renderChips();refreshRail();toast("Status updated");
+});
+$("lNotes").addEventListener("input",()=>{
+  const e=logById(selLogId);if(!e)return;
+  e.notes=$("lNotes").value;saveJSON(LS_LOG,logEntries);
+});
+$("copyMsg").onclick=()=>{const e=logById(selLogId);if(e)copyText(e.msg||"")};
+$("copyReply").onclick=()=>{const e=logById(selLogId);if(e)copyText(e.reply||"")};
+$("lEdit").onclick=()=>{const e=logById(selLogId);if(e)openLogModal(e)};
+$("lDel").onclick=()=>{
+  if(!selLogId)return;
+  if(!confirm("Delete this saved message?"))return;
+  logEntries=logEntries.filter(x=>x.id!==selLogId);
+  saveJSON(LS_LOG,logEntries);
+  selLogId=null;$("logBody").hidden=true;$("dEmpty").hidden=false;
+  document.body.classList.remove("viewing");
+  renderChips();refreshRail();toast("Deleted");
+};
+
+/* ---------- saved messages: modal ---------- */
+let editingLogId=null;
+function openLogModal(e,prefill){
+  editingLogId=e?e.id:null;
+  $("gTitle").textContent=e?"Edit Saved Message":"Save Message to Log";
+  const ts=$("gType");ts.innerHTML="";
+  TYPES.forEach(t=>{const o=document.createElement("option");o.value=o.textContent=t;ts.appendChild(o)});
+  const ss=$("gStatus");ss.innerHTML="";
+  STATUSES.forEach(s=>{const o=document.createElement("option");o.value=o.textContent=s;ss.appendChild(o)});
+  $("gOrder").value=e?e.order:(prefill&&prefill.order)||"";
+  $("gAccount").value=e?(e.account||""):"";
+  $("gAgent").value=e?(e.agent||""):"";
+  $("gRef").value=e?(e.ref||""):"";
+  ts.value=e?e.type:(prefill&&prefill.type)||"Other";
+  ss.value=e?e.status:"Pending";
+  $("gMsg").value=e?e.msg:(prefill&&prefill.msg)||"";
+  $("gReply").value=e?e.reply:(prefill&&prefill.reply)||"";
+  $("gNotes").value=e?e.notes:"";
+  showDlg($("logModal"));
+}
+$("gCancel").onclick=()=>hideDlg($("logModal"));
+$("gSave").onclick=()=>{
+  const msg=$("gMsg").value.trim(), reply=$("gReply").value.trim();
+  if(!msg&&!reply){toast("Add the eBay message or your reply");return}
+  if(editingLogId){
+    const e=logById(editingLogId);if(e){
+      e.order=$("gOrder").value.trim();e.type=$("gType").value;e.status=$("gStatus").value;
+      e.account=$("gAccount").value.trim();e.agent=$("gAgent").value.trim();e.ref=$("gRef").value.trim();
+      e.msg=msg;e.reply=reply;e.notes=$("gNotes").value.trim();
+    }
+    saveJSON(LS_LOG,logEntries);
+    hideDlg($("logModal"));renderChips();refreshRail();
+    if(selLogId===editingLogId)openLog(editingLogId);
+    toast("Saved ✓");
+  }else{
+    const e={id:"log-"+Date.now(),ts:new Date().toISOString(),order:$("gOrder").value.trim(),
+      account:$("gAccount").value.trim(),agent:$("gAgent").value.trim(),ref:$("gRef").value.trim(),
+      type:$("gType").value,status:$("gStatus").value,msg,reply,notes:$("gNotes").value.trim()};
+    logEntries.push(e);saveJSON(LS_LOG,logEntries);
+    hideDlg($("logModal"));renderChips();refreshRail();
+    toast("Saved to log ✓");
+    if(mode==="log")openLog(e.id);
+  }
+};
+$("saveMsgBtn").onclick=()=>{
+  openLogModal(null,{msg:$("buyerMsg").value.trim()});
+};
+$("saveLogBtn").onclick=()=>{
+  const c=curCase();if(!c)return;
+  openLogModal(null,{
+    msg:mode==="match"?$("buyerMsg").value.trim():"",
+    reply:resolvedText(),
+    type:CAT2TYPE[c.cat]||"Other"
+  });
+};
+
+$("rulesBtn").onclick=()=>showDlg($("rulesModal"));
+$("rulesClose").onclick=()=>hideDlg($("rulesModal"));
+
+/* ---------- backup / restore ---------- */
+$("backupBtn").onclick=()=>{
+  const data={app:"m98m-ebay-defense",version:VERSION,exported:new Date().toISOString(),
+    log:logEntries,customs,overrides};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="m98m-ebay-defense-backup-"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  toast("Backup downloaded ✓");
+};
+$("restoreBtn").onclick=()=>$("restoreFile").click();
+$("restoreFile").addEventListener("change",ev=>{
+  const f=ev.target.files&&ev.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const d=JSON.parse(rd.result);
+      if(!d||(!Array.isArray(d.log)&&!Array.isArray(d.customs))){toast("Not a valid backup file");return}
+      if(!confirm("Restore from backup? Existing entries are kept; entries from the file are added or updated."))return;
+      if(Array.isArray(d.log)){
+        const map=new Map(logEntries.map(e=>[e.id,e]));
+        d.log.forEach(e=>{if(e&&e.id)map.set(e.id,e)});
+        logEntries=[...map.values()];saveJSON(LS_LOG,logEntries);
+      }
+      if(Array.isArray(d.customs)){
+        const map=new Map(customs.map(c=>[c.id,c]));
+        d.customs.forEach(c=>{if(c&&c.id)map.set(c.id,c)});
+        customs=[...map.values()];saveJSON(LS_CUSTOM,customs);
+      }
+      if(d.overrides&&typeof d.overrides==="object"){
+        overrides=Object.assign({},overrides,d.overrides);saveJSON(LS_OVR,overrides);
+      }
+      renderChips();refreshRail();renderRecent();toast("Restored ✓");
+    }catch(e){toast("Could not read that file")}
+    ev.target.value="";
+  };
+  rd.readAsText(f);
+});
+
+/* ---------- modes / events ---------- */
+function setMode(m){
+  mode=m;
+  $("modeCase").className=m==="case"?"on":"";
+  $("modeMatch").className=m==="match"?"on":"";
+  $("modeLog").className=m==="log"?"on":"";
+  $("buyerBox").hidden=m!=="match";
+  searchEl.parentElement.style.display=m==="match"?"none":"";
+  searchEl.placeholder=m==="log"
+    ?"Search saved msgs — order no, agent name, ref, words from the message…"
+    :"Type case or keywords — e.g. late shipment, extortion, cancellation defect…";
+  $("addBtn").textContent=m==="log"?"＋ Save new message":"＋ New template (My Templates)";
+  $("logTools").hidden=m!=="log";
+  renderChips();renderRecent();refreshRail();
+  if(m==="match")$("buyerMsg").focus();
+}
+$("modeCase").onclick=()=>setMode("case");
+$("modeMatch").onclick=()=>setMode("match");
+$("modeLog").onclick=()=>setMode("log");
+$("addBtn").onclick=()=>{mode==="log"?openLogModal(null,null):openModal(null)};
+$("suggestBtn").onclick=refreshRail;
+$("buyerMsg").addEventListener("keydown",e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey))refreshRail()});
+searchEl.addEventListener("input",refreshRail);
+document.addEventListener("keydown",e=>{
+  if(e.key==="/"&&document.activeElement!==searchEl&&document.activeElement.tagName!=="TEXTAREA"&&document.activeElement.tagName!=="INPUT"&&document.activeElement.tagName!=="SELECT"){
+    e.preventDefault();
+    if(mode==="match")setMode("case");
+    searchEl.focus();searchEl.select();
+  }else if(e.key==="Escape"){
+    if($("modal").open||$("logModal").open||$("rulesModal").open)return;
+    document.body.classList.remove("viewing");
+  }else if(document.activeElement===searchEl&&railItems.length){
+    if(e.key==="ArrowDown"){e.preventDefault();hi=Math.min(hi+1,railItems.length-1);renderRail();scrollHi()}
+    else if(e.key==="ArrowUp"){e.preventDefault();hi=Math.max(hi-1,0);renderRail();scrollHi()}
+    else if(e.key==="Enter"){e.preventDefault();
+      const id=railItems[Math.max(hi,0)].id;
+      mode==="log"?openLog(id):openCase(id);}
+  }
+});
+function scrollHi(){const el=rail.querySelectorAll(".row")[hi];if(el)el.scrollIntoView({block:"nearest"})}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+/* ---------- init ---------- */
+renderWS();renderChips();renderRecent();refreshRail();
+</script>
+</body>
+</html>

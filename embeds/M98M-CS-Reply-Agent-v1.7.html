@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M98M CS Reply Agent v1.7</title>
+<style>
+:root{
+  --ink:#0b3c49; --teal:#00a896; --teal-dark:#008577; --mint:#f0faf8;
+  --card:#ffffff; --line:#d7ebe6; --sub:#547d84; --amber:#b45309; --amber-bg:#fff7e6;
+  --tok-bg:#e0f5f1; --tok-empty:#fde9c8; --danger:#b3402e;
+  --c-general:#00a896; --c-defect:#e07a3f; --c-delivery:#3b82c4; --c-negfb:#c4573b; --c-lovely:#d6699e; --c-custom:#6d5cd6;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--mint);color:var(--ink);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--teal);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* header */
+header{background:var(--ink);color:#eafcf9;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{background:var(--teal);color:#fff;font-weight:800;letter-spacing:.06em;border-radius:9px;padding:8px 11px;font-size:15px}
+.h-title{font-size:19px;font-weight:800;letter-spacing:.10em;text-transform:uppercase}
+.h-sub{font-family:var(--mono);font-size:12px;color:#9fd8cf}
+.count-pill{margin-left:auto;font-family:var(--mono);font-size:12px;background:#12505f;border:1px solid #1f6a7c;color:#c8efe9;border-radius:999px;padding:4px 12px}
+
+/* toolbar */
+.toolbar{padding:14px 20px 4px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;border:1.5px solid var(--line);background:#fff;border-radius:10px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:9px 15px;font-weight:600;color:var(--sub)}
+.seg button.on{background:var(--teal);color:#fff}
+.searchwrap{flex:1;min-width:230px;position:relative}
+.searchwrap input{width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+.searchwrap input:focus{border-color:var(--teal);outline:none;box-shadow:0 0 0 3px #00a89626}
+.slash{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:5px;padding:1px 7px;background:var(--mint)}
+.chips{padding:8px 20px 2px;display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:5px 13px;font-size:13px;font-weight:600;color:var(--sub)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.75;margin-left:4px}
+.recentbar{padding:6px 20px 2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+.recentbar[hidden]{display:none}
+.rchip{border:1px dashed var(--line);background:#fff;border-radius:8px;padding:3px 10px;font-size:12px;color:var(--ink)}
+
+/* layout */
+main{flex:1;display:grid;grid-template-columns:360px 1fr;gap:16px;padding:12px 20px 20px;align-items:start}
+aside{background:var(--card);border:1.5px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 210px);min-height:320px}
+#buyerBox{padding:12px;border-bottom:1.5px solid var(--line);background:#fbfefd}
+#buyerBox[hidden]{display:none}
+#buyerBox textarea{width:100%;min-height:96px;resize:vertical;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+#buyerBox button{margin-top:8px;width:100%;background:var(--ink);color:#fff;border:0;border-radius:10px;padding:10px;font-weight:700}
+.rail{overflow-y:auto;flex:1}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid #eef7f4;padding:11px 12px 11px 0;position:relative}
+.row{cursor:pointer}
+.row:hover{background:#f4fbf9}
+.row.sel{background:#e6f6f2}
+.row .tab{width:5px;align-self:stretch;border-radius:0 4px 4px 0;flex:0 0 5px}
+.row .nm{font-weight:700;font-size:13.5px;letter-spacing:.02em}
+.row .meta{font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row .body{flex:1;min-width:0}
+.vpill{border:1px solid var(--line);border-radius:999px;padding:0 7px;font-size:10.5px}
+.warn-dot{color:var(--amber);font-size:13px}
+.bar{height:5px;border-radius:99px;background:#e2f1ed;margin-top:5px;overflow:hidden;max-width:180px}
+.bar i{display:block;height:100%;background:var(--teal)}
+.rail-empty{padding:26px 18px;color:var(--sub);font-size:13.5px;text-align:center}
+.addbtn{margin:10px 12px 12px;border:1.5px dashed var(--teal);color:var(--teal-dark);background:#f4fdfb;border-radius:10px;padding:10px;font-weight:700}
+.custbtns{display:flex;gap:6px}
+.mini{border:1px solid var(--line);background:#fff;border-radius:7px;padding:2px 8px;font-size:12px;color:var(--sub)}
+.mini:hover{color:var(--ink)}
+
+/* detail */
+#detail{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:18px 20px 20px;min-height:320px}
+.d-empty{color:var(--sub);text-align:center;padding:70px 20px;font-size:14.5px}
+.d-cat{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;align-items:center;gap:8px}
+.d-cat .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.d-name{font-size:21px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:4px 0 2px}
+.backbtn{display:none;margin-bottom:10px;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:700;color:var(--ink)}
+.flagbox{margin:10px 0;background:var(--amber-bg);border:1.5px solid #f2d49a;color:#7a4a08;border-radius:10px;padding:10px 13px;font-size:13.5px}
+.vtabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+.vtabs button{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:600;font-size:13px;color:var(--sub)}
+.vtabs button.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.fields{margin:12px 0 4px;background:#f7fcfb;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px}
+.fields h4{margin:0 0 8px;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;justify-content:space-between;align-items:center}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:9px}
+.fgrid label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--teal-dark);letter-spacing:.05em;margin-bottom:3px}
+.fgrid input{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+.fgrid input:focus{border-color:var(--teal);outline:none}
+.clearf{border:0;background:none;color:var(--sub);font-size:12px;text-decoration:underline;padding:0}
+.preview{margin-top:12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;padding:15px 16px;white-space:pre-wrap;font-size:14.5px;line-height:1.62;min-height:140px}
+.preview .tok{font-family:var(--mono);font-size:12.5px;border-radius:6px;padding:1px 6px}
+.preview .tok.f{background:var(--tok-bg);color:var(--teal-dark)}
+.preview .tok.e{background:var(--tok-empty);color:var(--amber);border:1px dashed #e7b264}
+#editArea{display:none;width:100%;min-height:260px;margin-top:12px;border:1.5px solid var(--teal);border-radius:12px;padding:14px;font:14.5px/1.62 inherit;resize:vertical}
+.d-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.copybtn{flex:1;min-width:190px;background:var(--teal);border:0;color:#fff;font-weight:800;font-size:15px;letter-spacing:.04em;border-radius:11px;padding:13px 18px}
+.copybtn:hover{background:var(--teal-dark)}
+.ghost{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:11px 15px;font-weight:600;color:var(--ink)}
+.chars{font-family:var(--mono);font-size:12px;color:var(--sub)}
+.chars.hot{color:var(--amber);font-weight:700}
+.editnote{font-size:12px;color:var(--amber);display:none}
+
+footer{padding:12px 20px 18px;color:var(--sub);font-size:12px;font-family:var(--mono)}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;border-radius:10px;padding:10px 20px;font-weight:700;opacity:0;pointer-events:none;transition:all .18s}
+#toast.show{opacity:1;transform:translateX(-50%)}
+
+/* modal */
+dialog{border:1.5px solid var(--line);border-radius:14px;padding:0;width:min(560px,94vw)}
+dialog::backdrop{background:#0b3c4966}
+dialog.fb[open]{display:block;position:fixed;inset:0;margin:auto;height:fit-content;z-index:60;box-shadow:0 12px 40px #0b3c4955}
+.m-head{background:var(--ink);color:#fff;padding:13px 18px;font-weight:800;letter-spacing:.06em}
+.m-body{padding:16px 18px}
+.m-body label{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:10px 0 4px}
+.m-body input,.m-body select,.m-body textarea{width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:9px;font:inherit}
+.m-body textarea{min-height:170px;resize:vertical}
+.m-hint{font-size:12px;color:var(--sub);margin-top:5px}
+.m-hint code{font-family:var(--mono);background:var(--tok-bg);border-radius:5px;padding:0 5px;color:var(--teal-dark)}
+.m-actions{display:flex;gap:10px;justify-content:flex-end;padding:0 18px 16px}
+.m-actions .save{background:var(--teal);border:0;color:#fff;font-weight:800;border-radius:9px;padding:10px 20px}
+.m-actions .cancel{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:10px 16px}
+
+/* mobile */
+@media (max-width:880px){
+  main{grid-template-columns:1fr}
+  aside{max-height:none}
+  body.viewing aside, body.viewing .toolbar, body.viewing .chips, body.viewing .recentbar{display:none}
+  body:not(.viewing) #detail{display:none}
+  .backbtn{display:inline-block}
+  .count-pill{margin-left:0}
+}
+@media (min-width:881px){ body.viewing #detail{display:block} }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">M98M</span>
+  <div>
+    <div class="h-title">CS Reply Agent</div>
+    <div class="h-sub">eBay customer service · type the case, get the reply</div>
+  </div>
+  <span class="count-pill" id="countPill"></span>
+</header>
+
+<div class="toolbar">
+  <div class="seg" role="tablist" aria-label="Mode">
+    <button id="modeCase" class="on">Case Search</button>
+    <button id="modeBuyer">Match Buyer Message</button>
+  </div>
+  <div class="searchwrap">
+    <input id="search" type="search" placeholder="Type case name or keywords — e.g. INR, wrong colour, damaged, VAT…" autocomplete="off">
+    <span class="slash">/</span>
+  </div>
+</div>
+
+<div class="chips" id="chips"></div>
+<div class="recentbar" id="recentWrap" hidden>Recent:&nbsp;<span id="recent"></span></div>
+
+<main>
+  <aside>
+    <div id="buyerBox" hidden>
+      <textarea id="buyerMsg" placeholder="Paste the buyer's message here…"></textarea>
+      <button id="suggestBtn">Suggest replies</button>
+    </div>
+    <div class="rail" id="rail" role="listbox" aria-label="Cases"></div>
+    <button class="addbtn" id="addBtn">＋ New template (My Templates)</button>
+  </aside>
+
+  <section id="detail">
+    <div class="d-empty" id="dEmpty">Search a case on the left, or switch to <b>Match Buyer Message</b> and paste what the buyer wrote.<br><br>Press <b>/</b> to jump to search.</div>
+    <div id="dBody" hidden>
+      <button class="backbtn" id="backBtn">← All cases</button>
+      <div class="d-cat"><span class="dot" id="dDot"></span><span id="dCat"></span><span id="dCustomTag" hidden style="color:var(--c-custom)">· MY TEMPLATE</span><span id="ovrTag" hidden style="color:#b8860b">· EDITED</span></div>
+      <div class="d-name" id="dName"></div>
+      <div class="flagbox" id="dFlag" hidden></div>
+      <div class="vtabs" id="vTabs"></div>
+      <div class="fields" id="fields" hidden>
+        <h4>Fill in details <button class="clearf" id="clearFields">clear fields</button></h4>
+        <div class="fgrid" id="fGrid"></div>
+      </div>
+      <div class="preview" id="preview"></div>
+      <textarea id="editArea" spellcheck="false"></textarea>
+      <div class="d-actions">
+        <button class="copybtn" id="copyBtn">Copy Reply</button>
+        <button class="ghost" id="editBtn">Edit template</button>
+        <button class="ghost" id="saveTplBtn" hidden style="border-color:var(--teal);color:var(--teal);font-weight:700">Save template</button>
+        <span class="chars" id="chars"></span>
+        <span class="editnote" id="editNote">editing — keep the [TOKENS] you want as fill-in fields · <a href="#" id="cancelEdit">cancel</a></span>
+        <span class="editnote" id="ovrNote" hidden>customised template · <a href="#" id="restoreOrig">restore original</a></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>M98M LTD · internal customer-service tool · source: EBAY_CHAT_MESSAGES.xlsx · v1.7</footer>
+<div id="toast">Copied ✓</div>
+
+<dialog id="modal">
+  <div class="m-head" id="mTitle">New Template</div>
+  <div class="m-body">
+    <label for="mName">Case name</label>
+    <input id="mName" maxlength="90" placeholder="e.g. BUYER ASKS FOR DISCOUNT">
+    <label for="mCat">Category</label>
+    <select id="mCat"></select>
+    <label for="mText">Reply text</label>
+    <textarea id="mText" placeholder="Dear Valued Customer, Hope you are doing well.&#10;&#10;…&#10;&#10;Kind regards,&#10;Customer Support Team"></textarea>
+    <div class="m-hint">Tip: write fill-in fields in square brackets and CAPITALS, e.g. <code>[ITEM NAME]</code>, <code>[TRACKING NUMBER]</code> — the tool turns them into input boxes automatically.</div>
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="mCancel">Cancel</button>
+    <button class="save" id="mSave">Save template</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const VERSION="1.7";
+const DB=[{"id":"partial-full-refund-sent-to-buyer","cat":"General Replies","name":"Partial Full Refund Sent to Buyer","kw":["refund sent","full refund","refund processed","refund done"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience you experienced. As agreed, I have now processed your full refund, and it should reach your original payment method shortly.\n\nThank you for your patience and understanding throughout — it is genuinely appreciated. If you were satisfied with how I handled this for you, I would be most grateful if you could leave feedback about your experience, as it makes a real difference to my small business.\n\nKind regards,\nRebecca"}]},{"id":"feedback-revision-request","cat":"General Replies","name":"Feedback Revision Request","kw":["feedback revision","revise feedback","change feedback","negative feedback"],"flag":"The 'Emotional appeal' variant links the refund to revising feedback first — wording like this risks eBay's feedback-manipulation policy. Prefer the Standard variant.","variants":[{"label":"Standard","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am more than happy to issue you a full refund. Before I proceed, I would kindly ask you to revise your feedback — I have already sent you a feedback revision request through eBay.\n\nThe moment your feedback has been revised, I will process your full refund immediately, without any delay.\n\nPlease accept my sincere apologies once again for the inconvenience caused. Your patience, understanding, and support for my small business mean a great deal to me.\n\nKind regards,\nRebecca"},{"label":"Emotional appeal","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the difficulties you have experienced. I am truly sorry that the item arrived damaged and that the refund has taken longer than it should have.\n\nI would ask for a moment of your understanding. I am a small, independent seller, and my livelihood depends entirely on this work. If you would kindly revise your feedback first, I give you my word that your full refund will follow immediately.\n\nHowever, if I issue the refund first and the feedback remains unchanged, the damage to my account would be very difficult to recover from. I hope you can appreciate the position I am in.\n\nPlease place your trust in me: revise the feedback first, and I will process your refund straight away. A single review carries enormous weight for a business of my size, and your help would mean more to me than I can express.\n\nThank you, most sincerely, from the bottom of my heart.\n\nKind regards,\nRebecca"},{"label":"Buyer apologised","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you so much for your kind message. Please do not worry at all — there is truly no need to apologise. I completely understand that misunderstandings can happen to anyone.\n\nYour satisfaction matters enormously to me, and the last thing I would ever want is for a customer to feel concerned or disappointed.\n\nI will send you a feedback revision request shortly. I would be very grateful if you could accept it and revise your feedback once it arrives.\n\nYour support makes a genuine difference to my small business, and I sincerely appreciate your kindness and understanding. Should you need anything further, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"replacement-tracking","cat":"General Replies","name":"Replacement Tracking","kw":["replacement tracking","tracking soon","dispatched replacement"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you very much for your kind words — I am delighted to hear that you are pleased with my service and communication.\n\nI can confirm that your order has already been dispatched. The courier normally updates the tracking information within 24 hours of collection, and as soon as it becomes available, I will share the details with you straight away.\n\nThank you once again for your patience, understanding, and support. I truly value your custom.\n\nKind regards,\nRebecca"}]},{"id":"missing-quantity-replacement","cat":"General Replies","name":"Missing Quantity Replacement","kw":["missing quantity","only one arrived","replacement missing item"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused. I understand that you ordered and paid for [QTY ORDERED] x [ITEM NAME], yet only [QTY RECEIVED] was included in your parcel.\n\nTo put this right as quickly as possible, I have arranged a replacement for the missing item, and it has now been dispatched.\n\nThe tracking information should become available within the next 24 hours, and I will forward it to you the moment the courier provides it.\n\nOnce again, I am very sorry for this packing error, and I greatly appreciate your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"not-return","cat":"General Replies","name":"Not Return","kw":["no return needed","keep the item","close return case","return case"],"flag":"","variants":[{"label":"Keep item + photos","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nThere is no need for you to return the item — please feel free to keep it, and I will issue you a full refund.\n\nI have just one small request. Would you kindly send me a few clear photographs of the item, along with a brief description of the problem you encountered? This information will help me investigate what went wrong and strengthen my quality control.\n\nAs soon as I receive the photographs and details, I will be glad to assist you further and bring this matter to a swift resolution.\n\nThank you for your cooperation and understanding.\n\nKind regards,\nRebecca"},{"label":"Close case, then refund","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience and disappointment this order has caused you.\n\nMay I kindly ask you to close the return case? As soon as it has been closed, I will issue your full refund immediately. You have my assurance that I am fully committed to resolving this for you without delay.\n\nThank you very much for your patience, understanding, and cooperation.\n\nKind regards,\nRebecca"},{"label":"Close case (eBay restriction)","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI would kindly ask you to close the return case first. Owing to eBay's system restrictions, I am unable to process a refund while a return case remains open.\n\nAs soon as the case has been closed, I will issue your full refund immediately.\n\nI appreciate your patience and cooperation, and you have my assurance that the refund will be processed promptly the moment the case is closed.\n\nKind regards,\nRebecca"},{"label":"Reassurance (buyer worried)","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI completely understand your concern, and I sincerely apologise for any uncertainty this situation has caused you.\n\nYour satisfaction is of the utmost importance to me, and I would never wish for any customer to feel worried or let down.\n\nPlease be assured that the moment you close the return case, I will process your full refund — and you will not be required to return the item.\n\nI appreciate that trust has to be earned, and I am committed to resolving this fairly and promptly. I would simply ask that you give me the opportunity to make things right.\n\nAs a small business, your understanding and support genuinely mean a great deal to me. Thank you for your cooperation.\n\nKind regards,\nRebecca"}]},{"id":"what-issue","cat":"General Replies","name":"What Issue","kw":["what issue","send pictures","doesnt fit","broken","not working"],"flag":"","variants":[{"label":"Doesn't fit","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sorry to hear that the item does not fit as you expected.\n\nCould you kindly tell me a little more about the problem you are experiencing? I would also be grateful if you could send me a few clear photographs showing the fitting issue.\n\nThis will allow me to look into the matter thoroughly and understand exactly what has gone wrong. Your feedback is genuinely valuable to me, as it helps me improve both my products and my service.\n\nYour satisfaction is my highest priority, and I am committed to finding the most suitable solution for you.\n\nI look forward to hearing from you soon.\n\nKind regards,\nRebecca"},{"label":"Arrived broken","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am so sorry that your [ITEM NAME] arrived broken and unusable. I completely understand how disappointing this must be, and I sincerely apologise for the inconvenience caused.\n\nWould you kindly send me a few clear photographs of the damaged item and its packaging? This will help me establish what may have happened in transit and improve my service going forward.\n\nAs soon as I receive the photographs, I will review the matter promptly and offer you the most suitable resolution.\n\nYour satisfaction is my highest priority, and I am committed to putting this right as quickly as possible.\n\nThank you for your cooperation — I look forward to hearing from you.\n\nKind regards,\nRebecca"},{"label":"Not working properly","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nI always strive to provide my customers with brand-new items of high quality, so I am genuinely sorry to hear that [ISSUE DESCRIPTION].\n\nCould you kindly send me a few clear photographs showing the problem? This will allow me to investigate the matter properly and offer you the most suitable resolution without delay.\n\nThank you for your cooperation and understanding — I look forward to assisting you further.\n\nKind regards,\nRebecca"}]},{"id":"proof-of-delivery","cat":"Delivery & Tracking","name":"Proof of Delivery","kw":["pod","proof of delivery","says delivered","cannot find parcel","letterbox","not received but delivered"],"flag":"","variants":[{"label":"Letterbox delivery","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that you have been unable to locate your parcel.\n\nHaving checked the tracking information, I can confirm that the courier recorded the parcel as delivered through your letterbox on [DELIVERY DATE & TIME].\n\nMay I suggest reviewing the Proof of Delivery (POD) I have already sent you, as it contains the delivery details recorded by the courier. It may also be worth checking around your property, with other members of your household, and with your neighbours, in case the parcel was accepted on your behalf.\n\nI fully appreciate how frustrating this situation must be, and I apologise sincerely for the inconvenience. If you are still unable to find the parcel after checking, please let me know and I will gladly assist you further.\n\nKind regards,\nRebecca"},{"label":"Delivered to address","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nAccording to the courier's tracking records, your parcel was successfully delivered on [DELIVERY DATE & TIME] to the delivery address provided with your order.\n\nThe courier has also supplied Proof of Delivery (POD), which I have shared with you for your reference. May I suggest reviewing it and checking around your property, with neighbours and household members, or in any safe place where the parcel might have been left.\n\nIf you are still unable to locate the parcel after checking, please let me know and I will gladly assist you further.\n\nKind regards,\nRebecca"}]},{"id":"phone-case-order-issue","cat":"General Replies","name":"Phone Case Order Issue","kw":["phone case","wrong model","which model"],"flag":"","variants":[{"label":"Ask model + photo","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nCould you kindly confirm which phone model you ordered and which model you received? I would also appreciate a clear photograph of the item that arrived.\n\nThis will allow me to investigate the matter properly and offer you the most suitable resolution.\n\nThank you very much for your patience and cooperation.\n\nKind regards,\nRebecca"},{"label":"Not as expected + photo","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sincerely sorry that the item did not meet your expectations, and I apologise for any inconvenience this has caused.\n\nYour feedback genuinely matters to me, and I would like to look into this further to understand exactly what went wrong.\n\nWould you kindly share a few clear photographs of the item you received? This will help me review the situation properly and offer you the most suitable resolution without delay.\n\nThank you for your cooperation and understanding.\n\nKind regards,\nRebecca"}]},{"id":"for-delay-order","cat":"Delivery & Tracking","name":"For Delayed Order","kw":["delay","late delivery","where is my order","still waiting","order delayed"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for any inconvenience this delay may have caused.\n\nHaving carefully reviewed the latest tracking information, I can confirm that your order was dispatched successfully and is currently in transit with the courier. Occasional delays can occur within the courier network owing to operational pressures, high parcel volumes, or unforeseen circumstances. While this lies outside my direct control, I am actively monitoring your shipment to ensure it reaches you as soon as possible.\n\nI would kindly ask for a little more patience, and I am confident your order will arrive shortly. Should you have any further questions, please feel free to contact me at any time — I am always happy to help.\n\nKind regards,\nRebecca"}]},{"id":"item-deliver-close-inr-case","cat":"Delivery & Tracking","name":"Item Delivered Close INR Case","kw":["inr","close inr","item received close case","arrived close case"],"flag":"","variants":[{"label":"Short version","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you for letting me know that your order has arrived safely — I am delighted to hear it.\n\nAs you have opened an Item Not Received (INR) case, I would kindly ask you to close it, since the item has now been successfully delivered.\n\nThank you for your patience, understanding, and support. If there is anything else I can help you with, please do not hesitate to contact me.\n\nKind regards,\nRebecca"},{"label":"Detailed version","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you for letting me know — I am absolutely delighted that your parcel has now arrived safely.\n\nAs your order has been successfully delivered, may I kindly ask you to close the \"Item Not Received\" request on eBay, since the matter has now been fully resolved?\n\nThank you very much for your patience and understanding throughout. Should there be anything else I can help you with, please feel free to contact me at any time — your satisfaction remains my highest priority.\n\nKind regards,\nRebecca"}]},{"id":"instruction-helpful","cat":"General Replies","name":"Instruction Helpful","kw":["instructions","how to use","user manual"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI hope these instructions prove helpful and allow you to resolve the matter quickly and easily.\n\nIf you require any further assistance or have any questions at all, please do not hesitate to contact me — I will be more than happy to help.\n\nKind regards,\nRebecca"}]},{"id":"send-return-label-to-buyer","cat":"General Replies","name":"Send Return Label to Buyer","kw":["return label","need order number","arrange label"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nCould you kindly provide me with your order number so that I can arrange a return label for you as quickly as possible?\n\nI would also appreciate a few clear photographs of the item, as these will help me investigate the issue thoroughly and understand exactly what has gone wrong.\n\nOnce I have reviewed the details, I will do everything I can to provide the most suitable resolution.\n\nYour satisfaction is my highest priority, and I am committed to resolving this promptly.\n\nKind regards,\nRebecca"}]},{"id":"item-is-not-deliver-close-inr-case","cat":"Delivery & Tracking","name":"Item Not Delivered Close INR Case","kw":["inr","not delivered","close case refund","item not received"],"flag":"","variants":[{"label":"Refund offer","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience you have experienced. I am truly sorry that your item has not been delivered.\n\nYour satisfaction is of great importance to me, and I would kindly ask you to close the \"Item Not Received\" case on eBay — your support would mean a great deal to my small business.\n\nTo resolve this matter as quickly as possible, I would like to offer you a full refund.\n\nOnce again, please accept my apologies for the inconvenience, and thank you for your patience and understanding.\n\nKind regards,\nRebecca"},{"label":"Refund or replacement","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience you have experienced. I am truly sorry that your item has not been delivered.\n\nYour satisfaction is of great importance to me, and I would kindly ask you to close the \"Item Not Received\" case on eBay — your support would mean a great deal to my small business.\n\nTo resolve this matter as quickly as possible, I would like to offer you either a full refund or a replacement — please let me know which you would prefer.\n\nOnce again, please accept my apologies for the inconvenience, and thank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"take-cancellation-request-from-buyer","cat":"General Replies","name":"Take Cancellation Request from Buyer","kw":["out of stock","ask buyer cancel","defective stock","cancellation request"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nUnfortunately, this item has now sold out. I had only one unit remaining, and during my final quality inspection I found it to be defective. As your satisfaction is my highest priority, I did not feel it would be right to send you an item that falls short of my standards.\n\nI would therefore kindly ask you to submit a cancellation request through eBay. As soon as I receive it, I will process your full refund immediately, without any delay.\n\nI am genuinely sorry for the disappointment, and I thank you for your patience, understanding, and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"leave-feedback","cat":"General Replies","name":"Leave Feedback","kw":["leave feedback","positive feedback","happy buyer feedback"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThat is wonderful news — I am delighted to hear that your order has arrived safely. Thank you for letting me know.\n\nIf you are happy with your purchase and the service you received, I would be most grateful if you could leave feedback. Your support makes a genuine difference to my small business and helps me continue providing excellent service to my customers.\n\nThank you once again for your patience and support.\n\nKind regards,\nRebecca"}]},{"id":"your-parcel-is-deliver-to-your-address","cat":"Delivery & Tracking","name":"Your Parcel Is Delivered to Your Address","kw":["delivered to address","delivery photo","wrong door","safe place","neighbour"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience and confusion caused.\n\nI have reviewed the delivery information, and according to the courier's tracking system, the parcel was delivered to the address provided at the time of purchase.\n\nIf the delivery photograph does not appear to match your door or letterbox, may I kindly suggest checking with household members or neighbours? Couriers do occasionally leave parcels in a safe place or a nearby location.\n\nIf you are still unable to locate the parcel, please let me know and I will gladly raise the matter with the courier on your behalf.\n\nThank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"product-quality-issue","cat":"General Replies","name":"Product Quality Issue","kw":["quality issue","poor quality","not satisfied"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sincerely sorry that the quality of the item has not met your expectations.\n\nCould you kindly describe the problem in a little more detail? If possible, a few clear photographs showing the issue would also be very helpful.\n\nThis will allow me to understand the situation fully and offer you the most suitable resolution without delay.\n\nI am here to help, and I am committed to putting this right for you.\n\nKind regards,\nRebecca"}]},{"id":"incomplete-address","cat":"General Replies","name":"Incomplete Address","kw":["incomplete address","missing house number","confirm address","wrong address"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThank you very much for your recent order.\n\nWhile preparing your parcel for dispatch, I noticed that the shipping address provided appears to be incomplete — it is missing key details such as the house number, street name, or flat number.\n\nTo avoid any delivery delays, or the parcel being returned to me, could you please reply with your full and exact address?\n\nAs soon as I have the complete details, I will dispatch your order immediately. Thank you very much for your cooperation.\n\nKind regards,\nRebecca"}]},{"id":"order-number","cat":"General Replies","name":"Order Number","kw":["order number","which item ordered","order details"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nCould you kindly confirm which item you ordered and provide your order number?\n\nThis will allow me to look into the matter properly and offer you the most suitable resolution.\n\nThank you very much for your patience and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"ask-buyer-to-send-return","cat":"General Replies","name":"Ask Buyer to Send Return","kw":["send return","return for refund","post it back"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nYour satisfaction is my highest priority, and I take great care to send only brand-new items of high quality to every customer.\n\nIf you are not satisfied with the item, you are very welcome to return it to me. As soon as the return has been delivered and received, I will process your full refund immediately.\n\nThank you for your understanding and support.\n\nKind regards,\nRebecca"}]},{"id":"replacement-dispatch","cat":"General Replies","name":"Replacement Dispatch","kw":["replacement arranged","resend item","new item sent"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nTo put this right for you, I have arranged a replacement, which will be dispatched as soon as possible. Once it has been shipped, I will share the tracking details with you so that you can follow your delivery.\n\nThank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"delivery-asap","cat":"Delivery & Tracking","name":"Delivery ASAP","kw":["asap","urgent delivery","need it fast","chasing courier"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you very much for your patience.\n\nI am doing everything I can to ensure your parcel reaches you as soon as possible. The courier is currently handling the delivery, and I am monitoring the shipment closely.\n\nI look forward to your parcel arriving shortly, and I appreciate your understanding.\n\nKind regards,\nRebecca"}]},{"id":"improve-product-quality","cat":"General Replies","name":"Improve Product Quality","kw":["quality feedback","investigate quality","thanks for info"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nThank you for providing this information. I can see that [ISSUE DESCRIPTION], and I am genuinely sorry.\n\nYour satisfaction is my highest priority, and I fully appreciate how disappointing this must have been.\n\nI will look into this further so that I can improve the quality of my products and service in future.\n\nThank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"close-return-case-ebay-we-provide-return-label","cat":"General Replies","name":"Close Return Case eBay I Provide Return Label","kw":["close return case","I send label","return postage","yes refunds"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nYes, of course — I am happy to provide a refund.\n\nMay I kindly ask you to close the return case on eBay first? If the case remains open, you may be required to pay the return postage yourself.\n\nOnce the case has been closed, I will send you a return label free of charge, so you can return the item to me at no cost.\n\nAs soon as the returned item has been delivered back to me, I will issue your full refund immediately.\n\nThank you for your cooperation and understanding.\n\nKind regards,\nRebecca"}]},{"id":"order-invoice-vat","cat":"General Replies","name":"Order Invoice VAT","kw":["vat","invoice","receipt","vat invoice"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nUnfortunately, I am unable to provide a VAT invoice, as I am not VAT registered.\n\nMay I suggest obtaining an invoice directly through eBay? Your order details and payment information are all available there.\n\nI apologise for any inconvenience, and I appreciate your understanding.\n\nKind regards,\nRebecca"}]},{"id":"not-cancel-order","cat":"General Replies","name":"Not Cancel Order","kw":["cannot cancel","already dispatched","too late to cancel"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI understand that you would like to cancel your order.\n\nUnfortunately, your order has already been dispatched, and the tracking details have been provided to you. As the parcel is now in transit, I am no longer able to cancel the order at this stage.\n\nThank you for your understanding. If there is anything further I can help you with, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"cancel-order","cat":"General Replies","name":"Cancel Order","kw":["please cancel","quality inspection failed","I ask buyer cancel"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience.\n\nI would kindly ask you to cancel this order. During my final quality inspection, I found that the item did not meet my standards, and rather than send you something that may fall short of your expectations, I would prefer to cancel.\n\nAs soon as you submit the cancellation request, I will approve it immediately and you will receive a full refund. You are then very welcome to place a new order whenever it suits you.\n\nYour satisfaction is my highest priority, and I would never knowingly send you anything less than a perfect item.\n\nThank you very much for your understanding and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"return-label","cat":"General Replies","name":"Return Label","kw":["label sent","return tracking","return deadline","royal mail"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have now provided your return label.\n\nPlease package the item securely and return it to me by [RETURN DEADLINE].\n\nCourier: [COURIER NAME]\nTracking number: [TRACKING NUMBER]\n\nAs soon as your returned parcel has been delivered to me, I will process your full refund without delay.\n\nThank you for your cooperation and understanding.\n\nKind regards,\nRebecca"}]},{"id":"wrong-colour-and-wrong-variant","cat":"General Replies","name":"Wrong Colour and Wrong Variant","kw":["wrong colour","wrong color","wrong variant","ask keep item"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am truly sorry, and I apologise wholeheartedly for my mistake. I completely understand how disappointing this must be, particularly as you were expecting the [ORDERED COLOUR/VARIANT] [ITEM NAME].\n\nIt appears an error occurred during the packing process, and I take full responsibility for it. I am genuinely sorry for the inconvenience and frustration this has caused.\n\nYour satisfaction is my highest priority, and I never want any customer to be let down. As a small business I always do my very best, but on this occasion I made a genuine packing mistake.\n\nIf it were at all possible, I would be extremely grateful if you would consider keeping the [RECEIVED COLOUR/VARIANT] [ITEM NAME]. Your understanding and support would mean a great deal to my small business.\n\nOnce again, please accept my sincere apologies, and thank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"return-policy","cat":"General Replies","name":"Return Policy","kw":["return policy expired","30 days","too late return","outside window"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sorry to hear that [ISSUE DESCRIPTION].\n\nUnfortunately, I am unable to accept this return, as my 30-day return period has now expired. Returns must reach me within 30 days of the delivery date, and that period has now passed.\n\nI sincerely apologise for any inconvenience this may cause, and I appreciate your understanding.\n\nIf you have any further questions, please feel free to contact me.\n\nKind regards,\nRebecca"}]},{"id":"sent-wrong-colour-to-buyer","cat":"General Replies","name":"Sent Wrong Colour to Buyer","kw":["wrong colour sent","wrong color sent","packing error","apologise colour"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am truly sorry, and I apologise wholeheartedly for my mistake. I completely understand how disappointing it must be to have expected an [ORDERED COLOUR] item and received a [RECEIVED COLOUR] one instead.\n\nPlease accept my heartfelt apologies for the inconvenience and frustration this has caused. This is not what you ordered, and I am genuinely sorry for the packing error.\n\nYour satisfaction is my highest priority, and I am committed to putting this right for you as quickly as possible.\n\nCould you please let me know which solution you would prefer? I will do my very best to resolve this to your complete satisfaction.\n\nThank you for your patience, understanding, and cooperation — I truly appreciate your support.\n\nKind regards,\nRebecca"}]},{"id":"we-sent-high-quality-products-to-customer","cat":"General Replies","name":"I Sent High Quality Products to Customer","kw":["high quality","brand new","inspected before dispatch"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nYour satisfaction is of the utmost importance to me, and I would never wish for any customer to feel worried or let down.\n\nI take great care to provide only brand-new items of the highest quality, and I inspect every item carefully before dispatch. If your experience has fallen short of the standards I aim for, please accept my sincere apologies.\n\nIf there is any problem with the item you received, please do let me know. I will do my very best to investigate and offer you the most suitable resolution.\n\nKind regards,\nRebecca"}]},{"id":"we-sent-correct-order","cat":"General Replies","name":"I Sent Correct Order","kw":["correct order sent","matches listing","you selected"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have checked your order, and I can confirm that you selected [COLOUR] – [MODEL].\n\nI sent you exactly the colour and model that you ordered. You are welcome to refer to my listing, where the item's colour and model are clearly shown.\n\nIf you believe there is still a problem with the item you received, please send me a few clear photographs and I will gladly investigate and offer you the most suitable resolution.\n\nKind regards,\nRebecca"}]},{"id":"order-confirmation-to-buyer","cat":"General Replies","name":"Order Confirmation to Buyer","kw":["order confirmation","confirm selection"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have checked your order, and I can confirm that you selected [COLOUR] – [MODEL].\n\nThis is the order as it was placed. If you have any further questions, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"we-cancel-your-order","cat":"General Replies","name":"I Cancel Your Order","kw":["cancel confirmed","no problem cancel","refund coming"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nOf course — that is no problem at all. Your satisfaction is my highest priority, and I would never want you to feel concerned.\n\nI will cancel your order as requested and process your full refund as quickly as possible.\n\nIf there is anything further I can help you with, please feel free to contact me.\n\nKind regards,\nRebecca"}]},{"id":"buyer-order-confirm","cat":"General Replies","name":"Buyer Order Confirm","kw":["confirm colour model","before dispatch confirm"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have checked your order and can confirm the details as follows:\n\nColour: [COLOUR]\nModel: [MODEL]\n\nI will process your order according to these specifications. If you have any further questions, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"buyer-want-to-cancel-order","cat":"General Replies","name":"Buyer Wants to Cancel Order","kw":["buyer wants cancel","submit cancellation","approve cancel"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThat is no problem at all — I am happy to cancel your order for you.\n\nCould you kindly submit a cancellation request through eBay? As soon as I receive it, I will approve it straight away and process your full refund immediately.\n\nYou are then very welcome to place a new order for the correct item whenever it suits you.\n\nThank you for your understanding and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"close-return-case-we-send-free-return-label","cat":"General Replies","name":"Close Return Case I Send Free Return Label","kw":["free return label","close case label"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused.\n\nMay I kindly ask you to close the return case on eBay? Once it has been closed, I will send you a free return postage label so that you can return the item to me at no cost.\n\nAs soon as your return has been delivered back to me, I will process your full refund straight away.\n\nThank you for your cooperation and understanding.\n\nKind regards,\nRebecca"}]},{"id":"buyer-order-two-one-works-one-not-works","cat":"Defective / Pictures","name":"Buyer Ordered Two One Works One Doesn't","kw":["one works one doesnt","two items one faulty"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease do not worry — you are not troubling me in the slightest. I am sorry to hear that only one of the items is working.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel worried or let down.\n\nCould you kindly tell me exactly what the problem is? A few clear photographs of both items showing the issue would also be very helpful.\n\nAs soon as I receive the pictures or a short video, I will investigate and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"return-the-item-and-proceed-new-correct-order","cat":"Defective / Pictures","name":"Return the Item and Proceed New Correct Order","kw":["return and reorder","order correct one"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nOf course — you are very welcome to return the case.\n\nPlease send the item back to me, and as soon as your return has been delivered, I will process your full refund without delay.\n\nOnce your refund has been completed, you can simply place a new order for the correct case you require. Your satisfaction is my highest priority, and I want this to be as straightforward as possible for you.\n\nIf there is anything further I can help you with, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"if-buyer-not-send-pictures-of-product","cat":"Defective / Pictures","name":"If Buyer not Send Pictures of Product","kw":["refuses pictures","why photos","wont send photos","annoyed at photos"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies if my request caused you any frustration — that was never my intention. Your satisfaction is my highest priority, and I would never want a customer to feel inconvenienced.\n\nI asked for photographs only because they allow me to investigate the issue properly and ensure I offer you the most appropriate resolution. Without seeing the item, it is genuinely difficult for me to establish the exact cause of the problem.\n\nI would be grateful for your cooperation. As soon as I receive the photographs and your description of the issue, I will review everything immediately and work to resolve the matter as quickly as possible.\n\nThank you for your patience and understanding — I truly appreciate it.\n\nKind regards,\nRebecca"}]},{"id":"buyer-receive-parcel-some-items-are-missing","cat":"Defective / Pictures","name":"Buyer Received Parcel Some Items Are Missing","kw":["items missing","incomplete parcel","missing from order"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that some items appear to be missing from your order. I completely understand how disappointing this must be, and I sincerely apologise for the inconvenience.\n\nTo help me investigate as quickly as possible, could you kindly send me a few clear photographs of everything you received, including the item(s) and the packaging, if you still have it? This will help me establish what may have happened and ensure I offer you the most suitable resolution.\n\nThank you very much for your patience and cooperation — I look forward to resolving this for you promptly.\n\nKind regards,\nRebecca"}]},{"id":"doesn-t-match-description-or-photos-send-pictures","cat":"Defective / Pictures","name":"Doesn't Match Description or Photos (send Pictures)","kw":["not as described","doesnt match","different from photos","snad"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sorry to hear that you feel the item does not match the description or photographs.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly tell me exactly what the issue is? I would appreciate a few clear photographs of the item you received, showing the part that does not match the listing.\n\nAs soon as I receive the pictures and your explanation, I will investigate and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"buyer-receive-wrong-colour","cat":"Defective / Pictures","name":"Buyer Received Wrong Colour","kw":["received wrong colour","received wrong color"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies — I am very sorry to hear that you received the wrong colour. Your satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nTo help me investigate as quickly as possible, could you kindly send me a few clear photographs of the item you received? This will allow me to verify the issue and offer you the most suitable resolution.\n\nThank you for your patience and cooperation — I look forward to resolving this for you promptly.\n\nKind regards,\nRebecca"}]},{"id":"thanks-buyer-for-sending-picture-and-give-best-soluton","cat":"Defective / Pictures","name":"Thanks Buyer for Sending Pictures and Give Best Solution","kw":["thanks for pictures","photos received","24 hours solution"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThank you very much for sending the photographs — I genuinely appreciate your cooperation.\n\nPlease accept my sincere apologies for the inconvenience caused. Your satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nI will now carefully investigate the issue based on the information you have provided, and I will come back to you with the most suitable resolution within the next 24 hours.\n\nThank you for your patience and understanding — I will do my very best to resolve this for you as quickly as possible.\n\nKind regards,\nRebecca"}]},{"id":"we-sent-you-correct-order-also-match-with-listing","cat":"Defective / Pictures","name":"I Sent You Correct Order Also Match with Listing","kw":["correct item sent","matches the listing"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have checked your order and can confirm that I sent you the exact item you ordered.\n\nYou are welcome to refer to my listing, where the item's details and specifications are clearly described.\n\nYour satisfaction is my highest priority, and I take great care to provide brand-new, high-quality items that match the listing description precisely.\n\nIf you believe there is any problem with the item you received, please let me know and I will gladly investigate and offer you the most suitable resolution.\n\nKind regards,\nRebecca"}]},{"id":"product-does-not-fit-send-pictures","cat":"Defective / Pictures","name":"Product Does not Fit (send Pictures)","kw":["does not fit","doesnt fit","wrong size","fitment"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that the item does not fit, and I sincerely apologise for the inconvenience. Your satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly tell me exactly what the problem is? A few clear photographs showing the item and how it does not fit would be very helpful.\n\nAs soon as I receive the pictures, I will investigate and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"buyer-order-2-quantity-we-send-1-our-fault","cat":"Defective / Pictures","name":"Buyer Ordered 2 Quantity I Sent 1 (my Fault)","kw":["my fault missing","short shipped","choose refund or replacement"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for this mistake and for any inconvenience it has caused.\n\nIt appears an error occurred during the packing process, and I am genuinely sorry. Your satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nPlease let me know which solution you would prefer:\n\nA full refund for the missing item, or\nA replacement for the missing quantity.\n\nAs soon as you confirm your preferred option, I will arrange it without delay.\n\nThank you for your patience and understanding, and once again, please accept my sincere apologies.\n\nKind regards,\nRebecca"}]},{"id":"send-product-pictures-just-didn-t-like-it","cat":"Defective / Pictures","name":"Send Product Pictures (just Didn't Like It)","kw":["didnt like it","changed mind","not to liking"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am sorry to hear that the item was not to your liking.\n\nCould you kindly tell me what it was that disappointed you? A few clear photographs of the item would also be appreciated, as they will help me understand the issue fully and offer you the most suitable resolution.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nI look forward to your reply.\n\nKind regards,\nRebecca"}]},{"id":"product-does-not-meet-buyer-expectations-what-issue-send-pictures","cat":"Defective / Pictures","name":"Product Does not Meet Buyer Expectations (what Issue Send Pictures)","kw":["expectations","disappointed","not what expected"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that the item did not meet your expectations, and I sincerely apologise for the disappointment and inconvenience caused.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly tell me exactly what the issue is, and in what way the item differs from what you expected? A few clear photographs of the item you received would also be greatly appreciated. This will allow me to investigate the matter properly and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation — I look forward to your reply.\n\nKind regards,\nRebecca"}]},{"id":"product-not-work-send-pictures","cat":"Defective / Pictures","name":"Product Not Working (send Pictures)","kw":["not working","dead on arrival","doa","wont turn on","faulty"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that the item is not working at all. I completely understand how disappointing and frustrating this must be, and I sincerely apologise for the inconvenience caused.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly describe exactly what happens when you try to use it — for example, is there any light, sound, or response from the item at all? A few clear photographs, or a short video showing the issue, would also be greatly appreciated.\n\nAs soon as I receive this information, I will investigate immediately and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation — I look forward to your reply.\n\nKind regards,\nRebecca"}]},{"id":"buyer-order-2-receive-only-1-quantity","cat":"Defective / Pictures","name":"Buyer Ordered 2 Received Only 1 Quantity","kw":["ordered 2 received 1","half order missing"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that only one item was included in your parcel when you ordered and paid for two.\n\nI completely understand how disappointing this must be, and I sincerely apologise for the inconvenience caused. Your satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nTo help me investigate as quickly as possible, could you kindly send me a few clear photographs of everything you received, including the item and the packaging? This will help me establish exactly what happened during packing and ensure I offer you the most suitable resolution.\n\nThank you for your patience and cooperation — I look forward to resolving this for you promptly.\n\nKind regards,\nRebecca"}]},{"id":"product-quality-not-good-send-pictures","cat":"Defective / Pictures","name":"Product Quality not Good (send Pictures)","kw":["bad quality","cheap feel","flimsy"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that you are not satisfied with the quality of the item, and I sincerely apologise for the disappointment and inconvenience caused.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly describe the problem in a little more detail? A few clear photographs showing the issue would also be greatly appreciated.\n\nThis will allow me to investigate the matter fully and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation — I look forward to your reply.\n\nKind regards,\nRebecca"}]},{"id":"item-arrived-damage-send-pictures","cat":"Defective / Pictures","name":"Item Arrived Damage (send Pictures)","kw":["damaged","arrived broken","smashed","cracked","transit damage"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to hear that your item arrived damaged. I completely understand how disappointing this must be, and I sincerely apologise for the inconvenience caused.\n\nYour satisfaction is my highest priority, and I would never want any customer to feel let down.\n\nCould you kindly send me a few clear photographs of the damaged item and its packaging? This will help me establish what may have happened in transit and offer you the most suitable resolution without delay.\n\nThank you for your patience and cooperation — I look forward to resolving this for you promptly.\n\nKind regards,\nRebecca"}]},{"id":"offer-partial-refund-and-replacement","cat":"Defective / Pictures","name":"Offer Partial Refund and Replacement","kw":["offer options","refund or replacement choice","partial refund"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience caused — I am truly sorry for any disappointment you have experienced.\n\nTo resolve this matter, I would like to offer you the choice of either a refund or a replacement item, whichever you would prefer.\n\nPlease let me know which option suits you best, and I will arrange it without delay.\n\nYour satisfaction is my highest priority, and I am committed to finding the most suitable resolution for you.\n\nThank you for your patience, understanding, and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"parcel-deliver-to-collecting-point","cat":"Delivery & Tracking","name":"Parcel Deliver to Collecting Point","kw":["collection point","pickup shop","collect parcel"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nAccording to the courier's tracking information, your parcel has been successfully delivered to your chosen collection shop and is now ready to collect. It arrived there on [DELIVERY DATE & TIME].\n\nYou are welcome to visit the collection shop at your convenience. I have also sent you the Proof of Delivery (POD), which confirms the parcel's arrival at the collection point.\n\nIf there is anything further I can help you with, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"estimated-delivery-timeframe","cat":"Delivery & Tracking","name":"Estimated Delivery Timeframe","kw":["estimated delivery","delivery window","when will it arrive"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nAccording to the estimated delivery timeframe, your parcel should arrive within the expected delivery window.\n\nI would kindly ask for your patience while the courier completes the delivery. Any updates will appear in the tracking information as they become available.\n\nYour satisfaction is my highest priority, and I want you to feel completely reassured.\n\nIf you have any further questions, please feel free to contact me.\n\nKind regards,\nRebecca"}]},{"id":"parcel-in-transit","cat":"Delivery & Tracking","name":"Parcel in Transit","kw":["in transit","tracking not updating","no tracking update"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI can confirm that your parcel has already been dispatched and is currently in transit. The courier's tracking system may not always show immediate updates while a parcel is moving through the network.\n\nPlease rest assured that your order is progressing through the delivery process and, according to the estimated timeframe, it should reach you within the stated delivery period.\n\nI apologise for any inconvenience, and I appreciate your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"we-contact-courier-about-your-parcel-not-deliver","cat":"Delivery & Tracking","name":"I Contacted Courier About Your Parcel (not Delivered)","kw":["contacted courier","waiting on courier","courier investigation"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have contacted the courier regarding your parcel and am currently awaiting their update. As soon as they provide any new information, I will let you know immediately.\n\nYour satisfaction is my highest priority, and I would never want you to feel worried. I would kindly ask for your patience while I work with the courier to resolve this matter.\n\nThank you for your understanding and cooperation.\n\nKind regards,\nRebecca"}]},{"id":"courier-confirm-parcel-deliver-to-your-address","cat":"Delivery & Tracking","name":"Courier Confirms Parcel Delivered to Your Address","kw":["courier confirmed delivered","checked with courier"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI have checked with the courier, and they have confirmed that your parcel was successfully delivered to the address provided with your order.\n\nAccording to their records, the parcel was delivered to the exact address entered at the time of purchase.\n\nIf you are still unable to locate your parcel, please let me know and I will gladly assist you further.\n\nKind regards,\nRebecca"}]},{"id":"courier-lost-parcel-offer","cat":"Delivery & Tracking","name":"Courier Lost Parcel Offer","kw":["lost parcel","lost in transit","courier lost it"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI am very sorry to inform you that, following my investigation with the courier, they have confirmed that your parcel has unfortunately been lost in transit.\n\nPlease accept my sincerest apologies for the inconvenience and disappointment this has caused. I completely understand how frustrating this situation is, and I am genuinely sorry.\n\nYour satisfaction is my highest priority, and I want to put this right for you as quickly as possible.\n\nTo resolve the matter, I would like to offer you either a replacement or a full refund. Please let me know which you would prefer, and I will arrange it immediately.\n\nOnce again, please accept my sincere apologies, and thank you for your patience, understanding, and support.\n\nKind regards,\nRebecca"}]},{"id":"working-days-delivery-2-to-3-days","cat":"Delivery & Tracking","name":"Working Days Delivery (2 to 3 Days)","kw":["2 to 3 days","few working days"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nYour parcel is currently with the courier. I have contacted them regarding your shipment, and they have advised that delivery is expected within the next two to three working days.\n\nI would kindly ask for your patience while the courier completes the delivery.\n\nI apologise for the delay, and I appreciate your understanding.\n\nKind regards,\nRebecca"}]},{"id":"today-or-tomorrow-deliver","cat":"Delivery & Tracking","name":"Today or Tomorrow Delivery","kw":["today or tomorrow","out for delivery","arriving soon"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nAccording to the courier's latest update, your parcel is expected to be delivered today or tomorrow. I would kindly ask for just a little more patience while they complete the delivery.\n\nIf you have any further questions or need any assistance, please do not hesitate to contact me.\n\nKind regards,\nRebecca"}]},{"id":"item-not-deliver-send-message-through-ebay-inr-case","cat":"Delivery & Tracking","name":"Item Not Delivered Send Message Through eBay (INR Case)","kw":["inr offer","refund or replacement inr"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the inconvenience you have experienced. I am truly sorry that your item has not been delivered.\n\nYour satisfaction is of great importance to me, and I want to put this right for you as quickly as possible. I would like to offer you either a full refund or a replacement — please let me know which you would prefer.\n\nOnce again, please accept my apologies for the inconvenience, and thank you for your patience and understanding.\n\nKind regards,\nRebecca"}]},{"id":"collection-code-for-buyer","cat":"Delivery & Tracking","name":"Collection Code for Buyer","kw":["collection code","pickup code","code not received"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nThe collection code is normally sent to you directly by the courier, by email or text message, once the parcel arrives at the collection point.\n\nMay I suggest checking your email inbox, your spam or junk folder, and your text messages? If the code still has not arrived, the courier's customer support team will be able to assist you.\n\nKind regards,\nRebecca"}]},{"id":"for-remove-negative-feedback-from-buyer-emotions","cat":"Negative Feedback","name":"For Remove Negative Feedback from Buyer (emotions)","kw":["remove negative","emotional appeal","small family business"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI would like to offer you my sincere apologies for the disappointment and inconvenience you experienced. I understand your frustration entirely, and I am truly sorry that your experience fell short of what you rightly expected.\n\nI run a small, family-run business, and every single order — and every piece of feedback — carries real weight for me. One negative review can significantly affect my reputation and my ability to continue trading on eBay.\n\nI am not a large company handling thousands of orders a day — just one person working hard to provide the best service I can, and it genuinely saddens me to have disappointed a valued customer.\n\nI would like to ask, humbly and respectfully, whether you might consider revising your feedback. Your understanding and generosity would mean more to me than words can express, and I would be sincerely grateful for a second chance.\n\nI fully respect your decision either way, but I truly hope you may find it in your heart to support my small business.\n\nThank you for taking the time to read this message — your patience, understanding, and support are deeply appreciated.\n\nWith sincere apologies and gratitude,\n\nKind regards,\nRebecca"}]},{"id":"for-remove-negative-feedback-from-buyer-offer","cat":"Negative Feedback","name":"For Remove Negative Feedback from Buyer (offer)","kw":["remove negative offer","revise feedback offer"],"flag":"Tying refund/replacement to a feedback revision can breach eBay's feedback policies — use with care.","variants":[{"label":"Refund or replacement","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nPlease accept my sincere apologies for the difficulties you have experienced. I am truly sorry that the item arrived damaged and that the refund has taken longer than expected.\n\nYour satisfaction is of great importance to me, and I would respectfully ask whether you might reconsider and revise your negative feedback — your support would mean a great deal to my small business.\n\nTo resolve this matter as quickly as possible, I would like to offer you two options:\n\n• A full refund\n• A replacement item\n\nPlease let me know which you would prefer, and I will arrange it for you immediately.\n\nOnce again, please accept my apologies for the inconvenience, and thank you for your patience and understanding.\n\nKind regards,\nRebecca"},{"label":"Goodwill resolution","text":"Dear [BUYER NAME],\n\nI hope you are doing well.\n\nI would like to apologise once again, most sincerely, for the disappointment and inconvenience you experienced with your order. Providing excellent service means everything to me, and I am truly sorry that on this occasion I fell short of the standards I strive to maintain.\n\nAs a gesture of goodwill, and of my genuine commitment to your satisfaction, I would be more than happy to offer a suitable resolution — whether a replacement or a refund, entirely at your preference.\n\nI would kindly ask that you allow me the opportunity to make things right. If you feel I have resolved the matter to your satisfaction, I would be incredibly grateful if you would consider revising your feedback. For a small business such as mine, feedback carries significant weight, and your support would mean a great deal.\n\nThank you for your patience, your understanding, and the opportunity to put this right. I truly value your custom and hope to restore your confidence in my service.\n\nKind regards,\nRebecca"}]},{"id":"feedback-revision-request-sent-short-note","cat":"Negative Feedback","name":"Feedback Revision Request Sent (short Note)","kw":[],"flag":"","variants":[{"label":"Standard","text":"Dear [BUYER NAME],\n\nI have just sent you a feedback revision request. When you have a moment, I would be most grateful if you could review it — your support would be greatly appreciated.\n\nThank you very much.\n\nKind regards,\nRebecca"}]},{"id":"closer-my-dear-customer-your-order-i","cat":"Lovely Closers","name":"My Dear Customer, your order is now on…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"My Dear [BUYER NAME],\n\nYour order is now on fast-track delivery, and the courier has been instructed to prioritise it. I truly understand how important it is to receive your parcel on time, so I’m personally keeping a close eye on it and will share an update with you as soon as possible. You’re my top priority, and I’m committed to making this experience as smooth and stress-free as possible for you ❤❤"}]},{"id":"closer-you-re-very-welcome-and-thank","cat":"Lovely Closers","name":"You're very welcome, and Thank You for…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nYou're very welcome, and thank you for your purchase."}]},{"id":"closer-my-kindest-customer-as-i-check","cat":"Lovely Closers","name":"my kindest customer as I check I put a…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI have personally looked into your concern and raised it as a priority on my side. I will send you a confirmation update as soon as possible — please don't worry at all."}]},{"id":"closer-no-need-to-thank-me-it-s-our","cat":"Lovely Closers","name":"No need to thank me, it's my duty. Th…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThere is no need to thank me — it has been my pleasure. Thank you for your cooperation and support; I am grateful for the opportunity to assist you."}]},{"id":"closer-thank-you-so-much-for-kind-und","cat":"Lovely Closers","name":"Thank you so much for kind understandi…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThank you so much for your kind understanding and for trusting me on this one — I really appreciate it 🥹❤️"}]},{"id":"closer-you-are-most-welcome-always-h","cat":"Lovely Closers","name":"You are most welcome! Always here for…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nYou are most welcome — I am always here for you!"}]},{"id":"closer-thank-you-for-being-so-nice-an","cat":"Lovely Closers","name":"Thank You for being so nice and cooper…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThank you for being so nice and cooperative ❤️❤️"}]},{"id":"closer-was-a-pleasure-assisting-a-kin","cat":"Lovely Closers","name":"Was a pleasure assisting a kindhearted…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nIt was a pleasure assisting a kind-hearted customer like you. ❤"}]},{"id":"closer-thank-you-so-much-you-are-so-s","cat":"Lovely Closers","name":"Thank you so much you are so sweet, Ju…","kw":["closer","thank you","lovely"],"flag":"Coaching buyers on how ratings count can breach eBay's feedback policies — use with care.","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThank you so much — you are so sweet! Just to let you know, a neutral rating is also counted as negative on eBay. Have a great day, my best customer!"}]},{"id":"closer-i-love-to-help-my-kind-custome","cat":"Lovely Closers","name":"I love to help my kind customers, You…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nI love helping my kind customers — you always deserve the best, my dear valued customer!"}]},{"id":"closer-thank-you-and-have-a-great-day","cat":"Lovely Closers","name":"Thank you and Have a great day! ❤️❤️❤️","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nThank you, and have a great day! ❤️❤️❤️"}]},{"id":"closer-is-there-anything-else-i-can-h","cat":"Lovely Closers","name":"Is there anything else I can help you…","kw":["closer","thank you","lovely"],"flag":"","variants":[{"label":null,"text":"Dear [BUYER NAME],\n\nIs there anything else I can help you with?"}]}];
+
+const LS_CUSTOM="m98m_cs_custom_v1", LS_RECENT="m98m_cs_recent_v1", LS_OVR="m98m_cs_overrides_v1";
+const CATS=["General Replies","Defective / Pictures","Delivery & Tracking","Negative Feedback","Lovely Closers","My Templates"];
+const CATCOLOR={"General Replies":"var(--c-general)","Defective / Pictures":"var(--c-defect)","Delivery & Tracking":"var(--c-delivery)","Negative Feedback":"var(--c-negfb)","Lovely Closers":"var(--c-lovely)","My Templates":"var(--c-custom)"};
+const STOP=new Set(["the","and","for","you","your","our","with","this","that","have","has","are","was","were","will","would","can","could","please","kindly","kind","regards","dear","valued","customer","customers","team","hope","doing","well","thank","thanks","very","much","from","not","but","item","order","ebay","sincerely","apologize","apologise","inconvenience","caused","support","satisfaction","priority","possible","solution","best","also","been","they","them","their","when","what","which","once","soon","just","like","need","want","know","let","message","further","assistance","contact","feel","free","understanding","cooperation","patience"]);
+
+function loadJSON(k,f){try{const v=JSON.parse(localStorage.getItem(k));return v??f}catch(e){return f}}
+function saveJSON(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+let customs=loadJSON(LS_CUSTOM,[]);
+let recent=loadJSON(LS_RECENT,[]);
+let overrides=loadJSON(LS_OVR,{});
+
+function allCases(){return DB.concat(customs)}
+function byId(id){return allCases().find(c=>c.id===id)}
+function norm(s){return (s||"").toLowerCase().replace(/color/g,"colour").replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
+function tokens(s){return norm(s).split(" ").filter(w=>w.length>=3&&!STOP.has(w))}
+
+/* precompute body-token sets */
+const BODY=new Map();
+function bodyTokens(c){
+  if(BODY.has(c.id))return BODY.get(c.id);
+  const set=new Set();
+  c.variants.forEach(v=>tokens(v.text).forEach(w=>set.add(w)));
+  BODY.set(c.id,set);return set;
+}
+
+/* ---------- state ---------- */
+let mode="case";            // "case" | "buyer"
+let catFilter="All";
+let selId=null, selVar=0;
+let fieldVals={};           // "caseId::TOKEN" -> value
+let edited={};              // "caseId::varIdx" -> string (manual edit)
+let railItems=[];           // current rendered list [{id,score?}]
+let hi=-1;                  // keyboard highlight index
+
+/* ---------- els ---------- */
+const $=id=>document.getElementById(id);
+const rail=$("rail"), searchEl=$("search");
+
+/* ---------- chips ---------- */
+function renderChips(){
+  const counts={All:allCases().length};
+  allCases().forEach(c=>counts[c.cat]=(counts[c.cat]||0)+1);
+  const wrap=$("chips");wrap.innerHTML="";
+  ["All",...CATS].forEach(cat=>{
+    if(cat!=="All"&&!counts[cat])return;
+    const b=document.createElement("button");
+    b.className="chip"+(catFilter===cat?" on":"");
+    b.innerHTML=esc(cat)+' <span class="n">'+(counts[cat]||0)+"</span>";
+    b.onclick=()=>{catFilter=cat;renderChips();refreshRail()};
+    wrap.appendChild(b);
+  });
+  $("countPill").textContent=allCases().length+" cases · v"+VERSION;
+}
+
+/* ---------- search / match ---------- */
+function caseSearch(q){
+  const list=allCases().filter(c=>catFilter==="All"||c.cat===catFilter);
+  if(!q.trim())return list.map(c=>({id:c.id}));
+  const nq=norm(q), qt=tokens(q);
+  const out=[];
+  for(const c of list){
+    const nn=norm(c.name), kws=(c.kw||[]).map(norm);
+    let s=0;
+    if(nn.startsWith(nq))s=100;
+    else if(nn.includes(nq))s=70;
+    else if(kws.some(k=>k.includes(nq)))s=50;
+    else if(qt.length&&qt.every(w=>nn.includes(w)||kws.some(k=>k.includes(w))||bodyTokens(c).has(w)))s=25;
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out;
+}
+function buyerMatch(msg){
+  const list=allCases(); // suggestions always scan every case, ignoring the category chip
+  const nmsg=norm(msg), mt=new Set(tokens(msg));
+  const out=[];
+  for(const c of list){
+    let s=0;
+    (c.kw||[]).forEach(k=>{const nk=norm(k);
+      if(nk.includes(" ")){if(nmsg.includes(nk))s+=4;}
+      else if(mt.has(nk))s+=3;});
+    tokens(c.name).forEach(w=>{if(mt.has(w))s+=2});
+    let body=0;bodyTokens(c).forEach(w=>{if(mt.has(w))body++});
+    s+=Math.min(body,6);
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out.slice(0,8);
+}
+
+/* ---------- rail ---------- */
+function refreshRail(){
+  if(mode==="case")railItems=caseSearch(searchEl.value);
+  else railItems=$("buyerMsg").value.trim()?buyerMatch($("buyerMsg").value):[];
+  hi=-1;renderRail();
+}
+function renderRail(){
+  rail.innerHTML="";
+  if(!railItems.length){
+    const d=document.createElement("div");d.className="rail-empty";
+    d.textContent=mode==="buyer"&&!$("buyerMsg").value.trim()
+      ?"Paste the buyer's message above and press Suggest replies."
+      :"No case matches. Try fewer or different words — or add it under My Templates."
+       +(catFilter!=="All"?" You are filtering by \""+catFilter+"\" — click All to search everything.":"");
+    rail.appendChild(d);return;
+  }
+  const max=Math.max(...railItems.map(r=>r.score||1));
+  railItems.forEach((r,i)=>{
+    const c=byId(r.id);if(!c)return;
+    const b=document.createElement("div");
+    b.tabIndex=0;
+    b.className="row"+(c.id===selId?" sel":"")+(i===hi?" sel":"");
+    b.setAttribute("role","option");
+    const tab='<span class="tab" style="background:'+(CATCOLOR[c.cat]||"var(--teal)")+'"></span>';
+    const warn=c.flag?'<span class="warn-dot" title="Policy care — see note">⚠</span>':"";
+    const vp=c.variants.length>1?'<span class="vpill">×'+c.variants.length+"</span>":"";
+    const cust=c.custom?'<span style="color:var(--c-custom)">✎</span>':"";
+    let barHtml="";
+    if(mode==="buyer"&&r.score){const w=Math.max(8,Math.round(r.score/max*100));
+      barHtml='<div class="bar"><i style="width:'+w+'%"></i></div>';}
+    const btns=c.custom?'<span class="custbtns"><button class="mini" data-edit="'+c.id+'">edit</button><button class="mini" data-del="'+c.id+'">del</button></span>':"";
+    b.innerHTML=tab+'<span class="body"><span class="nm">'+esc(c.name)+' '+warn+'</span><span class="meta">'+esc(c.cat)+' '+vp+' '+cust+'</span>'+barHtml+'</span>'+btns;
+    const act=e=>{
+      const ed=e.target.getAttribute&&e.target.getAttribute("data-edit");
+      const dl=e.target.getAttribute&&e.target.getAttribute("data-del");
+      if(ed){openModal(byId(ed));return}
+      if(dl){delCustom(dl);return}
+      openCase(c.id);
+    };
+    b.onclick=act;
+    b.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act(e)}};
+    rail.appendChild(b);
+  });
+}
+
+/* ---------- detail ---------- */
+function openCase(id,varIdx=0){
+  const c=byId(id);if(!c)return;
+  selId=id;selVar=Math.min(varIdx,c.variants.length-1);
+  pushRecent(id);
+  $("dEmpty").hidden=true;$("dBody").hidden=false;
+  document.body.classList.add("viewing");
+  $("dCat").textContent=c.cat;
+  $("dDot").style.background=CATCOLOR[c.cat]||"var(--teal)";
+  $("dCustomTag").hidden=!c.custom;
+  $("dName").textContent=c.name;
+  $("dFlag").hidden=!c.flag;
+  if(c.flag)$("dFlag").textContent="⚠ Policy care: "+c.flag;
+  const vt=$("vTabs");vt.innerHTML="";
+  if(c.variants.length>1){
+    c.variants.forEach((v,i)=>{
+      const b=document.createElement("button");
+      b.dataset.lb=v.label||("Variant "+(i+1));
+      b.className=i===selVar?"on":"";
+      b.onclick=()=>{selVar=i;renderVariant()};
+      vt.appendChild(b);
+    });
+  }
+  renderVariant();
+  renderRail();
+  if(window.innerWidth<=880)window.scrollTo({top:0});
+}
+function curCase(){return byId(selId)}
+function curText(){const ek=editKey();return overrides[ek]!=null?overrides[ek]:curCase().variants[selVar].text}
+function activeRaw(){const ek=editKey();return edited[ek]!=null?edited[ek]:curText()}
+function toksOf(t){const s=new Set();(t.match(/\[([^\]\n]{2,40})\]/g)||[]).forEach(m=>s.add(m.slice(1,-1)));return [...s]}
+function editKey(){return selId+"::"+selVar}
+function resolvedText(){
+  let t=activeRaw();
+  toksOf(t).forEach(tok=>{
+    const v=(fieldVals[selId+"::"+tok]||"").trim();
+    if(v)t=t.split("["+tok+"]").join(v);
+  });
+  return t;
+}
+function buildFields(tks){
+  const fg=$("fGrid");fg.innerHTML="";
+  tks.forEach(tok=>{
+    const w=document.createElement("div");
+    const inp=document.createElement("input");
+    inp.value=fieldVals[selId+"::"+tok]||"";
+    inp.placeholder=tok.toLowerCase();
+    inp.oninput=()=>{fieldVals[selId+"::"+tok]=inp.value;paint()};
+    const lb=document.createElement("label");lb.textContent="["+tok+"]";
+    w.appendChild(lb);w.appendChild(inp);fg.appendChild(w);
+  });
+  fg.dataset.sig=tks.join("|");
+}
+function renderVariant(){
+  const c=curCase(); if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  const tks=toksOf(activeRaw());
+  [...$("vTabs").children].forEach((b,i)=>{
+    b.className=i===selVar?"on":"";
+    b.textContent=b.dataset.lb+(overrides[selId+"::"+i]!=null?" •":"");
+  });
+  $("fields").hidden=!tks.length;
+  buildFields(tks);
+  $("preview").style.display=isEd?"none":"block";
+  $("editArea").style.display=isEd?"block":"none";
+  $("editNote").style.display=isEd?"inline":"none";
+  $("editBtn").hidden=isEd;
+  $("saveTplBtn").hidden=!isEd;
+  $("ovrTag").hidden=isEd||overrides[ek]==null;
+  $("ovrNote").hidden=isEd||overrides[ek]==null||!!c.custom;
+  if(isEd&&document.activeElement!==$("editArea"))$("editArea").value=edited[ek];
+  paint();
+}
+function paint(){
+  const c=curCase();if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  if(!isEd){
+    let html=esc(curText());
+    toksOf(curText()).forEach(tok=>{
+      const v=(fieldVals[selId+"::"+tok]||"").trim();
+      const span=v?'<span class="tok f">'+esc(v)+"</span>"
+                  :'<span class="tok e">['+esc(tok)+"]</span>";
+      html=html.split(esc("["+tok+"]")).join(span);
+    });
+    $("preview").innerHTML=html;
+  }
+  const txt=resolvedText();
+  const missing=toksOf(activeRaw()).filter(t=>!(fieldVals[selId+"::"+t]||"").trim()).length;
+  const ch=$("chars");
+  ch.textContent=txt.length+" chars"+(missing?" · "+missing+" field"+(missing>1?"s":"")+" empty":"");
+  ch.className="chars"+(txt.length>=1900||missing?" hot":"");
+  ch.title=txt.length>=1900?"Very long — check it sends fully in an eBay message":"";
+}
+
+/* ---------- actions ---------- */
+$("copyBtn").onclick=async()=>{
+  const txt=resolvedText();
+  try{await navigator.clipboard.writeText(txt)}
+  catch(e){
+    const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);
+    ta.select();try{document.execCommand("copy")}catch(_){}
+    ta.remove();
+  }
+  toast("Copied ✓");
+};
+$("editBtn").onclick=()=>{
+  edited[editKey()]=curText();renderVariant();$("editArea").focus();
+};
+$("editArea").addEventListener("input",()=>{
+  const ek=editKey();edited[ek]=$("editArea").value;
+  const tks=toksOf(edited[ek]);
+  if($("fGrid").dataset.sig!==tks.join("|")){$("fields").hidden=!tks.length;buildFields(tks);}
+  paint();
+});
+$("cancelEdit").onclick=e=>{e.preventDefault();delete edited[editKey()];renderVariant()};
+$("saveTplBtn").onclick=()=>{
+  const ek=editKey(), val=$("editArea").value, c=curCase();
+  if(!val.trim()){toast("Template is empty");return}
+  if(c.custom){c.variants[selVar].text=val;saveJSON(LS_CUSTOM,customs);}
+  else{overrides[ek]=val;saveJSON(LS_OVR,overrides);}
+  delete edited[ek];renderVariant();toast("Template saved ✓");
+};
+$("restoreOrig").onclick=e=>{e.preventDefault();
+  if(!confirm("Restore the original template text? Your saved edit will be removed."))return;
+  delete overrides[editKey()];saveJSON(LS_OVR,overrides);renderVariant();toast("Original restored");
+};
+$("clearFields").onclick=()=>{
+  toksOf(curText()).forEach(t=>delete fieldVals[selId+"::"+t]);renderVariant();
+};
+$("backBtn").onclick=()=>{document.body.classList.remove("viewing")};
+
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1400)}
+
+/* ---------- recent ---------- */
+function pushRecent(id){
+  recent=[id,...recent.filter(r=>r!==id)].slice(0,8);
+  saveJSON(LS_RECENT,recent);renderRecent();
+}
+function renderRecent(){
+  const ids=recent.filter(id=>byId(id));
+  $("recentWrap").hidden=!ids.length;
+  const w=$("recent");w.innerHTML="";
+  ids.forEach(id=>{
+    const b=document.createElement("button");b.className="rchip";
+    b.textContent=byId(id).name.slice(0,34);
+    b.onclick=()=>openCase(id);w.appendChild(b);
+  });
+}
+
+/* ---------- custom templates ---------- */
+let editingId=null;
+function openModal(c){
+  editingId=c?c.id:null;
+  $("mTitle").textContent=c?"Edit Template":"New Template";
+  const sel=$("mCat");sel.innerHTML="";
+  CATS.forEach(cat=>{const o=document.createElement("option");o.value=o.textContent=cat;sel.appendChild(o)});
+  $("mName").value=c?c.name:"";
+  sel.value=c?c.cat:"My Templates";
+  $("mText").value=c?c.variants[0].text:"";
+  showDlg();
+}
+const dlg=$("modal");
+function showDlg(){if(dlg.showModal)dlg.showModal();else{dlg.classList.add("fb");dlg.setAttribute("open","")}}
+function hideDlg(){if(dlg.close&&!dlg.classList.contains("fb"))dlg.close();else{dlg.removeAttribute("open");dlg.classList.remove("fb")}}
+$("addBtn").onclick=()=>openModal(null);
+$("mCancel").onclick=hideDlg;
+$("mSave").onclick=()=>{
+  const name=$("mName").value.trim(), text=$("mText").value.trim();
+  if(!name||!text){toast("Name and text required");return}
+  if(editingId){
+    const c=byId(editingId);
+    c.name=name;c.cat=$("mCat").value;c.variants=[{label:null,text}];
+    BODY.delete(c.id);
+  }else{
+    customs.push({id:"custom-"+Date.now(),cat:$("mCat").value,name,kw:[],flag:"",custom:true,
+      variants:[{label:null,text}]});
+  }
+  saveJSON(LS_CUSTOM,customs);
+  hideDlg();renderChips();refreshRail();toast("Saved ✓");
+};
+function delCustom(id){
+  if(!confirm("Delete this template?"))return;
+  customs=customs.filter(c=>c.id!==id);
+  saveJSON(LS_CUSTOM,customs);
+  if(selId===id){selId=null;$("dBody").hidden=true;$("dEmpty").hidden=false;document.body.classList.remove("viewing")}
+  renderChips();refreshRail();renderRecent();
+}
+
+/* ---------- modes / events ---------- */
+function setMode(m){
+  mode=m;
+  $("modeCase").className=m==="case"?"on":"";
+  $("modeBuyer").className=m==="buyer"?"on":"";
+  $("buyerBox").hidden=m!=="buyer";
+  searchEl.parentElement.style.display=m==="case"?"":"none";
+  refreshRail();
+  if(m==="buyer")$("buyerMsg").focus();
+}
+$("modeCase").onclick=()=>setMode("case");
+$("modeBuyer").onclick=()=>setMode("buyer");
+$("suggestBtn").onclick=refreshRail;
+$("buyerMsg").addEventListener("keydown",e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey))refreshRail()});
+searchEl.addEventListener("input",refreshRail);
+document.addEventListener("keydown",e=>{
+  if(e.key==="/"&&document.activeElement!==searchEl&&document.activeElement.tagName!=="TEXTAREA"&&document.activeElement.tagName!=="INPUT"){
+    e.preventDefault();setMode("case");searchEl.focus();searchEl.select();
+  }else if(e.key==="Escape"){
+    if($("modal").open)return;
+    document.body.classList.remove("viewing");
+  }else if(document.activeElement===searchEl&&railItems.length){
+    if(e.key==="ArrowDown"){e.preventDefault();hi=Math.min(hi+1,railItems.length-1);renderRail();scrollHi()}
+    else if(e.key==="ArrowUp"){e.preventDefault();hi=Math.max(hi-1,0);renderRail();scrollHi()}
+    else if(e.key==="Enter"){e.preventDefault();openCase(railItems[Math.max(hi,0)].id)}
+  }
+});
+function scrollHi(){const el=rail.children[hi];if(el)el.scrollIntoView({block:"nearest"})}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+/* ---------- init ---------- */
+renderChips();renderRecent();refreshRail();
+</script>
+</body>
+</html>
