@@ -1,0 +1,4 @@
+oauth_client_id (public, safe to embed): 1054155928251-ehfifr8bgd8bfaqa28uqm3bs225pkikr.apps.googleusercontent.com
+GCP project: M98M Portal (m98m786@gmail.com) - published to production, External
+JS origin allowed: https://m98m786.github.io
+Deployment: v4 (same /exec)

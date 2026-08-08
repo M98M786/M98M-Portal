@@ -104,13 +104,25 @@ function getPortalDb_(createIfMissing) {
   return ss;
 }
 function now_() { return Utilities.formatDate(new Date(), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ss'+05:00'"); }
+/** Security-critical keys are never cached: a change to who is a super admin, or to the
+ * sign-in client, must take effect on the very next request — not up to a cache TTL later. */
+const CONFIG_NEVER_CACHE = ['super_admins', 'oauth_client_id'];
+const CONFIG_CACHE_SECONDS = 25;
+
 function getConfig(key) {
+  const cacheable = CONFIG_NEVER_CACHE.indexOf(key) < 0;
   const cache = CacheService.getScriptCache();
-  const hit = cache.get('cfg_' + key);
-  if (hit !== null) return hit;
+  if (cacheable) {
+    const hit = cache.get('cfg_' + key);
+    if (hit !== null) return hit;
+  }
   const sh = getPortalDb_(false).getSheetByName('CONFIG');
   const rows = sh.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) if (rows[i][0] === key) { cache.put('cfg_' + key, String(rows[i][1]), 300); return String(rows[i][1]); }
+  for (let i = 1; i < rows.length; i++) if (rows[i][0] === key) {
+    const val = String(rows[i][1]);
+    if (cacheable) cache.put('cfg_' + key, val, CONFIG_CACHE_SECONDS);
+    return val;
+  }
   return '';
 }
 /** RL-6: append-only activity log, locked. Detail stays server-side (RL-9). */
