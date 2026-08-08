@@ -56,7 +56,15 @@ When the portal is live, sign in with your Google account, open **Admin → Appr
 | OPEN-9 | Husnain reconciliation view from month 1? | yes |
 | OPEN-10 | DMs fully private (no management reading UI)? | yes |
 
-## One more file
+## Logo — ✅ received 8 Aug
 
-Drop the **M98M logo PNG** into the repo folder at `assets/logo.png`
-(`Documents/Claude Code/M98M-Portal/assets/logo.png`). The portal already has the slot; no code change needed.
+`assets/logo.png` is installed, with the cart-mark cropped for favicon and app icons. Nothing more needed.
+
+## One decision for Step 1 — public or private repo
+
+GitHub Pages on a **free** account only works on **public** repos. The portal page itself is safe to be public (it contains no data — all business data stays behind Google sign-in in Apps Script). But your master prompt and business documents are **not** safe to publish, so:
+
+- **Default (free):** the repo goes public with ONLY the portal files (index.html, assets, embeds). The master prompt and internal docs stay on this Mac, out of the public repo.
+- **Alternative (£3–4/month):** GitHub Pro allows Pages on a **private** repo — then everything can live together privately.
+
+Claude will ask you once at push time; answering **"default"** picks the free option.
