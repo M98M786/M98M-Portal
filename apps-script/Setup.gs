@@ -73,6 +73,37 @@ function seedFromSeedGs_(ss, seeded) {
   }
 }
 
+/** SETUP-ONLY bootstrap: approve a user from the script editor.
+ * Needed once, to solve the chicken-and-egg — approveUser (§4.1b) requires an already-approved
+ * Management user, and on day one nobody is approved. Run from the editor only; it is not exposed
+ * as a router action, so it can never be called from the browser. Every use is logged.
+ * Super-admin rights are NOT granted here — those live in CONFIG.super_admins (§4.1). */
+function bootstrapApproveUser(email, role, accounts) {
+  email = email || 'm98m786@gmail.com';
+  role = role || 'Management';
+  accounts = accounts || 'ALL';
+  if (ROLES.indexOf(role) < 0) throw new Error('unknown role: ' + role);
+  const sh = getPortalDb_(false).getSheetByName('USERS');
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (normalizeEmail(rows[i][0]) === normalizeEmail(email)) {
+      const old = rows[i][2] + '|' + rows[i][5];
+      sh.getRange(i + 1, 3).setValue(role);
+      sh.getRange(i + 1, 5).setValue(accounts);
+      sh.getRange(i + 1, 6).setValue('approved');
+      sh.getRange(i + 1, 8).setValue('setup bootstrap');
+      SpreadsheetApp.flush();
+      logActivity_('setup', 'BOOTSTRAP_APPROVE', rows[i][0], old, role + '|approved', 'editor-run');
+      const okMsg = 'APPROVED ' + rows[i][0] + ' as ' + role + ' (accounts: ' + accounts + ') — row ' + (i + 1);
+      Logger.log(okMsg);
+      return okMsg;
+    }
+  }
+  const missMsg = 'NOT FOUND: ' + email + ' among ' + (rows.length - 1) + ' users — sign in once first so the row exists.';
+  Logger.log(missMsg);
+  return missMsg;
+}
+
 /** Phase 1 DoD: one-line Anthropic test — proves the key works. Reads key from Script Properties ONLY (RL-2). */
 function testAnthropicKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
