@@ -15,7 +15,7 @@ const GLOBAL_NAME_HINTS = [
   // Spellings verified against the live registry 8 Aug 2026 ("Perfomance", "Costumer").
   [/ppc|advertis/i, 'ppc'], [/potential/i, 'potential_cpc'], [/hunt/i, 'hunting'],
   [/recheck|order check/i, 'order_recheck'], [/wrong/i, 'wrong_orders'],
-  [/co?ustomer service|(^|\s)cs(\s|$)/i, 'cs'], [/return|refund/i, 'returns'],
+  [/c[ou]st[ou]mer service|(^|\s)cs(\s|$)/i, 'cs'], [/return|refund/i, 'returns'],
   [/^staff.*perfo?r?mance/i, 'staff_perf'], [/email/i, 'staff_email'], [/learning/i, 'account_learnings'],
 ];
 
