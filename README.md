@@ -21,8 +21,8 @@ Existing Google Sheets never change structure. The portal is an input/output lay
 
 ## Status
 
-- [x] Phase 0 — Workspace (this repo; Pages pending Hasib's GitHub steps)
-- [ ] Phase 1 — Database & connections
+- [x] Phase 0 — Workspace — **LIVE:** https://m98m786.github.io/M98M-Portal/ (public repo = clean deploy copy only; this source repo stays local per SECURITY-RED-LINE RL-2)
+- [~] Phase 1 — Database & connections (backend written; awaiting Apps Script paste + run)
 - [ ] Phase 2 — Auth & shell (Royal design)
 - [ ] Phase 3 — Core loop (tasks, reports, rota, DMs, agenda, meetings)
 - [ ] Phase 4 — Product pipeline
