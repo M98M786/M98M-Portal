@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M98M AliExpress Recovery Agent v1.2</title>
+<style>
+:root{
+  --ink:#431407; --acc:#c2410c; --acc-dark:#9a3412; --mist:#fcf7f2;
+  --card:#ffffff; --line:#f0ddcd; --sub:#8a6a58; --amber:#b45309; --amber-bg:#fff7e6;
+  --tok-bg:#fde8dc; --tok-empty:#fdefc8; --danger:#b3402e;
+  --tip-bg:#ecf7f0; --tip-line:#c2e5cf; --tip-ink:#1d6b44;
+  --reason-bg:#f6effc; --reason-line:#ddc7ee; --reason-ink:#5b2478;
+  --c-supplier:#ea580c; --c-appeal:#7c2d92; --c-chat:#0e7490; --c-extra:#b83d75; --c-custom:#0e9384;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--mist);color:var(--ink);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* header */
+header{background:var(--ink);color:#fdeee2;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{background:var(--acc);color:#fff;font-weight:800;letter-spacing:.06em;border-radius:9px;padding:8px 11px;font-size:15px}
+.h-title{font-size:19px;font-weight:800;letter-spacing:.10em;text-transform:uppercase}
+.h-sub{font-family:var(--mono);font-size:12px;color:#f0b490}
+.wsbar{padding:10px 20px 0;display:flex;gap:8px;flex-wrap:wrap}
+.ws{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-weight:700;color:var(--sub);font-size:13.5px;display:flex;align-items:center;gap:7px;cursor:pointer}
+.ws .wdot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.ws.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.raildiv{padding:9px 12px 5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);border-bottom:1px solid #f7ede2;background:#fdf8f2}
+.chips[hidden]{display:none}
+.count-pill{margin-left:auto;font-family:var(--mono);font-size:12px;background:#5c2410;border:1px solid #7c3a1d;color:#f6d3bb;border-radius:999px;padding:4px 12px}
+.rulesbtn{font-family:var(--mono);font-size:12px;background:#5c2410;border:1px solid #7c3a1d;color:#f6d3bb;border-radius:999px;padding:4px 12px}
+.rulesbtn:hover{background:#6e2d14}
+.rules-list{margin:0;padding-left:20px}
+.rules-list li{margin:7px 0}
+.rules-h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:16px 0 6px}
+.rules-h:first-child{margin-top:0}
+
+/* toolbar */
+.toolbar{padding:14px 20px 4px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;border:1.5px solid var(--line);background:#fff;border-radius:10px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:9px 15px;font-weight:600;color:var(--sub)}
+.seg button.on{background:var(--acc);color:#fff}
+.searchwrap{flex:1;min-width:230px;position:relative}
+.searchwrap input{width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+.searchwrap input:focus{border-color:var(--acc);outline:none;box-shadow:0 0 0 3px #c2410c26}
+.slash{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:5px;padding:1px 7px;background:var(--mist)}
+.chips{padding:8px 20px 2px;display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:5px 13px;font-size:13px;font-weight:600;color:var(--sub)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.75;margin-left:4px}
+.recentbar{padding:6px 20px 2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+.recentbar[hidden]{display:none}
+.rchip{border:1px dashed var(--line);background:#fff;border-radius:8px;padding:3px 10px;font-size:12px;color:var(--ink)}
+
+/* layout */
+main{flex:1;display:grid;grid-template-columns:360px 1fr;gap:16px;padding:12px 20px 20px;align-items:start}
+aside{background:var(--card);border:1.5px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 210px);min-height:320px}
+#buyerBox{padding:12px;border-bottom:1.5px solid var(--line);background:#fdf9f5}
+#buyerBox[hidden]{display:none}
+#buyerBox textarea{width:100%;min-height:96px;resize:vertical;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+.bbrow{display:flex;gap:8px;margin-top:8px}
+.bbrow button{flex:1;border:0;border-radius:10px;padding:10px;font-weight:700}
+#suggestBtn{background:var(--ink);color:#fff}
+#saveMsgBtn{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+.rail{overflow-y:auto;flex:1}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid #f7ede2;padding:11px 12px 11px 0;position:relative;cursor:pointer}
+.row:hover{background:#fcf3ea}
+.row.sel{background:#fbe8da}
+.row .tab{width:5px;align-self:stretch;border-radius:0 4px 4px 0;flex:0 0 5px}
+.row .nm{font-weight:700;font-size:13.5px;letter-spacing:.02em}
+.row .meta{font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row .body{flex:1;min-width:0}
+.vpill{border:1px solid var(--line);border-radius:999px;padding:0 7px;font-size:10.5px}
+.warn-dot{color:var(--amber);font-size:13px}
+.spill{border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:700;color:#fff}
+.bar{height:5px;border-radius:99px;background:#f4e5d8;margin-top:5px;overflow:hidden;max-width:180px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.rail-empty{padding:26px 18px;color:var(--sub);font-size:13.5px;text-align:center}
+.addbtn{margin:10px 12px 6px;border:1.5px dashed var(--acc);color:var(--acc-dark);background:#fdf3ec;border-radius:10px;padding:10px;font-weight:700}
+.logtools{display:flex;gap:8px;padding:0 12px 12px}
+.logtools[hidden]{display:none}
+.logtools button{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:8px;font-weight:700;color:var(--sub);font-size:12.5px}
+.logtools button:hover{color:var(--ink)}
+.custbtns{display:flex;gap:6px}
+.mini{border:1px solid var(--line);background:#fff;border-radius:7px;padding:2px 8px;font-size:12px;color:var(--sub)}
+.mini:hover{color:var(--ink)}
+
+/* detail */
+#detail{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:18px 20px 20px;min-height:320px}
+.d-empty{color:var(--sub);text-align:center;padding:70px 20px;font-size:14.5px}
+.d-cat{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;align-items:center;gap:8px}
+.d-cat .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.d-name{font-size:21px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:4px 0 2px}
+.backbtn{display:none;margin-bottom:10px;border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:700;color:var(--ink)}
+.flagbox{margin:10px 0;background:var(--amber-bg);border:1.5px solid #f2d49a;color:#7a4a08;border-radius:10px;padding:10px 13px;font-size:13.5px}
+.reasonbox{margin:10px 0 2px;background:var(--reason-bg);border:1.5px solid var(--reason-line);color:var(--reason-ink);border-radius:10px;padding:10px 13px;font-size:13.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.reasonbox b{font-family:var(--mono);font-size:13px;letter-spacing:.02em}
+.reasonbox .rlabel{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase}
+.reasonbox .mini{margin-left:auto;border-color:var(--reason-line);color:var(--reason-ink)}
+.nextlink{margin:8px 0 0;font-size:12.5px;color:var(--sub);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.nextlink button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 11px;font-size:12.5px;font-weight:700;color:var(--acc-dark)}
+.nextlink button:hover{border-color:var(--acc)}
+.tipbox{margin:12px 0 2px;background:var(--tip-bg);border:1.5px solid var(--tip-line);color:var(--tip-ink);border-radius:10px;padding:10px 13px;font-size:13.5px}
+.vtabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+.vtabs button{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:7px 13px;font-weight:600;font-size:13px;color:var(--sub)}
+.vtabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.fields{margin:12px 0 4px;background:#fdf8f3;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px}
+.fields h4{margin:0 0 8px;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);display:flex;justify-content:space-between;align-items:center}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:9px}
+.fgrid label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--acc-dark);letter-spacing:.05em;margin-bottom:3px}
+.fgrid input{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+.fgrid input:focus{border-color:var(--acc);outline:none}
+.clearf{border:0;background:none;color:var(--sub);font-size:12px;text-decoration:underline;padding:0}
+.preview{margin-top:12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;padding:15px 16px;white-space:pre-wrap;font-size:14.5px;line-height:1.62;min-height:140px}
+.preview .tok{font-family:var(--mono);font-size:12.5px;border-radius:6px;padding:1px 6px}
+.preview .tok.f{background:var(--tok-bg);color:var(--acc-dark)}
+.preview .tok.e{background:var(--tok-empty);color:var(--amber);border:1px dashed #e7b264}
+#editArea{display:none;width:100%;min-height:260px;margin-top:12px;border:1.5px solid var(--acc);border-radius:12px;padding:14px;font:14.5px/1.62 inherit;resize:vertical}
+.d-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.copybtn{flex:1;min-width:190px;background:var(--acc);border:0;color:#fff;font-weight:800;font-size:15px;letter-spacing:.04em;border-radius:11px;padding:13px 18px}
+.copybtn:hover{background:var(--acc-dark)}
+.ghost{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:11px 15px;font-weight:600;color:var(--ink)}
+.chars{font-family:var(--mono);font-size:12px;color:var(--sub)}
+.chars.hot{color:var(--amber);font-weight:700}
+.editnote{font-size:12px;color:var(--amber);display:none}
+
+/* saved-case detail */
+.msglabel{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:16px 0 6px;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.msgpre{white-space:pre-wrap;background:#fdf8f3;border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.55;min-height:44px}
+#lNotes{width:100%;min-height:70px;resize:vertical;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit;margin-top:4px}
+#lStatus{padding:7px 10px;border:1.5px solid var(--line);border-radius:9px;font:inherit;background:#fff;font-weight:700}
+
+footer{padding:12px 20px 18px;color:var(--sub);font-size:12px;font-family:var(--mono)}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;border-radius:10px;padding:10px 20px;font-weight:700;opacity:0;pointer-events:none;transition:all .18s}
+#toast.show{opacity:1;transform:translateX(-50%)}
+
+/* modal */
+dialog{border:1.5px solid var(--line);border-radius:14px;padding:0;width:min(560px,94vw)}
+dialog::backdrop{background:#43140766}
+dialog.fb[open]{display:block;position:fixed;inset:0;margin:auto;height:fit-content;z-index:60;box-shadow:0 12px 40px #43140755}
+.m-head{background:var(--ink);color:#fff;padding:13px 18px;font-weight:800;letter-spacing:.06em}
+.m-body{padding:16px 18px;max-height:70vh;overflow-y:auto}
+.m-body label{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:10px 0 4px}
+.m-body input,.m-body select,.m-body textarea{width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:9px;font:inherit}
+.m-body textarea{min-height:120px;resize:vertical}
+.m-hint{font-size:12px;color:var(--sub);margin-top:5px}
+.m-hint code{font-family:var(--mono);background:var(--tok-bg);border-radius:5px;padding:0 5px;color:var(--acc-dark)}
+.m-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.m-actions{display:flex;gap:10px;justify-content:flex-end;padding:0 18px 16px}
+.m-actions .save{background:var(--acc);border:0;color:#fff;font-weight:800;border-radius:9px;padding:10px 20px}
+.m-actions .cancel{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:10px 16px}
+
+@media (max-width:880px){
+  main{grid-template-columns:1fr}
+  aside{max-height:none}
+  body.viewing aside, body.viewing .toolbar, body.viewing .chips, body.viewing .recentbar, body.viewing .wsbar{display:none}
+  body:not(.viewing) #detail{display:none}
+  .backbtn{display:inline-block}
+  .count-pill{margin-left:0}
+  .m-row2{grid-template-columns:1fr}
+}
+@media (min-width:881px){ body.viewing #detail{display:block} }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">M98M</span>
+  <div>
+    <div class="h-title">AliExpress Recovery Agent</div>
+    <div class="h-sub">buyer-side recovery · supplier messages · long-form appeals · chat replies · refunds</div>
+  </div>
+  <span class="count-pill" id="countPill"></span>
+  <button class="rulesbtn" id="rulesBtn">📌 Rules</button>
+</header>
+
+<div class="wsbar" id="wsbar"></div>
+
+<div class="toolbar">
+  <div class="seg" role="tablist" aria-label="Mode">
+    <button id="modeCase" class="on">Templates</button>
+    <button id="modeMatch">Match Reply</button>
+    <button id="modeLog">Saved Cases</button>
+  </div>
+  <div class="searchwrap">
+    <input id="search" type="search" placeholder="Type case or keywords — e.g. dead on arrival, partial offer, missing part…" autocomplete="off">
+    <span class="slash">/</span>
+  </div>
+</div>
+
+<div class="chips" id="chips"></div>
+<div class="recentbar" id="recentWrap" hidden>Recent:&nbsp;<span id="recent"></span></div>
+
+<main>
+  <aside>
+    <div id="buyerBox" hidden>
+      <textarea id="buyerMsg" placeholder="Paste the supplier's or AliExpress's message here…"></textarea>
+      <div class="bbrow">
+        <button id="suggestBtn">Suggest replies</button>
+        <button id="saveMsgBtn">Save to log</button>
+      </div>
+    </div>
+    <div class="rail" id="rail" role="listbox" aria-label="Cases"></div>
+    <button class="addbtn" id="addBtn">＋ New template (My Templates)</button>
+    <div class="logtools" id="logTools" hidden>
+      <button id="backupBtn">⬇ Backup</button>
+      <button id="restoreBtn">⬆ Restore</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+    </div>
+  </aside>
+
+  <section id="detail">
+    <div class="d-empty" id="dEmpty">Search a case on the left, paste a supplier or AliExpress reply under <b>Match Reply</b>, or open <b>Saved Cases</b> to review running disputes.<br><br>Press <b>/</b> to jump to search.</div>
+
+    <div id="dBody" hidden>
+      <button class="backbtn" id="backBtn">← All cases</button>
+      <div class="d-cat"><span class="dot" id="dDot"></span><span id="dCat"></span><span id="dCustomTag" hidden style="color:var(--c-custom)">· MY TEMPLATE</span><span id="ovrTag" hidden style="color:#b8860b">· EDITED</span></div>
+      <div class="d-name" id="dName"></div>
+      <div class="flagbox" id="dFlag" hidden></div>
+      <div class="reasonbox" id="dReason" hidden><span class="rlabel">Dispute reason to select</span><b id="dReasonTxt"></b><button class="mini" id="copyReason">copy</button></div>
+      <div class="nextlink" id="dNext" hidden><span>Escalation path →</span><button id="dNextBtn"></button></div>
+      <div class="vtabs" id="vTabs"></div>
+      <div class="fields" id="fields" hidden>
+        <h4>Fill in details <button class="clearf" id="clearFields">clear fields</button></h4>
+        <div class="fgrid" id="fGrid"></div>
+      </div>
+      <div class="preview" id="preview"></div>
+      <textarea id="editArea" spellcheck="false"></textarea>
+      <div class="tipbox" id="dTip" hidden></div>
+      <div class="d-actions">
+        <button class="copybtn" id="copyBtn">Copy Message</button>
+        <button class="ghost" id="saveLogBtn">Save to log</button>
+        <button class="ghost" id="editBtn">Edit template</button>
+        <button class="ghost" id="saveTplBtn" hidden style="border-color:var(--acc);color:var(--acc);font-weight:700">Save template</button>
+        <span class="chars" id="chars"></span>
+        <span class="editnote" id="editNote">editing — keep the [TOKENS] you want as fill-in fields · <a href="#" id="cancelEdit">cancel</a></span>
+        <span class="editnote" id="ovrNote" hidden>customised template · <a href="#" id="restoreOrig">restore original</a></span>
+      </div>
+    </div>
+
+    <div id="logBody" hidden>
+      <button class="backbtn" id="lBack">← All saved cases</button>
+      <div class="d-cat"><span class="dot" id="lDot"></span><span>SAVED CASE · <span id="lType"></span></span></div>
+      <div class="d-name" id="lOrder"></div>
+      <div class="d-cat" style="margin-top:4px;gap:12px"><span id="lDate"></span><select id="lStatus" aria-label="Status"></select></div>
+      <div class="d-cat" id="lMeta" style="margin-top:6px;text-transform:none;letter-spacing:.03em" hidden></div>
+      <div class="msglabel"><span>Supplier / AliExpress said</span><button class="mini" id="copyMsg">copy</button></div>
+      <div class="msgpre" id="lMsg"></div>
+      <div class="msglabel"><span>Our message</span><button class="mini" id="copyReply">copy</button></div>
+      <div class="msgpre" id="lReply"></div>
+      <div class="msglabel"><span>Notes (deadline date · dispute ID · next step)</span></div>
+      <textarea id="lNotes" placeholder="e.g. 48h expires 10 Aug · dispute 5011239… · escalate to AliExpress if silent"></textarea>
+      <div class="d-actions">
+        <button class="ghost" id="lEdit">Edit entry</button>
+        <button class="ghost" id="lDel" style="color:var(--danger);border-color:#e8c2bc">Delete</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>M98M LTD · internal buyer-recovery tool · source: M98M AliExpress Agent Instructions v1 · pairs with eBay Defense Agent v1.8 · v1.2</footer>
+<div id="toast">Copied ✓</div>
+
+<dialog id="modal">
+  <div class="m-head" id="mTitle">New Template</div>
+  <div class="m-body">
+    <label for="mName">Case name</label>
+    <input id="mName" maxlength="90" placeholder="e.g. SUPPLIER — ASKS FOR MORE PHOTOS">
+    <label for="mCat">Category</label>
+    <select id="mCat"></select>
+    <label for="mText">Message text</label>
+    <textarea id="mText" style="min-height:170px" placeholder="Order [Order Number] — [Item Name]… state the fault, the evidence, the demand, the deadline."></textarea>
+    <div class="m-hint">Tip: write fill-in fields in square brackets, e.g. <code>[Order Number]</code>, <code>[Delivered Date]</code> — the tool turns them into input boxes automatically. Keep it hard: facts → demand → deadline.</div>
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="mCancel">Cancel</button>
+    <button class="save" id="mSave">Save template</button>
+  </div>
+</dialog>
+
+<dialog id="logModal">
+  <div class="m-head" id="gTitle">Save Case to Log</div>
+  <div class="m-body">
+    <div class="m-row2">
+      <div>
+        <label for="gOrder">Order number</label>
+        <input id="gOrder" maxlength="60" placeholder="e.g. 8163524409871">
+      </div>
+      <div>
+        <label for="gType">Type</label>
+        <select id="gType"></select>
+      </div>
+    </div>
+    <div class="m-row2">
+      <div>
+        <label for="gAccount">Buyer account</label>
+        <input id="gAccount" maxlength="60" placeholder="which AliExpress buyer account">
+      </div>
+      <div>
+        <label for="gAgent">Supplier / store</label>
+        <input id="gAgent" maxlength="60" placeholder="store name">
+      </div>
+    </div>
+    <div class="m-row2">
+      <div>
+        <label for="gRef">Dispute ID</label>
+        <input id="gRef" maxlength="60" placeholder="once the dispute is open">
+      </div>
+      <div>
+        <label for="gStatus">Status</label>
+        <select id="gStatus"></select>
+      </div>
+    </div>
+    <label for="gMsg">Supplier / AliExpress said</label>
+    <textarea id="gMsg" placeholder="Paste what the supplier or AliExpress wrote…"></textarea>
+    <label for="gReply">Our message</label>
+    <textarea id="gReply" placeholder="The message you sent (or will send)…"></textarea>
+    <label for="gNotes">Notes</label>
+    <input id="gNotes" maxlength="300" placeholder="Deadline date · dispute ID · evidence uploaded · next step">
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="gCancel">Cancel</button>
+    <button class="save" id="gSave">Save</button>
+  </div>
+</dialog>
+
+<dialog id="rulesModal" style="width:min(680px,94vw)">
+  <div class="m-head">📌 Golden Rules — Har Case Se Pehle</div>
+  <div class="m-body" style="font-size:14px;line-height:1.6">
+    <div class="rules-h">Golden rules</div>
+    <ol class="rules-list">
+      <li><b>THE ONE RULE:</b> har claim evidence se match kare. AliExpress photos aur video par decide karta hai, wording par nahi. Jo photo/video mein <b>nazar nahi aata</b>, woh message mein nahi likha jayega — ek unsupported claim poora case reject karwata hai. Hard hona = invented hona NAHI.</li>
+      <li><b>Tone hard, facts first:</b> order, date, fault, test, evidence — phir flat refund demand. No pleading, no "small business", no "respectfully request". Soft language AliExpress ko stall karne ki jagah deti hai; hard facts nahi dete.</li>
+      <li><b>Escalation ladder:</b> 1) Supplier direct (48h) — zyada tar yahin settle ho jate hain. 2) No reply / refusal → formal appeal open karo. 3) Chat replies se push karo. 4) Supplier stall kare → dispute AliExpress ko escalate.</li>
+      <li><b>Dispute kabhi promise par close nahi.</b> Refund account mein show ho, TAB close — closing usually Buyer Protection khatam kar deta hai. Koi exception nahi.</li>
+      <li><b>Deadlines:</b> supplier stage 48 hours; stall ya fault admit hote hi 24 hours. Buyer Protection window se <b>pehle</b> dispute kholo — photos open case mein baad mein add ho sakti hain. Returned item ke pohanchne ka intezar kabhi nahi.</li>
+      <li><b>Simple English, short sentences</b> — suppliers ki English basic hoti hai. No idioms, no long paragraphs.</li>
+      <li>Har message ke baad <b>Saved Cases</b> mein log karo: order no, supplier, dispute ID, status, deadline date. Deadline guzarte hi agla qadam — clock reset nahi hota.</li>
+    </ol>
+    <div class="rules-h">Appeal ek hi dafa, mukammal</div>
+    <ul class="rules-list">
+      <li>Appeal is tarah likhi jati hai ke reviewer <b>wahin faisla kar de</b> — chat stage tak jane ki zaroorat na pare. Har wo sawal jo woh puchta, appeal mein pehle se answered ho: testing, return, partial, replacement.</li>
+      <li><b>Numbered evidence list</b> = har number ke against file waqai attached ho. Jo evidence list mein hai magar case par nahi, wohi appeal ko girata hai.</li>
+      <li>Evidence drip-feed <b>kabhi nahi</b> — sab kuch ek submission mein. Adhoori appeal ke baad "more evidence" ka round hi asal waqt zaya karta hai.</li>
+      <li>Reject ho jaye to naya claim mat jodo — <b>A-16 Re-Appeal</b>: wohi reason, wohi case, sirf missed point aur exact photo/frame batao.</li>
+      <li>Dispute box chhota ho to <b>Condensed variant</b> paste karo aur baaqi tafseel evidence ke sath upload — text kaatna nahi.</li>
+    </ul>
+    <div class="rules-h">Evidence that wins</div>
+    <ul class="rules-list">
+      <li>Item + packaging + shipping label <b>EK frame</b> mein — parcel ko order se link karta hai.</li>
+      <li>10–20s video har "doesn't work / won't hold" case ke liye — video hi DOA aur feature cases decide karti hai.</li>
+      <li>Listing image vs item <b>side by side</b> — not-as-described ke liye.</li>
+      <li>Ruler in-frame — size/dimension claims ke liye; numbers readable hon.</li>
+      <li>Damage ka close-up — item par, sirf box par nahi.</li>
+    </ul>
+    <div class="rules-h">Honesty gate — kab draft NAHI karna</div>
+    <ul class="rules-list">
+      <li>Tracking "delivered" dikhaye aur "not received" chahiye — <b>kabhi nahi</b>. Yeh check hota hai aur account ki credibility jala deta hai.</li>
+      <li>Fault camera par dikhaya nahi ja sakta — pehle evidence banao, phir message.</li>
+      <li>Claim jo listing ne kabhi kiya hi nahi. In cases mein strongest <b>honest</b> route lo — usually not-as-described ya partial-refund push.</li>
+    </ul>
+    <div class="rules-h">Partial / replacement offers</div>
+    <ul class="rules-list">
+      <li>Item usable + issue minor → partial <b>accept</b> (paisa jaldi wapas). Item genuinely dead/damaged → <b>hold</b> for full — partial dead unit cover nahi karta.</li>
+      <li>Replacement decline sirf <b>genuine reason</b> par (feature asli nahi / customer already refunded) — warna replacement aksar fastest hal hai.</li>
+    </ul>
+  </div>
+  <div class="m-actions">
+    <button class="cancel" id="rulesClose">Close</button>
+  </div>
+</dialog>
+
+<script>
+const VERSION="1.2";
+
+/* ======================================================================
+   DB — M98M AliExpress Agent Instructions v1 · buyer-side · hard wording
+   ====================================================================== */
+const DB=[
+
+/* ---------------- SUPPLIER MESSAGES (stage 1) — hard, blocked, deadline-led ---------------- */
+{"id": "s-doa", "cat": "Supplier Messages", "type": "Faulty / DOA", "next": "a-doa", "name": "S-1 · Dead on Arrival — Electronics", "kw": ["dead on arrival", "doa", "no power", "not working", "not turning on", "faulty", "wont charge", "does not switch on"], "flag": "Make the video BEFORE sending. Every line here is a fact the supplier can check — do not add one you cannot show.", "tip": "Attach: 10–20s video (unit power par, koi response nahi) + item aur shipping label EK frame mein. Message jaan boojh kar labelled blocks mein hai aur sentences chhoti — supplier ki English basic hoti hai, isay scan karna asaan hona chahiye. Labels wese hi rakho.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. Delivered [Delivered Date].\n\nPROBLEM: the unit is dead on arrival. [Fault — no power / function dead / ran then failed]. It has never worked.\n\nWHAT I CHECKED: I tested it on [Number Tested] different [Power Sources / Devices]. Each one works with other units. Your unit gives no response on any of them. There is nothing to set up and nothing to switch on. This is not user error.\n\nEVIDENCE: video attached, showing the unit under power with no response. Photo attached of the item with your shipping label in the same frame.\n\nWHAT I NEED: full refund of [Amount Paid].\n\nNO RETURN. Postage to China costs more than the item, and the unit was faulty when it arrived. I will not pay to send back a dead unit. A partial refund does not help either — a discount on a unit that does not work is still a total loss.\n\nI order from your store regularly and I would rather keep it that way. Settle this directly and I will not open a dispute.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nThe unit is dead on arrival. The video and the photos are already with you. Nothing here is unclear and nothing is waiting on my side.\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours. After that I open the dispute and upload the same evidence, and AliExpress decides it instead of you. Settling it now is the better outcome for your store."}]},
+
+{"id": "s-damaged", "cat": "Supplier Messages", "type": "Damaged", "next": "a-damaged", "name": "S-2 · Arrived Damaged", "kw": ["damaged", "broken", "cracked", "smashed", "shattered", "crushed", "bent", "dented"], "flag": "Photograph the damage ON THE ITEM. A damaged box with an intact item is not this case.", "tip": "Attach: item + packaging + shipping label EK frame mein (as delivered) + damage ka close-up. 'Photographed before and during opening' line sirf tab likho jab waqai film kiya ho — parcel kholte waqt video banana routine bana lo.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. Delivered [Delivered Date].\n\nPROBLEM: the item arrived damaged. [Damage On The Item]. The damage is on the item itself, not only on the outer box.\n\nCONDITION: I photographed the parcel before and during opening. Nothing was changed, taken apart or repaired. The damage was there when the parcel arrived.\n\nEVIDENCE: photos attached — the item, the packaging and your shipping label in one frame, plus a close-up of the damage.\n\nWHAT I NEED: full refund of [Amount Paid].\n\nNO RETURN. Postage to China costs more than the item, and the damage is already documented in the photos. Sending it back shows you nothing new. The item cannot be sold in this condition, so a partial refund does not cover it either.\n\nI order from your store regularly. Sort this directly and there is no dispute.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nThe item arrived damaged and the photos are already with you. The condition is documented and it does not change.\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours. After that the dispute opens with the same photos attached."}]},
+
+{"id": "s-nad", "cat": "Supplier Messages", "type": "Not as described", "next": "a-nad", "name": "S-3 · Not as Described — Quality", "kw": ["not as described", "different from listing", "looks different", "poor quality", "cheap quality", "doesnt match photos", "low quality", "bad quality"], "flag": "Name a difference VISIBLE in the side-by-side photo. 'Poor quality' with nothing to show gets you a small partial at best.", "tip": "Attach: listing image vs item side-by-side (same light) + close-ups. Difference ko naam do — colour, print, stitching, material, finish. 'I sell to UK customers' line unhein yaad dilati hai ke yeh repeat business ka sawal hai, sirf ek order ka nahi.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. Delivered [Delivered Date].\n\nPROBLEM: the item does not match your listing. Your listing shows [What The Listing Showed]. What arrived is [What Actually Arrived]. The difference is [Visible Difference].\n\nEVIDENCE: photos attached — your listing image and the item side by side, in the same light, plus a close-up of [Specific Detail]. The difference is visible in the photo. This is not my opinion.\n\nWHAT I NEED: full refund of [Amount Paid]. I sell to UK customers. I cannot send them this item as the product in your photos, so it has no value to me at any price.\n\nNO RETURN. Postage to China costs more than the item, and the mismatch is already in the photos.\n\nI buy from your store regularly and I would rather keep the account clean than open a case. Settle it directly.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nThe item does not match your listing and the side-by-side photos are already with you.\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours. After that the dispute opens, with your own listing image attached next to the item you sent."}]},
+
+{"id": "s-feature", "cat": "Supplier Messages", "type": "Not as described", "next": "a-feature", "name": "S-4 · Feature Missing / Not Working", "kw": ["magnetic", "magsafe", "not compatible", "doesnt hold", "not recognised", "not recognized", "feature not working", "waterproof fails", "wireless not working", "fast charge not working"], "flag": "Screenshot the listing's OWN feature claim before it changes. Their wording is the case.", "tip": "Attach: feature fail hone ki video + listing claim ka screenshot. 'Ruled out user error' mein exact tareeqa likho — doosri device, doosra cable, official app, same setup mein working unit. Replacement decline sirf tab jab feature product mein hai hi nahi.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. Delivered [Delivered Date].\n\nPROBLEM: your listing says [Listed Feature]. The item does not do it. [What Fails — magnet does not hold / not recognised].\n\nWHAT I CHECKED: [How Ruled Out]. I used [Number Tested] different [Devices / Setups]. Each one works with another unit in the same setup, with nothing changed except your item. The problem follows your product. This is not user error.\n\nEVIDENCE: video attached showing the feature failing. Screenshot attached of your own listing claim.\n\nWHAT I NEED: full refund of [Amount Paid]. [Listed Feature] is the reason this item was bought and the reason it was priced this way. Without it the item is no use to me.\n\nNO RETURN, and no replacement — [Replacement Reason — feature absent in this product].\n\nDEADLINE: 48 hours. After that I open the dispute with your listing claim and the video attached together."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nYour listing advertises [Listed Feature]. Your item does not do it, and the video showing that is already with you.\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours. After that the dispute opens, and your own listing text goes in as evidence against the product you sent."}]},
+
+{"id": "s-wrong", "cat": "Supplier Messages", "type": "Wrong / missing", "next": "a-wrong", "name": "S-5 · Wrong Item / Colour / Variant", "kw": ["wrong item", "wrong colour", "wrong color", "wrong variant", "different item", "not what i ordered", "sent the wrong"], "flag": "", "tip": "Packing label / barcode ki photo hi saboot hai ke unhon ne asal mein kya bheja. Address sirf tab bharo jab correct item chahiye. 'Choose one' format supplier ko faisla karne par majboor karta hai — open sawal nahi chhorta.", "variants": [{"label": "Message", "text": "Order [Order Number]. I ordered [What Was Ordered]. You sent [What Arrived]. These are not the same product.\n\nEVIDENCE: photos attached of the item and of your packing label. Your own label shows what left your warehouse, and it does not match the order.\n\nThis is a picking error at your end. The order record shows the variant that was selected and paid for. I did not order this item and I have no use for it.\n\nWHAT I NEED — choose one:\n1. Send the correct [What Was Ordered] to [Address] with tracking.\n2. Refund [Amount Paid] in full.\n\nNO RETURN of the wrong item. Postage to China costs more than the item, and the mistake is yours. I will not pay to correct your dispatch error.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nWrong item received. The photos of the item and of your own packing label are already with you.\n\nCorrect item dispatched today with tracking, or refund [Amount Paid].\n\nDEADLINE: 24 hours, then the dispute opens."}]},
+
+{"id": "s-qty", "cat": "Supplier Messages", "type": "Wrong / missing", "next": "a-qty", "name": "S-6 · Missing Quantity / Short Shipment", "kw": ["missing quantity", "short shipment", "only received", "less than ordered", "short", "fewer", "not all items"], "flag": "Confirm the order quantity and check for a SECOND tracking number BEFORE sending — split shipments are common and a wrong claim here is hard to walk back.", "tip": "Teen facts jo split-shipment aur tampering dono ka jawab pehle hi de dete hain: parcel sealed tha, andar koi doosra unit nahi, alag se kuch nahi aaya. Photo: parcel + label + jitne units aaye, sab EK frame mein.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. I paid for [Qty Ordered]. [Qty Received] arrived. [Qty Missing] are missing.\n\nPARCEL: it arrived sealed and undamaged, with no sign of tampering. There was no second unit inside. Nothing has arrived separately and there is no second tracking number on this order. The shortage happened at your packing stage, not in transit.\n\nEVIDENCE: photos attached — the sealed parcel as delivered, and your shipping label with everything that was inside laid out in one frame.\n\nWHAT I NEED — choose one:\n1. Send the missing [Qty Missing] to [Address] with tracking.\n2. Refund [Amount For Missing Units] for the units you did not send.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\n[Qty Missing] units short. The photos of the sealed parcel and the full contents are already with you.\n\nMissing units dispatched today with tracking, or refund [Amount For Missing Units].\n\nDEADLINE: 24 hours, then the dispute opens."}]},
+
+{"id": "s-part", "cat": "Supplier Messages", "type": "Wrong / missing", "next": "a-part", "name": "S-7 · Missing Part / Accessory", "kw": ["missing part", "no remote", "no cable", "no charger", "accessory missing", "without the", "incomplete", "no bracket", "no screws"], "flag": "", "tip": "Jo kuch mila sab laid out ek photo mein + listing ke package contents ka screenshot. Dono baatein message mein zaroori: part listing mein shamil tha AUR item us ke baghair chalta hi nahi — yeh 'sold separately' ka jawab pehle hi band kar deta hai.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Delivered [Delivered Date] with no [Missing Part].\n\nPROBLEM: [Missing Part] is listed in your own package contents. It is not an optional extra in your listing and it is not sold separately there. Without it the item [Why It Is Unusable — cannot be powered or mounted]. The item is not partly usable. It is unusable.\n\nEVIDENCE: photo attached of everything that was in the parcel, laid out in one frame with your shipping label.\n\nWHAT I NEED — choose one:\n1. Send [Missing Part] to [Address] with tracking.\n2. Refund [Amount Paid] in full.\n\nDEADLINE: 48 hours. After that I open the dispute and attach your own listing showing the part is included."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nThe [Missing Part] is missing and the item cannot be used without it. The photo of everything you sent is already with you.\n\nPart dispatched today with tracking, or refund [Amount Paid].\n\nDEADLINE: 24 hours, then the dispute opens with your listing attached."}]},
+
+{"id": "s-fit", "cat": "Supplier Messages", "type": "Not as described", "next": "a-fit", "name": "S-8 · Doesn't Fit (Listing Says It Does)", "kw": ["doesnt fit", "does not fit", "too small", "too big", "wrong size for", "not compatible with", "loose", "tight"], "flag": "A legible measurement in-frame beats 'it doesn't fit'. Test against the exact model listed, not a similar one.", "tip": "Item device ke against ya ruler ke saath photo — numbers photo mein readable hon. Listing ka compatibility claim bhi screenshot karo. Measurement + unka apna claim milke behas khatam kar dete hain.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. Delivered [Delivered Date].\n\nPROBLEM: your listing says it fits [Model / Size]. It does not. [Mismatch + Measurement]. I tested it against [Model / Size] itself, not a similar model.\n\nEVIDENCE: photo attached of the item against [The Device / A Ruler], with the measurement readable in the picture. Screenshot attached of your compatibility claim.\n\nA measurement is not an opinion. The compatibility stated on your listing is wrong, and buyers are ordering it on that basis.\n\nWHAT I NEED: full refund of [Amount Paid].\n\nNO RETURN. Postage to China costs more than the item, and the measurement is already in the photo.\n\nDEADLINE: 48 hours."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. No reply from you.\n\nThe item does not fit [Model / Size] as your listing states. The photo with the measurement in frame is already with you.\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours, then the dispute opens."}]},
+
+{"id": "s-inr", "cat": "Supplier Messages", "type": "Not received", "next": "a-inr", "name": "S-9 · Not Received / Tracking Stalled", "kw": ["not received", "not arrived", "no delivery", "tracking stuck", "no movement", "still waiting", "never arrived", "where is my order"], "flag": "NOT for parcels tracking says were delivered. That route gets checked, fails, and damages every future claim on the account.", "tip": "Attach: tracking screenshot jis mein stall ya no delivery scan clear ho. Buyer Protection ki expiry date ABHI check karo aur usi ke hisaab se deadline lagao — supplier ka 'please wait' clock nahi rokta.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date]. The parcel has not arrived.\n\nTRACKING: [Tracking Number] shows [No Delivery Scan / No Movement Since Date]. There is no delivery scan on this order and nothing has been received at [Address].\n\nThe Buyer Protection window on this order closes soon. I will not let it close while I wait for an update that has not come.\n\nWHAT I NEED — choose one:\n1. Refund [Amount Paid] in full.\n2. Give me a firm delivery date in writing today, and confirm here that you refund in full if that date is missed.\n\nDEADLINE: 48 hours. If I have neither, I open the dispute before the protection window ends. That is not a threat, it is the deadline I am working to."}, {"label": "24h final notice", "text": "Order [Order Number] — second message. Still nothing delivered and tracking is unchanged since [Last Movement Date].\n\nRefund [Amount Paid] today.\n\nDEADLINE: 24 hours. After that the dispute opens, because the protection window will not wait for either of us."}]},
+
+/* ---------------- FORMAL APPEALS (stage 2) — long-form, decide-at-appeal ---------------- */
+{"id": "a-doa", "cat": "Formal Appeals", "type": "Faulty / DOA", "next": "a-reappeal", "reason": "Functional defect — item does not work", "name": "A-1 · Appeal — Dead on Arrival", "kw": ["appeal dead on arrival", "dispute doa", "functional defect", "does not work appeal", "dead unit"], "flag": "Send ONCE, complete. Every numbered evidence item listed must actually be attached — a list that promises evidence the reviewer can't see kills the appeal.", "tip": "Attach: 10–20s video (unit power par, zero response) + item aur shipping label EK frame mein. Yeh appeal is liye lambi hai ke reviewer ke paas har sawal ka jawab pehle se ho — testing, return, partial, replacement sab pre-empt ho chuke hain, to chat stage tak jane ki zaroorat hi na pare. Sirf wohi symptom likho jo video mein nazar aata hai.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date], delivered [Delivered Date]. The unit is dead on arrival.\n\nFAULT: [Fault — no power / function dead / ran then failed]. This is the condition it arrived in. It has never worked.\n\nTESTING: tested on [Number Tested] separate working [Power Sources / Devices], each verified working with other units immediately before and after. Same result every time: no response. There is nothing to configure and nothing to switch on. User error is not possible on this item.\n\nEVIDENCE ATTACHED:\n1. Video — the unit under power with no response. [What The Video Shows]\n2. Photo — item, packaging and shipping label in one frame, linking the parcel to this order.\n3. Photo — [Additional Photo].\n\nThe item is defective and has no use. It cannot be sold and cannot be repaired at this price point. It was faulty before it was dispatched.\n\nRETURN: refused. Return postage to China exceeds the value of the item, and the item arrived faulty. The buyer does not fund the return of a dead unit.\n\nPARTIAL REFUND: refused. A discount on a unit that does not work at all is still a total loss.\n\nREPLACEMENT: refused. [Replacement Reason — same batch / already refunded].\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The evidence attached is complete and decides this case on its own."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. Dead on arrival — [Fault — no power / function dead / ran then failed]. Tested on [Number Tested] working [Power Sources / Devices]; no output on any. There is nothing to set up and nothing to switch on. Video attached showing the failure. The item is defective and unusable. Full refund of [Amount Paid] required. No return — postage to China exceeds the item value and the unit was faulty on arrival. A partial refund or replacement does not resolve a dead unit."}]},
+
+{"id": "a-damaged", "cat": "Formal Appeals", "type": "Damaged", "next": "a-reappeal", "reason": "Item arrived damaged", "name": "A-2 · Appeal — Arrived Damaged", "kw": ["appeal damaged", "dispute damaged", "arrived broken appeal", "damaged in transit"], "flag": "Damage must be shown ON THE ITEM. A damaged box with an intact item loses, and claiming otherwise burns the account's credibility on future disputes.", "tip": "Attach: item + packaging + shipping label EK frame mein (as delivered, untouched) + damage ka close-up. Parcel kholte waqt video banane ki aadat — 'photographed before and during opening' line tabhi likhi ja sakti hai jab yeh sach ho.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date], delivered [Delivered Date]. The item arrived damaged.\n\nDAMAGE: [Damage On The Item]. This is damage to the item itself, not to the outer packaging alone.\n\nCONDITION AS DELIVERED: the parcel was photographed before and during opening. Nothing has been altered, dismantled or repaired. The damage was present when the parcel was opened.\n\nEVIDENCE ATTACHED:\n1. Photo — item, packaging and shipping label in one frame, linking the parcel to this order.\n2. Photo — close-up of the damage on the item.\n3. [Additional Evidence — opening video / packaging condition].\n\nThe item is not usable and not sellable in this condition. It has no residual value to me.\n\nRETURN: refused. Return postage to China exceeds the item value, and the damage is documented in the photographs above — shipping it back verifies nothing the photographs do not already show.\n\nPARTIAL REFUND: [Partial Position — refused, the item is unsellable].\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The attached evidence is complete and decides this case without further exchange."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date], damaged. [Damage On The Item]. Photos attached show the item, packaging and shipping label as delivered, untouched. The item is not usable or sellable in this condition. Full refund of [Amount Paid] required. No return — postage exceeds the item value and the damage is documented."}]},
+
+{"id": "a-nad", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — does not match listing images", "name": "A-3 · Appeal — Not as Described (Quality)", "kw": ["appeal not as described", "dispute quality", "below specification", "does not match listing appeal"], "flag": "Name a difference VISIBLE in the side-by-side photo. An unshown 'poor quality' claim gets a partial at best.", "tip": "Attach: listing image vs item side-by-side (same lighting) + close-ups. Difference ko naam do — colour, print, stitching, material, finish. Agar item usable hai aur issue minor hai to partial line par 'open to a full-value partial' rakho; agar sellable hi nahi to 'refused'.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date], delivered [Delivered Date]. The item does not match the listing it was sold under.\n\nWHAT THE LISTING SHOWED: [What The Listing Showed].\nWHAT ARRIVED: [What Actually Arrived].\nTHE DIFFERENCE: [Visible Difference]. This is not expectation or interpretation — it is visible side by side in the photographs attached.\n\nEVIDENCE ATTACHED:\n1. Photo — the listing image and the item received, side by side, same lighting.\n2. Photo — close-up of [Specific Detail].\n3. Photo — item, packaging and shipping label in one frame.\n\nThe item was bought against the seller's own images and description. What arrived is materially below that specification and cannot be supplied to my customers as the product advertised.\n\nRETURN: refused. Return postage to China exceeds the item value, and the mismatch is already documented — returning the item proves nothing the photographs do not.\n\nPARTIAL REFUND: [Partial Position — refused, the item is unsellable].\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. Decide on the side-by-side evidence attached."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. The item does not match the listing. [Visible Difference]. Photos attached, next to the listing image, show the difference directly. The item is below the specification advertised and cannot be sold. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-feature", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — advertised feature absent", "name": "A-4 · Appeal — Feature Missing / Not Working", "kw": ["appeal feature", "advertised feature absent", "magnetic appeal", "not compatible appeal", "feature dispute"], "flag": "Screenshot the listing's OWN feature claim before it changes — the seller's wording is the case.", "tip": "Attach: feature fail hone ki video + listing claim ka screenshot. 'Ruled out user error' mein exact tareeqa likho — doosri device, doosra cable, official app, same setup mein working unit. Replacement decline sirf tab jab feature product mein hai hi nahi (doosra unit bhi fail karega).", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Ordered [Order Date], delivered [Delivered Date]. The item does not perform the function it was advertised to perform.\n\nTHE LISTING CLAIM: the listing states [Listed Feature]. A copy of that claim is attached.\nTHE FAILURE: [What Fails — magnet does not hold / not recognised].\n\nUSER ERROR RULED OUT: [How Ruled Out]. [Number Tested] separate [Devices / Setups] were used, each verified working with a comparable unit in the same setup immediately before and after. The failure follows this item, not the setup.\n\nEVIDENCE ATTACHED:\n1. Video — the feature failing, in a setup shown to work. [What The Video Shows]\n2. Screenshot — the seller's own listing claim.\n3. Photo — item, packaging and shipping label in one frame.\n\n[Listed Feature] is the reason this item was bought and the reason it was priced as it was. Without it the item has no use to me.\n\nRETURN: refused. Return postage to China exceeds the item value and the failure is on video.\n\nREPLACEMENT: refused. [Replacement Reason — feature absent in this product].\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The seller's own listing and the attached video decide this."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. The listing states [Listed Feature]. The item does not perform it — [What Fails — magnet does not hold / not recognised]. User error ruled out: [How Ruled Out]. Video and a copy of the listing claim attached. The item does not do what was advertised, which is why it was bought. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-wrong", "cat": "Formal Appeals", "type": "Wrong / missing", "next": "a-reappeal", "reason": "Wrong item received", "name": "A-5 · Appeal — Wrong Item / Colour / Variant", "kw": ["appeal wrong item", "wrong item dispute", "wrong colour appeal", "wrong variant dispute"], "flag": "", "tip": "Packing label / barcode ki photo hi saboot hai ke seller ne asal mein kya dispatch kiya — item ke saath dono attach karo. Address sirf tab bharo jab correct item chahiye.", "variants": [{"label": "Full appeal", "text": "Order [Order Number]. Ordered [What Was Ordered]; received [What Arrived]. These are not the same product.\n\nORDERED: [What Was Ordered] — as shown on the order record and on the seller's own listing.\nRECEIVED: [What Arrived] — as shown in the photographs and on the seller's packing label.\n\nThe packing label attached to the parcel identifies what the seller dispatched, and it does not match the order. This is a dispatch error on the seller's side. It is not a description dispute and not a buyer selection error — the order record shows the variant that was paid for.\n\nEVIDENCE ATTACHED:\n1. Photo — the item received.\n2. Photo — the packing label / barcode on the parcel.\n3. Photo — item, packaging and shipping label in one frame.\n\nThe item received was not ordered, was not paid for, and has no use to me.\n\nRETURN: refused. Return postage to China exceeds the item value and the error is the seller's. The buyer does not fund the correction of a seller's dispatch error.\n\nDEMAND: full refund of [Amount Paid], or the correct [What Was Ordered] dispatched to [Address] with tracking within 48 hours. Nothing else resolves this order."}, {"label": "Condensed (small box)", "text": "Order [Order Number]. Ordered [What Was Ordered], received [What Arrived]. Photos of the item and the packing label attached. This is not the item ordered or paid for. Full refund of [Amount Paid] required, or dispatch the correct item to [Address]."}]},
+
+{"id": "a-qty", "cat": "Formal Appeals", "type": "Wrong / missing", "next": "a-reappeal", "reason": "Missing items / wrong quantity", "name": "A-6 · Appeal — Missing Quantity", "kw": ["appeal missing quantity", "short shipment dispute", "wrong quantity appeal", "missing items dispute"], "flag": "Confirm the order quantity and check for a SECOND tracking number before opening — split shipments are common and a wrong claim here is very hard to recover from.", "tip": "Teen facts jo split-shipment aur tampering dono ka jawab pehle hi de dete hain: parcel sealed tha, andar koi doosra unit nahi, alag se kuch nahi aaya. Photo: parcel + label + jitne units aaye, sab EK frame mein.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Paid for [Qty Ordered]; [Qty Received] delivered. [Qty Missing] short.\n\nPARCEL CONDITION: the parcel arrived sealed and undamaged. There is no sign of tampering and no second unit inside. Nothing has arrived separately and there is no second tracking number on this order.\n\nEVIDENCE ATTACHED:\n1. Photo — the sealed parcel as delivered.\n2. Photo — the shipping label and the full contents laid out in one frame, showing [Qty Received] units.\n3. [Additional Evidence].\n\nThe order record shows [Qty Ordered] paid for. The photographs show [Qty Received] delivered. The shortage occurred at the seller's packing stage and is documented above.\n\nDEMAND: dispatch the missing [Qty Missing] to [Address] with tracking within 48 hours, or refund [Amount For Missing Units] for the units not supplied. The order record and the attached photographs decide this without further exchange."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name]. Ordered and paid for [Qty Ordered]; [Qty Received] delivered. Parcel sealed and undamaged, no other unit inside, nothing arrived separately. Photos of the parcel, label and contents attached. Dispatch the missing [Qty Missing] to [Address], or refund [Amount For Missing Units] for the units not supplied."}]},
+
+{"id": "a-part", "cat": "Formal Appeals", "type": "Wrong / missing", "next": "a-reappeal", "reason": "Incomplete — component missing", "name": "A-7 · Appeal — Missing Part / Accessory", "kw": ["appeal missing part", "component missing", "incomplete appeal", "accessory missing dispute"], "flag": "State the part is both LISTED and REQUIRED — that closes off a 'sold separately' reply before it is made.", "tip": "Jo kuch mila sab laid out ek photo mein + listing ke package contents ka screenshot. Dono baatein zaroori: part listing mein shamil tha AUR item us ke baghair chalta hi nahi.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name], delivered [Delivered Date] without [Missing Part].\n\nTHE LISTING: [Missing Part] is included in the listing's own stated package contents — a copy is attached. It is not an optional extra and is not sold separately in this listing.\n\nTHE ITEM: without [Missing Part] the item [Why It Is Unusable — cannot be powered or mounted]. It is not partially usable. It is unusable.\n\nEVIDENCE ATTACHED:\n1. Photo — everything supplied in the parcel, laid out in one frame.\n2. Photo — the parcel and shipping label as delivered.\n3. Screenshot — the listing's stated package contents.\n\nThe item as delivered is incomplete against the seller's own listing. There is nothing to test, adjust or return.\n\nDEMAND: dispatch [Missing Part] to [Address] with tracking within 48 hours, or refund [Amount Paid] in full."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date] without [Missing Part], which the listing includes and the item requires to work. Photos of everything supplied attached. The item is unusable as delivered. Dispatch the missing [Missing Part] to [Address], or refund [Amount Paid] in full."}]},
+
+{"id": "a-fit", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — does not fit as listed", "name": "A-8 · Appeal — Doesn't Fit as Listed", "kw": ["appeal doesnt fit", "does not fit dispute", "compatibility appeal", "wrong fit"], "flag": "A legible measurement in-frame beats 'it doesn't fit'. Test against the exact model listed, not a similar one.", "tip": "Item device ke against ya ruler ke saath photo — numbers readable hon. Listing ka compatibility claim bhi screenshot karo; measurement + unka apna claim milke case khatam kar dete hain.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name], delivered [Delivered Date]. The item does not fit the model the listing states it fits.\n\nTHE LISTING CLAIM: fits [Model / Size]. A copy of that compatibility claim is attached.\nTHE ACTUAL FIT: [Mismatch + Measurement]. The item was tested against [Model / Size] itself, not a similar model.\n\nEVIDENCE ATTACHED:\n1. Photo — the item against [The Device / A Ruler], with the measurement legible in frame.\n2. Screenshot — the listing's compatibility claim.\n3. Photo — item, packaging and shipping label in one frame.\n\nA measurement is not an opinion. The compatibility stated on the listing is wrong, and this is a described-item failure by the seller.\n\nRETURN: refused. Return postage to China exceeds the item value and the mismatch is documented to the millimetre.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. The listing states it fits [Model / Size]; it does not — [Mismatch + Measurement]. Photos of the item against [The Device / A Ruler] attached. The item does not match the compatibility stated. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-inr", "cat": "Formal Appeals", "type": "Not received", "next": "a-reappeal", "reason": "Item not received — no delivery scan", "name": "A-9 · Appeal — Not Received", "kw": ["appeal not received", "item not received dispute", "no delivery scan", "tracking stalled appeal"], "flag": "Genuinely undelivered ONLY. If tracking shows delivered, do NOT use — it will be checked, and one false claim damages every future dispute on the account.", "tip": "Tracking screenshot attach karo. Buyer Protection expiry se PEHLE kholo — yeh appeal dates par decide hoti hai, promises par nahi. Parcel ke intezar mein deadline kabhi miss nahi karni.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Not delivered.\n\nTRACKING: [Tracking Number] shows [No Delivery Scan / No Movement Since Date]. There is no delivery scan against this order and no parcel has been received at [Address].\n\nTIMELINE: ordered [Order Date]. The stated delivery window closed [Delivery Window Closed Date]. [Days Elapsed] days have now passed. The seller has [Seller Position — not responded / promised delivery].\n\nEVIDENCE ATTACHED:\n1. Screenshot — the tracking record showing [No Delivery Scan / No Movement Since Date].\n2. [Additional Evidence — carrier statement / message thread].\n\nThere is nothing to inspect and nothing to return. The item was paid for and was not delivered. Further waiting only runs down the protection window on an order that has already failed.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The carrier's own record is the whole of this case and it is attached."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name]. Not received. Tracking [Tracking Number] shows [No Delivery Scan / No Movement Since Date]. The delivery window has passed. Full refund of [Amount Paid] required for the undelivered item."}]},
+
+{"id": "a-counterfeit", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — counterfeit", "name": "A-10 · Appeal — Counterfeit / Not Genuine", "kw": ["counterfeit", "fake", "not genuine", "replica received", "not original", "fake product"], "flag": "Show the specific tell — logo, print, packaging — in the photographs. Only run this where the listing actually claimed a genuine or branded product.", "tip": "Tells naam do: no branding, ghalat logo, build/packaging genuine se inconsistent. Listing ka 'genuine/branded' claim screenshot karo. Yeh item kabhi relist nahi hoga — full refund hi maango, replacement kabhi nahi.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name], delivered [Delivered Date]. The item is not the genuine product the listing advertised.\n\nTHE LISTING CLAIM: [Genuine / Branded Claim]. A copy is attached.\nTHE ITEM RECEIVED: [The Tells — no branding / wrong logo / wrong packaging]. [Additional Tell].\n\nEVIDENCE ATTACHED:\n1. Photo — the item, showing [The Tells].\n2. Photo — close-up of [Specific Detail — logo / serial / print quality].\n3. Screenshot — the listing's genuine-product claim.\n4. Photo — item, packaging and shipping label in one frame.\n\nThe item cannot be resold. Supplying it to UK customers as the advertised product would expose this business to trading-standards and intellectual-property risk that I will not carry. The item is therefore a total loss.\n\nRETURN: refused. I will not ship a non-genuine item back across borders at my own cost.\n\nREPLACEMENT: refused — the same stock produces the same item.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The discrepancy against the seller's own listing is documented above."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. The listing advertised [Genuine / Branded Claim]. The item received is not genuine — [The Tells — no branding / wrong logo / wrong packaging]. Photos attached showing the discrepancy against the listing. The item is not what was advertised and cannot be resold. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-size", "cat": "Formal Appeals", "type": "Wrong / missing", "next": "a-reappeal", "reason": "Wrong item — incorrect size/spec sent", "name": "A-11 · Appeal — Wrong Size / Spec Sent", "kw": ["wrong size", "wrong spec", "incorrect size", "different specification", "wrong model sent"], "flag": "", "tip": "Size marking ya spec item ke SAATH photo karo — marking + packing label + item. Ordered variant order record par hai; wohi is case ki jaan hai.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Ordered [Size / Spec Ordered]; received [Size / Spec Received].\n\nTHE ORDER RECORD: [Size / Spec Ordered] was selected and paid for — the variant is recorded on the order.\nWHAT ARRIVED: [Size / Spec Received], as marked on the item itself and on the seller's packing label.\n\nEVIDENCE ATTACHED:\n1. Photo — the size / spec marking on the item.\n2. Photo — the packing label showing what was dispatched.\n3. Photo — item, packaging and shipping label in one frame.\n\nThis is a picking error at the seller's end. The variant selected is on the order record and the item dispatched does not match it. The item received cannot be used for the purpose it was bought for.\n\nRETURN: refused. Return postage to China exceeds the item value and the error is the seller's.\n\nDEMAND: full refund of [Amount Paid], or the correct [Size / Spec Ordered] dispatched to [Address] with tracking within 48 hours."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name]. Ordered [Size / Spec Ordered]; received [Size / Spec Received]. Photos of the item, the size marking and the label attached. This is not the specification ordered. Full refund of [Amount Paid] required, or dispatch the correct [Size / Spec Ordered] to [Address]."}]},
+
+{"id": "a-dims", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — dimensions differ from listing", "name": "A-12 · Appeal — Dimensions Differ", "kw": ["smaller than described", "dimensions differ", "measures less", "size smaller", "not the size listed"], "flag": "The ruler shot IS the case — the figures must be legible in frame or the appeal has nothing to stand on.", "tip": "Listed dimensions vs actual measurement — dono numbers appeal mein likho, aur ruler photo mein figures clearly readable hon. Blur ruler = weak case.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name], delivered [Delivered Date]. The item is materially smaller than the dimensions stated in the listing.\n\nLISTED: [Dimensions Listed]. A copy of the listing specification is attached.\nMEASURED: [Actual Measurement]. Measured against a rule, item flat, at the points the listing specifies.\nDIFFERENCE: [Size Difference].\n\nEVIDENCE ATTACHED:\n1. Photo — the item against a rule, figures legible in frame.\n2. Screenshot — the listing's stated dimensions.\n3. Photo — item, packaging and shipping label in one frame.\n\nDimensions are a factual specification, not a description open to interpretation. The item does not meet the specification it was sold under and does not fit the use it was bought for.\n\nRETURN: refused. Return postage to China exceeds the item value and the measurement is documented.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The measurement is in frame and decides this."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. The listing states [Dimensions Listed]. The item measures [Actual Measurement]. Photo of the item against a ruler attached. The item is materially smaller than advertised. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-notnew", "cat": "Formal Appeals", "type": "Not as described", "next": "a-reappeal", "reason": "Not as described — item not new", "name": "A-13 · Appeal — Not New / Used Item", "kw": ["used item", "not new", "second hand", "opened box", "resealed", "signs of use", "scratched used"], "flag": "Show the SPECIFIC signs of use in close-up. A general 'looks used' is not evidence.", "tip": "Signs naam do aur unhi ke close-ups attach karo: scratches, wear, dirt, opened/resealed packaging. 'Opening was photographed' line sirf tab likho jab waqai photo/video maujood ho.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name], delivered [Delivered Date]. Sold as new; delivered used.\n\nSIGNS OF USE: [Signs Of Use — scratches / wear / resealed packaging]. [Additional Sign]. These were present on opening and are not handling marks from my end — the opening was photographed.\n\nEVIDENCE ATTACHED:\n1. Photo — close-up of [Signs Of Use — scratches / wear / resealed packaging].\n2. Photo — the packaging, showing [Packaging Condition — reseal / opened box].\n3. Photo — item, packaging and shipping label in one frame.\n\nThe listing sold this item as new. A used item is not the product paid for and cannot be supplied to a customer as new. The condition difference is not cosmetic to a reseller — it makes the item unsellable.\n\nRETURN: refused. Return postage to China exceeds the item value and the condition is documented.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. Sold as new; received used — [Signs Of Use — scratches / wear / resealed packaging]. Photos attached. The item is not in the new condition advertised and cannot be sold as new. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-early", "cat": "Formal Appeals", "type": "Faulty / DOA", "next": "a-reappeal", "reason": "Functional defect — failed after minimal use", "name": "A-14 · Appeal — Early Failure (Failed in Days)", "kw": ["stopped working", "failed after", "worked then died", "broke after days", "early failure", "died after a week"], "flag": "Only where it genuinely failed under normal use. State the true timeframe — an inflated one is easy to disprove against the delivery date.", "tip": "Timeframe sach likho. Video mein fault ab jaisa hai wohi dikhaao. 'No drops, no water, no modification' line supplier ke misuse angle ko pehle hi kaat deti hai — lekin sirf tab likho jab sach ho.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. Delivered [Delivered Date]; failed [Failure Date], after [X Days] of normal use.\n\nUSE: used as intended, for [What It Was Used For], within the specification on the listing. No drops, no water ingress, no modification and no third-party parts. [Usage Detail].\nFAILURE: [What Happened]. The item is now [Current State — will not power on / function dead].\n\nEVIDENCE ATTACHED:\n1. Video — the fault as it stands now. [What The Video Shows]\n2. Photo — the item, showing no external damage or misuse.\n3. Photo — item, packaging and shipping label in one frame.\n\nAn item that fails within [X Days] of light, correct use is defective as supplied. This is a manufacturing fault, not wear, and the photographs show no impact, water or misuse that could account for it.\n\nRETURN: refused. Return postage to China exceeds the item value and the fault is on video.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name], delivered [Delivered Date]. Worked initially and failed within [X Days] of normal use — [What Happened]. Used as intended, no misuse. Video attached showing the fault. This is a manufacturing defect. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-empty", "cat": "Formal Appeals", "type": "Not received", "next": "a-reappeal", "reason": "Item not received — empty or wrong parcel", "name": "A-15 · Appeal — Empty / Wrong Parcel", "kw": ["empty box", "empty parcel", "different item in parcel", "not my item", "parcel empty", "wrong parcel"], "flag": "The opening video is the case. Without it this claim is very hard to win — film the seal and label BEFORE opening, every time.", "tip": "Parcel kholte waqt video: seal, shipping label, phir andar ka content — bina rukay, ek hi clip mein. Open parcel + label EK frame mein photo bhi lo.", "variants": [{"label": "Full appeal", "text": "Order [Order Number] — [Item Name]. The ordered item was not inside the parcel.\n\nWHAT ARRIVED: the parcel was [Empty / Containing A Different Item]. It was opened on camera, without interruption. The seal and the shipping label were filmed before opening.\nPARCEL CONDITION: [Parcel Condition — seal intact / seal broken on arrival]. [Weight Note].\n\nEVIDENCE ATTACHED:\n1. Video — the parcel being opened, seal and shipping label visible throughout.\n2. Photo — the open parcel with the shipping label in the same frame.\n3. Photo — [What Was Inside].\n\nThe shipping label ties this parcel to order [Order Number]. The ordered item was not in it. Nothing was received to inspect, use or return, so there is no return to make.\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. The opening video and the label in frame settle what was delivered."}, {"label": "Condensed (small box)", "text": "Order [Order Number], [Item Name]. The parcel arrived [Empty / Containing A Different Item]. Photos of the open parcel, the seal and the shipping label attached. The ordered item was not delivered. Full refund of [Amount Paid] required."}]},
+
+{"id": "a-reappeal", "cat": "Formal Appeals", "type": "Refund chase", "next": "cr-rejected", "reason": "Keep the ORIGINAL reason — never change it mid-dispute", "name": "A-16 · Re-Appeal — After a Rejection", "kw": ["rejected", "re-appeal", "appeal again", "decision appeal", "rejected decision", "more evidence demanded", "judgment against"], "flag": "Do not change the dispute reason and do not add a new claim. Re-appeal on the point that was missed, with the evidence already on file.", "tip": "Rejection ke baad panic mein naya claim mat jodo — wohi case, wohi reason, sirf missed point par focus. Reviewer ko exact jagah batao (photo number ya video ka second). Naya evidence hai to pehle case par upload karo, phir yeh bhejo.", "variants": [{"label": "Re-appeal", "text": "Order [Order Number] — [Item Name]. The decision of [Rejection Date] is disputed.\n\nTHE CLAIM: [Case Type — defect / not as described / wrong item]. It was rejected on the basis of [Stated Reason For Rejection]. That basis does not hold against the evidence already on file.\n\nTHE POINT MISSED: [The Specific Point]. It is visible in [The Specific Photo / Frame At 0:0X] — [What It Shows]. This was submitted with the original claim and is on the case now.\n\n[Additional Evidence Now Attached].\n\nNothing in this claim has changed and nothing has been overstated. The item is [Faulty / Damaged / Not As Described] and the attached evidence shows it directly. The seller has [Seller Position — fault not disputed / partial offered].\n\nDEMAND: full refund of [Amount Paid] on order [Order Number]. Review the evidence at the point identified above and decide on that."}, {"label": "If more evidence is demanded", "text": "Order [Order Number] — [Item Name]. The evidence requested is on the case.\n\n[The Specific Photo / Frame At 0:0X] shows [What It Shows]. [Additional Evidence Now Attached].\n\nThe fault is [Fault] and the item is [Unusable / Damaged / Not As Described]. No further evidence exists beyond what has been supplied, because this is the whole of the fault. Full refund of [Amount Paid] required."}]},
+
+/* ---------------- CHAT REPLIES (stage 3) — hard, no-give replies ---------------- */
+{"id": "cr-return", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-1 · “Please return the item for a refund”", "kw": ["return the item", "send it back", "return for refund", "ship back", "return it to us", "return first"], "flag": "For low-value items, no-return refunds are standard on AliExpress. Hold the line.", "tip": "Return-to-China ka cost hamesha unka issue hai, hamara nahi — faulty item par yeh line kabhi soft nahi karni. Agar woh prepaid label offer karein to refund pehle likhit mein lo, tab ship karo.", "variants": [{"label": "Reply", "text": "The item was faulty when it arrived. This is not a change of mind, and a return at my cost is not the remedy for a defective item.\n\nPostage to China costs more than the item is worth. A return at my expense is not a resolution — it is a way to make the refund not worth claiming.\n\nRefund without return. The photos and video are already on this case and they show the fault clearly. There is nothing left to inspect."}, {"label": "If they insist", "text": "Two options, choose one:\n1. Send a prepaid return label at your cost, and confirm the full refund in writing here before I ship anything.\n2. Refund now, without a return.\n\nI will not pay to ship a defective unit to China, and I will not send anything back on a promise. 24 hours."}]},
+
+{"id": "cr-partial", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-2 · “We can offer a partial refund”", "kw": ["partial refund", "we can offer", "compensation", "offer you", "refund part", "some refund", "partial compensation"], "flag": "Decide honestly before replying: item usable + issue minor → ACCEPT. Genuinely dead or damaged → HOLD for full.", "tip": "Confusion ho to fault se decide karo — dead ya damaged unit par chhota partial kabhi accept nahi; usable item par minor issue mein partial paisa jaldi wapas laata hai. Jo bhi accept karo, dispute refund SHOW hone ke baad hi close.", "variants": [{"label": "ACCEPT — item usable", "text": "[Amount] accepted. Process it now and I close this as soon as it shows in my account.\n\nIf it is not processed today the offer lapses and I go back to the full amount."}, {"label": "HOLD — dead / damaged", "text": "The item does not work at all. This is not a minor fault or a quality complaint, and it is not something a discount fixes.\n\n[Amount] leaves me holding a unit with no use and leaves you holding the sale. That is not a settlement.\n\nFull refund of [Amount Paid]. The evidence on this case shows the item is defective, and that is what a dispute will be decided on."}]},
+
+{"id": "cr-video", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-3 · “Please provide a video”", "kw": ["provide a video", "send video", "need a video", "show us video", "record a video", "video proof"], "flag": "The clip should already exist. This reply points at it — it does not promise a new one.", "tip": "Video pehle se ready honi chahiye. [What The Video Shows] mein sirf wohi fact likho jo clip mein nazar aata hai. Dobara filming ki demand aksar clock chalane ki chaal hoti hai — us par mat chalo.", "variants": [{"label": "Reply", "text": "The video is already attached to this case. It shows [What The Video Shows]. The fault is [Fault], and it is visible within the first seconds of the clip.\n\nIf you cannot see it, tell me which second you are looking at and I will point you to the exact moment. I am not filming the same fault a second time to restart the clock on this case."}]},
+
+{"id": "cr-usererror", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-4 · “This is a user / customer problem”", "kw": ["user problem", "used wrongly", "operate correctly", "customer problem", "wrong use", "user error", "using it wrong", "read the manual"], "flag": "", "tip": "Exact batao user error kaise eliminate hua — doosri device, doosra cable, official app, same setup mein working unit. Vague 'we tested it' kaafi nahi; jo test likha hai woh evidence se match kare.", "variants": [{"label": "Reply", "text": "User error is ruled out, and I have already documented how. [How Ruled Out].\n\nOther [Devices / Units] work in the same setup, before and after, with nothing changed except your item. The failure follows your unit, not the way it is used.\n\nThat is a product fault, and the video on this case shows it. Refund [Amount Paid]."}]},
+
+{"id": "cr-close", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-5 · “Close the dispute, we'll refund after”", "kw": ["close the dispute", "cancel the dispute", "close first", "after you close", "close it and we will refund", "withdraw the dispute"], "flag": "NEVER close on a promise — closing usually ends Buyer Protection. No exceptions, whatever is promised.", "tip": "Yeh sab se common trap hai. Dispute tab close hota hai jab refund account mein SHOW ho. Agar woh promise karein to screenshot le kar Saved Cases mein note karo — baad mein kaam aata hai.", "variants": [{"label": "Reply", "text": "No. The dispute stays open until the refund is processed and showing in my account. The day it shows, I close it — I have no reason to keep a case open against a supplier I buy from.\n\nClosing it first removes my protection on this order and leaves the refund entirely on your word. That is not a risk I take with any supplier, and it is not personal.\n\nRefund first."}, {"label": "If they push again", "text": "This is not negotiable, and repeating it only costs us both time.\n\nThe case closes the day the money appears, not before. Process the refund of [Amount Paid] now.\n\n24 hours, then AliExpress decides it instead of you."}]},
+
+{"id": "cr-rejected", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-6 · AliExpress: “Rejected / more evidence needed”", "kw": ["rejected", "more evidence", "insufficient evidence", "judgment", "appeal failed", "provide more proof", "not enough evidence", "dispute rejected"], "flag": "Point the reviewer to ONE clearest piece of evidence. Add no claims the evidence does not support.", "tip": "Reviewer ko exact jagah dikhao — photo number ya video ka second — poori kahani dobara nahi. Naya evidence hai to pehle case par upload karo, phir yeh bhejo. Lambi re-appeal chahiye to A-16 use karo.", "variants": [{"label": "Reply", "text": "Escalating. The evidence on this case is complete and I am not adding new claims to it.\n\nLook at [The Specific Photo / Frame At 0:0X]. It shows [Fault]. That single point decides this case — the item is [Unusable / Damaged / Not As Described], and it was in that condition on arrival.\n\nNothing has changed since the claim was filed and nothing has been overstated. Full refund of [Amount Paid]."}]},
+
+{"id": "cr-replacement", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-7 · “We'll send a replacement”", "kw": ["send a replacement", "resend", "new one", "ship again", "replace it", "send another"], "flag": "Decline only with a genuine reason — otherwise a replacement is often the fastest fix.", "tip": "Accept karo to tracking demand zaroor karo aur dispute khula rakho jab tak replacement pohanch kar working confirm na ho. Decline sirf sachhi wajah par: feature asli nahi (doosra unit bhi fail karega) ya customer already refunded.", "variants": [{"label": "ACCEPT", "text": "Replacement accepted, on these terms: dispatch to [Address] and send me the tracking number today.\n\nThe dispute stays open until the replacement arrives and is confirmed working. If it does not arrive, or arrives with the same fault, this goes back to a full refund of [Amount Paid]."}, {"label": "DECLINE — real reason only", "text": "A replacement does not resolve this. [Real Reason — feature isn't real / already refunded].\n\nA second unit from the same stock gives the same result, and I am not waiting another three weeks to prove that.\n\nRefund [Amount Paid]."}]},
+
+{"id": "cr-avoid", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-8 · “Can we avoid a dispute? We'll look after you”", "kw": ["avoid dispute", "dont open dispute", "look after you", "take care of you", "good customer", "solve it privately", "no dispute please"], "flag": "", "tip": "Repeat-order history asli leverage hai — supplier dispute apne record par nahi chahta. Jo bhi confirm ho (refund ya credit), chat mein LIKHIT lo aur 48h ki deadline saath rakho.", "variants": [{"label": "Reply", "text": "I am willing to keep this off the dispute system. I order from your store regularly and a case on your record helps neither of us.\n\nConfirm the [Full Refund / Next-Order Credit] here in writing and I will not open one. That is the whole condition — nothing else is required from you.\n\n48 hours. After that it goes through the system, and then it sits on your record whether you settle it or not."}]},
+
+{"id": "cr-silent", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-9 · Supplier Goes Quiet", "kw": ["no reply", "ignored", "silent", "no response", "not answering", "stopped replying"], "flag": "Then ACTUALLY escalate. Silence is a stalling tactic and the deadline does not reset.", "tip": "Yeh notice bhejo, Saved Cases mein deadline date likho, aur guzarte hi dispute open ya escalate karo. Ek dafa khali dhamki de di to agli dafa koi deadline serious nahi legi.", "variants": [{"label": "Reply", "text": "No response since [Date Of Last Message]. Silence does not pause this order or the protection window on it.\n\nThe evidence is on the order and the fault is not in question. Resolve it within 24 hours, or I escalate to AliExpress and let them decide it on the evidence attached.\n\nThis is the last message before that happens."}]},
+
+{"id": "cr-coupon", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-10 · “We'll give you a coupon / store credit”", "kw": ["coupon", "store credit", "voucher", "discount next order", "credit for next"], "flag": "", "tip": "Credit sirf tab accept karo jab waqai unse aur stock lena ho — warna cash refund, original payment par. Coupon accept karne ka matlab hai apna paisa wapas lene ke liye aur paisa kharch karna.", "variants": [{"label": "Reply", "text": "A coupon does not refund an order. I paid cash for an item I cannot use.\n\nStore credit only returns my money if I spend more money with you first, which means I carry the loss on this order either way.\n\nFull refund of [Amount Paid] to the original payment method."}]},
+
+{"id": "cr-patient", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-11 · “Please wait / be patient”", "kw": ["please wait", "be patient", "kindly wait", "check with", "few more days", "wait for", "give us time"], "flag": "Don't let 'be patient' run down the Buyer Protection window — check the expiry date now.", "tip": "Waiting unki strategy hai, hamari nahi. [Time Waited] mein exact arsa likho. Protection expiry qareeb ho to intezar band — dispute kholo, chahe baat chalti rahe.", "variants": [{"label": "Reply", "text": "I have already waited [Time Waited]. The item is [Faulty / Not Delivered], the evidence is attached, and none of that changes with more time.\n\nWaiting only runs down the protection window on this order, and that is the one thing I will not allow to happen.\n\nProcess the refund of [Amount Paid] now. 24 hours."}]},
+
+{"id": "cr-admitted", "cat": "Chat Replies", "type": "Refund chase", "name": "CR-12 · “Yes it's faulty, we'll sort it soon”", "kw": ["yes it is faulty", "we will sort", "confirm the problem", "yes defective", "we admit", "sorry it is faulty", "we will solve soon"], "flag": "", "tip": "Jaise hi supplier fault maan le, same-day refund par pin karo — 'soon' accept nahi. Admission ka screenshot Saved Cases mein rakho; dispute mein yeh sab se mazboot cheez hoti hai.", "variants": [{"label": "Reply", "text": "You have confirmed the fault, so there is nothing left to check and nothing left to investigate. The only open question is when the money comes back.\n\nFull refund of [Amount Paid] today.\n\nIf it is not processed within 24 hours I escalate to AliExpress, and your own message confirming the fault goes with it."}]},
+
+/* ---------------- M98M EXTRAS ---------------- */
+{"id": "x-vat", "cat": "M98M Extras", "type": "Compliance", "name": "X-1 · VAT Invoice Request (HMRC)", "kw": ["vat invoice", "tax invoice", "invoice request", "hmrc", "vat receipt", "need invoice"], "flag": "", "tip": "HMRC ko PER-ORDER VAT invoice chahiye — card statement ya order summary kaafi nahi. PDF chat mein hi mangwao. 48h mein na aaye to chaser, phir AliExpress support ke zariye.", "variants": [{"label": "Request", "text": "Order [Order Number]. I need the VAT invoice for this order.\n\nIt must show, on the same document: the order number, the item, the price paid, and the VAT amount as a separate line.\n\nA payment screenshot or an order summary is not sufficient. UK tax records require a proper invoice per order, and I cannot substitute anything else for it.\n\nSend it as a PDF here in this chat.\n\nDEADLINE: 48 hours. This is a legal record-keeping requirement on my side, not an optional request."}, {"label": "24h chaser", "text": "Order [Order Number] — second request for the VAT invoice.\n\nPDF, showing the order number, the item, the price paid and the VAT as a separate line.\n\n24 hours. After that I request it through AliExpress support instead, which puts a record against your store rather than settling it quietly between us."}]},
+
+{"id": "x-recall", "cat": "M98M Extras", "type": "Compliance", "name": "X-2 · Unsafe / Recalled Product (OPSS · GPSR)", "kw": ["recall", "opss", "unsafe product", "gpsr", "safety", "ukca", "ce marking", "banned product", "not compliant"], "flag": "Full refund ONLY — never a replacement of the same non-compliant stock. FLAG TO MANAGEMENT: the eBay listing must be ended as well.", "tip": "Recall reference aur specific defect ka exact match likho — jaise LED tea light / OPSS 2303-0149 case mein. Evidence: recall notice + supplier listing/photos jo wohi defect dikhayen. Yeh product dobara kabhi order nahi hoga — supplier ko yeh clearly bata do.", "variants": [{"label": "Message", "text": "Order [Order Number] — [Item Name].\n\nThis product matches UK safety recall [Recall Reference] and does not meet UK product safety requirements under the General Product Safety Regulations 2005. The specific defect is [Specific Defect].\n\nThis is not a quality complaint. The item cannot legally be sold or supplied in the UK. It has been removed from sale on our side and it will not be relisted.\n\nWHAT I NEED: full refund of [Amount Paid].\n\nNO REPLACEMENT. Stock of the same product carries the same defect and the same legal problem. I will not accept another unit of it in any circumstances.\n\nNO RETURN. I am not putting a recalled item back into the postal system.\n\nEvidence attached: the recall notice, and your own listing photographs showing the defect.\n\nDEADLINE: 48 hours."}]}
+];
+
+/* ---------------- constants ---------------- */
+const CATS=["Supplier Messages","Formal Appeals","Chat Replies","M98M Extras","My Templates"];
+const CATCOLOR={"Supplier Messages":"var(--c-supplier)","Formal Appeals":"var(--c-appeal)","Chat Replies":"var(--c-chat)","M98M Extras":"var(--c-extra)","My Templates":"var(--c-custom)"};
+const TYPES=["Faulty / DOA","Damaged","Wrong / missing","Not as described","Not received","Refund chase","Compliance","Other"];
+const TYPECOLOR={"Faulty / DOA":"#c2453a","Damaged":"#d97a2b","Wrong / missing":"#6d5cd6","Not as described":"#b83d75","Not received":"#0e7490","Refund chase":"#2e56c6","Compliance":"#0e9384","Other":"#8a6a58"};
+const STATUSES=["Sent · 48h","Supplier replied","Dispute open","Escalated","Refunded ✓","Partial ✓","Resend agreed","Closed ✗"];
+const STATUSCOLOR={"Sent · 48h":"#b45309","Supplier replied":"#2e56c6","Dispute open":"#c2410c","Escalated":"#6d5cd6","Refunded ✓":"#1d7a46","Partial ✓":"#0e7490","Resend agreed":"#0e9384","Closed ✗":"#b3402e"};
+const WS_LIST=[["all","All"],["Supplier Messages","Supplier ✉"],["Formal Appeals","Appeals ⚖"],["Chat Replies","Chat Replies 💬"],["M98M Extras","Extras"]];
+const STOP=new Set(["the","and","for","you","your","our","with","this","that","have","has","are","was","were","will","would","can","could","please","kindly","kind","regards","dear","friend","valued","customer","customers","team","hope","doing","well","thank","thanks","very","much","from","not","but","item","order","aliexpress","supplier","store","seller","buyer","sincerely","apologize","apologise","inconvenience","caused","support","satisfaction","priority","possible","solution","best","also","been","they","them","their","when","what","which","once","soon","just","like","need","want","know","let","message","further","assistance","contact","feel","free","understanding","cooperation","patience","hello","today","chat","refund","full","hours"]);
+
+const LS_CUSTOM="m98m_ali_custom_v1", LS_RECENT="m98m_ali_recent_v1", LS_OVR="m98m_ali_ovr_v1", LS_LOG="m98m_ali_log_v1";
+function loadJSON(k,f){try{const v=JSON.parse(localStorage.getItem(k));return v??f}catch(e){return f}}
+function saveJSON(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+let customs=loadJSON(LS_CUSTOM,[]);
+let recent=loadJSON(LS_RECENT,[]);
+let overrides=loadJSON(LS_OVR,{});
+let logEntries=loadJSON(LS_LOG,[]);
+
+function allCases(){return DB.concat(customs)}
+function byId(id){return allCases().find(c=>c.id===id)}
+function logById(id){return logEntries.find(e=>e.id===id)}
+function norm(s){return (s||"").toLowerCase().replace(/color/g,"colour").replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
+function tokens(s){return norm(s).split(" ").filter(w=>w.length>=3&&!STOP.has(w))}
+function fmtDate(ts){try{return new Date(ts).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}catch(e){return ""}}
+
+/* precompute body-token sets */
+const BODY=new Map();
+function bodyTokens(c){
+  if(BODY.has(c.id))return BODY.get(c.id);
+  const set=new Set();
+  c.variants.forEach(v=>tokens(v.text).forEach(w=>set.add(w)));
+  (c.kw||[]).forEach(k=>tokens(k).forEach(w=>set.add(w)));
+  BODY.set(c.id,set);return set;
+}
+
+/* ---------- state ---------- */
+let mode="case";            // "case" | "match" | "log"
+let ws="all";
+let railDivs={};
+let catFilter="All";
+let logFilter="All";
+let selId=null, selVar=0;
+let selLogId=null;
+let fieldVals={};           // "caseId::TOKEN" -> value
+let edited={};              // "caseId::varIdx" -> string (manual edit)
+let railItems=[];
+let hi=-1;
+
+/* ---------- els ---------- */
+const $=id=>document.getElementById(id);
+const rail=$("rail"), searchEl=$("search");
+
+/* ---------- workspaces ---------- */
+function wsLabel(w){const f=WS_LIST.find(x=>x[0]===w);return f?f[1]:w}
+function renderWS(){
+  const bar=$("wsbar");bar.innerHTML="";
+  WS_LIST.forEach(([w,lb])=>{
+    const b=document.createElement("button");
+    b.className="ws"+(ws===w?" on":"");
+    const col=w==="all"?"var(--acc)":(CATCOLOR[w]||"var(--acc)");
+    b.innerHTML='<span class="wdot" style="background:'+col+'"></span>'+esc(lb);
+    b.onclick=()=>{ws=w;catFilter="All";logFilter="All";renderWS();renderChips();refreshRail()};
+    bar.appendChild(b);
+  });
+}
+
+/* ---------- chips ---------- */
+function renderChips(){
+  const wrap=$("chips");wrap.innerHTML="";
+  wrap.hidden=(mode==="match"||ws!=="all");
+  if(wrap.hidden){$("countPill").textContent=allCases().length+" cases · "+logEntries.length+" saved · v"+VERSION;return}
+  if(mode==="log"){
+    const counts={All:logEntries.length};
+    logEntries.forEach(e=>counts[e.type]=(counts[e.type]||0)+1);
+    ["All",...TYPES].forEach(t=>{
+      if(t!=="All"&&!counts[t])return;
+      const b=document.createElement("button");
+      b.className="chip"+(logFilter===t?" on":"");
+      b.innerHTML=esc(t)+' <span class="n">'+(counts[t]||0)+"</span>";
+      b.onclick=()=>{logFilter=t;renderChips();refreshRail()};
+      wrap.appendChild(b);
+    });
+  }else{
+    const counts={All:allCases().length};
+    allCases().forEach(c=>counts[c.cat]=(counts[c.cat]||0)+1);
+    ["All",...CATS].forEach(cat=>{
+      if(cat!=="All"&&!counts[cat])return;
+      const b=document.createElement("button");
+      b.className="chip"+(catFilter===cat?" on":"");
+      b.innerHTML=esc(cat)+' <span class="n">'+(counts[cat]||0)+"</span>";
+      b.onclick=()=>{catFilter=cat;renderChips();refreshRail()};
+      wrap.appendChild(b);
+    });
+  }
+  $("countPill").textContent=allCases().length+" cases · "+logEntries.length+" saved · v"+VERSION;
+}
+
+/* ---------- search / match ---------- */
+function caseSearch(q){
+  const list=allCases().filter(c=>ws==="all"?(catFilter==="All"||c.cat===catFilter):(c.cat===ws||(ws!=="My Templates"&&false)));
+  if(!q.trim())return list.map(c=>({id:c.id}));
+  const nq=norm(q), qt=tokens(q);
+  const out=[];
+  for(const c of list){
+    const nn=norm(c.name), kws=(c.kw||[]).map(norm);
+    let s=0;
+    if(nn.startsWith(nq))s=100;
+    else if(nn.includes(nq))s=70;
+    else if(kws.some(k=>k.includes(nq)))s=50;
+    else if(qt.length&&qt.every(w=>nn.includes(w)||kws.some(k=>k.includes(w))||bodyTokens(c).has(w)))s=25;
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out;
+}
+function msgMatch(msg){
+  const list=allCases(); // suggestions scan every case, ignoring the category chip
+  const nmsg=norm(msg), mt=new Set(tokens(msg));
+  const out=[];
+  for(const c of list){
+    let s=0;
+    if(ws!=="all"&&c.cat===ws)s+=4;
+    if(c.cat==="Chat Replies")s+=2; // pasted messages are usually replies to answer
+    (c.kw||[]).forEach(k=>{const nk=norm(k);
+      if(nk.includes(" ")){if(nmsg.includes(nk))s+=5;}
+      else if(mt.has(nk))s+=3;});
+    tokens(c.name).forEach(w=>{if(mt.has(w))s+=2});
+    let body=0;bodyTokens(c).forEach(w=>{if(mt.has(w))body++});
+    s+=Math.min(body,6);
+    if(s>0)out.push({id:c.id,score:s});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out.slice(0,8);
+}
+function logSearch(q){
+  let list=logEntries.filter(e=>logFilter==="All"||e.type===logFilter);
+  if(q.trim()){
+    const nq=norm(q);
+    list=list.filter(e=>norm([e.order,e.account,e.agent,e.ref,e.type,e.status,e.msg,e.reply,e.notes].join(" ")).includes(nq));
+  }
+  list=[...list].sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
+  return list.map(e=>({id:e.id}));
+}
+
+/* ---------- rail ---------- */
+function refreshRail(){
+  railDivs={};
+  if(mode==="case"){
+    railItems=caseSearch(searchEl.value);
+    if(ws!=="all"&&!searchEl.value.trim()&&railItems.length){
+      railDivs[0]=wsLabel(ws)+" — ready to send";
+    }
+  }
+  else if(mode==="match")railItems=$("buyerMsg").value.trim()?msgMatch($("buyerMsg").value):[];
+  else railItems=logSearch(searchEl.value);
+  hi=-1;renderRail();
+}
+function renderRail(){
+  rail.innerHTML="";
+  if(!railItems.length){
+    const d=document.createElement("div");d.className="rail-empty";
+    if(mode==="match")d.textContent="Paste the supplier's or AliExpress's message above and press Suggest replies.";
+    else if(mode==="log")d.textContent=searchEl.value.trim()||logFilter!=="All"
+      ?"No saved cases match. Clear the search or the type filter."
+      :"No saved cases yet. After every message, press Save to log so the order, dispute ID, deadline, and outcome stay searchable.";
+    else d.textContent="No case matches. Try fewer or different words — or add it under My Templates."
+      +(catFilter!=="All"?" You are filtering by \""+catFilter+"\" — click All to search everything.":"");
+    rail.appendChild(d);return;
+  }
+  if(mode==="log"){renderLogRows();return}
+  const max=Math.max(...railItems.map(r=>r.score||1));
+  railItems.forEach((r,i)=>{
+    if(railDivs[i]!=null){const dv=document.createElement("div");dv.className="raildiv";dv.textContent=railDivs[i];rail.appendChild(dv);}
+    const c=byId(r.id);if(!c)return;
+    const b=document.createElement("div");
+    b.tabIndex=0;
+    b.className="row"+(c.id===selId?" sel":"")+(i===hi?" sel":"");
+    b.setAttribute("role","option");
+    const tab='<span class="tab" style="background:'+(CATCOLOR[c.cat]||"var(--acc)")+'"></span>';
+    const warn=c.flag?'<span class="warn-dot" title="Case care — see note">⚠</span>':"";
+    const vp=c.variants.length>1?'<span class="vpill">×'+c.variants.length+"</span>":"";
+    const cust=c.custom?'<span style="color:var(--c-custom)">✎</span>':"";
+    let barHtml="";
+    if(mode==="match"&&r.score){const w=Math.max(8,Math.round(r.score/max*100));
+      barHtml='<div class="bar"><i style="width:'+w+'%"></i></div>';}
+    const btns=c.custom?'<span class="custbtns"><button class="mini" data-edit="'+c.id+'">edit</button><button class="mini" data-del="'+c.id+'">del</button></span>':"";
+    b.innerHTML=tab+'<span class="body"><span class="nm">'+esc(c.name)+' '+warn+'</span><span class="meta">'+esc(c.cat)+' '+vp+' '+cust+'</span>'+barHtml+'</span>'+btns;
+    const act=e=>{
+      const ed=e.target.getAttribute&&e.target.getAttribute("data-edit");
+      const dl=e.target.getAttribute&&e.target.getAttribute("data-del");
+      if(ed){openModal(byId(ed));return}
+      if(dl){delCustom(dl);return}
+      openCase(c.id);
+    };
+    b.onclick=act;
+    b.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act(e)}};
+    rail.appendChild(b);
+  });
+}
+function renderLogRows(){
+  railItems.forEach((r,i)=>{
+    const e=logById(r.id);if(!e)return;
+    const b=document.createElement("div");
+    b.tabIndex=0;
+    b.className="row"+(e.id===selLogId?" sel":"")+(i===hi?" sel":"");
+    b.setAttribute("role","option");
+    const tab='<span class="tab" style="background:'+(TYPECOLOR[e.type]||"var(--acc)")+'"></span>';
+    const pill='<span class="spill" style="background:'+(STATUSCOLOR[e.status]||"#8a6a58")+'">'+esc(e.status||"")+"</span>";
+    const snip=esc((e.msg||e.reply||"").slice(0,52));
+    b.innerHTML=tab+'<span class="body"><span class="nm">'+esc(e.order||"(no order no)")+'</span><span class="meta">'+esc(e.type)+' · '+esc(fmtDate(e.ts))+(e.ref?' · '+esc(e.ref):'')+' '+pill+'</span><span class="meta" style="font-family:inherit">'+snip+(snip.length>=52?"…":"")+'</span></span>';
+    const act=()=>openLog(e.id);
+    b.onclick=act;
+    b.onkeydown=ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();act()}};
+    rail.appendChild(b);
+  });
+}
+
+/* ---------- template detail ---------- */
+function openCase(id,varIdx=0){
+  const c=byId(id);if(!c)return;
+  selId=id;selVar=Math.min(varIdx,c.variants.length-1);
+  pushRecent(id);
+  $("dEmpty").hidden=true;$("logBody").hidden=true;$("dBody").hidden=false;
+  document.body.classList.add("viewing");
+  $("dCat").textContent=c.cat;
+  $("dDot").style.background=CATCOLOR[c.cat]||"var(--acc)";
+  $("dCustomTag").hidden=!c.custom;
+  $("dName").textContent=c.name;
+  $("dFlag").hidden=!c.flag;
+  if(c.flag)$("dFlag").textContent="⚠ Case care: "+c.flag;
+  $("dReason").hidden=!c.reason;
+  if(c.reason)$("dReasonTxt").textContent=c.reason;
+  const nx=c.next?byId(c.next):null;
+  $("dNext").hidden=!nx;
+  if(nx){$("dNextBtn").textContent=nx.name;$("dNextBtn").onclick=()=>openCase(nx.id)}
+  const vt=$("vTabs");vt.innerHTML="";
+  if(c.variants.length>1){
+    c.variants.forEach((v,i)=>{
+      const b=document.createElement("button");
+      b.dataset.lb=v.label||("Variant "+(i+1));
+      b.className=i===selVar?"on":"";
+      b.onclick=()=>{selVar=i;renderVariant()};
+      vt.appendChild(b);
+    });
+  }
+  renderVariant();
+  renderRail();
+  if(window.innerWidth<=880)window.scrollTo({top:0});
+}
+function curCase(){return byId(selId)}
+function curText(){const ek=editKey();return overrides[ek]!=null?overrides[ek]:curCase().variants[selVar].text}
+function activeRaw(){const ek=editKey();return edited[ek]!=null?edited[ek]:curText()}
+function toksOf(t){const s=new Set();(t.match(/\[([^\]\n]{2,60})\]/g)||[]).forEach(m=>s.add(m.slice(1,-1)));return [...s]}
+function editKey(){return selId+"::"+selVar}
+function resolvedText(){
+  let t=activeRaw();
+  toksOf(t).forEach(tok=>{
+    const v=(fieldVals[selId+"::"+tok]||"").trim();
+    if(v)t=t.split("["+tok+"]").join(v);
+  });
+  return t;
+}
+function buildFields(tks){
+  const fg=$("fGrid");fg.innerHTML="";
+  tks.forEach(tok=>{
+    const w=document.createElement("div");
+    const inp=document.createElement("input");
+    inp.value=fieldVals[selId+"::"+tok]||"";
+    inp.placeholder=tok.toLowerCase();
+    inp.oninput=()=>{fieldVals[selId+"::"+tok]=inp.value;paint()};
+    const lb=document.createElement("label");lb.textContent="["+tok+"]";
+    w.appendChild(lb);w.appendChild(inp);fg.appendChild(w);
+  });
+  fg.dataset.sig=tks.join("|");
+}
+function renderVariant(){
+  const c=curCase(); if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  const tks=toksOf(activeRaw());
+  [...$("vTabs").children].forEach((b,i)=>{
+    b.className=i===selVar?"on":"";
+    b.textContent=b.dataset.lb+(overrides[selId+"::"+i]!=null?" •":"");
+  });
+  $("fields").hidden=!tks.length;
+  buildFields(tks);
+  $("preview").style.display=isEd?"none":"block";
+  $("editArea").style.display=isEd?"block":"none";
+  $("editNote").style.display=isEd?"inline":"none";
+  $("editBtn").hidden=isEd;
+  $("saveTplBtn").hidden=!isEd;
+  $("ovrTag").hidden=isEd||overrides[ek]==null;
+  $("ovrNote").hidden=isEd||overrides[ek]==null||!!c.custom;
+  $("dTip").hidden=!c.tip;
+  if(c.tip)$("dTip").innerHTML="<b>Meri tip:</b> "+esc(c.tip);
+  if(isEd&&document.activeElement!==$("editArea"))$("editArea").value=edited[ek];
+  paint();
+}
+function paint(){
+  const c=curCase();if(!c)return;
+  const ek=editKey(), isEd=edited[ek]!=null;
+  if(!isEd){
+    let html=esc(curText());
+    toksOf(curText()).forEach(tok=>{
+      const v=(fieldVals[selId+"::"+tok]||"").trim();
+      const span=v?'<span class="tok f">'+esc(v)+"</span>"
+                  :'<span class="tok e">['+esc(tok)+"]</span>";
+      html=html.split(esc("["+tok+"]")).join(span);
+    });
+    $("preview").innerHTML=html;
+  }
+  const txt=resolvedText();
+  const missing=toksOf(activeRaw()).filter(t=>!(fieldVals[selId+"::"+t]||"").trim()).length;
+  const ch=$("chars");
+  const long=txt.length>=1000;
+  ch.textContent=txt.length+" chars"+(long?" · long":"")+(missing?" · "+missing+" field"+(missing>1?"s":"")+" empty":"");
+  ch.className="chars"+(long||missing?" hot":"");
+  ch.title=long?"Long — if the dispute box cuts it off, switch to the Condensed variant and attach the rest as evidence":"";
+}
+
+/* ---------- template actions ---------- */
+$("copyBtn").onclick=async()=>{copyText(resolvedText())};
+$("copyReason").onclick=()=>{const c=curCase();if(c&&c.reason)copyText(c.reason)};
+async function copyText(txt){
+  try{await navigator.clipboard.writeText(txt)}
+  catch(e){
+    const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);
+    ta.select();try{document.execCommand("copy")}catch(_){}
+    ta.remove();
+  }
+  toast("Copied ✓");
+}
+$("editBtn").onclick=()=>{
+  edited[editKey()]=curText();renderVariant();$("editArea").focus();
+};
+$("editArea").addEventListener("input",()=>{
+  const ek=editKey();edited[ek]=$("editArea").value;
+  const tks=toksOf(edited[ek]);
+  if($("fGrid").dataset.sig!==tks.join("|")){$("fields").hidden=!tks.length;buildFields(tks);}
+  paint();
+});
+$("cancelEdit").onclick=e=>{e.preventDefault();delete edited[editKey()];renderVariant()};
+$("saveTplBtn").onclick=()=>{
+  const ek=editKey(), val=$("editArea").value, c=curCase();
+  if(!val.trim()){toast("Template is empty");return}
+  if(c.custom){c.variants[selVar].text=val;saveJSON(LS_CUSTOM,customs);}
+  else{overrides[ek]=val;saveJSON(LS_OVR,overrides);}
+  delete edited[ek];renderVariant();toast("Template saved ✓");
+};
+$("restoreOrig").onclick=e=>{e.preventDefault();
+  if(!confirm("Restore the original template text? Your saved edit will be removed."))return;
+  delete overrides[editKey()];saveJSON(LS_OVR,overrides);renderVariant();toast("Original restored");
+};
+$("clearFields").onclick=()=>{
+  toksOf(curText()).forEach(t=>delete fieldVals[selId+"::"+t]);renderVariant();
+};
+$("backBtn").onclick=()=>{document.body.classList.remove("viewing")};
+$("lBack").onclick=()=>{document.body.classList.remove("viewing")};
+
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1400)}
+
+/* ---------- recent ---------- */
+function pushRecent(id){
+  recent=[id,...recent.filter(r=>r!==id)].slice(0,8);
+  saveJSON(LS_RECENT,recent);renderRecent();
+}
+function renderRecent(){
+  const ids=recent.filter(id=>byId(id));
+  $("recentWrap").hidden=!ids.length||mode==="log";
+  const w=$("recent");w.innerHTML="";
+  ids.forEach(id=>{
+    const b=document.createElement("button");b.className="rchip";
+    b.textContent=byId(id).name.slice(0,34);
+    b.onclick=()=>openCase(id);w.appendChild(b);
+  });
+}
+
+/* ---------- custom templates ---------- */
+let editingId=null;
+function openModal(c){
+  editingId=c?c.id:null;
+  $("mTitle").textContent=c?"Edit Template":"New Template";
+  const sel=$("mCat");sel.innerHTML="";
+  CATS.forEach(cat=>{const o=document.createElement("option");o.value=o.textContent=cat;sel.appendChild(o)});
+  $("mName").value=c?c.name:"";
+  sel.value=c?c.cat:(ws!=="all"&&CATS.includes(ws)?ws:"My Templates");
+  $("mText").value=c?c.variants[0].text:"";
+  showDlg($("modal"));
+}
+function showDlg(d){if(d.showModal)d.showModal();else{d.classList.add("fb");d.setAttribute("open","")}}
+function hideDlg(d){if(d.close&&!d.classList.contains("fb"))d.close();else{d.removeAttribute("open");d.classList.remove("fb")}}
+$("mCancel").onclick=()=>hideDlg($("modal"));
+$("mSave").onclick=()=>{
+  const name=$("mName").value.trim(), text=$("mText").value.trim();
+  if(!name||!text){toast("Name and text required");return}
+  if(editingId){
+    const c=byId(editingId);
+    c.name=name;c.cat=$("mCat").value;c.variants=[{label:null,text}];
+    BODY.delete(c.id);
+  }else{
+    customs.push({id:"custom-"+Date.now(),cat:$("mCat").value,name,kw:[],flag:"",tip:"",custom:true,type:"Other",
+      variants:[{label:null,text}]});
+  }
+  saveJSON(LS_CUSTOM,customs);
+  hideDlg($("modal"));renderChips();refreshRail();toast("Saved ✓");
+};
+function delCustom(id){
+  if(!confirm("Delete this template?"))return;
+  customs=customs.filter(c=>c.id!==id);
+  saveJSON(LS_CUSTOM,customs);
+  if(selId===id){selId=null;$("dBody").hidden=true;$("dEmpty").hidden=false;document.body.classList.remove("viewing")}
+  renderChips();refreshRail();renderRecent();
+}
+
+/* ---------- saved cases: detail ---------- */
+function openLog(id){
+  const e=logById(id);if(!e)return;
+  selLogId=id;
+  $("dEmpty").hidden=true;$("dBody").hidden=true;$("logBody").hidden=false;
+  document.body.classList.add("viewing");
+  $("lType").textContent=e.type;
+  $("lDot").style.background=TYPECOLOR[e.type]||"var(--acc)";
+  $("lOrder").textContent=e.order||"(no order no)";
+  $("lDate").textContent=fmtDate(e.ts);
+  const st=$("lStatus");st.innerHTML="";
+  STATUSES.forEach(s=>{const o=document.createElement("option");o.value=o.textContent=s;st.appendChild(o)});
+  st.value=STATUSES.includes(e.status)?e.status:"Sent · 48h";
+  st.style.color=STATUSCOLOR[st.value]||"var(--ink)";
+  const mp=[];
+  if(e.account)mp.push("Account: "+e.account);
+  if(e.agent)mp.push("Supplier: "+e.agent);
+  if(e.ref)mp.push("Dispute: "+e.ref);
+  $("lMeta").hidden=!mp.length;
+  $("lMeta").textContent=mp.join("  ·  ");
+  $("lMsg").textContent=e.msg||"—";
+  $("lReply").textContent=e.reply||"—";
+  $("lNotes").value=e.notes||"";
+  renderRail();
+  if(window.innerWidth<=880)window.scrollTo({top:0});
+}
+$("lStatus").addEventListener("change",()=>{
+  const e=logById(selLogId);if(!e)return;
+  e.status=$("lStatus").value;
+  $("lStatus").style.color=STATUSCOLOR[e.status]||"var(--ink)";
+  saveJSON(LS_LOG,logEntries);renderChips();refreshRail();toast("Status updated");
+});
+$("lNotes").addEventListener("input",()=>{
+  const e=logById(selLogId);if(!e)return;
+  e.notes=$("lNotes").value;saveJSON(LS_LOG,logEntries);
+});
+$("copyMsg").onclick=()=>{const e=logById(selLogId);if(e)copyText(e.msg||"")};
+$("copyReply").onclick=()=>{const e=logById(selLogId);if(e)copyText(e.reply||"")};
+$("lEdit").onclick=()=>{const e=logById(selLogId);if(e)openLogModal(e)};
+$("lDel").onclick=()=>{
+  if(!selLogId)return;
+  if(!confirm("Delete this saved case?"))return;
+  logEntries=logEntries.filter(x=>x.id!==selLogId);
+  saveJSON(LS_LOG,logEntries);
+  selLogId=null;$("logBody").hidden=true;$("dEmpty").hidden=false;
+  document.body.classList.remove("viewing");
+  renderChips();refreshRail();toast("Deleted");
+};
+
+/* ---------- saved cases: modal ---------- */
+let editingLogId=null;
+function openLogModal(e,prefill){
+  editingLogId=e?e.id:null;
+  $("gTitle").textContent=e?"Edit Saved Case":"Save Case to Log";
+  const ts=$("gType");ts.innerHTML="";
+  TYPES.forEach(t=>{const o=document.createElement("option");o.value=o.textContent=t;ts.appendChild(o)});
+  const ss=$("gStatus");ss.innerHTML="";
+  STATUSES.forEach(s=>{const o=document.createElement("option");o.value=o.textContent=s;ss.appendChild(o)});
+  $("gOrder").value=e?e.order:(prefill&&prefill.order)||"";
+  $("gAccount").value=e?(e.account||""):"";
+  $("gAgent").value=e?(e.agent||""):"";
+  $("gRef").value=e?(e.ref||""):"";
+  ts.value=e?e.type:(prefill&&prefill.type)||"Other";
+  ss.value=e?(STATUSES.includes(e.status)?e.status:"Sent · 48h"):"Sent · 48h";
+  $("gMsg").value=e?e.msg:(prefill&&prefill.msg)||"";
+  $("gReply").value=e?e.reply:(prefill&&prefill.reply)||"";
+  $("gNotes").value=e?e.notes:"";
+  showDlg($("logModal"));
+}
+$("gCancel").onclick=()=>hideDlg($("logModal"));
+$("gSave").onclick=()=>{
+  const msg=$("gMsg").value.trim(), reply=$("gReply").value.trim();
+  if(!msg&&!reply){toast("Add their message or our message");return}
+  if(editingLogId){
+    const e=logById(editingLogId);if(e){
+      e.order=$("gOrder").value.trim();e.type=$("gType").value;e.status=$("gStatus").value;
+      e.account=$("gAccount").value.trim();e.agent=$("gAgent").value.trim();e.ref=$("gRef").value.trim();
+      e.msg=msg;e.reply=reply;e.notes=$("gNotes").value.trim();
+    }
+    saveJSON(LS_LOG,logEntries);
+    hideDlg($("logModal"));renderChips();refreshRail();
+    if(selLogId===editingLogId)openLog(editingLogId);
+    toast("Saved ✓");
+  }else{
+    const e={id:"log-"+Date.now(),ts:new Date().toISOString(),order:$("gOrder").value.trim(),
+      account:$("gAccount").value.trim(),agent:$("gAgent").value.trim(),ref:$("gRef").value.trim(),
+      type:$("gType").value,status:$("gStatus").value,msg,reply,notes:$("gNotes").value.trim()};
+    logEntries.push(e);saveJSON(LS_LOG,logEntries);
+    hideDlg($("logModal"));renderChips();refreshRail();
+    toast("Saved to log ✓");
+    if(mode==="log")openLog(e.id);
+  }
+};
+$("saveMsgBtn").onclick=()=>{
+  openLogModal(null,{msg:$("buyerMsg").value.trim()});
+};
+$("saveLogBtn").onclick=()=>{
+  const c=curCase();if(!c)return;
+  openLogModal(null,{
+    msg:mode==="match"?$("buyerMsg").value.trim():"",
+    reply:resolvedText(),
+    order:(fieldVals[selId+"::Order Number"]||"").trim(),
+    type:c.type||"Other"
+  });
+};
+
+$("rulesBtn").onclick=()=>showDlg($("rulesModal"));
+$("rulesClose").onclick=()=>hideDlg($("rulesModal"));
+
+/* ---------- backup / restore ---------- */
+$("backupBtn").onclick=()=>{
+  const data={app:"m98m-ali-recovery",version:VERSION,exported:new Date().toISOString(),
+    log:logEntries,customs,overrides};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="m98m-ali-recovery-backup-"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  toast("Backup downloaded ✓");
+};
+$("restoreBtn").onclick=()=>$("restoreFile").click();
+$("restoreFile").addEventListener("change",ev=>{
+  const f=ev.target.files&&ev.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const d=JSON.parse(rd.result);
+      if(!d||(!Array.isArray(d.log)&&!Array.isArray(d.customs))){toast("Not a valid backup file");return}
+      if(!confirm("Restore from backup? Existing entries are kept; entries from the file are added or updated."))return;
+      if(Array.isArray(d.log)){
+        const map=new Map(logEntries.map(e=>[e.id,e]));
+        d.log.forEach(e=>{if(e&&e.id)map.set(e.id,e)});
+        logEntries=[...map.values()];saveJSON(LS_LOG,logEntries);
+      }
+      if(Array.isArray(d.customs)){
+        const map=new Map(customs.map(c=>[c.id,c]));
+        d.customs.forEach(c=>{if(c&&c.id)map.set(c.id,c)});
+        customs=[...map.values()];saveJSON(LS_CUSTOM,customs);
+      }
+      if(d.overrides&&typeof d.overrides==="object"){
+        overrides=Object.assign({},overrides,d.overrides);saveJSON(LS_OVR,overrides);
+      }
+      renderChips();refreshRail();renderRecent();toast("Restored ✓");
+    }catch(e){toast("Could not read that file")}
+    ev.target.value="";
+  };
+  rd.readAsText(f);
+});
+
+/* ---------- modes / events ---------- */
+function setMode(m){
+  mode=m;
+  $("modeCase").className=m==="case"?"on":"";
+  $("modeMatch").className=m==="match"?"on":"";
+  $("modeLog").className=m==="log"?"on":"";
+  $("buyerBox").hidden=m!=="match";
+  searchEl.parentElement.style.display=m==="match"?"none":"";
+  searchEl.placeholder=m==="log"
+    ?"Search saved cases — order no, supplier, dispute ID, words from the message…"
+    :"Type case or keywords — e.g. dead on arrival, partial offer, missing part…";
+  $("addBtn").textContent=m==="log"?"＋ Save new case":"＋ New template (My Templates)";
+  $("logTools").hidden=m!=="log";
+  renderChips();renderRecent();refreshRail();
+  if(m==="match")$("buyerMsg").focus();
+}
+$("modeCase").onclick=()=>setMode("case");
+$("modeMatch").onclick=()=>setMode("match");
+$("modeLog").onclick=()=>setMode("log");
+$("addBtn").onclick=()=>{mode==="log"?openLogModal(null,null):openModal(null)};
+$("suggestBtn").onclick=refreshRail;
+$("buyerMsg").addEventListener("keydown",e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey))refreshRail()});
+searchEl.addEventListener("input",refreshRail);
+document.addEventListener("keydown",e=>{
+  if(e.key==="/"&&document.activeElement!==searchEl&&document.activeElement.tagName!=="TEXTAREA"&&document.activeElement.tagName!=="INPUT"&&document.activeElement.tagName!=="SELECT"){
+    e.preventDefault();
+    if(mode==="match")setMode("case");
+    searchEl.focus();searchEl.select();
+  }else if(e.key==="Escape"){
+    if($("modal").open||$("logModal").open||$("rulesModal").open)return;
+    document.body.classList.remove("viewing");
+  }else if(document.activeElement===searchEl&&railItems.length){
+    if(e.key==="ArrowDown"){e.preventDefault();hi=Math.min(hi+1,railItems.length-1);renderRail();scrollHi()}
+    else if(e.key==="ArrowUp"){e.preventDefault();hi=Math.max(hi-1,0);renderRail();scrollHi()}
+    else if(e.key==="Enter"){e.preventDefault();
+      const id=railItems[Math.max(hi,0)].id;
+      mode==="log"?openLog(id):openCase(id);}
+  }
+});
+function scrollHi(){const el=rail.querySelectorAll(".row")[hi];if(el)el.scrollIntoView({block:"nearest"})}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+/* ---------- init ---------- */
+renderWS();renderChips();renderRecent();refreshRail();
+</script>
+</body>
+</html>

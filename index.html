@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M98M Portal</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg0:#10141F; --bg1:#1C2436; --panel:#171D2C;
+  --gold-line:rgba(233,180,60,.16); --gold-line-hi:rgba(233,180,60,.45);
+  --text:#F2F4F8; --text-2:#A7B0C0; --text-3:#6B7688;
+  --gold-a:#F6D06B; --gold-b:#E9A93C; --gold-c:#B66F1F;
+  --blue:#3D9BF0; --blue-2:#63B4FF;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:"Amazon Ember","Open Sans","Segoe UI",Arial,sans-serif;
+  color:var(--text); display:grid; place-items:center; text-align:center;
+  background:radial-gradient(1100px 520px at 50% -8%, var(--bg1) 0%, var(--bg0) 58%) fixed var(--bg0);
+}
+.wrap{opacity:0; transform:translateY(10px); animation:enter .55s cubic-bezier(.2,.8,.2,1) .1s forwards; padding:24px}
+@keyframes enter{to{opacity:1;transform:none}}
+.logo{width:min(320px,70vw); height:auto; border-radius:18px; box-shadow:0 10px 40px rgba(0,0,0,.45), 0 0 30px rgba(233,169,60,.12)}
+h1{font-size:clamp(22px,4vw,30px); font-weight:800; margin-top:26px; letter-spacing:.01em}
+.goldtext{
+  background:linear-gradient(110deg,var(--gold-c) 0%,var(--gold-a) 28%,var(--gold-b) 46%,#F8E39B 52%,var(--gold-b) 58%,var(--gold-c) 100%);
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent;
+  animation:sheen 3s ease-in-out .5s 1 both;
+}
+@keyframes sheen{from{background-position:120% 0}to{background-position:0% 0}}
+p{color:var(--text-2); font-size:14.5px; margin-top:10px; font-weight:600}
+.chip{display:inline-flex; align-items:center; gap:8px; margin-top:22px; padding:8px 16px; border-radius:99px;
+  font-weight:700; font-size:12.5px; color:var(--gold-a); border:1px solid var(--gold-line-hi);
+  background:linear-gradient(135deg,rgba(233,169,60,.16),rgba(233,169,60,.04))}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--blue-2); box-shadow:0 0 10px rgba(61,155,240,.8); animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="assets/logo.png" alt="M98M E-commerce">
+  <h1>The <span class="goldtext">M98M Portal</span> is being built</h1>
+  <p>Synchronized working · Task giving · Database · Business overview</p>
+  <div class="chip"><span class="dot"></span>Phase 0 — workspace live · built phase by phase by Claude Code</div>
+</div>
+</body>
+</html>
