@@ -884,3 +884,7 @@ function connectionHealth() {
   return { perAccount: perAccount, globals: globals,
     globalsLinked: globals.filter(function(g){ return g.status === 'linked'; }).length, globalsOf: GLOBAL_KINDS.length };
 }
+
+
+/** Phase 1 registry import runner (registry ID captured 8 Aug). */
+function runRegistryImport() { Logger.log(JSON.stringify(importRegistry('1skQQ4qdf_Bc6W1cT-dSNerDt32-gbYZL3lwMS5iGUlo', 'pane-setup'), null, 1)); }
