@@ -134,12 +134,17 @@ input,select{font:inherit}
 .ideas textarea{width:100%;margin-top:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:66px}
 .toast{position:fixed; bottom:22px; left:50%; transform:translate(-50%,90px); z-index:50; background:linear-gradient(180deg,#1E2637,#161C2A); border:1px solid var(--gold-line-hi); color:var(--text); font-weight:700; font-size:13px; padding:12px 19px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.5); transition:transform .38s cubic-bezier(.2,.8,.2,1)}
 .toast.show{transform:translate(-50%,0)}
+/* Grid items default to min-width:auto, so a wide child pushes the whole shell past the
+   viewport. Zero them and let the scroll live inside the panel that owns the wide content. */
+.top,.shiftline,.main,.side{min-width:0}
+.acct{max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:880px){
-  .shell{grid-template-columns:66px 1fr}
+  .shell{grid-template-columns:66px minmax(0,1fr)}
   .nav-label,.brand-text,.side .foot{display:none}
   .nav a{justify-content:center;padding:11px 0} .nav .badge{position:absolute;top:4px;right:8px}
   .g-2{grid-template-columns:1fr} .sl-meta{display:none} .shiftline{padding:0 14px;gap:10px}
   .main{padding:18px 14px 40px} .hgroup h1{font-size:20px} .streak-label{display:none}
+  .top{padding:0 12px; gap:8px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -201,7 +206,8 @@ input,select{font:inherit}
   <header class="top">
     <div class="acct" id="acctChip">—</div>
     <div class="spacer"></div>
-    <button class="iconbtn" title="Notifications" id="bellBtn"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></button>
+    <span id="meetingChip"></span>
+    <button class="iconbtn" title="Notifications" id="bellBtn"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="dot hidden" id="bellDot">0</span></button>
     <button class="iconbtn" title="Royal / Ivory" id="themeBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.5 4.5l2 2M17.5 17.5l2 2M19.5 4.5l-2 2M6.5 17.5l-2 2"/></svg></button>
     <div class="avatar" id="avatar" title="Sign out">MU</div>
   </header>
@@ -219,7 +225,7 @@ input,select{font:inherit}
 <script>
 /* ============ M98M Portal — client. Knows ONLY the backend URL (RL-9). ============ */
 var BACKEND = "https://script.google.com/macros/s/AKfycbzJNaOWnabcexE_fTFSAslKymrlM8LAegfOe91Zumwmpp5DW60mavh6jfrAs3d-Zx8uVg/exec";
-var STATE = { idToken:null, user:null, config:null };
+var STATE = { idToken:null, user:null, config:null, counts:{} };
 var $ = function(id){ return document.getElementById(id); };
 function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; } /* RL-3 */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
@@ -285,38 +291,16 @@ function showPending(user){
 $('pendingRefresh').onclick=function(){ api('whoami').then(routeUser).catch(function(){}); };
 $('pendingSignout').onclick=signOut;
 
-/* ---- App ---- */
-var NAV = [
-  { key:'home', label:'Home', icon:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>', roles:'*' },
-  { key:'tasks', label:'My tasks', icon:'<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 5.5 1 1L6.5 4.5"/><path d="m3.5 11.5 1 1 2-2"/><path d="m3.5 17.5 1 1 2-2"/>', roles:'*' },
-  { key:'inbox', label:'Inbox', icon:'<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>', roles:'*' },
-  { key:'reports', label:'2-hourly reports', icon:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>', roles:'*' },
-  { key:'rules', label:'Rules & SOPs', icon:'<path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H19"/>', roles:'*' },
-  { key:'dashboard', label:'Business overview', icon:'<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>', roles:['Management','Ops Head','Team Lead','Advertising Manager','CS'] },
-  { key:'perf', label:'My performance', icon:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/>', roles:'*' }
-];
-function canSee(item){ if(item.roles==='*') return true; return item.roles.indexOf(STATE.user.role)>=0; }
-function enterApp(user){
-  var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
-  $('avatar').textContent=initials;
-  $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
-  $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
-  $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
-  $('shiftFoot').innerHTML= user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management';
-  var nav=$('nav'); nav.innerHTML='';
-  NAV.filter(canSee).forEach(function(item,i){
-    var a=document.createElement('a'); if(i===0) a.className='on'; a.dataset.key=item.key;
-    a.innerHTML='<svg viewBox="0 0 24 24">'+item.icon+'</svg><span class="nav-label">'+esc(item.label)+'</span>';
-    a.onclick=function(){ document.querySelectorAll('.nav a').forEach(function(x){x.classList.remove('on');}); a.classList.add('on'); renderView(item.key); };
-    nav.appendChild(a);
-  });
-  show('appShell'); renderView('home');
-}
-function renderView(key){
-  var m=$('mainView'); var u=STATE.user;
-  if(key==='home'){
-    m.innerHTML =
-     '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(" ")[0]||u.name)+'</span></h1>'+
+/* ---- App: view registry. Each view module registers VIEWS[key] = {label,icon,roles,order,render,init} ---- */
+var VIEWS = {};
+var VIEW_CSS = [];
+
+VIEWS.home = {
+  label:'Home', order:0, roles:'*',
+  icon:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  render:function(){
+    var u=STATE.user;
+    return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
@@ -327,27 +311,3261 @@ function renderView(key){
        '<div class="card ideas enter d3"><div class="hd">Any new idea generation ✨</div><div class="bd">'+
          '<div style="font-size:12.5px;color:var(--text-2);font-weight:600">Your idea goes straight to Management. Implemented ideas get a shoutout.</div>'+
          '<textarea id="ideaBox" placeholder="Type your idea…"></textarea>'+
-         '<button class="btn-gold" style="margin-top:10px" onclick="submitIdea()">Submit idea</button>'+
+         '<button class="btn-gold" style="margin-top:10px" id="ideaBtn">Submit idea</button>'+
        '</div></div>'+
      '</div>'+
      '<div class="card enter d3" style="margin-top:16px"><div class="hd">Today’s agenda <span class="hint">from Management</span></div>'+
        '<div class="bd" id="agendaBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
-    loadAgenda();
-  } else if(key==='rules'){
-    m.innerHTML='<div class="hgroup enter d1"><h1>Rules &amp; <span class="goldtext">SOPs</span></h1><span class="sub">Your department’s current law</span></div><div class="card enter d2"><div class="bd" id="rulesBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
-    loadRules();
-  } else {
-    m.innerHTML='<div class="hgroup enter d1"><h1>'+esc(labelFor(key))+'</h1><span class="sub">Coming in the next build phase</span></div>'+
-      '<div class="card enter d2"><div class="bd" style="color:var(--text-3);font-weight:600;padding:30px;text-align:center">This section is being built. Your data and permissions are already live on the backend.</div></div>';
+  },
+  init:function(){
+    $('ideaBtn').onclick=function(){
+      var v=$('ideaBox').value.trim(); if(!v){ return; }
+      api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
+        .catch(function(e){ toast('Could not send: '+e.message); });
+    };
+    api('todayAgenda').then(function(a){
+      var b=$('agendaBox'); var items=(a&&a.items)||[];
+      if(!items.length){ b.textContent='No agenda posted for today yet.'; return; }
+      b.innerHTML=items.map(function(x){ return '<div class="tl-row">'+esc(typeof x==='string'?x:(x.text||''))+'</div>'; }).join('');
+    }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; });
+  }
+};
+
+/* ---------- view-agenda.js ---------- */
+/* §20.1 Daily agenda + §20.2 Meetings.
+   Views: VIEWS.agenda, VIEWS.meetings.
+   Backend: todayAgenda, setAgenda, congratulate, agendaHistory, createMeeting, rsvp, myMeetings, meetingGrid. */
+(function () {
+'use strict';
+
+/* §26.1 departments and the composer roles of §20.1/§20.2. Hiding a control here is cosmetic —
+   the server refuses the same calls from the same roles (RL-1/RL-4). */
+var DEPTS = ['Hunting', 'Listing', 'Advertising', 'CS', 'Order Processing'];
+var COMPOSER_ROLES = ['Management', 'Ops Head', 'Team Lead'];
+var HISTORY_ROLES = ['Management', 'Ops Head'];
+
+/* §20.2 — the two RSVP answers are fixed company copy: button label and stored answer are this text. */
+var RSVP_YES = 'Yes sir, I will be there';
+var RSVP_NO = "Can't attend (+reason)";
+
+var REFRESH_MS = 60000;
+var DEFAULT_DURATION = 30;
+var DEFAULT_REMINDERS = '60,10';                 // §20.2 default reminder_offsets
+
+var agenda = null;
+var hitSeen = null;        // null until the first payload — so a page load can never celebrate (§25.5)
+var composerRows = [];
+var historyRows = [];
+var people = {};           // email -> name, learned only from payloads this user already holds
+
+var meetings = [];
+var gridOpenId = '';
+var gridData = null;
+
+VIEW_CSS.push([
+  /* .scroll and .minibtn belong to the Royal preview but are not in the shell's stylesheet yet;
+     these are the preview's own values, identical in every view module. */
+  '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}',
+  '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}',
+  '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}',
+
+  '.ag-col{display:grid;gap:16px;align-content:start}',
+  '.ag-empty{color:var(--text-3);font-weight:600;font-size:13px;padding:4px 0}',
+  '.ag-t{padding:12px 0}',
+  '.ag-t+.ag-t{border-top:1px solid var(--gold-line)}',
+  '.ag-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap}',
+  '.ag-txt{font-weight:700;font-size:13.5px}',
+  '.ag-metric{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--blue-2)}',
+  '.ag-nums{display:flex;align-items:baseline;gap:6px;margin-top:7px;font-size:13px;font-weight:800;color:var(--text-2)}',
+  '.ag-sep{color:var(--text-3);font-weight:700}',
+  '.ag-pc{margin-left:auto;font-size:14px;font-weight:800;color:var(--blue-2)}',
+  '.ag-bar{position:relative;height:8px;border-radius:99px;background:rgba(120,132,152,.22);margin-top:8px;overflow:hidden}',
+  '.ag-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:99px;background:linear-gradient(90deg,var(--blue-deep),var(--blue-2));box-shadow:var(--glow-blue);transition:width .9s cubic-bezier(.2,.8,.2,1)}',
+  '.ag-t.hit .ag-fill{background:linear-gradient(90deg,var(--gold-c),var(--gold-a) 52%,var(--gold-b));box-shadow:var(--glow-gold)}',
+  '.ag-t.hit .ag-txt{color:var(--gold-a)}',
+  '.pill.ag-hit{background:linear-gradient(135deg,rgba(233,169,60,.2),rgba(233,169,60,.05));color:var(--gold-a);border:1px solid var(--gold-line-hi)}',
+  '.pill.ag-miss{background:var(--bad-soft);color:var(--bad)}',
+  '.ag-act{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}',
+  '.ag-note{padding:9px 0;font-size:13px;font-weight:600;white-space:pre-line}',
+  '.ag-note+.ag-note{border-top:1px solid var(--gold-line)}',
+
+  '.medal{display:flex;align-items:flex-start;gap:11px;padding:11px 0}',
+  '.medal+.medal{border-top:1px solid var(--gold-line)}',
+  '.medal .m-ico{width:28px;height:28px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:14px;background:linear-gradient(135deg,var(--gold-a),var(--gold-c));box-shadow:var(--glow-gold)}',
+  '.medal .m-body{flex:1;min-width:0}',
+  '.medal .m-text{font-size:13px;font-weight:700}',
+  '.medal .m-meta{font-size:11.5px;font-weight:700;color:var(--text-3);margin-top:3px}',
+
+  '.ag-cg{margin-top:10px;padding:12px 13px;border:1px solid var(--gold-line-hi);border-radius:10px;background:rgba(61,155,240,.06)}',
+  '.ag-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px}',
+  '.ag-lab{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:16px 0 8px}',
+  '.ag-hintline{display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-top:10px}',
+  '.ag-trow{display:grid;grid-template-columns:1fr 92px 200px 34px;gap:8px;align-items:center;margin-bottom:8px}',
+  '.ag-trow input,.ag-trow select,.ag-ta{width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}',
+  '.ag-trow input:focus,.ag-trow select:focus,.ag-ta:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}',
+  '.ag-ta{resize:vertical;min-height:72px}',
+  '.ag-hrow{padding:12px 0}',
+  '.ag-hrow+.ag-hrow{border-top:1px solid var(--gold-line)}',
+  '.ag-hmeta{font-size:11.5px;font-weight:700;color:var(--text-3);margin-top:3px}',
+  '.ag-hitem{font-size:12.5px;font-weight:600;color:var(--text-2);padding:3px 0}',
+
+  '.mt-item{padding:14px 0}',
+  '.mt-item+.mt-item{border-top:1px solid var(--gold-line)}',
+  '.mt-hd{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:6px}',
+  '.mt-title{font-size:14.5px;font-weight:800}',
+  '.pill.mt-yes{background:var(--ok-soft);color:var(--ok)}',
+  '.pill.mt-no{background:var(--bad-soft);color:var(--bad)}',
+  '.pill.mt-wait{background:var(--warn-soft);color:var(--warn)}',
+  '.pill.mt-live{background:linear-gradient(135deg,rgba(233,169,60,.2),rgba(233,169,60,.05));color:var(--gold-a);border:1px solid var(--gold-line-hi)}',
+  '.mt-soon{animation:mt-pulse 2.4s ease-in-out infinite}',
+  '@keyframes mt-pulse{0%,100%{box-shadow:0 0 0 rgba(61,155,240,0)}50%{box-shadow:var(--glow-blue)}}',
+  '.mt-rsvp{display:flex;gap:9px;flex-wrap:wrap;margin-top:10px}',
+  '.mt-reason{margin-top:10px}',
+  '.mt-reason input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}',
+  '.mt-reason input:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}',
+  '.mt-grid{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px}',
+  '.mt-grid th{text-align:left;font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);padding:8px 10px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+  '.mt-grid td{padding:9px 10px;border-bottom:1px solid var(--gold-line);font-weight:600}',
+  '.mt-counts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}',
+
+  '.ag-confetti{position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:60;overflow:hidden}',
+  '.ag-cp{position:absolute;top:-16px;width:8px;height:14px;border-radius:2px;background:linear-gradient(180deg,var(--gold-a),var(--gold-c));animation:ag-fall linear forwards}',
+  '.ag-cp.b{background:linear-gradient(180deg,var(--blue-2),var(--blue-deep))}',
+  '@keyframes ag-fall{to{transform:translateY(106vh) rotate(540deg);opacity:.1}}',
+
+  '@media (max-width:640px){.ag-2col{grid-template-columns:1fr}.ag-trow{grid-template-columns:1fr 1fr 34px}.ag-trow .tr-text{grid-column:1/-1}}'
+].join('\n'));
+
+/* ---------- shared helpers ---------- */
+
+/* esc() escapes & < > but leaves quotes, so anything landing in an HTML attribute needs this (RL-3). */
+function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
+function has(list, v) { return list.indexOf(v) >= 0; }
+function myRole() { return (STATE.user && STATE.user.role) || ''; }
+function sameEmail(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+function isMe(email) { return sameEmail(email, STATE.user && STATE.user.email); }
+function reduceMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+function fail(what, e) { toast(what + ' — ' + ((e && e.message) || 'request failed')); }
+
+function dayLabel(ymd) {
+  var d = new Date(String(ymd || '') + 'T12:00:00+05:00');
+  if (isNaN(d.getTime())) return String(ymd || '');
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Karachi' });
+}
+
+function countUp(el, to, suffix) {
+  if (!el) return;
+  to = Number(to) || 0; suffix = suffix || '';
+  if (reduceMotion() || !window.requestAnimationFrame) { el.textContent = to + suffix; return; }
+  var start = 0;
+  function step(ts) {
+    if (!start) start = ts;
+    var p = Math.min(1, (ts - start) / 700);
+    el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))) + suffix;
+    if (p < 1) window.requestAnimationFrame(step);
+  }
+  window.requestAnimationFrame(step);
+}
+
+/* §25.5 — 110 gold+blue particles, fired ONLY when a target that was not hit becomes hit. */
+function celebrate() {
+  if (reduceMotion()) return;
+  var wrap = document.createElement('div');
+  wrap.className = 'ag-confetti';
+  for (var i = 0; i < 110; i++) {
+    var p = document.createElement('i');
+    p.className = 'ag-cp' + (i % 2 ? ' b' : '');
+    p.style.left = (Math.random() * 100) + '%';
+    p.style.transform = 'rotate(' + Math.round(Math.random() * 360) + 'deg)';
+    p.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's';
+    p.style.animationDuration = (1.6 + Math.random() * 1.3).toFixed(2) + 's';
+    wrap.appendChild(p);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(function () { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }, 3400);
+}
+
+/* A view has no unmount hook: the timer stops itself once its sentinel leaves the DOM. */
+function keepFresh(sentinelId, fn) {
+  var t = setInterval(function () {
+    if (!document.getElementById(sentinelId)) { clearInterval(t); return; }
+    fn();
+  }, REFRESH_MS);
+}
+
+function learnPerson(email, name) {
+  var e = String(email || '').trim();
+  if (e.indexOf('@') > 0) people[e] = String(name || '') || e;
+}
+function paintPeople(listId) {
+  var dl = $(listId);
+  if (!dl) return;
+  var h = '', k;
+  for (k in people) {
+    if (!people.hasOwnProperty(k)) continue;
+    h += '<option value="' + attr(k) + '">' + esc(people[k]) + '</option>';
+  }
+  dl.innerHTML = h;
+}
+
+function audienceSelectHtml(id, withAny, personLabel) {
+  var h = '<select id="' + attr(id) + '">';
+  if (withAny) h += '<option value="">Any audience</option>';
+  h += '<option value="ALL">ALL</option>';
+  for (var i = 0; i < DEPTS.length; i++) h += '<option value="' + attr(DEPTS[i]) + '">' + esc(DEPTS[i]) + '</option>';
+  h += '<option value="__person">' + esc(personLabel) + '</option></select>';
+  return h;
+}
+
+/* =====================================================================
+   §20.1 — DAILY AGENDA
+   ===================================================================== */
+
+VIEWS.agenda = {
+  label: 'Daily agenda',
+  order: 10,
+  roles: '*',
+  icon: '<path d="M8 3v3M16 3v3"/><rect x="3" y="6" width="18" height="15" rx="2"/><path d="M3 11h18"/><path d="M8 15.5l2.2 2.2L16 12"/>',
+  render: function () {
+    return '<div class="hgroup enter d1"><h1>Daily <span class="goldtext">agenda</span></h1>' +
+        '<span class="sub" id="agSub">Loading today’s agenda…</span></div>' +
+      '<div class="grid g-2">' +
+        '<div class="ag-col enter d2">' +
+          '<div class="card"><div class="hd">Today’s targets <span class="hint">live progress</span></div>' +
+            '<div class="bd" id="agTargets"><div class="spinner"></div></div></div>' +
+          '<div class="card"><div class="hd">Yesterday <span class="hint" id="agYHint"></span></div>' +
+            '<div class="bd" id="agYesterday"><div class="ag-empty">Loading…</div></div></div>' +
+        '</div>' +
+        '<div class="ag-col enter d3">' +
+          '<div class="card ideas"><div class="hd">Shoutouts 🎉 <span class="hint">congratulations today</span></div>' +
+            '<div class="bd" id="agShoutouts"><div class="ag-empty">Loading…</div></div></div>' +
+          '<div class="card"><div class="hd">Notes &amp; announcements</div>' +
+            '<div class="bd" id="agNotes"><div class="ag-empty">Loading…</div></div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div id="agComposeWrap"></div><div id="agHistoryWrap"></div>' +
+      '<datalist id="agPeopleList"></datalist>';
+  },
+  init: function () {
+    load(false);
+    keepFresh('agTargets', function () { load(true); });
+  }
+};
+
+function load(silent) {
+  return api('todayAgenda').then(function (a) {
+    agenda = a;
+    var s = a.shoutouts || [];
+    for (var i = 0; i < s.length; i++) { learnPerson(s[i].from, s[i].from_name); learnPerson(s[i].to, s[i].to_name); }
+    paintPeople('agPeopleList');
+    paintHeader();
+    paintTargets();
+    paintYesterday();
+    paintShoutouts();
+    paintNotes();
+    buildComposer();
+    checkCelebration();
+  }).catch(function (e) {
+    if (silent) return;
+    var box = $('agTargets');
+    if (box) box.innerHTML = '<div class="ag-empty">Could not load the agenda. Nothing was changed.</div>';
+    fail('Could not load the agenda', e);
+  });
+}
+
+/* A hit is only ever announced on a refresh that flips it — never on the first payload (§25.5). */
+function checkCelebration() {
+  var now = {}, list = (agenda && agenda.targets) || [], i, key, fresh = null;
+  for (i = 0; i < list.length; i++) {
+    if (!list[i].tracked || !(Number(list[i].progress) >= 100)) continue;
+    key = list[i].id || ('#' + i + ':' + list[i].text);
+    now[key] = list[i].text;
+  }
+  if (hitSeen === null) { hitSeen = now; return; }
+  for (key in now) { if (now.hasOwnProperty(key) && !hitSeen[key]) fresh = now[key]; }
+  hitSeen = now;
+  if (fresh) { celebrate(); toast('🎉 Target hit: ' + fresh); }
+}
+
+function paintHeader() {
+  var sub = $('agSub');
+  if (!sub || !agenda) return;
+  var dept = (agenda.audience && agenda.audience.dept) || '';
+  sub.innerHTML = esc(dayLabel(agenda.date)) + ' · <span class="pill role">' +
+    esc(dept === '*' ? 'All departments' : dept) + '</span>';
+}
+
+function targetHtml(t, i, isY) {
+  var hit = isY ? (t.hit === true) : !!(t.tracked && Number(t.progress) >= 100);
+  var missed = isY && t.hit === false;
+  var h = '<div class="ag-t' + (hit ? ' hit' : '') + '">' +
+    '<div class="ag-head"><span class="ag-txt">' + esc(t.text) + '</span>';
+  if (t.metric_label) h += '<span class="ag-metric">' + esc(t.metric_label) + '</span>';
+  if (hit) h += '<span class="pill ag-hit">Hit</span>';
+  else if (missed) h += '<span class="pill ag-miss">Missed</span>';
+  h += '</div>';
+  if (t.tracked) {
+    h += '<div class="ag-nums"><span class="num ag-val" data-to="' + Number(t.value || 0) + '">0</span>' +
+      '<span class="ag-sep">/</span><span class="num">' + Number(t.target || 0) + '</span>' +
+      '<span class="ag-pc num' + (hit ? ' goldtext' : '') + '" data-to="' + Number(t.progress || 0) + '">0%</span></div>' +
+      '<div class="ag-bar"><span class="ag-fill" data-w="' + Number(t.progress || 0) + '"></span></div>';
+  } else if (t.target) {
+    h += '<div class="ag-nums"><span class="ag-sep">Target</span><span class="num">' + Number(t.target) + '</span></div>';
+  }
+  if (hit) {
+    h += '<div class="ag-act"><button class="minibtn ag-congrat" data-i="' + i + '" data-y="' + (isY ? 1 : 0) + '">' +
+      '🎉 congratulate</button></div>';
+  }
+  return h + '</div>';
+}
+
+function animateBox(box) {
+  var i, els = box.querySelectorAll('.ag-fill');
+  for (i = 0; i < els.length; i++) {
+    (function (el) {
+      var w = Number(el.getAttribute('data-w')) || 0;
+      setTimeout(function () { el.style.width = w + '%'; }, 40);
+    })(els[i]);
+  }
+  els = box.querySelectorAll('.ag-val');
+  for (i = 0; i < els.length; i++) countUp(els[i], els[i].getAttribute('data-to'), '');
+  els = box.querySelectorAll('.ag-pc');
+  for (i = 0; i < els.length; i++) countUp(els[i], els[i].getAttribute('data-to'), '%');
+}
+
+function wireCongrat(box, list) {
+  var btns = box.querySelectorAll('.ag-congrat');
+  for (var i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        var t = list[Number(btn.getAttribute('data-i'))];
+        if (!t) return;
+        openCongrat(btn.parentNode.parentNode, t.text, t.id || '');   /* .ag-congrat > .ag-act > .ag-t */
+      };
+    })(btns[i]);
   }
 }
-function labelFor(k){ var f=NAV.filter(function(n){return n.key===k;})[0]; return f?f.label:k; }
-function loadAgenda(){ api('todayAgenda').then(function(a){ var b=$('agendaBox'); if(!a||!a.items||!a.items.length){ b.textContent='No agenda posted for today yet.'; return;} b.innerHTML=a.items.map(function(x){return '<div class="tl-row">'+esc(x)+'</div>';}).join(''); }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; }); }
-function loadRules(){ api('myRules').then(function(r){ var b=$('rulesBox'); if(!r||!r.rules||!r.rules.length){ b.textContent='No rules published for your department yet.'; return;} b.innerHTML=r.rules.map(function(x){return '<div class="tl-row"><span class="pill role">'+esc(x.type)+'</span> '+esc(x.rule_text)+'</div>';}).join(''); }).catch(function(){ $('rulesBox').textContent='Rules load when the backend action ships.'; }); }
-function submitIdea(){ var v=$('ideaBox').value.trim(); if(!v){return;} api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); }).catch(function(e){ toast('Could not send: '+e.message); }); }
+
+function paintTargets() {
+  var box = $('agTargets');
+  if (!box) return;
+  var list = (agenda && agenda.targets) || [];
+  if (!list.length) { box.innerHTML = '<div class="ag-empty">No targets set for today yet.</div>'; return; }
+  var h = '';
+  for (var i = 0; i < list.length; i++) h += targetHtml(list[i], i, false);
+  box.innerHTML = h;
+  animateBox(box);
+  wireCongrat(box, list);
+}
+
+function paintYesterday() {
+  var box = $('agYesterday');
+  if (!box) return;
+  var y = (agenda && agenda.yesterday) || {};
+  var hint = $('agYHint');
+  if (hint) hint.textContent = y.date ? dayLabel(y.date) : '';
+  var list = y.targets || [];
+  if (!list.length) { box.innerHTML = '<div class="ag-empty">No targets were set yesterday.</div>'; return; }
+  var h = '';
+  for (var i = 0; i < list.length; i++) h += targetHtml(list[i], i, true);
+  box.innerHTML = h;
+  animateBox(box);
+  wireCongrat(box, list);
+}
+
+function paintShoutouts() {
+  var box = $('agShoutouts');
+  if (!box) return;
+  var list = (agenda && agenda.shoutouts) || [];
+  if (!list.length) {
+    box.innerHTML = '<div class="ag-empty">No shoutouts yet today — send the first one.</div>';
+    return;
+  }
+  var h = '', i, s;
+  for (i = 0; i < list.length; i++) {
+    s = list[i];
+    h += '<div class="medal"><span class="m-ico">🥇</span><div class="m-body">' +
+      '<div class="m-text">' + esc(s.text) + '</div>' +
+      '<div class="m-meta">' + esc(s.from_name || s.from) + ' → ' + esc(s.to_name || s.to) +
+      (s.at ? ' · ' + esc(fmtPkt(s.at)) : '') + '</div></div>';
+    if (s.to && !isMe(s.to)) {
+      h += '<button class="minibtn ag-again" data-i="' + i + '">🎉 congratulate</button>';
+    }
+    h += '</div>';
+  }
+  box.innerHTML = h;
+  var btns = box.querySelectorAll('.ag-again');
+  for (i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        var s2 = list[Number(btn.getAttribute('data-i'))];
+        if (!s2) return;
+        btn.disabled = true;
+        sendCongrat(s2.to, '', '', function () { btn.disabled = false; });
+      };
+    })(btns[i]);
+  }
+}
+
+function paintNotes() {
+  var box = $('agNotes');
+  if (!box) return;
+  var list = (agenda && agenda.notes) || [];
+  if (!list.length) { box.innerHTML = '<div class="ag-empty">Nothing announced today.</div>'; return; }
+  var h = '';
+  for (var i = 0; i < list.length; i++) h += '<div class="ag-note">' + esc(list[i]) + '</div>';
+  box.innerHTML = h;
+}
+
+/* §20.1 one-click congratulate. The panel only asks who it is for — the backend refuses a
+   congratulation to yourself and refuses a reference that is not real credit already earned. */
+function openCongrat(row, prefill, ref) {
+  if (!row) return;
+  var old = row.querySelector ? row.querySelector('.ag-cg') : null;
+  if (old) { old.parentNode.removeChild(old); return; }
+  var panel = document.createElement('div');
+  panel.className = 'ag-cg';
+  panel.innerHTML = '<div class="field"><label>Congratulate (email)</label>' +
+      '<input type="email" class="cg-to" list="agPeopleList" placeholder="teammate’s email"></div>' +
+    '<div class="field"><label>Message</label><input type="text" class="cg-msg" maxlength="240"></div>' +
+    '<div class="ag-act"><button class="btn-gold cg-send">🎉 congratulate</button>' +
+    '<button class="btn-ghost cg-cancel">Cancel</button></div>';
+  row.appendChild(panel);
+  var to = panel.querySelector('.cg-to');
+  var msg = panel.querySelector('.cg-msg');
+  msg.value = prefill ? String(prefill) : '';
+  to.focus();
+  panel.querySelector('.cg-cancel').onclick = function () { panel.parentNode.removeChild(panel); };
+  panel.querySelector('.cg-send').onclick = function () {
+    sendCongrat(to.value, msg.value, ref, null);
+  };
+}
+
+function sendCongrat(to, text, ref, done) {
+  to = String(to || '').trim();
+  if (to.indexOf('@') < 1) { toast('Type the email address of the person you are congratulating.'); if (done) done(); return; }
+  api('congratulate', { to: to, text: String(text || '').trim(), ref: ref || '' }).then(function () {
+    toast('🎉 Congratulations sent.');
+    load(true);
+  }).catch(function (e) {
+    fail('Could not send the congratulation', e);
+  }).then(function () { if (done) done(); });
+}
+
+/* ---------- composer (Management / Ops Head / Team Lead) ---------- */
+
+function buildComposer() {
+  var wrap = $('agComposeWrap');
+  if (!wrap) return;
+  if (!agenda || !agenda.canCompose) { wrap.innerHTML = ''; return; }
+  if (wrap.getAttribute('data-built') === '1') return;
+  wrap.setAttribute('data-built', '1');
+  if (!composerRows.length) composerRows = [{ id: '', text: '', target: '', metric: '' }];
+
+  wrap.innerHTML = '<div class="grid g-2" style="margin-top:16px">' +
+      '<div class="card enter d2"><div class="hd">Compose the agenda ' +
+        '<span class="hint">Management · Ops Head · Team Lead</span></div><div class="bd">' +
+        '<div class="ag-2col">' +
+          '<div class="field"><label>Date</label><input type="date" id="agcDate"></div>' +
+          '<div class="field"><label>Audience</label>' + audienceSelectHtml('agcAud', false, 'Person…') + '</div>' +
+        '</div>' +
+        '<div class="field hidden" id="agcPersonWrap"><label>Person (email)</label>' +
+          '<input type="email" id="agcPerson" list="agPeopleList" placeholder="teammate’s email"></div>' +
+        '<div class="ag-lab">Day targets</div><div id="agcRows"></div>' +
+        '<button class="minibtn" id="agcAdd">+ Add target</button>' +
+        '<div class="field"><label>Notes / announcements</label><textarea class="ag-ta" id="agcNotes"></textarea></div>' +
+        '<button class="btn-gold" id="agcSave" style="margin-top:14px">Post agenda</button>' +
+        '<span class="ag-hintline">Posting replaces the targets and notes for that date and audience. ' +
+        'A linked metric fills its bar from your own approved work only.</span>' +
+      '</div></div>' +
+      '<div class="card ideas enter d3"><div class="hd">Shoutout 🎉 <span class="hint">lands on today’s agenda</span></div><div class="bd">' +
+        '<div class="field"><label>To (email)</label><input type="email" id="agcTo" list="agPeopleList" placeholder="teammate’s email"></div>' +
+        '<div class="field"><label>Message</label><input type="text" id="agcMsg" maxlength="240"></div>' +
+        '<button class="btn-gold" id="agcSend" style="margin-top:14px">🎉 congratulate</button>' +
+        '<span class="ag-hintline">Everyone sees it, and the person is notified.</span>' +
+      '</div></div>' +
+    '</div>';
+
+  $('agcDate').value = agenda.date || '';
+  $('agcAud').onchange = function () {
+    $('agcPersonWrap').classList.toggle('hidden', this.value !== '__person');
+  };
+  $('agcAdd').onclick = function () {
+    readComposerRows();
+    composerRows.push({ id: '', text: '', target: '', metric: '' });
+    paintComposerRows();
+  };
+  $('agcSave').onclick = saveAgenda;
+  $('agcSend').onclick = function () {
+    var to = $('agcTo'), msg = $('agcMsg');
+    sendCongrat(to.value, msg.value, '', function () { to.value = ''; msg.value = ''; });
+  };
+  paintComposerRows();
+  buildHistory();
+}
+
+function metricOptions(selected) {
+  var list = (agenda && agenda.metrics) || [];
+  var h = '<option value="">No linked metric</option>';
+  for (var i = 0; i < list.length; i++) {
+    h += '<option value="' + attr(list[i].key) + '"' + (list[i].key === selected ? ' selected' : '') + '>' +
+      esc(list[i].label) + '</option>';
+  }
+  return h;
+}
+
+function paintComposerRows() {
+  var box = $('agcRows');
+  if (!box) return;
+  var h = '', i, r;
+  for (i = 0; i < composerRows.length; i++) {
+    r = composerRows[i];
+    h += '<div class="ag-trow" data-r="' + i + '">' +
+      '<input type="text" class="tr-text" maxlength="200" placeholder="e.g. 20 listings today" value="' + attr(r.text) + '">' +
+      '<input type="number" class="tr-num" min="1" step="1" placeholder="No." value="' + attr(r.target) + '">' +
+      '<select class="tr-metric">' + metricOptions(r.metric) + '</select>' +
+      '<button class="minibtn tr-del" title="Remove">✕</button>' +
+      '</div>';
+  }
+  box.innerHTML = h;
+  var dels = box.querySelectorAll('.tr-del');
+  for (i = 0; i < dels.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        readComposerRows();
+        composerRows.splice(Number(btn.parentNode.getAttribute('data-r')), 1);
+        if (!composerRows.length) composerRows = [{ id: '', text: '', target: '', metric: '' }];
+        paintComposerRows();
+      };
+    })(dels[i]);
+  }
+}
+
+function readComposerRows() {
+  var box = $('agcRows');
+  if (!box) return;
+  var rows = box.querySelectorAll('.ag-trow');
+  for (var i = 0; i < rows.length; i++) {
+    var idx = Number(rows[i].getAttribute('data-r'));
+    if (!composerRows[idx]) continue;
+    composerRows[idx].text = rows[i].querySelector('.tr-text').value;
+    composerRows[idx].target = rows[i].querySelector('.tr-num').value;
+    composerRows[idx].metric = rows[i].querySelector('.tr-metric').value;
+  }
+}
+
+function saveAgenda() {
+  readComposerRows();
+  var date = String($('agcDate').value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Pick a date for this agenda.'); return; }
+  if (agenda && agenda.date && date < agenda.date) { toast('That date has passed — pick today or a later date.'); return; }
+
+  var aud = $('agcAud').value;
+  if (aud === '__person') {
+    aud = String($('agcPerson').value || '').trim();
+    if (aud.indexOf('@') < 1) { toast('Type the email address of the person this agenda is for.'); return; }
+  }
+
+  var targets = [], i, r;
+  for (i = 0; i < composerRows.length; i++) {
+    r = composerRows[i];
+    var text = String(r.text || '').trim();
+    var num = String(r.target || '').trim();
+    if (!text && !num && !r.metric) continue;
+    if (!text) { toast('Every target needs its text.'); return; }
+    if (r.metric && !num) { toast('A linked metric needs a number to count towards.'); return; }
+    if (num && !(Number(num) > 0)) { toast('A target number must be greater than zero.'); return; }
+    targets.push({ id: r.id || '', text: text, target: num === '' ? '' : Number(num), metric: r.metric || '' });
+  }
+
+  var btn = $('agcSave');
+  btn.disabled = true;
+  api('setAgenda', { date: date, audience: aud, targets: targets, notes: String($('agcNotes').value || '') })
+    .then(function () {
+      toast('Agenda posted for ' + dayLabel(date) + '.');
+      composerRows = [{ id: '', text: '', target: '', metric: '' }];
+      paintComposerRows();
+      $('agcNotes').value = '';
+      load(true);
+    })
+    .catch(function (e) { fail('Could not post the agenda', e); })
+    .then(function () { btn.disabled = false; });
+}
+
+/* ---------- history browser (agendaHistory is Management-side on the server too) ---------- */
+
+function buildHistory() {
+  var wrap = $('agHistoryWrap');
+  if (!wrap) return;
+  if (!has(HISTORY_ROLES, myRole())) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div class="card enter d3" style="margin-top:16px">' +
+    '<div class="hd">Agenda history <span class="hint">browse by date</span></div><div class="bd">' +
+      '<div class="ag-2col">' +
+        '<div class="field"><label>From</label><input type="date" id="aghFrom"></div>' +
+        '<div class="field"><label>To</label><input type="date" id="aghTo"></div>' +
+      '</div>' +
+      '<div class="field"><label>Audience</label>' + audienceSelectHtml('aghAud', true, 'Person…') + '</div>' +
+      '<div class="field hidden" id="aghPersonWrap"><label>Person (email)</label>' +
+        '<input type="email" id="aghPerson" list="agPeopleList" placeholder="teammate’s email"></div>' +
+      '<button class="btn-ghost" id="aghGo" style="margin-top:14px">Browse</button>' +
+      '<div id="aghOut" style="margin-top:6px"></div>' +
+    '</div></div>';
+  $('aghTo').value = agenda.date || '';
+  $('aghAud').onchange = function () { $('aghPersonWrap').classList.toggle('hidden', this.value !== '__person'); };
+  $('aghGo').onclick = browseHistory;
+}
+
+function browseHistory() {
+  var payload = {};
+  var from = String($('aghFrom').value || '').trim();
+  var to = String($('aghTo').value || '').trim();
+  if (from) payload.from = from;
+  if (to) payload.to = to;
+  var aud = $('aghAud').value;
+  if (aud === '__person') {
+    aud = String($('aghPerson').value || '').trim();
+    if (aud.indexOf('@') < 1) { toast('Type the email address to filter by.'); return; }
+  }
+  if (aud) payload.audience = aud;
+
+  var out = $('aghOut');
+  out.innerHTML = '<div class="spinner"></div>';
+  api('agendaHistory', payload).then(function (res) {
+    historyRows = res.agendas || [];
+    paintHistory(res);
+  }).catch(function (e) {
+    out.innerHTML = '<div class="ag-empty">Could not load the history.</div>';
+    fail('Could not load the history', e);
+  });
+}
+
+function paintHistory(res) {
+  var out = $('aghOut');
+  if (!out) return;
+  if (!historyRows.length) {
+    out.innerHTML = '<div class="ag-empty">No agendas in ' + esc(res.from) + ' → ' + esc(res.to) + '.</div>';
+    return;
+  }
+  var h = '', i, j, row, t;
+  for (i = 0; i < historyRows.length; i++) {
+    row = historyRows[i];
+    h += '<div class="ag-hrow"><div class="ag-head"><span class="ag-txt">' + esc(dayLabel(row.date)) + '</span>' +
+      '<span class="pill role">' + esc(row.audience) + '</span>' +
+      '<button class="minibtn agh-load" data-i="' + i + '" style="margin-left:auto">Load into composer</button></div>';
+    for (j = 0; j < (row.targets || []).length; j++) {
+      t = row.targets[j];
+      h += '<div class="ag-hitem">• ' + esc(t.text) + (t.target ? ' — <span class="num">' + Number(t.target) + '</span>' : '') +
+        (t.metric ? ' · ' + esc(t.metric) : '') + '</div>';
+    }
+    if (row.notes) h += '<div class="ag-note">' + esc(row.notes) + '</div>';
+    h += '<div class="ag-hmeta">' + (row.shoutouts || []).length + ' shoutout' + ((row.shoutouts || []).length === 1 ? '' : 's') +
+      ' · set by ' + esc(row.set_by) + (row.set_at ? ' · ' + esc(fmtPkt(row.set_at, true)) : '') + '</div></div>';
+  }
+  out.innerHTML = h;
+  var btns = out.querySelectorAll('.agh-load');
+  for (i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () { loadIntoComposer(historyRows[Number(btn.getAttribute('data-i'))]); };
+    })(btns[i]);
+  }
+}
+
+function loadIntoComposer(row) {
+  if (!row || !$('agcRows')) return;
+  composerRows = [];
+  for (var i = 0; i < (row.targets || []).length; i++) {
+    composerRows.push({
+      id: row.targets[i].id || '',
+      text: row.targets[i].text || '',
+      target: row.targets[i].target || '',
+      metric: row.targets[i].metric || ''
+    });
+  }
+  if (!composerRows.length) composerRows = [{ id: '', text: '', target: '', metric: '' }];
+  paintComposerRows();
+  $('agcNotes').value = row.notes || '';
+  var aud = String(row.audience || 'ALL');
+  var sel = $('agcAud'), known = false;
+  for (var j = 0; j < sel.options.length; j++) { if (sel.options[j].value === aud) known = true; }
+  if (known) { sel.value = aud; $('agcPersonWrap').classList.add('hidden'); }
+  else { sel.value = '__person'; $('agcPersonWrap').classList.remove('hidden'); $('agcPerson').value = aud; }
+  $('agcDate').value = (agenda && agenda.date) || '';
+  toast('Loaded into the composer — check the date before posting.');
+  $('agcDate').scrollIntoView({ block: 'center' });
+}
+
+/* =====================================================================
+   §20.2 — MEETINGS
+   ===================================================================== */
+
+VIEWS.meetings = {
+  label: 'Meetings',
+  order: 45,
+  roles: '*',
+  icon: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M5 3 2.5 5.5M19 3l2.5 2.5"/>',
+  render: function () {
+    return '<div class="hgroup enter d1"><h1>Meetings</h1>' +
+        '<span class="sub">Every time here is Pakistan time (PKT).</span></div>' +
+      '<div class="card enter d2"><div class="hd">My upcoming meetings <span class="hint" id="mtHint">…</span></div>' +
+        '<div class="bd" id="mtList"><div class="spinner"></div></div></div>' +
+      '<div id="mtGridWrap"></div><div id="mtCreateWrap"></div>' +
+      '<datalist id="mtPeopleList"></datalist>';
+  },
+  init: function () {
+    loadMeetings(false);
+    buildMeetingComposer();
+    keepFresh('mtList', function () { loadMeetings(true); });
+  }
+};
+
+function loadMeetings(silent) {
+  return api('myMeetings').then(function (res) {
+    meetings = res.meetings || [];
+    for (var i = 0; i < meetings.length; i++) learnPerson(meetings[i].created_by, meetings[i].created_by);
+    paintPeople('mtPeopleList');
+    paintMeetings();
+    var pending = 0;
+    for (i = 0; i < meetings.length; i++) { if (!meetings[i].myRsvp || !meetings[i].myRsvp.answer) pending++; }
+    STATE.counts.meetings = pending;
+    if (typeof refreshBadges === 'function') refreshBadges();
+    if (gridOpenId) loadGrid(gridOpenId, true);
+  }).catch(function (e) {
+    if (silent) return;
+    var box = $('mtList');
+    if (box) box.innerHTML = '<div class="ag-empty">Could not load your meetings.</div>';
+    fail('Could not load your meetings', e);
+  });
+}
+
+function startsIn(min) {
+  min = Number(min) || 0;
+  if (min < 1) return 'starts now';
+  if (min < 60) return 'starts in ' + min + ' min';
+  if (min < 1440) return 'starts in ' + Math.floor(min / 60) + ' h ' + (min % 60) + ' min';
+  return 'starts in ' + Math.round(min / 1440) + ' day' + (Math.round(min / 1440) === 1 ? '' : 's');
+}
+
+function whereHtml(v) {
+  var raw = String(v || '');
+  if (!raw) return '<span style="color:var(--text-3)">—</span>';
+  var url = safeUrl(raw);                       /* RL-3: only http/https ever becomes a link */
+  if (!url) return esc(raw);
+  return '<a href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue-2);font-weight:700">' + esc(raw) + '</a>';
+}
+
+function paintMeetings() {
+  var box = $('mtList');
+  if (!box) return;
+  var hint = $('mtHint');
+  if (hint) hint.textContent = meetings.length + (meetings.length === 1 ? ' meeting' : ' meetings');
+  if (!meetings.length) {
+    box.innerHTML = '<div class="ag-empty">No meetings scheduled for you right now.</div>';
+    return;
+  }
+  var h = '', i, m, ans, state;
+  for (i = 0; i < meetings.length; i++) {
+    m = meetings[i];
+    ans = (m.myRsvp && m.myRsvp.answer) ? String(m.myRsvp.answer) : '';
+    state = ans === RSVP_YES ? 'yes' : (ans ? 'no' : 'pending');
+    h += '<div class="mt-item" data-i="' + i + '"><div class="mt-hd">' +
+      '<span class="mt-title">' + esc(m.title) + '</span>' +
+      (state === 'yes' ? '<span class="pill mt-yes">Yes</span>' : '') +
+      (state === 'no' ? '<span class="pill mt-no">No</span>' : '') +
+      (state === 'pending' ? '<span class="pill mt-wait">Pending</span>' : '') +
+      (m.inProgress ? '<span class="pill mt-live">In progress</span>' :
+        '<span class="pill mt-wait' + (Number(m.minutesUntil) <= 60 ? ' mt-soon' : '') + '">' + esc(startsIn(m.minutesUntil)) + '</span>') +
+      '</div>' +
+      '<div class="tl-row"><span class="k">When</span><b>' + esc(fmtPkt(m.datetime_pkt, true)) + ' PKT</b>' +
+        '<span style="color:var(--text-3);font-weight:700">· ' + Number(m.duration) + ' min</span></div>' +
+      '<div class="tl-row"><span class="k">Where</span>' + whereHtml(m.location_link) + '</div>' +
+      '<div class="tl-row"><span class="k">Invited by</span><b>' + esc(m.created_by) + '</b></div>';
+    if (ans) {
+      h += '<div class="tl-row"><span class="k">My reply</span><b>' + esc(ans) + '</b>' +
+        (m.myRsvp.reason ? '<span style="color:var(--text-3);font-weight:700">· ' + esc(m.myRsvp.reason) + '</span>' : '') + '</div>';
+    }
+    h += '<div class="mt-rsvp">' +
+      '<button class="btn-gold mt-yes-btn" data-i="' + i + '">' + esc(RSVP_YES) + '</button>' +
+      '<button class="btn-ghost mt-no-btn" data-i="' + i + '">' + esc(RSVP_NO) + '</button>';
+    if (m.isCreator || has(HISTORY_ROLES, myRole())) {
+      h += '<button class="minibtn mt-grid-btn" data-id="' + attr(m.meeting_id) + '">Attendance grid</button>';
+    }
+    h += '</div><div class="mt-reason hidden"><input type="text" maxlength="500" placeholder="Reason for not attending"></div></div>';
+  }
+  box.innerHTML = h;
+  wireMeetings(box);
+}
+
+function wireMeetings(box) {
+  var i, btns = box.querySelectorAll('.mt-yes-btn');
+  for (i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        var m = meetings[Number(btn.getAttribute('data-i'))];
+        if (!m) return;
+        btn.disabled = true;
+        sendRsvp(m.meeting_id, RSVP_YES, '', function () { btn.disabled = false; });
+      };
+    })(btns[i]);
+  }
+  btns = box.querySelectorAll('.mt-no-btn');
+  for (i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        var item = btn.parentNode.parentNode;
+        var pane = item.querySelector('.mt-reason');
+        var input = pane.querySelector('input');
+        var m = meetings[Number(btn.getAttribute('data-i'))];
+        if (!m) return;
+        if (pane.className.indexOf('hidden') >= 0) {
+          pane.classList.remove('hidden');
+          input.focus();
+          return;
+        }
+        var reason = String(input.value || '').trim();
+        if (!reason) { toast('Add the reason you cannot attend.'); input.focus(); return; }
+        btn.disabled = true;
+        sendRsvp(m.meeting_id, RSVP_NO, reason, function () { btn.disabled = false; });
+      };
+    })(btns[i]);
+  }
+  btns = box.querySelectorAll('.mt-grid-btn');
+  for (i = 0; i < btns.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        var id = btn.getAttribute('data-id');
+        if (gridOpenId === id) { gridOpenId = ''; gridData = null; paintGrid(); return; }
+        gridOpenId = id;
+        loadGrid(id, false);
+      };
+    })(btns[i]);
+  }
+}
+
+function sendRsvp(meetingId, answer, reason, done) {
+  api('rsvp', { meeting_id: meetingId, answer: answer, reason: reason }).then(function () {
+    toast(answer === RSVP_YES ? 'Reply sent: ' + RSVP_YES : 'Reply sent — the organiser has your reason.');
+    loadMeetings(true);
+  }).catch(function (e) {
+    fail('Could not send your reply', e);
+  }).then(function () { if (done) done(); });
+}
+
+/* ---------- creator's live attendance grid (§20.2: pending / yes / no+reason) ---------- */
+
+function loadGrid(meetingId, silent) {
+  var wrap = $('mtGridWrap');
+  if (!wrap) return;
+  if (!silent) wrap.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>';
+  api('meetingGrid', { meeting_id: meetingId }).then(function (res) {
+    if (gridOpenId !== meetingId) return;
+    gridData = res;
+    for (var i = 0; i < (res.grid || []).length; i++) learnPerson(res.grid[i].email, res.grid[i].name);
+    paintPeople('mtPeopleList');
+    paintGrid();
+  }).catch(function (e) {
+    gridOpenId = ''; gridData = null;
+    wrap.innerHTML = '';
+    fail('Could not load the attendance grid', e);
+  });
+}
+
+function paintGrid() {
+  var wrap = $('mtGridWrap');
+  if (!wrap) return;
+  if (!gridOpenId || !gridData) { wrap.innerHTML = ''; return; }
+  var g = gridData, c = g.counts || {}, rows = g.grid || [];
+  var h = '<div class="card enter d2" style="margin-top:16px">' +
+    '<div class="hd">Attendance · ' + esc(g.title) + ' <span class="hint">' + esc(fmtPkt(g.datetime_pkt, true)) + ' PKT</span></div>' +
+    '<div class="bd"><div class="mt-counts">' +
+      '<span class="pill mt-wait">Pending ' + Number(c.pending || 0) + '</span>' +
+      '<span class="pill mt-yes">Yes ' + Number(c.yes || 0) + '</span>' +
+      '<span class="pill mt-no">No ' + Number(c.no || 0) + '</span>' +
+    '</div>' +
+    '<div class="scroll"><table class="mt-grid"><thead><tr><th>Person</th><th>Role</th><th>RSVP</th><th>Reason</th><th>Replied</th></tr></thead><tbody>';
+  if (!rows.length) h += '<tr><td colspan="5">No invitees.</td></tr>';
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var pill = r.status === 'yes' ? '<span class="pill mt-yes">Yes</span>' :
+      (r.status === 'no' ? '<span class="pill mt-no">No</span>' : '<span class="pill mt-wait">Pending</span>');
+    h += '<tr><td><b>' + esc(r.name) + '</b></td><td>' + esc(r.role) + '</td><td>' + pill + '</td>' +
+      '<td>' + esc(r.reason || '') + '</td><td>' + esc(r.responded_at ? fmtPkt(r.responded_at, true) : '') + '</td></tr>';
+  }
+  h += '</tbody></table></div>';
+  if (g.pending_flagged_at) {
+    h += '<div class="ag-hintline">Pending replies were flagged to you at ' + esc(fmtPkt(g.pending_flagged_at, true)) + ' PKT.</div>';
+  }
+  h += '</div></div>';
+  wrap.innerHTML = h;
+}
+
+/* ---------- schedule a meeting (Management / Ops Head / Team Lead) ---------- */
+
+function buildMeetingComposer() {
+  var wrap = $('mtCreateWrap');
+  if (!wrap) return;
+  if (!has(COMPOSER_ROLES, myRole())) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div class="card enter d3" style="margin-top:16px">' +
+    '<div class="hd">Schedule meeting <span class="hint">Management · Ops Head · Team Lead</span></div><div class="bd">' +
+      '<div class="field"><label>Title</label><input type="text" id="mtTitle" maxlength="200" placeholder="What is this meeting about?"></div>' +
+      '<div class="ag-2col" style="margin-top:12px">' +
+        '<div class="field"><label>Date &amp; time (PKT)</label><input type="datetime-local" id="mtWhen"></div>' +
+        '<div class="field"><label>Duration (minutes)</label><input type="number" id="mtDur" min="5" max="480" step="5" value="' + DEFAULT_DURATION + '"></div>' +
+      '</div>' +
+      '<div class="ag-2col" style="margin-top:12px">' +
+        '<div class="field"><label>Audience</label>' + audienceSelectHtml('mtAud', false, 'Chosen people…') + '</div>' +
+        '<div class="field"><label>Reminders (minutes before)</label><input type="text" id="mtRem" value="' + DEFAULT_REMINDERS + '"></div>' +
+      '</div>' +
+      '<div class="field hidden" id="mtPeopleWrap"><label>People (emails, comma separated)</label>' +
+        '<input type="text" id="mtPeople" list="mtPeopleList" placeholder="one@gmail.com, two@gmail.com"></div>' +
+      '<div class="field" style="margin-top:12px"><label>Where (place or https link)</label>' +
+        '<input type="text" id="mtLoc" maxlength="300" placeholder="Office / https://meet…"></div>' +
+      '<button class="btn-gold" id="mtCreate" style="margin-top:16px">Schedule meeting</button>' +
+      '<span class="ag-hintline">The time you type is Pakistan time. Everyone invited is notified, ' +
+      'and the ⏰ banner opens at the first reminder.</span>' +
+    '</div></div>';
+  $('mtAud').onchange = function () { $('mtPeopleWrap').classList.toggle('hidden', this.value !== '__person'); };
+  $('mtCreate').onclick = createMeeting;
+}
+
+function createMeeting() {
+  var title = String($('mtTitle').value || '').trim();
+  if (!title) { toast('Give the meeting a title.'); return; }
+  /* datetime-local yields YYYY-MM-DDTHH:MM and the server reads it as PKT (§20.2) — never a device clock. */
+  var when = String($('mtWhen').value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(when)) { toast('Pick the date and time (PKT).'); return; }
+  var dur = Number($('mtDur').value || DEFAULT_DURATION);
+  if (!(dur >= 5 && dur <= 480)) { toast('Duration must be between 5 and 480 minutes.'); return; }
+  var aud = $('mtAud').value;
+  if (aud === '__person') {
+    aud = String($('mtPeople').value || '').trim();
+    if (aud.indexOf('@') < 1) { toast('Type the email addresses of the people to invite.'); return; }
+  }
+
+  var btn = $('mtCreate');
+  btn.disabled = true;
+  api('createMeeting', {
+    title: title, datetime_pkt: when, duration: dur, audience: aud,
+    location_link: String($('mtLoc').value || '').trim(),
+    reminder_offsets: String($('mtRem').value || DEFAULT_REMINDERS).trim()
+  }).then(function (res) {
+    toast('Meeting scheduled — ' + Number(res.invited) + ' invited and notified.');
+    $('mtTitle').value = ''; $('mtWhen').value = ''; $('mtLoc').value = '';
+    loadMeetings(true);
+  }).catch(function (e) {
+    fail('Could not schedule the meeting', e);
+  }).then(function () { btn.disabled = false; });
+}
+
+})();
+
+/* ---------- view-inbox.js ---------- */
+/* ===================== INBOX — direct messages + notifications (§24, §14) =====================
+ * Owns the ONE shared 45s poll (§24): bell, DM badge, inbox lists and the ⏰ meeting banner all
+ * ride on api('poll') so the portal stays inside Apps Script quotas.
+ * RL-3: message bodies are plain text — they reach the DOM through createTextNode only, and a URL
+ * becomes a link only when safeUrl() accepts it (http/https).
+ */
+
+VIEW_CSS.push(
+  '.ib-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}' +
+  '.ib-tab{display:flex;align-items:center;gap:8px;padding:8px 15px;border-radius:10px;border:1px solid var(--gold-line);font-weight:800;font-size:13px;color:var(--text-2);transition:all .15s}' +
+  '.ib-tab:hover{color:var(--blue-2);border-color:var(--blue)}' +
+  '.ib-tab.on{color:var(--gold-a);border-color:var(--gold-line-hi);background:linear-gradient(135deg,rgba(233,169,60,.16),rgba(233,169,60,.03));box-shadow:var(--glow-gold)}' +
+  '.ib-tab .n{background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));color:#fff;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px}' +
+  /* min-width:0 everywhere a long URL or name could otherwise stretch the whole shell sideways. */
+  '.ib-2{display:grid;gap:16px;grid-template-columns:320px 1fr;align-items:start;min-width:0}' +
+  '.ib-2>*,.ib-2 .hd,.ib-2 .bd{min-width:0}' +
+  '.ib-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+  '.ib-sm{padding:7px 13px;font-size:12.5px}' +
+  '.ib-new{margin-top:12px;border-top:1px solid var(--gold-line);padding-top:10px}' +
+  '.ib-hint{font-size:11.5px;color:var(--text-3);font-weight:600;line-height:1.5}' +
+  '.ib-pick,.ib-thread{display:block;width:100%;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;transition:all .15s}' +
+  '.ib-pick:hover,.ib-thread:hover{background:var(--blue-soft);border-color:rgba(61,155,240,.35)}' +
+  '.ib-thread.on{border-color:var(--gold-line-hi);background:linear-gradient(90deg,rgba(233,169,60,.13),transparent)}' +
+  '.ib-thread .r1,.ib-thread .r2{display:flex;align-items:center;gap:8px;min-width:0}' +
+  '.ib-thread .r2{margin-top:3px}' +
+  '.ib-thread .nm{flex:0 1 auto;font-weight:800;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}' +
+  '.ib-thread .pill.role{flex:none;white-space:nowrap}' +
+  '.ib-thread .tm{flex:none;font-size:11px;color:var(--text-3);font-weight:700;white-space:nowrap}' +
+  '.ib-thread .pv{flex:1 1 auto;min-width:0;font-size:12px;color:var(--text-3);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+  '.ib-badge{margin-left:auto;background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));color:#fff;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px;flex:none}' +
+  '.ib-msgs{min-height:240px;max-height:52vh;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:2px}' +
+  '.ib-b{max-width:78%;min-width:0;align-self:flex-start;padding:9px 12px;border-radius:12px;border:1px solid var(--gold-line);background:var(--panel-2);font-size:13.4px;font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}' +
+  '.ib-b.me{align-self:flex-end;background:var(--blue-soft);border-color:rgba(61,155,240,.4)}' +
+  '.ib-b .t{display:block;margin-top:5px;font-size:11px;color:var(--text-3);font-weight:700}' +
+  '.ib-b a{color:var(--blue-2);font-weight:700}' +
+  '.ib-comp{display:flex;gap:8px;align-items:flex-end;margin-top:12px;border-top:1px solid var(--gold-line);padding-top:12px}' +
+  '.ib-comp textarea{flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:46px;max-height:150px}' +
+  '.ib-comp textarea:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}' +
+  '.ib-empty{padding:16px 2px;color:var(--text-3);font-weight:600;font-size:12.5px}' +
+  '.ib-privacy{margin-top:12px;padding-top:10px;border-top:1px solid var(--gold-line);font-size:11.5px;color:var(--text-3);font-weight:600;line-height:1.55}' +
+  '.ib-notif{display:block;width:100%;text-align:left;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line);border-left:3px solid transparent;margin-bottom:8px;transition:all .15s;opacity:.62}' +
+  '.ib-notif.unread{opacity:1;border-left-color:var(--blue);background:var(--blue-soft)}' +
+  '.ib-notif:hover{border-color:var(--gold-line-hi)}' +
+  '.ib-notif .ty{display:block;font-weight:800;font-size:12.5px;color:var(--gold-a)}' +
+  '.ib-notif .ms{display:block;margin-top:3px;font-size:13px;font-weight:600}' +
+  '.ib-notif .tm{display:block;margin-top:4px;font-size:11px;color:var(--text-3);font-weight:700}' +
+  '.ib-back{display:none}' +
+  '.iconbtn .dot{position:absolute;top:2px;right:1px;min-width:17px;padding:0 4px;height:17px;line-height:17px;text-align:center;border-radius:99px;font-size:10.5px;font-weight:800;color:#fff;background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));box-shadow:var(--glow-blue)}' +
+  /* The alarm sits in a fixed-height top bar: it must shrink, never widen the shell. */
+  '.mchip{position:relative;display:inline-flex;align-items:center;gap:8px;min-width:0;max-width:min(58vw,560px);padding:5px 6px 5px 12px;border-radius:99px;border:1px solid var(--gold-line-hi);background:linear-gradient(135deg,rgba(233,169,60,.18),rgba(233,169,60,.04));box-shadow:var(--glow-gold);animation:mchipPulse 2.6s ease-in-out infinite}' +
+  '@keyframes mchipPulse{0%,100%{box-shadow:0 0 0 0 rgba(233,169,60,.28)}50%{box-shadow:0 0 0 7px rgba(233,169,60,0)}}' +
+  '.mchip-head{display:flex;align-items:center;gap:8px;min-width:0;font-size:12.5px;font-weight:800;color:var(--gold-a);white-space:nowrap}' +
+  '.mchip-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px}' +
+  '.mchip-acts{flex:none}' +
+  '.mchip-head .mchip-in{color:var(--text-2);font-weight:700}' +
+  '.mchip-acts{display:flex;align-items:center;gap:6px}' +
+  '.mchip-b{padding:6px 12px;border-radius:99px;font-size:12px;font-weight:800;white-space:nowrap;border:1px solid var(--gold-line-hi);color:var(--text-2)}' +
+  '.mchip-b:hover{color:var(--blue-2);border-color:var(--blue)}' +
+  '.mchip-b.on{color:var(--gold-ink);background:linear-gradient(135deg,var(--gold-a),var(--gold-b) 55%,var(--gold-c));border-color:transparent}' +
+  '.ib-ov{position:fixed;inset:0;z-index:60;background:rgba(8,11,18,.62);display:grid;place-items:center;padding:20px}' +
+  '.ib-modal{width:min(420px,94vw)}' +
+  '@media(max-width:880px){' +
+    '.ib-2{grid-template-columns:1fr}' +
+    '.ib-2.conv .ib-list{display:none}' +
+    '.ib-2.conv .ib-back{display:inline-flex}' +
+    '.ib-b{max-width:88%}' +
+    '.mchip .mchip-title,.mchip-head .mchip-in{display:none}' +
+    '.mchip-acts{display:none;position:absolute;top:42px;right:0;flex-direction:column;align-items:stretch;gap:8px;padding:10px;min-width:236px;border-radius:12px;border:1px solid var(--gold-line-hi);background:linear-gradient(180deg,var(--panel-2),var(--panel));box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:45}' +
+    '.mchip.open .mchip-acts{display:flex}' +
+  '}'
+);
+
+/* §20.2 — these two labels are the RSVP contract with the backend: they are sent as the answer. */
+var IB_RSVP_YES = 'Yes sir, I will be there';
+var IB_RSVP_NO = "Can't attend (+reason)";
+var IB_POLL_MS = 45000;
+var IB_POLL_MIN_GAP = 3000;
+var IB_NOTIF_KEEP = 40;
+
+var IB = {
+  threads: [], byId: {}, pick: [],
+  open: '', other: '', otherName: '', otherRole: '',
+  msgs: [], notifs: [], readIds: {}, tab: 'dm',
+  loaded: false, sending: false,
+  busy: false, again: false, lastAt: 0, timer: null, started: false,
+  meeting: null, mchipOpen: false
+};
+
+VIEWS.inbox = {
+  label: 'Inbox',
+  icon: '<path d="M3 6.5h18v11H3z"/><path d="m3.7 7.2 8.3 6 8.3-6"/>',
+  roles: '*',
+  order: 40,
+  render: function () {
+    return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
+        '<span class="sub">Direct messages and your notifications · all times PKT</span></div>' +
+      '<div class="ib-tabs enter d1">' +
+        '<button class="ib-tab on" id="ibTabDm">Messages <span class="n hidden" id="ibTabDmN"></span></button>' +
+        '<button class="ib-tab" id="ibTabNt">Notifications <span class="n hidden" id="ibTabNtN"></span></button>' +
+      '</div>' +
+      '<div id="ibDmPane">' +
+        '<div class="ib-2" id="ibWrap">' +
+          '<div class="card ib-list enter d2"><div class="hd">Conversations <span class="hint" id="ibListHint">loading…</span></div>' +
+            '<div class="bd">' +
+              '<button class="btn-ghost ib-sm" id="ibNewBtn">New message</button>' +
+              '<div class="ib-new hidden" id="ibNew">' +
+                '<div class="ib-hint">Management can message anyone, and any team member can message any other team member. Pick a recent conversation or type a colleague’s company email — the portal only delivers to approved staff.</div>' +
+                '<div class="field"><label>Send to</label><input id="ibNewTo" placeholder="Name or company email" autocomplete="off"></div>' +
+                '<div id="ibPick"></div>' +
+              '</div>' +
+              '<div id="ibThreads" style="margin-top:10px"><div class="spinner"></div></div>' +
+              '<div class="ib-privacy" id="ibPrivacy"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="card ib-conv enter d3">' +
+            '<div class="hd"><button class="btn-ghost ib-sm ib-back" id="ibBack">Back</button>' +
+              '<span id="ibConvName">Conversation</span><span class="hint ib-meta" id="ibConvMeta">pick a conversation</span></div>' +
+            '<div class="bd">' +
+              '<div class="ib-msgs" id="ibMsgs"><div class="ib-empty">Open a conversation on the left, or start a new one.</div></div>' +
+              '<div class="ib-comp hidden" id="ibComp">' +
+                '<textarea id="ibInput" placeholder="Write a message — Enter sends, Shift+Enter makes a new line" maxlength="4000"></textarea>' +
+                '<button class="btn-gold" id="ibSendBtn">Send</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div id="ibNtPane" class="hidden">' +
+        '<div class="card enter d2"><div class="hd">Notifications <span class="hint">newest first</span>' +
+          '<button class="btn-ghost ib-sm" id="ibMarkAll" style="margin-left:12px">Mark all as read</button></div>' +
+          '<div class="bd" id="ibNotifList"><div class="spinner"></div></div></div>' +
+      '</div>';
+  },
+  init: function () {
+    /* §24, honest privacy note — the portal rule and its real technical limit, both stated. */
+    $('ibPrivacy').textContent = 'Private: a DM is visible only to its two participants — no role, ' +
+      'including Management, gets a portal screen for reading someone else’s thread. Honest limit: the ' +
+      'MESSAGES tab lives in the Portal DB spreadsheet owned by Hasib’s Google account, so that file’s ' +
+      'owner could always open the raw sheet. Nothing is ever deleted — history is kept permanently.';
+
+    $('ibTabDm').onclick = function () { ibTab('dm'); };
+    $('ibTabNt').onclick = function () { ibTab('nt'); };
+    $('ibNewBtn').onclick = function () {
+      var box = $('ibNew'), openNow = box.classList.contains('hidden');
+      box.classList.toggle('hidden');
+      if (openNow) { ibDrawPicker(); $('ibNewTo').focus(); }
+    };
+    $('ibNewTo').oninput = ibDrawPicker;
+    $('ibBack').onclick = function () { $('ibWrap').classList.remove('conv'); };
+    $('ibSendBtn').onclick = ibSend;
+    $('ibInput').onkeydown = function (e) {
+      if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey) { e.preventDefault(); ibSend(); }
+    };
+    $('ibMarkAll').onclick = ibMarkAllRead;
+
+    $('ibThreads').onclick = function (e) {
+      var b = ibClosest(e.target, 'ib-thread'); if (!b) return;
+      var t = IB.threads[Number(b.getAttribute('data-i'))]; if (!t) return;
+      ibOpen(t.thread_id, t.other);
+    };
+    $('ibPick').onclick = function (e) {
+      var b = ibClosest(e.target, 'ib-pick'); if (!b) return;
+      var email = IB.pick[Number(b.getAttribute('data-p'))]; if (!email) return;
+      $('ibNew').classList.add('hidden'); $('ibNewTo').value = '';
+      ibOpen('', email);
+    };
+    $('ibNotifList').onclick = function (e) {
+      var b = ibClosest(e.target, 'ib-notif'); if (!b) return;
+      ibNotifTap(Number(b.getAttribute('data-n')));
+    };
+
+    ibDrawThreads(); ibDrawNotifs(); ibDrawTabCounts();
+    if (IB.open) { ibDrawHead(); ibDrawMsgs(); }
+
+    api('listThreads').then(function (d) {
+      IB.loaded = true;
+      ibMergeThreads(d.threads || [], true);
+      ibDrawThreads();
+    })['catch'](function () {
+      if ($('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
+    });
+    ibPollNow();
+  }
+};
+
+/* ---------- polling: ONE call for bell + inbox + meeting banner (§24) ---------- */
+
+function startPolling() {
+  if (IB.started) return;
+  IB.started = true;
+  if (!STATE.counts) STATE.counts = {};
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { ibClearTimer(); return; }
+    ibPollNow();
+  });
+  var bell = $('bellBtn');
+  if (bell) bell.onclick = function () { ibGoInbox('nt'); };
+  ibPollNow();
+}
+
+function ibClearTimer() { if (IB.timer) { clearTimeout(IB.timer); IB.timer = null; } }
+
+function ibSchedule() {
+  ibClearTimer();
+  if (document.hidden) return;
+  IB.timer = setTimeout(ibPollNow, IB.again ? IB_POLL_MIN_GAP : IB_POLL_MS);
+}
+
+/** Overlapping polls are the quota risk here: one in flight at a time, the next scheduled only
+ *  after the previous settles, nothing scheduled while the tab is hidden, and the refreshes that
+ *  actions ask for are coalesced so a burst of clicks cannot become a burst of calls. */
+function ibPollNow() {
+  if (IB.busy) { IB.again = true; return; }
+  if (document.hidden || !STATE.idToken) return;
+  var wait = IB_POLL_MIN_GAP - (ibNowMs() - IB.lastAt);
+  if (wait > 0) { ibClearTimer(); IB.timer = setTimeout(ibPollNow, wait); return; }
+  IB.busy = true; IB.again = false;
+  ibClearTimer();
+  api('poll').then(function (d) {
+    ibSettle();
+    try { ibApplyPoll(d || {}); } catch (e) {}
+    ibSchedule();
+  })['catch'](function () {
+    ibSettle();
+    ibSchedule();
+  });
+}
+
+function ibSettle() { IB.busy = false; IB.lastAt = ibNowMs(); }
+
+function ibApplyPoll(d) {
+  if (!STATE.counts) STATE.counts = {};
+  STATE.counts.notifications = d.unreadNotif || 0;
+  STATE.counts.inbox = d.unreadDm || 0;
+  if (typeof refreshBadges === 'function') refreshBadges();
+  ibBell(d.unreadNotif || 0);
+  ibDmChip(d.unreadDm || 0);
+  ibMergeThreads(d.threads || [], false);
+  ibMergeNotifs(d.notifications || []);
+  ibMeetingChip(d.meetings || null);
+  if (ibMounted()) { ibDrawThreads(); ibDrawNotifs(); ibDrawTabCounts(); ibReloadOpenIfNew(); }
+}
+
+function ibBell(n) {
+  var el = $('bellDot'); if (!el) return;
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.classList.toggle('hidden', !n);
+}
+
+/** §24: the unread DM count sits in the top bar beside the ⏰/bell. The shell has no slot for it,
+ *  so this module creates the chip once and keeps it updated. */
+function ibDmChip(n) {
+  var chip = $('dmChip');
+  if (!chip) {
+    var bell = $('bellBtn'); if (!bell || !bell.parentNode) return;
+    chip = document.createElement('button');
+    chip.className = 'iconbtn'; chip.id = 'dmChip'; chip.title = 'Messages';
+    chip.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 6.5h18v11H3z"/><path d="m3.7 7.2 8.3 6 8.3-6"/></svg>' +
+      '<span class="dot hidden" id="dmDot">0</span>';
+    chip.onclick = function () { ibGoInbox('dm'); };
+    bell.parentNode.insertBefore(chip, bell);
+  }
+  var dot = $('dmDot'); if (!dot) return;
+  dot.textContent = n > 99 ? '99+' : String(n);
+  dot.classList.toggle('hidden', !n);
+}
+
+function ibGoInbox(tab) {
+  IB.tab = tab || 'dm';
+  var a = document.querySelector('.nav a[data-key="inbox"]');
+  if (a) { a.click(); ibTab(IB.tab); }
+}
+
+/* ---------- ⏰ meeting alarm chip (§20.2) ---------- */
+
+function ibMeetingChip(m) {
+  var slot = $('meetingChip'); if (!slot) return;
+  IB.meeting = m;
+  if (!m || !m.meeting_id) { slot.innerHTML = ''; IB.mchipOpen = false; return; }
+  var mins = Number(m.minutesUntil || 0);
+  var when = mins <= 0 ? 'now' : 'in ' + mins + ' min';
+  var yesOn = m.myRsvp === IB_RSVP_YES ? ' on' : '';
+  var noOn = m.myRsvp === IB_RSVP_NO ? ' on' : '';
+  slot.innerHTML = '<span class="mchip' + (IB.mchipOpen ? ' open' : '') + '" id="mchip">' +
+      '<button class="mchip-head" id="mchipHead">⏰ <b class="mchip-title">' + esc(m.title) + '</b>' +
+        '<span class="mchip-in num">' + esc(when) + '</span></button>' +
+      '<span class="mchip-acts">' +
+        '<button class="mchip-b' + yesOn + '" id="mchipYes">' + esc(IB_RSVP_YES) + '</button>' +
+        '<button class="mchip-b' + noOn + '" id="mchipNo">' + esc(IB_RSVP_NO) + '</button>' +
+      '</span></span>';
+  $('mchipHead').onclick = function () {
+    IB.mchipOpen = !IB.mchipOpen;
+    $('mchip').classList.toggle('open', IB.mchipOpen);
+  };
+  $('mchipYes').onclick = function () { ibRsvp(m.meeting_id, IB_RSVP_YES, ''); };
+  $('mchipNo').onclick = function () { ibRsvpAskReason(m.meeting_id, m.title); };
+}
+
+function ibRsvp(meetingId, answer, reason) {
+  api('rsvp', { meeting_id: meetingId, answer: answer, reason: reason || '' }).then(function () {
+    IB.mchipOpen = false;
+    toast('Sent to the meeting organiser: ' + answer);
+    ibPollNow();
+  })['catch'](function (e) { toast('RSVP not sent: ' + e.message); });
+}
+
+function ibRsvpAskReason(meetingId, title) {
+  var ov = document.createElement('div');
+  ov.className = 'ib-ov';
+  ov.innerHTML = '<div class="card ib-modal"><div class="hd">' + esc(IB_RSVP_NO) + '</div><div class="bd">' +
+    '<div class="ib-hint">' + esc(title) + '</div>' +
+    '<div class="field"><label>Reason</label><input id="ibRsvpWhy" maxlength="500" placeholder="Why you can’t attend"></div>' +
+    '<div style="display:flex;gap:8px;margin-top:16px">' +
+      '<button class="btn-gold" id="ibRsvpSend">Send</button>' +
+      '<button class="btn-ghost" id="ibRsvpCancel">Cancel</button></div>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  var close = function () { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+  ov.onclick = function (e) { if (e.target === ov) close(); };
+  $('ibRsvpCancel').onclick = close;
+  $('ibRsvpSend').onclick = function () {
+    var why = ibTrim($('ibRsvpWhy').value);
+    if (!why) { toast('A reason is required to decline.'); return; }
+    close();
+    ibRsvp(meetingId, IB_RSVP_NO, why);
+  };
+  $('ibRsvpWhy').focus();
+}
+
+/* ---------- threads ---------- */
+
+function ibMounted() { return !!$('ibThreads'); }
+
+function ibMergeThreads(list, authoritative) {
+  if (authoritative) { IB.threads = []; IB.byId = {}; }
+  list.forEach(function (t) {
+    var id = String(t.thread_id || ''); if (!id) return;
+    var cur = IB.byId[id];
+    if (cur) {
+      cur.name = t.name; cur.role = t.role; cur.other = t.other;
+      cur.unread = t.unread; cur.last_at = t.last_at; cur.last_from = t.last_from; cur.preview = t.preview;
+    } else {
+      IB.byId[id] = t; IB.threads.push(t);
+    }
+  });
+  IB.threads.sort(function (a, b) { return ibMs(b.last_at) - ibMs(a.last_at); });
+}
+
+function ibDrawThreads() {
+  var box = $('ibThreads'); if (!box) return;
+  var hint = $('ibListHint');
+  if (hint) hint.textContent = IB.threads.length ? (IB.threads.length + (IB.threads.length === 1 ? ' conversation' : ' conversations')) : (IB.loaded ? 'none yet' : 'loading…');
+  if (!IB.threads.length) {
+    box.innerHTML = '<div class="ib-empty">' + (IB.loaded ? 'No conversations yet — “New message” starts one.' : 'Loading…') + '</div>';
+    return;
+  }
+  var h = '';
+  IB.threads.forEach(function (t, i) {
+    h += '<button class="ib-thread' + (t.thread_id === IB.open ? ' on' : '') + '" data-i="' + i + '">' +
+        '<span class="r1"><span class="nm">' + esc(t.name || t.other) + '</span>' +
+          (t.role ? '<span class="pill role">' + esc(t.role) + '</span>' : '') +
+          (t.unread ? '<span class="ib-badge">' + esc(String(t.unread)) + '</span>' : '') + '</span>' +
+        '<span class="r2"><span class="pv">' + (t.last_from && t.last_from === ibMe() ? 'You: ' : '') + esc(t.preview || '') + '</span>' +
+          '<span class="tm num">' + esc(fmtPkt(t.last_at, true)) + '</span></span>' +
+      '</button>';
+  });
+  box.innerHTML = h;
+}
+
+function ibDrawPicker() {
+  var input = $('ibNewTo'); if (!input) return;
+  var q = ibTrim(input.value).toLowerCase();
+  var rows = [], h = '';
+  IB.pick = [];
+  IB.threads.forEach(function (t) {
+    var hay = ((t.name || '') + ' ' + (t.other || '')).toLowerCase();
+    if (!q || hay.indexOf(q) >= 0) rows.push(t);
+  });
+  rows.forEach(function (t) {
+    IB.pick.push(t.other);
+    h += '<button class="ib-pick" data-p="' + (IB.pick.length - 1) + '">' +
+        '<span class="nm" style="font-weight:800;font-size:13px">' + esc(t.name || t.other) + '</span>' +
+        (t.role ? ' <span class="pill role">' + esc(t.role) + '</span>' : '') +
+      '</button>';
+  });
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q) && ibKnown(q) < 0) {
+    IB.pick.push(q);
+    h += '<button class="ib-pick" data-p="' + (IB.pick.length - 1) + '">' +
+        '<span style="font-weight:800;font-size:13px">Start a conversation with ' + esc(q) + '</span></button>';
+  }
+  $('ibPick').innerHTML = h || '<div class="ib-empty">No match yet — type the full company email to start a new conversation.</div>';
+}
+
+function ibKnown(email) {
+  for (var i = 0; i < IB.threads.length; i++) {
+    if (String(IB.threads[i].other || '').toLowerCase() === email) return i;
+  }
+  return -1;
+}
+
+/* ---------- conversation ---------- */
+
+function ibOpen(threadId, other) {
+  if (!threadId && other && other.toLowerCase() === ibMe()) { toast('You can’t message yourself.'); return; }
+  IB.open = threadId || ''; IB.other = other || '';
+  IB.otherName = ''; IB.otherRole = ''; IB.msgs = [];
+  var t = threadId ? IB.byId[threadId] : null;
+  if (t) { IB.otherName = t.name; IB.otherRole = t.role; }
+  var wrap = $('ibWrap'); if (wrap) wrap.classList.add('conv');
+  ibDrawHead();
+  if ($('ibMsgs')) $('ibMsgs').innerHTML = '<div class="spinner"></div>';
+  ibDrawThreads();
+
+  var payload = threadId ? { threadId: threadId } : { 'with': other };
+  api('threadMessages', payload).then(function (d) {
+    IB.open = d.thread_id;
+    IB.other = (d.other && d.other.email) || IB.other;
+    IB.otherName = (d.other && d.other.name) || IB.other;
+    IB.otherRole = (d.other && d.other.role) || '';
+    IB.msgs = d.messages || [];
+    ibDrawHead(); ibDrawMsgs();
+    var cur = IB.byId[IB.open];
+    if (cur) { cur.unread = 0; ibDrawThreads(); }
+    return api('markThreadRead', { threadId: IB.open });
+  }).then(function () { ibPollNow(); })['catch'](function (e) {
+    if ($('ibMsgs')) $('ibMsgs').innerHTML = '<div class="ib-empty">' + esc('This conversation could not be opened: ' + e.message) + '</div>';
+  });
+}
+
+function ibDrawHead() {
+  var n = $('ibConvName'), m = $('ibConvMeta'), c = $('ibComp');
+  if (!n || !m) return;
+  if (!IB.other) {
+    n.textContent = 'Conversation'; m.textContent = 'pick a conversation';
+    if (c) c.classList.add('hidden');
+    return;
+  }
+  n.innerHTML = esc(IB.otherName || IB.other) + (IB.otherRole ? ' <span class="pill role">' + esc(IB.otherRole) + '</span>' : '');
+  m.innerHTML = '<span class="mono">' + esc(IB.other) + '</span> · PKT';
+  if (c) c.classList.remove('hidden');
+}
+
+function ibDrawMsgs() {
+  var box = $('ibMsgs'); if (!box) return;
+  box.innerHTML = '';
+  if (!IB.msgs.length) {
+    var e = document.createElement('div');
+    e.className = 'ib-empty';
+    e.textContent = 'No messages in this conversation yet.';
+    box.appendChild(e);
+    return;
+  }
+  IB.msgs.forEach(function (msg) {
+    var b = document.createElement('div');
+    b.className = 'ib-b' + (msg.mine ? ' me' : '');
+    var body = document.createElement('span');
+    ibLinkify(body, msg.body == null ? '' : String(msg.body));
+    var t = document.createElement('span');
+    t.className = 't';
+    t.textContent = fmtPkt(msg.sent_at, true) + (msg.mine && msg.read_at ? ' · Read' : '');
+    b.appendChild(body); b.appendChild(t);
+    box.appendChild(b);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+
+/** RL-3: the body never touches innerHTML. Text goes in as text nodes; only a run that safeUrl()
+ *  accepts (http/https) becomes an anchor. */
+function ibLinkify(el, text) {
+  var re = /(https?:\/\/[^\s<>"']+)/gi, last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    var raw = m[1].replace(/[.,;:!?)\]]+$/, '');
+    var href = safeUrl(raw);
+    if (href) {
+      var a = document.createElement('a');
+      a.href = href; a.textContent = raw;
+      a.target = '_blank'; a.rel = 'noopener noreferrer nofollow';
+      el.appendChild(a);
+    } else {
+      el.appendChild(document.createTextNode(raw));
+    }
+    last = m.index + raw.length;
+    re.lastIndex = last;
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function ibSend() {
+  var ta = $('ibInput'); if (!ta || IB.sending) return;
+  var v = ibTrim(ta.value);
+  if (!v) return;
+  if (!IB.other) { toast('Pick who this goes to first.'); return; }
+  IB.sending = true;
+  var btn = $('ibSendBtn'); if (btn) btn.disabled = true;
+  api('sendMessage', { to: IB.other, body: v }).then(function (res) {
+    IB.sending = false; if (btn) btn.disabled = false;
+    ta.value = '';
+    IB.open = res.thread_id || IB.open;
+    IB.msgs.push({ msg_id: res.msg_id, from: ibMe(), to: IB.other, body: v, sent_at: res.sent_at, read_at: '', mine: true });
+    ibDrawMsgs();
+    ibPollNow();
+  })['catch'](function (e) {
+    IB.sending = false; if (btn) btn.disabled = false;
+    toast('Not sent: ' + e.message);
+  });
+}
+
+function ibReloadOpenIfNew() {
+  if (!IB.open) return;
+  var t = IB.byId[IB.open];
+  if (!t || !t.unread) return;
+  api('threadMessages', { threadId: IB.open }).then(function (d) {
+    IB.msgs = d.messages || [];
+    ibDrawMsgs();
+    t.unread = 0; ibDrawThreads();
+    return api('markThreadRead', { threadId: IB.open });
+  })['catch'](function () {});
+}
+
+/* ---------- notifications (§14) ---------- */
+
+/** A poll already in flight when the user taps "read" would otherwise hand back a stale unread
+ *  list: what this session has marked read stays read. */
+function ibMergeNotifs(fresh) {
+  var seen = {}, out = [];
+  fresh.forEach(function (n) {
+    var id = String(n.notif_id || ''); if (!id || seen[id]) return;
+    seen[id] = 1; n._read = !!IB.readIds[id]; out.push(n);
+  });
+  IB.notifs.forEach(function (n) {
+    var id = String(n.notif_id || '');
+    if (!id || seen[id] || !n._read) return;
+    seen[id] = 1; out.push(n);
+  });
+  out.sort(function (a, b) { return ibMs(b.created_at) - ibMs(a.created_at); });
+  IB.notifs = out.slice(0, IB_NOTIF_KEEP);
+}
+
+function ibDrawNotifs() {
+  var box = $('ibNotifList'); if (!box) return;
+  if (!IB.notifs.length) { box.innerHTML = '<div class="ib-empty">No new notifications.</div>'; return; }
+  var h = '';
+  IB.notifs.forEach(function (n, i) {
+    h += '<button class="ib-notif' + (n._read ? '' : ' unread') + '" data-n="' + i + '">' +
+        '<span class="ty">' + esc(n.type) + '</span>' +
+        '<span class="ms">' + esc(n.message) + '</span>' +
+        '<span class="tm num">' + esc(fmtPkt(n.created_at, true)) + '</span>' +
+      '</button>';
+  });
+  box.innerHTML = h;
+}
+
+function ibNotifTap(i) {
+  var n = IB.notifs[i]; if (!n) return;
+  var ref = String(n.ref || '');
+  if (!n._read) {
+    n._read = true; IB.readIds[n.notif_id] = 1;
+    ibDrawNotifs(); ibDrawTabCounts();
+    api('markNotifRead', { notifId: n.notif_id }).then(function () { ibPollNow(); })['catch'](function (e) {
+      n._read = false; delete IB.readIds[n.notif_id];
+      ibDrawNotifs(); ibDrawTabCounts(); toast('Could not mark read: ' + e.message);
+    });
+  }
+  if (ref.indexOf('dm:') === 0) { ibTab('dm'); ibOpen(ref.slice(3), ''); }
+}
+
+function ibMarkAllRead() {
+  api('markNotifRead', { all: true }).then(function () {
+    IB.notifs.forEach(function (n) { n._read = true; IB.readIds[n.notif_id] = 1; });
+    ibDrawNotifs(); ibDrawTabCounts();
+    ibPollNow();
+  })['catch'](function (e) { toast('Could not mark all read: ' + e.message); });
+}
+
+/* ---------- small helpers ---------- */
+
+function ibTab(which) {
+  IB.tab = which === 'nt' ? 'nt' : 'dm';
+  if (!ibMounted()) return;
+  $('ibDmPane').classList.toggle('hidden', IB.tab !== 'dm');
+  $('ibNtPane').classList.toggle('hidden', IB.tab !== 'nt');
+  $('ibTabDm').classList.toggle('on', IB.tab === 'dm');
+  $('ibTabNt').classList.toggle('on', IB.tab === 'nt');
+}
+
+function ibDrawTabCounts() {
+  var dm = $('ibTabDmN'), nt = $('ibTabNtN');
+  if (dm) {
+    var d = (STATE.counts && STATE.counts.inbox) || 0;
+    dm.textContent = String(d); dm.classList.toggle('hidden', !d);
+  }
+  if (nt) {
+    var u = 0;
+    IB.notifs.forEach(function (n) { if (!n._read) u++; });
+    nt.textContent = String(u); nt.classList.toggle('hidden', !u);
+  }
+}
+
+function ibClosest(el, cls) {
+  while (el && el !== document.body) {
+    if (el.classList && el.classList.contains(cls)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
+function ibMe() { return String((STATE.user && STATE.user.email) || '').toLowerCase(); }
+function ibNowMs() { return (new Date()).getTime(); }
+function ibTrim(s) { return String(s == null ? '' : s).replace(/^\s+|\s+$/g, ''); }
+function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t; }
+
+/* ---------- view-reports.js ---------- */
+/* §5 2-hourly reporting · §28.2 Daily Productivity Report · §25.4 the golden shift line.
+ * Backend actions: myCheckpoints, submitReport, reportsGrid. All labels (count fields, the
+ * value-addition prompt, the grid legend) come from the backend payload — never hardcoded here. */
+(function () {
+
+  var GRID_ROLES = ['Management', 'Ops Head', 'Team Lead'];
+  var FLAG_LABEL = { ontime: 'On time', late: 'Late', missed: 'Missed' };
+  var FLAG_PILL = { ontime: 'rp-ok', late: 'rp-warn', missed: 'rp-bad' };
+  var CELL_FLAG = { green: 'ontime', amber: 'late', red: 'missed' };
+  var CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg>';
+  var CROSS_SVG = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  var RAIL_PAD = 8;
+  var TICK_MS = 60000;
+
+  VIEW_CSS.push(
+    '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
+    '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
+    '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}' +
+    '.field textarea{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:84px}' +
+    '.field textarea:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}' +
+    '.field.rp-sentence label{text-transform:none;letter-spacing:0;font-size:13px;color:var(--gold-a)}' +
+    '.tl-row.rp-row{flex-wrap:wrap}' +
+    '.pill.rp-final{white-space:nowrap}' +
+    '.pill.rp-ok{background:var(--ok-soft);color:var(--ok)}' +
+    '.pill.rp-warn{background:var(--warn-soft);color:var(--warn)}' +
+    '.pill.rp-bad{background:var(--bad-soft);color:var(--bad)}' +
+    '.pill.rp-blue{background:var(--blue-soft);color:var(--blue-2)}' +
+    '.pill.rp-dim{background:rgba(120,132,152,.14);color:var(--text-3)}' +
+    /* the golden shift line (§25.4) */
+    '.rp-rail{position:relative;height:66px;margin:4px 2px 0;min-width:240px}' +
+    '.rp-bar{position:absolute;top:22px;left:0;right:0;height:5px;border-radius:99px;background:rgba(120,132,152,.22)}' +
+    '.rp-fill{position:absolute;top:22px;left:0;height:5px;border-radius:99px;background:linear-gradient(90deg,var(--blue-deep),var(--blue-2));box-shadow:var(--glow-blue);transition:width .7s cubic-bezier(.2,.8,.2,1)}' +
+    '.rp-now{position:absolute;top:10px;width:2px;height:29px;background:var(--blue-2);box-shadow:var(--glow-blue);border-radius:2px}' +
+    '.rp-node{position:absolute;top:24.5px;transform:translate(-50%,-50%);width:21px;height:21px;border-radius:50%;background:var(--panel);border:2px solid rgba(120,132,152,.4);display:grid;place-items:center;z-index:2;transition:all .3s ease}' +
+    '.rp-node svg{width:11px;height:11px;stroke:var(--gold-ink);stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:0;transform:scale(.4);transition:all .25s ease}' +
+    '.rp-node.done{background:linear-gradient(135deg,var(--gold-a),var(--gold-c));border-color:var(--gold-b);box-shadow:0 0 12px rgba(233,169,60,.5)}' +
+    '.rp-node.done svg{opacity:1;transform:scale(1)}' +
+    '.rp-node.done.late{border-color:var(--warn)}' +
+    '.rp-node.due{border-color:var(--gold-b);animation:rpring 1.8s ease-out infinite}' +
+    '@keyframes rpring{0%{box-shadow:0 0 0 0 rgba(233,169,60,.5)}100%{box-shadow:0 0 0 11px rgba(233,169,60,0)}}' +
+    '.rp-node.miss{background:var(--bad-soft);border-color:var(--bad)}' +
+    '.rp-node.miss svg{opacity:1;transform:scale(1);stroke:var(--bad)}' +
+    '.rp-node .t{position:absolute;top:22px;left:50%;transform:translateX(-50%);font-size:10.5px;font-weight:800;color:var(--text-3);white-space:nowrap}' +
+    '.rp-node.done .t,.rp-node.due .t{color:var(--text-2)}' +
+    '.rp-node.miss .t{color:var(--bad)}' +
+    '.rp-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11.5px;font-weight:700;color:var(--text-3);margin-top:16px}' +
+    '.rp-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}' +
+    '.rp-err{color:var(--bad);font-weight:700;font-size:12.5px;margin-top:10px;min-height:17px}' +
+    '.rp-note{color:var(--text-3);font-weight:600;font-size:12.5px}' +
+    '.rp-fields{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(148px,1fr))}' +
+    '.rp-counts{display:flex;flex-wrap:wrap;gap:8px}' +
+    '.rp-count{display:inline-flex;align-items:baseline;gap:7px;border:1px solid var(--gold-line);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;color:var(--text-2);white-space:nowrap}' +
+    '.rp-count b{font-weight:800;color:var(--gold-a)}' +
+    '.rp-dpr{white-space:pre-wrap;font-size:12.5px;font-weight:600;color:var(--text-2);padding:2px 0 12px}' +
+    /* the management grid */
+    '.rp-tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}' +
+    '.rp-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.rp-tbl td{padding:10px 12px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
+    '.rp-tbl tr:last-child td{border-bottom:0}' +
+    '.rp-tbl tbody tr{transition:background .12s}' +
+    '.rp-tbl tbody tr:hover{background:var(--blue-soft)}' +
+    '.rp-tbl th.rp-cp,.rp-tbl td.rp-cpc{text-align:center;width:62px}' +
+    '.rp-cell{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;border:1px solid transparent}' +
+    '.rp-cell svg{width:13px;height:13px;fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}' +
+    '.rp-cell.green{background:var(--ok-soft);border-color:rgba(63,207,142,.4)}.rp-cell.green svg{stroke:var(--ok)}' +
+    '.rp-cell.amber{background:var(--warn-soft);border-color:rgba(255,159,67,.42)}.rp-cell.amber svg{stroke:var(--warn)}' +
+    '.rp-cell.red{background:var(--bad-soft);border-color:rgba(240,96,90,.45)}.rp-cell.red svg{stroke:var(--bad)}' +
+    '.rp-cell.empty{background:rgba(120,132,152,.10);border-color:rgba(120,132,152,.25)}' +
+    '.rp-cell.empty em{display:block;width:5px;height:5px;border-radius:50%;background:var(--text-3)}' +
+    '.rp-who{font-weight:700;white-space:nowrap}' +
+    '.rp-who span{display:block;font-size:11px;color:var(--text-3);font-weight:600}'
+  );
+
+  /* esc() escapes text nodes but leaves quotes intact, so attribute values need this too (RL-3). */
+  function escAttr(v) { return esc(v).replace(/"/g, '&quot;'); }
+
+  /* ---------- time helpers (checkpoints are 'HH:mm' PKT strings from the backend) ---------- */
+
+  function parseHm(cp) {
+    var m = String(cp == null ? '' : cp).match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    return { h: Number(m[1]), m: Number(m[2]) };
+  }
+  function toMin(cp) { var p = parseHm(cp); return p ? p.h * 60 + p.m : 0; }
+  function hm12(cp) {
+    var p = parseHm(cp);
+    if (!p) return String(cp == null ? '' : cp);
+    var h = p.h % 12; if (h === 0) { h = 12; }
+    return h + ':' + (p.m < 10 ? '0' : '') + p.m;
+  }
+  function hmFull(cp) {
+    var p = parseHm(cp);
+    if (!p) return String(cp == null ? '' : cp);
+    return hm12(cp) + ' ' + (p.h < 12 ? 'AM' : 'PM');
+  }
+  /* Same wrap rule as the backend: a checkpoint at or before the previous one is the next day. */
+  function absList(cps) {
+    var out = [], day = 0, i;
+    for (i = 0; i < cps.length; i++) {
+      if (i > 0 && toMin(cps[i]) <= toMin(cps[i - 1])) { day++; }
+      out.push(day * 1440 + toMin(cps[i]));
+    }
+    return out;
+  }
+  function fmtDay(d) {
+    var p = String(d == null ? '' : d).split('-');
+    if (p.length !== 3) { return String(d == null ? '' : d); }
+    var dt = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+    if (isNaN(dt.getTime())) { return String(d); }
+    return dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  }
+  function fmtIn(mins) {
+    var n = Math.round(Number(mins));
+    if (!isFinite(n) || n <= 0) { return ''; }
+    if (n < 60) { return 'in ' + n + 'm'; }
+    var h = Math.floor(n / 60), m = n % 60;
+    return 'in ' + h + 'h' + (m ? ' ' + m + 'm' : '');
+  }
+  function pct(n) { return (isFinite(n) ? n : 0).toFixed(2); }
+  function clamp(n, lo, hi) { return n < lo ? lo : (n > hi ? hi : n); }
+
+  /* ---------- VIEW: my 2-hourly reports ---------- */
+
+  var busy = false;
+  var ticker = null;
+
+  function railHtml(d) {
+    var cps = d.checkpoints || [];
+    if (!cps.length) {
+      return '<div class="rp-note">No checkpoints yet — your timetable is set by Management.</div>';
+    }
+    var times = [], i;
+    for (i = 0; i < cps.length; i++) { times.push(cps[i].checkpoint); }
+    var abs = absList(times);
+    var span = abs[abs.length - 1] - abs[0];
+    var usable = 100 - (RAIL_PAD * 2);
+    var at = function (a) {
+      if (!(span > 0)) { return RAIL_PAD + usable / 2; }
+      return RAIL_PAD + ((a - abs[0]) / span) * usable;
+    };
+    var nowAbs = null;
+    for (i = 0; i < cps.length; i++) {
+      if (isFinite(Number(cps[i].minutes_until))) { nowAbs = abs[i] - Number(cps[i].minutes_until); break; }
+    }
+
+    var h = '<div class="rp-rail"><div class="rp-bar"></div>';
+    var fill = 0;
+    if (nowAbs !== null && nowAbs > abs[0]) { fill = clamp(at(nowAbs), 0, 100); }
+    h += '<div class="rp-fill" style="width:' + pct(fill) + '%"></div>';
+    if (nowAbs !== null && nowAbs >= abs[0] && nowAbs <= abs[abs.length - 1]) {
+      h += '<div class="rp-now" style="left:' + pct(clamp(at(nowAbs), 0, 100)) + '%"></div>';
+    }
+    for (i = 0; i < cps.length; i++) {
+      var c = cps[i], cls = 'rp-node', icon = CHECK_SVG;
+      if (c.state === 'submitted') { cls += ' done'; if (c.flag === 'late') { cls += ' late'; } }
+      else if (c.state === 'due now') { cls += ' due'; }
+      else if (c.state === 'missed') { cls += ' miss'; icon = CROSS_SVG; }
+      var left = (span > 0) ? at(abs[i]) : (cps.length > 1 ? RAIL_PAD + (i / (cps.length - 1)) * usable : 50);
+      h += '<div class="' + cls + '" style="left:' + pct(left) + '%" title="' +
+           escAttr(hmFull(c.checkpoint) + ' · ' + stateLabel(c)) + '">' + icon +
+           '<span class="t">' + esc(hm12(c.checkpoint)) + '</span></div>';
+    }
+    h += '</div>';
+    h += '<div class="rp-legend">' +
+      '<span><i style="background:linear-gradient(135deg,var(--gold-a),var(--gold-c))"></i>Submitted</span>' +
+      '<span><i style="background:transparent;border:2px solid var(--gold-b)"></i>Due now</span>' +
+      '<span><i style="background:transparent;border:2px solid rgba(120,132,152,.5)"></i>Upcoming</span>' +
+      '<span><i style="background:var(--bad)"></i>Missed</span>' +
+      '</div>';
+    return h;
+  }
+
+  function stateLabel(c) {
+    if (c.state === 'submitted') { return FLAG_LABEL[c.flag] || 'Submitted'; }
+    if (c.state === 'due now') { return 'Due now'; }
+    if (c.state === 'missed') { return FLAG_LABEL.missed; }
+    return 'Upcoming';
+  }
+
+  function listHtml(d) {
+    var cps = d.checkpoints || [];
+    if (!cps.length) { return '<div class="rp-note">Management sets your timetable.</div>'; }
+    var h = '', i;
+    for (i = 0; i < cps.length; i++) {
+      var c = cps[i], pill = 'rp-dim', right = '';
+      if (c.state === 'submitted') {
+        pill = FLAG_PILL[c.flag] || 'rp-ok';
+        right = c.submitted_at ? ('submitted ' + fmtPkt(c.submitted_at)) : '';
+      } else if (c.state === 'due now') { pill = 'rp-blue'; }
+      else if (c.state === 'missed') { pill = 'rp-bad'; }
+      else { right = fmtIn(c.minutes_until); }
+      h += '<div class="tl-row rp-row"><span class="k">' + esc(hmFull(c.checkpoint)) + '</span>' +
+           '<span class="pill ' + pill + '">' + esc(stateLabel(c)) + '</span>' +
+           (c.is_final ? '<span class="pill role rp-final">Daily Productivity Report</span>' : '') +
+           '<span style="margin-left:auto;color:var(--text-3);font-weight:600;font-size:12px;white-space:nowrap">' + esc(right) + '</span></div>';
+    }
+    return h;
+  }
+
+  function pickTarget(d) {
+    var cps = d.checkpoints || [], i;
+    for (i = 0; i < cps.length; i++) { if (cps[i].state === 'due now') { return cps[i]; } }
+    for (i = 0; i < cps.length; i++) { if (cps[i].state === 'upcoming') { return cps[i]; } }
+    return null;
+  }
+
+  function formHtml(d, target) {
+    var cps = d.checkpoints || [], i, done = 0;
+    for (i = 0; i < cps.length; i++) { if (cps[i].state === 'submitted') { done++; } }
+    if (!cps.length) { return '<div class="rp-note">Nothing to submit until Management sets your timetable.</div>'; }
+    if (!target) {
+      if (done === cps.length) {
+        return '<div class="ideas" style="border-radius:10px;padding:14px 16px">' +
+          '<b>Every checkpoint is in for ' + esc(fmtDay(d.date)) + '.</b>' +
+          '<div class="rp-note" style="margin-top:4px">Nothing left to submit today.</div></div>';
+      }
+      return '<div class="rp-note">No checkpoint is open right now.</div>';
+    }
+
+    var labels = d.countFields || [];
+    var h = '<div class="field" style="margin-top:0"><label>Work summary</label>' +
+      '<textarea id="rpSummary" placeholder="What did you work on since the last checkpoint?"></textarea></div>';
+    if (labels.length) {
+      h += '<div class="rp-fields" style="margin-top:14px">';
+      for (i = 0; i < labels.length; i++) {
+        h += '<div class="field" style="margin-top:0"><label>' + esc(labels[i]) + '</label>' +
+             '<input type="number" min="0" step="1" inputmode="numeric" class="num" id="rpCount' + i + '" placeholder="0"></div>';
+      }
+      h += '</div>';
+    }
+    if (target.is_final) {
+      h += '<div class="field rp-sentence"><label>' +
+        esc(d.valueAdditionPrompt || d.valueAdditionLabel || 'Required for the Daily Productivity Report') +
+        ' <span style="color:var(--text-3)">· required</span></label>' +
+        '<textarea id="rpValue" placeholder="The one thing that made a difference today"></textarea></div>';
+    }
+    h += '<div class="rp-err" id="rpErr"></div>' +
+      '<button class="btn-gold" id="rpSubmit">' + (target.is_final ? 'Submit Daily Productivity Report' : 'Submit report') + '</button>';
+    return h;
+  }
+
+  function touched(d, target) {
+    if (!target) { return false; }
+    var s = $('rpSummary'), v = $('rpValue'), i;
+    if (s && s.value.trim()) { return true; }
+    if (v && v.value.trim()) { return true; }
+    var labels = d.countFields || [];
+    for (i = 0; i < labels.length; i++) {
+      var el = $('rpCount' + i);
+      if (el && el.value.trim()) { return true; }
+    }
+    return false;
+  }
+
+  function paint(d) {
+    var target = pickTarget(d);
+    var hint = $('rpHint'), sub = $('rpSub'), rail = $('rpRail'), list = $('rpList'),
+        form = $('rpForm'), hd = $('rpFormHd');
+    if (!rail) { return; }
+    rail.innerHTML = railHtml(d);
+    if (list) { list.innerHTML = listHtml(d); }
+    if (sub) {
+      sub.innerHTML = esc(fmtDay(d.date)) + ' · <span class="pill role">' + esc(d.role || STATE.user.role) + '</span>';
+    }
+    if (hint) {
+      var bits = [];
+      if (d.shift) { bits.push(d.shift); }
+      if (isFinite(Number(d.lateThresholdMin))) { bits.push('late after ' + Number(d.lateThresholdMin) + ' min'); }
+      hint.textContent = bits.join(' · ');
+    }
+    if (hd) {
+      hd.innerHTML = (target && target.is_final ? 'Daily Productivity Report' : 'Checkpoint report') +
+        (target ? ' <span class="hint">' + esc(hmFull(target.checkpoint) +
+          (target.state === 'due now' ? ' · due now' : ' · ' + (fmtIn(target.minutes_until) || 'next'))) + '</span>' : '');
+    }
+    if (form) {
+      form.innerHTML = formHtml(d, target);
+      var btn = $('rpSubmit');
+      if (btn) { btn.onclick = function () { submit(d, target, btn); }; }
+    }
+
+    var due = 0, i, cps = d.checkpoints || [];
+    for (i = 0; i < cps.length; i++) { if (cps[i].state === 'due now') { due++; } }
+    STATE.counts.reports = due;
+    if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
+  }
+
+  function fail(msg) {
+    var el = $('rpErr');
+    if (el) { el.textContent = msg; }
+  }
+
+  function submit(d, target, btn) {
+    if (busy) { return; }
+    fail('');
+    var summary = ($('rpSummary') ? $('rpSummary').value : '').trim();
+    if (!summary) { fail('Work summary is required.'); return; }
+
+    var labels = d.countFields || [], counts = [], i;
+    for (i = 0; i < labels.length; i++) {
+      var raw = ($('rpCount' + i) ? $('rpCount' + i).value : '').trim();
+      if (raw === '') { fail('Enter ' + labels[i] + '.'); return; }
+      if (!/^\d+$/.test(raw)) { fail(labels[i] + ' must be a whole number, 0 or more.'); return; }
+      counts.push(Number(raw));
+    }
+
+    var payload = { checkpoint: target.checkpoint, work_summary: summary, counts: counts };
+    if (target.is_final) {
+      var va = ($('rpValue') ? $('rpValue').value : '').trim();
+      if (!va) {
+        fail((d.valueAdditionLabel ? d.valueAdditionLabel + ' is' : 'This field is') + ' required on the Daily Productivity Report.');
+        return;
+      }
+      payload.value_addition = va;
+    }
+
+    busy = true;
+    btn.disabled = true;
+    var was = btn.textContent;
+    btn.textContent = 'Submitting…';
+    api('submitReport', payload).then(function (res) {
+      busy = false;
+      if (res && res.daily_productivity_report) { toast('Daily Productivity Report submitted — thank you.'); }
+      else if (res && res.flag === 'late') { toast('Checkpoint ' + hm12(target.checkpoint) + ' submitted — marked late.'); }
+      else { toast('Checkpoint ' + hm12(target.checkpoint) + ' submitted on time.'); }
+      load();
+    }).catch(function (e) {
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = was;
+      fail(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'That did not go through. Nothing was saved — please try again.');
+      toast('Report not submitted');
+    });
+  }
+
+  function load() {
+    return api('myCheckpoints').then(function (d) {
+      paint(d || {});
+      return d;
+    }).catch(function (e) {
+      var rail = $('rpRail');
+      if (rail) { rail.innerHTML = '<div class="rp-note">Your checkpoints could not be loaded. Please try again.</div>'; }
+      var form = $('rpForm');
+      if (form) { form.innerHTML = '<div class="rp-note">' + esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'Not available right now.') + '</div>'; }
+      var list = $('rpList');
+      if (list) { list.innerHTML = ''; }
+    });
+  }
+
+  /* Keeps an idle screen honest as a checkpoint falls due; never refreshes over typed input. */
+  function startTicker() {
+    if (ticker) { clearInterval(ticker); }
+    ticker = setInterval(function () {
+      if (!$('rpRail')) { clearInterval(ticker); ticker = null; return; }
+      if (busy) { return; }
+      api('myCheckpoints').then(function (d) {
+        if (!$('rpRail') || busy) { return; }
+        if (touched(d || {}, pickTarget(d || {}))) { return; }
+        paint(d || {});
+      }).catch(function () {});
+    }, TICK_MS);
+  }
+
+  VIEWS.reports = {
+    label: 'My reports',
+    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    roles: '*',
+    order: 30,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>My <span class="goldtext">checkpoints</span></h1>' +
+        '<span class="sub" id="rpSub">2-hourly reporting</span></div>' +
+        '<div class="card enter d2"><div class="hd">Today’s shift line <span class="hint" id="rpHint">Loading…</span></div>' +
+        '<div class="bd scroll" id="rpRail"><div class="spinner"></div></div></div>' +
+        '<div class="grid g-2" style="margin-top:16px">' +
+          '<div class="card enter d3"><div class="hd" id="rpFormHd">Checkpoint report</div>' +
+          '<div class="bd" id="rpForm"><div class="spinner"></div></div></div>' +
+          '<div class="card enter d3"><div class="hd">Checkpoints <span class="hint">PKT</span></div>' +
+          '<div class="bd" id="rpList"><div class="spinner"></div></div></div>' +
+        '</div>';
+    },
+    init: function () {
+      busy = false;
+      load();
+      startTicker();
+    }
+  };
+
+  /* ---------- VIEW: the management grid ---------- */
+
+  function cellHtml(cell) {
+    var state = (cell && cell.state) || 'empty';
+    if (['green', 'amber', 'red', 'empty'].indexOf(state) < 0) { state = 'empty'; }
+    var flag = CELL_FLAG[state];
+    var label = hmFull(cell && cell.checkpoint) + ' · ' + (flag ? FLAG_LABEL[flag] : 'Not yet due');
+    var inner = state === 'empty' ? '<em></em>' : (state === 'red' ? CROSS_SVG : CHECK_SVG);
+    return '<span class="rp-cell ' + state + '" title="' + escAttr(label) + '">' + inner + '</span>';
+  }
+
+  function countsHtml(counts) {
+    if (!counts || !counts.length) { return '<span class="rp-note">—</span>'; }
+    var h = '<div class="rp-counts">', i;
+    for (i = 0; i < counts.length; i++) {
+      h += '<span class="rp-count">' + esc(counts[i].label) + ' <b class="num">' + esc(counts[i].value) + '</b></span>';
+    }
+    return h + '</div>';
+  }
+
+  function gridHtml(d) {
+    var rows = (d && d.rows) || [];
+    if (!rows.length) {
+      return '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">Nobody is scheduled on ' + esc(fmtDay(d.date)) + '.</div></div>';
+    }
+    var groups = [], byKey = {}, i, j;
+    for (i = 0; i < rows.length; i++) {
+      var cps = rows[i].checkpoints || [];
+      var key = cps.join('|');
+      if (!byKey[key]) { byKey[key] = { checkpoints: cps, shifts: [], rows: [] }; groups.push(byKey[key]); }
+      byKey[key].rows.push(rows[i]);
+      var sh = rows[i].shift || '';
+      if (sh && byKey[key].shifts.indexOf(sh) < 0) { byKey[key].shifts.push(sh); }
+    }
+
+    var h = '';
+    for (i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">' +
+        esc(g.shifts.length ? g.shifts.join(' · ') : 'Checkpoints') +
+        '<span class="hint">' + esc(g.rows.length) + (g.rows.length === 1 ? ' person' : ' people') + '</span></div>' +
+        '<div class="bd scroll"><table class="rp-tbl"><thead><tr><th>Person</th>';
+      for (j = 0; j < g.checkpoints.length; j++) {
+        h += '<th class="rp-cp">' + esc(hm12(g.checkpoints[j])) + '</th>';
+      }
+      h += '<th>Counts</th></tr></thead><tbody>';
+      for (j = 0; j < g.rows.length; j++) {
+        var r = g.rows[j], k;
+        h += '<tr><td><div class="rp-who">' + esc(r.name || r.email) + '<span>' + esc(r.role || '') + '</span></div></td>';
+        var cells = r.cells || [];
+        for (k = 0; k < g.checkpoints.length; k++) {
+          h += '<td class="rp-cpc">' + cellHtml(cells[k] || { checkpoint: g.checkpoints[k], state: 'empty' }) + '</td>';
+        }
+        h += '<td>' + countsHtml(r.counts) + '</td></tr>';
+      }
+      h += '</tbody></table></div></div>';
+    }
+    return h;
+  }
+
+  function totalsHtml(d) {
+    var totals = (d && d.totalsByRole) || {};
+    var roles = [], k;
+    for (k in totals) { if (Object.prototype.hasOwnProperty.call(totals, k)) { roles.push(k); } }
+    var h = '<div class="card enter d3" style="margin-top:16px"><div class="hd">Role counters ' +
+      '<span class="hint">auto-summed · ' + esc(fmtDay(d.date)) + '</span></div><div class="bd">';
+    if (!roles.length) {
+      h += '<div class="rp-note">No counts submitted for this day yet.</div>';
+    } else {
+      for (var i = 0; i < roles.length; i++) {
+        var items = totals[roles[i]] || [], parts = '<div class="rp-counts">';
+        for (var j = 0; j < items.length; j++) {
+          parts += '<span class="rp-count">' + esc(items[j].label) + ' <b class="num">' + esc(items[j].total) + '</b></span>';
+        }
+        parts += '</div>';
+        h += '<div class="tl-row"><span class="k"><span class="pill role">' + esc(roles[i]) + '</span></span>' + parts + '</div>';
+      }
+    }
+    return h + '</div></div>';
+  }
+
+  function dprHtml(d) {
+    var rows = (d && d.rows) || [], has = false, h =
+      '<div class="card enter d3" style="margin-top:16px"><div class="hd">Daily Productivity Report ' +
+      '<span class="hint">final checkpoint of the shift</span></div><div class="bd" id="rgDpr">';
+    for (var i = 0; i < rows.length; i++) {
+      var text = rows[i].daily_productivity_report;
+      if (!text) { continue; }
+      has = true;
+      h += '<div class="tl-row"><span class="k">' + esc(rows[i].name || rows[i].email) + '</span>' +
+        '<span class="pill role">' + esc(rows[i].role || '') + '</span>' +
+        '<button class="minibtn" style="margin-left:auto" data-dpr="' + i + '">Show</button></div>' +
+        '<div class="rp-dpr hidden" id="rgDpr' + i + '">' + esc(text) + '</div>';
+    }
+    if (!has) { h += '<div class="rp-note">No Daily Productivity Report submitted for this day yet.</div>'; }
+    return h + '</div></div>';
+  }
+
+  function paintGrid(d) {
+    var body = $('rgBody');
+    if (!body) { return; }
+    var input = $('rgDate');
+    if (input && d.date) { input.value = d.date; }
+    var legend = $('rgLegend');
+    if (legend && d.legend) {
+      legend.innerHTML =
+        '<span><i style="background:var(--ok)"></i>' + esc(FLAG_LABEL[d.legend.green] || d.legend.green) + '</span>' +
+        '<span><i style="background:var(--warn)"></i>' + esc(FLAG_LABEL[d.legend.amber] || d.legend.amber) + '</span>' +
+        '<span><i style="background:var(--bad)"></i>' + esc(FLAG_LABEL[d.legend.red] || d.legend.red) + '</span>' +
+        '<span><i style="background:rgba(120,132,152,.45)"></i>Not yet due</span>';
+    }
+    body.innerHTML = gridHtml(d) + totalsHtml(d) + dprHtml(d);
+    var box = $('rgDpr');
+    if (box) {
+      box.onclick = function (ev) {
+        var t = ev.target;
+        if (!t || !t.getAttribute) { return; }
+        var idx = t.getAttribute('data-dpr');
+        if (idx === null) { return; }
+        var panel = $('rgDpr' + idx);
+        if (!panel) { return; }
+        var hidden = panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', !hidden);
+        t.textContent = hidden ? 'Hide' : 'Show';
+      };
+    }
+  }
+
+  function loadGrid(date) {
+    var body = $('rgBody');
+    if (body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+    api('reportsGrid', date ? { date: date } : {}).then(function (d) {
+      paintGrid(d || {});
+    }).catch(function (e) {
+      if (!$('rgBody')) { return; }
+      $('rgBody').innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">' +
+        esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'The grid could not be loaded. Please try again.') +
+        '</div></div>';
+    });
+  }
+
+  VIEWS.reportsGrid = {
+    label: 'Reports grid',
+    icon: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    roles: GRID_ROLES,
+    order: 35,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Reports <span class="goldtext">grid</span></h1>' +
+        '<span class="sub">Per person · per checkpoint</span></div>' +
+        '<div class="card enter d2"><div class="bd">' +
+          '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">' +
+            '<div class="field" style="margin-top:0;min-width:168px"><label>Day</label><input type="date" id="rgDate"></div>' +
+            '<button class="minibtn" id="rgToday" style="margin-bottom:1px">Today</button>' +
+          '</div>' +
+          '<div class="rp-legend" id="rgLegend"></div>' +
+        '</div></div>' +
+        '<div id="rgBody"><div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
+    },
+    init: function () {
+      var input = $('rgDate');
+      if (input) { input.onchange = function () { loadGrid(input.value); }; }
+      var today = $('rgToday');
+      if (today) { today.onclick = function () { if (input) { input.value = ''; } loadGrid(''); }; }
+      loadGrid('');
+    }
+  };
+
+})();
+
+/* ---------- view-rota.js ---------- */
+/* §26 — Rules & SOPs (the living company law) and §5 — the rota.
+ * Registers VIEWS.rules (everyone) and VIEWS.rota (Management / Ops Head). */
+
+(function () {
+
+/* §26.1 — the only departments a rule or an instruction may target. */
+var RULE_DEPTS = ['Hunting', 'Listing', 'Advertising', 'CS', 'Order Processing', 'ALL'];
+/* §26.1 types, shown under the workbook's own headings (§26.2 "exactly in the familiar layout"). */
+var RULE_TYPES = ['Do', "Don't", 'Criteria'];
+var TYPE_LABEL = { 'Do': "Do's", "Don't": "Don'ts", 'Criteria': 'Criteria' };
+
+/* .scroll and .minibtn belong to the Royal preview but are not in the shell's stylesheet yet;
+ * the values below are the preview's own, so a later shell definition is identical. */
+VIEW_CSS.push([
+  '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}',
+  '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}',
+  '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}',
+  '.rl-tbl,.rt-tbl{width:100%;border-collapse:collapse;font-size:13px}',
+  '.rl-tbl th,.rt-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}',
+  '.rl-tbl td,.rt-tbl td{padding:11px 12px;border-bottom:1px solid var(--gold-line);vertical-align:top}',
+  '.rl-tbl tr:last-child td,.rt-tbl tr:last-child td{border-bottom:0}',
+  '.rl-tbl{min-width:560px}.rt-tbl{min-width:820px}',
+  '.rl-tbl tbody tr,.rt-tbl tbody tr{transition:background .12s;cursor:pointer}',
+  '.rl-tbl tbody tr:hover,.rt-tbl tbody tr:hover{background:var(--blue-soft)}',
+  '.rl-row{align-items:flex-start;flex-wrap:wrap;gap:12px}',
+  '.rl-txt{flex:1 1 220px;min-width:0}',
+  '.rl-txt .t{font-weight:600;white-space:pre-wrap;word-break:break-word}',
+  '.rl-meta{font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:3px}',
+  '.rl-act{display:flex;align-items:center;gap:8px;flex:none;padding-top:1px}',
+  '.rl-new{background:var(--blue-soft);color:var(--blue-2);outline:1px solid rgba(61,155,240,.35)}',
+  '.rl-ok{font-size:11.5px;font-weight:800;color:var(--ok);white-space:nowrap}',
+  '.rl-dept{background:rgba(120,132,152,.16);color:var(--text-2)}',
+  '.rl-ret{background:var(--warn-soft);color:var(--warn)}',
+  '.rl-empty{color:var(--text-3);font-weight:600;font-size:12.5px;padding:4px 0}',
+  '.rl-sop+.rl-sop{border-top:1px solid var(--gold-line)}',
+  '.rl-sopq{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 0;font-weight:700;font-size:13px;color:var(--text)}',
+  '.rl-sopq .ord{min-width:20px;color:var(--gold-a);font-weight:800}',
+  '.rl-sopq .chev{margin-left:auto;color:var(--text-3);transition:transform .15s}',
+  '.rl-sopq.open .chev{transform:rotate(90deg)}',
+  '.rl-sopc{white-space:pre-wrap;word-break:break-word;font-size:12.5px;color:var(--text-2);font-weight:600;padding:2px 0 12px 12px;margin:0 0 4px 8px;border-left:2px solid var(--gold-line)}',
+  '.rl-seg{display:inline-flex;background:var(--panel);border:1px solid var(--gold-line);border-radius:11px;padding:3px;gap:2px}',
+  '.rl-seg button{padding:6px 15px;border-radius:8px;font-weight:800;font-size:12.5px;color:var(--text-3);transition:all .18s}',
+  '.rl-seg button.on{background:linear-gradient(135deg,var(--gold-a),var(--gold-b) 60%,var(--gold-c));color:var(--gold-ink);box-shadow:var(--glow-gold)}',
+  '.rl-ta{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:80px}',
+  '.rl-ta:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}',
+  '.rl-cell{max-width:340px;white-space:pre-wrap;word-break:break-word}',
+  '.rt-name{font-weight:800}',
+  '.rt-meta{font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px}',
+  '.rt-day{text-align:center;width:46px}',
+  '.rt-today{background:rgba(61,155,240,.07)}',
+  '.rt-dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(120,132,152,.3)}',
+  '.rt-dot.on{background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));box-shadow:var(--glow-blue)}',
+  '.rt-none{color:var(--text-3);font-weight:800}',
+  '.rt-req{background:var(--warn-soft);color:var(--warn)}',
+  '.rt-due{background:var(--warn-soft);color:var(--warn)}',
+  '.rt-up{background:rgba(120,132,152,.16);color:var(--text-3)}',
+  '.rt-cps{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}',
+  '.rt-legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:12px}',
+  '.rt-legend span{display:flex;align-items:center;gap:6px}',
+  '.rt-fields{display:grid;gap:0 14px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}',
+  '.rt-days{display:flex;gap:6px;flex-wrap:wrap}',
+  '.rt-days button.on{border-color:var(--blue);color:var(--blue-2);background:var(--blue-soft)}'
+].join('\n'));
+
+/* ---------- shared helpers ---------- */
+
+/* esc() does not escape quotes, so attribute values go through this instead (RL-3). */
+function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
+function pkt(iso) { return iso ? fmtPkt(iso, true) : ''; }
+function isMgmt() { return ['Management', 'Ops Head'].indexOf(String(STATE.user && STATE.user.role)) >= 0; }
+function loadingCard(msg) {
+  return '<div class="card enter d2"><div class="bd" style="text-align:center"><div class="spinner"></div>' +
+    '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">' + esc(msg) + '</div></div></div>';
+}
+function noteCard(msg) {
+  return '<div class="card enter d2"><div class="bd" style="color:var(--text-3);font-weight:600;font-size:12.5px">' + esc(msg) + '</div></div>';
+}
+/* A view can be swapped out while its request is in flight, so every write is null-safe. */
+function put(id, html) {
+  var el = $(id);
+  if (el) { el.innerHTML = html; }
+  return el;
+}
+/* Walks up from the click target to the nearest element carrying the named attribute. */
+function upTo(node, name, root) {
+  while (node && node !== root) {
+    if (node.getAttribute && node.getAttribute(name) !== null) return node;
+    node = node.parentNode;
+  }
+  return null;
+}
+function selectHtml(id, options, chosen) {
+  var h = '<select id="' + attr(id) + '">';
+  for (var i = 0; i < options.length; i++) {
+    h += '<option value="' + attr(options[i]) + '"' + (String(options[i]) === String(chosen) ? ' selected' : '') + '>' +
+      esc(options[i]) + '</option>';
+  }
+  return h + '</select>';
+}
+
+/* ============================ §26 — RULES & SOPs ============================ */
+
+var law = null, ackGrid = null, composerKind = 'rule';
+
+VIEWS.rules = {
+  label: 'Rules & SOPs',
+  order: 50,
+  roles: '*',
+  icon: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M8 7.5h8M8 11h8M8 14.5h5"/>',
+  render: function () {
+    return '<div class="hgroup enter d1"><h1>Rules &amp; <span class="goldtext">SOPs</span></h1>' +
+      '<span class="sub" id="rlScope">Company law · published by Management, delivered the moment it lands</span></div>' +
+      '<div id="rlPinned"></div>' +
+      '<div id="rlLaw">' + loadingCard('Loading your rules…') + '</div>' +
+      '<div id="rlSops" style="margin-top:16px">' + loadingCard('Loading your SOPs…') + '</div>' +
+      '<div id="rlAdmin" style="margin-top:16px"></div>';
+  },
+  init: function () {
+    loadLaw();
+    api('mySops').then(renderSops).catch(function () {
+      put('rlSops', noteCard('SOPs could not be loaded right now.'));
+    });
+    if (isMgmt()) { renderAdmin(); loadAckGrid(); }
+  }
+};
+
+function loadLaw() {
+  return api('myRules').then(function (d) {
+    law = d;
+    var scope = $('rlScope');
+    if (scope) {
+      scope.textContent = 'Company law · ' + (d.dept === '*' ? 'all departments' : d.dept) +
+        ' · published by Management, delivered the moment it lands';
+    }
+    renderPinned(d);
+    renderLaw(d);
+    STATE.counts.rules = Number(d.unacknowledged) || 0;
+    if (typeof refreshBadges === 'function') refreshBadges();
+  }).catch(function () {
+    put('rlLaw', noteCard('Your rules could not be loaded. Nothing has changed — try again shortly.'));
+  });
+}
+
+/* §26.2 — the Advertising master list is pinned as a card on the Advertising Manager's screen. */
+function renderPinned(d) {
+  var box = $('rlPinned'), list = d.pinned || [];
+  if (!box) { return; }
+  if (!list.length) { box.innerHTML = ''; return; }
+  var h = '<div class="card ideas enter d1" style="margin-bottom:16px"><div class="hd">' +
+    esc(d.pinnedDepartment) + ' — master list <span class="hint">pin this on the wall</span></div><div class="bd">';
+  for (var i = 0; i < list.length; i++) {
+    var r = list[i];
+    h += '<div class="tl-row rl-row"><div class="rl-txt"><div class="t">' + esc(r.rule_text) + '</div>' +
+      '<div class="rl-meta"><span class="pill rl-dept">' + esc(TYPE_LABEL[r.type] || r.type) + '</span> ' +
+      esc('issued by ' + r.added_by) + ' · ' + esc(pkt(r.added_at)) + ' PKT</div></div>' +
+      (r.isNew ? '<div class="rl-act"><span class="pill rl-new">New</span></div>' : '') + '</div>';
+  }
+  box.innerHTML = h + '</div></div>';
+}
+
+function ackBits(kind, id, acknowledged, at) {
+  if (acknowledged) { return '<span class="rl-ok">Understood ✓ ' + esc(pkt(at)) + '</span>'; }
+  return '<span class="pill rl-new">New</span>' +
+    '<button class="minibtn" data-ack-kind="' + attr(kind) + '" data-ack-id="' + attr(id) + '">Understood</button>';
+}
+
+function lawRow(text, deptPill, meta, actions) {
+  return '<div class="tl-row rl-row"><div class="rl-txt"><div class="t">' + esc(text) + '</div>' +
+    '<div class="rl-meta">' + deptPill + esc(meta) + '</div></div>' +
+    '<div class="rl-act">' + actions + '</div></div>';
+}
+
+function deptPill(department, myDept) {
+  if (String(department) === String(myDept)) { return ''; }
+  return '<span class="pill rl-dept">' + esc(department) + '</span> ';
+}
+
+function renderLaw(d) {
+  var types = (d.types && d.types.length) ? d.types : RULE_TYPES;
+  var groups = d.groups || {};
+  var h = '<div class="grid">';
+  for (var t = 0; t < types.length; t++) {
+    var type = types[t], rows = groups[type] || [], fresh = 0, body = '';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.isNew) { fresh++; }
+      body += lawRow(r.rule_text, deptPill(r.department, d.dept),
+        'issued by ' + r.added_by + ' · ' + pkt(r.added_at) + ' PKT',
+        ackBits('rule', r.rule_id, r.acknowledged, r.acknowledged_at));
+    }
+    if (!rows.length) { body = '<div class="rl-empty">Nothing here yet.</div>'; }
+    h += '<div class="card enter d2"><div class="hd">' + esc(TYPE_LABEL[type] || type) +
+      ' <span class="hint">' + rows.length + (rows.length === 1 ? ' rule' : ' rules') +
+      (fresh ? ' · ' + fresh + ' new' : '') + '</span></div><div class="bd">' + body + '</div></div>';
+  }
+
+  var instructions = d.instructions || [], ibody = '';
+  for (var j = 0; j < instructions.length; j++) {
+    var n = instructions[j];
+    ibody += lawRow(n.instruction_text, deptPill(n.department, d.dept),
+      'effective from ' + n.date + ' · given by ' + n.given_by,
+      ackBits('instruction', n.instr_id, n.acknowledged, n.acknowledged_at));
+  }
+  h += '<div class="card enter d3"><div class="hd">Instructions Given By The Management ' +
+    '<span class="hint">' + instructions.length + ' active</span></div><div class="bd">' +
+    (ibody || '<div class="rl-empty">No standing instructions right now.</div>') + '</div></div>';
+
+  var retired = d.retired || [];
+  if (retired.length) {
+    var rbody = '';
+    for (var k = 0; k < retired.length; k++) {
+      var q = retired[k];
+      rbody += lawRow(q.rule_text, deptPill(q.department, d.dept),
+        (TYPE_LABEL[q.type] || q.type) + ' · retired by ' + q.retired_by + ' · ' + pkt(q.retired_at),
+        '<span class="pill rl-ret">Retired</span>');
+    }
+    h += '<div class="card enter d3"><div class="hd">Retired rules <span class="hint">history · nothing is ever deleted</span></div>' +
+      '<div class="bd">' + rbody + '</div></div>';
+  }
+
+  var box = put('rlLaw', h + '</div>');
+  if (box) { box.onclick = onAckClick; }
+}
+
+/* §26.3 — one tap and the acknowledgment is recorded; the row answers on the spot. */
+function onAckClick(ev) {
+  var btn = upTo(ev.target, 'data-ack-id', this);
+  if (!btn) { return; }
+  var kind = btn.getAttribute('data-ack-kind'), id = btn.getAttribute('data-ack-id');
+  var slot = btn.parentNode;
+  btn.disabled = true;
+  var action = kind === 'instruction' ? 'acknowledgeInstruction' : 'acknowledgeRule';
+  var payload = kind === 'instruction' ? { instr_id: id } : { rule_id: id };
+  api(action, payload).then(function (res) {
+    slot.innerHTML = '<span class="rl-ok">Understood ✓ ' + esc(pkt(res.acknowledged_at)) + '</span>';
+    STATE.counts.rules = Math.max(0, (Number(STATE.counts.rules) || 0) - 1);
+    if (typeof refreshBadges === 'function') { refreshBadges(); }
+    toast('Understood — Management can see you have read it.');
+    if (isMgmt()) { loadAckGrid(); }
+  }).catch(function (e) {
+    btn.disabled = false;
+    toast('Could not record that — ' + e.message);
+  });
+}
+
+function renderSops(d) {
+  var sops = d.sops || [], h = '';
+  for (var i = 0; i < sops.length; i++) {
+    var s = sops[i];
+    h += '<div class="rl-sop">' +
+      '<button class="rl-sopq" data-sop="' + i + '"><span class="ord num">' + esc(s.order || (i + 1)) + '</span>' +
+      '<b>' + esc(s.title) + '</b><span class="chev">▸</span></button>' +
+      '<div class="rl-sopc hidden" data-sopc="' + i + '">' + esc(s.content) +
+      '\n\n' + esc('— updated by ' + s.updated_by + ' · ' + pkt(s.updated_at)) + '</div></div>';
+  }
+  var box = put('rlSops', '<div class="card enter d3"><div class="hd">SOPs <span class="hint">' +
+    (d.dept === '*' ? 'every department' : esc(d.dept)) + ' · in order</span></div><div class="bd">' +
+    (h || '<div class="rl-empty">No SOPs for your department yet.</div>') + '</div></div>');
+  if (!box) { return; }
+  box.onclick = function (ev) {
+    var q = upTo(ev.target, 'data-sop', this);
+    if (!q) { return; }
+    var idx = q.getAttribute('data-sop'), panels = box.querySelectorAll('[data-sopc]');
+    for (var j = 0; j < panels.length; j++) {
+      if (panels[j].getAttribute('data-sopc') === idx) {
+        panels[j].classList.toggle('hidden');
+        q.className = 'rl-sopq' + (panels[j].classList.contains('hidden') ? '' : ' open');
+      }
+    }
+  };
+}
+
+/* ---------- management: the composer (§26.1, §26.4) and the acknowledgment grid (§26.3) ---------- */
+
+function renderAdmin() {
+  composerKind = 'rule';                       // the freshly drawn switch always starts on Rule
+  var types = (law && law.types && law.types.length) ? law.types : RULE_TYPES;
+  var h = '<div class="grid">' +
+    '<div class="card enter d3"><div class="hd">Publish company law <span class="hint">delivered to that department instantly</span></div>' +
+    '<div class="bd">' +
+      '<div class="rl-seg" id="rlKind"><button class="on" data-kind="rule">Rule</button><button data-kind="instruction">Instruction</button></div>' +
+      '<div class="rt-fields">' +
+        '<div class="field"><label>Department</label>' + selectHtml('rlDept', RULE_DEPTS, 'ALL') + '</div>' +
+        '<div class="field" id="rlTypeField"><label>Type</label>' + selectHtml('rlType', types, types[0]) + '</div>' +
+        '<div class="field hidden" id="rlDateField"><label>Effective from</label><input type="date" id="rlDate"></div>' +
+      '</div>' +
+      '<div class="field"><label id="rlTextLabel">Rule text</label><textarea class="rl-ta" id="rlText" placeholder="Write it exactly as staff should read it…"></textarea></div>' +
+      '<button class="btn-gold" id="rlPublish" style="margin-top:14px">Publish rule</button>' +
+      '<div class="rl-meta">Every staff member in that department is notified with the date, time and your name.</div>' +
+    '</div></div>' +
+    '<div class="card enter d3"><div class="hd">Acknowledgment grid <span class="hint">who has read it, who has not</span></div>' +
+      '<div class="bd" id="rlGrid">' + loadingCard('Loading acknowledgments…') + '</div></div>' +
+    '<div id="rlDetail"></div>' +
+  '</div>';
+  if (!put('rlAdmin', h)) { return; }
+
+  $('rlKind').onclick = function (ev) {
+    var b = upTo(ev.target, 'data-kind', this);
+    if (!b) { return; }
+    composerKind = b.getAttribute('data-kind');
+    var all = this.getElementsByTagName('button');
+    for (var i = 0; i < all.length; i++) { all[i].className = all[i] === b ? 'on' : ''; }
+    var rule = composerKind === 'rule';
+    $('rlTypeField').classList.toggle('hidden', !rule);
+    $('rlDateField').classList.toggle('hidden', rule);
+    $('rlTextLabel').textContent = rule ? 'Rule text' : 'Instruction';
+    $('rlPublish').textContent = rule ? 'Publish rule' : 'Publish instruction';
+  };
+  $('rlPublish').onclick = publish;
+}
+
+function publish() {
+  var text = $('rlText').value.replace(/^\s+|\s+$/g, '');
+  if (!text) { toast('Write the text first.'); return; }
+  var btn = $('rlPublish');
+  btn.disabled = true;
+  var rule = composerKind === 'rule';
+  var action = rule ? 'addRule' : 'addInstruction';
+  var payload = rule
+    ? { department: $('rlDept').value, type: $('rlType').value, rule_text: text }
+    : { department: $('rlDept').value, instruction_text: text, date: $('rlDate').value };
+  api(action, payload).then(function (res) {
+    btn.disabled = false;
+    $('rlText').value = '';
+    var n = Number(res.delivered) || 0;
+    toast((rule ? 'Rule' : 'Instruction') + ' published — delivered to ' + n + (n === 1 ? ' person.' : ' people.'));
+    loadLaw();
+    loadAckGrid();
+  }).catch(function (e) {
+    btn.disabled = false;
+    toast('Could not publish — ' + e.message);
+  });
+}
+
+function loadAckGrid() {
+  if (!isMgmt() || !$('rlGrid')) { return; }
+  api('ruleAckGrid', {}).then(function (d) {
+    ackGrid = d.rules || [];
+    renderAckGrid();
+  }).catch(function () {
+    put('rlGrid', '<div class="rl-empty">The acknowledgment grid could not be loaded.</div>');
+  });
+}
+
+function renderAckGrid() {
+  if (!ackGrid.length) {
+    put('rlGrid', '<div class="rl-empty">No active rules yet.</div>');
+    return;
+  }
+  var h = '<div class="scroll"><table class="rl-tbl"><thead><tr><th>Rule</th><th>Department</th><th>Type</th><th>Read</th></tr></thead><tbody>';
+  for (var i = 0; i < ackGrid.length; i++) {
+    var r = ackGrid[i], done = Number(r.acknowledged) || 0, of = Number(r.of) || 0;
+    h += '<tr data-rule="' + attr(r.rule_id) + '">' +
+      '<td><div class="rl-cell">' + esc(r.rule_text) + '</div>' +
+        '<div class="rl-meta mono">' + esc(r.rule_id) + '</div></td>' +
+      '<td>' + esc(r.department) + '</td>' +
+      '<td>' + esc(TYPE_LABEL[r.type] || r.type) + '</td>' +
+      '<td><span class="num" style="font-weight:800;color:' + (done >= of && of ? 'var(--ok)' : 'var(--warn)') + '">' +
+        done + ' / ' + of + '</span></td></tr>';
+  }
+  var box = put('rlGrid', h + '</tbody></table></div><div class="rl-meta">Tap a rule to see exactly who has read it.</div>');
+  if (!box) { return; }
+  box.onclick = function (ev) {
+    var tr = upTo(ev.target, 'data-rule', this);
+    if (tr) { loadAckDetail(tr.getAttribute('data-rule')); }
+  };
+}
+
+function loadAckDetail(ruleId) {
+  put('rlDetail', loadingCard('Loading who has read it…'));
+  api('ruleAckGrid', { rule_id: ruleId }).then(renderAckDetail).catch(function () {
+    put('rlDetail', noteCard('That acknowledgment grid could not be loaded.'));
+  });
+}
+
+function renderAckDetail(d) {
+  var grid = d.grid || [], counts = d.counts || {}, rows = '';
+  for (var i = 0; i < grid.length; i++) {
+    var p = grid[i];
+    rows += '<div class="tl-row"><span class="k">' + esc(p.name || p.email) + '</span>' +
+      '<span class="pill rl-dept">' + esc(p.role || '—') + '</span>' +
+      '<span style="margin-left:auto">' + (p.acknowledged
+        ? '<span class="rl-ok">Read ✓ ' + esc(pkt(p.acknowledged_at)) + '</span>'
+        : '<span class="pill rt-req">Not yet</span>') + '</span></div>';
+  }
+  var retire = d.status === 'active'
+    ? '<button class="minibtn" id="rlRetire" data-rule="' + attr(d.rule_id) + '" style="margin-top:14px">Retire this rule</button>'
+    : '<div class="rl-meta">Retired by ' + esc(d.retired_by) + ' · ' + esc(pkt(d.retired_at)) + '</div>';
+
+  put('rlDetail', '<div class="card enter d2"><div class="hd">Who has read it ' +
+    '<span class="hint">' + (Number(counts.acknowledged) || 0) + ' read · ' + (Number(counts.pending) || 0) + ' not yet</span></div>' +
+    '<div class="bd"><div class="rl-txt"><div class="t">' + esc(d.rule_text) + '</div>' +
+      '<div class="rl-meta">' + esc(d.department + ' · ' + (TYPE_LABEL[d.type] || d.type) +
+        ' · issued by ' + d.added_by + ' · ' + pkt(d.added_at)) + ' PKT</div></div>' +
+    '<div style="margin-top:8px">' + (rows || '<div class="rl-empty">Nobody is targeted by this rule yet.</div>') + '</div>' +
+    retire + '</div></div>');
+
+  var btn = $('rlRetire');
+  if (btn) {
+    btn.onclick = function () {
+      if (!window.confirm('Retire this rule? It stays visible in history with your name and the time.')) { return; }
+      btn.disabled = true;
+      api('retireRule', { rule_id: btn.getAttribute('data-rule') }).then(function () {
+        toast('Rule retired — it stays in history.');
+        put('rlDetail', '');
+        loadLaw();
+        loadAckGrid();
+      }).catch(function (e) {
+        btn.disabled = false;
+        toast('Could not retire — ' + e.message);
+      });
+    };
+  }
+}
+
+/* ============================ §5 — THE ROTA ============================ */
+
+var rota = null, editing = null;
+
+VIEWS.rota = {
+  label: 'Rota',
+  order: 60,
+  roles: ['Management', 'Ops Head'],
+  icon: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M7.5 14h2M14.5 14h2M7.5 17.5h2M14.5 17.5h2"/>',
+  render: function () {
+    return '<div class="hgroup enter d1"><h1>Staff <span class="goldtext">rota</span></h1>' +
+      '<span class="sub">Management sets every timetable — staff only request a shift</span></div>' +
+      '<div id="rtMine">' + loadingCard('Loading your timetable…') + '</div>' +
+      '<div id="rtEditor"></div>' +
+      '<div id="rtGrid" style="margin-top:16px">' + loadingCard('Loading the rota…') + '</div>';
+  },
+  init: function () {
+    api('myTimetable').then(renderMine).catch(function () {
+      put('rtMine', noteCard('Your timetable could not be loaded right now.'));
+    });
+    loadRota();
+  }
+};
+
+function renderMine(d) {
+  var s = d.schedule, cps = d.checkpoints || [], pills = '';
+  for (var i = 0; i < cps.length; i++) {
+    var c = cps[i];
+    var cls = c.status === 'done' ? 'pill role' : (c.status === 'due' ? 'pill rt-due' : 'pill rt-up');
+    pills += '<span class="' + cls + '"><span class="num">' + esc(c.time) + '</span></span>';
+  }
+  var source = !s ? 'Not set yet'
+    : (s.source === 'assigned'
+      ? 'set by ' + s.assigned_by + ' · from ' + s.effective_from
+      : 'from your requested shift — Management has not assigned a timetable yet');
+
+  put('rtMine', '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div>' +
+    '<div class="bd">' +
+      '<div class="tl-row"><span class="k">Shift</span><b>' + esc(s ? s.shift_label : (d.shift || 'Not set yet')) + '</b></div>' +
+      '<div class="tl-row"><span class="k">Work</span><b class="num">' + esc(s && s.work_start ? s.work_start + '–' + s.work_end : '—') + '</b></div>' +
+      '<div class="tl-row"><span class="k">Break</span><b class="num">' + esc(s && s.break_start ? s.break_start + '–' + s.break_end : '—') + '</b></div>' +
+      '<div class="tl-row"><span class="k">Working days</span><b>' + esc(s && s.working_days ? s.working_days : 'Not set yet') + '</b></div>' +
+      '<div class="tl-row"><span class="k">Checkpoints</span><span class="rt-cps">' + (pills || '<span class="rt-none">—</span>') + '</span></div>' +
+      '<div class="rl-meta">' + esc(source) + '</div>' +
+    '</div></div>');
+}
+
+function loadRota() {
+  return api('rotaGrid').then(function (d) {
+    rota = d;
+    renderRota(d);
+  }).catch(function () {
+    put('rtGrid', noteCard('The rota could not be loaded. Nothing has changed — try again shortly.'));
+  });
+}
+
+function renderRota(d) {
+  var week = d.week || [], staff = d.staff || [];
+  var h = '<div class="card enter d2"><div class="hd">Staff × days ' +
+    '<span class="hint">tap any cell to set that person’s schedule</span></div><div class="bd">' +
+    '<div class="scroll"><table class="rt-tbl"><thead><tr>' +
+    '<th>Staff</th><th>Shift</th><th>Work</th><th>Break</th>';
+  for (var w = 0; w < week.length; w++) {
+    h += '<th class="rt-day' + (week[w].date === d.today ? ' rt-today' : '') + '">' + esc(week[w].day) +
+      '<div class="rt-meta num">' + esc(Number(String(week[w].date).slice(8, 10))) + '</div></th>';
+  }
+  h += '<th>Checkpoints</th></tr></thead><tbody>';
+
+  for (var i = 0; i < staff.length; i++) {
+    var s = staff[i];
+    h += '<tr data-i="' + i + '">' +
+      '<td><div class="rt-name">' + esc(s.name || s.email) + '</div>' +
+        '<div class="rt-meta">' + esc(s.role) + '</div></td>' +
+      '<td><b>' + esc(s.shift_label || '—') + '</b>' +
+        (s.assigned ? '' : ' <span class="pill rt-req">Requested</span>') +
+        '<div class="rt-meta">' + esc(s.assigned ? 'from ' + s.effective_from : 'not set by Management yet') + '</div></td>' +
+      '<td class="num">' + esc(s.work_start ? s.work_start + '–' + s.work_end : '—') + '</td>' +
+      '<td class="num">' + esc(s.break_start ? s.break_start + '–' + s.break_end : '—') + '</td>';
+    var days = s.week || [];
+    for (var j = 0; j < days.length; j++) {
+      var cell = days[j].working === null || days[j].working === undefined
+        ? '<span class="rt-none">—</span>'
+        : '<i class="rt-dot' + (days[j].working ? ' on' : '') + '"></i>';
+      h += '<td class="rt-day' + (days[j].date === d.today ? ' rt-today' : '') + '">' + cell + '</td>';
+    }
+    h += '<td class="rt-meta num">' + esc((s.checkpoints || []).join(' · ') || '—') + '</td></tr>';
+  }
+  if (!staff.length) {
+    h += '<tr><td colspan="' + (5 + week.length) + '"><div class="rl-empty">No approved staff yet.</div></td></tr>';
+  }
+
+  h += '</tbody></table></div>' +
+    '<div class="rt-legend"><span><i class="rt-dot on"></i> Working day</span>' +
+      '<span><i class="rt-dot"></i> Off</span>' +
+      '<span><b class="rt-none">—</b> Working days not set yet</span>' +
+      '<span>Staff request a shift; Management assigns the timetable.</span></div>' +
+    '</div></div>';
+
+  var box = put('rtGrid', h);
+  if (!box) { return; }
+  box.onclick = function (ev) {
+    var tr = upTo(ev.target, 'data-i', this);
+    if (!tr) { return; }
+    var rec = (rota.staff || [])[Number(tr.getAttribute('data-i'))];
+    if (rec) { openEditor(rec); }
+  };
+}
+
+/* §5 — Management (and Ops Head) set the working, break and shift schedule; saving notifies the staff member. */
+function openEditor(rec) {
+  editing = rec;
+  var labels = (rota && rota.shift_labels) || [], dayCodes = (rota && rota.days) || [];
+  var picked = rec.working_days ? rec.working_days.split(',') : [];
+  var dayBtns = '';
+  for (var i = 0; i < dayCodes.length; i++) {
+    dayBtns += '<button class="minibtn' + (picked.indexOf(dayCodes[i]) >= 0 ? ' on' : '') +
+      '" data-day="' + attr(dayCodes[i]) + '">' + esc(dayCodes[i]) + '</button>';
+  }
+  var stamp = rec.assigned
+    ? 'Current timetable set by ' + rec.assigned_by + ' · ' + pkt(rec.assigned_at)
+    : 'No timetable assigned yet · ' + (rec.name || rec.email) + ' requested ' + (rec.requested_shift || 'no shift');
+
+  if (!put('rtEditor', '<div class="card enter d2" style="margin-top:16px">' +
+    '<div class="hd">Set ' + esc(rec.name || rec.email) + '’s timetable <span class="hint">saving notifies them</span></div>' +
+    '<div class="bd">' +
+      '<div class="rt-fields">' +
+        '<div class="field"><label>Shift</label>' + selectHtml('rtShift', labels, rec.shift_label) + '</div>' +
+        '<div class="field"><label>Effective from</label><input type="date" id="rtEff" value="' + attr(rota.today) + '"></div>' +
+        '<div class="field"><label>Work start</label><input type="time" id="rtWs" value="' + attr(rec.work_start) + '"></div>' +
+        '<div class="field"><label>Work end</label><input type="time" id="rtWe" value="' + attr(rec.work_end) + '"></div>' +
+        '<div class="field"><label>Break start</label><input type="time" id="rtBs" value="' + attr(rec.break_start) + '"></div>' +
+        '<div class="field"><label>Break end</label><input type="time" id="rtBe" value="' + attr(rec.break_end) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label>Working days</label><div class="rt-days" id="rtDays">' + dayBtns + '</div></div>' +
+      '<div class="rl-meta" style="margin-top:12px">' + esc(stamp) + '</div>' +
+      '<div class="rl-meta">Checkpoints follow automatically: every 2 hours from work start, skipping the break, final report at work end.</div>' +
+      '<div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">' +
+        '<button class="btn-gold" id="rtSave">Save timetable</button>' +
+        '<button class="btn-ghost" id="rtCancel">Cancel</button>' +
+      '</div>' +
+    '</div></div>')) { return; }
+
+  $('rtDays').onclick = function (ev) {
+    var b = upTo(ev.target, 'data-day', this);
+    if (!b) { return; }
+    b.className = b.className.indexOf(' on') >= 0 ? 'minibtn' : 'minibtn on';
+  };
+  /* Switching to a named shift blanks the times so the backend fills that shift's CONFIG preset (§5). */
+  $('rtShift').onchange = function () {
+    if (this.value === rec.shift_label || this.value === 'Custom') { return; }
+    $('rtWs').value = ''; $('rtWe').value = ''; $('rtBs').value = ''; $('rtBe').value = '';
+  };
+  $('rtCancel').onclick = function () { editing = null; put('rtEditor', ''); };
+  $('rtSave').onclick = saveSchedule;
+  try { $('rtEditor').scrollIntoView(); } catch (e) {}
+}
+
+function saveSchedule() {
+  if (!editing) { return; }
+  var label = $('rtShift').value, ws = $('rtWs').value, we = $('rtWe').value;
+  var bs = $('rtBs').value, be = $('rtBe').value;
+  if (label === 'Custom' && (!ws || !we)) { toast('A custom shift needs a work start and a work end.'); return; }
+  if ((bs && !be) || (!bs && be)) { toast('A break needs both a start and an end.'); return; }
+
+  var days = [], btns = $('rtDays').getElementsByTagName('button');
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i].className.indexOf(' on') >= 0) { days.push(btns[i].getAttribute('data-day')); }
+  }
+  var who = editing.name || editing.email;
+  var btn = $('rtSave');
+  btn.disabled = true;
+  api('setSchedule', {
+    email: editing.email, shift_label: label, effective_from: $('rtEff').value,
+    work_start: ws, work_end: we, break_start: bs, break_end: be, working_days: days.join(',')
+  }).then(function (res) {
+    editing = null;
+    put('rtEditor', '');
+    toast('Timetable saved — ' + who + ' has been notified · checkpoints ' + (res.checkpoints || []).join(', '));
+    loadRota();
+  }).catch(function (e) {
+    btn.disabled = false;
+    toast('Could not save — ' + e.message);
+  });
+}
+
+})();
+
+/* ---------- view-tasks.js ---------- */
+/* view-tasks.js — §7 TASKS + §8.0b UNIVERSAL APPROVAL GATE.
+ * Views: tasks (My tasks) · approvals (Pending approvals).
+ * Backend: myTasks · createTask · startTask · submitTask · pendingApprovals · approveTask · returnTask. */
+(function () {
+
+  /* Status strings, task types and creator rights are backend vocabulary — they must match
+     Tasks.gs character for character (the em dash in TK_SUBMITTED included). */
+  var TK_PENDING = 'Pending';
+  var TK_WORKING = 'Working';
+  var TK_UPDATED = 'Updated';
+  var TK_SUBMITTED = 'Submitted — awaiting approval';
+  var TK_COMPLETED = 'Completed';
+  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query'];
+  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review'];
+  var TK_CREATE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager'];       // §4.3 + §4.4
+  var TK_APPROVE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager'];
+  var TK_OPEN = [TK_PENDING, TK_WORKING, TK_UPDATED];
+
+  VIEW_CSS.push(
+    '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
+    '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
+    '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}' +
+    '.minibtn[disabled]{opacity:.4;cursor:default;box-shadow:none}' +
+    '.tk-tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}' +
+    '.tk-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);text-align:left;padding:9px 14px;border-bottom:1px solid var(--gold-line);font-weight:800}' +
+    '.tk-tbl td{padding:12px 14px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
+    '.tk-tbl tbody tr{transition:background .12s}' +
+    '.tk-tbl tbody tr:hover{background:var(--blue-soft)}' +
+    '.tk-tbl tr.tk-x:hover{background:none}' +
+    '.tk-tbl tr.tk-x>td{padding-top:0;border-bottom:1px solid var(--gold-line)}' +
+    '.due{font-weight:800}.due.today{color:var(--warn)}.due.late{color:var(--bad)}' +
+    '.pill.pending{background:var(--warn-soft);color:var(--warn)}' +
+    '.pill.working{background:var(--blue-soft);color:var(--blue-2)}' +
+    '.pill.updated{background:var(--blue-soft);color:var(--blue-2);outline:1px solid rgba(61,155,240,.35)}' +
+    '.pill.awaiting{background:linear-gradient(135deg,rgba(233,169,60,.18),rgba(233,169,60,.05));color:var(--gold-a);border:1px solid var(--gold-line-hi)}' +
+    '.pill.done{background:var(--ok-soft);color:var(--ok)}' +
+    '.tk-title{font-weight:800}' +
+    '.tk-meta{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:3px;letter-spacing:.03em}' +
+    '.tk-act{display:flex;gap:8px;flex-wrap:wrap;align-items:center}' +
+    '.tk-sub{font-size:11.5px;color:var(--text-3);font-weight:700}' +
+    '.tk-txt{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.55}' +
+    '.tk-link{color:var(--blue-2);font-weight:700}' +
+    '.tk-box{margin-top:10px;padding:11px 13px;border-radius:10px}' +
+    '.tk-box .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-3);margin-bottom:5px}' +
+    '.tk-ret{background:var(--bad-soft);border:1px solid rgba(240,96,90,.45)}' +
+    '.tk-ret .k{color:var(--bad)}' +
+    '.tk-det{background:rgba(120,132,152,.10);border:1px solid var(--gold-line)}' +
+    '.tk-note{background:var(--blue-soft);border:1px solid rgba(61,155,240,.30)}' +
+    '.tk-note .k{color:var(--blue-2)}' +
+    '.tk-form{margin-top:10px}' +
+    '.tk-grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}' +
+    '.tk-ta,.tk-in{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.tk-ta{resize:vertical;min-height:66px}' +
+    '.tk-ta:focus,.tk-in:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}' +
+    '.tk-btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}' +
+    '.tk-empty{color:var(--text-2);font-weight:700;padding:10px 0}' +
+    '.tk-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}' +
+    '.tk-ap{padding:15px 0}.tk-ap+.tk-ap{border-top:1px solid var(--gold-line)}' +
+    '.tk-ap-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}' +
+    '.tk-lag{background:rgba(120,132,152,.16);color:var(--text-2)}' +
+    '.tk-lag.tk-w{background:var(--warn-soft);color:var(--warn)}' +
+    '.tk-lag.tk-b{background:var(--bad-soft);color:var(--bad)}' +
+    '@media (max-width:880px){' +
+      '.tk-grid{grid-template-columns:1fr}' +
+      '.tk-tbl{min-width:0}.tk-tbl thead{display:none}' +
+      '.tk-tbl tr{display:block;padding:6px 0}' +
+      '.tk-tbl td{display:block;border-bottom:0;padding:4px 0}' +
+      '.tk-tbl tr.tk-r{border-top:1px solid var(--gold-line);padding-top:12px}' +
+      '.tk-tbl tr.tk-x>td{border-bottom:0}' +
+      '.tk-tbl td[data-k]:before{content:attr(data-k) " ";font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);font-weight:800;margin-right:7px}' +
+    '}'
+  );
+
+  // ---------- safety helpers (RL-3) ----------
+  /** esc() leaves quotes intact, so attribute values need the stricter form. */
+  function tkAttr(v) { return esc(v).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+  /** Text for the DOM: escaped, with http/https URLs (and nothing else) turned into links. */
+  function tkText(v) {
+    var s = String(v == null ? '' : v), out = '', re = /https?:\/\/[^\s<>"']+/g, last = 0, m, url;
+    while ((m = re.exec(s)) !== null) {
+      out += esc(s.slice(last, m.index));
+      url = m[0].replace(/[.,;:!?)\]]+$/, '');
+      out += '<a class="tk-link" href="' + tkAttr(url) + '" target="_blank" rel="noopener noreferrer">' + esc(url) + '</a>';
+      last = m.index + url.length;
+      re.lastIndex = last;
+    }
+    return out + esc(s.slice(last));
+  }
+
+  function tkPick(root, attr, val) {
+    var els = root.querySelectorAll('[' + attr + ']'), i;
+    for (i = 0; i < els.length; i++) { if (els[i].getAttribute(attr) === val) return els[i]; }
+    return null;
+  }
+  function tkHas(arr, v) { return arr.indexOf(v) >= 0; }
+  function tkRole() { return (STATE.user && STATE.user.role) || ''; }
+  function tkCanCreate() { return tkHas(TK_CREATE_ROLES, tkRole()); }
+  function tkStr(v) { return String(v == null ? '' : v).trim(); }
+
+  function tkCount(key, n) {
+    if (!STATE.counts) { STATE.counts = {}; }
+    STATE.counts[key] = n;
+    if (typeof refreshBadges === 'function') { refreshBadges(); }
+  }
+
+  // ---------- PKT time (the team's clock, whatever the device says) ----------
+  var TK_TZ = 'Asia/Karachi';
+  function tkMs(iso) { var d = new Date(iso); return isNaN(d.getTime()) ? NaN : d.getTime(); }
+  function tkDay(ms) {
+    return new Date(ms).toLocaleDateString('en-CA', { timeZone: TK_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+  }
+  function tkClock(ms) {
+    var s = new Date(ms).toLocaleTimeString('en-GB', { timeZone: TK_TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+    return s.replace(/\s*([ap])\.?m\.?$/i, function (all, ap) { return ' ' + ap.toUpperCase() + 'M'; });
+  }
+  function tkWhen(iso) {
+    var ms = tkMs(iso);
+    if (isNaN(ms)) { return tkStr(iso); }
+    var today = tkDay(Date.now());
+    if (tkDay(ms) === today) { return 'Today ' + tkClock(ms); }
+    if (tkDay(ms) === tkDay(Date.now() + 86400000)) { return 'Tomorrow ' + tkClock(ms); }
+    return new Date(ms).toLocaleDateString('en-GB', { timeZone: TK_TZ, day: 'numeric', month: 'short' }) + ' ' + tkClock(ms);
+  }
+  function tkMins(min) {
+    var n = Number(min) || 0, d, h;
+    if (n < 60) { return n + 'm'; }
+    if (n < 1440) { h = Math.floor(n / 60); return h + 'h ' + (n - h * 60) + 'm'; }
+    d = Math.floor(n / 1440); h = Math.round((n - d * 1440) / 60);
+    return d + 'd ' + h + 'h';
+  }
+
+  // ---------- task shaping ----------
+  function tkPillClass(status) {
+    if (status === TK_PENDING) return 'pending';
+    if (status === TK_WORKING) return 'working';
+    if (status === TK_UPDATED) return 'updated';
+    if (status === TK_SUBMITTED) return 'awaiting';
+    if (status === TK_COMPLETED) return 'done';
+    return '';
+  }
+  function tkDueCell(t) {
+    var iso = t.deadline_pkt, ms = tkMs(iso), status = tkStr(t.status), cls = 'due num', late;
+    if (!iso) { return '<span class="tk-sub">No deadline</span>'; }
+    late = t.overdue === true || (!isNaN(ms) && ms < Date.now() && status !== TK_COMPLETED);
+    if (late) { cls += ' late'; }
+    else if (!isNaN(ms) && tkDay(ms) === tkDay(Date.now())) { cls += ' today'; }
+    return '<span class="' + cls + '">' + esc(tkWhen(iso)) + '</span>' +
+      (late ? '<div class="tk-sub" style="color:var(--bad)">Overdue</div>' : '');
+  }
+  /** Return() appends "[stamp] Name returned: comment" to comments — the employee must see the last one. */
+  function tkReturned(comments) {
+    var lines = String(comments == null ? '' : comments).split('\n'), re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/, at = -1, i, m;
+    for (i = 0; i < lines.length; i++) { if (re.test(lines[i])) { at = i; } }
+    if (at < 0) { return null; }
+    m = re.exec(lines.slice(at).join('\n'));
+    return m ? { when: m[1], by: m[2], text: m[3] } : null;
+  }
+  function tkApprover(t) { return tkStr(t.assigned_by) || 'Management'; }
+
+  // ============================== MY TASKS ==============================
+  VIEWS.tasks = {
+    label: 'My tasks',
+    icon: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+    roles: '*',
+    order: 20,
+    badge: function () { return (STATE.counts && STATE.counts.tasks) || 0; },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>My tasks</h1>' +
+          '<span class="sub">Sorted by deadline · Pakistan time</span>' +
+          (tkCanCreate() ? '<button class="btn-gold" id="tkNewToggle" style="margin-left:auto">New task</button>' : '') +
+        '</div>' +
+        (tkCanCreate() ? tkComposer() : '') +
+        '<div class="card enter d2"><div class="hd">Assigned to me ' +
+          '<span class="hint">No task completes itself — every submission waits for approval</span></div>' +
+          '<div class="bd" id="tkBody"><div class="spinner"></div></div>' +
+        '</div>';
+    },
+    init: function () {
+      if (tkCanCreate()) { tkWireComposer(); }
+      tkLoadTasks();
+      if (tkHas(TK_APPROVE_ROLES, tkRole())) {
+        api('pendingApprovals').then(function (d) { tkCount('approvals', ((d && d.tasks) || []).length); }).catch(function () {});
+      }
+    }
+  };
+
+  function tkComposer() {
+    var role = tkRole();
+    var types = (role === 'Advertising Manager') ? ['listing_revision'] : TK_TYPES;   // §4.3: revisions only
+    var opts = types.map(function (t) { return '<option value="' + tkAttr(t) + '">' + esc(t) + '</option>'; }).join('');
+    var accounts = tkStr(STATE.user && STATE.user.accounts);
+    var accField;
+    if (accounts && accounts !== 'ALL') {
+      accField = '<select class="tk-in" id="tkNewAccount"><option value=""></option>' +
+        accounts.split(',').map(function (a) {
+          var v = a.replace(/^\s+|\s+$/g, '');
+          return v ? '<option value="' + tkAttr(v) + '">' + esc(v) + '</option>' : '';
+        }).join('') + '</select>';
+    } else {
+      accField = '<input class="tk-in" id="tkNewAccount" type="text" autocomplete="off">';
+    }
+    return '<div class="card enter d2 hidden" id="tkNewCard" style="margin-bottom:16px">' +
+      '<div class="hd">New task <span class="hint">the person you assign it to submits it back to you for approval</span></div>' +
+      '<div class="bd">' +
+        '<div class="tk-grid">' +
+          '<div class="field"><label>Type</label><select class="tk-in" id="tkNewType">' + opts + '</select></div>' +
+          '<div class="field"><label>Assign to</label><input class="tk-in" id="tkNewTo" type="email" autocomplete="off" placeholder="company email"></div>' +
+          '<div class="field"><label>Title</label><input class="tk-in" id="tkNewTitle" type="text" autocomplete="off"></div>' +
+          '<div class="field"><label>Deadline (PKT)</label><input class="tk-in" id="tkNewDeadline" type="datetime-local"></div>' +
+          '<div class="field"><label>Account</label>' + accField + '</div>' +
+          '<div class="field"><label>Item ID</label><input class="tk-in" id="tkNewItem" type="text" inputmode="numeric" autocomplete="off"></div>' +
+          '<div class="field"><label>Priority</label><input class="tk-in" id="tkNewPriority" type="text" autocomplete="off"></div>' +
+        '</div>' +
+        '<div class="field" style="margin-top:12px"><label>Details</label><textarea class="tk-ta" id="tkNewDetails"></textarea></div>' +
+        '<div class="tk-btns"><button class="btn-gold" id="tkNewSend">Create task</button>' +
+          '<button class="minibtn" id="tkNewCancel">Cancel</button></div>' +
+      '</div></div>';
+  }
+
+  function tkWireComposer() {
+    var card = $('tkNewCard');
+    $('tkNewToggle').onclick = function () {
+      card.classList.toggle('hidden');
+      if (!card.classList.contains('hidden')) { $('tkNewTitle').focus(); }
+    };
+    $('tkNewCancel').onclick = function () { card.classList.add('hidden'); };
+    $('tkNewSend').onclick = function () {
+      var btn = this;
+      var item = tkStr($('tkNewItem').value);
+      var payload = {
+        type: $('tkNewType').value,
+        assigned_to: tkStr($('tkNewTo').value),
+        title: tkStr($('tkNewTitle').value),
+        deadline_pkt: tkStr($('tkNewDeadline').value),
+        account: tkStr($('tkNewAccount').value),
+        priority: tkStr($('tkNewPriority').value),
+        details: tkStr($('tkNewDetails').value)
+      };
+      if (!payload.title) { toast('Give the task a title.'); return; }
+      if (!payload.assigned_to) { toast('Choose who this task is for.'); return; }
+      if (!payload.deadline_pkt) { toast('Set a deadline (Pakistan time).'); return; }
+      if (item && !/^\d{9,15}$/.test(item)) { toast('An Item ID is 9 to 15 digits.'); return; }
+      if (item) { payload.item_id = item; }
+      btn.disabled = true;
+      api('createTask', payload).then(function (res) {
+        btn.disabled = false;
+        card.classList.add('hidden');
+        $('tkNewTitle').value = ''; $('tkNewItem').value = ''; $('tkNewDetails').value = ''; $('tkNewPriority').value = '';
+        toast('Task created · ' + res.task_id);
+        tkLoadTasks();
+      }).catch(function (e) { btn.disabled = false; toast('Not created: ' + e.message); });
+    };
+  }
+
+  function tkLoadTasks() {
+    var box = $('tkBody');
+    if (!box) { return; }
+    api('myTasks').then(function (d) {
+      var tasks = (d && d.tasks) || [], open = 0, i;
+      for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
+      tkCount('tasks', open);
+      if (!tasks.length) {
+        box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
+        return;
+      }
+      box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
+        '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
+        '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
+      tkWireRows(box);
+    }).catch(function (e) {
+      box.innerHTML = '<div class="tk-empty">Your tasks could not be loaded just now.<span>' + esc(e.message) + '</span>' +
+        '<button class="minibtn" id="tkRetry" style="margin-top:10px">Try again</button></div>';
+      var r = $('tkRetry'); if (r) { r.onclick = tkLoadTasks; }
+    });
+  }
+
+  function tkRow(t) {
+    var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
+    var ret = (status === TK_WORKING || status === TK_UPDATED) ? tkReturned(t.comments) : null;
+    var details = tkStr(t.details);
+    var priority = tkStr(t.priority);
+    var act = '', extra = '';
+
+    if (status === TK_PENDING) {
+      act = '<button class="minibtn" data-act="start" data-id="' + tkAttr(id) + '">Start</button>';
+    } else if (status === TK_WORKING || status === TK_UPDATED) {
+      act = '<button class="minibtn" data-act="open" data-id="' + tkAttr(id) + '">Submit</button>';
+    } else if (status === TK_SUBMITTED) {
+      act = '<span class="pill awaiting">Awaiting approval</span><span class="tk-sub">with ' + esc(tkApprover(t)) + '</span>';
+    } else if (status === TK_COMPLETED) {
+      act = '<span class="tk-sub">Approved' + (t.decided_at ? ' · ' + esc(tkWhen(t.decided_at)) : '') + '</span>';
+    }
+    if (details) {
+      act += '<button class="minibtn" data-act="details" data-id="' + tkAttr(id) + '">Details</button>';
+    }
+
+    if (ret) {
+      extra += '<div class="tk-box tk-ret"><div class="k">Returned by ' + esc(ret.by) + ' · ' + esc(tkWhen(ret.when)) + '</div>' +
+        '<div class="tk-txt">' + tkText(ret.text) + '</div></div>';
+    }
+    if (details) {
+      extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
+        '<div class="tk-txt">' + tkText(details) + '</div></div>';
+    }
+    if (status === TK_WORKING || status === TK_UPDATED) {
+      extra += tkSubmitForm(t, id, type);
+    }
+
+    return '<tr class="tk-r">' +
+        '<td data-k="Task"><div class="tk-title">' + esc(tkStr(t.title)) + '</div>' +
+          '<div class="tk-meta">' + esc(type) + (priority ? ' · ' + esc(priority) : '') + '</div></td>' +
+        '<td data-k="Account">' + (tkStr(t.account) ? esc(tkStr(t.account)) : '<span class="tk-sub">—</span>') + '</td>' +
+        '<td data-k="Item ID" class="mono">' + (tkStr(t.item_id) ? esc(tkStr(t.item_id)) : '—') + '</td>' +
+        '<td data-k="Deadline">' + tkDueCell(t) + '</td>' +
+        '<td data-k="Status"><span class="pill ' + tkPillClass(status) + '">' + esc(status) + '</span></td>' +
+        '<td class="tk-act">' + act + '</td>' +
+      '</tr>' +
+      (extra ? '<tr class="tk-x"><td colspan="6">' + extra + '</td></tr>' : '');
+  }
+
+  function tkSubmitForm(t, id, type) {
+    var wantsItem = tkHas(TK_ITEM_TYPES, type);
+    return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
+      '<div class="field"><label>Submission note</label>' +
+        '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
+      (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
+        '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '">Submit for approval</button>' +
+        '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
+        '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
+    '</div>';
+  }
+
+  function tkWireRows(box) {
+    var btns = box.querySelectorAll('button[data-act]'), i;
+    for (i = 0; i < btns.length; i++) {
+      (function (b) {
+        b.onclick = function () { tkRowAction(box, b.getAttribute('data-act'), b.getAttribute('data-id'), b); };
+      })(btns[i]);
+    }
+  }
+
+  function tkRowAction(box, act, id, btn) {
+    var form, note, item, payload, block;
+    if (act === 'details') {
+      block = tkPick(box, 'data-details', id);
+      if (block) { block.classList.toggle('hidden'); }
+      return;
+    }
+    form = tkPick(box, 'data-form', id);
+    if (act === 'open') {
+      if (form) { form.classList.remove('hidden'); var ta = tkPick(box, 'data-note', id); if (ta) { ta.focus(); } }
+      return;
+    }
+    if (act === 'cancel') { if (form) { form.classList.add('hidden'); } return; }
+    if (act === 'start') {
+      btn.disabled = true;
+      api('startTask', { task_id: id }).then(function () { toast('Started — the clock is running.'); tkLoadTasks(); })
+        .catch(function (e) { btn.disabled = false; toast('Could not start: ' + e.message); });
+      return;
+    }
+    if (act === 'send') {
+      note = tkPick(box, 'data-note', id);
+      item = tkPick(box, 'data-item', id);
+      payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
+      if (!payload.submission_note) { toast('Add a submission note — the approver needs it.'); if (note) { note.focus(); } return; }
+      if (item) {
+        var v = tkStr(item.value);
+        if (v && !/^\d{9,15}$/.test(v)) { toast('An Item ID is 9 to 15 digits.'); item.focus(); return; }
+        if (v) { payload.item_id = v; }
+      }
+      btn.disabled = true;
+      api('submitTask', payload).then(function () { toast('Sent for approval.'); tkLoadTasks(); })
+        .catch(function (e) { btn.disabled = false; toast('Not submitted: ' + e.message); });
+    }
+  }
+
+  // ============================== PENDING APPROVALS ==============================
+  VIEWS.approvals = {
+    label: 'Pending approvals',
+    icon: '<path d="M12 3 5 6.2v5c0 4.4 3 8.2 7 9.3 4-1.1 7-4.9 7-9.3v-5z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
+    roles: TK_APPROVE_ROLES,
+    order: 25,
+    badge: function () { return (STATE.counts && STATE.counts.approvals) || 0; },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Pending approvals</h1>' +
+          '<span class="sub">Nothing counts for anyone until you decide · oldest first</span>' +
+          '<button class="minibtn" id="apRefresh" style="margin-left:auto">Refresh</button>' +
+        '</div>' +
+        '<div class="card enter d2"><div class="hd">Waiting on you ' +
+          '<span class="hint">Approve completes the task · Return needs a comment</span></div>' +
+          '<div class="bd" id="apBody"><div class="spinner"></div></div>' +
+        '</div>';
+    },
+    init: function () {
+      $('apRefresh').onclick = tkLoadApprovals;
+      tkLoadApprovals();
+      api('myTasks').then(function (d) {
+        var tasks = (d && d.tasks) || [], open = 0, i;
+        for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
+        tkCount('tasks', open);
+      }).catch(function () {});
+    }
+  };
+
+  function tkLoadApprovals() {
+    var box = $('apBody');
+    if (!box) { return; }
+    api('pendingApprovals').then(function (d) {
+      var tasks = (d && d.tasks) || [];
+      tkCount('approvals', tasks.length);
+      if (!tasks.length) {
+        box.innerHTML = '<div class="tk-empty">Nothing is waiting on your approval.<span>The queue is clear — thank you for keeping it moving.</span></div>';
+        return;
+      }
+      box.innerHTML = tasks.map(tkApprovalCard).join('');
+      tkWireApprovals(box);
+    }).catch(function (e) {
+      box.innerHTML = '<div class="tk-empty">The approval queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
+        '<button class="minibtn" id="apRetry" style="margin-top:10px">Try again</button></div>';
+      var r = $('apRetry'); if (r) { r.onclick = tkLoadApprovals; }
+    });
+  }
+
+  function tkApprovalCard(t) {
+    var id = tkStr(t.task_id);
+    var lag = Number(t.approval_lag_min);
+    var lagCls = 'pill tk-lag' + (lag >= 720 ? ' tk-b' : (lag >= 120 ? ' tk-w' : ''));   // 12h = the escalation mark
+    var note = tkStr(t.submission_note);
+    var details = tkStr(t.details);
+    var mins = Number(t.time_taken_min) || 0;
+
+    return '<div class="tk-ap">' +
+      '<div class="tk-ap-h"><span class="tk-title">' + esc(tkStr(t.title)) + '</span>' +
+        '<span class="tk-meta">' + esc(tkStr(t.type)) + '</span>' +
+        (isNaN(lag) ? '' : '<span class="' + lagCls + '">Waiting ' + esc(tkMins(lag)) + '</span>') + '</div>' +
+      '<div class="tl-row"><span class="k">From</span><b>' + esc(tkStr(t.assigned_to)) + '</b></div>' +
+      '<div class="tl-row"><span class="k">Account</span><b>' + (tkStr(t.account) ? esc(tkStr(t.account)) : '—') + '</b></div>' +
+      '<div class="tl-row"><span class="k">Item ID</span><span class="mono">' + (tkStr(t.item_id) ? esc(tkStr(t.item_id)) : '—') + '</span></div>' +
+      '<div class="tl-row"><span class="k">Deadline</span>' + tkDueCell(t) + '</div>' +
+      '<div class="tl-row"><span class="k">Submitted</span><span class="num">' + esc(tkWhen(t.submitted_at)) + '</span></div>' +
+      (mins ? '<div class="tl-row"><span class="k">Time taken</span><span class="num">' + esc(tkMins(mins)) + '</span></div>' : '') +
+      (details ? '<div class="tk-box tk-det"><div class="k">Task details</div><div class="tk-txt">' + tkText(details) + '</div></div>' : '') +
+      '<div class="tk-box tk-note"><div class="k">Submission note</div><div class="tk-txt">' + tkText(note) + '</div></div>' +
+      '<div class="field" style="margin-top:12px"><label>Comment (required to return)</label>' +
+        '<textarea class="tk-ta" data-cmt="' + tkAttr(id) + '" placeholder="What must be fixed before this can be approved"></textarea></div>' +
+      '<div class="tk-btns"><button class="btn-gold" data-ap="approve" data-id="' + tkAttr(id) + '">Approve</button>' +
+        '<button class="minibtn" data-ap="return" data-id="' + tkAttr(id) + '">Return</button></div>' +
+    '</div>';
+  }
+
+  function tkWireApprovals(box) {
+    var btns = box.querySelectorAll('button[data-ap]'), i;
+    for (i = 0; i < btns.length; i++) {
+      (function (b) {
+        b.onclick = function () { tkDecide(box, b.getAttribute('data-ap'), b.getAttribute('data-id'), b); };
+      })(btns[i]);
+    }
+  }
+
+  function tkDecide(box, act, id, btn) {
+    if (act === 'approve') {
+      btn.disabled = true;
+      api('approveTask', { task_id: id }).then(function () { toast('Approved — it counts now.'); tkLoadApprovals(); })
+        .catch(function (e) { btn.disabled = false; toast('Not approved: ' + e.message); });
+      return;
+    }
+    var ta = tkPick(box, 'data-cmt', id);
+    var comment = ta ? tkStr(ta.value) : '';
+    if (!comment) { toast('A comment is mandatory when returning a task.'); if (ta) { ta.focus(); } return; }
+    btn.disabled = true;
+    api('returnTask', { task_id: id, comment: comment })
+      .then(function () { toast('Returned with your comment.'); tkLoadApprovals(); })
+      .catch(function (e) { btn.disabled = false; toast('Not returned: ' + e.message); });
+  }
+
+})();
+
+function canSee(v){ if(!v.roles||v.roles==='*') return true; return v.roles.indexOf(STATE.user.role)>=0; }
+function viewList(){
+  return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
+    .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });
+}
+function ordOf(v){ return typeof v.order==='number' ? v.order : 99; }   /* order 0 is Home, not "missing" */
+function enterApp(user){
+  var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
+  $('avatar').textContent=initials;
+  $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
+  $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
+  $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
+  $('shiftFoot').innerHTML= user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management';
+  if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
+  var nav=$('nav'); nav.innerHTML='';
+  viewList().forEach(function(v,i){
+    var a=document.createElement('a'); if(i===0) a.className='on'; a.dataset.key=v.key;
+    a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
+    a.onclick=function(){ var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); renderView(v.key); };
+    nav.appendChild(a);
+  });
+  show('appShell'); renderView('home');
+  if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
+}
+function renderView(key){
+  var v=VIEWS[key]; var m=$('mainView');
+  if(!v || !canSee(v)){
+    m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
+    return;
+  }
+  try{ m.innerHTML=v.render(); }
+  catch(e){ m.innerHTML='<div class="card enter d1"><div class="bd">This section could not be drawn. Nothing was changed.</div></div>'; return; }
+  if(typeof v.init==='function'){ try{ v.init(); }catch(e){} }
+}
+/** Nav badges: view modules set STATE.counts[key] and call refreshBadges(). */
+function refreshBadges(){
+  var els=document.querySelectorAll('.nav .badge[data-badge]');
+  for(var i=0;i<els.length;i++){
+    var n=STATE.counts[els[i].getAttribute('data-badge')]||0;
+    els[i].textContent=n; els[i].classList.toggle('hidden', !n);
+  }
+  var bd=$('bellDot'); if(bd){ var u=STATE.counts.notifications||0; bd.textContent=u; bd.classList.toggle('hidden', !u); }
+}
 
 function greeting(){ var h=new Date().getHours(); return h<12?'Good morning':h<17?'Good afternoon':'Good evening'; }
 function dateStr(){ return new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'}); }
+/** Everything the team sees is PKT (the team's "PST"), whatever timezone the device is in. */
+function fmtPkt(iso, withDate){
+  if(!iso) return '';
+  var d=new Date(iso); if(isNaN(d.getTime())) return String(iso);
+  var opts=withDate?{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}:{hour:'2-digit',minute:'2-digit'};
+  opts.timeZone='Asia/Karachi'; opts.hour12=true;
+  return d.toLocaleString('en-GB',opts);
+}
+function safeUrl(u){ u=String(u||''); return /^https?:\/\//i.test(u) ? u : ''; }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
 function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
