@@ -134,12 +134,17 @@ input,select{font:inherit}
 .ideas textarea{width:100%;margin-top:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:66px}
 .toast{position:fixed; bottom:22px; left:50%; transform:translate(-50%,90px); z-index:50; background:linear-gradient(180deg,#1E2637,#161C2A); border:1px solid var(--gold-line-hi); color:var(--text); font-weight:700; font-size:13px; padding:12px 19px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.5); transition:transform .38s cubic-bezier(.2,.8,.2,1)}
 .toast.show{transform:translate(-50%,0)}
+/* Grid items default to min-width:auto, so a wide child pushes the whole shell past the
+   viewport. Zero them and let the scroll live inside the panel that owns the wide content. */
+.top,.shiftline,.main,.side{min-width:0}
+.acct{max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:880px){
-  .shell{grid-template-columns:66px 1fr}
+  .shell{grid-template-columns:66px minmax(0,1fr)}
   .nav-label,.brand-text,.side .foot{display:none}
   .nav a{justify-content:center;padding:11px 0} .nav .badge{position:absolute;top:4px;right:8px}
   .g-2{grid-template-columns:1fr} .sl-meta{display:none} .shiftline{padding:0 14px;gap:10px}
   .main{padding:18px 14px 40px} .hgroup h1{font-size:20px} .streak-label{display:none}
+  .top{padding:0 12px; gap:8px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -331,8 +336,9 @@ VIEWS.home = {
 function canSee(v){ if(!v.roles||v.roles==='*') return true; return v.roles.indexOf(STATE.user.role)>=0; }
 function viewList(){
   return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
-    .filter(canSee).sort(function(a,b){ return (a.order||99)-(b.order||99); });
+    .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });
 }
+function ordOf(v){ return typeof v.order==='number' ? v.order : 99; }   /* order 0 is Home, not "missing" */
 function enterApp(user){
   var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
   $('avatar').textContent=initials;

@@ -104,6 +104,32 @@ function bootstrapApproveUser(email, role, accounts) {
   return missMsg;
 }
 
+/** Time triggers the portal needs to run on its own (§5 missed checkpoints, §8.0b approval
+ * escalation). Idempotent: clears the ones it owns before recreating, so running it twice
+ * never doubles them up. Each handler is defensive — a module that is not deployed is skipped. */
+function installTriggers() {
+  const owned = ['runMissedCheckpointSweep', 'runSubmissionEscalationSweep'];
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (owned.indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('runMissedCheckpointSweep').timeBased().everyMinutes(30).create();
+  ScriptApp.newTrigger('runSubmissionEscalationSweep').timeBased().everyHours(1).create();
+  logActivity_('setup', 'INSTALL_TRIGGERS', 'triggers', '', owned.join(','), '');
+  return 'Triggers installed: missed-checkpoint sweep every 30 min, submission escalation hourly.';
+}
+
+function runMissedCheckpointSweep() {
+  if (typeof flagMissedCheckpoints !== 'function') return;
+  try { flagMissedCheckpoints(); }
+  catch (e) { logActivity_('trigger', 'ERROR:missedCheckpoints', '', '', '', String(e && e.stack || e)); }
+}
+
+function runSubmissionEscalationSweep() {
+  if (typeof escalateStaleSubmissions !== 'function') return;
+  try { escalateStaleSubmissions(); }
+  catch (e) { logActivity_('trigger', 'ERROR:submissionEscalation', '', '', '', String(e && e.stack || e)); }
+}
+
 /** Phase 1 DoD: one-line Anthropic test — proves the key works. Reads key from Script Properties ONLY (RL-2). */
 function testAnthropicKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');

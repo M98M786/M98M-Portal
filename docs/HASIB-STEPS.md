@@ -48,6 +48,16 @@ Claude has built the login screen and the whole backend; it cannot finish this s
 
 Nothing to copy or paste, and no payment: this is the free tier — creating a sign-in credential costs nothing.
 
+## Step 4c — One-time: authorize the background triggers (optional, do when convenient)
+
+The portal has two background "janitors": one flags a 2-hourly report as *missed* if it's not filed in time, the other nudges Management when a submitted task sits un-approved too long. They need one extra Google permission that only grants on your click.
+
+1. In the Apps Script tab, pick **installTriggers** from the function dropdown (next to Debug) and press **Run**.
+2. A **"Authorization required"** box appears → **Review permissions** → choose m98m786 → **Allow**.
+3. The execution log should say *"Triggers installed…"*. Done — the portal now polices itself.
+
+Everything else in the portal works without this; the triggers only automate two background chores. Say **"triggers done"** if you'd like Claude to confirm they're registered.
+
 ## Step 5 — Approve staff and set the rota
 
 When the portal is live, sign in with your Google account, open **Admin → Approvals**, approve each staff member, and set their shift in the **Rota** screen. Claude will walk you through it on screen.
