@@ -201,7 +201,8 @@ input,select{font:inherit}
   <header class="top">
     <div class="acct" id="acctChip">—</div>
     <div class="spacer"></div>
-    <button class="iconbtn" title="Notifications" id="bellBtn"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></button>
+    <span id="meetingChip"></span>
+    <button class="iconbtn" title="Notifications" id="bellBtn"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="dot hidden" id="bellDot">0</span></button>
     <button class="iconbtn" title="Royal / Ivory" id="themeBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.5 4.5l2 2M17.5 17.5l2 2M19.5 4.5l-2 2M6.5 17.5l-2 2"/></svg></button>
     <div class="avatar" id="avatar" title="Sign out">MU</div>
   </header>
@@ -219,7 +220,7 @@ input,select{font:inherit}
 <script>
 /* ============ M98M Portal — client. Knows ONLY the backend URL (RL-9). ============ */
 var BACKEND = "https://script.google.com/macros/s/AKfycbzJNaOWnabcexE_fTFSAslKymrlM8LAegfOe91Zumwmpp5DW60mavh6jfrAs3d-Zx8uVg/exec";
-var STATE = { idToken:null, user:null, config:null };
+var STATE = { idToken:null, user:null, config:null, counts:{} };
 var $ = function(id){ return document.getElementById(id); };
 function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; } /* RL-3 */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
@@ -285,38 +286,16 @@ function showPending(user){
 $('pendingRefresh').onclick=function(){ api('whoami').then(routeUser).catch(function(){}); };
 $('pendingSignout').onclick=signOut;
 
-/* ---- App ---- */
-var NAV = [
-  { key:'home', label:'Home', icon:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>', roles:'*' },
-  { key:'tasks', label:'My tasks', icon:'<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 5.5 1 1L6.5 4.5"/><path d="m3.5 11.5 1 1 2-2"/><path d="m3.5 17.5 1 1 2-2"/>', roles:'*' },
-  { key:'inbox', label:'Inbox', icon:'<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>', roles:'*' },
-  { key:'reports', label:'2-hourly reports', icon:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>', roles:'*' },
-  { key:'rules', label:'Rules & SOPs', icon:'<path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H19"/>', roles:'*' },
-  { key:'dashboard', label:'Business overview', icon:'<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>', roles:['Management','Ops Head','Team Lead','Advertising Manager','CS'] },
-  { key:'perf', label:'My performance', icon:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/>', roles:'*' }
-];
-function canSee(item){ if(item.roles==='*') return true; return item.roles.indexOf(STATE.user.role)>=0; }
-function enterApp(user){
-  var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
-  $('avatar').textContent=initials;
-  $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
-  $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
-  $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
-  $('shiftFoot').innerHTML= user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management';
-  var nav=$('nav'); nav.innerHTML='';
-  NAV.filter(canSee).forEach(function(item,i){
-    var a=document.createElement('a'); if(i===0) a.className='on'; a.dataset.key=item.key;
-    a.innerHTML='<svg viewBox="0 0 24 24">'+item.icon+'</svg><span class="nav-label">'+esc(item.label)+'</span>';
-    a.onclick=function(){ document.querySelectorAll('.nav a').forEach(function(x){x.classList.remove('on');}); a.classList.add('on'); renderView(item.key); };
-    nav.appendChild(a);
-  });
-  show('appShell'); renderView('home');
-}
-function renderView(key){
-  var m=$('mainView'); var u=STATE.user;
-  if(key==='home'){
-    m.innerHTML =
-     '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(" ")[0]||u.name)+'</span></h1>'+
+/* ---- App: view registry. Each view module registers VIEWS[key] = {label,icon,roles,order,render,init} ---- */
+var VIEWS = {};
+var VIEW_CSS = [];
+
+VIEWS.home = {
+  label:'Home', order:0, roles:'*',
+  icon:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  render:function(){
+    var u=STATE.user;
+    return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
@@ -327,27 +306,82 @@ function renderView(key){
        '<div class="card ideas enter d3"><div class="hd">Any new idea generation ✨</div><div class="bd">'+
          '<div style="font-size:12.5px;color:var(--text-2);font-weight:600">Your idea goes straight to Management. Implemented ideas get a shoutout.</div>'+
          '<textarea id="ideaBox" placeholder="Type your idea…"></textarea>'+
-         '<button class="btn-gold" style="margin-top:10px" onclick="submitIdea()">Submit idea</button>'+
+         '<button class="btn-gold" style="margin-top:10px" id="ideaBtn">Submit idea</button>'+
        '</div></div>'+
      '</div>'+
      '<div class="card enter d3" style="margin-top:16px"><div class="hd">Today’s agenda <span class="hint">from Management</span></div>'+
        '<div class="bd" id="agendaBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
-    loadAgenda();
-  } else if(key==='rules'){
-    m.innerHTML='<div class="hgroup enter d1"><h1>Rules &amp; <span class="goldtext">SOPs</span></h1><span class="sub">Your department’s current law</span></div><div class="card enter d2"><div class="bd" id="rulesBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
-    loadRules();
-  } else {
-    m.innerHTML='<div class="hgroup enter d1"><h1>'+esc(labelFor(key))+'</h1><span class="sub">Coming in the next build phase</span></div>'+
-      '<div class="card enter d2"><div class="bd" style="color:var(--text-3);font-weight:600;padding:30px;text-align:center">This section is being built. Your data and permissions are already live on the backend.</div></div>';
+  },
+  init:function(){
+    $('ideaBtn').onclick=function(){
+      var v=$('ideaBox').value.trim(); if(!v){ return; }
+      api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
+        .catch(function(e){ toast('Could not send: '+e.message); });
+    };
+    api('todayAgenda').then(function(a){
+      var b=$('agendaBox'); var items=(a&&a.items)||[];
+      if(!items.length){ b.textContent='No agenda posted for today yet.'; return; }
+      b.innerHTML=items.map(function(x){ return '<div class="tl-row">'+esc(typeof x==='string'?x:(x.text||''))+'</div>'; }).join('');
+    }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; });
   }
+};
+
+/* === PHASE 3 VIEW MODULES SPLICED HERE === */
+
+function canSee(v){ if(!v.roles||v.roles==='*') return true; return v.roles.indexOf(STATE.user.role)>=0; }
+function viewList(){
+  return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
+    .filter(canSee).sort(function(a,b){ return (a.order||99)-(b.order||99); });
 }
-function labelFor(k){ var f=NAV.filter(function(n){return n.key===k;})[0]; return f?f.label:k; }
-function loadAgenda(){ api('todayAgenda').then(function(a){ var b=$('agendaBox'); if(!a||!a.items||!a.items.length){ b.textContent='No agenda posted for today yet.'; return;} b.innerHTML=a.items.map(function(x){return '<div class="tl-row">'+esc(x)+'</div>';}).join(''); }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; }); }
-function loadRules(){ api('myRules').then(function(r){ var b=$('rulesBox'); if(!r||!r.rules||!r.rules.length){ b.textContent='No rules published for your department yet.'; return;} b.innerHTML=r.rules.map(function(x){return '<div class="tl-row"><span class="pill role">'+esc(x.type)+'</span> '+esc(x.rule_text)+'</div>';}).join(''); }).catch(function(){ $('rulesBox').textContent='Rules load when the backend action ships.'; }); }
-function submitIdea(){ var v=$('ideaBox').value.trim(); if(!v){return;} api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); }).catch(function(e){ toast('Could not send: '+e.message); }); }
+function enterApp(user){
+  var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
+  $('avatar').textContent=initials;
+  $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
+  $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
+  $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
+  $('shiftFoot').innerHTML= user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management';
+  if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
+  var nav=$('nav'); nav.innerHTML='';
+  viewList().forEach(function(v,i){
+    var a=document.createElement('a'); if(i===0) a.className='on'; a.dataset.key=v.key;
+    a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
+    a.onclick=function(){ var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); renderView(v.key); };
+    nav.appendChild(a);
+  });
+  show('appShell'); renderView('home');
+  if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
+}
+function renderView(key){
+  var v=VIEWS[key]; var m=$('mainView');
+  if(!v || !canSee(v)){
+    m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
+    return;
+  }
+  try{ m.innerHTML=v.render(); }
+  catch(e){ m.innerHTML='<div class="card enter d1"><div class="bd">This section could not be drawn. Nothing was changed.</div></div>'; return; }
+  if(typeof v.init==='function'){ try{ v.init(); }catch(e){} }
+}
+/** Nav badges: view modules set STATE.counts[key] and call refreshBadges(). */
+function refreshBadges(){
+  var els=document.querySelectorAll('.nav .badge[data-badge]');
+  for(var i=0;i<els.length;i++){
+    var n=STATE.counts[els[i].getAttribute('data-badge')]||0;
+    els[i].textContent=n; els[i].classList.toggle('hidden', !n);
+  }
+  var bd=$('bellDot'); if(bd){ var u=STATE.counts.notifications||0; bd.textContent=u; bd.classList.toggle('hidden', !u); }
+}
 
 function greeting(){ var h=new Date().getHours(); return h<12?'Good morning':h<17?'Good afternoon':'Good evening'; }
 function dateStr(){ return new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'}); }
+/** Everything the team sees is PKT (the team's "PST"), whatever timezone the device is in. */
+function fmtPkt(iso, withDate){
+  if(!iso) return '';
+  var d=new Date(iso); if(isNaN(d.getTime())) return String(iso);
+  var opts=withDate?{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}:{hour:'2-digit',minute:'2-digit'};
+  opts.timeZone='Asia/Karachi'; opts.hour12=true;
+  return d.toLocaleString('en-GB',opts);
+}
+function safeUrl(u){ u=String(u||''); return /^https?:\/\//i.test(u) ? u : ''; }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
 function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }

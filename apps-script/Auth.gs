@@ -89,33 +89,7 @@ function actionRegister_(payload, ctx) {
 }
 
 // ---------- approved-user reads ----------
-function actionTodayAgenda_(payload, ctx) {
-  const today = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
-  const dept = roleDept_(ctx.user.role);
-  const rows = readTab_('DAILY_AGENDA');
-  const items = [];
-  rows.forEach(function (r) {
-    const d = String(r.date).slice(0, 10);
-    if (d !== today) return;
-    const aud = String(r.audience || 'ALL');
-    if (aud !== 'ALL' && aud !== dept && normalizeEmail(aud) !== normalizeEmail(ctx.ident.email)) return;
-    if (r.day_targets) items.push(String(r.day_targets));
-    if (r.notes) items.push(String(r.notes));
-    if (r.shoutouts) items.push('🎉 ' + String(r.shoutouts));
-  });
-  return { items: items };
-}
-
-function actionMyRules_(payload, ctx) {
-  const dept = roleDept_(ctx.user.role);
-  const rows = readTab_('RULES');
-  const rules = rows.filter(function (r) {
-    if (String(r.status) !== 'active') return false;
-    const d = String(r.department || 'ALL');
-    return d === 'ALL' || dept === '*' || d === dept;
-  }).map(function (r) { return { type: r.type, rule_text: r.rule_text, department: r.department }; });
-  return { rules: rules };
-}
+// todayAgenda lives in Agenda.gs and myRules in RulesAck.gs — the full versions, per §20.1 and §26.
 
 function actionSubmitIdea_(payload, ctx) {
   const idea = String(payload.idea || '').trim();

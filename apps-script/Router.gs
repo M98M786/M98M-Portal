@@ -6,20 +6,36 @@
  * Access levels: 'public' (no token) | 'token' (valid Google identity, any portal status)
  *              | 'any' (approved user) | 'super' (super admin). */
 
-const ACTIONS = {
-  ping:             [actionPing_, 'public'],
-  getPublicConfig:  [actionGetPublicConfig_, 'public'],
-  whoami:           [actionWhoami_, 'token'],
-  register:         [actionRegister_, 'token'],
-  todayAgenda:      [actionTodayAgenda_, 'any'],
-  myRules:          [actionMyRules_, 'any'],
-  submitIdea:       [actionSubmitIdea_, 'any'],
-  // management / super
-  listPending:      [actionListPending_, 'any'],   // gated to mgmt inside
-  approveUser:      [actionApproveUser_, 'any'],
-  importRegistry:   [actionImportRegistry_, 'super'],
-  connectionHealth: [actionConnectionHealth_, 'any'],
-};
+/** Core actions, then every feature module's ACTIONS_* merged in. A module that is not
+ * deployed simply contributes nothing — its actions stay unknown and are rejected (RL-1). */
+function mergeActions_() {
+  const core = {
+    ping:             [actionPing_, 'public'],
+    getPublicConfig:  [actionGetPublicConfig_, 'public'],
+    whoami:           [actionWhoami_, 'token'],
+    register:         [actionRegister_, 'token'],
+    submitIdea:       [actionSubmitIdea_, 'any'],
+    listPending:      [actionListPending_, 'any'],   // gated to management inside
+    approveUser:      [actionApproveUser_, 'any'],
+    importRegistry:   [actionImportRegistry_, 'super'],
+    connectionHealth: [actionConnectionHealth_, 'any'],
+  };
+  const groups = [
+    typeof ACTIONS_TASKS      !== 'undefined' ? ACTIONS_TASKS      : null,
+    typeof ACTIONS_SCHEDULES  !== 'undefined' ? ACTIONS_SCHEDULES  : null,
+    typeof ACTIONS_REPORTS    !== 'undefined' ? ACTIONS_REPORTS    : null,
+    typeof ACTIONS_MESSAGING  !== 'undefined' ? ACTIONS_MESSAGING  : null,
+    typeof ACTIONS_AGENDA     !== 'undefined' ? ACTIONS_AGENDA     : null,
+    typeof ACTIONS_MEETINGS   !== 'undefined' ? ACTIONS_MEETINGS   : null,
+    typeof ACTIONS_RULES      !== 'undefined' ? ACTIONS_RULES      : null,
+  ];
+  groups.forEach(function (g) {
+    if (!g) return;
+    Object.keys(g).forEach(function (k) { core[k] = g[k]; });
+  });
+  return core;
+}
+const ACTIONS = mergeActions_();
 
 function doPost(e) {
   let req = {};
