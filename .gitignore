@@ -1,4 +1,5 @@
-local/
 public/
+local/
 .DS_Store
 *.pyc
+scratchpad/
