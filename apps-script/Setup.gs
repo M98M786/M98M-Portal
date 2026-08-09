@@ -104,20 +104,15 @@ function bootstrapApproveUser(email, role, accounts) {
   return missMsg;
 }
 
-/** Time triggers the portal needs to run on its own (§5 missed checkpoints, §8.0b approval
- * escalation). Idempotent: clears the ones it owns before recreating, so running it twice
- * never doubles them up. Each handler is defensive — a module that is not deployed is skipped. */
-function installTriggers() {
-  const owned = ['runMissedCheckpointSweep', 'runSubmissionEscalationSweep'];
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (owned.indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('runMissedCheckpointSweep').timeBased().everyMinutes(30).create();
-  ScriptApp.newTrigger('runSubmissionEscalationSweep').timeBased().everyHours(1).create();
-  logActivity_('setup', 'INSTALL_TRIGGERS', 'triggers', '', owned.join(','), '');
-  return 'Triggers installed: missed-checkpoint sweep every 30 min, submission escalation hourly.';
-}
-
+/** The portal's two background sweeps (§5 missed checkpoints, §8.0b approval escalation).
+ *
+ * These are created as time-driven triggers through the Apps Script UI (Triggers -> Add Trigger),
+ * deliberately NOT in code: calling ScriptApp.newTrigger would make the project demand the
+ * script.scriptapp OAuth scope, which forces a re-consent that blocks EVERY function until it is
+ * granted. Creating the same triggers from the UI needs no extra permission, so the portal keeps
+ * the smallest set of scopes that does the job (least privilege).
+ *
+ * Each handler is defensive — a module that is not deployed is simply skipped. */
 function runMissedCheckpointSweep() {
   if (typeof flagMissedCheckpoints !== 'function') return;
   try { flagMissedCheckpoints(); }

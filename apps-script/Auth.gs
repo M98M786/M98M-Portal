@@ -101,6 +101,31 @@ function actionSubmitIdea_(payload, ctx) {
   return { ok: true };
 }
 
+/** Who a task, hunt or meeting may be assigned to. Staff names and company emails are business
+ * data: they are served to signed-in users only and must never be baked into the public page
+ * (RL-2, RL-9). Optional payload.roles narrows the list, e.g. the listers on a hunt approval. */
+function actionAssignableStaff_(payload, ctx) {
+  const wantRoles = Array.isArray(payload.roles) ? payload.roles.filter(function (r) { return ROLES.indexOf(r) >= 0; }) : null;
+  const staff = readTab_('USERS').filter(function (u) {
+    if (String(u.status) !== 'approved') return false;
+    return !wantRoles || !wantRoles.length || wantRoles.indexOf(String(u.role)) >= 0;
+  }).map(function (u) {
+    return { email: String(u.email), name: String(u.name || u.email), role: String(u.role), accounts: String(u.accounts || '') };
+  });
+  staff.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  return { staff: staff };
+}
+
+/** The eBay seller accounts the portal is connected to — from CONNECTIONS, never hardcoded,
+ * so adding an account in the registry is enough for it to appear in every picker (§3). */
+function actionAccountList_(payload, ctx) {
+  const health = connectionHealth();
+  const accounts = (health.perAccount || []).map(function (a) {
+    return { account: a.account, linked: a.linked, of: a.of };
+  });
+  return { accounts: accounts };
+}
+
 // ---------- management ----------
 function actionListPending_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not management', ctx.ident.email);

@@ -15,6 +15,8 @@ function mergeActions_() {
     whoami:           [actionWhoami_, 'token'],
     register:         [actionRegister_, 'token'],
     submitIdea:       [actionSubmitIdea_, 'any'],
+    assignableStaff:  [actionAssignableStaff_, 'any'],
+    accountList:      [actionAccountList_, 'any'],
     listPending:      [actionListPending_, 'any'],   // gated to management inside
     approveUser:      [actionApproveUser_, 'any'],
     importRegistry:   [actionImportRegistry_, 'super'],
