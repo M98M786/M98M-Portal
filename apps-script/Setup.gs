@@ -164,6 +164,85 @@ function bootstrapApproveSeededStaff() {
   return msg;
 }
 
+/** SETUP-ONLY: apply the shift assignments Hasib gave, as §5 intends — Management sets the
+ * timetable, staff only ever requested one. Writes both the USERS shift column and a real
+ * SCHEDULES row per person, because checkpoints derive from the schedule, and notifies each
+ * person of their hours. Editor-run only; safe to re-run (it upserts). */
+function bootstrapSetShifts() {
+  // Zain works 6 PM - 3 AM, which is neither named shift, so it is a Custom schedule.
+  // Its break follows the pattern of the other two (three hours in, one hour long) — change it
+  // in the Rota screen if that is wrong; nothing else depends on the exact minute.
+  const PLAN = {
+    'm98mnine@gmail.com':  { label: 'Shift 2' },                                            // Rana Noman
+    'm98meight@gmail.com': { label: 'Shift 2' },                                            // Wahab
+    'm98mten@gmail.com':   { label: 'Shift 2' },                                            // Fasieh-Ul-Hassan
+    'm98mfour@gmail.com':  { label: 'Custom', start: '18:00', end: '03:00', bs: '21:00', be: '22:00' }, // Zain
+  };
+  const DEFAULT_LABEL = 'Shift 1';
+
+  const hoursFor = function (label) {
+    const key = label === 'Shift 2' ? 'shift2' : 'shift1';
+    const hours = String(getConfig(key + '_hours') || '').split('-');
+    const brk = String(getConfig(key + '_break') || '').split('-');
+    return { start: hours[0] || '', end: hours[1] || '', bs: brk[0] || '', be: brk[1] || '' };
+  };
+
+  const db = getPortalDb_(false);
+  const us = db.getSheetByName('USERS');
+  const sc = db.getSheetByName('SCHEDULES');
+  const rows = us.getDataRange().getValues();
+  const schedRows = sc.getDataRange().getValues();
+  const applied = [];
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    for (let i = 1; i < rows.length; i++) {
+      const email = String(rows[i][0] || '');
+      if (!email) continue;
+      const n = normalizeEmail(email);
+      if (!ROLE_PREFILL[n]) continue;                       // seeded staff only; owners keep theirs
+      if (String(rows[i][5]) !== 'approved') continue;
+
+      const plan = PLAN[n] || { label: DEFAULT_LABEL };
+      const base = hoursFor(plan.label);
+      const start = plan.start || base.start;
+      const end = plan.end || base.end;
+      const bs = plan.bs !== undefined ? plan.bs : base.bs;
+      const be = plan.be !== undefined ? plan.be : base.be;
+
+      const old = String(rows[i][3] || '');
+      us.getRange(i + 1, 4).setValue(plan.label);
+
+      let schedRow = 0;
+      for (let s = 1; s < schedRows.length; s++) {
+        if (normalizeEmail(schedRows[s][0]) === n) { schedRow = s + 1; break; }
+      }
+      const record = [email, now_().slice(0, 10), plan.label, start, end, bs, be, '', 'owner', now_()];
+      if (schedRow) sc.getRange(schedRow, 1, 1, record.length).setValues([record]);
+      else { sc.appendRow(record); schedRows.push(record); }
+
+      applied.push(email + ' -> ' + plan.label + ' ' + start + '-' + end + (bs ? ' (break ' + bs + '-' + be + ')' : ''));
+      logActivity_('setup', 'SET_SHIFT', email, old, plan.label + ' ' + start + '-' + end, 'owner instruction');
+      notify_(email, 'Your timetable is set',
+        'You are on ' + plan.label + ', ' + start + ' to ' + end + (bs ? ', break ' + bs + '-' + be : '') +
+        '. Your 2-hourly checkpoints appear on the My reports screen.', 'schedule');
+    }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+
+  const checks = applied.map(function (line) {
+    const email = line.split(' -> ')[0];
+    let cps = [];
+    try { cps = getCheckpointsForUser_(email) || []; } catch (e) { cps = ['(could not derive)']; }
+    return '  ' + line + '\n      checkpoints: ' + cps.join(', ');
+  });
+  const msg = 'SHIFTS SET for ' + applied.length + ':\n' + checks.join('\n') +
+    '\nWorking days left blank on purpose — set them in the Rota screen if some staff do not work every day.';
+  Logger.log(msg);
+  return msg;
+}
+
 /** Phase 1 DoD: one-line Anthropic test — proves the key works. Reads key from Script Properties ONLY (RL-2). */
 function testAnthropicKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
