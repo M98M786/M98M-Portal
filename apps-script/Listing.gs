@@ -290,14 +290,14 @@ function actionEnterItemId_(payload, ctx) {
     const found = taskFind_(sh, payload.task_id);
     rec = found.rec;
     if (String(rec.type || '') !== 'listing_new') throw new Error('not a listing task');
-    if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
+    if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'not your task');
 
     const status = String(rec.status || '');
     const carried = String(rec.item_id || '').trim();
     idempotent = carried === itemId && (status === TASK_STATUS_SUBMITTED || status === TASK_STATUS_COMPLETED);
     if (!idempotent) {
       if (carried && carried !== itemId) throw new Error('this task already carries a different Item ID');
-      if (status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) throw new Error('listing task is not in progress');
+      if (status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) throw new Error(SAFE_ERROR_PREFIX + 'listing task is not in progress');
     }
 
     const all = readTab_('TASKS');

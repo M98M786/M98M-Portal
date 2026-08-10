@@ -33,7 +33,7 @@ function actionSendMessage_(payload, ctx) {
   const body = String(payload.body === null || payload.body === undefined ? '' : payload.body).trim();
 
   if (!to) throw new Error('no recipient');
-  if (!body) throw new Error('empty message');
+  if (!body) throw new Error(SAFE_ERROR_PREFIX + 'empty message');
   if (body.length > DM_MAX_BODY) throw new Error('message too long');
   if (to === me) throw new Error('cannot message yourself');
 

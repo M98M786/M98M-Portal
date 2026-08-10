@@ -73,7 +73,9 @@ VIEW_CSS.push(
 /* §20.2 — these two labels are the RSVP contract with the backend: they are sent as the answer. */
 var IB_RSVP_YES = 'Yes sir, I will be there';
 var IB_RSVP_NO = "Can't attend (+reason)";
-var IB_POLL_MS = 45000;
+/* 13 staff each polling every 45s is a request every 3.5 seconds, all day, before anyone does
+   any work. 90s halves that background load and no one waiting on a message notices. */
+var IB_POLL_MS = 90000;
 var IB_POLL_MIN_GAP = 3000;
 var IB_NOTIF_KEEP = 40;
 

@@ -576,15 +576,31 @@ function buildHistory() {
       '<button class="btn-ghost" id="aghGo" style="margin-top:14px">Browse</button>' +
       '<div id="aghOut" style="margin-top:6px"></div>' +
     '</div></div>';
+  // Pre-fill BOTH ends. Filling only "To" made the obvious next click send a range with no start,
+  // which the server rejected — and the person only saw "request failed".
   $('aghTo').value = agenda.date || '';
+  $('aghFrom').value = agDaysBefore(agenda.date, 13);
   $('aghAud').onchange = function () { $('aghPersonWrap').classList.toggle('hidden', this.value !== '__person'); };
   $('aghGo').onclick = browseHistory;
+}
+
+function agDaysBefore(ymd, days) {
+  var s = String(ymd || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  var p = s.split('-');
+  var d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+  d.setUTCDate(d.getUTCDate() - days);
+  var mm = String(d.getUTCMonth() + 1), dd = String(d.getUTCDate());
+  return d.getUTCFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
 }
 
 function browseHistory() {
   var payload = {};
   var from = String($('aghFrom').value || '').trim();
   var to = String($('aghTo').value || '').trim();
+  // Someone picking the two dates the wrong way round means "show me these two weeks", not an
+  // error. Swap them rather than refusing.
+  if (from && to && from > to) { var swap = from; from = to; to = swap; $('aghFrom').value = from; $('aghTo').value = to; }
   if (from) payload.from = from;
   if (to) payload.to = to;
   var aud = $('aghAud').value;

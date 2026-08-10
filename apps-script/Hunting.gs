@@ -450,13 +450,13 @@ function huntColumnsFromPayload_(payload) {
 function huntAdvertisingType_(value, required) {
   const s = String(value === null || value === undefined ? '' : value).trim();
   if (!s || huntNormKey_(s) === huntNormKey_(HUNT_CPC_PLACEHOLDER)) {
-    if (required) throw new Error('advertising type required to approve');
+    if (required) throw new Error(SAFE_ERROR_PREFIX + 'advertising type required to approve');
     return '';
   }
   for (let i = 0; i < HUNT_ADVERTISING_TYPES.length; i++) {
     if (huntNormKey_(HUNT_ADVERTISING_TYPES[i]) === huntNormKey_(s)) return HUNT_ADVERTISING_TYPES[i];
   }
-  throw new Error('unknown advertising type');
+  throw new Error(SAFE_ERROR_PREFIX + 'unknown advertising type');
 }
 
 /** Accounts are data rows, never hardcoded (§3): the value is checked against CONNECTIONS when
@@ -486,16 +486,16 @@ function huntAccount_(value) {
 
 function huntResolveLister_(email) {
   const want = normalizeEmail(email || '');
-  if (!want) throw new Error('lister_email required to approve');
+  if (!want) throw new Error(SAFE_ERROR_PREFIX + 'lister_email required to approve');
   let found = null;
   readTab_('USERS').forEach(function (u) {
     if (found) return;
     if (normalizeEmail(u.email) !== want) return;
-    if (String(u.status) !== 'approved') throw new Error('lister is not an approved portal user');
-    if (HUNT_LISTER_ROLES.indexOf(String(u.role)) < 0) throw new Error('that user does not list');
+    if (String(u.status) !== 'approved') throw new Error(SAFE_ERROR_PREFIX + 'lister is not an approved portal user');
+    if (HUNT_LISTER_ROLES.indexOf(String(u.role)) < 0) throw new Error(SAFE_ERROR_PREFIX + 'that user does not list');
     found = { email: String(u.email), name: String(u.name || u.email) };
   });
-  if (!found) throw new Error('lister is not an approved portal user');
+  if (!found) throw new Error(SAFE_ERROR_PREFIX + 'lister is not an approved portal user');
   return found;
 }
 

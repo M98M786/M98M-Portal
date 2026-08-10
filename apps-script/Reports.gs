@@ -82,7 +82,7 @@ function actionSubmitReport_(payload, ctx) {
   const date = repShiftDate_(cps);
   const t = repTiming_(cps, date);
   // §5: once the next checkpoint has arrived this one is MISSED, whether or not the trigger ran yet.
-  if (t.nowAbs >= t.deadlines[i]) throw new Error('checkpoint window closed');
+  if (t.nowAbs >= t.deadlines[i]) throw new Error(SAFE_ERROR_PREFIX + 'checkpoint window closed');
 
   const summary = String(payload.work_summary || '').trim();
   if (!summary) throw new Error('work summary required');

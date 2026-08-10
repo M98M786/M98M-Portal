@@ -228,7 +228,7 @@ function actionAgendaHistory_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not management', ctx.ident.email);
   const to = payload.to ? agendaValidDate_(payload.to) : agendaToday_();
   const from = payload.from ? agendaValidDate_(payload.from) : agendaAddDays_(to, -13);
-  if (from > to) throw new Error('from is after to');
+  if (from > to) throw new Error(SAFE_ERROR_PREFIX + 'from is after to');
   if (agendaDaysBetween_(from, to) > AGENDA_HISTORY_MAX_DAYS) throw new Error('range too wide');
   const audience = payload.audience ? agendaValidAudience_(payload.audience) : '';
 
@@ -473,7 +473,7 @@ function agendaTz_() {
 
 function agendaValidDate_(v) {
   const s = String(v || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error('invalid date');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error(SAFE_ERROR_PREFIX + 'invalid date');
   return s;
 }
 function agendaAddDays_(ymd, delta) {

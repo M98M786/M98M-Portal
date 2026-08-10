@@ -231,12 +231,70 @@ function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 
-/* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ---- */
-function api(action, payload){
+/* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ----
+   Google spends roughly 2.5 seconds loading the backend before any of our code runs, and that
+   toll is per REQUEST, not per action. A screen that asks for five things used to pay it five
+   times. So calls made in the same moment are gathered and sent as one, transparently: every
+   caller still gets its own promise and its own error. Nothing in the views had to change. */
+var API_BATCH_WINDOW_MS = 20;
+var API_BATCH_MAX = 10;
+var apiQueue = [];
+var apiTimer = null;
+
+function apiSend(action, payload){
   var body = JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} });
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
-    .then(function(r){ return r.json(); })
-    .then(function(j){ if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; });
+    .then(function(r){ return r.json(); });
+}
+
+function apiFlush(){
+  var batch = apiQueue; apiQueue = []; apiTimer = null;
+  if(!batch.length) return;
+  if(batch.length === 1){
+    var one = batch[0];
+    apiSend(one.action, one.payload)
+      .then(function(j){ if(!j.ok){ one.reject(new Error(j.error||'request failed')); } else { one.resolve(j.data); } })
+      .catch(function(e){ one.reject(e); });
+    return;
+  }
+  apiSend('batch', { calls: batch.map(function(c){ return { action:c.action, payload:c.payload }; }) })
+    .then(function(j){
+      var results = j && j.ok && j.data && j.data.results;
+      // If batching itself is unavailable for any reason, fall back to one request per call so
+      // the portal degrades to its old speed instead of breaking. Individual call failures are
+      // NOT retried here — those are real answers and belong to their own caller.
+      if(!results || results.length !== batch.length){ apiRetrySingly(batch); return; }
+      batch.forEach(function(c, i){
+        var r = results[i];
+        if(!r){ c.reject(new Error('request failed')); }
+        else if(!r.ok){ c.reject(new Error(r.error||'request failed')); }
+        else { c.resolve(r.data); }
+      });
+    })
+    .catch(function(){ apiRetrySingly(batch); });
+}
+
+function apiRetrySingly(batch){
+  batch.forEach(function(c){
+    apiSend(c.action, c.payload)
+      .then(function(j){ if(!j.ok){ c.reject(new Error(j.error||'request failed')); } else { c.resolve(j.data); } })
+      .catch(function(e){ c.reject(e); });
+  });
+}
+
+function api(action, payload){
+  // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
+  if(!STATE.idToken || action === 'batch'){
+    return apiSend(action, payload).then(function(j){
+      if(!j.ok){ throw new Error(j.error||'request failed'); }
+      return j.data;
+    });
+  }
+  return new Promise(function(resolve, reject){
+    apiQueue.push({ action:action, payload:payload||{}, resolve:resolve, reject:reject });
+    if(apiQueue.length >= API_BATCH_MAX){ clearTimeout(apiTimer); apiFlush(); return; }
+    if(!apiTimer){ apiTimer = setTimeout(apiFlush, API_BATCH_WINDOW_MS); }
+  });
 }
 
 /* ---- Google Identity Services ---- */

@@ -18,7 +18,7 @@ const TASK_ESCALATION_REF = 'task-escalation:';
 // ---------- create (§4.3 / §4.4) ----------
 function actionCreateTask_(payload, ctx) {
   const type = String(payload.type || '').trim();
-  if (TASK_TYPES.indexOf(type) < 0) throw new Error('unknown task type');
+  if (TASK_TYPES.indexOf(type) < 0) throw new Error(SAFE_ERROR_PREFIX + 'unknown task type');
   if (!taskCanCreate_(ctx.user.role, ctx.ident.email, type)) throw new Error('role may not create this task');
 
   const title = String(payload.title || '').trim();
@@ -97,7 +97,7 @@ function actionStartTask_(payload, ctx) {
     const found = taskFind_(sh, payload.task_id);
     if (normalizeEmail(found.rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(found.rec.status || '');
-    if (old !== TASK_STATUS_PENDING) throw new Error('task is not Pending');
+    if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
     taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
     return { task_id: found.rec.task_id, status: TASK_STATUS_WORKING };
@@ -116,7 +116,7 @@ function actionSubmitTask_(payload, ctx) {
     rec = found.rec;
     if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(rec.status || '');
-    if (old !== TASK_STATUS_WORKING && old !== TASK_STATUS_UPDATED) throw new Error('task is not in progress');
+    if (old !== TASK_STATUS_WORKING && old !== TASK_STATUS_UPDATED) throw new Error(SAFE_ERROR_PREFIX + 'task is not in progress');
 
     let itemId = taskItemId_(payload.item_id) || String(rec.item_id || '').trim();
     if (String(rec.type) === 'listing_new' && !itemId) throw new Error('item_id required to submit a listing');
@@ -174,7 +174,7 @@ function actionApproveTask_(payload, ctx) {
     rec = found.rec;
     if (!taskMayDecide_(rec, ctx)) throw new Error('not the approver');
     const old = String(rec.status || '');
-    if (old !== TASK_STATUS_SUBMITTED) throw new Error('task is not awaiting approval');
+    if (old !== TASK_STATUS_SUBMITTED) throw new Error(SAFE_ERROR_PREFIX + 'task is not awaiting approval');
     stamp = now_();
     taskWrite_(sh, found, { status: TASK_STATUS_COMPLETED, approved_by: ctx.ident.email, decided_at: stamp, updated_at: stamp });
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)));
@@ -186,7 +186,7 @@ function actionApproveTask_(payload, ctx) {
 
 function actionReturnTask_(payload, ctx) {
   const comment = String(payload.comment || '').trim();
-  if (!comment) throw new Error('a comment is mandatory when returning a task');
+  if (!comment) throw new Error(SAFE_ERROR_PREFIX + 'a comment is mandatory when returning a task');
   const sh = tasksSheet_();
   let rec = null, stamp = '';
   const lock = LockService.getScriptLock();
@@ -196,7 +196,7 @@ function actionReturnTask_(payload, ctx) {
     rec = found.rec;
     if (!taskMayDecide_(rec, ctx)) throw new Error('not the approver');
     const old = String(rec.status || '');
-    if (old !== TASK_STATUS_SUBMITTED) throw new Error('task is not awaiting approval');
+    if (old !== TASK_STATUS_SUBMITTED) throw new Error(SAFE_ERROR_PREFIX + 'task is not awaiting approval');
     stamp = now_();
     const prior = String(rec.comments || '');
     const line = '[' + stamp + '] ' + ctx.user.name + ' returned: ' + comment.slice(0, 1000);

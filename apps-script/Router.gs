@@ -11,6 +11,7 @@
 function mergeActions_() {
   const core = {
     ping:             [actionPing_, 'public'],
+    batch:            [actionBatch_, 'token'],
     getPublicConfig:  [actionGetPublicConfig_, 'public'],
     whoami:           [actionWhoami_, 'token'],
     register:         [actionRegister_, 'token'],
@@ -50,35 +51,82 @@ function mergeActions_() {
 }
 const ACTIONS = mergeActions_();
 
+/** Reasons that are safe to show a staff member verbatim. Everything else stays generic (RL-9):
+ * a refusal about identity or permission must not describe the lock it just failed to open. */
+const SAFE_ERROR_PREFIX = 'SAY: ';
+
 function doPost(e) {
   let req = {};
+  execResetMemo_();          // fresh runtime per request, but be explicit about it
   try {
     req = JSON.parse(e.postData && e.postData.contents || '{}');
     const entry = ACTIONS[req.action];
     if (!entry) return out_({ ok: false, error: 'unknown action' }, 'REJECT unknown action', req);
 
-    let ident = null, user = null;
-    if (entry[1] !== 'public') {
-      ident = verifyGoogleToken_(req.idToken);              // RL-1: throws on any token failure
-      rateLimit_(ident.email);
-      user = loadUser_(ident.email);                        // may be null (not registered)
-      if (entry[1] === 'any' || entry[1] === 'super') {
-        if (!user || user.status !== 'approved') throw authErr_('not approved', ident.email);
-        if (isSuperAdmin(ident.email)) user.role = 'Management';
-        if (entry[1] === 'super' && !isSuperAdmin(ident.email)) throw authErr_('not super admin', ident.email);
-      }
-    }
+    const ctx = authorizeFor_(entry[1], req.idToken);
+    ctx.idToken = req.idToken;                              // batch re-authorises each inner call
     if (req.idem && seenIdem_(req.idem)) return out_({ ok: true, idempotent: true }, null, req);
-    const ctx = { ident: ident, user: user };
     const data = entry[0](req.payload || {}, ctx);
     if (req.idem) markIdem_(req.idem);
     return out_({ ok: true, data: data }, null, req);
   } catch (err) {
     logActivity_('router', 'ERROR:' + (req.action || '?'), (req && req.action) || '', '', '', String(err && err.stack || err));
-    return out_({ ok: false, error: (String(err.message) === 'auth' ? 'auth' : 'request failed') }, null, req);
+    const raw = String(err && err.message || '');
+    let shown = 'request failed';
+    if (raw === 'auth') shown = 'auth';
+    else if (raw.indexOf(SAFE_ERROR_PREFIX) === 0) shown = raw.slice(SAFE_ERROR_PREFIX.length);
+    // "Not saved: request failed" teaches a staff member nothing, so they try twice and then do
+    // the job in the spreadsheet instead — which is the exact drift the portal exists to end.
+    // Reasons a person can act on are passed through; anything security-shaped stays generic.
+    return out_({ ok: false, error: shown }, null, req);
   }
 }
 function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: true, service: 'M98M Portal', ts: now_() })).setMimeType(ContentService.MimeType.JSON); }
+
+/** The ONE place an access level is enforced. Both a direct call and a batched one go through
+ * here, so a batched action can never be checked more loosely than the same action called alone
+ * — the risk that makes batching dangerous if each path grows its own copy of the rules. */
+function authorizeFor_(level, idToken) {
+  if (level === 'public') return { ident: null, user: null };
+  const ident = verifyGoogleToken_(idToken);              // RL-1: throws on any token failure
+  rateLimit_(ident.email);
+  const user = loadUser_(ident.email);                    // may be null (not registered yet)
+  if (level === 'any' || level === 'super') {
+    if (!user || user.status !== 'approved') throw authErr_('not approved', ident.email);
+    if (isSuperAdmin(ident.email)) user.role = 'Management';
+    if (level === 'super' && !isSuperAdmin(ident.email)) throw authErr_('not super admin', ident.email);
+  }
+  return { ident: ident, user: user };
+}
+
+/** Several actions in one round trip. Apps Script spends roughly 2.5 seconds loading this script
+ * before a single line of ours runs, and a screen used to make four to eleven separate calls —
+ * so opening one screen cost 10-27 seconds of almost pure waiting. Batching pays that toll once.
+ * Each inner action is authorised individually through authorizeFor_, and one failure returns its
+ * own error without spoiling the rest. */
+const BATCH_MAX_CALLS = 12;
+
+function actionBatch_(payload, ctx) {
+  const calls = payload && payload.calls;
+  if (!Array.isArray(calls) || !calls.length) throw new Error(SAFE_ERROR_PREFIX + 'nothing to do');
+  if (calls.length > BATCH_MAX_CALLS) throw new Error('batch too large');
+
+  const results = calls.map(function (call) {
+    const name = call && call.action;
+    const entry = ACTIONS[name];
+    if (!entry || name === 'batch') return { ok: false, error: 'unknown action' };
+    try {
+      const inner = authorizeFor_(entry[1], ctx.idToken);
+      return { ok: true, data: entry[0](call.payload || {}, inner) };
+    } catch (err) {
+      logActivity_('router', 'ERROR:batch:' + name, name, '', '', String(err && err.stack || err));
+      const raw = String(err && err.message || '');
+      return { ok: false, error: raw === 'auth' ? 'auth'
+        : (raw.indexOf(SAFE_ERROR_PREFIX) === 0 ? raw.slice(SAFE_ERROR_PREFIX.length) : 'request failed') };
+    }
+  });
+  return { results: results };
+}
 
 /** RL-1 identity: verify Google ID token (signature+aud+exp via Google), return {email,name,...}. */
 function verifyGoogleToken_(idToken) {

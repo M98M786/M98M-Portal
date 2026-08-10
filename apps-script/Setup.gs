@@ -305,14 +305,32 @@ function testAnthropicKey() {
 }
 
 // ---------- shared helpers ----------
+/** Per-execution memo. Apps Script starts a fresh runtime for every request, so these live
+ * exactly as long as one request — there is no staleness across users. Opening the spreadsheet
+ * and reading Script Properties are both round trips of roughly 100-300ms, and a single request
+ * used to do it ten to twenty times (every logActivity_, getConfig, readTab_ and handler),
+ * which is where most of the portal's response time was going. */
+var EXEC_DB = null;
+var EXEC_CFG = {};
+var EXEC_TABS = {};
+
+/** Tabs that are read repeatedly in one request but never written and re-read inside it.
+ * Anything not listed here is read fresh every time, so write-then-read stays correct. */
+const EXEC_MEMO_TABS = ['USERS', 'CONFIG', 'CONNECTIONS', 'SCHEDULES', 'RULES', 'SOPS', 'INSTRUCTIONS'];
+
+function execResetMemo_() { EXEC_DB = null; EXEC_CFG = {}; EXEC_TABS = {}; }
+function execForgetTab_(name) { delete EXEC_TABS[name]; }
+
 function getPortalDb_(createIfMissing) {
+  if (EXEC_DB) return EXEC_DB;
   const props = PropertiesService.getScriptProperties();
   let id = props.getProperty(PROP_DB_ID);
-  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) { /* fall through */ } }
+  if (id) { try { EXEC_DB = SpreadsheetApp.openById(id); return EXEC_DB; } catch (e) { /* fall through */ } }
   if (!createIfMissing) throw new Error('Portal DB not initialised — run setupDatabase()');
   const found = DriveApp.getFilesByName(PORTAL_DB_NAME);
   const ss = found.hasNext() ? SpreadsheetApp.open(found.next()) : SpreadsheetApp.create(PORTAL_DB_NAME);
   props.setProperty(PROP_DB_ID, ss.getId());
+  EXEC_DB = ss;
   return ss;
 }
 function now_() { return Utilities.formatDate(new Date(), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ss'+05:00'"); }
@@ -322,20 +340,24 @@ const CONFIG_NEVER_CACHE = ['super_admins', 'oauth_client_id'];
 const CONFIG_CACHE_SECONDS = 25;
 
 function getConfig(key) {
+  // Within one request a setting cannot change, and the security keys below were re-reading the
+  // whole CONFIG tab on every single call.
+  if (Object.prototype.hasOwnProperty.call(EXEC_CFG, key)) return EXEC_CFG[key];
+
   const cacheable = CONFIG_NEVER_CACHE.indexOf(key) < 0;
   const cache = CacheService.getScriptCache();
   if (cacheable) {
     const hit = cache.get('cfg_' + key);
-    if (hit !== null) return hit;
+    if (hit !== null) { EXEC_CFG[key] = hit; return hit; }
   }
-  const sh = getPortalDb_(false).getSheetByName('CONFIG');
-  const rows = sh.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) if (rows[i][0] === key) {
-    const val = String(rows[i][1]);
-    if (cacheable) cache.put('cfg_' + key, val, CONFIG_CACHE_SECONDS);
-    return val;
+  const rows = readTab_('CONFIG');
+  let val = '';
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].key === key) { val = String(rows[i].value); break; }
   }
-  return '';
+  if (cacheable) cache.put('cfg_' + key, val, CONFIG_CACHE_SECONDS);
+  EXEC_CFG[key] = val;
+  return val;
 }
 /** RL-6: append-only activity log, locked. Detail stays server-side (RL-9). */
 function logActivity_(actor, action, target, oldV, newV, detail) {
@@ -347,12 +369,13 @@ function logActivity_(actor, action, target, oldV, newV, detail) {
 }
 
 function logActivityInner_(actor, action, target, oldV, newV, detail) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-    // false, never true: this runs on every error, and a create-if-missing here would answer a
-    // temporarily unreachable database by making a blank one and overwriting the stored id of
-    // the real one — erasing the way back at the exact moment something is already wrong.
-    getPortalDb_(false).getSheetByName('ACTIVITY_LOG').appendRow([now_(), actor, action, target, String(oldV).slice(0, 500), String(newV).slice(0, 500), String(detail || '').slice(0, 1000)]);
-  } finally { lock.releaseLock(); }
+  // No script lock. appendRow already appends atomically, and taking the PORTAL-WIDE lock here
+  // made every logged action — which is nearly all of them — queue behind every other user's.
+  // With 13 staff that turned an audit trail into the portal's main traffic jam. The lock still
+  // guards genuine read-modify-write sequences elsewhere, which is what it is for.
+  // false, never true: this runs on every error, and a create-if-missing here would answer a
+  // temporarily unreachable database by making a blank one and overwriting the stored id of the
+  // real one — erasing the way back at the exact moment something is already wrong.
+  getPortalDb_(false).getSheetByName('ACTIVITY_LOG')
+    .appendRow([now_(), actor, action, target, String(oldV).slice(0, 500), String(newV).slice(0, 500), String(detail || '').slice(0, 1000)]);
 }

@@ -156,12 +156,21 @@ function actionApproveUser_(payload, ctx) {
 
 // ---------- helpers ----------
 function readTab_(name) {
-  const vals = getPortalDb_(false).getSheetByName(name).getDataRange().getValues();
-  if (vals.length < 2) return [];
-  const head = vals[0];
-  return vals.slice(1).filter(function (r) { return r.join('') !== ''; }).map(function (r) {
-    const o = {}; head.forEach(function (h, i) { o[h] = r[i]; }); return o;
-  });
+  if (Object.prototype.hasOwnProperty.call(EXEC_TABS, name)) return EXEC_TABS[name];
+  const sheet = getPortalDb_(false).getSheetByName(name);
+  if (!sheet) throw new Error('unknown tab: ' + name);
+  const vals = sheet.getDataRange().getValues();
+  let out = [];
+  if (vals.length >= 2) {
+    const head = vals[0];
+    out = vals.slice(1).filter(function (r) { return r.join('') !== ''; }).map(function (r) {
+      const o = {}; head.forEach(function (h, i) { o[h] = r[i]; }); return o;
+    });
+  }
+  // Only the read-mostly tabs are held for the rest of the request; everything else is re-read
+  // each time so a handler that writes and then reads still sees its own change.
+  if (EXEC_MEMO_TABS.indexOf(name) >= 0) EXEC_TABS[name] = out;
+  return out;
 }
 function notify_(toEmail, type, message, ref) {
   getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow(['N' + Utilities.getUuid().slice(0, 8), toEmail, 'system', type, message, ref || '', now_(), '']);
