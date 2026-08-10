@@ -36,6 +36,11 @@ function mergeActions_() {
     typeof ACTIONS_LISTING    !== 'undefined' ? ACTIONS_LISTING    : null,
     typeof ACTIONS_CPC        !== 'undefined' ? ACTIONS_CPC        : null,
     typeof ACTIONS_POTENTIALCPC !== 'undefined' ? ACTIONS_POTENTIALCPC : null,
+    typeof ACTIONS_ADVERTISING !== 'undefined' ? ACTIONS_ADVERTISING : null,
+    typeof ACTIONS_ORDERS     !== 'undefined' ? ACTIONS_ORDERS     : null,
+    typeof ACTIONS_RECHECK    !== 'undefined' ? ACTIONS_RECHECK    : null,
+    typeof ACTIONS_CS         !== 'undefined' ? ACTIONS_CS         : null,
+    typeof ACTIONS_EMBEDS     !== 'undefined' ? ACTIONS_EMBEDS     : null,
   ];
   groups.forEach(function (g) {
     if (!g) return;
