@@ -42,6 +42,12 @@ function mergeActions_() {
     typeof ACTIONS_RECHECK    !== 'undefined' ? ACTIONS_RECHECK    : null,
     typeof ACTIONS_CS         !== 'undefined' ? ACTIONS_CS         : null,
     typeof ACTIONS_EMBEDS     !== 'undefined' ? ACTIONS_EMBEDS     : null,
+    typeof ACTIONS_DASHBOARD  !== 'undefined' ? ACTIONS_DASHBOARD  : null,
+    typeof ACTIONS_ALERTS     !== 'undefined' ? ACTIONS_ALERTS     : null,
+    typeof ACTIONS_PERFORMANCE !== 'undefined' ? ACTIONS_PERFORMANCE : null,
+    typeof ACTIONS_SIGNALS    !== 'undefined' ? ACTIONS_SIGNALS    : null,
+    typeof ACTIONS_STAFFADMIN !== 'undefined' ? ACTIONS_STAFFADMIN : null,
+    typeof ACTIONS_ATTENDANCE !== 'undefined' ? ACTIONS_ATTENDANCE : null,
   ];
   groups.forEach(function (g) {
     if (!g) return;

@@ -19,6 +19,8 @@ GS_ORDER = [
     'Agenda.gs', 'Meetings.gs', 'RulesAck.gs',
     'Hunting.gs', 'Listing.gs', 'CpcResearch.gs', 'PotentialCpc.gs',
     'Advertising.gs', 'Orders.gs', 'Recheck.gs', 'CustomerService.gs', 'Embeds.gs',
+    'Dashboard.gs', 'Alerts.gs', 'Performance.gs', 'Signals.gs', 'StaffAdmin.gs', 'Attendance.gs',
+    'Integrity.gs',
     'Router.gs', 'Registry.gs',
 ]
 MARKER = '/* === PHASE 3 VIEW MODULES SPLICED HERE === */'

@@ -61,8 +61,29 @@ In your own Chrome (not the Claude window — Google's permission popup won't op
 3. Set: Function **runMissedCheckpointSweep** · Deployment **Head** · Event source **Time-driven** · **Hour timer** · **Every hour** → **Save** → **Allow** if asked
 4. **Add Trigger** again for **runSubmissionEscalationSweep**, same settings
 5. **Add Trigger** once more for **generateRecheckRows**, but choose **Day timer** and a time early in the shift
+6. **Add Trigger** for **nightlyBackup** — **Day timer**, some quiet hour (e.g. 4–5 AM)
+7. **Add Trigger** for **buildDashboardCache** — **Minutes timer**, **Every 15 minutes** (this is what makes the dashboard open instantly instead of computing while you wait)
 
-You'll know it worked when the Triggers list shows three rows. Everything else in the portal works without them.
+You'll know it worked when the Triggers list shows five rows. Everything else in the portal works without them, except that the dashboard will be slower and nothing will be backed up.
+
+## Step 6 — Prove the backup works (5 minutes, once)
+
+A backup nobody has ever restored is a hope, not a safety net. Once the nightly trigger above has run at least once:
+
+1. In the Apps Script editor, choose **verifyLatestBackup** from the function list and press **Run**
+2. The log should say **COMPLETE** and list the row counts it found
+
+If it ever says INCOMPLETE or NO BACKUP FOUND, tell Claude — that is the one failure worth interrupting anything else for.
+
+## Step 7 — When you're ready to let the portal write to your real sheets
+
+Right now the portal writes to **nothing real**. Every write it *would* make to your Hunting sheet, Central sheets, PPC Central or Potential CPC workbook is recorded in the ACTIVITY_LOG as `SHADOW_WRITE`, with the exact values.
+
+**Before switching it on, read those rows.** They are literally a list of what it intends to do to your files.
+
+When you're satisfied: in the Apps Script editor run **setExternalWrites** — but first edit the call so it reads `setExternalWrites(true, 'hasib')`. It records who turned it on, tells Management, and reports how many shadow writes were logged first. To go back to rehearsal, run it again with `false`.
+
+You can also just say **"turn on live writing"** and Claude will do it and show you the shadow log first.
 
 ## Step 5 — Approve staff and set the rota
 
