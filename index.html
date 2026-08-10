@@ -231,12 +231,70 @@ function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 
-/* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ---- */
-function api(action, payload){
+/* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ----
+   Google spends roughly 2.5 seconds loading the backend before any of our code runs, and that
+   toll is per REQUEST, not per action. A screen that asks for five things used to pay it five
+   times. So calls made in the same moment are gathered and sent as one, transparently: every
+   caller still gets its own promise and its own error. Nothing in the views had to change. */
+var API_BATCH_WINDOW_MS = 20;
+var API_BATCH_MAX = 10;
+var apiQueue = [];
+var apiTimer = null;
+
+function apiSend(action, payload){
   var body = JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} });
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
-    .then(function(r){ return r.json(); })
-    .then(function(j){ if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; });
+    .then(function(r){ return r.json(); });
+}
+
+function apiFlush(){
+  var batch = apiQueue; apiQueue = []; apiTimer = null;
+  if(!batch.length) return;
+  if(batch.length === 1){
+    var one = batch[0];
+    apiSend(one.action, one.payload)
+      .then(function(j){ if(!j.ok){ one.reject(new Error(j.error||'request failed')); } else { one.resolve(j.data); } })
+      .catch(function(e){ one.reject(e); });
+    return;
+  }
+  apiSend('batch', { calls: batch.map(function(c){ return { action:c.action, payload:c.payload }; }) })
+    .then(function(j){
+      var results = j && j.ok && j.data && j.data.results;
+      // If batching itself is unavailable for any reason, fall back to one request per call so
+      // the portal degrades to its old speed instead of breaking. Individual call failures are
+      // NOT retried here — those are real answers and belong to their own caller.
+      if(!results || results.length !== batch.length){ apiRetrySingly(batch); return; }
+      batch.forEach(function(c, i){
+        var r = results[i];
+        if(!r){ c.reject(new Error('request failed')); }
+        else if(!r.ok){ c.reject(new Error(r.error||'request failed')); }
+        else { c.resolve(r.data); }
+      });
+    })
+    .catch(function(){ apiRetrySingly(batch); });
+}
+
+function apiRetrySingly(batch){
+  batch.forEach(function(c){
+    apiSend(c.action, c.payload)
+      .then(function(j){ if(!j.ok){ c.reject(new Error(j.error||'request failed')); } else { c.resolve(j.data); } })
+      .catch(function(e){ c.reject(e); });
+  });
+}
+
+function api(action, payload){
+  // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
+  if(!STATE.idToken || action === 'batch'){
+    return apiSend(action, payload).then(function(j){
+      if(!j.ok){ throw new Error(j.error||'request failed'); }
+      return j.data;
+    });
+  }
+  return new Promise(function(resolve, reject){
+    apiQueue.push({ action:action, payload:payload||{}, resolve:resolve, reject:reject });
+    if(apiQueue.length >= API_BATCH_MAX){ clearTimeout(apiTimer); apiFlush(); return; }
+    if(!apiTimer){ apiTimer = setTimeout(apiFlush, API_BATCH_WINDOW_MS); }
+  });
 }
 
 /* ---- Google Identity Services ---- */
@@ -2085,15 +2143,31 @@ function buildHistory() {
       '<button class="btn-ghost" id="aghGo" style="margin-top:14px">Browse</button>' +
       '<div id="aghOut" style="margin-top:6px"></div>' +
     '</div></div>';
+  // Pre-fill BOTH ends. Filling only "To" made the obvious next click send a range with no start,
+  // which the server rejected — and the person only saw "request failed".
   $('aghTo').value = agenda.date || '';
+  $('aghFrom').value = agDaysBefore(agenda.date, 13);
   $('aghAud').onchange = function () { $('aghPersonWrap').classList.toggle('hidden', this.value !== '__person'); };
   $('aghGo').onclick = browseHistory;
+}
+
+function agDaysBefore(ymd, days) {
+  var s = String(ymd || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  var p = s.split('-');
+  var d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+  d.setUTCDate(d.getUTCDate() - days);
+  var mm = String(d.getUTCMonth() + 1), dd = String(d.getUTCDate());
+  return d.getUTCFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
 }
 
 function browseHistory() {
   var payload = {};
   var from = String($('aghFrom').value || '').trim();
   var to = String($('aghTo').value || '').trim();
+  // Someone picking the two dates the wrong way round means "show me these two weeks", not an
+  // error. Swap them rather than refusing.
+  if (from && to && from > to) { var swap = from; from = to; to = swap; $('aghFrom').value = from; $('aghTo').value = to; }
   if (from) payload.from = from;
   if (to) payload.to = to;
   var aud = $('aghAud').value;
@@ -5257,7 +5331,9 @@ VIEW_CSS.push(
 /* §20.2 — these two labels are the RSVP contract with the backend: they are sent as the answer. */
 var IB_RSVP_YES = 'Yes sir, I will be there';
 var IB_RSVP_NO = "Can't attend (+reason)";
-var IB_POLL_MS = 45000;
+/* 13 staff each polling every 45s is a request every 3.5 seconds, all day, before anyone does
+   any work. 90s halves that background load and no one waiting on a message notices. */
+var IB_POLL_MS = 90000;
 var IB_POLL_MIN_GAP = 3000;
 var IB_NOTIF_KEEP = 40;
 
