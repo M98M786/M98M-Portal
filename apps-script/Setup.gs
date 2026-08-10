@@ -243,6 +243,48 @@ function bootstrapSetShifts() {
   return msg;
 }
 
+/** SETUP-ONLY: the whole team works Monday to Saturday (owner's instruction).
+ * Stored as the canonical comma list the rota screen and the report sweep both read, so Sunday
+ * stops producing checkpoints — no missed-report marks against a day nobody was working. */
+function bootstrapSetWorkingDays() {
+  const DAYS = 'Mon,Tue,Wed,Thu,Fri,Sat';
+  const sc = getPortalDb_(false).getSheetByName('SCHEDULES');
+  const rows = sc.getDataRange().getValues();
+  const head = rows[0];
+  let col = 0;
+  head.forEach(function (h, i) { if (String(h).trim() === 'working_days') col = i + 1; });
+  if (!col) throw new Error('working_days column not found');
+
+  const done = [];
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    for (let i = 1; i < rows.length; i++) {
+      const email = String(rows[i][0] || '');
+      if (!email) continue;
+      const old = String(rows[i][col - 1] || '');
+      if (old === DAYS) continue;
+      sc.getRange(i + 1, col).setValue(DAYS);
+      done.push(email);
+      logActivity_('setup', 'SET_WORKING_DAYS', email, old, DAYS, 'owner instruction');
+    }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+
+  // Prove it took effect where it matters: Sunday must be a non-working day now.
+  const sample = done.length ? done[0] : '';
+  let sundayCheck = 'no rows to check';
+  if (sample) {
+    const sched = getScheduleForUser_(sample);
+    sundayCheck = 'Sunday counted as a working day for ' + sample + '? ' +
+      (repIsWorkingDay_(sched && sched.working_days, '2026-08-16') ? 'YES (wrong)' : 'no (correct)') +
+      ' · Monday? ' + (repIsWorkingDay_(sched && sched.working_days, '2026-08-17') ? 'yes (correct)' : 'NO (wrong)');
+  }
+  const msg = 'WORKING DAYS set to ' + DAYS + ' for ' + done.length + ' schedule rows.\n' + sundayCheck;
+  Logger.log(msg);
+  return msg;
+}
+
 /** Phase 1 DoD: one-line Anthropic test — proves the key works. Reads key from Script Properties ONLY (RL-2). */
 function testAnthropicKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
