@@ -85,9 +85,29 @@ function verifyGoogleToken_(idToken) {
   if (!idToken) throw authErr_('no token', '');
   const clientId = getConfig('oauth_client_id');
   if (!clientId) throw authErr_('oauth_client_id not configured', '');
-  const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
-  if (resp.getResponseCode() !== 200) throw authErr_('token rejected by Google', '');
-  const t = JSON.parse(resp.getContentText());
+
+  /* Google's answer about a given pass cannot change for the hour that pass is valid, so asking
+   * again on every request spends an outbound call (a capped daily resource) to re-learn the
+   * same fact and adds a network round trip to every screen. Remember it briefly, keyed by a
+   * digest of the pass rather than the pass itself so no credential sits in the cache.
+   * Revocation is unaffected: the USERS row is still read fresh on every request below, so
+   * deactivating someone still stops them on their very next action (RL-5). */
+  const cache = CacheService.getScriptCache();
+  const digest = Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, idToken)).slice(0, 32);
+  const cacheKey = 'tok_' + digest;
+  const hit = cache.get(cacheKey);
+  let t;
+  if (hit) {
+    t = JSON.parse(hit);
+  } else {
+    const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) throw authErr_('token rejected by Google', '');
+    t = JSON.parse(resp.getContentText());
+    // Never outlive the pass itself.
+    const secondsLeft = Math.floor((Number(t.exp) * 1000 - Date.now()) / 1000);
+    if (secondsLeft > 30) cache.put(cacheKey, JSON.stringify(t), Math.min(300, secondsLeft - 30));
+  }
   if (t.aud !== clientId) throw authErr_('audience mismatch', t.email || '');
   if (Number(t.exp) * 1000 < Date.now()) throw authErr_('token expired', t.email || '');
   if (String(t.email_verified) !== 'true') throw authErr_('email not verified', t.email || '');
@@ -107,10 +127,19 @@ function loadUser_(email) {
 }
 function authErr_(why, email) { logActivity_('auth', 'AUTH_FAIL', email, '', '', why); return new Error('auth'); }
 
+const RATE_LIMIT_PER_MIN = 60;
+
+/** Fixed one-minute window. The key CONTAINS the minute, so the count genuinely restarts each
+ * minute. Re-putting a fixed key with a 60s TTL instead makes a SLIDING window: every request
+ * pushes the expiry out, the count never resets, and a staff member polling every 45 seconds is
+ * locked out mid-shift for the rest of the day. */
 function rateLimit_(email) {
-  const c = CacheService.getScriptCache(), k = 'rl_' + normalizeEmail(email);
-  const n = Number(c.get(k) || 0) + 1; c.put(k, String(n), 60);
-  if (n > 90) throw authErr_('rate limit', email);
+  const minute = Math.floor(Date.now() / 60000);
+  const key = 'rl_' + minute + '_' + normalizeEmail(email);
+  const c = CacheService.getScriptCache();
+  const n = Number(c.get(key) || 0) + 1;
+  c.put(key, String(n), 120);
+  if (n > RATE_LIMIT_PER_MIN) throw authErr_('rate limit', email);
 }
 function seenIdem_(key) { return CacheService.getScriptCache().get('idem_' + key) === '1'; }
 function markIdem_(key) { CacheService.getScriptCache().put('idem_' + key, '1', 21600); }

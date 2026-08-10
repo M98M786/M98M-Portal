@@ -314,6 +314,15 @@ function rulesStamp_(issuer, iso) {
  * Any missing connection, tab or column is reported as "not connected yet" — never an error,
  * and nothing on that sheet is ever created, renamed or reshaped. */
 function rulesPpcAppend_(text, date) {
+  // §16.10 pilot gate. This is the one write that reaches a live workbook without going through
+  // SheetBridge, so it must check the same flag itself — otherwise publishing one Advertising
+  // instruction puts a row into PPC Central while everyone believes the portal writes nothing.
+  if (String(getConfig('pipeline_write_external')) !== 'true') {
+    logActivity_('rules', 'SHADOW_WRITE', 'ppc!instructions', '', String(text).slice(0, 300),
+      'would append instruction dated ' + String(date));
+    return { ok: true, shadow: true, wouldWrite: { instruction: text, date: date } };
+  }
+
   let ss = null;
   try {
     const id = rulesPpcId_();

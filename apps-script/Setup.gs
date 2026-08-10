@@ -218,9 +218,20 @@ function getConfig(key) {
 }
 /** RL-6: append-only activity log, locked. Detail stays server-side (RL-9). */
 function logActivity_(actor, action, target, oldV, newV, detail) {
+  try {
+    logActivityInner_(actor, action, target, oldV, newV, detail);
+  } catch (e) {
+    // Logging must never be the reason a staff member's save fails.
+  }
+}
+
+function logActivityInner_(actor, action, target, oldV, newV, detail) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    getPortalDb_(true).getSheetByName('ACTIVITY_LOG').appendRow([now_(), actor, action, target, String(oldV).slice(0, 500), String(newV).slice(0, 500), String(detail || '').slice(0, 1000)]);
+    // false, never true: this runs on every error, and a create-if-missing here would answer a
+    // temporarily unreachable database by making a blank one and overwriting the stored id of
+    // the real one — erasing the way back at the exact moment something is already wrong.
+    getPortalDb_(false).getSheetByName('ACTIVITY_LOG').appendRow([now_(), actor, action, target, String(oldV).slice(0, 500), String(newV).slice(0, 500), String(detail || '').slice(0, 1000)]);
   } finally { lock.releaseLock(); }
 }

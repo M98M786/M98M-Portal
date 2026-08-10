@@ -48,15 +48,21 @@ Claude has built the login screen and the whole backend; it cannot finish this s
 
 Nothing to copy or paste, and no payment: this is the free tier — creating a sign-in credential costs nothing.
 
-## Step 4c — One-time: authorize the background triggers (optional, do when convenient)
+## Step 4c — Switch on the three background jobs (5 minutes, only you can do this)
 
-The portal has two background "janitors": one flags a 2-hourly report as *missed* if it's not filed in time, the other nudges Management when a submitted task sits un-approved too long. They need one extra Google permission that only grants on your click.
+The portal has three jobs that run on their own: one marks a 2-hourly report **missed** when nobody files it (this is the accountability spine — without it a missing report looks the same as one that isn't due yet), one nudges Management when a submitted task sits un-approved, and one generates each day's recheck rows.
 
-1. In the Apps Script tab, pick **installTriggers** from the function dropdown (next to Debug) and press **Run**.
-2. A **"Authorization required"** box appears → **Review permissions** → choose m98m786 → **Allow**.
-3. The execution log should say *"Triggers installed…"*. Done — the portal now polices itself.
+There is **no `installTriggers` function** — an earlier version of this guide said there was, and that was wrong. Creating them in code would have forced a Google permission that blocks every other function, so they are created from the Apps Script screen instead, which needs no extra permission.
 
-Everything else in the portal works without this; the triggers only automate two background chores. Say **"triggers done"** if you'd like Claude to confirm they're registered.
+In your own Chrome (not the Claude window — Google's permission popup won't open there):
+
+1. **script.google.com** → open **M98M Portal Backend**
+2. Left sidebar → the **clock icon** (Triggers) → **+ Add Trigger** (bottom right)
+3. Set: Function **runMissedCheckpointSweep** · Deployment **Head** · Event source **Time-driven** · **Hour timer** · **Every hour** → **Save** → **Allow** if asked
+4. **Add Trigger** again for **runSubmissionEscalationSweep**, same settings
+5. **Add Trigger** once more for **generateRecheckRows**, but choose **Day timer** and a time early in the shift
+
+You'll know it worked when the Triggers list shows three rows. Everything else in the portal works without them.
 
 ## Step 5 — Approve staff and set the rota
 

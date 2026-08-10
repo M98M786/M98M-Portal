@@ -218,7 +218,35 @@ function actionToolHtml_(payload, ctx) {
 
   logActivity_(email, 'TOOL_OPEN', def.kind, '', String(got.bytes), def.title + ' · role ' + role);
   // No id, no path, no Drive link — only the document (RL-9). Render it in a sandboxed iframe.
-  return { ok: true, tool: def.kind, title: def.title, bytes: got.bytes, html: got.html };
+  return { ok: true, tool: def.kind, title: def.title, bytes: got.bytes,
+    html: embedWithStorageShim_(got.html), storageIsTemporary: true };
+}
+
+/** The sandbox that makes these tools safe to embed (no allow-same-origin) also makes browser
+ * storage throw rather than return empty. The Listing Tool touches storage unguarded inside its
+ * startup path, so the throw kills its entire script block and it renders as a dead page.
+ * Rather than edit the tool — which would risk the standalone copies staff still rely on — give
+ * the frame a storage object that works for the session. Drafts last while the tab is open and
+ * are not carried between machines; the UI says so honestly. */
+function embedWithStorageShim_(html) {
+  const shim = '<script>(function(){' +
+    'function mem(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null;},' +
+    'setItem:function(k,v){d[k]=String(v);},removeItem:function(k){delete d[k];},' +
+    'clear:function(){d={};},key:function(i){return Object.keys(d)[i]||null;},' +
+    'get length(){return Object.keys(d).length;}};}' +
+    'function ok(n){try{var s=window[n];s.setItem("__probe","1");s.removeItem("__probe");return true;}catch(e){return false;}}' +
+    '["localStorage","sessionStorage"].forEach(function(n){' +
+      'if(ok(n))return;' +
+      'try{Object.defineProperty(window,n,{value:mem(),configurable:true});}catch(e){try{window[n]=mem();}catch(e2){}}' +
+    '});' +
+  '})();<\/script>';
+  const s = String(html || '');
+  const head = s.search(/<head[^>]*>/i);
+  if (head >= 0) {
+    const end = s.indexOf('>', head) + 1;
+    return s.slice(0, end) + shim + s.slice(end);
+  }
+  return shim + s;
 }
 
 // ---------- setup (run from the Apps Script editor, never from the browser) ----------
