@@ -95,8 +95,18 @@ function setExternalWrites(enabled, actor) {
   const rows = sh.getDataRange().getValues();
   let row = 0;
   for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === 'pipeline_write_external') { row = i + 1; break; }
-  if (!row) throw new Error('pipeline_write_external missing from CONFIG');
-  const old = String(rows[row - 1][1]);
+  // The key can be absent — it was added to the defaults after this database was first built, and
+  // setup only seeds keys that are missing when it runs. Absent still means NO writing, because
+  // bridgeWriteEnabled_ requires the exact string 'true'. Create the row so the setting is
+  // visible in the sheet rather than implied by a default nobody can see.
+  let old = '(not set — writing was off)';
+  if (!row) {
+    sh.appendRow(['pipeline_write_external', 'false', 'setup', now_()]);
+    SpreadsheetApp.flush();
+    row = sh.getLastRow();
+  } else {
+    old = String(rows[row - 1][1]);
+  }
   sh.getRange(row, 2).setValue(want ? 'true' : 'false');
   sh.getRange(row, 3).setValue(actor || 'owner');
   sh.getRange(row, 4).setValue(now_());
@@ -120,8 +130,13 @@ function integritySelfCheck() {
   const out = [];
   const ok = function (name, pass, detail) { out.push((pass ? 'PASS ' : 'FAIL ') + name + (detail ? '  — ' + detail : '')); };
 
-  const shadow = String(getConfig('pipeline_write_external')) !== 'true';
-  ok('shadow mode protects the live workbooks', shadow, shadow ? 'writes are recorded, not applied' : 'LIVE WRITING IS ON');
+  const flag = String(getConfig('pipeline_write_external'));
+  const shadow = flag !== 'true';
+  ok('shadow mode protects the live workbooks', shadow,
+    shadow ? ('writes are recorded, not applied' + (flag ? '' : ' (setting absent — absent means off)')) : 'LIVE WRITING IS ON');
+
+  // Prove it at the door rather than trusting the flag: ask the bridge itself.
+  ok('the bridge agrees writing is off', typeof bridgeWriteEnabled_ !== 'function' || bridgeWriteEnabled_() === false);
 
   const folder = DriveApp.getFoldersByName(BACKUP_FOLDER);
   let count = 0, newest = null;
