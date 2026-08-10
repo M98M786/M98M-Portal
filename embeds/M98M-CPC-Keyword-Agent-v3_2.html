@@ -1,0 +1,3759 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M98M — eBay CPC Keyword Decision Engine v1.0</title>
+<style>
+/* ============================================================
+   M98M CPC KEYWORD DECISION ENGINE — design tokens
+   Palette: sterling gold on petrol ink. Gold is reserved for
+   money and Tier 1 only. Mono type carries all data, because
+   "iphone 15" vs "iphone 14" must be scannable at a glance.
+   ============================================================ */
+:root{
+  --ink:#0F1922; --ink-2:#0B131A;
+  --panel:#16232E; --panel-2:#1C2C39; --panel-3:#223544;
+  --line:#273B4A; --line-soft:#1E2F3C;
+  --text:#E7EEF4; --text-2:#9EB3C2; --text-3:#6C8496;
+  --gold:#E2A83D; --gold-2:#F2C368; --gold-dim:#5C4517;
+  --teal:#3FB6C4; --teal-dim:#173F46;
+  --sage:#5CC08D; --sage-dim:#173D2C;
+  --clay:#E0685E; --clay-dim:#48211E;
+  --violet:#9A8CE0; --violet-dim:#2C2748;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --r:6px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ink); color:var(--text);
+  font-family:var(--sans); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+::selection{background:var(--gold);color:var(--ink)}
+
+/* ---------- masthead ---------- */
+.masthead{
+  border-bottom:1px solid var(--line); background:var(--ink-2);
+  display:flex;align-items:center;gap:10px 16px;padding:10px 18px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:40;
+}
+.brand{flex:0 1 auto;min-width:0}
+.masthead-spacer{flex:1 1 40px}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand-mark{
+  font-family:var(--mono);font-weight:700;letter-spacing:.14em;font-size:15px;
+  color:var(--gold);
+}
+.brand-name{font-size:13px;color:var(--text-2);letter-spacing:.02em}
+.brand-ver{
+  font-family:var(--mono);font-size:11px;color:var(--text-3);
+  border:1px solid var(--line);border-radius:99px;padding:1px 8px;
+}
+.masthead-actions{display:flex;gap:8px;flex-wrap:wrap}
+.save-state{font-family:var(--mono);font-size:11px;color:var(--text-3);align-self:center}
+
+/* ---------- shell ----------
+   The masthead sits outside this grid. Its height is measured at runtime
+   into --mast-h, because it wraps onto two lines at high browser zoom and
+   any hardcoded number is wrong the moment the user presses Ctrl +. */
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);align-items:start;
+  min-height:calc(100vh - var(--mast-h,52px))}
+.rail{
+  border-right:1px solid var(--line);background:var(--ink-2);
+  padding:16px 0;position:sticky;top:var(--mast-h,52px);align-self:start;
+  max-height:calc(100vh - var(--mast-h,52px));overflow-y:auto;overflow-x:hidden;min-width:0;
+}
+.rail-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--text-3);
+  text-transform:uppercase;padding:0 18px 10px;
+}
+.step{
+  display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:start;
+  width:100%;text-align:left;background:none;border:0;cursor:pointer;
+  padding:9px 18px;border-left:2px solid transparent;
+}
+.step:hover{background:var(--panel)}
+.step.is-active{background:var(--panel);border-left-color:var(--gold)}
+.step-num{
+  font-family:var(--mono);font-size:11px;color:var(--text-3);
+  border:1px solid var(--line);border-radius:3px;text-align:center;padding:1px 0;
+}
+.step.is-active .step-num{color:var(--gold);border-color:var(--gold-dim)}
+.step.is-done .step-num{color:var(--sage);border-color:var(--sage-dim)}
+.step-title{font-size:13px;color:var(--text-2);line-height:1.3}
+.step.is-active .step-title{color:var(--text);font-weight:600}
+.step-hint{font-family:var(--mono);font-size:10px;color:var(--text-3);margin-top:2px;display:block}
+.rail-foot{padding:16px 18px;margin-top:12px;border-top:1px solid var(--line-soft)}
+.rail-foot p{font-size:11px;color:var(--text-3);margin:0 0 6px}
+
+/* ---------- main ---------- */
+.main{padding:26px 30px 90px;max-width:1360px;width:100%;margin-inline:auto;min-width:0}
+.view{display:none}
+.view.is-active{display:block}
+.view-head{margin-bottom:20px}
+.eyebrow{
+  font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--gold);margin:0 0 6px;
+}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em;font-weight:650}
+.lede{color:var(--text-2);margin:0;max-width:74ch;font-size:13.5px}
+
+/* ---------- cards ---------- */
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px;margin-bottom:16px;
+}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+.card h2{font-size:14px;margin:0;font-weight:650;letter-spacing:.01em}
+.card-sub{color:var(--text-3);font-size:12px;margin:0 0 14px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+
+/* ---------- fields ---------- */
+.field{display:block;margin-bottom:12px}
+.field > span{
+  display:block;font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--text-3);margin-bottom:5px;
+}
+.field .opt{color:var(--text-3);text-transform:none;letter-spacing:0;font-family:var(--sans)}
+input[type=text],input[type=number],input[type=url],textarea,select{
+  width:100%;background:var(--ink);border:1px solid var(--line);border-radius:4px;
+  padding:8px 10px;color:var(--text);
+}
+input[type=text],input[type=url],textarea{font-family:var(--mono);font-size:12.5px}
+input[type=number]{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums}
+textarea{resize:vertical;line-height:1.55}
+input:hover,textarea:hover,select:hover{border-color:var(--panel-3)}
+input:focus,textarea:focus,select:focus{border-color:var(--gold);outline:none}
+::placeholder{color:var(--text-3);opacity:.75}
+
+/* ---------- buttons ---------- */
+.btn{
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+  padding:7px 14px;border-radius:4px;cursor:pointer;
+  font-size:12.5px;font-weight:550;white-space:nowrap;
+}
+.btn:hover{background:var(--panel-3);border-color:var(--panel-3)}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--gold);border-color:var(--gold);color:#1A1206;font-weight:650}
+.btn-primary:hover{background:var(--gold-2);border-color:var(--gold-2)}
+.btn-ghost{background:transparent}
+.btn-danger{color:var(--clay);border-color:var(--clay-dim)}
+.btn-danger:hover{background:var(--clay-dim);border-color:var(--clay)}
+.btn-lg{padding:11px 24px;font-size:14px}
+.btn-sm{padding:4px 9px;font-size:11.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* ---------- notes ---------- */
+.note{
+  border-left:2px solid var(--teal);background:var(--teal-dim);
+  padding:10px 12px;border-radius:0 4px 4px 0;font-size:12.5px;margin:12px 0;color:#CFEAEE;
+}
+.note-warn{border-left-color:var(--gold);background:#3A2C0E;color:#F0DDB4}
+.note-risk{border-left-color:var(--clay);background:var(--clay-dim);color:#F4CDC9}
+.note strong{font-weight:650}
+.tip{
+  border:1px dashed var(--gold-dim);background:#241B08;border-radius:4px;
+  padding:10px 12px;margin:12px 0;font-size:12.5px;color:#E8D6AB;
+}
+.tip b{
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--gold);display:block;margin-bottom:4px;
+}
+
+/* ---------- summary strip ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin-bottom:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.kpi-n{
+  font-family:var(--mono);font-size:26px;font-weight:600;line-height:1;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+}
+.kpi-l{
+  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-3);margin-top:6px;
+}
+.kpi.t1{border-color:var(--gold-dim)} .kpi.t1 .kpi-n{color:var(--gold)}
+.kpi.t2 .kpi-n{color:var(--teal)}
+.kpi.t3 .kpi-n{color:var(--violet)}
+.kpi.ex .kpi-n{color:var(--text-3)}
+
+/* ---------- table ---------- */
+.table-wrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+thead th{
+  position:sticky;top:0;background:var(--panel-2);z-index:2;
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-3);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);
+  white-space:nowrap;
+}
+thead th.sortable{cursor:pointer;user-select:none}
+thead th.sortable:hover{color:var(--text)}
+thead th .arrow{color:var(--gold)}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+tbody tr.krow{cursor:pointer}
+tbody tr.krow:hover{background:var(--panel-2)}
+tbody tr.is-open{background:var(--panel-2)}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+td.kw{font-family:var(--mono);font-size:12.5px;min-width:230px;word-break:break-word}
+td.mid{text-align:center}
+.na{color:var(--text-3);font-family:var(--mono);font-size:11.5px}
+
+.badge{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 7px;border-radius:3px;border:1px solid;white-space:nowrap;display:inline-block;
+}
+.b-t1{color:var(--gold);border-color:var(--gold-dim);background:#2B2008}
+.b-t2{color:var(--teal);border-color:var(--teal-dim);background:#0F2A30}
+.b-t3{color:var(--violet);border-color:var(--violet-dim);background:#1D1932}
+.b-ex{color:var(--text-3);border-color:var(--line);background:var(--ink)}
+.b-high{color:var(--sage);border-color:var(--sage-dim);background:#102A20}
+.b-med{color:var(--teal);border-color:var(--teal-dim);background:#0F2A30}
+.b-res{color:var(--violet);border-color:var(--violet-dim);background:#1D1932}
+.b-info{color:var(--text-3);border-color:var(--line);background:var(--ink)}
+.b-irr{color:var(--clay);border-color:var(--clay-dim);background:#311715}
+.b-risk{color:var(--clay);border-color:var(--clay-dim);background:#311715}
+.b-riskm{color:var(--gold);border-color:var(--gold-dim);background:#2B2008}
+.b-ok{color:var(--text-3);border-color:var(--line);background:transparent}
+.b-learn{color:var(--sage);border-color:var(--sage-dim);background:#102A20}
+.b-learn.down{color:var(--clay);border-color:var(--clay-dim);background:#311715}
+
+/* score spine — the signature element */
+.spine{display:flex;height:7px;width:100%;min-width:96px;border-radius:2px;overflow:hidden;background:var(--ink)}
+.spine i{display:block;height:100%}
+.score-cell{display:flex;flex-direction:column;gap:4px;align-items:flex-end;min-width:110px}
+.score-n{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* detail drawer */
+tr.detail > td{background:var(--ink);padding:0;border-bottom:1px solid var(--line)}
+.detail-in{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
+.detail-in h4{
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-3);margin:0 0 8px;
+}
+.bars{display:flex;flex-direction:column;gap:6px}
+.bar{display:grid;grid-template-columns:118px 1fr 46px;gap:8px;align-items:center;font-size:11.5px}
+.bar-track{height:6px;background:var(--ink-2);border-radius:2px;overflow:hidden;border:1px solid var(--line-soft)}
+.bar-fill{height:100%;display:block}
+.bar-v{font-family:var(--mono);font-size:11px;text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums}
+.detail-list{margin:0;padding:0;list-style:none;font-size:12.5px}
+.detail-list li{padding:4px 0;border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:12px}
+.detail-list li:last-child{border-bottom:0}
+.detail-list b{color:var(--text-2);font-weight:500}
+.detail-list span{font-family:var(--mono);font-size:11.5px;text-align:right}
+.reason{font-size:12.5px;color:var(--text-2);margin:0}
+.breakeven{
+  font-family:var(--mono);font-size:12px;color:var(--gold);
+  border:1px solid var(--gold-dim);background:#241B08;border-radius:4px;padding:8px 10px;margin-top:8px;
+}
+
+/* ---------- filters ---------- */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.filters select,.filters input[type=text]{width:auto;min-width:130px;padding:6px 9px;font-size:12px}
+.chip{
+  font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:99px;
+  border:1px solid var(--line);background:var(--panel);cursor:pointer;color:var(--text-2);
+}
+.chip:hover{border-color:var(--panel-3)}
+.chip.on{border-color:var(--gold);color:var(--gold);background:#241B08}
+
+/* ---------- misc ---------- */
+.hr{height:1px;background:var(--line-soft);border:0;margin:18px 0}
+.empty{
+  border:1px dashed var(--line);border-radius:var(--r);padding:34px 20px;text-align:center;
+  color:var(--text-3);font-size:13px;
+}
+.empty strong{display:block;color:var(--text-2);margin-bottom:6px;font-size:14px}
+.mono{font-family:var(--mono)}
+.dim{color:var(--text-3)}
+.gold{color:var(--gold)}
+.sage{color:var(--sage)}
+.clay{color:var(--clay)}
+.teal{color:var(--teal)}
+.right{text-align:right}
+.strategy pre{
+  font-family:var(--mono);font-size:12px;background:var(--ink);border:1px solid var(--line);
+  border-radius:4px;padding:14px;overflow:auto;white-space:pre-wrap;color:var(--text-2);margin:0;
+}
+.pill-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pill{
+  font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:3px;
+  border:1px solid var(--line);background:var(--ink);color:var(--text-2);
+}
+.pill.hot{border-color:var(--gold-dim);color:var(--gold)}
+.checkcell input{width:15px;height:15px;accent-color:var(--gold);cursor:pointer}
+.weight-row{display:grid;grid-template-columns:1fr 74px;gap:10px;align-items:center;margin-bottom:8px}
+.weight-row label{font-size:12.5px;color:var(--text-2)}
+.weight-total{font-family:var(--mono);font-size:12px;color:var(--text-2);margin-top:8px}
+.weight-total.bad{color:var(--clay)}
+.toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--panel-2);border:1px solid var(--gold-dim);color:var(--text);
+  padding:10px 18px;border-radius:5px;font-size:13px;z-index:99;box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+.sticky-actions{
+  position:sticky;bottom:0;background:linear-gradient(transparent,var(--ink) 22%);
+  padding:18px 0 0;margin-top:18px;
+}
+details.help{margin:10px 0}
+details.help summary{cursor:pointer;color:var(--text-2);font-size:12.5px}
+details.help summary:hover{color:var(--text)}
+details.help div{padding:10px 0 0;font-size:12.5px;color:var(--text-2)}
+code{font-family:var(--mono);font-size:11.5px;background:var(--ink);padding:1px 5px;border-radius:3px;border:1px solid var(--line-soft)}
+
+/* a narrower rail before dropping it entirely, so the middle range
+   (and moderate browser zoom, which shrinks the CSS viewport) stays usable */
+@media (max-width:1240px){
+  .shell{grid-template-columns:196px minmax(0,1fr)}
+  .main{padding:22px 20px 90px}
+}
+@media (max-width:1040px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:sticky;top:var(--mast-h,52px);z-index:30;max-height:none;height:auto;
+    display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;padding:8px;
+    border-right:0;border-bottom:1px solid var(--line)}
+  .rail-label,.rail-foot{display:none}
+  .step{width:auto;flex:0 0 auto;border-left:0;border-bottom:2px solid transparent;padding:8px 12px}
+  .step.is-active{border-left:0;border-bottom-color:var(--gold)}
+  .step-hint{display:none}
+  .main{padding:18px 14px 80px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media print{.rail,.masthead-actions,.sticky-actions{display:none}body{background:#fff;color:#000}}
+/* --- v2 simplification --- */
+td.why{font-size:12px;color:var(--text-2);line-height:1.45;max-width:340px}
+tr.krow td.checkcell{cursor:default}
+.checkcell input[type=checkbox]{width:15px;height:15px;accent-color:var(--gold);cursor:pointer;vertical-align:middle}
+details.adv{margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:5px}
+details.adv>summary{padding:14px 16px;font-size:13px;color:var(--text-2);cursor:pointer;list-style:none;
+  font-family:var(--mono);letter-spacing:.02em}
+details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary::before{content:'+';display:inline-block;width:16px;color:var(--gold);font-weight:600}
+details.adv[open]>summary::before{content:'−'}
+details.adv>summary:hover{color:var(--text-1)}
+details.adv>div{padding:4px 16px 18px;border-top:1px solid var(--line)}
+details.adv[open]{border-color:var(--line-2)}
+.grab-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  background:linear-gradient(180deg,rgba(226,168,61,.10),rgba(226,168,61,.04));
+  border:1px solid rgba(226,168,61,.34);border-radius:5px;padding:14px 16px;margin:0 0 18px}
+.grab-bar strong{display:block;font-size:13.5px;color:var(--text-1)}
+.grab-bar span{display:block;font-size:12px;color:var(--text-2);margin-top:2px}
+.grab-bar .btn{flex:0 0 auto;white-space:nowrap}
+
+/* nothing should be able to push the page sideways */
+.view,.card,.fetch-msg,.note{min-width:0}
+.fetch-msg,.card-sub,.lede{overflow-wrap:anywhere}
+
+/* --- v3 retrieval UI --- */
+.fetch-row{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+.fetch-input{flex:1 1 340px;min-width:0;background:var(--ink);border:1px solid var(--line-2);border-radius:4px;
+  padding:13px 14px;color:var(--text-1);font-family:var(--mono);font-size:13px;
+  /* a textarea, not an input: an input strips the line breaks out of a
+     pasted page, which loses everything below the first line */
+  resize:vertical;min-height:46px;line-height:1.45;white-space:pre-wrap}
+.fetch-input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(226,168,61,.13)}
+.fetch-row .btn{flex:0 0 auto;padding-left:22px;padding-right:22px}
+.fetch-msg{font-size:12.5px;line-height:1.6;color:var(--text-2);margin-top:12px}
+.fetch-msg:empty{display:none}
+.fetch-msg.ok{border-left:2px solid var(--sage);padding-left:12px}
+.fetch-msg.warn{border-left:2px solid var(--clay);padding-left:12px}
+.fetch-msg b{color:var(--text-1)}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line-2);border-top-color:var(--gold);
+  border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+details.comp-card{margin-bottom:10px}
+details.comp-card>summary{font-family:var(--sans);font-size:13px}
+details.comp-card>summary .badge{margin-right:8px}
+details.comp-card[data-empty="1"]>summary{color:var(--text-3)}
+</style>
+</head>
+<body>
+<header class="masthead" id="masthead">
+  <div class="brand">
+    <span class="brand-mark">M98M</span>
+    <span class="brand-name">eBay CPC Keyword Agent</span>
+    <span class="brand-ver">v3.2</span>
+  </div>
+  <div class="masthead-spacer"></div>
+  <div class="masthead-actions">
+    <span class="save-state" id="saveState">saved</span>
+    <button class="btn btn-sm btn-ghost" onclick="Project.exportJSON()">Save project</button>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('projFile').click()">Load project</button>
+    <input type="file" id="projFile" accept=".json" style="display:none" onchange="Project.importJSON(this)">
+    <button class="btn btn-sm btn-ghost" onclick="Project.reset()">Clear all</button>
+  </div>
+</header>
+
+<div class="shell">
+
+  <nav class="rail" id="rail">
+    <div class="rail-label">Workflow</div>
+    <button class="step is-active" data-view="v1"><span class="step-num">1</span><span><span class="step-title">My listing</span><span class="step-hint" id="h1">not set</span></span></button>
+    <button class="step" data-view="v2"><span class="step-num">2</span><span><span class="step-title">Competitor listings</span><span class="step-hint" id="h2">0 of 3</span></span></button>
+    <button class="step" data-view="v3"><span class="step-num">3</span><span><span class="step-title">eBay keywords</span><span class="step-hint" id="h3">0 keywords</span></span></button>
+    <button class="step" data-view="v4"><span class="step-num">4</span><span><span class="step-title">Analyse &amp; export</span><span class="step-hint" id="h4">not run</span></span></button>
+    <div class="rail-foot">
+      <p>Everything stays in this browser. No account, no internet, no eBay API.</p>
+      <p class="mono" style="color:var(--text-3);font-size:10px">M98M LTD · internal use</p>
+    </div>
+  </nav>
+
+  <main class="main">
+
+  <!-- ============ STEP 1 : MY LISTING ============ -->
+  <section class="view is-active" id="v1">
+    <div class="view-head">
+      <p class="eyebrow">Step 1</p>
+      <h1>My listing</h1>
+      <p class="lede">Paste the link. The tool pulls the title, price, condition, brand and item specifics for you.</p>
+    </div>
+
+    <div class="card">
+      <div class="fetch-row">
+        <textarea id="lInput" class="fetch-input" rows="1" placeholder="https://www.ebay.co.uk/itm/…"></textarea>
+        <button class="btn btn-primary" onclick="Retrieve.listing()">Get details</button>
+      </div>
+      <div id="lMsg" class="fetch-msg"></div>
+
+      <details class="help">
+        <summary>Link not working? Use the one-click grabber</summary>
+        <div>
+          <p style="margin:0 0 10px">Public retrieval services get rate limited and eBay sometimes shows them a bot check. The grabber runs <em>on the eBay page itself</em>, so nothing can block it. Set it up once, use it forever.</p>
+          <ol style="margin:0 0 12px;padding-left:20px;line-height:1.9">
+            <li>Press <b>Copy grabber</b> below.</li>
+            <li>In your browser, add a new bookmark. Name it <span class="mono">Grab eBay</span>.</li>
+            <li>Where it asks for the address or URL, paste what you copied. Save.</li>
+            <li>Open any eBay listing and click that bookmark. It copies the details.</li>
+            <li>Come back here, paste into the box above, press <b>Get details</b>.</li>
+          </ol>
+          <div class="btn-row">
+            <button class="btn" onclick="Retrieve.copyGrabber()">Copy grabber</button>
+            <button class="btn btn-ghost btn-sm" onclick="Retrieve.showGrabber()">Show the code</button>
+          </div>
+          <textarea id="grabberCode" rows="4" style="display:none;margin-top:10px;font-family:var(--mono);font-size:10.5px"></textarea>
+          <p class="dim" style="font-size:12px;margin:10px 0 0">Works on any eBay site. It reads only the page you are looking at and sends nothing anywhere — it just copies to your clipboard.</p>
+        </div>
+      </details>
+
+      <p class="dim" style="font-size:12px;margin:12px 0 0">You can also paste a copied eBay page straight into the same box. It works out which one you gave it.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Check what it found</h2></div>
+      <p class="card-sub">Correct anything wrong. Leave a field blank rather than guessing.</p>
+      <label class="field"><span>Product title</span><input type="text" id="lTitle" placeholder="Filled in from the link"></label>
+      <div class="grid-3">
+        <label class="field"><span>Brand</span><input type="text" id="lBrand" placeholder="—"></label>
+        <label class="field"><span>Model</span><input type="text" id="lModel" placeholder="—"></label>
+        <label class="field"><span>Condition</span>
+          <select id="lCondition">
+            <option value="new">New</option>
+            <option value="new-other">New (other)</option>
+            <option value="refurbished">Refurbished</option>
+            <option value="used">Used</option>
+          </select>
+        </label>
+      </div>
+      <label class="field"><span>Item specifics</span>
+        <textarea id="lSpecifics" rows="6" placeholder="Filled in from the link"></textarea>
+      </label>
+      <label class="field"><span>Never target <span class="opt">comma separated — the one box worth typing by hand</span></span>
+        <input type="text" id="lNever" placeholder="wired, poe, doorbell, indoor only, 4g sim">
+      </label>
+      <p class="dim" style="font-size:12px;margin:0">Anything listed here goes straight to Do Not Target whatever it scores. Put in every neighbouring product you do <em>not</em> sell.</p>
+      <div class="tip"><b>Meri tip</b>Never target box sab se zaroori hai. Jo cheez aap nahi bechte — wired version, doosra model, doosra size — woh yahan likh dein. Warna eBay ki suggested list se woh keywords chup ke Tier 1 tak pahunch jate hain aur paisa waste karte hain.</div>
+
+      <details class="help">
+        <summary>More fields</summary>
+        <div>
+          <div class="grid-2">
+            <label class="field"><span>eBay listing URL</span><input type="url" id="lUrl" placeholder="—"></label>
+            <label class="field"><span>Category</span><input type="text" id="lCategory" placeholder="—"></label>
+          </div>
+          <label class="field"><span>Must be about <span class="opt">comma separated</span></span>
+            <input type="text" id="lMust" placeholder="solar, wireless, outdoor"></label>
+          <label class="field"><span>Description</span>
+            <textarea id="lDesc" rows="4" placeholder="—"></textarea></label>
+        </div>
+      </details>
+    </div>
+
+    <div class="sticky-actions btn-row">
+      <button class="btn btn-primary" onclick="Nav.go('v2')">Next: competitors</button>
+      <button class="btn btn-ghost" onclick="Nav.go('v3')">Skip to keywords</button>
+    </div>
+  </section>
+
+  <!-- ============ STEP 2 : COMPETITORS ============ -->
+  <section class="view" id="v2">
+    <div class="view-head">
+      <p class="eyebrow">Step 2</p>
+      <h1>Competitor listings</h1>
+      <p class="lede">Optional. Paste up to three competitor links, one per line, and press the button once.</p>
+    </div>
+
+    <div class="card">
+      <label class="field"><span>Competitor links <span class="opt">one per line, up to three</span></span>
+        <textarea id="cInput" rows="4" placeholder="https://www.ebay.co.uk/itm/…&#10;https://www.ebay.co.uk/itm/…&#10;https://www.ebay.co.uk/itm/…"></textarea>
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="Retrieve.competitors()">Get all</button>
+        <span class="dim" style="font-size:12px">grabber data works here too — one per line</span>
+      </div>
+      <div id="cMsg" class="fetch-msg"></div>
+      <div class="tip"><b>Meri tip</b>Competitor sirf woh choose karein jo aap ke product ke closest hain aur achhi sales kar rahe hain. Random top listing na uthayein — agar unka product thoda alag hua to unke keywords aap ke liye zeher ban jayenge.</div>
+    </div>
+
+    <div id="compCards"></div>
+
+    <div class="sticky-actions btn-row">
+      <button class="btn btn-primary" onclick="Nav.go('v3')">Next: keywords</button>
+      <button class="btn btn-ghost" onclick="Nav.go('v3')">Skip — no competitors</button>
+    </div>
+  </section>
+
+  <!-- ============ STEP 3 : KEYWORDS ============ -->
+  <section class="view" id="v3">
+    <div class="view-head">
+      <p class="eyebrow">Step 3</p>
+      <h1>eBay keywords</h1>
+      <p class="lede">Paste the suggested keyword list from your Promoted Listings campaign. Any size list is fine.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Keyword list</h2></div>
+      <p class="card-sub">CSV, a copy-paste straight out of Excel or Google Sheets, or a plain one-per-line list. Columns are detected automatically.</p>
+      <label class="field"><span>Paste here</span>
+        <textarea id="kwPaste" rows="12" placeholder="keyword, search volume, suggested bid, competition&#10;solar security camera outdoor, 4400, 0.42, High&#10;wireless cctv camera, 3100, 0.36, High&#10;solar cctv camera wifi, 880, 0.28, Medium"></textarea>
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="Keywords.parse()">Read keyword list</button>
+        <button class="btn" onclick="document.getElementById('kwFile').click()">Upload a file instead</button>
+        <input type="file" id="kwFile" accept=".csv,.tsv,.txt" style="display:none" onchange="Keywords.readFile(this)">
+        <button class="btn btn-ghost btn-sm" onclick="Keywords.clear()">Clear</button>
+      </div>
+      <div id="kwReport"></div>
+
+      <details class="help">
+        <summary>Which columns does it understand?</summary>
+        <div>
+          <p style="margin:0 0 8px">Matched loosely, in any order:</p>
+          <ul style="margin:0;padding-left:18px">
+            <li><b>Keyword</b> — keyword, search term, term, query, phrase</li>
+            <li><b>Demand</b> — volume, searches, search volume, demand, impressions</li>
+            <li><b>Cost</b> — cpc, bid, suggested bid, cost per click, avg cpc</li>
+            <li><b>Competition</b> — competition, competitiveness, difficulty (High/Medium/Low, 0–1 or 0–100)</li>
+          </ul>
+          <p style="margin:8px 0 0">No header row and a numeric second column is read as <code>keyword, volume, cpc, competition</code>, and it tells you so. A one-column list is fine — those metrics read <span class="na">N/A</span> and their weight is shared across the rest.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="sticky-actions btn-row">
+      <button class="btn btn-primary" onclick="Engine.run()">Analyse keywords</button>
+    </div>
+  </section>
+
+  <!-- ============ STEP 4 : ANALYSE, APPROVE & EXPORT ============ -->
+  <section class="view" id="v4">
+    <div class="view-head">
+      <p class="eyebrow">Step 4</p>
+      <h1>Analyse &amp; export</h1>
+      <p class="lede">Tick the keywords you want, export the list, paste it into eBay yourself. Click any row to see how its score was built.</p>
+    </div>
+
+    <div id="resultsArea">
+      <div class="empty"><strong>Nothing analysed yet</strong>Add a listing at step 1 and a keyword list at step 3.
+        <div class="btn-row" style="justify-content:center;margin-top:14px"><button class="btn btn-primary" onclick="Engine.run()">Analyse keywords</button></div>
+      </div>
+    </div>
+
+    <div id="approveArea"></div>
+
+    <details class="help adv">
+      <summary>Optional — your costs, so bids are judged against real money</summary>
+      <div>
+        <p style="margin:0 0 12px">Leave this alone and keywords are simply compared against each other. Fill it in and the engine works out the most you can afford to pay per click, then judges every suggested bid against that figure.</p>
+        <div class="grid-3">
+          <label class="field"><span>Selling price £</span><input type="number" step="0.01" id="eSell" placeholder="0.00"></label>
+          <label class="field"><span>Product cost £</span><input type="number" step="0.01" id="eCost" placeholder="0.00"></label>
+          <label class="field"><span>Shipping cost £</span><input type="number" step="0.01" id="eShip" placeholder="0.00"></label>
+          <label class="field"><span>eBay fee %</span><input type="number" step="0.1" id="eFeePct" placeholder="12.8"></label>
+          <label class="field"><span>Fixed order fee £</span><input type="number" step="0.01" id="eFeeFix" placeholder="0.30"></label>
+          <label class="field"><span>Other costs £</span><input type="number" step="0.01" id="eOther" placeholder="0.00"></label>
+          <label class="field"><span>VAT rate % <span class="opt">0 if not registered</span></span><input type="number" step="0.1" id="eVat" placeholder="0"></label>
+          <label class="field"><span>Expected conversion %</span><input type="number" step="0.1" id="eCvr" placeholder="2.0"></label>
+          <label class="field"><span>Profit to keep %</span><input type="number" step="1" id="eKeep" placeholder="40"></label>
+        </div>
+        <div id="econOut"></div>
+        <div class="tip"><b>Meri tip</b>Sirf teen box — selling price, product cost, shipping — bhar dein to bhi kaam ho jata hai. Baaqi defaults theek hain. Conversion rate ek assumption hai, isliye har derived number ko planning estimate samjhein.</div>
+      </div>
+    </details>
+
+    <details class="help adv">
+      <summary>Optional — scoring weights and tier cut-offs</summary>
+      <div>
+        <p style="margin:0 0 12px">Defaults are tuned for eBay resale. Change these only if the shortlist keeps coming out wrong in the same direction.</p>
+        <div class="grid-2">
+          <div>
+            <div class="weight-row"><label for="wRel">Product relevance</label><input type="number" id="wRel" min="0" max="100"></div>
+            <div class="weight-row"><label for="wInt">Buyer intent</label><input type="number" id="wInt" min="0" max="100"></div>
+            <div class="weight-row"><label for="wCom">Commercial potential</label><input type="number" id="wCom" min="0" max="100"></div>
+            <div class="weight-row"><label for="wDem">Search demand</label><input type="number" id="wDem" min="0" max="100"></div>
+          </div>
+          <div>
+            <div class="weight-row"><label for="wCpc">CPC efficiency</label><input type="number" id="wCpc" min="0" max="100"></div>
+            <div class="weight-row"><label for="wVal">Competitor validation</label><input type="number" id="wVal" min="0" max="100"></div>
+            <div class="weight-row"><label for="wSpe">Specificity</label><input type="number" id="wSpe" min="0" max="100"></div>
+            <div class="weight-row"><label for="wCmp">Competition advantage</label><input type="number" id="wCmp" min="0" max="100"></div>
+          </div>
+        </div>
+        <div class="weight-total" id="wTotal">Total 100</div>
+        <div class="btn-row" style="margin:10px 0 18px">
+          <button class="btn btn-sm" onclick="Settings.normalise()">Rescale to 100</button>
+          <button class="btn btn-sm btn-ghost" onclick="Settings.resetWeights()">Back to defaults</button>
+        </div>
+        <div class="hr"></div>
+        <p style="margin:14px 0 10px">A keyword must clear both the score and the relevance floor to enter a tier. Nothing is selected to hit a target count — if only 12 keywords are strong, you get 12.</p>
+        <div class="grid-3">
+          <label class="field"><span>Tier 1 score ≥</span><input type="number" id="tT1" min="0" max="100"></label>
+          <label class="field"><span>Tier 2 score ≥</span><input type="number" id="tT2" min="0" max="100"></label>
+          <label class="field"><span>Tier 3 score ≥</span><input type="number" id="tT3" min="0" max="100"></label>
+          <label class="field"><span>Tier 1 relevance ≥</span><input type="number" id="tR1" min="0" max="100"></label>
+          <label class="field"><span>Tier 2 relevance ≥</span><input type="number" id="tR2" min="0" max="100"></label>
+          <label class="field"><span>Tier 3 relevance ≥</span><input type="number" id="tR3" min="0" max="100"></label>
+          <label class="field"><span>Duplicate sensitivity</span><input type="number" id="tDup" min="50" max="100" step="1"></label>
+          <label class="field"><span>Overlap limit <span class="opt">100 = off</span></span><input type="number" id="tOv" min="30" max="100" step="1"></label>
+        </div>
+        <p class="dim" style="font-size:12px;margin:0">A keyword is dropped when one in a higher tier already covers more than the overlap limit of the same search — that is what keeps the shortlist short. Keywords with the same meaningful words in a different order are always merged.</p>
+      </div>
+    </details>
+
+    <details class="help adv">
+      <summary>Optional — paste your eBay results back in after the campaign runs</summary>
+      <div>
+        <p style="margin:0 0 12px">Real spend beats every estimate on this page. Paste the keyword report from Seller Hub and winners are promoted, losers moved out — but only once there have been enough clicks to judge fairly.</p>
+        <label class="field"><span>Performance data</span>
+          <textarea id="perfPaste" rows="7" placeholder="keyword, impressions, clicks, spend, orders, sales&#10;solar security camera outdoor, 5210, 104, 21.40, 0, 0&#10;solar cctv camera wifi, 610, 19, 4.85, 3, 137.97"></textarea>
+        </label>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="Learning.parse()">Read performance data</button>
+          <button class="btn btn-ghost btn-sm" onclick="Learning.clear()">Clear</button>
+        </div>
+        <div id="perfReport"></div>
+        <div id="learnTable"></div>
+        <div class="tip"><b>Meri tip</b>Har 7 din baad report paste karein, roz nahi. Roz ka data itna thoda hota hai ke engine ghalat faisla kar sakta hai.</div>
+      </div>
+    </details>
+  </section>
+
+  </main>
+</div>
+<script>
+/* ============================================================
+   M98M eBay CPC Keyword Decision Engine v1.0
+   Offline. No API calls. All state in localStorage.
+
+   Module map (each block is independent — extend or replace one
+   without touching the others):
+     Store      state + persistence
+     Text       tokenising, stemming, normalising
+     Parse      keyword lists, page text, performance reports
+     Product    builds the product vocabulary model
+     Score      the seven-component opportunity score
+     Group      keyword grouping + duplicate consolidation
+     Tier       tier assignment + do-not-target rules
+     Econ       unit economics, max acceptable CPC, break-even
+     Learning   performance feedback + confidence gating
+     Engine     orchestration
+     Render     UI
+     Export     CSV / Excel / clipboard / campaign format
+   ============================================================ */
+'use strict';
+
+var STORE_KEY = 'm98m_cpc_agent_v1';
+var APP_VERSION = '1.0';
+
+var DEFAULT_WEIGHTS = {
+  relevance: 30, intent: 25, commercial: 15, demand: 10,
+  cpc: 10, validation: 5, specificity: 5, competition: 0
+};
+var WEIGHT_LABELS = {
+  relevance: 'Product relevance', intent: 'Buyer intent', commercial: 'Commercial potential',
+  demand: 'Search demand', cpc: 'CPC efficiency', validation: 'Competitor validation',
+  specificity: 'Specificity', competition: 'Competition advantage'
+};
+var WEIGHT_COLOURS = {
+  relevance: '#E2A83D', intent: '#3FB6C4', commercial: '#5CC08D', demand: '#9A8CE0',
+  cpc: '#F2C368', validation: '#4E7A88', specificity: '#7FA0B5', competition: '#B08C5A'
+};
+var DEFAULT_THRESHOLDS = { t1: 76, t2: 62, t3: 48, r1: 72, r2: 58, r3: 45, dup: 82, overlap: 60 };
+
+function defaultState(){
+  return {
+    version: APP_VERSION,
+    listing: { url:'', title:'', brand:'', model:'', category:'', condition:'new',
+               specifics:'', desc:'', must:'', never:'' },
+    competitors: [ blankComp(), blankComp(), blankComp() ],
+    keywordsRaw: '',
+    keywords: [],
+    parseReport: null,
+    econ: { sell:null, feePct:null, feeFix:null, cost:null, ship:null, other:null,
+            vat:null, cvr:null, keep:null },
+    weights: Object.assign({}, DEFAULT_WEIGHTS),
+    thresholds: Object.assign({}, DEFAULT_THRESHOLDS),
+    perf: {},
+    perfReport: null,
+    results: null,
+    approvals: {},
+    manual: [],
+    ui: { view:'v1', sort:'score', dir:'desc', filterTier:'all', filterGroup:'all',
+          filterIntent:'all', search:'', riskOnly:false, open:null }
+  };
+}
+function blankComp(){ return { url:'', title:'', text:'' }; }
+
+var S = defaultState();
+
+/* ---------------- Store ---------------- */
+var Store = {
+  save: function(){
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(S));
+      var el = document.getElementById('saveState');
+      if(el){ el.textContent = 'Saved ' + new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); }
+    }catch(e){
+      var el2 = document.getElementById('saveState');
+      if(el2){ el2.textContent = 'Could not save — storage full'; }
+    }
+  },
+  load: function(){
+    try{
+      var raw = localStorage.getItem(STORE_KEY);
+      if(!raw) return false;
+      var obj = JSON.parse(raw);
+      if(!obj || typeof obj !== 'object') return false;
+      S = Object.assign(defaultState(), obj);
+      S.listing = Object.assign(defaultState().listing, obj.listing || {});
+      S.econ = Object.assign(defaultState().econ, obj.econ || {});
+      S.weights = Object.assign({}, DEFAULT_WEIGHTS, obj.weights || {});
+      S.thresholds = Object.assign({}, DEFAULT_THRESHOLDS, obj.thresholds || {});
+      S.ui = Object.assign(defaultState().ui, obj.ui || {});
+      if(!Array.isArray(S.competitors) || S.competitors.length !== 3){
+        S.competitors = [blankComp(), blankComp(), blankComp()];
+      }
+      return true;
+    }catch(e){ return false; }
+  },
+  clear: function(){ try{ localStorage.removeItem(STORE_KEY); }catch(e){} }
+};
+
+/* ---------------- small helpers ---------------- */
+function $(id){ return document.getElementById(id); }
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
+function round(n, d){ var f = Math.pow(10, d||0); return Math.round(n*f)/f; }
+function num(v){
+  if(v === null || v === undefined || v === '') return null;
+  var s = String(v).replace(/[£$€,\s%]/g,'');
+  if(s === '' || s === '-' || s === '--') return null;
+  var n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+function money(n){ return n == null ? 'N/A' : '£' + n.toFixed(2); }
+function pct(n, d){ return n == null ? 'N/A' : (n*100).toFixed(d == null ? 1 : d) + '%'; }
+function naCell(v){ return v == null ? '<span class="na">N/A</span>' : v; }
+function toast(msg){
+  var t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 2600);
+}
+function uniq(arr){
+  var seen = {}, out = [];
+  for(var i=0;i<arr.length;i++){ if(!seen[arr[i]]){ seen[arr[i]] = 1; out.push(arr[i]); } }
+  return out;
+}
+function download(name, mime, content){
+  var blob = new Blob([content], {type: mime + ';charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+}
+function copyText(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ toast('Copied to clipboard'); },
+      function(){ fallbackCopy(text); });
+  } else { fallbackCopy(text); }
+}
+function fallbackCopy(text){
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); toast('Copied to clipboard'); }
+  catch(e){ toast('Copy blocked by the browser — select the text manually'); }
+  document.body.removeChild(ta);
+}
+
+/* ---------------- lexicons ----------------
+   Kept as plain data so they can be extended later without
+   touching the scoring code. */
+
+var STOPWORDS = {'the':1,'a':1,'an':1,'and':1,'or':1,'of':1,'to':1,'in':1,'on':1,'at':1,
+  'my':1,'your':1,'it':1,'is':1,'are':1,'be':1,'this':1,'that':1,'as':1,'by':1,'&':1,'w':1,'with':1,'without':1,'plus':1};
+
+/* "for" is dropped from matching but kept as a compatibility signal */
+var COMPAT_WORDS = {'for':1,'fits':1,'fit':1,'compatible':1,'compatibility':1,'suits':1,'suitable':1};
+
+var INFORMATIONAL = ['how to','what is','what are','why','guide','tutorial','manual','instructions',
+  'diagram','meaning','define','definition','explained','wiki','wikipedia','youtube','pdf',
+  'download','template','tips','ideas','information','info about','learn','course','tips for',
+  'difference between','vs','versus','comparison','which is better','how much does','how does',
+  'reddit','forum','blog'];
+
+var REVIEW_WORDS = ['review','reviews','rating','ratings','tested','test results','opinion','opinions'];
+
+var SERVICE_WRONG = ['repair service','repair shop','fitting service','installation service',
+  'hire','rent','rental','job','jobs','vacancy','wanted','wtb','want to buy','free','giveaway',
+  'homemade','make your own','how to make','diy build','recycling','disposal','scrap',
+  'insurance','warranty claim','recall','lawsuit','near me','shop near','store near'];
+
+var COMMERCIAL_MOD = ['buy','sale','for sale','price','cheap','best','deal','deals','offer','discount',
+  'uk','next day','fast delivery','free delivery','free postage','in stock','order','online',
+  'genuine','original','official','oem','brand new','sealed','bargain','clearance','bulk buy'];
+
+var VALUE_SEEKER = ['cheap','cheapest','budget','bargain','clearance','discount','under','below','free'];
+var PREMIUM_WORDS = ['genuine','original','official','oem','authentic','premium','professional','pro',
+  'heavy duty','commercial grade','branded'];
+
+var USED_WORDS = ['used','second hand','secondhand','pre owned','preowned','refurbished','refurb',
+  'reconditioned','broken','faulty','spares','repairs','damaged','for parts'];
+
+var BULK_WORDS = ['wholesale','bulk','job lot','joblot','pallet','clearance stock','liquidation',
+  'trade pack','case of'];
+
+var USE_CASE = ['outdoor','indoor','home','house','garden','office','car','van','lorry','caravan',
+  'motorhome','kitchen','bathroom','bedroom','living room','garage','shed','driveway','farm',
+  'travel','camping','festival','gym','running','cycling','fishing','hiking','baby','kids',
+  'children','toddler','pet','dog','cat','gaming','work','school','wedding','party','christmas',
+  'holiday','beach','pool','boat','caravan','static caravan','allotment','warehouse','shop',
+  'business','commercial','driving','walking','sleeping','cooking','cleaning','storage'];
+
+var FEATURE_WORDS = ['waterproof','wireless','rechargeable','bluetooth','wifi','usb','type c','usb c',
+  'led','lcd','oled','hd','full hd','4k','2k','1080p','720p','solar','battery','mains','portable',
+  'foldable','adjustable','heavy duty','non slip','anti slip','stainless','aluminium','carbon',
+  'silicone','leather','magnetic','smart','digital','analogue','automatic','manual','fast charge',
+  'quick charge','noise cancelling','night vision','motion sensor','pir','remote control','app',
+  'touchscreen','shockproof','dustproof','insulated','breathable','lightweight','compact',
+  'extendable','reversible','washable','microfibre','thermal','ip65','ip66','ip67','ip68'];
+
+var GENERIC_HEADS = ['camera','cameras','case','cases','cover','covers','light','lights','cable',
+  'cables','charger','chargers','holder','holders','bag','bags','box','boxes','set','sets','kit',
+  'kits','tool','tools','mat','mats','stand','stands','lamp','lamps','clock','clocks','toy','toys',
+  'shoes','shirt','dress','watch','watches','phone','phones','speaker','speakers','headphones',
+  'gift','gifts','accessories','accessory','equipment','supplies','parts','spare','device',
+  'gadget','gadgets','item','items','product','products','thing','stuff'];
+
+var COLOURS = ['black','white','grey','gray','silver','gold','rose gold','red','blue','navy',
+  'green','olive','yellow','orange','purple','violet','pink','brown','beige','cream','ivory',
+  'bronze','copper','turquoise','teal','maroon','burgundy','khaki','charcoal','clear','transparent',
+  'multicolour','multicolor','rainbow','camo','camouflage'];
+
+var SIZES = ['xs','s','m','l','xl','xxl','xxxl','2xl','3xl','small','medium','large','extra large',
+  'mini','micro','compact','standard','king','queen','single','double','super king','twin'];
+
+var UNIT_RE = /^\d+(\.\d+)?(mm|cm|m|in|inch|inches|ft|kg|g|lb|lbs|oz|ml|l|litre|liter|w|kw|v|a|mah|gb|tb|mb|k|mp|hz|ghz|mhz|pcs|pack|degree|deg)$/i;
+var MODELCODE_RE = /^(?=.*\d)(?=.*[a-z])[a-z0-9][a-z0-9-]{1,14}$/i;
+
+var UK_US = {'color':'colour','colors':'colour','colour':'colour','aluminum':'aluminium',
+  'tire':'tyre','tires':'tyre','tyres':'tyre','fiber':'fibre','fibers':'fibre','meter':'metre',
+  'meters':'metre','liter':'litre','liters':'litre','jewelry':'jewellery','pajamas':'pyjamas',
+  'gray':'grey','defense':'defence','organizer':'organiser','organizers':'organiser',
+  'cosy':'cosy','cozy':'cosy','doughnut':'donut','centre':'center'};
+/* ============================================================
+   Text — normalising, tokenising, stemming
+   ============================================================ */
+var Text = {
+  normalise: function(s){
+    return String(s || '')
+      .toLowerCase()
+      .replace(/[\u2018\u2019\u201c\u201d]/g, "'")
+      .replace(/[+/\\|]/g, ' ')
+      .replace(/[-_]/g, ' ')
+      .replace(/[^a-z0-9'.\s°"]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+  stem: function(w){
+    if(UK_US[w]) w = UK_US[w];
+    if(w.length <= 3) return w;
+    if(/ies$/.test(w)) return w.slice(0,-3) + 'y';
+    if(/(ches|shes|sses|xes|zes)$/.test(w)) return w.slice(0,-2);
+    if(/ss$/.test(w)) return w;
+    if(/s$/.test(w)) return w.slice(0,-1);
+    return w;
+  },
+  tokens: function(s){
+    var n = Text.normalise(s);
+    if(!n) return [];
+    return n.split(' ').filter(function(t){ return t.length > 0; });
+  },
+  /* content tokens = meaning-bearing words, stemmed */
+  content: function(s){
+    return Text.tokens(s).filter(function(t){
+      return !STOPWORDS[t] && !COMPAT_WORDS[t] && t.length > 1;
+    }).map(Text.stem);
+  },
+  signature: function(s){
+    return uniq(Text.content(s)).sort().join(' ');
+  },
+  bigrams: function(arr){
+    var out = [];
+    for(var i=0;i<arr.length-1;i++) out.push(arr[i] + ' ' + arr[i+1]);
+    return out;
+  },
+  hasPhrase: function(hay, phrase){
+    return (' ' + Text.normalise(hay) + ' ').indexOf(' ' + Text.normalise(phrase) + ' ') !== -1;
+  },
+  anyPhrase: function(hay, list){
+    var h = ' ' + Text.normalise(hay) + ' ';
+    for(var i=0;i<list.length;i++){
+      if(h.indexOf(' ' + list[i] + ' ') !== -1) return list[i];
+    }
+    return null;
+  },
+  /* base+number pairs, e.g. "iphone 15 pro" -> {iphone:"15"} */
+  modelPairs: function(s){
+    var t = Text.tokens(s), out = {};
+    for(var i=0;i<t.length-1;i++){
+      if(/^[a-z]{3,}$/.test(t[i]) && /^\d{1,4}$/.test(t[i+1])){
+        out[Text.stem(t[i])] = t[i+1];
+      }
+    }
+    return out;
+  },
+  jaccard: function(a, b){
+    var setA = {}, i, inter = 0, all = {};
+    for(i=0;i<a.length;i++){ setA[a[i]] = 1; all[a[i]] = 1; }
+    for(i=0;i<b.length;i++){ if(setA[b[i]]) inter++; all[b[i]] = 1; }
+    var union = Object.keys(all).length;
+    return union ? inter / union : 0;
+  }
+};
+
+/* ============================================================
+   Parse — delimited data and pasted eBay pages
+   ============================================================ */
+var Parse = {
+  splitRow: function(line, delim){
+    var out = [], cur = '', q = false;
+    for(var i=0;i<line.length;i++){
+      var c = line[i];
+      if(c === '"'){
+        if(q && line[i+1] === '"'){ cur += '"'; i++; }
+        else q = !q;
+      } else if(c === delim && !q){ out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out.map(function(s){ return s.trim(); });
+  },
+  detectDelim: function(text){
+    var line = text.split(/\r?\n/).filter(function(l){ return l.trim(); })[0] || '';
+    var counts = { '\t': (line.match(/\t/g)||[]).length,
+                   ',': (line.match(/,/g)||[]).length,
+                   ';': (line.match(/;/g)||[]).length,
+                   '|': (line.match(/\|/g)||[]).length };
+    var best = '\t', bestN = 0;
+    for(var d in counts){ if(counts[d] > bestN){ bestN = counts[d]; best = d; } }
+    return bestN === 0 ? null : best;
+  },
+  headerMap: function(cells){
+    var map = { kw:-1, vol:-1, cpc:-1, comp:-1 }, found = false;
+    for(var i=0;i<cells.length;i++){
+      var h = cells[i].toLowerCase().replace(/[^a-z ]/g,'').trim();
+      if(map.kw < 0 && /^(keyword|keywords|search term|search terms|term|query|phrase|targeting keyword)/.test(h)){ map.kw = i; found = true; }
+      else if(map.vol < 0 && /(volume|searches|search|demand|impression)/.test(h)){ map.vol = i; found = true; }
+      else if(map.cpc < 0 && /(cpc|bid|cost per click|cost)/.test(h)){ map.cpc = i; found = true; }
+      else if(map.comp < 0 && /(competition|competitive|difficulty)/.test(h)){ map.comp = i; found = true; }
+    }
+    return found && map.kw >= 0 ? map : null;
+  },
+  competition: function(v){
+    if(v == null || v === '') return null;
+    var s = String(v).toLowerCase().trim();
+    if(/very high|v high/.test(s)) return 90;
+    if(/^high/.test(s)) return 78;
+    if(/med|moderate/.test(s)) return 50;
+    if(/^low/.test(s)) return 22;
+    if(/very low/.test(s)) return 12;
+    var n = num(s);
+    if(n == null) return null;
+    if(n <= 1) return round(n * 100, 0);
+    if(n <= 100) return round(n, 0);
+    return null;
+  },
+
+  /* keyword list -> [{kw, volume, cpc, competition}] + report */
+  keywordList: function(text){
+    var lines = String(text||'').split(/\r?\n/).filter(function(l){ return l.trim() !== ''; });
+    var report = { rows:0, kept:0, dropped:0, blankDropped:0, dupes:0, mapping:'', headerUsed:false,
+                   hasVol:false, hasCpc:false, hasComp:false, assumed:false, notes:[] };
+    if(!lines.length) return { list:[], report:report };
+    var delim = Parse.detectDelim(text);
+    var rows, map = null;
+
+    if(delim){
+      rows = lines.map(function(l){ return Parse.splitRow(l, delim); });
+      map = Parse.headerMap(rows[0]);
+      if(map){ rows = rows.slice(1); report.headerUsed = true; }
+      else {
+        var probe = rows[0] || [];
+        if(probe.length >= 2 && num(probe[1]) != null){
+          map = { kw:0, vol:1, cpc: probe.length > 2 ? 2 : -1, comp: probe.length > 3 ? 3 : -1 };
+          report.assumed = true;
+        } else {
+          map = { kw:0, vol:-1, cpc:-1, comp:-1 };
+        }
+      }
+    } else {
+      rows = lines.map(function(l){ return [l]; });
+      map = { kw:0, vol:-1, cpc:-1, comp:-1 };
+    }
+
+    var seen = {}, out = [];
+    for(var i=0;i<rows.length;i++){
+      report.rows++;
+      var r = rows[i];
+      var kw = (r[map.kw] || '').replace(/^["']|["']$/g,'').trim();
+      if(!kw || kw.length < 2){ report.blankDropped++; continue; }
+      if(!/[a-z0-9]/i.test(kw)){ report.blankDropped++; continue; }
+      var key = Text.normalise(kw);
+      if(seen[key]){ report.dupes++; continue; }
+      seen[key] = 1;
+      var vol = map.vol >= 0 ? num(r[map.vol]) : null;
+      var cpc = map.cpc >= 0 ? num(r[map.cpc]) : null;
+      var comp = map.comp >= 0 ? Parse.competition(r[map.comp]) : null;
+      if(vol != null) report.hasVol = true;
+      if(cpc != null) report.hasCpc = true;
+      if(comp != null) report.hasComp = true;
+      out.push({ kw: kw.replace(/\s+/g,' '), volume: vol, cpc: cpc, competition: comp });
+      report.kept++;
+    }
+    var parts = ['column 1 → keyword'];
+    if(map.vol >= 0) parts.push('column ' + (map.vol+1) + ' → search demand');
+    if(map.cpc >= 0) parts.push('column ' + (map.cpc+1) + ' → CPC / suggested bid');
+    if(map.comp >= 0) parts.push('column ' + (map.comp+1) + ' → competition');
+    report.mapping = parts.join(', ');
+    if(report.assumed) report.notes.push('No header row found. Column order was assumed from the data — check the mapping above matches your file.');
+    if(!report.hasVol) report.notes.push('No search demand figures found. Demand will read N/A and its weight will be shared across the other factors.');
+    if(!report.hasCpc) report.notes.push('No CPC or bid figures found. Cost efficiency and break-even clicks cannot be calculated.');
+    if(!report.hasComp) report.notes.push('No competition figures found.');
+    return { list: out, report: report };
+  },
+
+  /* performance report -> {normKw: {impressions, clicks, spend, orders, sales}} */
+  performance: function(text){
+    var lines = String(text||'').split(/\r?\n/).filter(function(l){ return l.trim() !== ''; });
+    var report = { rows:0, matched:0, unmatched:0, unmatchedList:[], mapping:'', missing:[] };
+    if(!lines.length) return { data:{}, report:report };
+    var delim = Parse.detectDelim(text) || '\t';
+    var rows = lines.map(function(l){ return Parse.splitRow(l, delim); });
+    var head = rows[0].map(function(h){ return h.toLowerCase().replace(/[^a-z ]/g,'').trim(); });
+    var idx = { kw:-1, impr:-1, clicks:-1, spend:-1, orders:-1, sales:-1 };
+    for(var i=0;i<head.length;i++){
+      var h = head[i];
+      if(idx.kw < 0 && /(keyword|search term|term|query)/.test(h)) idx.kw = i;
+      else if(idx.impr < 0 && /impression/.test(h)) idx.impr = i;
+      else if(idx.clicks < 0 && /^click|clicks/.test(h)) idx.clicks = i;
+      else if(idx.spend < 0 && /(spend|cost|ad fee|advertising)/.test(h)) idx.spend = i;
+      else if(idx.orders < 0 && /(order|sold|purchase|conversion|transaction)/.test(h)) idx.orders = i;
+      else if(idx.sales < 0 && /(sales|revenue|value|turnover)/.test(h)) idx.sales = i;
+    }
+    var start = 1;
+    if(idx.kw < 0){ idx = { kw:0, impr:1, clicks:2, spend:3, orders:4, sales:5 }; start = 0;
+      report.missing.push('No header row recognised. Assumed order: keyword, impressions, clicks, spend, orders, sales.'); }
+    var data = {};
+    for(var r=start;r<rows.length;r++){
+      var row = rows[r];
+      var kw = (row[idx.kw] || '').replace(/^["']|["']$/g,'').trim();
+      if(!kw) continue;
+      report.rows++;
+      data[Text.normalise(kw)] = {
+        raw: kw,
+        impressions: idx.impr >= 0 ? num(row[idx.impr]) : null,
+        clicks: idx.clicks >= 0 ? num(row[idx.clicks]) : null,
+        spend: idx.spend >= 0 ? num(row[idx.spend]) : null,
+        orders: idx.orders >= 0 ? num(row[idx.orders]) : null,
+        sales: idx.sales >= 0 ? num(row[idx.sales]) : null
+      };
+    }
+    var m = [];
+    if(idx.impr >= 0) m.push('impressions'); if(idx.clicks >= 0) m.push('clicks');
+    if(idx.spend >= 0) m.push('spend'); if(idx.orders >= 0) m.push('orders');
+    if(idx.sales >= 0) m.push('sales');
+    report.mapping = m.length ? m.join(', ') : 'keyword only';
+    if(idx.clicks < 0) report.missing.push('No clicks column found — nothing can be judged without clicks.');
+    if(idx.orders < 0) report.missing.push('No orders column found — keywords cannot be upgraded or downgraded on results.');
+    return { data: data, report: report };
+  },
+
+  /* pasted eBay page -> best-effort field extraction, never silent */
+  pageFields: function(text){
+    var out = { title:'', price:null, condition:'', brand:'', specifics:[], found:[] };
+    var raw = String(text || '');
+    if(!raw.trim()) return out;
+    var lines = raw.split(/\r?\n/).map(function(l){ return l.replace(/\s+/g,' ').trim(); })
+                   .filter(function(l){ return l !== ''; });
+
+    /* inline "Key: Value" pairs */
+    var seenKey = {};
+    for(var i=0;i<lines.length;i++){
+      var m = lines[i].match(/^([A-Za-z][A-Za-z0-9 /&()'.-]{1,34}):\s*(.+)$/);
+      if(m){
+        var k = m[1].trim(), v = m[2].trim();
+        if(v.length > 0 && v.length < 120 && !/^https?:/i.test(v)){
+          if(!seenKey[k.toLowerCase()]){ seenKey[k.toLowerCase()] = 1; out.specifics.push({k:k, v:v}); }
+        }
+      }
+    }
+    /* two-line "Key" / "Value" pairs, the usual shape of an eBay copy */
+    var KEYS = /^(brand|model|type|colour|color|material|size|mpn|ean|upc|department|style|features|capacity|power source|connectivity|resolution|compatible model|compatible brand|manufacturer part number|item width|item height|item length|item weight|number of items|unit quantity|set includes|pattern|shape|finish|voltage|wattage|country\/region of manufacture|custom bundle|modified item|suitable for|room|theme|character|season|occasion|closure|sleeve length|neckline|fit|fabric type|care instructions|battery type|storage capacity|screen size|operating system|network|lock status|water resistance|warranty)$/i;
+    for(var j=0;j<lines.length-1;j++){
+      if(KEYS.test(lines[j]) && lines[j+1].length < 90 && !KEYS.test(lines[j+1])){
+        var kk = lines[j].trim();
+        if(!seenKey[kk.toLowerCase()]){ seenKey[kk.toLowerCase()] = 1; out.specifics.push({k:kk, v:lines[j+1].trim()}); }
+      }
+    }
+    /* brand + condition */
+    for(var s=0;s<out.specifics.length;s++){
+      var lk = out.specifics[s].k.toLowerCase();
+      if(lk === 'brand') out.brand = out.specifics[s].v;
+      if(lk === 'condition') out.condition = out.specifics[s].v;
+    }
+    if(!out.condition){
+      var cm = raw.match(/Condition:?\s*\n?\s*(New[^\n.]{0,40}|Used[^\n.]{0,40}|Refurbished[^\n.]{0,40}|Open box[^\n.]{0,40})/i);
+      if(cm) out.condition = cm[1].trim();
+    }
+    /* price: first plausible £ figure */
+    var pm = raw.match(/£\s?(\d{1,6}(?:,\d{3})*(?:\.\d{2})?)/);
+    if(pm) out.price = num(pm[1]);
+    /* title: longest early line that looks like a product title */
+    var best = '', limit = Math.min(lines.length, 40);
+    for(var t=0;t<limit;t++){
+      var L = lines[t];
+      if(L.length < 18 || L.length > 90) continue;
+      if(/^(shop|sign in|daily deals|brand outlet|gift cards|help|sell|watchlist|my ebay|notification|advanced|search|home|categories|back to home|breadcrumb|share|add to|see original|about this item|picture \d|opens in a new|£|\$|item number|listed|returns|delivery|postage|payments|seller|feedback|located in|posts to|estimated)/i.test(L)) continue;
+      if(/^[\d\s.,%]+$/.test(L)) continue;
+      var wordCount = L.split(' ').length;
+      if(wordCount < 4) continue;
+      if(L.length > best.length) best = L;
+      if(t > 0 && /^condition/i.test(lines[t+1] || '')) { best = L; break; }
+    }
+    out.title = best;
+    if(out.title) out.found.push('title');
+    if(out.price != null) out.found.push('price');
+    if(out.condition) out.found.push('condition');
+    if(out.brand) out.found.push('brand');
+    if(out.specifics.length) out.found.push(out.specifics.length + ' item specifics');
+    return out;
+  }
+};
+
+/* ============================================================
+   Product — the vocabulary model everything is scored against
+   ============================================================ */
+var Product = {
+  build: function(){
+    var L = S.listing;
+    var vocab = {};           /* stemmed token -> weight 0..1 */
+    var phrases = {};         /* bigrams from title + specifics */
+    var add = function(text, w){
+      var toks = Text.content(text);
+      for(var i=0;i<toks.length;i++){
+        if(!vocab[toks[i]] || vocab[toks[i]] < w) vocab[toks[i]] = w;
+      }
+      var bg = Text.bigrams(toks);
+      for(var b=0;b<bg.length;b++) phrases[bg[b]] = 1;
+    };
+
+    add(L.title, 1.0);
+    add(L.brand, 1.0);
+    add(L.model, 1.0);
+    add(L.category, 0.7);
+
+    var specs = Product.parseSpecifics(L.specifics);
+    for(var i=0;i<specs.length;i++){
+      add(specs[i].v, 0.9);
+      add(specs[i].k, 0.45);
+    }
+    add(L.desc, 0.55);
+    add(L.must, 1.0);
+
+    var mustList = String(L.must||'').split(',').map(function(s){ return Text.normalise(s); })
+                    .filter(function(s){ return s.length > 1; });
+    var neverList = String(L.never||'').split(',').map(function(s){ return Text.normalise(s); })
+                    .filter(function(s){ return s.length > 1; });
+
+    /* dimension values we actually are, for conflict detection */
+    var allText = [L.title, L.brand, L.model, L.category, L.specifics, L.desc, L.must].join(' ');
+    var ourColours = COLOURS.filter(function(c){ return Text.hasPhrase(allText, c); });
+    var ourSizes = SIZES.filter(function(z){ return Text.hasPhrase(allText, z); });
+    var ourModels = Text.modelPairs(L.title + ' ' + L.model + ' ' + L.specifics);
+
+    var headNouns = Text.content(L.title).filter(function(t){
+      return GENERIC_HEADS.indexOf(t) !== -1 || GENERIC_HEADS.indexOf(t + 's') !== -1;
+    });
+    if(!headNouns.length){
+      var tt = Text.content(L.title);
+      if(tt.length) headNouns = [tt[tt.length-1]];
+    }
+
+    return {
+      vocab: vocab, phrases: phrases, specifics: specs,
+      brandTokens: Text.content(L.brand),
+      modelTokens: Text.content(L.model),
+      titleTokens: Text.content(L.title),
+      headNouns: uniq(headNouns),
+      must: mustList, never: neverList,
+      ourColours: ourColours, ourSizes: ourSizes, ourModels: ourModels,
+      condition: L.condition || 'new',
+      hasTitle: !!String(L.title).trim(),
+      specificValues: specs.map(function(s){ return Text.content(s.v); })
+    };
+  },
+  parseSpecifics: function(text){
+    var out = [];
+    String(text || '').split(/\r?\n/).forEach(function(line){
+      var t = line.trim();
+      if(!t) return;
+      var m = t.match(/^([^:]{1,40}):\s*(.+)$/);
+      if(m) out.push({ k: m[1].trim(), v: m[2].trim() });
+      else out.push({ k: '', v: t });
+    });
+    return out;
+  }
+};
+
+/* ============================================================
+   Competitors — term frequency across the pasted listings
+   ============================================================ */
+var Competitors = {
+  build: function(){
+    var active = S.competitors.filter(function(c){
+      return String(c.title||'').trim() || String(c.text||'').trim();
+    });
+    var docs = active.map(function(c){
+      var body = (c.title || '') + ' ' + (c.text || '');
+      return { tokens: uniq(Text.content(body)), phrases: uniq(Text.bigrams(Text.content(body))),
+               text: Text.normalise(body), title: c.title || '', url: c.url || '' };
+    });
+    var freq = {};
+    docs.forEach(function(d){
+      d.tokens.forEach(function(t){ freq[t] = (freq[t] || 0) + 1; });
+    });
+    return { count: docs.length, docs: docs, freq: freq,
+             limited: docs.length === 0,
+             urlsOnly: S.competitors.filter(function(c){
+               return String(c.url||'').trim() && !String(c.text||'').trim() && !String(c.title||'').trim();
+             }).length };
+  },
+  /* fraction of competitors whose text supports this keyword */
+  support: function(comp, contentTokens){
+    if(!comp.count || !contentTokens.length) return null;
+    var hits = 0;
+    for(var i=0;i<comp.docs.length;i++){
+      var d = comp.docs[i], matched = 0;
+      for(var t=0;t<contentTokens.length;t++){
+        if(d.tokens.indexOf(contentTokens[t]) !== -1) matched++;
+      }
+      if(matched / contentTokens.length >= 0.7) hits++;
+    }
+    return hits / comp.count;
+  }
+};
+/* ============================================================
+   Econ — unit economics, max acceptable CPC, break-even
+   Every figure here is derived from what you typed. Nothing is
+   estimated from outside data.
+   ============================================================ */
+var Econ = {
+  compute: function(){
+    var e = S.econ;
+    var sell = num(e.sell);
+    if(sell == null || sell <= 0){
+      return { ok:false, reason:'Selling price not set', profit:null, maxCPC:null,
+               breakEvenCPC:null, breakEvenACOS:null, cvr:null };
+    }
+    var feePct = num(e.feePct); if(feePct == null) feePct = 12.8;
+    var feeFix = num(e.feeFix); if(feeFix == null) feeFix = 0.30;
+    var cost = num(e.cost) || 0;
+    var ship = num(e.ship) || 0;
+    var other = num(e.other) || 0;
+    var vat = num(e.vat) || 0;
+    var cvr = num(e.cvr); if(cvr == null) cvr = 2.0;
+    var keep = num(e.keep); if(keep == null) keep = 40;
+
+    var vatOut = vat > 0 ? sell * (vat / (100 + vat)) : 0;
+    var fees = sell * (feePct / 100) + feeFix;
+    var profit = sell - vatOut - fees - cost - ship - other;
+
+    var cvrFrac = clamp(cvr, 0.01, 100) / 100;
+    var breakEvenCPC = profit > 0 ? profit * cvrFrac : 0;
+    var maxCPC = breakEvenCPC * clamp(1 - keep / 100, 0.05, 1);
+    var breakEvenACOS = profit > 0 ? profit / sell : 0;
+
+    return {
+      ok: profit > 0, reason: profit > 0 ? '' : 'Profit before advertising is zero or negative',
+      sell: sell, vatOut: vatOut, fees: fees, cost: cost, ship: ship, other: other,
+      profit: profit, cvr: cvrFrac, keep: keep / 100,
+      breakEvenCPC: breakEvenCPC > 0 ? breakEvenCPC : null,
+      maxCPC: maxCPC > 0 ? maxCPC : null,
+      breakEvenACOS: breakEvenACOS > 0 ? breakEvenACOS : null,
+      assumedCVR: num(e.cvr) == null
+    };
+  }
+};
+
+/* ============================================================
+   Score — the analysis engine
+   ============================================================ */
+var Score = {
+
+  /* --- shared pass over the whole set, for percentiles --- */
+  context: function(list, econ){
+    var vols = [], cpcs = [];
+    list.forEach(function(k){
+      if(k.volume != null && k.volume > 0) vols.push(Math.log(1 + k.volume));
+      if(k.cpc != null && k.cpc > 0) cpcs.push(k.cpc);
+    });
+    vols.sort(function(a,b){ return a-b; });
+    cpcs.sort(function(a,b){ return a-b; });
+    var median = cpcs.length ? cpcs[Math.floor(cpcs.length/2)] : null;
+    return { vols: vols, medianCPC: median, econ: econ, hasVol: vols.length > 0, hasCPC: cpcs.length > 0 };
+  },
+  percentile: function(sorted, v){
+    if(!sorted.length) return null;
+    var lo = 0, hi = sorted.length;
+    while(lo < hi){ var mid = (lo + hi) >> 1; if(sorted[mid] < v) lo = mid + 1; else hi = mid; }
+    return sorted.length === 1 ? 0.5 : lo / (sorted.length - 1);
+  },
+
+  /* --- inspect one keyword against the product --- */
+  inspect: function(kw, P){
+    var norm = Text.normalise(kw);
+    var rawTokens = Text.tokens(kw);
+    var content = Text.content(kw);
+    var flags = [], hard = null;
+
+    var isCompat = rawTokens.some(function(t){ return COMPAT_WORDS[t]; });
+    /* "for iphone 15" is a compatibility search; "for the garden" is a use case */
+    var isDeviceCompat = isCompat && (/\bcompatible|\bfits\b/.test(Text.normalise(kw)) ||
+      Text.content(kw).some(function(t){ return MODELCODE_RE.test(t) || /^\d{2,4}$/.test(t); }));
+    var infoHit = Text.anyPhrase(kw, INFORMATIONAL);
+    var reviewHit = Text.anyPhrase(kw, REVIEW_WORDS);
+    var serviceHit = Text.anyPhrase(kw, SERVICE_WRONG);
+    var commHit = Text.anyPhrase(kw, COMMERCIAL_MOD);
+    var valueHit = Text.anyPhrase(kw, VALUE_SEEKER);
+    var premiumHit = Text.anyPhrase(kw, PREMIUM_WORDS);
+    var usedHit = Text.anyPhrase(kw, USED_WORDS);
+    var bulkHit = Text.anyPhrase(kw, BULK_WORDS);
+    var useCaseHit = Text.anyPhrase(kw, USE_CASE);
+    var featureHit = Text.anyPhrase(kw, FEATURE_WORDS);
+
+    /* never-target list wins over everything */
+    for(var n=0;n<P.never.length;n++){
+      if(Text.hasPhrase(kw, P.never[n])){
+        hard = 'On your Never target list ("' + P.never[n] + '").';
+        flags.push('excluded-term');
+        break;
+      }
+    }
+
+    /* attribute conflicts */
+    var conflicts = [];
+    if(!hard && P.ourColours.length){
+      for(var c=0;c<COLOURS.length;c++){
+        if(P.ourColours.indexOf(COLOURS[c]) !== -1) continue;
+        if(Text.hasPhrase(kw, COLOURS[c])){ conflicts.push('asks for ' + COLOURS[c] + ', yours is ' + P.ourColours.join('/')); break; }
+      }
+    }
+    if(!hard && P.ourSizes.length){
+      for(var z=0;z<SIZES.length;z++){
+        if(P.ourSizes.indexOf(SIZES[z]) !== -1) continue;
+        if(SIZES[z].length < 3) continue;
+        if(Text.hasPhrase(kw, SIZES[z])){ conflicts.push('asks for size ' + SIZES[z] + ', yours is ' + P.ourSizes.join('/')); break; }
+      }
+    }
+    var kwModels = Text.modelPairs(kw);
+    for(var base in kwModels){
+      if(P.ourModels[base] && P.ourModels[base] !== kwModels[base]){
+        conflicts.push('asks for ' + base + ' ' + kwModels[base] + ', yours is ' + base + ' ' + P.ourModels[base]);
+      }
+    }
+    /* condition mismatch */
+    var condMismatch = false;
+    var weAreNew = (P.condition === 'new' || P.condition === 'new-other');
+    if(usedHit && weAreNew && !Text.hasPhrase(kw, 'new')) condMismatch = true;
+    if(!weAreNew && /\bbrand new\b/.test(norm)) condMismatch = true;
+
+    /* token-level relevance */
+    var IGNORE_FOR_RELEVANCE = {};
+    COMMERCIAL_MOD.concat(VALUE_SEEKER).forEach(function(w){
+      if(w.indexOf(' ') === -1) IGNORE_FOR_RELEVANCE[Text.stem(w)] = 1;
+    });
+    var matchedWeight = 0, considered = 0, unmatched = [], matched = [];
+    content.forEach(function(t){
+      if(IGNORE_FOR_RELEVANCE[t]) return;
+      considered++;
+      var w = P.vocab[t];
+      if(w){ matchedWeight += w; matched.push(t); }
+      else unmatched.push(t);
+    });
+    var coverage = considered ? matchedWeight / considered : 0;
+    var base = 100 * coverage;
+
+    var penalty = 0, penaltyNotes = [];
+    unmatched.forEach(function(t){
+      var isAttr = COLOURS.indexOf(t) !== -1 || SIZES.indexOf(t) !== -1 ||
+                   UNIT_RE.test(t) || MODELCODE_RE.test(t);
+      var isAdjacent = FEATURE_WORDS.indexOf(t) !== -1 || USE_CASE.indexOf(t) !== -1;
+      if(isAttr){ penalty += 20; penaltyNotes.push('"' + t + '" is an attribute your listing does not claim'); }
+      else if(isAdjacent){ penalty += 12; penaltyNotes.push('"' + t + '" is a feature or use case your listing does not mention'); }
+      else { penalty += 22; penaltyNotes.push('"' + t + '" does not appear anywhere in your listing'); }
+    });
+    penalty = Math.min(penalty, 70);
+
+    var bonus = 0;
+    var brandHit = P.brandTokens.length && P.brandTokens.every(function(t){ return content.indexOf(t) !== -1; });
+    var modelHit = P.modelTokens.length && P.modelTokens.every(function(t){ return content.indexOf(t) !== -1; });
+    if(brandHit) bonus += 8;
+    if(modelHit) bonus += 10;
+    var bg = Text.bigrams(content), phraseHits = 0;
+    for(var b=0;b<bg.length;b++){ if(P.phrases[bg[b]]) phraseHits++; }
+    bonus += Math.min(phraseHits * 4, 12);
+
+    var headHit = P.headNouns.some(function(h){ return content.indexOf(h) !== -1; });
+    if(!headHit && P.headNouns.length) penalty += 10;
+
+    /* words that actually narrow the search, as opposed to the head noun
+       everyone in the category shares */
+    var distinguishing = matched.filter(function(t){
+      return GENERIC_HEADS.indexOf(t) === -1 && P.headNouns.indexOf(t) === -1;
+    });
+
+    var relevance = clamp(base - penalty + bonus, 0, 100);
+    /* every word matching is not the same as the keyword describing this
+       product: "camera" matches perfectly and sells nothing */
+    if(matched.length && distinguishing.length === 0) relevance = Math.min(relevance, 35);
+    else if(distinguishing.length === 1 && considered <= 2) relevance = Math.min(relevance, 68);
+    if(conflicts.length) relevance = Math.min(relevance, 10);
+    if(hard) relevance = Math.min(relevance, 5);
+
+    /* --- buyer intent --- */
+    var intent = 55;
+    var intentNotes = [];
+    if(commHit){ intent += 16; intentNotes.push('buying word "' + commHit + '"'); }
+    if(isCompat){ intent += 12; intentNotes.push('compatibility phrasing'); }
+    var hasAttr = content.some(function(t){
+      return COLOURS.indexOf(t) !== -1 || SIZES.indexOf(t) !== -1 || UNIT_RE.test(t) || MODELCODE_RE.test(t);
+    });
+    if(hasAttr){ intent += 10; intentNotes.push('names a specific attribute'); }
+    if(brandHit || modelHit){ intent += 8; intentNotes.push('names the brand or model'); }
+    if(distinguishing.length){
+      intent += Math.min(distinguishing.length * 7, 21);
+      intentNotes.push(distinguishing.length + ' word' + (distinguishing.length === 1 ? '' : 's') + ' narrowing the search');
+    }
+    if(/\b(pack|set|bundle|pair|pcs|x\d+|\d+pcs)\b/.test(norm)){ intent += 5; intentNotes.push('quantity or bundle wording'); }
+    if(featureHit){ intent += 4; }
+    if(reviewHit){ intent -= 30; intentNotes.push('review wording — buyer is still comparing'); }
+    if(infoHit){ intent -= 45; intentNotes.push('information wording "' + infoHit + '"'); }
+    if(serviceHit){ intent -= 50; intentNotes.push('not a product purchase — "' + serviceHit + '"'); }
+    if(condMismatch){ intent -= 35; intentNotes.push('condition does not match your item'); }
+    if(bulkHit){ intent -= 12; intentNotes.push('trade or bulk wording'); }
+    if(content.length <= 1){ intent -= 20; intentNotes.push('single broad word'); }
+    if(content.length === 2 && content.every(function(t){ return GENERIC_HEADS.indexOf(t) !== -1; })){
+      intent -= 12; intentNotes.push('two generic words');
+    }
+    intent = clamp(intent, 0, 100);
+
+    var intentClass;
+    if(hard || conflicts.length || serviceHit || condMismatch) intentClass = 'Irrelevant';
+    else if(infoHit) intentClass = 'Informational';
+    else if(intent >= 75) intentClass = 'High purchase';
+    else if(intent >= 58) intentClass = 'Medium purchase';
+    else intentClass = 'Research';
+
+    /* --- specificity --- */
+    var spec;
+    var n = content.length;
+    if(n <= 1) spec = 15; else if(n === 2) spec = 35; else if(n === 3) spec = 55;
+    else if(n === 4) spec = 72; else if(n === 5) spec = 84; else spec = 92;
+    if(hasAttr) spec += 8;
+    if(isCompat) spec += 6;
+    if(content.every(function(t){ return GENERIC_HEADS.indexOf(t) !== -1; })) spec = Math.min(spec, 30);
+    spec = clamp(spec, 0, 100);
+
+    /* --- commercial potential --- */
+    var specificValueHit = P.specificValues.some(function(vals){
+      return vals.length && vals.every(function(v){ return content.indexOf(v) !== -1; });
+    });
+    var decisive = 0;
+    if(headHit) decisive++;
+    if(brandHit) decisive++;
+    if(modelHit) decisive++;
+    if(isCompat) decisive++;
+    if(specificValueHit) decisive++;
+    var depth = decisive + Math.min(distinguishing.length, 3) * 0.7;
+    var commercial = 20 + depth * 13;
+    if(valueHit) commercial -= 8;
+    if(premiumHit && P.condition === 'new') commercial += 6;
+    if(condMismatch) commercial = Math.min(commercial, 15);
+    if(conflicts.length || hard) commercial = Math.min(commercial, 8);
+    if(content.length <= 2 && !brandHit && !modelHit) commercial = Math.min(commercial, 45);
+    commercial = clamp(commercial, 0, 100);
+
+    return {
+      norm: norm, content: content, matched: matched, unmatched: unmatched,
+      relevance: round(relevance, 1), intent: round(intent, 1), intentClass: intentClass,
+      specificity: round(spec, 1), commercial: round(commercial, 1),
+      conflicts: conflicts, hard: hard, condMismatch: condMismatch,
+      isCompat: isCompat, isDeviceCompat: isDeviceCompat, brandHit: brandHit, modelHit: modelHit, headHit: headHit,
+      infoHit: infoHit, serviceHit: serviceHit, reviewHit: reviewHit, commHit: commHit,
+      valueHit: valueHit, bulkHit: bulkHit, useCaseHit: useCaseHit, featureHit: featureHit,
+      hasAttr: hasAttr, decisive: decisive, distinguishing: distinguishing, penaltyNotes: penaltyNotes,
+      coverage: round(coverage * 100, 0), specificValueHit: specificValueHit,
+      intentNotes: intentNotes
+    };
+  },
+
+  /* --- demand, cost, competition components --- */
+  demand: function(k, ctx){
+    if(k.volume == null || !ctx.hasVol) return null;
+    var p = Score.percentile(ctx.vols, Math.log(1 + k.volume));
+    if(p == null) return null;
+    /* floor at 20 so a genuine long-tail term is never zeroed for being small */
+    return round(20 + 80 * p, 1);
+  },
+  /* Scored against what the keyword actually has to earn:
+       100  at a quarter of break-even CPC or less
+        55  at the ceiling you chose in the costs panel
+         0  at break-even, where a sale makes you nothing
+     Without economics, it falls back to a relative comparison
+     against the median bid in your own list. */
+  cpcEfficiency: function(k, ctx){
+    if(k.cpc == null || k.cpc <= 0) return null;
+    var econ = ctx.econ;
+    if(econ && econ.ok && econ.breakEvenCPC && econ.maxCPC){
+      var be = econ.breakEvenCPC, mx = econ.maxCPC, floor = be * 0.25;
+      if(k.cpc >= be) return 0;
+      if(k.cpc <= floor) return 100;
+      if(mx > floor && k.cpc <= mx){
+        return round(100 - 45 * ((k.cpc - floor) / (mx - floor)), 1);
+      }
+      if(mx > floor) return round(clamp(55 * (1 - (k.cpc - mx) / (be - mx)), 0, 55), 1);
+      return round(clamp(100 * (1 - k.cpc / be), 0, 100), 1);
+    }
+    var maxCPC = econ && econ.maxCPC;
+    if(maxCPC){
+      var r = k.cpc / maxCPC;
+      return round(clamp(100 * (1 - Math.min(r, 1.5) / 1.5), 0, 100), 1);
+    }
+    if(ctx.medianCPC){
+      var r2 = k.cpc / ctx.medianCPC;
+      return round(clamp(100 * (1 - Math.min(r2, 2) / 2), 0, 100), 1);
+    }
+    return null;
+  },
+  competitionAdvantage: function(k){
+    if(k.competition == null) return null;
+    return round(clamp(100 - k.competition, 0, 100), 1);
+  },
+
+  /* --- weighted total with redistribution for missing data --- */
+  total: function(parts, weights){
+    var sum = 0, wsum = 0, used = {};
+    for(var key in weights){
+      var w = num(weights[key]); if(w == null) w = 0;
+      if(w <= 0) continue;
+      var v = parts[key];
+      if(v == null) continue;
+      sum += v * w; wsum += w; used[key] = w;
+    }
+    if(wsum === 0) return { score: 0, contrib: {}, coverage: 0 };
+    var contrib = {};
+    for(var k2 in used) contrib[k2] = round(parts[k2] * used[k2] / wsum, 2);
+    var totalW = 0;
+    for(var k3 in weights){ var ww = num(weights[k3]); if(ww && ww > 0) totalW += ww; }
+    return { score: round(sum / wsum, 1), contrib: contrib, coverage: totalW ? round(wsum / totalW * 100, 0) : 0 };
+  },
+
+  /* --- budget protection --- */
+  wastage: function(k, ins, ctx, score){
+    var risks = [];
+    var maxCPC = ctx.econ && ctx.econ.maxCPC;
+    var overBid = (k.cpc != null && maxCPC) ? k.cpc / maxCPC : null;
+
+    if(overBid != null && overBid > 1 && ins.relevance < 70){
+      risks.push({ level:'high', text:'Suggested bid ' + money(k.cpc) + ' is above your maximum affordable ' + money(maxCPC) + ', and relevance is only ' + ins.relevance + '.' });
+    } else if(overBid != null && overBid > 1){
+      risks.push({ level:'medium', text:'Suggested bid ' + money(k.cpc) + ' exceeds your maximum affordable ' + money(maxCPC) + '. Bid below that figure or leave it out.' });
+    }
+    if(ins.content.length <= 2 && ins.intent < 60 && ins.relevance < 75){
+      risks.push({ level:'high', text:'Broad term with weak buying signal — likely to collect browsers rather than buyers.' });
+    }
+    if(k.competition != null && k.competition >= 75 && ins.specificity < 45 && ins.relevance < 75){
+      risks.push({ level:'high', text:'High competition on a term that does not distinguish your listing from anyone else\'s.' });
+    }
+    if(k.volume != null && ctx.hasVol && ins.relevance < 55){
+      var p = Score.percentile(ctx.vols, Math.log(1 + k.volume));
+      if(p != null && p >= 0.85){
+        risks.push({ level:'high', text:'Among the highest-demand terms in this list but poorly matched to your product — the classic way to burn a daily budget.' });
+      }
+    }
+    if(ins.unmatched.length >= 2 && ins.relevance < 70){
+      risks.push({ level:'medium', text:ins.unmatched.length + ' words in this keyword do not appear in your listing.' });
+    }
+    if(overBid != null && overBid > 0.8 && overBid <= 1 && ins.relevance < 75){
+      risks.push({ level:'medium', text:'Bid is close to your ceiling with only moderate relevance — little room for error.' });
+    }
+    if(ins.valueHit && ctx.econ && ctx.econ.ok){
+      risks.push({ level:'medium', text:'Price-led search. These clicks convert on price, which squeezes an already thin margin.' });
+    }
+    var level = 'none';
+    for(var i=0;i<risks.length;i++){ if(risks[i].level === 'high'){ level = 'high'; break; } level = 'medium'; }
+    return { level: level, risks: risks, overBid: overBid };
+  },
+
+  breakEven: function(k, econ){
+    if(!econ || !econ.ok || k.cpc == null || k.cpc <= 0) return null;
+    var clicks = econ.profit / k.cpc;
+    return { clicks: Math.ceil(clicks), requiredCVR: 1 / clicks };
+  }
+};
+/* ============================================================
+   Group — one primary group per keyword, rules in priority order
+   ============================================================ */
+var GROUPS = ['Exact product','Brand / model','Compatibility','Feature','Use case',
+              'Long tail','Core','Generic','Irrelevant'];
+
+var Group = {
+  assign: function(ins){
+    if(ins.hard || ins.conflicts.length || ins.serviceHit || ins.condMismatch) return 'Irrelevant';
+    if(ins.infoHit && ins.intent < 45) return 'Irrelevant';
+    if(ins.headHit && ins.brandHit && ins.modelHit) return 'Exact product';
+    if(ins.headHit && ins.decisive >= 3) return 'Exact product';
+    if((ins.brandHit || ins.modelHit) && ins.content.length <= 4) return 'Brand / model';
+    if(ins.isDeviceCompat) return 'Compatibility';
+    /* the main way buyers describe this product comes before feature and
+       use-case wording, or every core term ends up filed as a feature */
+    if(ins.headHit && ins.relevance >= 85 && ins.content.length <= 4) return 'Core';
+    if(ins.useCaseHit && ins.relevance >= 45) return 'Use case';
+    if(ins.featureHit && ins.relevance >= 45) return 'Feature';
+    if(ins.isCompat) return 'Compatibility';
+    if(ins.content.length >= 4) return 'Long tail';
+    if(ins.content.length <= 2 && ins.relevance < 70) return 'Generic';
+    if(ins.content.length <= 2 && ins.specificity <= 35) return 'Generic';
+    return 'Core';
+  }
+};
+
+/* ============================================================
+   Dedup — consolidate keywords chasing the same intent
+   ============================================================ */
+var Dedup = {
+  run: function(rows, sensitivity){
+    var byBucket = {}, i;
+    rows.forEach(function(r){ r.dupOf = null; r.dupWith = []; });
+
+    /* exact signature: same meaningful words in any order */
+    rows.forEach(function(r){
+      var sig = r.signature;
+      if(!sig) return;
+      (byBucket[sig] = byBucket[sig] || []).push(r);
+    });
+    var clusters = [];
+    for(var sig in byBucket){ if(byBucket[sig].length > 1) clusters.push(byBucket[sig]); }
+
+    /* looser pass. Only keywords sharing an uncommon word can be near
+       duplicates, so candidates are bucketed by their rarest word first —
+       that keeps a 1,000-keyword list fast instead of quadratic. */
+    var singles = rows.filter(function(r){ return (byBucket[r.signature] || []).length === 1; });
+    var thresh = clamp(num(sensitivity) || 82, 50, 100) / 100;
+    var freq = {};
+    singles.forEach(function(r){ uniq(r.ins.content).forEach(function(t){ freq[t] = (freq[t] || 0) + 1; }); });
+    var pools = {};
+    singles.forEach(function(r){
+      var toks = uniq(r.ins.content);
+      if(!toks.length) return;
+      var rarest = toks[0];
+      toks.forEach(function(t){ if(freq[t] < freq[rarest]) rarest = t; });
+      (pools[rarest] = pools[rarest] || []).push(r);
+    });
+    var used = {};
+    for(var key in pools){
+      var pool = pools[key];
+      for(i=0;i<pool.length;i++){
+        if(used[pool[i].kw]) continue;
+        var grp = [pool[i]];
+        for(var j=i+1;j<pool.length;j++){
+          if(used[pool[j].kw]) continue;
+          if(Text.jaccard(pool[i].ins.content, pool[j].ins.content) >= thresh){
+            grp.push(pool[j]); used[pool[j].kw] = 1;
+          }
+        }
+        if(grp.length > 1){ used[pool[i].kw] = 1; clusters.push(grp); }
+      }
+    }
+
+    var merged = 0;
+    clusters.forEach(function(cl){
+      /* keep the strongest; where scores are close, keep the phrasing more
+         buyers actually type */
+      cl.sort(function(a,b){
+        var d = b.score - a.score;
+        if(Math.abs(d) > 3) return d;
+        if((b.volume||0) !== (a.volume||0)) return (b.volume||0) - (a.volume||0);
+        if(d !== 0) return d;
+        return a.kw.length - b.kw.length;
+      });
+      var keeper = cl[0];
+      keeper.dupWith = cl.slice(1).map(function(r){ return r.kw; });
+      for(var k=1;k<cl.length;k++){
+        cl[k].dupOf = keeper.kw;
+        merged++;
+      }
+    });
+    return merged;
+  }
+};
+
+/* ============================================================
+   Tier — final placement. No target counts, no quotas.
+   ============================================================ */
+var Tier = {
+  assign: function(r, T, econ){
+    /* hard exclusions first */
+    if(r.ins.hard) return { tier:'Excluded', reason: r.ins.hard };
+    if(r.ins.conflicts.length) return { tier:'Excluded', reason:'Wrong variant — ' + r.ins.conflicts.join('; ') + '.' };
+    if(r.ins.serviceHit) return { tier:'Excluded', reason:'Not a purchase search — "' + r.ins.serviceHit + '" points at a service, not a product to buy.' };
+    if(r.ins.condMismatch) return { tier:'Excluded', reason:'Condition mismatch — the search asks for a different condition to the item you are selling.' };
+    if(r.ins.intentClass === 'Informational') return { tier:'Excluded', reason:'Information-seeking search' + (r.ins.infoHit ? ' ("' + r.ins.infoHit + '")' : '') + ' — these clicks read, they do not buy.' };
+    if(r.dupOf) return { tier:'Excluded', reason:'Same search intent as "' + r.dupOf + '", which scored higher. Targeting both pays twice for one audience.' };
+    if(r.ins.relevance < 30) return { tier:'Excluded', reason:'Relevance ' + r.ins.relevance + ' — too far from your product. ' + (r.ins.penaltyNotes[0] || '') };
+
+    /* performance override from the results panel */
+    if(r.perf && r.perf.verdict === 'fail'){
+      return { tier:'Excluded', reason: r.perf.text };
+    }
+
+    var s = r.score, rel = r.ins.relevance;
+    var tier;
+    if(s >= T.t1 && rel >= T.r1 && (r.ins.intentClass === 'High purchase' || r.ins.intentClass === 'Medium purchase')) tier = 'Tier 1';
+    else if(s >= T.t2 && rel >= T.r2) tier = 'Tier 2';
+    else if(s >= T.t3 && rel >= T.r3) tier = 'Tier 3';
+    /* low volume, on its own, must never disqualify a term that clearly
+       describes the product and clearly wants to buy it — but it still has
+       to clear the Tier 3 cut-off once demand is taken out of the score */
+    else if(rel >= 80 && r.ins.intentClass === 'High purchase' && r.scoreNoDemand >= T.t3){
+      tier = 'Tier 3';
+      r.capped = 'Kept despite a low or missing search volume — on every other factor it scores ' + r.scoreNoDemand + '.';
+    }
+    else return { tier:'Excluded', reason:'Score ' + s + ' and relevance ' + rel + ' both sit below the cut-off. Relevant enough to understand, not strong enough to pay for.' };
+
+    /* budget protection can cap a tier but never promotes one */
+    if(r.wastage.level === 'high' && tier !== 'Tier 3'){
+      var strong = rel >= 85 && r.ins.intentClass === 'High purchase';
+      if(!strong){
+        tier = 'Tier 3';
+        r.capped = 'Held at Tier 3 by a high wastage risk.';
+      }
+    }
+    /* eBay's suggested bid is a suggestion, not a rule — but a keyword you
+       cannot afford at the suggested price does not belong at the top of the
+       list, so it is held one tier down with the bid you can afford */
+    if(tier === 'Tier 1' && r.wastage.overBid != null && r.wastage.overBid > 1 && econ && econ.maxCPC){
+      tier = 'Tier 2';
+      r.capped = 'Held at Tier 2: worth targeting, but bid ' + money(econ.maxCPC) + ' rather than the suggested ' + money(r.cpc) + '.';
+    }
+    if(r.perf && r.perf.verdict === 'weak'){
+      if(tier === 'Tier 1'){ tier = 'Tier 2'; r.capped = 'Moved down a tier on live performance.'; }
+      else if(tier === 'Tier 2'){ tier = 'Tier 3'; r.capped = 'Moved down a tier on live performance.'; }
+    }
+
+    var reason = Tier.reason(r, tier);
+    return { tier: tier, reason: reason };
+  },
+
+  reason: function(r, tier){
+    var bits = [];
+    var ins = r.ins;
+    if(tier === 'Tier 1') bits.push('Close product match with a clear buying signal.');
+    else if(tier === 'Tier 2') bits.push('Relevant and commercially useful, a step less specific than your Tier 1 terms.');
+    else bits.push('Relevant but carrying some uncertainty — worth a controlled test.');
+
+    if(ins.brandHit && ins.modelHit) bits.push('Names your brand and model.');
+    else if(ins.modelHit) bits.push('Names your model.');
+    else if(ins.brandHit) bits.push('Names your brand.');
+    if(ins.isCompat) bits.push('Compatibility search, which usually means the buyer already knows what they need.');
+    if(ins.specificValueHit) bits.push('Matches one of your item specifics exactly.');
+    if(ins.unmatched.length) bits.push('Words not in your listing: ' + ins.unmatched.slice(0,3).map(function(t){ return '"' + t + '"'; }).join(', ') + '.');
+    if(r.wastage.risks.length) bits.push((r.wastage.level === 'high' ? '⚠ HIGH WASTAGE RISK — ' : '⚠ ') + r.wastage.risks[0].text);
+    if(r.capped) bits.push(r.capped);
+    if(r.perf && r.perf.text) bits.push(r.perf.text);
+    return bits.join(' ');
+  }
+};
+
+/* ============================================================
+   Learning — performance feedback with a confidence gate
+   ============================================================ */
+var Learning = {
+  evaluate: function(kw, econ, priorCVR){
+    var p = S.perf[Text.normalise(kw)];
+    if(!p) return null;
+    var clicks = p.clicks, spend = p.spend, orders = p.orders, sales = p.sales, impr = p.impressions;
+    if(clicks == null || clicks <= 0){
+      return { verdict:'none', delta:0, text:'Performance data logged but no clicks yet — nothing to judge.',
+               stats: Learning.stats(p, econ) };
+    }
+    var actualCPC = (spend != null && clicks > 0) ? spend / clicks : null;
+    var profitPerSale = (econ && econ.ok) ? econ.profit : null;
+    var breakEvenClicks = null;
+    if(profitPerSale && actualCPC && actualCPC > 0) breakEvenClicks = profitPerSale / actualCPC;
+    else if(priorCVR) breakEvenClicks = 1 / priorCVR;
+
+    var stats = Learning.stats(p, econ);
+    if(orders == null){
+      return { verdict:'none', delta:0, text:'No orders column in the data you pasted, so this keyword cannot be judged on results.', stats: stats };
+    }
+
+    if(orders === 0){
+      if(breakEvenClicks && clicks >= breakEvenClicks * 3){
+        return { verdict:'fail', delta:-30,
+          text: clicks + ' clicks and ' + money(spend) + ' spent with no sales. Break-even needs one sale every ' +
+                Math.ceil(breakEvenClicks) + ' clicks, so there is roughly 95% confidence this keyword converts below break-even. Moved out — the figures stay attached if you want to retest later.',
+          stats: stats };
+      }
+      if(breakEvenClicks && clicks >= breakEvenClicks * 1.5){
+        return { verdict:'weak', delta:-15,
+          text: clicks + ' clicks, no sales yet — past break-even but not yet conclusive. Dropped a tier and worth capping the bid.',
+          stats: stats };
+      }
+      return { verdict:'watch', delta:0,
+        text: clicks + ' clicks, no sales yet. Below the ' + (breakEvenClicks ? Math.ceil(breakEvenClicks) : '—') +
+              ' clicks needed to break even, so this is insufficient data. Left where it is.',
+        stats: stats };
+    }
+
+    /* has orders */
+    var profit = (profitPerSale != null && spend != null) ? orders * profitPerSale - spend : null;
+    var confidence = Math.min(orders / 3, 1);
+    if(profit != null){
+      if(profit > 0){
+        var delta = round(10 + 15 * confidence, 0);
+        return { verdict:'win', delta: delta,
+          text: orders + (orders === 1 ? ' sale' : ' sales') + ' from ' + clicks + ' clicks at ' + money(spend) +
+                ' spend — about ' + money(profit) + ' profit after ad cost. Priority raised' +
+                (orders < 3 ? ', though with fewer than 3 sales this is still a small sample.' : '.'),
+          stats: stats };
+      }
+      return { verdict:'weak', delta:-12,
+        text: orders + ' sale(s) but roughly ' + money(Math.abs(profit)) + ' down after ad cost. Selling, not paying its way — reduce the bid rather than dropping it.',
+        stats: stats };
+    }
+    return { verdict:'win', delta: round(8 + 12 * confidence, 0),
+      text: orders + ' sale(s) from ' + clicks + ' clicks. Priority raised. Add your costs to see whether it is actually profitable.',
+      stats: stats };
+  },
+
+  stats: function(p, econ){
+    var o = {};
+    o.impressions = p.impressions; o.clicks = p.clicks; o.spend = p.spend;
+    o.orders = p.orders; o.sales = p.sales;
+    o.ctr = (p.impressions && p.clicks != null && p.impressions > 0) ? p.clicks / p.impressions : null;
+    o.cvr = (p.clicks && p.orders != null && p.clicks > 0) ? p.orders / p.clicks : null;
+    o.cpc = (p.clicks && p.spend != null && p.clicks > 0) ? p.spend / p.clicks : null;
+    o.cpa = (p.orders && p.spend != null && p.orders > 0) ? p.spend / p.orders : null;
+    o.roas = (p.spend && p.sales != null && p.spend > 0) ? p.sales / p.spend : null;
+    o.acos = (p.sales && p.spend != null && p.sales > 0) ? p.spend / p.sales : null;
+    o.profit = (econ && econ.ok && p.orders != null && p.spend != null) ? p.orders * econ.profit - p.spend : null;
+    return o;
+  },
+
+  parse: function(){
+    var res = Parse.performance($('perfPaste').value);
+    S.perf = res.data;
+    S.perfReport = res.report;
+    Store.save();
+    Render.perfReport();
+    if(S.results){ Engine.run(true); }
+    toast(Object.keys(res.data).length + ' keyword rows read');
+  },
+  clear: function(){
+    S.perf = {}; S.perfReport = null; $('perfPaste').value = '';
+    Store.save(); Render.perfReport();
+    if(S.results) Engine.run(true);
+  }
+};
+
+/* ============================================================
+   Engine — orchestration
+   ============================================================ */
+var Engine = {
+  run: function(quiet){
+    Forms.pull();
+    if(!S.keywords.length){
+      var parsed = Parse.keywordList($('kwPaste').value);
+      if(parsed.list.length){ S.keywords = parsed.list; S.parseReport = parsed.report; }
+    }
+    if(!String(S.listing.title || '').trim()){
+      Nav.go('v1'); toast('Add your product title first — every score is measured against it.'); return;
+    }
+    if(!S.keywords.length){
+      Nav.go('v3'); toast('Load a keyword list first.'); return;
+    }
+
+    var P = Product.build();
+    var comp = Competitors.build();
+    var econ = Econ.compute();
+    var ctx = Score.context(S.keywords, econ);
+    var W = S.weights, T = S.thresholds, wSum = 0;
+    for(var wk in W){ wSum += num(W[wk]) || 0; }
+    /* a total of zero would score every keyword at zero and quietly reject
+       the lot, so the defaults are restored and the user is told */
+    var weightsFellBack = false;
+    if(wSum <= 0){ W = Object.assign({}, DEFAULT_WEIGHTS); weightsFellBack = true; }
+    var priorCVR = econ.ok ? econ.cvr : 0.02;
+
+    var rows = S.keywords.concat(S.manual.map(function(k){
+      return { kw:k.kw, volume:k.volume, cpc:k.cpc, competition:k.competition, manual:true };
+    })).map(function(k){
+      var ins = Score.inspect(k.kw, P);
+      var parts = {
+        relevance: ins.relevance, intent: ins.intent, commercial: ins.commercial,
+        specificity: ins.specificity,
+        demand: Score.demand(k, ctx),
+        cpc: Score.cpcEfficiency(k, ctx),
+        competition: Score.competitionAdvantage(k),
+        validation: (function(){
+          var sup = Competitors.support(comp, ins.content);
+          return sup == null ? null : round(sup * 100, 0);
+        })()
+      };
+      var tot = Score.total(parts, W);
+      /* the same score with demand taken out of the equation, so a strong
+         long-tail term is never rejected purely for having a small or
+         missing search volume */
+      var noDemand = Object.assign({}, parts); noDemand.demand = null;
+      var totND = Score.total(noDemand, W);
+      var perf = Learning.evaluate(k.kw, econ, priorCVR);
+      var baseScore = tot.score;
+      var score = clamp(baseScore + (perf ? perf.delta : 0), 0, 100);
+      var row = {
+        kw: k.kw, volume: k.volume, cpc: k.cpc, competition: k.competition, manual: !!k.manual,
+        ins: ins, parts: parts, contrib: tot.contrib, dataCoverage: tot.coverage,
+        baseScore: baseScore, score: round(score, 1), scoreNoDemand: round(totND.score, 1), perf: perf,
+        signature: Text.signature(k.kw),
+        group: Group.assign(ins),
+        breakEven: Score.breakEven(k, econ),
+        capped: null, dupOf: null, dupWith: []
+      };
+      row.wastage = Score.wastage(k, ins, ctx, score);
+      return row;
+    });
+
+    /* consolidate duplicates using scores, then tier */
+    var merged = Dedup.run(rows.filter(function(r){
+      return !r.ins.hard && !r.ins.conflicts.length && r.ins.intentClass !== 'Irrelevant';
+    }), T.dup);
+
+    rows.forEach(function(r){
+      var t = Tier.assign(r, T, econ);
+      r.tier = t.tier; r.reason = t.reason;
+    });
+
+    rows.sort(function(a,b){ return b.score - a.score; });
+    Engine.trimMarginal(rows, T);
+
+    var counts = { total: rows.length, t1:0, t2:0, t3:0, ex:0, merged: merged, risk:0 };
+    rows.forEach(function(r){
+      if(r.tier === 'Tier 1') counts.t1++;
+      else if(r.tier === 'Tier 2') counts.t2++;
+      else if(r.tier === 'Tier 3') counts.t3++;
+      else counts.ex++;
+      if(r.wastage.level === 'high') counts.risk++;
+    });
+
+    S.results = {
+      rows: rows, counts: counts, econ: econ, weightsFellBack: weightsFellBack, comp: Engine.compAnalysis(rows, comp, P),
+      compMeta: { count: comp.count, limited: comp.limited, urlsOnly: comp.urlsOnly },
+      ctx: { hasVol: ctx.hasVol, hasCPC: ctx.hasCPC, medianCPC: ctx.medianCPC },
+      strategy: null, ranAt: new Date().toISOString()
+    };
+    S.results.strategy = Engine.strategy(rows, counts, econ);
+    Store.save();
+    Render.all();
+    if(!quiet){ Nav.go('v4'); toast(counts.total + ' keywords analysed'); }
+  },
+
+  /* A Tier 3 keyword earns its place by reaching buyers the stronger tiers
+     miss. If a Tier 1 or Tier 2 keyword already covers essentially the same
+     search, paying for both buys the same click twice. No fixed number is
+     applied — a keyword survives on what it adds, not on a quota. */
+  trimMarginal: function(rows, T){
+    var limit = clamp(num(T.overlap) || 60, 30, 100) / 100;
+    if(limit >= 1) return;
+    var pass = function(tier, against){
+      var higher = rows.filter(function(r){ return against.indexOf(r.tier) !== -1; });
+      if(!higher.length) return;
+      rows.forEach(function(r){
+        if(r.tier !== tier) return;
+        for(var i=0;i<higher.length;i++){
+          var h = higher[i];
+          if(Text.jaccard(r.ins.content, h.ins.content) >= limit){
+            r.tier = 'Excluded';
+            r.reason = 'Covered already by "' + h.kw + '" in ' + h.tier +
+                       '. Close enough in meaning that targeting both pays twice for one audience.';
+            return;
+          }
+        }
+      });
+    };
+    pass('Tier 2', ['Tier 1']);
+    pass('Tier 3', ['Tier 1','Tier 2']);
+  },
+
+  compAnalysis: function(rows, comp, P){
+    if(!comp.count) return { limited:true, common:[], gaps:[], only:[], theirTerms:[], ourTerms:[] };
+    var common = [], gaps = [], only = [];
+    rows.forEach(function(r){
+      var sup = Competitors.support(comp, r.ins.content);
+      r.compSupport = sup;
+      if(sup == null) return;
+      if(sup >= 0.5 && comp.count > 1) common.push(r);
+      if(sup === 0 && r.ins.relevance >= 70 && r.tier !== 'Excluded') gaps.push(r);
+      if(sup > 0 && r.ins.relevance < 45) only.push(r);
+    });
+    var theirTerms = [], ourTerms = [];
+    for(var t in comp.freq){
+      if(comp.freq[t] >= Math.max(2, Math.ceil(comp.count/2)) && !P.vocab[t] && t.length > 2 &&
+         GENERIC_HEADS.indexOf(t) === -1) theirTerms.push(t);
+    }
+    for(var v in P.vocab){
+      if(P.vocab[v] >= 0.9 && !comp.freq[v] && v.length > 2) ourTerms.push(v);
+    }
+    var sortScore = function(a,b){ return b.score - a.score; };
+    return {
+      limited:false,
+      common: common.sort(sortScore).slice(0,25),
+      gaps: gaps.sort(sortScore).slice(0,25),
+      only: only.sort(sortScore).slice(0,25),
+      theirTerms: theirTerms.slice(0,20),
+      ourTerms: ourTerms.slice(0,20)
+    };
+  },
+
+  strategy: function(rows, counts, econ){
+    var selected = rows.filter(function(r){ return r.tier !== 'Excluded'; });
+    if(!selected.length) return { campaigns: [], note:'Nothing cleared the cut-offs, so there is no campaign to build yet.' };
+
+    var claimed = {};
+    var take = function(tiers, groups){
+      return selected.filter(function(r){
+        if(claimed[r.kw]) return false;
+        if(tiers.indexOf(r.tier) === -1) return false;
+        if(groups && groups.indexOf(r.group) === -1) return false;
+        return true;
+      });
+    };
+    var byTier = function(a, b){
+      var o = { 'Tier 1':0, 'Tier 2':1, 'Tier 3':2 };
+      if(o[a.tier] !== o[b.tier]) return o[a.tier] - o[b.tier];
+      return b.score - a.score;
+    };
+    var campaigns = [];
+    /* rank 1 = bid hardest, 2 = bid below that, 3+ = lower priority.
+       Ranks 1 and 2 are what the "good ones" export takes. */
+    var push = function(name, priority, list, note, rank){
+      if(!list.length) return;
+      list.forEach(function(r){ claimed[r.kw] = 1; });
+      campaigns.push({ name:name, priority:priority, rank:rank, keywords: list.sort(byTier), note:note });
+    };
+
+    /* a small set is one campaign — splitting it would only thin the data out */
+    if(selected.length <= 12){
+      push('Single campaign — everything you approve', 'Start here',
+        take(['Tier 1','Tier 2','Tier 3']),
+        'Small enough that splitting it would only spread the clicks too thin to read. One campaign, one ad group, and give it a fortnight before judging it.', 1);
+      return { campaigns: campaigns, note:'' };
+    }
+
+    push('Campaign 1 — Core high intent', 'Highest priority, largest share of budget',
+      take(['Tier 1','Tier 2'], ['Exact product','Brand / model','Core']),
+      'Your exact product, brand and model terms — the closest thing to a buyer asking for your listing by name. Bid these hardest.', 1);
+    push('Campaign 2 — Feature and use case', 'Medium priority',
+      take(['Tier 1','Tier 2'], ['Feature','Use case','Compatibility']),
+      'Buyers searching by what the product does or where it is used. Bid below the core campaign.', 2);
+    push('Campaign 3 — Long tail', 'Low bid, let it run',
+      take(['Tier 1','Tier 2','Tier 3'], ['Long tail']),
+      'Specific searches. Usually cheaper clicks and better conversion, but they need longer to gather enough clicks to judge.', 3);
+    push('Campaign 4 — Secondary reach', 'Open only once the core campaign is converting',
+      take(['Tier 1','Tier 2']),
+      'Relevant but broader. Leave this closed until Campaign 1 has produced sales you can measure.', 4);
+    push('Campaign 5 — Controlled test', 'Capped daily budget',
+      take(['Tier 3']),
+      'Uncertain but worth a look. Cap the daily spend and review it against break-even clicks rather than against a feeling.', 5);
+    return { campaigns: campaigns, note:'' };
+  }
+};
+/* ============================================================
+   Nav + Forms
+   ============================================================ */
+var Nav = {
+  go: function(id){
+    var views = document.querySelectorAll('.view');
+    for(var i=0;i<views.length;i++) views[i].classList.toggle('is-active', views[i].id === id);
+    var steps = document.querySelectorAll('.step');
+    for(var j=0;j<steps.length;j++) steps[j].classList.toggle('is-active', steps[j].getAttribute('data-view') === id);
+    S.ui.view = id; Store.save();
+    window.scrollTo(0, 0);
+    if(id === 'v4') Render.all();
+  }
+};
+
+var RESCORE = ['lTitle','lBrand','lModel','lCategory','lCondition','lSpecifics','lDesc','lMust','lNever',
+               'eSell','eFeePct','eFeeFix','eCost','eShip','eOther','eVat','eCvr','eKeep',
+               'wRel','wInt','wCom','wDem','wCpc','wVal','wSpe','wCmp',
+               'tT1','tT2','tT3','tR1','tR2','tR3','tDup','tOv'];
+
+var Forms = {
+  bind: function(){
+    var ids = ['lUrl','lTitle','lBrand','lModel','lCategory','lCondition','lSpecifics','lDesc','lMust','lNever',
+               'eSell','eFeePct','eFeeFix','eCost','eShip','eOther','eVat','eCvr','eKeep',
+               'wRel','wInt','wCom','wDem','wCpc','wVal','wSpe','wCmp',
+               'tT1','tT2','tT3','tR1','tR2','tR3','tDup','tOv','kwPaste','perfPaste'];
+    ids.forEach(function(id){
+      var el = $(id); if(!el) return;
+      el.addEventListener('change', function(){
+        Forms.pull(); Store.save();
+        /* costs, weights and cut-offs all change the answer, so results on
+           screen are re-calculated rather than left showing an old number */
+        if(S.results && RESCORE.indexOf(id) !== -1){ Engine.run(true); return; }
+        Render.hints(); Render.econ(); Render.weightTotal();
+      });
+      el.addEventListener('input', function(){ Render.weightTotal(); });
+    });
+    document.querySelectorAll('.step').forEach(function(b){
+      b.addEventListener('click', function(){ Nav.go(b.getAttribute('data-view')); });
+    });
+  },
+  push: function(){
+    var L = S.listing;
+    $('lUrl').value = L.url; $('lTitle').value = L.title; $('lBrand').value = L.brand;
+    $('lModel').value = L.model; $('lCategory').value = L.category; $('lCondition').value = L.condition || 'new';
+    $('lSpecifics').value = L.specifics; $('lDesc').value = L.desc;
+    $('lMust').value = L.must; $('lNever').value = L.never;
+    var e = S.econ;
+    $('eSell').value = e.sell == null ? '' : e.sell; $('eFeePct').value = e.feePct == null ? '' : e.feePct;
+    $('eFeeFix').value = e.feeFix == null ? '' : e.feeFix; $('eCost').value = e.cost == null ? '' : e.cost;
+    $('eShip').value = e.ship == null ? '' : e.ship; $('eOther').value = e.other == null ? '' : e.other;
+    $('eVat').value = e.vat == null ? '' : e.vat; $('eCvr').value = e.cvr == null ? '' : e.cvr;
+    $('eKeep').value = e.keep == null ? '' : e.keep;
+    var w = S.weights;
+    $('wRel').value = w.relevance; $('wInt').value = w.intent; $('wCom').value = w.commercial;
+    $('wDem').value = w.demand; $('wCpc').value = w.cpc; $('wVal').value = w.validation;
+    $('wSpe').value = w.specificity; $('wCmp').value = w.competition;
+    var t = S.thresholds;
+    $('tT1').value = t.t1; $('tT2').value = t.t2; $('tT3').value = t.t3;
+    $('tR1').value = t.r1; $('tR2').value = t.r2; $('tR3').value = t.r3; $('tDup').value = t.dup; $('tOv').value = t.overlap;
+    $('kwPaste').value = S.keywordsRaw || '';
+    Render.competitors();
+  },
+  pull: function(){
+    var L = S.listing;
+    L.url = $('lUrl').value; L.title = $('lTitle').value; L.brand = $('lBrand').value;
+    L.model = $('lModel').value; L.category = $('lCategory').value; L.condition = $('lCondition').value;
+    L.specifics = $('lSpecifics').value; L.desc = $('lDesc').value;
+    L.must = $('lMust').value; L.never = $('lNever').value;
+    var e = S.econ;
+    e.sell = num($('eSell').value); e.feePct = num($('eFeePct').value); e.feeFix = num($('eFeeFix').value);
+    e.cost = num($('eCost').value); e.ship = num($('eShip').value); e.other = num($('eOther').value);
+    e.vat = num($('eVat').value); e.cvr = num($('eCvr').value); e.keep = num($('eKeep').value);
+    var w = S.weights;
+    w.relevance = num($('wRel').value) || 0; w.intent = num($('wInt').value) || 0;
+    w.commercial = num($('wCom').value) || 0; w.demand = num($('wDem').value) || 0;
+    w.cpc = num($('wCpc').value) || 0; w.validation = num($('wVal').value) || 0;
+    w.specificity = num($('wSpe').value) || 0; w.competition = num($('wCmp').value) || 0;
+    var t = S.thresholds;
+    t.t1 = num($('tT1').value) || DEFAULT_THRESHOLDS.t1; t.t2 = num($('tT2').value) || DEFAULT_THRESHOLDS.t2;
+    t.t3 = num($('tT3').value) || DEFAULT_THRESHOLDS.t3; t.r1 = num($('tR1').value) || DEFAULT_THRESHOLDS.r1;
+    t.r2 = num($('tR2').value) || DEFAULT_THRESHOLDS.r2; t.r3 = num($('tR3').value) || DEFAULT_THRESHOLDS.r3;
+    t.dup = num($('tDup').value) || DEFAULT_THRESHOLDS.dup;
+    t.overlap = num($('tOv').value) || DEFAULT_THRESHOLDS.overlap;
+    S.keywordsRaw = $('kwPaste').value;
+    for(var i=0;i<3;i++){
+      var u = $('cUrl'+i), ti = $('cTitle'+i), tx = $('cText'+i);
+      if(u) S.competitors[i].url = u.value;
+      if(ti) S.competitors[i].title = ti.value;
+      if(tx) S.competitors[i].text = tx.value;
+    }
+  }
+};
+
+var Settings = {
+  normalise: function(){
+    Forms.pull();
+    var w = S.weights, sum = 0, k;
+    for(k in w) sum += w[k];
+    if(sum <= 0){ S.weights = Object.assign({}, DEFAULT_WEIGHTS); }
+    else { for(k in w) w[k] = round(w[k] / sum * 100, 1); }
+    Forms.push(); Store.save(); Render.weightTotal(); toast('Weights rescaled to 100');
+  },
+  resetWeights: function(){
+    Forms.pull();
+    S.weights = Object.assign({}, DEFAULT_WEIGHTS);
+    S.thresholds = Object.assign({}, DEFAULT_THRESHOLDS);
+    Forms.push(); Store.save(); Render.weightTotal(); toast('Back to defaults');
+  }
+};
+
+/* ============================================================
+   Listing / Competitors / Keywords input handlers
+   ============================================================ */
+var Keywords = {
+  parse: function(){
+    Forms.pull();
+    var res = Parse.keywordList($('kwPaste').value);
+    S.keywords = res.list; S.parseReport = res.report;
+    Store.save(); Render.kwReport(); Render.hints();
+    toast(res.list.length + ' keywords ready');
+  },
+  readFile: function(input){
+    var f = input.files && input.files[0];
+    if(!f) return;
+    var rd = new FileReader();
+    rd.onload = function(){
+      $('kwPaste').value = String(rd.result || '');
+      Keywords.parse();
+    };
+    rd.onerror = function(){ toast('Could not read that file'); };
+    rd.readAsText(f);
+    input.value = '';
+  },
+  clear: function(){
+    S.keywords = []; S.parseReport = null; S.keywordsRaw = ''; $('kwPaste').value = '';
+    /* results belong to the list that produced them */
+    S.results = null; S.ui.open = null;
+    Store.save(); Render.kwReport(); Render.results(); Render.approve(); Render.hints();
+    Render.emptyResults();
+  },
+  addManual: function(){
+    var el = $('manualKw');
+    var v = el.value.trim();
+    if(!v) return;
+    v.split(/\r?\n/).forEach(function(line){
+      var t = line.trim(); if(!t) return;
+      if(S.manual.some(function(m){ return Text.normalise(m.kw) === Text.normalise(t); })) return;
+      if(S.keywords.some(function(m){ return Text.normalise(m.kw) === Text.normalise(t); })) return;
+      S.manual.push({ kw:t, volume:null, cpc:null, competition:null });
+    });
+    el.value = '';
+    Store.save(); Engine.run(true); toast('Added and scored');
+  }
+};
+
+/* ============================================================
+   Render
+   ============================================================ */
+var Render = {
+  all: function(){
+    Render.hints(); Render.econ(); Render.weightTotal();
+    Render.kwReport(); Render.results(); Render.approve();
+    Render.perfReport(); Render.learnTable();
+  },
+
+  hints: function(){
+    var L = S.listing;
+    $('h1').textContent = L.title ? (L.title.length > 26 ? L.title.slice(0,26) + '…' : L.title) : 'not set';
+    var cc = S.competitors.filter(function(c){ return (c.title||'').trim() || (c.text||'').trim(); }).length;
+    $('h2').textContent = cc + ' of 3';
+    $('h3').textContent = S.keywords.length + ' keywords';
+    var econ = Econ.compute();
+    var c = S.results ? S.results.counts : null;
+    var ap = Object.keys(S.approvals).filter(function(k){ return S.approvals[k] === 1; }).length;
+    $('h4').textContent = !c ? 'not run' : (ap ? ap + ' approved' : (c.t1 + c.t2 + c.t3) + ' recommended');
+    document.querySelectorAll('.step').forEach(function(b){
+      var v = b.getAttribute('data-view');
+      var done = (v === 'v1' && L.title) || (v === 'v2' && cc) || (v === 'v3' && S.keywords.length) ||
+                 (v === 'v4' && S.results);
+      b.classList.toggle('is-done', !!done);
+    });
+  },
+
+  competitors: function(){
+    var html = '';
+    for(var i=0;i<3;i++){
+      var c = S.competitors[i] || blankComp();
+      var got = !!(c.title || c.text);
+      html += '<details class="help comp-card"' + (got ? '' : ' data-empty="1"') + '>' +
+        '<summary><span class="badge ' + (got ? 'b-ok' : 'b-ex') + '">' + (got ? '✓' : '—') + '</span> ' +
+        'Competitor ' + (i+1) + (got ? ' · ' + esc(c.title ? c.title.slice(0,54) : 'text only') : ' · nothing loaded') + '</summary>' +
+        '<div>' +
+        '<label class="field"><span>Listing URL</span><input type="url" id="cUrl' + i + '" value="' + esc(c.url) + '" placeholder="—"></label>' +
+        '<label class="field"><span>Listing title</span><input type="text" id="cTitle' + i + '" value="' + esc(c.title) + '" placeholder="—"></label>' +
+        '<label class="field"><span>Page text used for the comparison</span>' +
+        '<textarea id="cText' + i + '" rows="5" placeholder="—">' + esc(c.text) + '</textarea></label>' +
+        '<span class="dim mono" id="cMsg' + i + '" style="font-size:11.5px"></span>' +
+        '</div></details>';
+    }
+    $('compCards').innerHTML = html;
+    for(var j=0;j<3;j++){
+      ['cUrl','cTitle','cText'].forEach(function(p){
+        var el = $(p + j);
+        if(el) el.addEventListener('change', function(){
+          Forms.pull(); Store.save(); Render.hints();
+          if(S.results) Engine.run(true);
+        });
+      });
+    }
+  },
+
+  kwReport: function(){
+    var el = $('kwReport'); if(!el) return;
+    var r = S.parseReport;
+    if(!r){ el.innerHTML = ''; return; }
+    var h = '<div class="note"><strong>' + r.kept + ' keywords ready.</strong> ' +
+      'Mapping used — ' + esc(r.mapping) + '.' +
+      (r.dupes ? ' ' + r.dupes + ' exact repeats in the file were dropped.' : '') +
+      (r.blankDropped ? ' ' + r.blankDropped + ' blank or unusable rows were skipped.' : '') + '</div>';
+    r.notes.forEach(function(n){ h += '<div class="note note-warn">' + esc(n) + '</div>'; });
+    el.innerHTML = h;
+  },
+
+  econ: function(){
+    var el = $('econOut'); if(!el) return;
+    var e = Econ.compute();
+    if(!e.ok && e.reason === 'Selling price not set'){
+      el.innerHTML = '<div class="note">Add a selling price and the engine will work out the most you can afford to pay per click, and judge every suggested bid against it. Without it, cost efficiency is scored against the median bid in your own list instead.</div>';
+      return;
+    }
+    if(!e.ok){
+      el.innerHTML = '<div class="note note-risk"><strong>' + esc(e.reason) + '.</strong> Profit per sale works out at ' + money(e.profit) +
+        '. There is no advertising budget to find here — the listing needs repricing before any CPC spend makes sense.</div>';
+      return;
+    }
+    el.innerHTML =
+      '<div class="grid-3" style="margin-top:6px">' +
+      Render.stat('Profit per sale', money(e.profit), 'sage') +
+      Render.stat('Break-even ad cost', pct(e.breakEvenACOS, 1) + ' of price', '') +
+      Render.stat('Break-even CPC', money(e.breakEvenCPC), '') +
+      Render.stat('Maximum you should pay per click', money(e.maxCPC), 'gold') +
+      Render.stat('Clicks one sale must cover', e.maxCPC ? Math.ceil(e.profit / e.maxCPC) + ' clicks' : 'N/A', '') +
+      Render.stat('Conversion rate used', pct(e.cvr, 1) + (e.assumedCVR ? ' (assumed)' : ''), e.assumedCVR ? 'dim' : '') +
+      '</div>' +
+      '<p class="dim" style="font-size:12px;margin:10px 0 0">Break-even CPC = profit per sale × conversion rate. Your maximum is that figure reduced by the ' +
+      Math.round(e.keep * 100) + '% of profit you chose to keep. Every keyword is measured against ' + money(e.maxCPC) + '.</p>';
+  },
+  stat: function(label, value, cls){
+    return '<div class="kpi"><div class="kpi-n ' + (cls || '') + '" style="font-size:19px">' + esc(value) +
+           '</div><div class="kpi-l">' + esc(label) + '</div></div>';
+  },
+
+  weightTotal: function(){
+    var el = $('wTotal'); if(!el) return;
+    var ids = ['wRel','wInt','wCom','wDem','wCpc','wVal','wSpe','wCmp'], sum = 0;
+    ids.forEach(function(i){ sum += num($(i) ? $(i).value : 0) || 0; });
+    sum = round(sum, 1);
+    el.textContent = sum <= 0
+      ? 'Total 0 — every keyword would score zero, so the defaults are used instead until you set a weight'
+      : 'Total ' + sum + (sum === 100 ? '' : ' — weights are shared out proportionally, so any total works, but 100 keeps the score readable');
+    el.classList.toggle('bad', sum <= 0);
+  },
+
+  /* ---------- results ---------- */
+  emptyResults: function(){
+    var el = $('resultsArea'); if(!el || S.results) return;
+    el.innerHTML = '<div class="empty"><strong>Nothing analysed yet</strong>Add a listing at step 1 and a keyword list at step 3.' +
+      '<div class="btn-row" style="justify-content:center;margin-top:14px">' +
+      '<button class="btn btn-primary" onclick="Engine.run()">Analyse keywords</button></div></div>';
+  },
+
+  results: function(){
+    var el = $('resultsArea'); if(!el) return;
+    if(!S.results){ Render.emptyResults(); return; }
+    var R = S.results, c = R.counts;
+    var h = '';
+
+    h += '<div class="kpis">' +
+      '<div class="kpi"><div class="kpi-n">' + c.total + '</div><div class="kpi-l">Keywords read</div></div>' +
+      '<div class="kpi t1"><div class="kpi-n">' + c.t1 + '</div><div class="kpi-l">Tier 1 primary</div></div>' +
+      '<div class="kpi t2"><div class="kpi-n">' + c.t2 + '</div><div class="kpi-l">Tier 2 secondary</div></div>' +
+      '<div class="kpi t3"><div class="kpi-n">' + c.t3 + '</div><div class="kpi-l">Tier 3 test</div></div>' +
+      '<div class="kpi ex"><div class="kpi-n">' + c.ex + '</div><div class="kpi-l">Do not target</div></div>' +
+      '<div class="kpi"><div class="kpi-n clay">' + c.risk + '</div><div class="kpi-l">Wastage risks</div></div>' +
+      '</div>';
+
+    h += Render.dataNotices(R);
+    h += Render.summaryPanel(R);
+    h += '<div class="card"><div class="card-head"><h2>Every keyword, decided</h2>' +
+      '<span class="dim" style="font-size:12px">tick what you want to run</span></div>' +
+      '<div class="btn-row" style="margin-bottom:12px">' +
+      '<button class="btn btn-primary" onclick="Approve.bulk(\'t1\')">Tick Tier 1</button>' +
+      '<button class="btn" onclick="Approve.bulk(\'t12\')">Tick Tier 1 + 2</button>' +
+      '<button class="btn" onclick="Approve.bulk(\'all\')">Tick everything recommended</button>' +
+      '<button class="btn btn-ghost" onclick="Approve.bulk(\'clear\')">Clear ticks</button></div>';
+    h += Render.filters();
+    h += '<div class="table-wrap"><table id="resTable"><thead><tr>' +
+      '<th style="width:34px"></th><th style="width:22px"></th>' +
+      Render.th('kw','Keyword') + Render.th('tier','Decision') + Render.th('score','Score') +
+      Render.th('intent','Intent') + Render.th('cpc','Bid') + Render.th('volume','Demand') +
+      '<th>Risk</th><th style="min-width:220px">Why</th></tr></thead><tbody id="resBody"></tbody></table></div>';
+    h += '</div>';
+
+    h += Render.competitorPanel(R);
+    h += Render.strategyPanel(R);
+    h += '<div class="sticky-actions btn-row">' +
+         '<button class="btn" onclick="Engine.run()">Re-run analysis</button>' +
+         '<button class="btn btn-ghost" onclick="Nav.go(\'v3\')">Change the keyword list</button>' +
+         '<button class="btn btn-ghost" onclick="Nav.go(\'v1\')">Edit my listing</button></div>';
+    el.innerHTML = h;
+    Render.bindFilters();
+    Render.rows();
+  },
+
+  th: function(key, label){
+    var on = S.ui.sort === key;
+    return '<th class="sortable" data-sort="' + key + '">' + esc(label) +
+           (on ? ' <span class="arrow">' + (S.ui.dir === 'desc' ? '▾' : '▴') + '</span>' : '') + '</th>';
+  },
+
+  dataNotices: function(R){
+    var h = '';
+    if(R.weightsFellBack){
+      h += '<div class="note note-warn"><strong>Your weights added up to zero.</strong> Every keyword would have scored zero, so this analysis used the default weights. Set at least one weight above zero in the scoring panel below.</div>';
+    }
+    if(R.compMeta.limited){
+      h += '<div class="note note-warn"><strong>Competitor analysis is limited.</strong> No competitor titles or page text were provided' +
+           (R.compMeta.urlsOnly ? ', only URLs — and this tool cannot open them' : '') +
+           '. Competitor validation reads N/A for every keyword and its weight has been shared across the other factors.</div>';
+    }
+    if(!R.ctx.hasVol || !R.ctx.hasCPC){
+      var missing = [];
+      if(!R.ctx.hasVol) missing.push('search demand');
+      if(!R.ctx.hasCPC) missing.push('CPC');
+      h += '<div class="note note-warn"><strong>No ' + missing.join(' or ') + ' figures in your keyword file.</strong> ' +
+           'Those columns read N/A rather than being guessed at, and their weight has been shared across the factors that do have data.</div>';
+    }
+    if(!R.econ.ok && R.econ.reason === 'Selling price not set'){
+      h += '<div class="note">Open the costs panel below and add your selling price and product cost to turn suggested bids into a yes or no. Without them, cost is only judged relative to the other keywords in your own list.</div>';
+    }
+    return h;
+  },
+
+  summaryPanel: function(R){
+    var rows = R.rows;
+    var t1 = rows.filter(function(r){ return r.tier === 'Tier 1'; });
+    var best = t1.slice(0, 8);
+    var eff = rows.filter(function(r){ return r.tier !== 'Excluded' && r.cpc != null && r.breakEven; })
+                  .sort(function(a,b){ return a.breakEven.clicks - b.breakEven.clicks; }).slice(0, 6);
+    var risks = rows.filter(function(r){ return r.wastage.level === 'high'; })
+                    .sort(function(a,b){ return (b.volume||0) - (a.volume||0); }).slice(0, 6);
+    var order = [];
+    if(t1.length) order.push('First: the Tier 1 list — ' + t1.length + ' keyword' + (t1.length===1?'':'s') + ', run alone for at least a fortnight so the data is clean.');
+    if(R.counts.t2) order.push('Second: Tier 2, opened only once Tier 1 has produced sales you can measure.');
+    if(R.counts.t3) order.push('Third: Tier 3 on a capped daily budget, reviewed against break-even clicks rather than gut feeling.');
+
+    var h = '<div class="card"><div class="card-head"><h2>What this comes down to</h2></div>' +
+      '<div class="grid-2">';
+    h += '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">🎯 Best keywords</h4>';
+    h += best.length ? '<div class="pill-row">' + best.map(function(r){
+      return '<span class="pill hot">' + esc(r.kw) + ' · ' + r.score + '</span>'; }).join('') + '</div>'
+      : '<p class="dim" style="font-size:12.5px;margin:0">Nothing reached Tier 1. Either the keyword list is a poor fit for this listing, or the cut-offs in the scoring panel are set too high for it.</p>';
+    h += '</div>';
+
+    h += '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">💰 CPC efficiency</h4>';
+    h += eff.length ? '<ul class="detail-list">' + eff.map(function(r){
+      return '<li><b>' + esc(r.kw) + '</b><span>1 sale per ' + r.breakEven.clicks + ' clicks</span></li>'; }).join('') + '</ul>'
+      : '<p class="dim" style="font-size:12.5px;margin:0">Needs both a CPC column in your keyword file and your costs in the panel below.</p>';
+    h += '</div>';
+
+    h += '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">⚠️ Wastage risks</h4>';
+    h += risks.length ? '<ul class="detail-list">' + risks.map(function(r){
+      return '<li><b>' + esc(r.kw) + '</b><span class="clay">' + esc(r.wastage.risks[0].text.slice(0,58)) + '…</span></li>'; }).join('') + '</ul>'
+      : '<p class="dim" style="font-size:12.5px;margin:0">No high-risk keywords flagged in this set.</p>';
+    h += '</div>';
+
+    h += '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">📊 Testing order</h4>';
+    h += order.length ? '<ol style="margin:0;padding-left:16px;font-size:12.5px;color:var(--text-2)">' +
+      order.map(function(o){ return '<li style="margin-bottom:5px">' + esc(o) + '</li>'; }).join('') + '</ol>'
+      : '<p class="dim" style="font-size:12.5px;margin:0">Nothing cleared the cut-offs yet.</p>';
+    h += '</div></div>';
+    h += '<p class="dim" style="font-size:12px;margin:14px 0 0">These are probabilities, not promises. A high score means strong buyer intent and a close product match — it does not mean a keyword will sell.</p>';
+    h += '</div>';
+    return h;
+  },
+
+  filters: function(){
+    var u = S.ui;
+    var groupOpts = ['all'].concat(GROUPS).map(function(g){
+      return '<option value="' + esc(g) + '"' + (u.filterGroup === g ? ' selected' : '') + '>' +
+             (g === 'all' ? 'All groups' : esc(g)) + '</option>'; }).join('');
+    var intents = ['all','High purchase','Medium purchase','Research','Informational','Irrelevant'].map(function(g){
+      return '<option value="' + esc(g) + '"' + (u.filterIntent === g ? ' selected' : '') + '>' +
+             (g === 'all' ? 'All intents' : esc(g)) + '</option>'; }).join('');
+    return '<div class="filters">' +
+      ['all','Tier 1','Tier 2','Tier 3','Excluded'].map(function(t){
+        return '<button class="chip' + (u.filterTier === t ? ' on' : '') + '" data-tier="' + esc(t) + '">' +
+               (t === 'all' ? 'All tiers' : t === 'Excluded' ? 'Do not target' : t) + '</button>'; }).join('') +
+      '<select id="fGroup">' + groupOpts + '</select>' +
+      '<select id="fIntent">' + intents + '</select>' +
+      '<input type="text" id="fSearch" placeholder="Find a keyword…" value="' + esc(u.search) + '">' +
+      '<button class="chip' + (u.riskOnly ? ' on' : '') + '" id="fRisk">⚠ Wastage risks only</button>' +
+      '<span class="dim mono" id="rowCount" style="font-size:11.5px;margin-left:auto"></span>' +
+      '</div>';
+  },
+
+  bindFilters: function(){
+    document.querySelectorAll('[data-tier]').forEach(function(b){
+      b.addEventListener('click', function(){ S.ui.filterTier = b.getAttribute('data-tier'); Store.save(); Render.results(); });
+    });
+    document.querySelectorAll('#resTable th.sortable').forEach(function(th){
+      th.addEventListener('click', function(){
+        var k = th.getAttribute('data-sort');
+        if(S.ui.sort === k) S.ui.dir = S.ui.dir === 'desc' ? 'asc' : 'desc';
+        else { S.ui.sort = k; S.ui.dir = (k === 'kw' || k === 'group' || k === 'intent') ? 'asc' : 'desc'; }
+        Store.save(); Render.results();
+      });
+    });
+    var g = $('fGroup'); if(g) g.addEventListener('change', function(){ S.ui.filterGroup = g.value; Store.save(); Render.rows(); });
+    var it = $('fIntent'); if(it) it.addEventListener('change', function(){ S.ui.filterIntent = it.value; Store.save(); Render.rows(); });
+    var se = $('fSearch'); if(se) se.addEventListener('input', function(){ S.ui.search = se.value; Render.rows(); });
+    var rk = $('fRisk'); if(rk) rk.addEventListener('click', function(){ S.ui.riskOnly = !S.ui.riskOnly; Store.save(); Render.results(); });
+  },
+
+  filtered: function(){
+    var u = S.ui, q = Text.normalise(u.search);
+    var rows = S.results.rows.filter(function(r){
+      if(u.filterTier !== 'all' && r.tier !== u.filterTier) return false;
+      if(u.filterGroup !== 'all' && r.group !== u.filterGroup) return false;
+      if(u.filterIntent !== 'all' && r.ins.intentClass !== u.filterIntent) return false;
+      if(u.riskOnly && r.wastage.level !== 'high') return false;
+      if(q && r.ins.norm.indexOf(q) === -1) return false;
+      return true;
+    });
+    var k = u.sort, dir = u.dir === 'desc' ? -1 : 1;
+    rows.sort(function(a,b){
+      var va, vb;
+      if(k === 'kw'){ va = a.kw.toLowerCase(); vb = b.kw.toLowerCase(); }
+      else if(k === 'tier'){ va = a.tier; vb = b.tier; }
+      else if(k === 'group'){ va = a.group; vb = b.group; }
+      else if(k === 'intent'){ va = a.ins.intentClass; vb = b.ins.intentClass; }
+      else if(k === 'relevance'){ va = a.ins.relevance; vb = b.ins.relevance; }
+      else if(k === 'cpc'){ va = a.cpc == null ? -1 : a.cpc; vb = b.cpc == null ? -1 : b.cpc; }
+      else if(k === 'volume'){ va = a.volume == null ? -1 : a.volume; vb = b.volume == null ? -1 : b.volume; }
+      else if(k === 'competition'){ va = a.competition == null ? -1 : a.competition; vb = b.competition == null ? -1 : b.competition; }
+      else { va = a.score; vb = b.score; }
+      if(va < vb) return -1 * dir;
+      if(va > vb) return 1 * dir;
+      return b.score - a.score;
+    });
+    return rows;
+  },
+
+  rows: function(){
+    var body = $('resBody'); if(!body) return;
+    var rows = Render.filtered();
+    var rc = $('rowCount'); if(rc) rc.textContent = rows.length + ' shown of ' + S.results.rows.length;
+    if(!rows.length){ body.innerHTML = '<tr><td colspan="10" class="dim" style="padding:26px;text-align:center">Nothing matches those filters.</td></tr>'; return; }
+    var h = '';
+    rows.forEach(function(r){
+      var open = S.ui.open === r.kw;
+      var short = r.reason.length > 132 ? r.reason.slice(0, 130) + '…' : r.reason;
+      h += '<tr class="krow' + (open ? ' is-open' : '') + '" data-kw="' + esc(r.kw) + '">' +
+        '<td class="checkcell">' + (r.tier === 'Excluded'
+          ? '<input type="checkbox" class="ax-check" data-kw="' + esc(r.kw) + '" ' + (Approve.isApproved(r.kw) ? 'checked' : '') + ' title="Override — target this anyway">'
+          : '<input type="checkbox" class="ax-check" data-kw="' + esc(r.kw) + '" ' + (Approve.isApproved(r.kw) ? 'checked' : '') + '>') + '</td>' +
+        '<td class="mid dim mono" style="font-size:11px">' + (open ? '▾' : '▸') + '</td>' +
+        '<td class="kw">' + esc(r.kw) + (r.manual ? ' <span class="badge b-ok">added</span>' : '') + '</td>' +
+        '<td>' + Render.tierBadge(r.tier) + '</td>' +
+        '<td><div class="score-cell"><span class="score-n">' + r.score.toFixed(1) + '</span>' + Render.spine(r) + '</div></td>' +
+        '<td>' + Render.intentBadge(r.ins.intentClass) + '</td>' +
+        '<td class="num">' + (r.cpc == null ? '<span class="na">N/A</span>' : money(r.cpc)) + '</td>' +
+        '<td class="num">' + (r.volume == null ? '<span class="na">N/A</span>' : r.volume.toLocaleString('en-GB')) + '</td>' +
+        '<td>' + Render.riskBadge(r.wastage.level) + (r.perf ? ' ' + Render.perfBadge(r.perf) : '') + '</td>' +
+        '<td class="why">' + esc(short) + '</td>' +
+        '</tr>';
+      if(open) h += Render.detail(r);
+    });
+    body.innerHTML = h;
+    body.querySelectorAll('.ax-check').forEach(function(cb){
+      cb.addEventListener('click', function(ev){ ev.stopPropagation(); });
+      cb.addEventListener('change', function(){ Approve.set(cb.getAttribute('data-kw'), cb.checked ? 1 : 0); });
+    });
+    body.querySelectorAll('tr.krow').forEach(function(tr){
+      tr.addEventListener('click', function(){
+        var k = tr.getAttribute('data-kw');
+        S.ui.open = (S.ui.open === k) ? null : k;
+        Store.save(); Render.rows();
+      });
+    });
+  },
+
+  tierBadge: function(t){
+    var c = t === 'Tier 1' ? 'b-t1' : t === 'Tier 2' ? 'b-t2' : t === 'Tier 3' ? 'b-t3' : 'b-ex';
+    return '<span class="badge ' + c + '">' + esc(t === 'Excluded' ? 'Do not target' : t) + '</span>';
+  },
+  intentBadge: function(i){
+    var c = i === 'High purchase' ? 'b-high' : i === 'Medium purchase' ? 'b-med' :
+            i === 'Research' ? 'b-res' : i === 'Irrelevant' ? 'b-irr' : 'b-info';
+    return '<span class="badge ' + c + '">' + esc(i) + '</span>';
+  },
+  riskBadge: function(l){
+    if(l === 'high') return '<span class="badge b-risk">⚠ High</span>';
+    if(l === 'medium') return '<span class="badge b-riskm">Medium</span>';
+    return '<span class="badge b-ok">—</span>';
+  },
+  perfBadge: function(p){
+    if(p.verdict === 'win') return '<span class="badge b-learn">▲ live</span>';
+    if(p.verdict === 'fail' || p.verdict === 'weak') return '<span class="badge b-learn down">▼ live</span>';
+    return '<span class="badge b-ok">live</span>';
+  },
+  spine: function(r){
+    var keys = Object.keys(r.contrib);
+    if(!keys.length) return '<div class="spine"></div>';
+    var total = 0; keys.forEach(function(k){ total += r.contrib[k]; });
+    if(total <= 0) return '<div class="spine"></div>';
+    var order = ['relevance','intent','commercial','demand','cpc','specificity','validation','competition'];
+    var segs = order.filter(function(k){ return r.contrib[k]; }).map(function(k){
+      return '<i style="width:' + (r.contrib[k] / total * 100).toFixed(1) + '%;background:' + WEIGHT_COLOURS[k] + '"></i>';
+    }).join('');
+    return '<div class="spine" title="Contribution to the score by factor">' + segs + '</div>';
+  },
+
+  detail: function(r){
+    var h = '<tr class="detail"><td colspan="10"><div class="detail-in">';
+
+    h += '<div><h4>Why this score</h4><div class="bars">';
+    ['relevance','intent','commercial','specificity','demand','cpc','validation','competition'].forEach(function(k){
+      var v = r.parts[k], w = S.weights[k];
+      if(!w) return;
+      var label = WEIGHT_LABELS[k] + ' · ' + w + '%';
+      if(v == null){
+        h += '<div class="bar"><span class="dim">' + esc(label) + '</span><span class="bar-track"></span><span class="bar-v na">N/A</span></div>';
+      } else {
+        h += '<div class="bar"><span>' + esc(label) + '</span><span class="bar-track">' +
+             '<i class="bar-fill" style="width:' + v.toFixed(0) + '%;background:' + WEIGHT_COLOURS[k] + '"></i></span>' +
+             '<span class="bar-v">' + v.toFixed(0) + '</span></div>';
+      }
+    });
+    h += '</div>';
+    if(r.dataCoverage < 100){
+      h += '<p class="dim" style="font-size:11.5px;margin:8px 0 0">Scored on ' + r.dataCoverage + '% of the weight — the rest had no data and was shared out rather than guessed.</p>';
+    }
+    if(r.baseScore !== r.score){
+      h += '<p style="font-size:11.5px;margin:6px 0 0" class="' + (r.score > r.baseScore ? 'sage' : 'clay') + '">Base score ' + r.baseScore +
+           ' adjusted to ' + r.score + ' on live campaign data.</p>';
+    }
+    h += '</div>';
+
+    h += '<div><h4>Decision</h4><p class="reason">' + esc(r.reason) + '</p>';
+    if(r.breakEven){
+      h += '<div class="breakeven">Break-even: one sale per ' + r.breakEven.clicks + ' clicks at ' + money(r.cpc) +
+           ', i.e. a ' + pct(r.breakEven.requiredCVR, 2) + ' conversion rate.</div>';
+    } else if(r.cpc == null){
+      h += '<div class="breakeven" style="color:var(--text-3);border-color:var(--line);background:var(--ink)">Break-even: N/A — no CPC figure for this keyword.</div>';
+    } else {
+      h += '<div class="breakeven" style="color:var(--text-3);border-color:var(--line);background:var(--ink)">Break-even: N/A — add your costs in the panel below step 4.</div>';
+    }
+    if(r.dupWith && r.dupWith.length){
+      h += '<p class="dim" style="font-size:12px;margin:8px 0 0">Consolidated ' + r.dupWith.length + ' near-identical variant' +
+           (r.dupWith.length === 1 ? '' : 's') + ' into this one: ' + r.dupWith.map(function(d){ return '<span class="mono">' + esc(d) + '</span>'; }).join(', ') + '</p>';
+    }
+    if(r.wastage.risks.length){
+      h += '<h4 style="margin-top:14px">Budget protection</h4><ul style="margin:0;padding-left:16px;font-size:12.5px;color:var(--text-2)">' +
+        r.wastage.risks.map(function(x){
+          return '<li style="margin-bottom:4px" class="' + (x.level === 'high' ? 'clay' : '') + '">' + esc(x.text) + '</li>'; }).join('') + '</ul>';
+    }
+    h += '</div>';
+
+    h += '<div><h4>Signals</h4><ul class="detail-list">' +
+      '<li><b>Group</b><span>' + esc(r.group) + '</span></li>' +
+      '<li><b>Words matched to your listing</b><span>' + (r.ins.matched.length ? esc(r.ins.matched.join(', ')) : '—') + '</span></li>' +
+      '<li><b>Words not in your listing</b><span class="' + (r.ins.unmatched.length ? 'clay' : '') + '">' + (r.ins.unmatched.length ? esc(r.ins.unmatched.join(', ')) : 'none') + '</span></li>' +
+      '<li><b>Brand named</b><span>' + (r.ins.brandHit ? 'yes' : 'no') + '</span></li>' +
+      '<li><b>Model named</b><span>' + (r.ins.modelHit ? 'yes' : 'no') + '</span></li>' +
+      '<li><b>Competitor support</b><span>' + (r.parts.validation == null ? '<span class="na">N/A</span>' : r.parts.validation + '% of competitors') + '</span></li>' +
+      '<li><b>Intent signals</b><span>' + (r.ins.intentNotes.length ? esc(r.ins.intentNotes.join('; ')) : '—') + '</span></li>' +
+      '</ul></div>';
+
+    if(r.perf){
+      var st = r.perf.stats;
+      h += '<div><h4>Live performance</h4><ul class="detail-list">' +
+        '<li><b>Impressions</b><span>' + (st.impressions == null ? '<span class="na">N/A</span>' : st.impressions.toLocaleString('en-GB')) + '</span></li>' +
+        '<li><b>Clicks</b><span>' + (st.clicks == null ? '<span class="na">N/A</span>' : st.clicks) + '</span></li>' +
+        '<li><b>CTR</b><span>' + (st.ctr == null ? '<span class="na">N/A</span>' : pct(st.ctr, 2)) + '</span></li>' +
+        '<li><b>Spend</b><span>' + (st.spend == null ? '<span class="na">N/A</span>' : money(st.spend)) + '</span></li>' +
+        '<li><b>Actual CPC</b><span>' + (st.cpc == null ? '<span class="na">N/A</span>' : money(st.cpc)) + '</span></li>' +
+        '<li><b>Orders</b><span>' + (st.orders == null ? '<span class="na">N/A</span>' : st.orders) + '</span></li>' +
+        '<li><b>Conversion rate</b><span>' + (st.cvr == null ? '<span class="na">N/A</span>' : pct(st.cvr, 2)) + '</span></li>' +
+        '<li><b>ROAS</b><span>' + (st.roas == null ? '<span class="na">N/A</span>' : st.roas.toFixed(2) + '×') + '</span></li>' +
+        '<li><b>Profit after ad cost</b><span class="' + (st.profit != null && st.profit < 0 ? 'clay' : st.profit != null ? 'sage' : '') + '">' +
+          (st.profit == null ? '<span class="na">N/A</span>' : money(st.profit)) + '</span></li>' +
+        '</ul><p class="reason" style="margin-top:8px">' + esc(r.perf.text) + '</p></div>';
+    }
+
+    h += '</div></td></tr>';
+    return h;
+  },
+
+  competitorPanel: function(R){
+    var C = R.comp;
+    if(C.limited){
+      return '<div class="card"><div class="card-head"><h2>Competitors</h2></div>' +
+        '<p class="card-sub">Nothing to compare against. Paste at least one competitor listing at step 2 and this section fills in.</p></div>';
+    }
+    var list = function(arr, empty){
+      if(!arr.length) return '<p class="dim" style="font-size:12.5px;margin:0">' + empty + '</p>';
+      return '<div class="pill-row">' + arr.map(function(r){
+        return '<span class="pill">' + esc(r.kw) + ' · ' + r.score + '</span>'; }).join('') + '</div>';
+    };
+    return '<div class="card"><div class="card-head"><h2>Competitors</h2>' +
+      '<span class="dim" style="font-size:12px">' + R.compMeta.count + ' listing' + (R.compMeta.count === 1 ? '' : 's') + ' analysed · supporting signal only, ' + S.weights.validation + '% of the score</span></div>' +
+      '<div class="grid-2" style="margin-top:8px">' +
+      '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Shared ground</h4>' +
+        '<p class="dim" style="font-size:12px;margin:0 0 8px">Keywords more than one competitor is clearly written for.</p>' + list(C.common, 'None found.') + '</div>' +
+      '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Gaps you can take</h4>' +
+        '<p class="dim" style="font-size:12px;margin:0 0 8px">Relevant to your listing, apparently unclaimed by theirs.</p>' + list(C.gaps, 'None found.') + '</div>' +
+      '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Theirs, not yours</h4>' +
+        '<p class="dim" style="font-size:12px;margin:0 0 8px">Their terms, poorly matched to your product. Copying these would misrepresent what you sell.</p>' + list(C.only, 'None found.') + '</div>' +
+      '<div><h4 style="font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:0 0 8px">Wording worth reviewing</h4>' +
+        '<p class="dim" style="font-size:12px;margin:0 0 8px">Words competitors repeat that your listing never uses. If any of these are true of your product, add them to the title or item specifics — that lifts relevance across the whole set.</p>' +
+        (C.theirTerms.length ? '<div class="pill-row">' + C.theirTerms.map(function(t){ return '<span class="pill">' + esc(t) + '</span>'; }).join('') + '</div>'
+          : '<p class="dim" style="font-size:12.5px;margin:0">Nothing notable.</p>') + '</div>' +
+      '</div></div>';
+  },
+
+  strategyPanel: function(R){
+    var st = R.strategy;
+    if(!st.campaigns.length){
+      return '<div class="card"><div class="card-head"><h2>Recommended campaign structure</h2></div><p class="card-sub">' + esc(st.note) + '</p></div>';
+    }
+    var topCount = 0;
+    st.campaigns.forEach(function(c){ if(c.rank <= 2) topCount += c.keywords.length; });
+    var h = '<div class="card strategy"><div class="card-head"><h2>🏆 Recommended campaign structure</h2></div>' +
+      '<p class="card-sub">Built from what actually cleared the cut-offs. No campaign is created just to fill a shape.</p>';
+    if(topCount){
+      var single = st.campaigns.length === 1;
+      h += '<div class="grab-bar">' +
+        '<div><strong>The ' + topCount + ' worth spending on</strong>' +
+        '<span>' + (single
+          ? 'Your whole shortlist, in one file ready for eBay.'
+          : 'Highest and medium priority together, in one file ready for eBay.') + '</span></div>' +
+        '<button class="btn btn-primary" onclick="Export.topCSV()">⬇ Download these ' + topCount + '</button>' +
+        '</div>';
+    }
+    st.campaigns.forEach(function(c){
+      h += '<div style="margin-bottom:14px"><div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">' +
+        '<strong style="font-size:13px">' + esc(c.name) + '</strong>' +
+        '<span class="badge ' + (c.rank <= 2 ? 'b-t1' : 'b-ok') + '">' + esc(c.priority) + '</span>' +
+        '<span class="dim mono" style="font-size:11px">' + c.keywords.length + ' keywords</span></div>' +
+        '<p class="dim" style="font-size:12.5px;margin:4px 0 6px">' + esc(c.note) + '</p>' +
+        '<div class="pill-row">' + c.keywords.slice(0, 14).map(function(r){
+          return '<span class="pill">' + esc(r.kw) + '</span>'; }).join('') +
+        (c.keywords.length > 14 ? '<span class="pill dim">+' + (c.keywords.length - 14) + ' more</span>' : '') + '</div></div>';
+    });
+    h += '<div class="tip"><b>Meri tip</b>Sab campaigns ek saath mat kholein. Pehle sirf Campaign 1 chalayein 10–14 din. Jab tak break-even clicks ka data na aa jaye, baaki campaigns band rakhein — warna pata hi nahi chalega ke sale kis keyword se aayi.</div>';
+    h += '</div>';
+    return h;
+  },
+
+  perfReport: function(){
+    var el = $('perfReport'); if(!el) return;
+    var r = S.perfReport;
+    if(!r){ el.innerHTML = ''; return; }
+    var matched = 0, unmatched = [];
+    var known = {};
+    (S.keywords || []).forEach(function(k){ known[Text.normalise(k.kw)] = 1; });
+    (S.manual || []).forEach(function(k){ known[Text.normalise(k.kw)] = 1; });
+    for(var k in S.perf){ if(known[k]) matched++; else unmatched.push(S.perf[k].raw); }
+    var h = '<div class="note"><strong>' + r.rows + ' rows read.</strong> Columns used: ' + esc(r.mapping) + '. ' +
+      matched + ' matched a keyword in your list.' +
+      (unmatched.length ? ' ' + unmatched.length + ' did not match and are ignored: ' +
+        unmatched.slice(0,6).map(function(u){ return '<span class="mono">' + esc(u) + '</span>'; }).join(', ') +
+        (unmatched.length > 6 ? '…' : '') : '') + '</div>';
+    r.missing.forEach(function(m){ h += '<div class="note note-warn">' + esc(m) + '</div>'; });
+    el.innerHTML = h;
+  },
+
+  learnTable: function(){
+    var el = $('learnTable'); if(!el) return;
+    if(!S.results || !Object.keys(S.perf).length){ el.innerHTML = ''; return; }
+    var rows = S.results.rows.filter(function(r){ return r.perf; });
+    if(!rows.length){ el.innerHTML = '<div class="empty">None of the performance rows matched a keyword in your analysed list.</div>'; return; }
+    rows.sort(function(a,b){ return (b.perf.delta) - (a.perf.delta); });
+    var h = '<div class="card"><div class="card-head"><h2>What the live data changed</h2></div>' +
+      '<p class="card-sub">Nothing is deleted. A keyword moved out on results keeps its figures and can be retested later.</p>' +
+      '<div class="table-wrap"><table><thead><tr><th>Keyword</th><th>Clicks</th><th>Spend</th><th>Orders</th>' +
+      '<th>CVR</th><th>Profit after ads</th><th>Verdict</th><th>Now</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var st = r.perf.stats;
+      var vc = r.perf.verdict === 'win' ? 'b-high' : r.perf.verdict === 'fail' ? 'b-irr' :
+               r.perf.verdict === 'weak' ? 'b-riskm' : 'b-ok';
+      var vt = r.perf.verdict === 'win' ? 'Working' : r.perf.verdict === 'fail' ? 'Moved out' :
+               r.perf.verdict === 'weak' ? 'Downgraded' : 'Insufficient data';
+      h += '<tr><td class="kw">' + esc(r.kw) + '</td>' +
+        '<td class="num">' + (st.clicks == null ? '<span class="na">N/A</span>' : st.clicks) + '</td>' +
+        '<td class="num">' + (st.spend == null ? '<span class="na">N/A</span>' : money(st.spend)) + '</td>' +
+        '<td class="num">' + (st.orders == null ? '<span class="na">N/A</span>' : st.orders) + '</td>' +
+        '<td class="num">' + (st.cvr == null ? '<span class="na">N/A</span>' : pct(st.cvr, 2)) + '</td>' +
+        '<td class="num ' + (st.profit != null && st.profit < 0 ? 'clay' : st.profit != null ? 'sage' : '') + '">' +
+          (st.profit == null ? '<span class="na">N/A</span>' : money(st.profit)) + '</td>' +
+        '<td><span class="badge ' + vc + '">' + vt + '</span></td>' +
+        '<td>' + Render.tierBadge(r.tier) + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+    el.innerHTML = h;
+  }
+};
+/* ============================================================
+   Retrieval — turn an eBay URL into listing fields
+
+   A file opened from your own disk cannot read an eBay page
+   directly: the browser blocks it, because eBay never sends the
+   header that would permit it. So there are three routes, tried
+   in this order, and the tool always tells you which one it used.
+
+     1. Public read-only proxies. One request, no setup. They can
+        be rate limited or handed a bot check by eBay, which is
+        why there is a second route.
+     2. The one-click grabber (a bookmarklet). It runs on the eBay
+        page itself, so nothing can block it. Always works.
+     3. Copy the page and paste it. The last resort.
+   ============================================================ */
+var PROXIES = [
+  { name: 'r.jina.ai',   build: function(u){ return 'https://r.jina.ai/' + u; }, kind: 'text' },
+  { name: 'allorigins',  build: function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); }, kind: 'html' },
+  { name: 'codetabs',    build: function(u){ return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u); }, kind: 'html' },
+  { name: 'isomorphic',  build: function(u){ return 'https://cors.isomorphic-git.org/' + u; }, kind: 'html' }
+];
+
+var Fetcher = {
+  isURL: function(s){
+    return /^https?:\/\/\S+$/i.test(String(s || '').trim());
+  },
+  isEbay: function(s){
+    return /(^|\.)ebay\.[a-z.]+\//i.test(String(s || ''));
+  },
+  itemId: function(s){
+    var m = String(s || '').match(/\/itm\/(?:[^\/]*\/)?(\d{9,15})/) || String(s || '').match(/[?&]item=(\d{9,15})/);
+    return m ? m[1] : null;
+  },
+  /* strip tracking junk so the proxy sees the shortest possible URL */
+  tidy: function(u){
+    u = String(u || '').trim();
+    var id = Fetcher.itemId(u);
+    var dom = (u.match(/https?:\/\/(?:www\.)?(ebay\.[a-z.]+)\//i) || [])[1];
+    if(id && dom) return 'https://www.' + dom + '/itm/' + id;
+    return u.split('?')[0];
+  },
+
+  get: function(url, done){
+    var target = Fetcher.tidy(url), i = 0, tried = [];
+    function attempt(){
+      if(i >= PROXIES.length){
+        done({ ok:false, tried:tried,
+          error:'None of the retrieval services could reach that page. This usually means they are rate limited or eBay showed them a bot check — it is not a problem with your link.' });
+        return;
+      }
+      var p = PROXIES[i++];
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function(){ if(ctrl) ctrl.abort(); }, 20000);
+      var opts = ctrl ? { signal: ctrl.signal, redirect:'follow' } : { redirect:'follow' };
+      fetch(p.build(target), opts).then(function(r){
+        clearTimeout(timer);
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function(body){
+        if(!body || body.length < 400) throw new Error('empty response');
+        if(/captcha|are you a human|unusual traffic|pardon our interruption/i.test(body.slice(0, 4000))){
+          throw new Error('bot check');
+        }
+        done({ ok:true, body:body, kind:p.kind, via:p.name, url:target, tried:tried.concat(p.name) });
+      }).catch(function(e){
+        clearTimeout(timer);
+        tried.push(p.name + ' (' + (e && e.message ? e.message : 'failed') + ')');
+        attempt();
+      });
+    }
+    attempt();
+  }
+};
+
+/* ============================================================
+   eBay page parsing — HTML first, then the readable-text form
+   the r.jina.ai proxy returns, then plain pasted text
+   ============================================================ */
+var Ebay = {
+  /* returns { title, price, condition, brand, model, category, specifics, desc, found:[] } */
+  read: function(body, kind, url){
+    var out = { url: url || '', title:'', price:'', condition:'', brand:'', model:'',
+                category:'', specifics:'', desc:'', found:[], via:'' };
+    var looksHTML = /<\s*(html|head|body|div|h1|meta)\b/i.test(body.slice(0, 3000));
+    if(looksHTML && typeof DOMParser !== 'undefined'){
+      try { Ebay.fromDOM(body, out); } catch(e){ /* fall through to text */ }
+    }
+    if(!out.title || !out.specifics) Ebay.fromText(Ebay.plain(body), out);
+    return out;
+  },
+
+  plain: function(body){
+    return String(body)
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<\/(div|p|li|tr|h\d|section|dd|dt)>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n\s*\n+/g, '\n\n');
+  },
+
+  txt: function(node){
+    return node ? String(node.textContent || '').replace(/\s+/g, ' ').trim() : '';
+  },
+
+  fromDOM: function(html, out){
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var pick = function(sels){
+      for(var i=0;i<sels.length;i++){
+        var el = doc.querySelector(sels[i]);
+        var v = Ebay.txt(el);
+        if(v) return v;
+      }
+      return '';
+    };
+    var meta = function(prop){
+      var el = doc.querySelector('meta[property="' + prop + '"], meta[name="' + prop + '"]');
+      return el ? String(el.getAttribute('content') || '').trim() : '';
+    };
+
+    /* --- structured data is the most reliable thing on the page --- */
+    var blocks = doc.querySelectorAll('script[type="application/ld+json"]');
+    for(var b=0;b<blocks.length;b++){
+      var data = null;
+      try { data = JSON.parse(blocks[b].textContent); } catch(e){ continue; }
+      var items = [].concat(data, (data && data['@graph']) || []);
+      for(var n=0;n<items.length;n++){
+        var it = items[n];
+        if(!it || typeof it !== 'object') continue;
+        if(it['@type'] === 'Product' || it.name && it.offers){
+          if(it.name && !out.title){ out.title = String(it.name).trim(); out.found.push('title (structured data)'); }
+          if(it.brand && !out.brand){ out.brand = String(it.brand.name || it.brand).trim(); out.found.push('brand (structured data)'); }
+          if(it.mpn && !out.model){ out.model = String(it.mpn).trim(); out.found.push('model (structured data)'); }
+          if(it.description && !out.desc) out.desc = String(it.description).trim();
+          var off = it.offers && (it.offers.length ? it.offers[0] : it.offers);
+          if(off){
+            if(off.price && !out.price){ out.price = String(off.price).trim(); out.found.push('price (structured data)'); }
+            if(off.itemCondition && !out.condition){
+              var c = String(off.itemCondition);
+              out.condition = /New/i.test(c) ? 'New' : /Refurb/i.test(c) ? 'Refurbished' : /Used/i.test(c) ? 'Used' : '';
+              if(out.condition) out.found.push('condition (structured data)');
+            }
+          }
+        }
+        if(it['@type'] === 'BreadcrumbList' && it.itemListElement && !out.category){
+          var crumbs = [];
+          for(var e=0;e<it.itemListElement.length;e++){
+            var li = it.itemListElement[e];
+            var nm = li && (li.name || (li.item && li.item.name));
+            if(nm) crumbs.push(String(nm).trim());
+          }
+          if(crumbs.length){ out.category = crumbs.join(' > '); out.found.push('category (breadcrumb)'); }
+        }
+      }
+    }
+
+    /* --- eBay's own markup --- */
+    if(!out.title){
+      var t = pick(['h1.x-item-title__mainTitle span', 'h1.x-item-title__mainTitle',
+                    '.x-item-title__mainTitle', 'h1#itemTitle', 'h1[data-testid="x-item-title"]', 'h1']);
+      t = t.replace(/^\s*Details about\s*/i, '').replace(/^\s*New listing\s*/i, '').trim();
+      if(t){ out.title = t; out.found.push('title'); }
+    }
+    if(!out.title){
+      var ogt = meta('og:title');
+      if(ogt){ out.title = ogt.replace(/\s*\|\s*eBay\s*$/i, '').trim(); out.found.push('title (page metadata)'); }
+    }
+    if(!out.price){
+      var pr = pick(['.x-price-primary span.ux-textspans', '.x-price-primary',
+                     '[data-testid="x-price-primary"]', '#prcIsum', '#mm-saleDscPrc']);
+      var pm = pr.match(/([£$€]\s?[\d,]+(?:\.\d{2})?)/);
+      if(pm){ out.price = pm[1].replace(/\s/g, ''); out.found.push('price'); }
+    }
+    if(!out.condition){
+      var cd = pick(['.x-item-condition-value .ux-textspans', '.x-item-condition-value',
+                     '[data-testid="x-item-condition"] .ux-textspans', '#vi-itm-cond']);
+      if(cd){ out.condition = cd.split('.')[0].trim(); out.found.push('condition'); }
+    }
+    if(!out.category){
+      var crumbs2 = doc.querySelectorAll('nav[aria-label="breadcrumb"] a, .seo-breadcrumb-text, #vi-VR-brumb-lnkLst a');
+      var parts = [];
+      for(var i2=0;i2<crumbs2.length;i2++){
+        var v2 = Ebay.txt(crumbs2[i2]);
+        if(v2 && !/^ebay$/i.test(v2)) parts.push(v2);
+      }
+      if(parts.length){ out.category = parts.join(' > '); out.found.push('category'); }
+    }
+
+    /* --- item specifics: label/value pairs --- */
+    var pairs = [], seen = {};
+    var rows = doc.querySelectorAll('.ux-layout-section-evo__row, .ux-layout-section__row, .ux-labels-values');
+    for(var r=0;r<rows.length;r++){
+      var labs = rows[r].querySelectorAll('.ux-labels-values__labels, .ux-labels-values--labels, dt');
+      var vals = rows[r].querySelectorAll('.ux-labels-values__values, .ux-labels-values--values, dd');
+      var pairCount = Math.min(labs.length, vals.length);
+      for(var k=0;k<pairCount;k++){
+        var L = Ebay.txt(labs[k]).replace(/[:\s]+$/, '');
+        var V = Ebay.txt(vals[k]);
+        if(!L || !V || L.length > 42 || V.length > 120) continue;
+        if(/read more|see full|about this item/i.test(L + V)) continue;
+        var key = L.toLowerCase();
+        if(seen[key]) continue;
+        seen[key] = 1; pairs.push(L + ': ' + V);
+      }
+    }
+    if(!pairs.length){
+      var dts = doc.querySelectorAll('dl dt');
+      for(var q=0;q<dts.length;q++){
+        var dd = dts[q].nextElementSibling;
+        var L2 = Ebay.txt(dts[q]).replace(/[:\s]+$/, ''), V2 = Ebay.txt(dd);
+        if(L2 && V2 && L2.length <= 42 && V2.length <= 120 && !seen[L2.toLowerCase()]){
+          seen[L2.toLowerCase()] = 1; pairs.push(L2 + ': ' + V2);
+        }
+      }
+    }
+    if(pairs.length){
+      out.specifics = pairs.join('\n');
+      out.found.push(pairs.length + ' item specifics');
+      Ebay.lift(out, pairs);
+    }
+    if(!out.desc){
+      var d2 = meta('og:description') || meta('description');
+      if(d2) out.desc = d2;
+    }
+  },
+
+  /* the readable-text form, and anything a human pastes */
+  fromText: function(text, out){
+    var lines = String(text).split(/\r?\n/).map(function(l){ return l.replace(/\s+/g, ' ').trim(); });
+    var i;
+    if(!out.title){
+      /* jina puts "Title: ..." at the top; otherwise take the first long line */
+      for(i=0;i<Math.min(lines.length, 40);i++){
+        var m = lines[i].match(/^(?:Title|# )\s*:?\s*(.+)$/i);
+        if(m && m[1].length > 12){ out.title = m[1].replace(/\s*\|\s*eBay\s*$/i, '').trim(); out.found.push('title'); break; }
+      }
+    }
+    if(!out.title){
+      for(i=0;i<Math.min(lines.length, 60);i++){
+        if(lines[i].length >= 25 && lines[i].length <= 90 && /[a-z]/i.test(lines[i]) &&
+           !/^(skip to|shop by|hi |sign in|daily deals|help & contact|sell|watchlist|my ebay)/i.test(lines[i])){
+          out.title = lines[i]; out.found.push('title (best guess — please check it)'); break;
+        }
+      }
+    }
+    if(!out.price){
+      var pm = String(text).match(/(?:^|\s)([£$€]\s?[\d,]+\.\d{2})/);
+      if(pm){ out.price = pm[1].replace(/\s/g, ''); out.found.push('price'); }
+    }
+    if(!out.condition){
+      var cm = String(text).match(/\bCondition\b\s*:?\s*([A-Za-z][A-Za-z \-()]{2,40})/i);
+      if(cm){ out.condition = cm[1].split(/[.\n]/)[0].trim(); out.found.push('condition'); }
+    }
+    if(!out.specifics){
+      var pairs = [], seen = {};
+      for(i=0;i<lines.length;i++){
+        var line = lines[i];
+        var inline = line.match(/^([A-Za-z][A-Za-z0-9 \/&\-()']{1,40}?)\s*:\s*(.{1,90})$/);
+        if(inline && !NOT_A_SPECIFIC.test(inline[1].trim()) && !/^https?:\/\//i.test(inline[2].trim())){
+          var k1 = inline[1].toLowerCase();
+          if(!seen[k1]){ seen[k1] = 1; pairs.push(inline[1].trim() + ': ' + inline[2].trim()); }
+          continue;
+        }
+        /* eBay's two-line shape: label on one line, value on the next */
+        if(/^[A-Z][A-Za-z0-9 \/&\-()']{1,32}$/.test(line) && lines[i+1] &&
+           lines[i+1].length <= 90 && lines[i+1].length > 0 &&
+           !/^[A-Z][a-z]+ [a-z]/.test(lines[i+1]) === false){
+          var k2 = line.toLowerCase();
+          if(!seen[k2] && SPEC_LABELS.test(line)){
+            seen[k2] = 1; pairs.push(line + ': ' + lines[i+1]); i++;
+          }
+        }
+      }
+      if(pairs.length){ out.specifics = pairs.join('\n'); out.found.push(pairs.length + ' item specifics'); Ebay.lift(out, pairs); }
+    }
+  },
+
+  /* pull brand / model / colour out of the specifics we already have */
+  lift: function(out, pairs){
+    pairs.forEach(function(p){
+      var m = p.match(/^([^:]+):\s*(.+)$/); if(!m) return;
+      var k = m[1].trim().toLowerCase(), v = m[2].trim();
+      if(!out.brand && /^brand$/.test(k)) out.brand = v;
+      if(!out.model && /^(model|mpn|manufacturer part number|model number)$/.test(k) && !/does not apply|n\/a/i.test(v)) out.model = v;
+      if(!out.condition && /^condition$/.test(k)) out.condition = v;
+    });
+  }
+};
+
+/* Page furniture that reads like an item specific but is not one. Letting
+   "Item location: Manchester" through would make "manchester" look like a
+   word that describes the product, which quietly corrupts every relevance
+   score after it. */
+var NOT_A_SPECIFIC = /^(title|url|url source|source|link|price|was|now|rrp|condition|quantity|available|sold|watchers|item number|item id|listing|seller|store|shop|feedback|postage|shipping|delivery|dispatch|posted|located|item location|location|returns|refund|payments?|paypal|note|notes|tip|warranty period|description|markdown content|contents|category|breadcrumb|added|ends|time left|bids?|buy it now|best offer|collection|click|see|read more|about this item|specifications?|features? include)$/i;
+
+var SPEC_LABELS = /^(brand|model|mpn|type|colour|color|size|material|style|features?|connectivity|power source|resolution|capacity|voltage|wattage|length|width|height|weight|compatible|department|item|number of|pack|set|storage|battery|waterproof|warranty|country|manufacturer|ean|upc|gtin|custom bundle|unit|finish|shape|pattern|theme|occasion|room|installation|mounting|frequency|range|sensor|lens|zoom|display|screen|operating|memory|processor|network|interface|max|min)/i;
+
+/* ============================================================
+   One input box that works out what you gave it
+   ============================================================ */
+var Smart = {
+  classify: function(raw){
+    var s = String(raw || '').trim();
+    if(!s) return 'empty';
+    if(/^\s*\{[\s\S]*"m98m"\s*:/.test(s) || /^\s*\{[\s\S]*"title"\s*:/.test(s)) return 'grabber';
+    if(Fetcher.isURL(s.split(/\s/)[0]) && s.split(/\s+/).length <= 3) return 'url';
+    return 'text';
+  },
+  fromGrabber: function(raw){
+    var o = JSON.parse(raw);
+    return {
+      url: o.url || '', title: o.title || '', price: o.price || '', condition: o.condition || '',
+      brand: o.brand || '', model: o.model || '', category: o.category || '',
+      specifics: (o.specifics || []).join ? o.specifics.join('\n') : String(o.specifics || ''),
+      desc: o.desc || '',
+      found: ['read straight off the eBay page'], via: 'grabber'
+    };
+  }
+};
+
+/* ============================================================
+   The grabber — a bookmarklet that runs on the eBay page itself
+   ============================================================ */
+/* Written as a real function and then stringified, so there is no
+   escaping to get wrong. Newlines are collapsed for the bookmark URL. */
+function grabFn(){
+  try{
+    var q = function(sel){ var e = document.querySelector(sel); return e ? e.textContent.replace(/\s+/g,' ').trim() : ''; };
+    var o = { m98m:1, url:location.href, title:'', price:'', condition:'', brand:'', model:'', category:'', specifics:[], desc:'' };
+    o.title = (q('h1.x-item-title__mainTitle span') || q('.x-item-title__mainTitle') || q('h1'))
+              .replace(/^Details about\s*/i,'').replace(/^New listing\s*/i,'');
+    var p = q('.x-price-primary span') || q('.x-price-primary') || q('#prcIsum');
+    var pm = p.match(/[\u00a3$\u20ac]\s?[\d,]+(\.\d{2})?/);
+    if(pm) o.price = pm[0].replace(/\s/g,'');
+    o.condition = (q('.x-item-condition-value .ux-textspans') || q('.x-item-condition-value') || q('#vi-itm-cond')).split('.')[0];
+    var cb = document.querySelectorAll('nav[aria-label=breadcrumb] a, .seo-breadcrumb-text, #vi-VR-brumb-lnkLst a');
+    var cs = [];
+    for(var i=0;i<cb.length;i++){ var t = cb[i].textContent.trim(); if(t && !/^ebay$/i.test(t)) cs.push(t); }
+    o.category = cs.join(' > ');
+    var rows = document.querySelectorAll('.ux-layout-section-evo__row, .ux-layout-section__row, .ux-labels-values');
+    var seen = {};
+    for(var r=0;r<rows.length;r++){
+      var L = rows[r].querySelectorAll('.ux-labels-values__labels, .ux-labels-values--labels, dt');
+      var V = rows[r].querySelectorAll('.ux-labels-values__values, .ux-labels-values--values, dd');
+      for(var k=0;k<Math.min(L.length,V.length);k++){
+        var a = L[k].textContent.replace(/\s+/g,' ').trim().replace(/[:\s]+$/,'');
+        var b = V[k].textContent.replace(/\s+/g,' ').trim();
+        if(!a || !b || a.length > 42 || b.length > 120 || seen[a.toLowerCase()]) continue;
+        seen[a.toLowerCase()] = 1;
+        o.specifics.push(a + ': ' + b);
+        var lk = a.toLowerCase();
+        if(lk === 'brand') o.brand = b;
+        if(lk === 'model' || lk === 'mpn') o.model = b;
+      }
+    }
+    var m = document.querySelector('meta[property="og:description"]');
+    if(m) o.desc = m.content;
+    var s = JSON.stringify(o);
+    var done = function(){ alert('Copied. ' + o.specifics.length + ' item specifics found.\n\nNow paste it into the M98M tool.'); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(s).then(done, function(){ prompt('Copy this, then paste it into the M98M tool:', s); });
+    } else {
+      prompt('Copy this, then paste it into the M98M tool:', s);
+    }
+  }catch(e){ alert('Grabber error: ' + e.message); }
+}
+var GRABBER = 'javascript:(' + String(grabFn).replace(/\n\s*/g, '') + ')();';
+
+/* ============================================================
+   Wiring
+   ============================================================ */
+var Retrieve = {
+  busy: false,
+
+  say: function(id, msg, cls){
+    var el = $(id); if(!el) return;
+    el.className = 'fetch-msg ' + (cls || '');
+    el.innerHTML = msg;
+  },
+
+  /* ---------- my listing ---------- */
+  listing: function(){
+    var raw = $('lInput').value.trim();
+    var kind = Smart.classify(raw);
+    if(kind === 'empty'){ Retrieve.say('lMsg', 'Paste your eBay listing link first.', 'warn'); return; }
+
+    if(kind === 'grabber'){
+      var got;
+      try { got = Smart.fromGrabber(raw); }
+      catch(e){ Retrieve.say('lMsg', 'That looked like grabber data but could not be read. Try the grabber again.', 'warn'); return; }
+      Retrieve.applyListing(got); return;
+    }
+    if(kind === 'text'){
+      Retrieve.applyListing(Ebay.read(raw, 'text', '')); return;
+    }
+
+    if(Retrieve.busy) return;
+    if(!Fetcher.isEbay(raw)) Retrieve.say('lMsg', 'That is not an eBay link, but trying anyway…', '');
+    Retrieve.busy = true;
+    Retrieve.say('lMsg', '<span class="spin"></span> Fetching the page…', '');
+    Fetcher.get(raw, function(res){
+      Retrieve.busy = false;
+      if(!res.ok){ Retrieve.fail('lMsg', res); return; }
+      var got = Ebay.read(res.body, res.kind, res.url);
+      got.via = res.via;
+      if(!got.title){ Retrieve.fail('lMsg', { tried: res.tried, error:'The page came back but no title could be read from it — eBay probably served a stripped-down version.' }); return; }
+      Retrieve.applyListing(got);
+    });
+  },
+
+  applyListing: function(g){
+    var L = S.listing;
+    if(g.url) $('lUrl').value = g.url;
+    if(g.title) $('lTitle').value = g.title;
+    if(g.brand) $('lBrand').value = g.brand;
+    if(g.model) $('lModel').value = g.model;
+    if(g.category) $('lCategory').value = g.category;
+    if(g.specifics) $('lSpecifics').value = g.specifics;
+    if(g.desc) $('lDesc').value = g.desc;
+    if(g.condition){
+      var c = g.condition.toLowerCase();
+      $('lCondition').value = /refurb/.test(c) ? 'refurbished' : /used|pre-?owned/.test(c) ? 'used' :
+                              /other/.test(c) ? 'new-other' : 'new';
+    }
+    if(g.price){
+      var p = parseFloat(String(g.price).replace(/[^0-9.]/g, ''));
+      if(p && !$('eSell').value) $('eSell').value = p.toFixed(2);
+    }
+    Forms.pull(); Store.save(); Render.hints(); Render.econ();
+    if(S.results) Engine.run(true);
+
+    var bits = g.found.length ? g.found.join(', ') : 'not much';
+    var src = g.via === 'grabber' ? 'the grabber' : g.via ? ('a proxy — ' + g.via) : 'your pasted text';
+    Retrieve.say('lMsg', '<b>Read via ' + esc(src) + '.</b> Found ' + esc(bits) +
+      (g.price ? ', price ' + esc(g.price) : '') + '. Check the fields below and correct anything wrong.', 'ok');
+    Retrieve.say('lFound', '', '');
+  },
+
+  fail: function(id, res){
+    Retrieve.say(id,
+      '<b>Could not fetch that page.</b> ' + esc(res.error || '') +
+      (res.tried && res.tried.length ? '<br><span class="dim mono" style="font-size:11px">Tried: ' + esc(res.tried.join(' · ')) + '</span>' : '') +
+      '<br>Use the one-click grabber below instead — it runs on the eBay page itself, so nothing can block it.', 'warn');
+  },
+
+  /* ---------- competitors ---------- */
+  competitors: function(){
+    if(Retrieve.busy) return;
+    var raw = $('cInput').value.trim();
+    if(!raw){ Retrieve.say('cMsg', 'Paste one competitor link per line.', 'warn'); return; }
+
+    /* grabber data can be pasted here too, one JSON object per line */
+    var lines = raw.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean).slice(0, 3);
+    var results = [], pending = lines.length, done = 0;
+    if(!pending) return;
+
+    Retrieve.busy = true;
+    Retrieve.say('cMsg', '<span class="spin"></span> Fetching ' + pending + ' listing' + (pending === 1 ? '' : 's') + '…', '');
+
+    lines.forEach(function(line, idx){
+      var kind = Smart.classify(line);
+      var finish = function(obj, note){
+        results[idx] = { obj: obj, note: note };
+        done++;
+        if(done === pending) Retrieve.applyCompetitors(results, lines);
+      };
+      if(kind === 'grabber'){
+        try { finish(Smart.fromGrabber(line), 'grabber'); }
+        catch(e){ finish(null, 'grabber data could not be read'); }
+        return;
+      }
+      if(kind !== 'url'){ finish(null, 'not a link'); return; }
+      Fetcher.get(line, function(res){
+        if(!res.ok){ finish(null, 'could not be fetched'); return; }
+        var g = Ebay.read(res.body, res.kind, res.url);
+        if(!g.title){ finish(null, 'page came back empty'); return; }
+        g.via = res.via; finish(g, res.via);
+      });
+    });
+  },
+
+  applyCompetitors: function(results, lines){
+    Retrieve.busy = false;
+    var ok = 0, notes = [];
+    for(var i=0;i<3;i++){
+      var r = results[i];
+      if(!r || !r.obj){
+        if(lines[i]) notes.push('Listing ' + (i+1) + ': ' + ((r && r.note) || 'skipped'));
+        continue;
+      }
+      var g = r.obj;
+      $('cUrl' + i).value = g.url || lines[i];
+      $('cTitle' + i).value = g.title || '';
+      $('cText' + i).value = [g.title, g.category, g.specifics, g.desc].filter(Boolean).join('\n');
+      ok++;
+      notes.push('Listing ' + (i+1) + ': ' + (g.title ? g.title.slice(0, 46) + (g.title.length > 46 ? '…' : '') : 'read'));
+    }
+    Forms.pull(); Store.save(); Render.hints();
+    if(S.results) Engine.run(true);
+    Retrieve.say('cMsg',
+      '<b>' + ok + ' of ' + lines.length + ' read.</b><br>' + esc(notes.join(' · ')) +
+      (ok < lines.length ? '<br>For any that failed, use the grabber on that page and paste what it copies here.' : ''),
+      ok ? 'ok' : 'warn');
+  },
+
+  /* ---------- grabber ---------- */
+  copyGrabber: function(){
+    var ta = document.createElement('textarea');
+    ta.value = GRABBER;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var okc = false;
+    try { okc = document.execCommand('copy'); } catch(e){ okc = false; }
+    document.body.removeChild(ta);
+    if(okc){ toast('Grabber copied — now make a bookmark and paste it as the address'); }
+    else {
+      var box = $('grabberCode');
+      if(box){ box.style.display = 'block'; box.value = GRABBER; box.select(); }
+      toast('Select the text below and copy it');
+    }
+  },
+  showGrabber: function(){
+    var box = $('grabberCode');
+    if(box){ box.style.display = box.style.display === 'block' ? 'none' : 'block'; box.value = GRABBER; }
+  }
+};
+/* ============================================================
+   Approvals — nothing leaves this tool without a decision
+   ============================================================ */
+var Approve = {
+  isApproved: function(kw){ return S.approvals[kw] === 1; },
+  isRejected: function(kw){ return S.approvals[kw] === -1; },
+  set: function(kw, v){
+    if(v === 0) delete S.approvals[kw];
+    else S.approvals[kw] = v;
+    Store.save(); Render.approve(); Render.hints();
+  },
+  toggle: function(kw){
+    Approve.set(kw, Approve.isApproved(kw) ? 0 : 1);
+  },
+  bulk: function(mode){
+    if(!S.results) return;
+    var rows = S.results.rows;
+    if(mode === 'clear'){ S.approvals = {}; }
+    else if(mode === 't1'){
+      rows.forEach(function(r){ if(r.tier === 'Tier 1') S.approvals[r.kw] = 1; });
+    } else if(mode === 'all'){
+      rows.forEach(function(r){ if(r.tier !== 'Excluded') S.approvals[r.kw] = 1; });
+    } else if(mode === 't12'){
+      rows.forEach(function(r){ if(r.tier === 'Tier 1' || r.tier === 'Tier 2') S.approvals[r.kw] = 1; });
+    }
+    Store.save(); Render.rows(); Render.approve(); Render.hints();
+    toast(Approve.list().length + ' keywords ticked');
+  },
+  list: function(){
+    if(!S.results) return [];
+    return S.results.rows.filter(function(r){ return Approve.isApproved(r.kw); });
+  }
+};
+
+Render.approve = function(){
+  var el = $('approveArea'); if(!el) return;
+  /* keep anything half-typed in the manual box — this panel redraws on
+     every tick and it would otherwise be wiped mid-sentence */
+  var draft = $('manualKw') ? $('manualKw').value : '';
+  if(!S.results){ el.innerHTML = ''; return; }
+  var rows = S.results.rows;
+  var selectable = rows.filter(function(r){ return r.tier !== 'Excluded'; });
+  var approved = Approve.list();
+
+  var h = '<div class="card"><div class="card-head"><h2>Your final keyword list</h2></div>';
+
+  if(!approved.length){
+    h += '<p class="card-sub">Tick keywords in the table above and the final list appears here, ready to copy into eBay. ' +
+      selectable.length + ' cleared the cut-offs' + (selectable.length ? ' — the quickest start is <em>Tick Tier 1</em>' : '') + '.</p>';
+  } else {
+    var byTier = { 'Tier 1':[], 'Tier 2':[], 'Tier 3':[], 'Excluded':[] };
+    approved.forEach(function(r){ if(byTier[r.tier]) byTier[r.tier].push(r); });
+    var totalCPC = 0, cpcCount = 0;
+    approved.forEach(function(r){ if(r.cpc != null){ totalCPC += r.cpc; cpcCount++; } });
+    h += '<p class="card-sub">' + approved.length + ' keywords ticked · ' +
+      byTier['Tier 1'].length + ' Tier 1, ' + byTier['Tier 2'].length + ' Tier 2, ' + byTier['Tier 3'].length + ' Tier 3' +
+      (byTier['Excluded'].length ? ', ' + byTier['Excluded'].length + ' overridden from Do Not Target' : '') +
+      (cpcCount ? ' · average suggested bid ' + money(totalCPC / cpcCount) : '') + '</p>';
+    h += '<pre style="font-family:var(--mono);font-size:12px;background:var(--ink);border:1px solid var(--line);border-radius:4px;padding:14px;max-height:280px;overflow:auto;margin:0 0 14px;white-space:pre-wrap">' +
+      esc(Export.plainList(approved)) + '</pre>';
+  }
+
+  h += '<div class="btn-row">' +
+    '<button class="btn btn-primary" onclick="Export.topCSV()">⬇ High + medium priority only</button>' +
+    '<button class="btn" onclick="Export.clipboard()" ' + (approved.length ? '' : 'disabled') + '>Copy for Excel</button>' +
+    '<button class="btn" onclick="Export.keywordsOnly()" ' + (approved.length ? '' : 'disabled') + '>Copy keywords only</button>' +
+    '<button class="btn" onclick="Export.csv()" ' + (approved.length ? '' : 'disabled') + '>Download CSV</button>' +
+    '<button class="btn" onclick="Export.excel()" ' + (approved.length ? '' : 'disabled') + '>Download Excel</button>' +
+    '<button class="btn btn-ghost" onclick="Export.campaignCSV()" ' + (approved.length ? '' : 'disabled') + '>Campaign-ready CSV</button>' +
+    '<button class="btn btn-ghost" onclick="Export.fullCSV()">Full analysis CSV</button>' +
+    '</div>';
+  h += '<p class="dim" style="font-size:12px;margin:12px 0 0">Nothing here touches eBay. You copy the list across yourself. The Excel workbook has four sheets: your approved keywords, the full analysis, the do-not-target list with reasons, and the campaign plan.</p>';
+
+  h += '<div class="hr"></div><label class="field"><span>Add a keyword by hand <span class="opt">one per line — scored the same way</span></span>' +
+    '<textarea id="manualKw" rows="2" placeholder="solar cctv camera with sim card"></textarea></label>' +
+    '<button class="btn btn-sm" onclick="Keywords.addManual()">Add and score</button>';
+  h += '<div class="tip"><b>Meri tip</b>Do Not Target wali list ko negative keywords ke taur par bhi use karein jahan eBay allow kare. Override tab hi karein jab pakka pata ho — engine ne usko kisi wajah se nikala hai, wajah "Why" column mein likhi hai.</div>';
+  h += '</div>';
+
+  el.innerHTML = h;
+  if(draft && $('manualKw')) $('manualKw').value = draft;
+};
+
+/* ============================================================
+   Export
+   ============================================================ */
+var EXPORT_COLS = ['Keyword','Tier','Score','Intent','Relevance','CPC','Demand','Competition','Reason','Approved'];
+
+var Export = {
+  rowValues: function(r){
+    return [
+      r.kw, r.tier === 'Excluded' ? 'Do not target' : r.tier, r.score.toFixed(1),
+      r.ins.intentClass, r.ins.relevance.toFixed(0),
+      r.cpc == null ? 'N/A — data not available' : r.cpc.toFixed(2),
+      r.volume == null ? 'N/A — data not available' : String(r.volume),
+      r.competition == null ? 'N/A — data not available' : String(r.competition),
+      r.reason,
+      Approve.isApproved(r.kw) ? 'Yes' : Approve.isRejected(r.kw) ? 'Rejected' : 'No'
+    ];
+  },
+  csvCell: function(v){
+    var s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  },
+  toCSV: function(rows){
+    return '\uFEFF' + rows.map(function(r){ return r.map(Export.csvCell).join(','); }).join('\r\n');
+  },
+  stamp: function(){
+    var d = new Date();
+    return d.getFullYear() + ('0'+(d.getMonth()+1)).slice(-2) + ('0'+d.getDate()).slice(-2);
+  },
+  slug: function(){
+    var t = Text.normalise(S.listing.title || 'listing').split(' ').slice(0,4).join('-');
+    return t || 'listing';
+  },
+
+  csv: function(){
+    var rows = [EXPORT_COLS].concat(Approve.list().map(Export.rowValues));
+    download('M98M-approved-keywords-' + Export.slug() + '-' + Export.stamp() + '.csv', 'text/csv', Export.toCSV(rows));
+    toast('CSV downloaded');
+  },
+  fullCSV: function(){
+    if(!S.results){ toast('Run the analysis first'); return; }
+    var rows = [EXPORT_COLS.concat(['Group','Wastage risk','Break-even clicks','Duplicate of'])];
+    S.results.rows.forEach(function(r){
+      rows.push(Export.rowValues(r).concat([
+        r.group,
+        r.wastage.level === 'high' ? 'HIGH WASTAGE RISK' : r.wastage.level === 'medium' ? 'Medium' : '—',
+        r.breakEven ? String(r.breakEven.clicks) : 'N/A — data not available',
+        r.dupOf || ''
+      ]));
+    });
+    download('M98M-full-analysis-' + Export.slug() + '-' + Export.stamp() + '.csv', 'text/csv', Export.toCSV(rows));
+    toast('Full analysis downloaded');
+  },
+  clipboard: function(){
+    var rows = [EXPORT_COLS].concat(Approve.list().map(Export.rowValues));
+    copyText(rows.map(function(r){ return r.join('\t'); }).join('\n'));
+  },
+  keywordsOnly: function(){
+    copyText(Approve.list().map(function(r){ return r.kw; }).join('\n'));
+  },
+  plainList: function(approved){
+    var out = [];
+    ['Tier 1','Tier 2','Tier 3'].forEach(function(t){
+      var g = approved.filter(function(r){ return r.tier === t; });
+      if(!g.length) return;
+      out.push('— ' + t.toUpperCase() + ' —');
+      g.forEach(function(r){
+        out.push(r.kw + '   [score ' + r.score.toFixed(1) + (r.cpc != null ? ' · bid ' + money(r.cpc) : '') + ']');
+      });
+      out.push('');
+    });
+    return out.join('\n').trim();
+  },
+  matchType: function(r){
+    if(r.tier === 'Tier 1') return 'Exact';
+    if(r.group === 'Long tail') return 'Phrase';
+    return 'Phrase';
+  },
+  suggestedBid: function(r){
+    var econ = S.results && S.results.econ;
+    var maxCPC = econ && econ.maxCPC;
+    if(r.cpc == null && !maxCPC) return 'N/A — data not available';
+    var bid = r.cpc;
+    if(maxCPC){
+      var ceiling = r.tier === 'Tier 1' ? maxCPC : r.tier === 'Tier 2' ? maxCPC * 0.8 : maxCPC * 0.6;
+      bid = (bid == null) ? ceiling : Math.min(bid, ceiling);
+    }
+    return bid == null ? 'N/A — data not available' : bid.toFixed(2);
+  },
+  /* The two campaigns worth spending on, in one file. Ticks are respected
+     when there are any; when there are none it takes everything those two
+     campaigns hold, so the button works without a setup step first. */
+  topKeywords: function(){
+    if(!S.results || !S.results.strategy){ toast('Run the analysis first'); return null; }
+    var top = S.results.strategy.campaigns.filter(function(c){ return c.rank <= 2; });
+    if(!top.length){ toast('Nothing reached high or medium priority yet'); return null; }
+    var anyTicked = Approve.list().length > 0;
+    var out = [], seen = {};
+    top.forEach(function(c){
+      c.keywords.forEach(function(r){
+        if(seen[r.kw]) return;
+        if(anyTicked && !Approve.isApproved(r.kw)) return;
+        seen[r.kw] = 1;
+        out.push({ row:r, campaign:c.name, priority:c.priority });
+      });
+    });
+    return { list: out, filtered: anyTicked };
+  },
+
+  topCSV: function(){
+    var got = Export.topKeywords();
+    if(!got) return;
+    if(!got.list.length){ toast('None of those keywords are ticked'); return; }
+    var econ = S.results.econ;
+    var rows = [['Keyword','Campaign','Priority','Suggested bid £','Bid to use £','Tier','Score','Buyer intent','Group','Search demand','Why']];
+    got.list.forEach(function(e){
+      var r = e.row;
+      rows.push([
+        r.kw,
+        e.campaign,
+        e.priority,
+        r.cpc == null ? 'N/A — data not available' : r.cpc.toFixed(2),
+        Export.bidToUse(r, econ),
+        r.tier,
+        r.score.toFixed(1),
+        r.ins.intentClass,
+        r.group,
+        r.volume == null ? 'N/A — data not available' : String(r.volume),
+        r.reason
+      ]);
+    });
+    download('M98M-top-keywords-' + Export.slug() + '-' + Export.stamp() + '.csv', 'text/csv', Export.toCSV(rows));
+    toast(got.list.length + ' high and medium priority keywords downloaded');
+  },
+
+  /* the affordable bid where costs are known, otherwise eBay's own number */
+  bidToUse: function(r, econ){
+    if(r.cpc == null) return 'N/A — data not available';
+    if(econ && econ.ok && econ.maxCPC) return Math.min(r.cpc, econ.maxCPC).toFixed(2);
+    return r.cpc.toFixed(2);
+  },
+
+  campaignCSV: function(){
+    if(!S.results){ toast('Run the analysis first'); return; }
+    var approved = Approve.list();
+    var plan = S.results.strategy.campaigns;
+    var rows = [['Campaign','Ad group','Keyword','Match type','Suggested bid £','Tier','Score','Status']];
+    var placed = {};
+    plan.forEach(function(c){
+      c.keywords.forEach(function(r){
+        if(!Approve.isApproved(r.kw) || placed[r.kw]) return;
+        placed[r.kw] = 1;
+        rows.push([c.name, r.group, r.kw, Export.matchType(r), Export.suggestedBid(r), r.tier, r.score.toFixed(1), 'Ready']);
+      });
+    });
+    approved.forEach(function(r){
+      if(placed[r.kw]) return;
+      rows.push(['Campaign — unassigned', r.group, r.kw, Export.matchType(r), Export.suggestedBid(r), r.tier, r.score.toFixed(1), 'Ready']);
+    });
+    rows.push([]);
+    rows.push(['Do not target — use as negatives where eBay allows']);
+    rows.push(['Keyword','Reason']);
+    S.results.rows.filter(function(r){ return r.tier === 'Excluded'; }).forEach(function(r){
+      rows.push([r.kw, r.reason]);
+    });
+    download('M98M-campaign-plan-' + Export.slug() + '-' + Export.stamp() + '.csv', 'text/csv', Export.toCSV(rows));
+    toast('Campaign plan downloaded');
+  },
+
+  /* SpreadsheetML workbook — opens natively in Excel and Sheets */
+  xmlCell: function(v){
+    var s = String(v == null ? '' : v);
+    var isNum = /^-?\d+(\.\d+)?$/.test(s) && s !== '';
+    var e = s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+             .replace(/"/g,'&quot;').replace(/\r?\n/g,'&#10;');
+    return '<Cell><Data ss:Type="' + (isNum ? 'Number' : 'String') + '">' + e + '</Data></Cell>';
+  },
+  xmlSheet: function(name, rows){
+    var out = '<Worksheet ss:Name="' + name.replace(/[\\/?*\[\]:]/g,'') + '"><Table>';
+    rows.forEach(function(r, i){
+      out += '<Row>' + r.map(function(c){
+        if(i === 0) return '<Cell ss:StyleID="h"><Data ss:Type="String">' +
+          String(c).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</Data></Cell>';
+        return Export.xmlCell(c);
+      }).join('') + '</Row>';
+    });
+    return out + '</Table><WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><FreezePanes/><SplitHorizontal>1</SplitHorizontal><TopRowBottomPane>1</TopRowBottomPane><ActivePane>2</ActivePane></WorksheetOptions></Worksheet>';
+  },
+  excel: function(){
+    if(!S.results){ toast('Run the analysis first'); return; }
+    var approved = [EXPORT_COLS].concat(Approve.list().map(Export.rowValues));
+    var full = [EXPORT_COLS.concat(['Group','Wastage risk','Break-even clicks','Duplicate of'])];
+    S.results.rows.forEach(function(r){
+      full.push(Export.rowValues(r).concat([
+        r.group,
+        r.wastage.level === 'high' ? 'HIGH WASTAGE RISK' : r.wastage.level === 'medium' ? 'Medium' : '—',
+        r.breakEven ? r.breakEven.clicks : 'N/A — data not available',
+        r.dupOf || ''
+      ]));
+    });
+    var excl = [['Keyword','Score','Relevance','Why it was rejected']];
+    S.results.rows.filter(function(r){ return r.tier === 'Excluded'; }).forEach(function(r){
+      excl.push([r.kw, r.score.toFixed(1), r.ins.relevance.toFixed(0), r.reason]);
+    });
+    var plan = [['Campaign','Ad group','Keyword','Match type','Suggested bid £','Tier','Score']];
+    var placed = {};
+    S.results.strategy.campaigns.forEach(function(c){
+      c.keywords.forEach(function(r){
+        if(!Approve.isApproved(r.kw) || placed[r.kw]) return;
+        placed[r.kw] = 1;
+        plan.push([c.name, r.group, r.kw, Export.matchType(r), Export.suggestedBid(r), r.tier, r.score.toFixed(1)]);
+      });
+    });
+
+    var xml = '<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n' +
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" ' +
+      'xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+      'xmlns:x="urn:schemas-microsoft-com:office:excel" ' +
+      'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+      '<Styles><Style ss:ID="h"><Font ss:Bold="1"/><Interior ss:Color="#EFEFEF" ss:Pattern="Solid"/></Style></Styles>' +
+      Export.xmlSheet('Approved keywords', approved) +
+      Export.xmlSheet('Full analysis', full) +
+      Export.xmlSheet('Do not target', excl) +
+      Export.xmlSheet('Campaign plan', plan) +
+      '</Workbook>';
+    download('M98M-cpc-keywords-' + Export.slug() + '-' + Export.stamp() + '.xls',
+             'application/vnd.ms-excel', xml);
+    toast('Excel workbook downloaded');
+  }
+};
+
+/* ============================================================
+   Project — file save / load / reset
+   ============================================================ */
+/* The rail and the page height both sit below a sticky masthead whose
+   height changes with browser zoom and window width. Measuring it beats
+   guessing it. */
+var Layout = {
+  sync: function(){
+    var m = $('masthead'); if(!m) return;
+    var h = Math.round(m.getBoundingClientRect().height);
+    if(h > 0) document.documentElement.style.setProperty('--mast-h', h + 'px');
+  },
+  watch: function(){
+    Layout.sync();
+    window.addEventListener('resize', Layout.sync);
+    if(typeof ResizeObserver !== 'undefined' && $('masthead')){
+      try { new ResizeObserver(Layout.sync).observe($('masthead')); } catch(e){}
+    }
+    setTimeout(Layout.sync, 250);
+  }
+};
+
+var Project = {
+  exportJSON: function(){
+    Forms.pull();
+    var copy = JSON.parse(JSON.stringify(S));
+    copy.results = null; /* recalculated on load, keeps the file small */
+    download('M98M-cpc-project-' + Export.slug() + '-' + Export.stamp() + '.json',
+             'application/json', JSON.stringify(copy, null, 2));
+    toast('Project file saved');
+  },
+  importJSON: function(input){
+    var f = input.files && input.files[0];
+    if(!f) return;
+    var rd = new FileReader();
+    rd.onload = function(){
+      try{
+        var obj = JSON.parse(String(rd.result));
+        S = Object.assign(defaultState(), obj);
+        S.listing = Object.assign(defaultState().listing, obj.listing || {});
+        S.econ = Object.assign(defaultState().econ, obj.econ || {});
+        S.weights = Object.assign({}, DEFAULT_WEIGHTS, obj.weights || {});
+        S.thresholds = Object.assign({}, DEFAULT_THRESHOLDS, obj.thresholds || {});
+        S.ui = Object.assign(defaultState().ui, obj.ui || {});
+        Store.save(); Forms.push(); Render.all();
+        if(S.keywords.length && S.listing.title) Engine.run(true);
+        toast('Project loaded');
+      }catch(e){ toast('That file could not be read as a project'); }
+    };
+    rd.readAsText(f);
+    input.value = '';
+  },
+  reset: function(){
+    if(!confirm('Clear the listing, competitors, keywords, approvals and performance data from this browser? This cannot be undone.')) return;
+    Store.clear();
+    S = defaultState();
+    Forms.push();
+    ['lInput','cInput','perfPaste','kwPaste','manualKw','grabberCode'].forEach(function(id){
+      var el = $(id); if(el) el.value = '';
+    });
+    ['lMsg','cMsg'].forEach(function(id){ var el = $(id); if(el){ el.innerHTML = ''; el.className = 'fetch-msg'; } });
+    Render.all();
+    Render.emptyResults();
+    Nav.go('v1');
+    toast('Cleared');
+  }
+};
+
+/* ============================================================
+   Init
+   ============================================================ */
+function init(){
+  Store.load();
+  Forms.push();
+  Forms.bind();
+  Render.all();
+  if(S.keywords.length && S.listing.title && !S.results) Engine.run(true);
+  else if(S.results) Render.results();
+  Layout.watch();
+  Nav.go(['v1','v2','v3','v4'].indexOf(S.ui.view) === -1 ? 'v1' : S.ui.view);
+  window.addEventListener('beforeunload', function(){ try{ Forms.pull(); Store.save(); }catch(e){} });
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+</script>
+</body>
+</html>

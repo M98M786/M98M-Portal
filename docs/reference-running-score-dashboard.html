@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sir Hasib — Running Score</title>
+<style>
+:root{
+  --ink:#0C1017;
+  --panel:#161A25;
+  --panel-2:#1D2231;
+  --rule:#2A3140;
+  --gold:#C9A227;
+  --gold-lt:#E8C86A;
+  --swoosh:#3C7DF0;
+  --pos:#3CC08B;
+  --neg:#E5484D;
+  --warn:#E8A33D;
+  --text:#EDF0F5;
+  --muted:#8B95A8;
+  --dim:#5C6678;
+  --display:"Playfair Display",Georgia,"Times New Roman",serif;
+  --body:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --data:"JetBrains Mono","SF Mono",SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1100px 520px at 12% -8%, rgba(60,125,240,.16), transparent 62%),
+    radial-gradient(900px 460px at 92% 0%, rgba(201,162,39,.13), transparent 60%),
+    var(--ink);
+  color:var(--text);
+  font-family:var(--body);
+  font-size:15px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1220px;margin:0 auto;padding:28px 22px 70px}
+
+/* ---------- masthead ---------- */
+.mast{
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:18px;
+  justify-content:space-between;
+  padding-bottom:16px;border-bottom:1px solid var(--rule);
+}
+.brand{display:flex;align-items:center;gap:14px}
+.crest{
+  width:44px;height:44px;flex:none;border-radius:11px;
+  background:linear-gradient(150deg,var(--gold-lt),var(--gold) 46%,#8A6E14);
+  display:grid;place-items:center;
+  font-family:var(--display);font-size:20px;font-weight:700;color:#161A25;
+  box-shadow:0 6px 20px rgba(201,162,39,.28);
+}
+h1{
+  font-family:var(--display);font-weight:700;
+  font-size:clamp(26px,3.6vw,38px);line-height:1.05;margin:0;letter-spacing:-.01em;
+}
+h1 em{font-style:normal;color:var(--gold-lt)}
+.sub{font-size:12.5px;color:var(--muted);margin-top:5px;letter-spacing:.05em;text-transform:uppercase}
+.stamp{text-align:right;font-family:var(--data);font-size:11.5px;color:var(--dim);line-height:1.8}
+.stamp b{color:var(--pos);font-weight:600}
+
+/* ---------- kpi strip ---------- */
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--rule);
+  border:1px solid var(--rule);border-radius:12px;overflow:hidden;margin:22px 0 26px}
+.kpi{background:var(--panel);padding:15px 16px 14px}
+.kpi .lab{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font-family:var(--data);font-size:22px;font-weight:600;margin-top:7px;letter-spacing:-.02em}
+.kpi .note{font-size:11.5px;color:var(--dim);margin-top:3px}
+.kpi.accent .val{color:var(--gold-lt)}
+.kpi.blue .val{color:var(--swoosh)}
+
+/* ---------- panels ---------- */
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:20px 20px 18px;margin-bottom:22px}
+.phead{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;justify-content:space-between;margin-bottom:4px}
+.ptitle{font-family:var(--display);font-size:19px;font-weight:600;margin:0}
+.pnote{font-size:12.5px;color:var(--muted);max-width:56ch}
+.grid2{display:grid;grid-template-columns:1.55fr 1fr;gap:22px}
+
+/* ---------- toggle ---------- */
+.seg{display:inline-flex;background:var(--ink);border:1px solid var(--rule);border-radius:9px;padding:3px;gap:3px}
+.seg button{
+  font:600 11.5px/1 var(--body);letter-spacing:.05em;text-transform:uppercase;
+  background:none;border:0;color:var(--muted);padding:8px 13px;border-radius:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel-2);color:var(--gold-lt)}
+.seg button:focus-visible{outline:2px solid var(--swoosh);outline-offset:2px}
+
+/* ---------- chart ---------- */
+.chartbox{margin-top:14px;position:relative}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.bar{transition:opacity .18s}
+.chartbox.hot .bar{opacity:.34}
+.chartbox.hot .bar.on{opacity:1}
+.gl{stroke:var(--rule);stroke-width:1}
+.ax{font-family:var(--data);font-size:10px;fill:var(--dim)}
+.plab{font-family:var(--body);font-size:11.5px;fill:var(--muted);font-weight:600}
+.nt-line{fill:none;stroke:var(--gold-lt);stroke-width:2;stroke-linejoin:round}
+.nt-dot{fill:var(--ink);stroke:var(--gold-lt);stroke-width:2}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:12px}
+.legend i{width:11px;height:11px;border-radius:3px;display:inline-block;margin-right:7px;vertical-align:-1px}
+.tip{
+  position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--panel-2);border:1px solid var(--rule);border-radius:9px;
+  padding:10px 12px;font-family:var(--data);font-size:11.5px;line-height:1.7;
+  box-shadow:0 12px 30px rgba(0,0,0,.5);z-index:5;white-space:nowrap}
+.tip b{font-family:var(--body);font-size:12.5px;display:block;margin-bottom:5px;color:var(--gold-lt)}
+.tip s{text-decoration:none;color:var(--muted);display:inline-block;width:96px}
+
+/* ---------- table ---------- */
+.scroll{overflow-x:auto;margin-top:6px}
+table{border-collapse:collapse;width:100%;font-family:var(--data);font-size:13px;min-width:720px}
+th,td{padding:11px 10px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap}
+th{font:600 10.5px/1.4 var(--body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:right}
+th:first-child,td:first-child{text-align:left;font-family:var(--body);font-weight:600;font-size:13.5px}
+tbody tr{transition:background .15s}
+tbody tr:hover{background:var(--panel-2)}
+tbody tr.cur td{color:var(--text)}
+tbody tr.cur td:first-child::after{
+  content:"latest";font-family:var(--body);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink);background:var(--gold);border-radius:4px;padding:2px 6px;margin-left:9px;vertical-align:2px}
+tfoot td{border-top:2px solid var(--gold);border-bottom:0;font-weight:600;padding-top:13px}
+tfoot td:first-child{font-family:var(--body)}
+.pos{color:var(--pos)}.neg{color:var(--neg)}.gold{color:var(--gold-lt)}.blue{color:var(--swoosh)}.mut{color:var(--dim)}
+
+/* efficiency pill */
+.nt{display:inline-block;font-family:var(--data);font-size:12.5px;padding:3px 9px;border-radius:20px;border:1px solid}
+.nt.good{color:var(--pos);border-color:rgba(60,192,139,.4);background:rgba(60,192,139,.1)}
+.nt.mid{color:var(--warn);border-color:rgba(232,163,61,.4);background:rgba(232,163,61,.1)}
+.nt.bad{color:var(--neg);border-color:rgba(229,72,77,.4);background:rgba(229,72,77,.1)}
+
+/* ---------- watchlist ---------- */
+.watch{display:flex;flex-direction:column;gap:2px}
+.wrow{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;
+  padding:11px 2px;border-bottom:1px solid var(--rule)}
+.wrow:last-child{border-bottom:0}
+.wname{font-size:13.5px;font-weight:600;line-height:1.3}
+.wmeta{font-size:11.5px;color:var(--dim);font-family:var(--data);margin-top:2px}
+.spark{width:96px;height:26px}
+.verdict{font:600 10px/1 var(--body);letter-spacing:.09em;text-transform:uppercase;
+  padding:5px 8px;border-radius:5px;white-space:nowrap}
+.v-kill{background:rgba(229,72,77,.15);color:var(--neg)}
+.v-trim{background:rgba(232,163,61,.15);color:var(--warn)}
+.v-scale{background:rgba(60,192,139,.15);color:var(--pos)}
+
+/* ---------- leaderboard ---------- */
+.lb{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.lbrow{display:grid;grid-template-columns:1fr 62px;gap:12px;align-items:center}
+.lbname{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbtrack{height:6px;border-radius:3px;background:var(--panel-2);margin-top:6px;overflow:hidden}
+.lbfill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--gold),var(--gold-lt))}
+.lbval{font-family:var(--data);font-size:13px;text-align:right;color:var(--gold-lt)}
+
+/* ---------- open items ---------- */
+.items{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:12px}
+.item{background:var(--panel-2);border:1px solid var(--rule);border-left:3px solid var(--dim);
+  border-radius:9px;padding:12px 13px}
+.item.hi{border-left-color:var(--neg)}
+.item.md{border-left-color:var(--warn)}
+.item .t{font-size:13px;font-weight:600;line-height:1.35}
+.item .d{font-size:11.5px;color:var(--muted);margin-top:5px;font-family:var(--data)}
+
+footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--rule);
+  font-size:11.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
+
+@media (max-width:940px){
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .grid2{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .stamp{text-align:left}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div class="brand">
+      <div class="crest">H</div>
+      <div>
+        <h1>Running Score — <em>Sir Hasib</em></h1>
+        <div class="sub">M98M LTD · Sales analysis · 1 – 8 Aug 2026</div>
+      </div>
+    </div>
+    <div class="stamp">
+      Every H = OP order earning <b>&#10003; exact</b><br>
+      Priority fees from dashboard &middot; CA cross-checked<br>
+      Formula errors across 5 sheets: <b>0</b>
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><div class="lab">Trading days</div><div class="val">8</div><div class="note">5 sheets built</div></div>
+    <div class="kpi"><div class="lab">Units sold</div><div class="val">252</div><div class="note">31.5 / day</div></div>
+    <div class="kpi"><div class="lab">Total sold</div><div class="val">£2,578</div><div class="note">£322.28 / day</div></div>
+    <div class="kpi accent"><div class="lab">Raw profit</div><div class="val">£459.87</div><div class="note">£57.48 / day</div></div>
+    <div class="kpi"><div class="lab">Margin</div><div class="val">17.8<span style="font-size:15px">%</span></div><div class="note">COGS 37.1% of sales</div></div>
+    <div class="kpi blue"><div class="lab">Ads incl VAT</div><div class="val">£542.70</div><div class="note">N/T ratio 1.18</div></div>
+  </div>
+
+  <!-- SIGNATURE: profit vs ad spend rail -->
+  <section class="panel">
+    <div class="phead">
+      <div>
+        <h2 class="ptitle">Profit against ad spend</h2>
+        <p class="pnote">Gold is what the business kept. Blue is what the ads took. The line is N/T — pounds of ad spend per pound of profit. Below 1.00 means profit outran the ads.</p>
+      </div>
+      <div class="seg" role="group" aria-label="Normalise figures">
+        <button id="bTotal" aria-pressed="true">Per period</button>
+        <button id="bDay" aria-pressed="false">Per day</button>
+      </div>
+    </div>
+    <div class="chartbox" id="chartbox">
+      <svg id="chart" viewBox="0 0 900 330" role="img" aria-label="Profit versus ad spend by period"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:linear-gradient(180deg,var(--gold-lt),var(--gold))"></i>Raw profit</span>
+      <span><i style="background:var(--swoosh)"></i>Ads incl VAT</span>
+      <span><i style="background:var(--gold-lt);border-radius:50%"></i>N/T ratio (right axis)</span>
+    </div>
+  </section>
+
+  <!-- LEDGER -->
+  <section class="panel">
+    <div class="phead">
+      <h2 class="ptitle">The ledger</h2>
+      <p class="pnote">All figures verified against the order processing sheet, penny by penny.</p>
+    </div>
+    <div class="scroll">
+      <table id="ledger">
+        <thead>
+          <tr>
+            <th>Period</th><th>Days</th><th>Units</th><th>Sold</th>
+            <th>eBay earning</th><th>AliExpress cost</th>
+            <th>Raw profit</th><th>Margin</th><th>Ads incl VAT</th><th>N/T</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot>
+          <tr>
+            <td>Total</td><td>8</td><td>252</td><td>£2,578.25</td>
+            <td>£2,097.39</td><td class="mut">£957.23</td>
+            <td class="gold">£459.87</td><td>17.8%</td><td class="blue">£542.70</td>
+            <td><span class="nt mid">1.18</span></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <!-- WATCHLIST -->
+    <section class="panel" style="margin-bottom:0">
+      <div class="phead">
+        <h2 class="ptitle">Watchlist</h2>
+        <p class="pnote">Products tracked across every period. Sparkline is raw profit; the call is based on the trend, not the last day alone.</p>
+      </div>
+      <div class="watch" id="watch"></div>
+    </section>
+
+    <!-- LEADERBOARD -->
+    <section class="panel" style="margin-bottom:0">
+      <div class="phead">
+        <h2 class="ptitle">Top earners</h2>
+        <p class="pnote">7–8 August, by raw profit.</p>
+      </div>
+      <div class="lb" id="lb"></div>
+    </section>
+  </div>
+
+  <!-- OPEN ITEMS -->
+  <section class="panel" style="margin-top:22px">
+    <div class="phead">
+      <h2 class="ptitle">Open items</h2>
+      <p class="pnote">Things that change the numbers once answered. Red items are blocking accuracy.</p>
+    </div>
+    <div class="items">
+      <div class="item hi">
+        <div class="t">8 August tab has no footer row</div>
+        <div class="d">Data starts at row 2 &middot; 1 order at risk</div>
+      </div>
+      <div class="item hi">
+        <div class="t">Rechargeable LED campaign screenshot</div>
+        <div class="d">CA fallback £12.91 &middot; £9.47 swing</div>
+      </div>
+      <div class="item hi">
+        <div class="t">Heat Shrink general fee split</div>
+        <div class="d">£18.66 vs £9.33 absorbed &middot; £7.46 impact</div>
+      </div>
+      <div class="item md">
+        <div class="t">Garmin lead AliExpress cost</div>
+        <div class="d">01-14989-70201 &middot; £4.91 profit unbacked</div>
+      </div>
+      <div class="item md">
+        <div class="t">MagSafe Liquid Silicone CA row</div>
+        <div class="d">1–3 Aug &middot; 7 units, £62.57 missing</div>
+      </div>
+      <div class="item md">
+        <div class="t">Military Paracord campaign screenshot</div>
+        <div class="d">CA fallback £5.23</div>
+      </div>
+      <div class="item">
+        <div class="t">Knee Pillow cost £1.31</div>
+        <div class="d">26–27 Jul &middot; T £6.52 &rarr; £5.21 on your say-so</div>
+      </div>
+      <div class="item">
+        <div class="t">Two toothbrush listings named alike</div>
+        <div class="d">236850574868 £12.99 / 236774626366 £16.99</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Built from the July/August order processing sheet, eBay Custom Analysis and campaign dashboards.</span>
+    <span>Raw profit = 0.8 &times; (earning &minus; cost) &minus; priority ads</span>
+  </footer>
+</div>
+
+<script>
+const P = [
+  {name:"1–3 Aug", days:3, units:81, sold:810.93, h:659.36, i:295.01, t:111.83, ads:215.58, nt:1.93},
+  {name:"4 Aug",   days:1, units:24, sold:268.71, h:217.64, i:100.45, t:52.35,  ads:49.68,  nt:0.95},
+  {name:"5 Aug",   days:1, units:46, sold:445.76, h:353.36, i:155.15, t:108.50, ads:60.08,  nt:0.55},
+  {name:"6 Aug",   days:1, units:37, sold:370.28, h:303.89, i:138.21, t:70.36,  ads:74.62,  nt:1.06},
+  {name:"7–8 Aug", days:2, units:64, sold:682.57, h:563.14, i:268.41, t:116.83, ads:142.74, nt:1.22}
+];
+
+const WATCH = [
+  {n:"Sonic Toothbrush Rechargeable", m:"£16.99 · 3 → 12 units in two days", s:[null,null,null,7.00,40.86], v:"scale", vl:"Scale"},
+  {n:"Waterproof Heat Shrink Tubing", m:"ACOS 8.5% · ROAS 14.11",            s:[null,9.84,0.90,null,12.84], v:"scale", vl:"Scale"},
+  {n:"5-in-1 SD Card Reader",         m:"Recovered from a loss",             s:[-1.03,7.06,7.89,null,14.84], v:"scale", vl:"Scale"},
+  {n:"Luxury Magsafe w/ Stand",       m:"ACOS 22% → 44% in two days",        s:[14.40,null,5.56,6.98,0.64], v:"trim", vl:"Trim 50%"},
+  {n:"250W 6 Port Car Charger",       m:"ACOS now 111%",                     s:[5.69,0.88,8.91,4.54,-3.27], v:"kill", vl:"Kill"},
+  {n:"Shockproof Samsung S25",        m:"ACOS 11% → 67%",                    s:[6.32,1.16,6.32,1.18,-1.42], v:"kill", vl:"Pause"},
+  {n:"MagSafe Mesh Grid Cooling",     m:"Loss, then 3 periods of zero sales", s:[-2.47,null,null,null,null], v:"kill", vl:"Kill"}
+];
+
+const LB = [
+  {n:"Sonic Toothbrush Rechargeable", v:40.86},
+  {n:"5-in-1 SD Card Reader", v:14.84},
+  {n:"20-100pcs H2 Connectors", v:13.04},
+  {n:"Waterproof Heat Shrink Tubing", v:12.84},
+  {n:"USB Type C Endoscope", v:12.62},
+  {n:"Sonic Toothbrush IPX7", v:6.50},
+  {n:"83W 4 Port Car Charger", v:6.05}
+];
+
+const gbp = n => "£" + n.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+const ntClass = v => v < 1 ? "good" : v < 1.5 ? "mid" : "bad";
+
+/* ---- ledger ---- */
+document.querySelector("#ledger tbody").innerHTML = P.map((p,idx)=>`
+  <tr class="${idx===P.length-1?'cur':''}">
+    <td>${p.name}</td>
+    <td>${p.days}</td>
+    <td>${p.units}</td>
+    <td>${gbp(p.sold)}</td>
+    <td>${gbp(p.h)}</td>
+    <td class="mut">${gbp(p.i)}</td>
+    <td class="gold">${gbp(p.t)}</td>
+    <td>${(p.t/p.sold*100).toFixed(1)}%</td>
+    <td class="blue">${gbp(p.ads)}</td>
+    <td><span class="nt ${ntClass(p.nt)}">${p.nt.toFixed(2)}</span></td>
+  </tr>`).join("");
+
+/* ---- chart ---- */
+const W=900,H=330,mL=54,mR=46,mT=18,mB=52;
+const iw=W-mL-mR, ih=H-mT-mB;
+let perDay=false;
+
+function draw(){
+  const d = P.map(p=>({
+    name:p.name,
+    t: perDay ? p.t/p.days : p.t,
+    ads: perDay ? p.ads/p.days : p.ads,
+    nt: p.nt, days:p.days, raw:p
+  }));
+  const max = Math.max(...d.map(x=>Math.max(x.t,x.ads)));
+  const top = Math.ceil(max/25)*25;
+  const ntMax = 2;
+  const y  = v => mT + ih - (v/top)*ih;
+  const yn = v => mT + ih - (v/ntMax)*ih;
+  const bandW = iw/d.length;
+  const bw = Math.min(30, bandW*0.26);
+  const gap = 7;
+
+  let g = "";
+  for(let v=0; v<=top; v+=top/4){
+    g += `<line class="gl" x1="${mL}" y1="${y(v)}" x2="${mL+iw}" y2="${y(v)}"/>
+          <text class="ax" x="${mL-10}" y="${y(v)+3.5}" text-anchor="end">${v===0?"0":"£"+Math.round(v)}</text>`;
+  }
+  for(let v=0; v<=ntMax; v+=0.5){
+    g += `<text class="ax" x="${mL+iw+10}" y="${yn(v)+3.5}" fill="#C9A227">${v.toFixed(1)}</text>`;
+  }
+  // break-even reference at N/T = 1
+  g += `<line x1="${mL}" y1="${yn(1)}" x2="${mL+iw}" y2="${yn(1)}"
+         stroke="#C9A227" stroke-width="1" stroke-dasharray="3 5" opacity=".45"/>
+        <text class="ax" x="${mL+iw-4}" y="${yn(1)-7}" text-anchor="end" fill="#C9A227" opacity=".75">N/T 1.00</text>`;
+
+  let bars="", line="", dots="";
+  d.forEach((x,idx)=>{
+    const cx = mL + bandW*idx + bandW/2;
+    const xT = cx - bw - gap/2, xA = cx + gap/2;
+    bars += `<rect class="bar b${idx}" x="${xT}" y="${y(x.t)}" width="${bw}" height="${Math.max(1,mT+ih-y(x.t))}" rx="3" fill="url(#gold)"/>`;
+    bars += `<rect class="bar b${idx}" x="${xA}" y="${y(x.ads)}" width="${bw}" height="${Math.max(1,mT+ih-y(x.ads))}" rx="3" fill="#3C7DF0" opacity=".82"/>`;
+    bars += `<text class="plab b${idx}" x="${cx}" y="${mT+ih+22}" text-anchor="middle">${x.name}</text>`;
+    bars += `<text class="ax b${idx}" x="${cx}" y="${mT+ih+38}" text-anchor="middle">${x.days} day${x.days>1?"s":""}</text>`;
+    bars += `<rect class="hit" data-i="${idx}" x="${mL+bandW*idx}" y="${mT}" width="${bandW}" height="${ih}" fill="transparent"/>`;
+    line += `${idx?"L":"M"}${cx},${yn(x.nt)}`;
+    dots += `<circle class="nt-dot b${idx}" cx="${cx}" cy="${yn(x.nt)}" r="4.5"/>`;
+  });
+
+  document.getElementById("chart").innerHTML = `
+    <defs><linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E8C86A"/><stop offset="100%" stop-color="#B8901E"/>
+    </linearGradient></defs>
+    ${g}${bars}
+    <path class="nt-line" d="${line}"/>${dots}`;
+
+  // hover
+  const box=document.getElementById("chartbox"), tip=document.getElementById("tip");
+  box.querySelectorAll(".hit").forEach(h=>{
+    h.addEventListener("mouseenter",()=>{
+      const i=+h.dataset.i, x=d[i], p=x.raw;
+      box.classList.add("hot");
+      box.querySelectorAll(".bar").forEach(b=>b.classList.toggle("on", b.classList.contains("b"+i)));
+      tip.innerHTML = `<b>${p.name}</b>
+        <s>Units</s>${p.units}<br>
+        <s>Sold</s>${gbp(p.sold)}<br>
+        <s>Profit</s>${gbp(x.t)}${perDay?" / day":""}<br>
+        <s>Ads</s>${gbp(x.ads)}${perDay?" / day":""}<br>
+        <s>Margin</s>${(p.t/p.sold*100).toFixed(1)}%<br>
+        <s>N/T</s>${p.nt.toFixed(2)}`;
+      const bandPx = (box.clientWidth/W)*(iw/P.length);
+      const leftPx = (box.clientWidth/W)*(mL) + bandPx*i + bandPx/2;
+      tip.style.opacity=1;
+      tip.style.left = Math.min(Math.max(leftPx-tip.offsetWidth/2,0), box.clientWidth-tip.offsetWidth)+"px";
+      tip.style.top = "10px";
+    });
+  });
+  box.addEventListener("mouseleave",()=>{
+    box.classList.remove("hot"); tip.style.opacity=0;
+    box.querySelectorAll(".bar").forEach(b=>b.classList.remove("on"));
+  });
+}
+draw();
+
+const bT=document.getElementById("bTotal"), bD=document.getElementById("bDay");
+bT.onclick=()=>{perDay=false;bT.setAttribute("aria-pressed","true");bD.setAttribute("aria-pressed","false");draw();};
+bD.onclick=()=>{perDay=true;bD.setAttribute("aria-pressed","true");bT.setAttribute("aria-pressed","false");draw();};
+
+/* ---- watchlist sparklines ---- */
+document.getElementById("watch").innerHTML = WATCH.map(w=>{
+  const pts = w.s.map((v,i)=>({v,i})).filter(p=>p.v!==null);
+  const vals = pts.map(p=>p.v);
+  const lo = Math.min(...vals,0), hi = Math.max(...vals,0);
+  const sw=96, sh=26, pad=3;
+  const X = i => pad + (i/(w.s.length-1))*(sw-pad*2);
+  const Y = v => sh-pad - ((v-lo)/((hi-lo)||1))*(sh-pad*2);
+  const path = pts.map((p,k)=>`${k?"L":"M"}${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  const last = pts[pts.length-1];
+  const col = last.v>=0 ? "var(--pos)" : "var(--neg)";
+  const zero = (lo<0&&hi>0) ? `<line x1="${pad}" y1="${Y(0)}" x2="${sw-pad}" y2="${Y(0)}" stroke="#5C6678" stroke-width="1" stroke-dasharray="2 3"/>` : "";
+  return `<div class="wrow">
+    <div><div class="wname">${w.n}</div><div class="wmeta">${w.m}</div></div>
+    <svg class="spark" viewBox="0 0 ${sw} ${sh}">${zero}
+      <path d="${path}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${X(last.i)}" cy="${Y(last.v)}" r="2.8" fill="${col}"/>
+    </svg>
+    <span class="verdict v-${w.v}">${w.vl}</span>
+  </div>`;
+}).join("");
+
+/* ---- leaderboard ---- */
+const lbMax = Math.max(...LB.map(x=>x.v));
+document.getElementById("lb").innerHTML = LB.map(x=>`
+  <div class="lbrow">
+    <div>
+      <div class="lbname">${x.n}</div>
+      <div class="lbtrack"><div class="lbfill" style="width:${(x.v/lbMax*100).toFixed(1)}%"></div></div>
+    </div>
+    <div class="lbval">${gbp(x.v)}</div>
+  </div>`).join("");
+</script>
+</body>
+</html>

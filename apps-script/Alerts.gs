@@ -532,7 +532,7 @@ function actionAccountKpis_(payload, ctx) {
   const account = alertsAccount_(payload.account);
   const refresh = !!payload.refresh && alertsMayRefresh_(ctx);
   const cache = CacheService.getScriptCache();
-  const key = 'alerts_kpi_' + alertsNorm_(account).replace(/\s/g, '_');
+  const key = alertsKpiKey_(account);
   if (!refresh) {
     const hit = cache.get(key);
     if (hit) {
@@ -630,6 +630,7 @@ function alertsActiveFor_(account) {
  * interval. Without this an eight-account Alerts Centre opens up to 24 workbooks per viewer: the
  * report, the Central Main Sheet and the Wrong Advertising tab, once for every person who looks. */
 function alertsFeedKey_(account) { return 'alerts_feed_' + alertsNorm_(account).replace(/\s/g, '_'); }
+function alertsKpiKey_(account) { return 'alerts_kpi_' + alertsNorm_(account).replace(/\s/g, '_'); }
 
 function alertsAccountFeed_(account, refresh) {
   const key = alertsFeedKey_(account);
@@ -1149,8 +1150,7 @@ function alertsRefresh() {
         puts.push({ metric: c.metric, account: account, period: period, value: c.value });
       });
       try {
-        CacheService.getScriptCache().put('alerts_kpi_' + alertsNorm_(account).replace(/\s/g, '_'),
-          JSON.stringify(kpis), ALERTS_CACHE_SECONDS);
+        CacheService.getScriptCache().put(alertsKpiKey_(account), JSON.stringify(kpis), ALERTS_CACHE_SECONDS);
       } catch (e) { /* oversized payload — the next viewer recomputes */ }
     }
     if (!got.ok) continue;
