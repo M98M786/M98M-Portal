@@ -48,6 +48,7 @@ function mergeActions_() {
     typeof ACTIONS_SIGNALS    !== 'undefined' ? ACTIONS_SIGNALS    : null,
     typeof ACTIONS_STAFFADMIN !== 'undefined' ? ACTIONS_STAFFADMIN : null,
     typeof ACTIONS_ATTENDANCE !== 'undefined' ? ACTIONS_ATTENDANCE : null,
+    typeof ACTIONS_AUDIT      !== 'undefined' ? ACTIONS_AUDIT      : null,
   ];
   groups.forEach(function (g) {
     if (!g) return;
