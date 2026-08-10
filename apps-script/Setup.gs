@@ -125,6 +125,45 @@ function runSubmissionEscalationSweep() {
   catch (e) { logActivity_('trigger', 'ERROR:submissionEscalation', '', '', '', String(e && e.stack || e)); }
 }
 
+/** SETUP-ONLY: approve every seeded staff member at once, with the §4.1 role already on their row.
+ * Editor-run only — never a router action. Approves ONLY the emails seeded from the real staff
+ * list (ROLE_PREFILL): a stranger who self-registered is untouched and still needs a human.
+ * Shift is deliberately left as it stands — §5 says Management assigns the timetable, and
+ * guessing who works which shift would put people on the wrong hours. */
+function bootstrapApproveSeededStaff() {
+  const sh = getPortalDb_(false).getSheetByName('USERS');
+  const rows = sh.getDataRange().getValues();
+  const approved = [], skipped = [], noShift = [];
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    for (let i = 1; i < rows.length; i++) {
+      const email = String(rows[i][0] || '');
+      if (!email) continue;
+      const n = normalizeEmail(email);
+      const seededRole = ROLE_PREFILL[n];
+      if (!seededRole) { if (String(rows[i][5]) !== 'approved') skipped.push(email); continue; }
+      if (String(rows[i][5]) === 'approved') continue;
+      const role = String(rows[i][2] || '') || seededRole;
+      sh.getRange(i + 1, 3).setValue(role);
+      sh.getRange(i + 1, 6).setValue('approved');
+      sh.getRange(i + 1, 8).setValue('bulk approval by owner');
+      approved.push(email + ' -> ' + role);
+      if (!String(rows[i][3] || '').trim()) noShift.push(email);
+      logActivity_('setup', 'BULK_APPROVE', email, 'pending', 'approved', role);
+      notify_(email, 'Welcome to the M98M Portal',
+        'Your access is approved. Role: ' + role + '. Your timetable is set by Management in the Rota screen.', 'approved');
+    }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+
+  const msg = 'APPROVED ' + approved.length + ':\n  ' + approved.join('\n  ') +
+    '\nNot seeded staff, left for a human to decide: ' + (skipped.join(', ') || 'none') +
+    '\nNo shift set yet (no checkpoints until the Rota screen assigns one): ' + (noShift.join(', ') || 'none');
+  Logger.log(msg);
+  return msg;
+}
+
 /** Phase 1 DoD: one-line Anthropic test — proves the key works. Reads key from Script Properties ONLY (RL-2). */
 function testAnthropicKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
