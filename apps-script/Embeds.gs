@@ -59,6 +59,12 @@ const EMBED_TOOLS = [
   { kind: 'tool_recovery', title: 'M98M AliExpress Recovery Agent v1.2',
     roles: ['CS', 'Order Processor'],
     file_hint: 'M98M-AliExpress-Recovery-Agent-v1_0.html' },
+  { kind: 'tool_cpc_keyword', title: 'M98M CPC Keyword Decision Engine',
+    roles: ['Item Lister', 'Listing Manager', 'Advertising Manager'],
+    file_hint: 'M98M-CPC-Keyword-Agent-v3_2.html' },
+  { kind: 'tool_order_ops', title: 'M98M Order Operations',
+    roles: ['Order Processor', 'Team Lead'],
+    file_hint: 'M98M-Order-Ops.html' },
 ];
 
 // ---------- role gate ----------
@@ -348,3 +354,45 @@ const ACTIONS_EMBEDS = {
   toolManifest: [actionToolManifest_, 'any'],
   toolHtml:     [actionToolHtml_, 'any'],   // role gated inside, every open logged
 };
+
+/** SETUP-ONLY: find every tool in Drive by its filename and register it in one go.
+ *
+ * The tools live in the owner's Drive rather than on the public site because they carry M98M's
+ * customer-service playbooks and listing templates — a public URL for them would be a leak that
+ * no lock screen could take back. Upload them (unconverted, as .html) and run this once.
+ *
+ * Safe to re-run: it re-points a kind at whatever file it finds now, and says plainly which
+ * tools it could not find rather than failing the whole batch for one missing file. */
+function bootstrapRegisterTools() {
+  const done = [], missing = [], failed = [];
+
+  EMBED_TOOLS.forEach(function (def) {
+    const name = def.file_hint;
+    let file = null;
+    const byName = DriveApp.getFilesByName(name);
+    if (byName.hasNext()) file = byName.next();
+
+    if (!file) {
+      // Tolerate Drive dropping or changing the extension on upload.
+      const stem = name.replace(/\.html?$/i, '');
+      const all = DriveApp.getFilesByName(stem);
+      if (all.hasNext()) file = all.next();
+    }
+
+    if (!file) { missing.push(name); return; }
+    try {
+      registerTool_(def.kind, file.getId(), 'setup');
+      done.push(def.title + '  ←  ' + file.getName());
+    } catch (e) {
+      failed.push(def.title + ' — ' + String(e && e.message || e));
+    }
+  });
+
+  const msg = 'TOOLS REGISTERED: ' + done.length + '\n' +
+    (done.length ? '  ' + done.join('\n  ') + '\n' : '') +
+    (missing.length ? 'NOT FOUND IN DRIVE (upload these, keeping the .html extension):\n  ' + missing.join('\n  ') + '\n' : '') +
+    (failed.length ? 'COULD NOT REGISTER:\n  ' + failed.join('\n  ') + '\n' : '') +
+    'Anything not registered shows as "not set up yet" on the Tools screen — never an error.';
+  Logger.log(msg);
+  return msg;
+}
