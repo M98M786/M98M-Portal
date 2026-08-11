@@ -272,9 +272,22 @@ function paint() {
 
 function load(force) {
   var host = $('dbBody');
+  // Only show a spinner when there is genuinely nothing to look at. If this screen has been
+  // opened before, it paints the previous figures at once and swaps in the fresh ones when the
+  // backend answers — the stamp line says which of the two you are reading.
+  if (!force && typeof apiCached === 'function' && cacheRead('dashboard', {}) != null) {
+    apiCached('dashboard', {}, function (d, stale) {
+      dbData = d;
+      paint();
+      var s = $('dbStamp');
+      if (s && stale) { s.textContent = s.textContent + ' · updating…'; }
+    }).catch(function () { /* apiCached already fell back to the cached figures */ });
+    return;
+  }
   if (host) host.innerHTML = '<div class="spinner"></div>';
   api(force ? 'refreshDashboard' : 'dashboard').then(function (d) {
     dbData = d;
+    if (typeof cacheWrite === 'function') { cacheWrite('dashboard', {}, d); }
     paint();
   }).catch(function (e) {
     if (host) {

@@ -297,6 +297,56 @@ function api(action, payload){
   });
 }
 
+/* ---- last-answer cache: paint now, refresh underneath -----------------------------------
+   The 2.5s toll above is Google's, not ours, and we cannot remove it. What we can remove is the
+   STARING at a spinner: a screen you have opened before repaints instantly from the last answer
+   it received, then quietly replaces it when the fresh one lands. Read-only screens only —
+   never anything that decides, approves or writes. The key carries the signed-in email, so one
+   person's numbers can never surface under another's login, and profit stripping still happens
+   server-side per role before anything is ever stored here. */
+var CACHE_TTL_MS = 24*60*60*1000;
+function cacheKey(action, payload){
+  var who = (STATE.user && STATE.user.email) || decodeJwt(STATE.idToken||'').email || '?';
+  return 'm98m:' + who + ':' + action + ':' + JSON.stringify(payload||{});
+}
+function cacheRead(action, payload){
+  try{
+    var raw = localStorage.getItem(cacheKey(action,payload));
+    if(!raw) return null;
+    var o = JSON.parse(raw);
+    if(!o || (Date.now() - o.t) > CACHE_TTL_MS) return null;
+    return o.d;
+  }catch(e){ return null; }
+}
+function cacheWrite(action, payload, data){
+  try{ localStorage.setItem(cacheKey(action,payload), JSON.stringify({ t:Date.now(), d:data })); }
+  catch(e){ /* quota or private mode — caching is an optimisation, never a requirement */ }
+}
+function cacheClearAll(){
+  try{
+    var kill = [];
+    for(var i=0;i<localStorage.length;i++){ var k = localStorage.key(i); if(k && k.indexOf('m98m:')===0) kill.push(k); }
+    kill.forEach(function(k){ localStorage.removeItem(k); });
+  }catch(e){}
+}
+
+/* onData(data, isStale) may be called twice: once from cache, once with the truth. */
+function apiCached(action, payload, onData){
+  var had = cacheRead(action, payload);
+  if(had != null){ try{ onData(had, true); }catch(e){} }
+  return api(action, payload).then(function(fresh){
+    cacheWrite(action, payload, fresh);
+    onData(fresh, false);
+    return fresh;
+  }).catch(function(e){
+    // A cached screen stays usable when the network does not: show the error only if we have
+    // nothing at all to show.
+    if(had == null) throw e;
+    toast('Showing the last figures — could not reach the server just now.');
+    return had;
+  });
+}
+
 /* ---- Google Identity Services ---- */
 function initGsi(){
   if(!window.google || !google.accounts || !STATE.config || !STATE.config.oauth_client_id){ return; }
@@ -448,7 +498,7 @@ function fmtPkt(iso, withDate){
 function safeUrl(u){ u=String(u||''); return /^https?:\/\//i.test(u) ? u : ''; }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
-function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} cacheClearAll(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
 /* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
 function boot(){
