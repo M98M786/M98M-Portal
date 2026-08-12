@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M98M — Management Business Overview</title>
+<!-- ============================================================
+  M98M MANAGEMENT OVERVIEW · standalone module for the portal
+  INTEGRATION (for Claude Code):
+   1) Embed as the Management version's "Overview" tab via iframe
+      (sandbox allow-scripts) or mount the <main> sections directly.
+   2) LIVE DATA: call  window.M98M_OVERVIEW.load(payload)  — schema at
+      the bottom of this file — or from the portal shell:
+      iframe.contentWindow.postMessage({type:'M98M_DATA', payload}, '*')
+   3) Until wired, it runs on deterministic demo data modelled exactly
+      on the Sales Analysis sheets (Dashboard tiles + Monthly columns).
+   4) MANAGEMENT-ONLY: this file assumes the portal has already
+      verified a Management/Team-Lead session server-side.
+  ============================================================ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0E16; --panel:#161A25; --panel-2:#1B2130; --panel-3:#232A3B;
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.14);
+  --text:#E9ECF4; --text-2:#9AA3B8; --text-3:#616B82;
+  --gold:#D8B24C; --gold-hi:#F0D68A; --gold-lo:#A8811F;
+  --gold-veil:rgba(216,178,76,.12); --gold-line:rgba(216,178,76,.34);
+  --blue:#4D9CF5; --blue-veil:rgba(77,156,245,.13); --blue-line:rgba(77,156,245,.32);
+  --rose:#F0616D; --rose-veil:rgba(240,97,109,.13); --rose-line:rgba(240,97,109,.32);
+  --amber:#E9A93A; --amber-veil:rgba(233,169,58,.13); --amber-line:rgba(233,169,58,.30);
+  --teal:#3FC2A8; --teal-veil:rgba(63,194,168,.13); --teal-line:rgba(63,194,168,.30);
+  --green:#58BE6C; --green-veil:rgba(88,190,108,.13); --green-line:rgba(88,190,108,.30);
+  --peri:#8E9EF5; --peri-veil:rgba(142,158,245,.13); --peri-line:rgba(142,158,245,.30);
+  --font:"Plus Jakarta Sans",system-ui,sans-serif;
+  --display:"Sora",var(--font);
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --r:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:
+  radial-gradient(1100px 480px at 18% -6%, rgba(216,178,76,.05), transparent 60%),
+  radial-gradient(900px 420px at 85% -4%, rgba(77,156,245,.05), transparent 55%),
+  var(--bg);
+  color:var(--text); font-family:var(--font); font-size:14px; line-height:1.55;
+  -webkit-font-smoothing:antialiased; padding:22px clamp(14px,2.6vw,34px) 60px}
+.num{font-variant-numeric:tabular-nums lining-nums}
+.mono{font-family:var(--mono)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input{font:inherit;color:inherit}
+::selection{background:rgba(77,156,245,.3)}
+
+/* ---------- header ---------- */
+.hdr{display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:18px}
+.mark{width:44px;height:44px;border-radius:12px; position:relative; flex:none;
+  background:radial-gradient(circle at 30% 25%, #232A3B, #10141F 72%);
+  display:grid; place-items:center; font-family:var(--display); font-weight:700; font-size:12px; letter-spacing:.04em;
+  color:transparent; background-clip:padding-box}
+.mark::before{content:""; position:absolute; inset:-1.5px; border-radius:13px; padding:1.5px;
+  background:linear-gradient(135deg,var(--gold-hi),var(--gold-lo) 55%,var(--blue));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude}
+.mark span{background:linear-gradient(135deg,var(--gold-hi),var(--gold));
+  -webkit-background-clip:text; background-clip:text; color:transparent}
+.hdr h1{font-family:var(--display); font-size:20px; font-weight:700; letter-spacing:.01em}
+.hdr .sub{color:var(--text-3); font-size:12px; font-weight:600; margin-top:1px}
+.hdr .spacer{flex:1}
+.demo-badge{font-size:10.5px; font-weight:700; letter-spacing:.08em; color:var(--amber);
+  border:1px solid var(--amber-line); background:var(--amber-veil); padding:4px 10px; border-radius:99px}
+
+/* ---------- date engine ---------- */
+.dates{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:22px;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:10px 12px}
+.seg{display:flex; gap:4px; flex-wrap:wrap}
+.seg button{padding:7px 13px; border-radius:9px; font-weight:700; font-size:12px; color:var(--text-2);
+  border:1px solid transparent; transition:all .16s}
+.seg button:hover{color:var(--text); background:var(--panel-3)}
+.seg button.on{color:var(--gold-hi); background:var(--gold-veil); border-color:var(--gold-line)}
+.custom{display:flex; align-items:center; gap:7px; margin-left:auto; flex-wrap:wrap}
+.custom label{font-size:11px; font-weight:700; color:var(--text-3); letter-spacing:.06em}
+.custom input[type=date]{background:var(--panel-2); border:1px solid var(--line-2); border-radius:8px;
+  padding:6px 9px; font-size:12.5px; color-scheme:dark}
+.custom input[type=date]:focus{outline:none; border-color:var(--blue-line)}
+.btn-p{padding:7px 14px; border-radius:9px; font-weight:700; font-size:12px; color:#241A06;
+  background:linear-gradient(135deg,var(--gold-hi),var(--gold) 55%,var(--gold-lo));
+  box-shadow:0 2px 10px rgba(216,178,76,.28)}
+.range-label{width:100%; font-size:11.5px; color:var(--text-3); font-weight:600; padding:2px 4px 0}
+.range-label b{color:var(--text-2)}
+
+/* ---------- section shells ---------- */
+.sec{margin-bottom:26px}
+.sec-h{display:flex; align-items:baseline; gap:12px; margin-bottom:12px; flex-wrap:wrap}
+.sec-h h2{font-family:var(--display); font-size:15px; font-weight:700; letter-spacing:.02em}
+.sec-h .hint{font-size:11.5px; color:var(--text-3); font-weight:600}
+.sec-h .tools{margin-left:auto; display:flex; gap:6px}
+.card{background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line);
+  border-radius:var(--r); padding:16px}
+.card:hover{border-color:var(--line-2)}
+.grid{display:grid; gap:14px}
+
+/* ---------- KPI hero ---------- */
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:12px}
+.kpi{background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line);
+  border-radius:var(--r); padding:14px 15px; position:relative; overflow:hidden}
+.kpi::after{content:""; position:absolute; left:0; right:0; top:0; height:2px; background:var(--tone,var(--gold)); opacity:.65}
+.kpi-l{font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text-3)}
+.kpi-v{font-family:var(--display); font-size:clamp(19px,1.8vw,24px); font-weight:700; margin-top:6px}
+.kpi-v.gold{background:linear-gradient(120deg,var(--gold-lo),var(--gold-hi) 40%,var(--gold) 60%,var(--gold-lo));
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:sheen 3s ease .3s 1 both}
+@keyframes sheen{from{background-position:130% 0}to{background-position:0 0}}
+.kpi-d{font-size:11.5px; font-weight:700; margin-top:5px}
+.kpi-d.up{color:var(--green)} .kpi-d.dn{color:var(--rose)} .kpi-d.mut{color:var(--text-3)}
+.kpi-s{font-size:10.5px; color:var(--text-3); font-weight:600; margin-top:2px}
+</style>
+
+<style>
+.ll-tools{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:11px}
+.ll-tools input{flex:1;min-width:200px;background:var(--panel);border:1px solid var(--line-2);border-radius:10px;padding:9px 13px;font-size:12.5px;color:var(--text)}
+.ll-tools input:focus{outline:none;border-color:var(--gold-line)}
+.ll{width:100%;border-collapse:collapse;font-size:12.5px;min-width:900px}
+.ll th{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:9px 11px;border-bottom:1px solid var(--line-2);font-weight:800;white-space:nowrap}
+.ll td{padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ll tr:last-child td{border-bottom:0}
+.ll tbody tr:hover{background:rgba(216,178,76,.05)}
+.campchip{padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:800;background:var(--blue-veil);color:var(--blue)}
+.campSel{background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:5px 8px;font-size:11px;color:var(--text)}
+.primary-tag{font-size:9.5px;letter-spacing:.1em;font-weight:800;color:var(--gold-hi);background:var(--gold-veil);border:1px solid var(--gold-line);padding:3px 10px;border-radius:99px}
+</style>
+</head>
+<body>
+<style>
+/* ---------- charts ---------- */
+.chart-wrap{position:relative}
+.chart-wrap svg{display:block; width:100%; height:auto}
+.legend{display:flex; gap:14px; flex-wrap:wrap; font-size:11px; font-weight:700; color:var(--text-3); margin-top:8px}
+.legend i{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:6px; vertical-align:0}
+.axis{font-size:9.5px; fill:var(--text-3); font-family:var(--mono)}
+.gridln{stroke:rgba(255,255,255,.05)}
+
+/* ---------- profitability ---------- */
+.mode{display:flex; gap:4px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:3px}
+.mode button{padding:6px 13px; border-radius:8px; font-weight:700; font-size:12px; color:var(--text-2)}
+.mode button.on{color:#241A06; background:linear-gradient(135deg,var(--gold-hi),var(--gold))}
+.acct-chips{display:flex; gap:6px; flex-wrap:wrap}
+.acct-chips button{padding:6px 12px; border-radius:99px; font-weight:700; font-size:12px; color:var(--text-2);
+  border:1px solid var(--line-2); transition:all .15s}
+.acct-chips button.on{color:var(--blue); border-color:var(--blue-line); background:var(--blue-veil)}
+.split{display:grid; grid-template-columns:1.6fr 1fr; gap:14px}
+@media(max-width:1000px){.split{grid-template-columns:1fr}}
+.rank{display:flex; flex-direction:column; gap:8px}
+.rank-row{display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:11px;
+  background:var(--panel-2); border:1px solid var(--line)}
+.rank-row.top{background:linear-gradient(135deg,var(--gold-veil),transparent); border-color:var(--gold-line)}
+.rank-n{font-family:var(--display); font-weight:700; font-size:13px; width:22px; color:var(--text-3); text-align:center}
+.rank-row.top .rank-n{color:var(--gold-hi)}
+.rank-name{font-weight:700; font-size:13px}
+.rank-bar{flex:1; height:7px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden; min-width:60px}
+.rank-bar i{display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,var(--gold-lo),var(--gold-hi))}
+.rank-row:not(.top) .rank-bar i{background:linear-gradient(90deg,#2E5E96,var(--blue))}
+.rank-v{font-weight:700; font-size:12.5px; min-width:74px; text-align:right}
+.rank-d{font-size:11px; font-weight:700; min-width:56px; text-align:right}
+.up{color:var(--green)} .dn{color:var(--rose)}
+.tiles-mini{display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:9px; margin-top:12px}
+.tile{background:var(--panel-2); border:1px solid var(--line); border-radius:11px; padding:10px 11px}
+.tile b{display:block; font-size:9.5px; letter-spacing:.08em; color:var(--text-3); font-weight:700; text-transform:uppercase}
+.tile span{display:block; font-family:var(--display); font-weight:700; font-size:15.5px; margin-top:4px}
+
+/* ---------- today strip ---------- */
+.today{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px}
+.mini-rows{display:flex; flex-direction:column; gap:6px; margin-top:9px}
+.mini-row{display:flex; align-items:center; gap:9px; font-size:12.5px}
+.mini-row .n{width:92px; font-weight:700; color:var(--text-2); font-size:11.5px}
+.mini-row .b{flex:1; height:6px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden}
+.mini-row .b i{display:block; height:100%; border-radius:99px}
+.mini-row .v{font-weight:700; min-width:66px; text-align:right}
+
+/* ---------- staff ---------- */
+.hero-staff{background:linear-gradient(135deg,var(--gold-veil),transparent 60%); border:1px solid var(--gold-line);
+  border-radius:var(--r); padding:16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap}
+.hero-ava{width:52px;height:52px;border-radius:50%; flex:none; display:grid; place-items:center;
+  font-family:var(--display); font-weight:700; font-size:16px; color:#241A06;
+  background:linear-gradient(135deg,var(--gold-hi),var(--gold-lo)); box-shadow:0 4px 18px rgba(216,178,76,.35)}
+.hero-staff h3{font-family:var(--display); font-size:16px}
+.hero-staff .why{font-size:12px; color:var(--text-2); font-weight:600; margin-top:2px}
+.hero-stats{margin-left:auto; display:flex; gap:18px; flex-wrap:wrap}
+.hstat b{display:block; font-size:9.5px; letter-spacing:.08em; color:var(--gold); font-weight:700; text-transform:uppercase}
+.hstat span{font-family:var(--display); font-weight:700; font-size:16px}
+.staff-table{width:100%; border-collapse:collapse; font-size:12.5px; min-width:860px}
+.staff-table th{font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-3);
+  text-align:left; padding:9px 10px; border-bottom:1px solid var(--line-2); font-weight:700; white-space:nowrap}
+.staff-table td{padding:10px; border-bottom:1px solid var(--line); vertical-align:middle; white-space:nowrap}
+.staff-table tr:last-child td{border-bottom:0}
+.staff-table tbody tr:hover{background:rgba(77,156,245,.05)}
+.scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+.role{font-size:10.5px; color:var(--text-3); font-weight:600}
+.trend-up{color:var(--green); font-weight:700} .trend-dn{color:var(--rose); font-weight:700}
+.va{max-width:230px; white-space:normal; font-size:11.5px; color:var(--text-2)}
+.pillrate{padding:3px 9px; border-radius:99px; font-weight:700; font-size:11px}
+.pr-g{background:var(--green-veil); color:var(--green)} .pr-a{background:var(--amber-veil); color:var(--amber)} .pr-r{background:var(--rose-veil); color:var(--rose)}
+
+/* ---------- adv / returns / health / sops ---------- */
+.gauge-wrap{display:flex; align-items:center; gap:18px; flex-wrap:wrap}
+.g-side b{display:block; font-size:10px; letter-spacing:.08em; color:var(--text-3); text-transform:uppercase; font-weight:700}
+.g-side span{font-family:var(--display); font-weight:700; font-size:18px}
+.cases-table{width:100%; border-collapse:collapse; font-size:12.5px; min-width:720px}
+.cases-table th{font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-3); text-align:left; padding:8px 10px; border-bottom:1px solid var(--line-2); font-weight:700}
+.cases-table td{padding:9px 10px; border-bottom:1px solid var(--line)}
+.cases-table tr:last-child td{border-bottom:0}
+.tag{padding:2px 9px; border-radius:99px; font-weight:700; font-size:10.5px}
+.tag.inad{background:var(--rose-veil); color:var(--rose)} .tag.ret{background:var(--amber-veil); color:var(--amber)}
+.tag.open{background:var(--blue-veil); color:var(--blue)} .tag.done{background:var(--green-veil); color:var(--green)}
+.health{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px}
+.h-card{background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:13px}
+.h-card .hn{display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px}
+.h-dot{width:9px;height:9px;border-radius:50%}
+.h-ok{background:var(--green); box-shadow:0 0 8px rgba(88,190,108,.5)}
+.h-warn{background:var(--amber); box-shadow:0 0 8px rgba(233,169,58,.5)}
+.h-bad{background:var(--rose); box-shadow:0 0 8px rgba(240,97,109,.5)}
+.h-rows{margin-top:9px; display:flex; flex-direction:column; gap:5px; font-size:11.5px}
+.h-rows div{display:flex; justify-content:space-between; color:var(--text-2)}
+.h-rows b{color:var(--text); font-weight:700}
+.sops-list{display:flex; flex-direction:column; gap:8px}
+.sop-row{display:flex; gap:12px; align-items:center; padding:10px 12px; border-radius:11px; background:var(--panel-2); border:1px solid var(--line); flex-wrap:wrap}
+.sop-date{font-family:var(--mono); font-size:11px; color:var(--text-3); min-width:74px}
+.sop-dept{padding:2px 9px; border-radius:99px; font-size:10.5px; font-weight:700; background:var(--peri-veil); color:var(--peri)}
+.sop-t{font-weight:700; font-size:12.5px; flex:1; min-width:180px}
+.sop-by{font-size:11px; color:var(--text-3); font-weight:600}
+.ack{font-size:11px; font-weight:700}
+.empty{padding:18px; text-align:center; color:var(--text-3); font-size:12.5px; font-weight:600}
+footer{margin-top:30px; font-size:11px; color:var(--text-3); text-align:center; font-weight:600}
+</style>
+
+<header class="hdr">
+  <div class="mark"><span>M98M</span></div>
+  <div><h1>Business Overview</h1><div class="sub">Management · all accounts · confidential</div></div>
+  <div class="spacer"></div>
+  <span class="demo-badge" id="dataBadge">DEMO DATA — awaiting portal feed</span>
+</header>
+
+<div class="dates">
+  <div class="seg" id="presets"></div>
+  <div class="custom">
+    <label>FROM</label><input type="date" id="dFrom">
+    <label>TO</label><input type="date" id="dTo">
+    <button class="btn-p" onclick="applyCustom()">Apply</button>
+  </div>
+  <div class="range-label" id="rangeLabel"></div>
+</div>
+
+
+<div class="sec" style="margin-bottom:16px">
+ <div style="display:flex;flex-direction:column;gap:10px">
+  <div style="display:flex;gap:12px;align-items:flex-start;border:1px solid var(--rose-line);background:linear-gradient(135deg,var(--rose-veil),transparent 65%);border-radius:var(--r);padding:12px 15px;flex-wrap:wrap">
+   <span style="font-size:16px">🔻</span><div><b style="font-size:13px">WENT NEGATIVE YESTERDAY — LED strip lights 5m · Sir Hasib · <span class="mono" style="font-size:11px">336704118820</span></b>
+   <div style="font-size:12px;color:var(--text-2)">Actual profit <b style="color:var(--rose)">−£3.42</b> · Dynamic ad-eat 17% of price → SOP says move up to Simple General · one-tap actions below</div></div>
+   <div style="margin-left:auto;display:flex;gap:7px"><button class="btn-p" onclick="this.closest('div[style]').style.opacity=.55">Open record</button><button class="btn-p" style="background:linear-gradient(135deg,#8CC2FA,var(--blue));color:#0E1B2E" onclick="this.closest('div[style]').style.opacity=.55">Flag to Zain</button></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+   <span class="primary-tag">APPROVALS WAITING</span>
+   <span style="font-size:12px;font-weight:700;color:var(--text-2)">Hunted products <b style="color:var(--gold-hi)">3</b> · Potential-CPC <b style="color:var(--gold-hi)">2</b> · Task submissions <b style="color:var(--gold-hi)">5</b> · New staff <b style="color:var(--gold-hi)">0</b></span>
+  </div>
+ </div>
+</div>
+<section class="sec">
+  <div class="sec-h"><h2>Collective — all accounts</h2><span class="hint" id="kpiHint"></span></div>
+  <div class="kpis" id="kpis"></div>
+</section>
+
+<section class="sec">
+  <div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint">live pulse per account</span></div>
+  <div class="today">
+    <div class="card"><b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">TODAY'S SALES — ALL ACCOUNTS</b><div class="mini-rows" id="todaySales"></div></div>
+    <div class="card"><b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">YESTERDAY'S PROFIT — PER ACCOUNT</b><div class="mini-rows" id="ydayProfit"></div></div>
+    <div class="card"><b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">YESTERDAY'S AD SPEND — PER ACCOUNT</b><div class="mini-rows" id="ydayAds"></div></div>
+  </div>
+</section>
+
+
+<section class="sec">
+  <div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL'S PRIMARY PURPOSE</span><span class="hint">profit · sale price · AliExpress cost — visible to Management, Team Lead &amp; Zain only</span></div>
+  <div class="ll-tools"><input placeholder="Search by item ID or title…" oninput="L_Q=this.value.toLowerCase();renderListings()"><div class="acct-chips" id="llChips" style="margin:0"></div></div>
+  <div class="card scroll"><table class="ll"><thead><tr><th>Listing</th><th>Account</th><th>Sale price</th><th>AliExpress cost</th><th>Order earning</th><th>Profit</th><th>ROI ÷ Ali</th><th>Margin</th><th>Campaign</th></tr></thead><tbody id="llBody"></tbody></table></div>
+</section>
+<section class="sec">
+  <div class="sec-h">
+    <h2>Profitability</h2><span class="hint">ROI &amp; margin computed on AliExpress spend</span>
+    <div class="tools"><div class="mode"><button class="on" id="mAll" onclick="setMode('all')">All accounts</button><button id="mAcct" onclick="setMode('acct')">Account to account</button></div></div>
+  </div>
+  <div id="acctChips" class="acct-chips" style="display:none; margin-bottom:12px"></div>
+  <div class="split">
+    <div class="card">
+      <div class="chart-wrap" id="profitChart"></div>
+      <div class="legend" id="profitLegend"></div>
+    </div>
+    <div class="card" id="rightPanel"></div>
+  </div>
+  <div class="tiles-mini" id="tileRow"></div>
+</section>
+
+<section class="sec">
+  <div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">judged against the SOP main target — ROAS ≥ 5</span></div>
+  <div class="split">
+    <div class="card"><div class="chart-wrap" id="advChart"></div><div class="legend" id="advLegend"></div></div>
+    <div class="card"><div class="gauge-wrap" id="roasGauge"></div><div class="mini-rows" id="advPerAcct" style="margin-top:14px"></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-h"><h2>Returns, refunds &amp; cases</h2><span class="hint" id="retHint"></span></div>
+  <div class="split">
+    <div class="card"><div class="mini-rows" id="retPerAcct"></div></div>
+    <div class="card scroll"><table class="cases-table" id="casesTable"></table></div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-h"><h2>Account health</h2><span class="hint">sample values — binds to the Health Tracker file on arrival</span></div>
+  <div class="health" id="healthGrid"></div>
+</section>
+
+<section class="sec">
+  <div class="sec-h"><h2>Staff performance</h2><span class="hint">management excluded · hours + value addition + output</span>
+    <div class="tools"><div class="mode" id="staffMode">
+      <button class="on" data-p="day" onclick="setStaffP('day',this)">Day</button>
+      <button data-p="week" onclick="setStaffP('week',this)">Week</button>
+      <button data-p="month" onclick="setStaffP('month',this)">Month</button>
+    </div></div>
+  </div>
+  <div class="hero-staff" id="topStaff" style="margin-bottom:12px"></div>
+  <div class="card scroll"><table class="staff-table" id="staffTable"></table></div>
+</section>
+
+
+<div class="grid" style="grid-template-columns:1.4fr 1fr; margin-bottom:26px">
+ <div class="card"><b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">AI DAILY INSIGHT — SHIFT END</b>
+  <div style="font-size:12.5px;color:var(--text-2);margin-top:9px;line-height:1.7">Pending across staff: <b style="color:var(--text)">11 tasks</b> (3 overdue — 2 on Umar, 1 on Zain). <b style="color:var(--amber)">Hunting produced zero submissions today</b> — Irfan's first blank day in 3 weeks. Zeeshan trending down: output −18% this week vs last. ABRT is the fleet's weak spot: ROAS 3.8 and the negative-profit LED item — both trace to the Dynamic-tier ad-eat pattern already in your Learnings ("cheap-lane ads eat margin — gate at 15%").</div></div>
+ <div class="card"><b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">💡 IDEAS INBOX — NEW</b>
+  <div style="font-size:12.5px;margin-top:9px"><b>Wahab:</b> "Batch tracking paste — one textarea, split by line, fills all rows." <span style="color:var(--text-3)">· yesterday</span></div>
+  <div style="font-size:12.5px;margin-top:7px"><b>Umar:</b> "Auto-copy competitor title angles into the CPC sheet." <span style="color:var(--text-3)">· 2 days ago</span></div></div>
+</div>
+<section class="sec">
+  <div class="sec-h"><h2>SOPs &amp; instructions issued in this period</h2><span class="hint" id="sopHint"></span></div>
+  <div class="sops-list" id="sopsList"></div>
+</section>
+
+<footer>M98M LTD · Management Overview module · integrates into the portal's Management version · charts are pure SVG (lossless at any resolution)</footer>
+<script>
+/* ================= DATA ENGINE (demo, deterministic; replaced by portal feed) ================= */
+const ACCOUNTS=[
+ {n:"Saif Bhai", base:470, c:"#4D9CF5"},
+ {n:"Azhar Bhai", base:520, c:"#D8B24C"},
+ {n:"Sir Hasib", base:390, c:"#3FC2A8"},
+ {n:"Hafiza Sadia", base:340, c:"#8E9EF5"},
+ {n:"ABRT", base:300, c:"#EE8449"},
+ {n:"Amna Baji", base:260, c:"#F0616D"}
+];
+function rng(seed){let a=seed>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function hash(s){let h=9;for(const ch of s)h=Math.imul(h^ch.charCodeAt(0),387420489);return h>>>0}
+const DAYS=75, MS=86400000, today=new Date(); today.setHours(0,0,0,0);
+const dayKey=d=>d.toISOString().slice(0,10);
+const SERIES={};
+ACCOUNTS.forEach(a=>{
+  const r=rng(hash(a.n)); const arr=[];
+  for(let i=DAYS-1;i>=0;i--){
+    const d=new Date(today-i*MS); const wk=[0,6].includes(d.getDay())?1.14:1;
+    const sold=+(a.base*wk*(0.72+r()*0.62)).toFixed(2);
+    const ali=+(sold*(0.36+r()*0.06)).toFixed(2);
+    const ads=+(sold*(0.20+r()*0.11)).toFixed(2);
+    const waste=+(ads*(0.12+r()*0.16)).toFixed(2);
+    const earning=sold*0.787;
+    let profit=+(earning-ali-ads-(r()*8)).toFixed(2);
+    if(r()<0.05) profit=+(profit-25-r()*20).toFixed(2); // occasional bad day
+    const returns=r()<0.16?+(6+r()*22).toFixed(2):0;
+    const orders=Math.max(3,Math.round(sold/9.7));
+    arr.push({d, sold, ali, ads, waste, profit:+(profit-returns).toFixed(2), returns, orders});
+  }
+  SERIES[a.n]=arr;
+});
+const STAFF=[
+ {n:"Muhammad Umar", r:"Item Lister", f:{listed:[4,9],revisions:[1,4],approved:[3,8]}},
+ {n:"Hamza Mumtaz", r:"Listing Manager", f:{keywords:[3,7],approvalsGiven:[4,10],listed:[1,3]}},
+ {n:"Irfan Hassan", r:"Product Hunter", f:{hunted:[3,8],approved:[1,5]}},
+ {n:"Zain", r:"Advertising", f:{campaigns:[3,9],reviews:[6,14]}},
+ {n:"Husnain Naeem", r:"Customer Service", f:{replies:[10,26],cases:[1,5]}},
+ {n:"Wahab", r:"Order Processor", f:{tracking:[14,34],rechecks:[2,4]}},
+ {n:"Zeeshan", r:"Order Processor", f:{orders:[12,30],rechecks:[2,4]}},
+ {n:"Rana Noman", r:"Order Processor", f:{orders:[12,28],wrongFound:[0,2]}},
+ {n:"Yousaf Bhai", r:"Team Lead", f:{hunted:[1,4],pricing:[4,10]}},
+ {n:"Ubaid Kaleem", r:"Pricing", f:{repriced:[6,16],reviews:[2,6]}}
+];
+const VAS=["Rebuilt variation tables on 3 weak listings","Cleared the full recheck backlog before 9 PM","Negotiated faster supplier on 2 SKUs","Wrote fresh keyword sets for winter lane","Closed 4 INAD cases without refunds","Found duplicate-campaign fee leak","Repriced 12 items to hold rank","Cut £18 daily ad waste on Testing tier"];
+STAFF.forEach(s=>{const r=rng(hash(s.n)); s.series=[];
+  for(let i=DAYS-1;i>=0;i--){const day={hours:+(6.4+r()*2.8).toFixed(1)}; let out=0;
+    for(const k in s.f){const [a,b]=s.f[k]; const v=Math.round(a+r()*(b-a)); day[k]=v; out+=v}
+    day.out=out; s.series.push(day)}
+  s.va=VAS[hash(s.n)%VAS.length]; s.rate=Math.round(68+rng(hash(s.n+"r"))()*30);
+});
+const SOPS=[
+ {d:-1, dept:"Advertising", t:"Testing wastage cap reminder — £3 by 9 PM", by:"Zaid", ack:100},
+ {d:-2, dept:"Listing", t:"Winter lane titles: no 'Waterproof' without IP rating", by:"Hasib", ack:90},
+ {d:-4, dept:"Order Processing", t:"Variation double-check before AliExpress payment", by:"Fasieh", ack:100},
+ {d:-6, dept:"Customer Service", t:"INAD: photo evidence before any refund", by:"Zaid", ack:80},
+ {d:-9, dept:"Hunting", t:"Priority-campaign items: min £8 sale price", by:"Hasib", ack:100},
+ {d:-13, dept:"ALL", t:"2-hourly report field update — value addition required", by:"Zaid", ack:70},
+ {d:-24, dept:"Advertising", t:"Fee gates enforced: 7% above £20, 5% above £30", by:"Hasib", ack:100}
+];
+const CASE_REASONS=["Doesn't fit","Arrived damaged","Not as described","Changed mind","Wrong item sent","Quality not adequate"];
+const CASES=[]; ACCOUNTS.forEach(a=>{const r=rng(hash(a.n+"c"));
+  for(let i=0;i<DAYS;i++){ if(r()<0.10){ CASES.push({d:new Date(today-i*MS), acct:a.n,
+    type:r()<0.42?"INAD":"Return", item:["Vacuum bags 6-pack","MagSafe case","Head torch","Posture belt","Bike lights","Pet clippers"][Math.floor(r()*6)],
+    reason:CASE_REASONS[Math.floor(r()*6)], refund:+(4+r()*22).toFixed(2), open:r()<0.3})}}});
+const HEALTH=[
+ {a:"Saif Bhai",s:"ok",inad:"0.4%",late:"1.1%",fb:"99.2%",pLDR:"1.3%",pINAD:"0.5%"},
+ {a:"Azhar Bhai",s:"ok",inad:"0.6%",late:"1.4%",fb:"98.8%",pLDR:"1.5%",pINAD:"0.6%"},
+ {a:"Sir Hasib",s:"warn",inad:"1.2%",late:"2.6%",fb:"98.1%",pLDR:"2.9%",pINAD:"1.3%"},
+ {a:"Hafiza Sadia",s:"ok",inad:"0.5%",late:"1.0%",fb:"99.0%",pLDR:"1.2%",pINAD:"0.5%"},
+ {a:"ABRT",s:"warn",inad:"1.0%",late:"2.2%",fb:"98.4%",pLDR:"2.4%",pINAD:"1.1%"},
+ {a:"Amna Baji",s:"ok",inad:"0.3%",late:"0.9%",fb:"99.4%",pLDR:"1.0%",pINAD:"0.4%"}
+];
+
+/* ================= RANGE ENGINE ================= */
+let R={a:null,b:null,label:""}, MODE="all", ACCT=ACCOUNTS[0].n, STAFF_P="week";
+const PRESETS=[["Today",0,0],["Yesterday",1,1],["This week",null,"tw"],["Last week",null,"lw"],["This month",null,"tm"],["Last month",null,"lm"]];
+function monday(d){const x=new Date(d); const k=(x.getDay()+6)%7; x.setDate(x.getDate()-k); return x}
+function setPreset(name){
+  let a,b=new Date(today);
+  if(name==="Today"){a=new Date(today)}
+  else if(name==="Yesterday"){a=new Date(today-MS); b=new Date(today-MS)}
+  else if(name==="This week"){a=monday(today)}
+  else if(name==="Last week"){b=new Date(monday(today)-MS); a=new Date(+b-6*MS)}
+  else if(name==="This month"){a=new Date(today.getFullYear(),today.getMonth(),1)}
+  else if(name==="Last month"){a=new Date(today.getFullYear(),today.getMonth()-1,1); b=new Date(today.getFullYear(),today.getMonth(),0)}
+  R={a,b,label:name}; document.querySelectorAll('#presets button').forEach(x=>x.classList.toggle('on',x.textContent===name));
+  document.getElementById('dFrom').value=dayKey(a); document.getElementById('dTo').value=dayKey(b);
+  renderAll();
+}
+function applyCustom(){const a=new Date(document.getElementById('dFrom').value), b=new Date(document.getElementById('dTo').value);
+  if(isNaN(a)||isNaN(b)||a>b) return; a.setHours(0,0,0,0); b.setHours(0,0,0,0);
+  R={a,b,label:"Custom"}; document.querySelectorAll('#presets button').forEach(x=>x.classList.remove('on')); renderAll()}
+function inR(d,a,b){return d>=a&&d<=b}
+function prevRange(){const len=Math.round((R.b-R.a)/MS)+1; return {a:new Date(+R.a-len*MS), b:new Date(+R.a-MS)}}
+function monthAgoRange(){return {a:new Date(R.a.getFullYear(),R.a.getMonth()-1,R.a.getDate()), b:new Date(R.b.getFullYear(),R.b.getMonth()-1,R.b.getDate())}}
+function sum(acct,f,a,b){let t=0; const list=acct?[acct]:ACCOUNTS.map(x=>x.n);
+  list.forEach(n=>SERIES[n].forEach(p=>{if(inR(p.d,a,b))t+=p[f]})); return t}
+const GBP=v=>"£"+(+v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+const GBP0=v=>"£"+Math.round(v).toLocaleString("en-GB");
+const pc=v=>(v*100).toFixed(1)+"%";
+function delta(cur,prev){if(!prev)return{t:"—",c:"mut"};const d=(cur-prev)/Math.abs(prev)*100;
+  return{t:(d>=0?"▲ +":"▼ ")+d.toFixed(1)+"%", c:d>=0?"up":"dn"}}
+
+/* ================= SVG CHART HELPERS (lossless resolution) ================= */
+function areaChart(el, series, colors, labels){
+  const W=720,H=240,P={l:44,r:10,t:14,b:26}; const days=[];
+  for(let d=new Date(R.a);d<=R.b;d=new Date(+d+MS))days.push(new Date(d));
+  const data=series.map(fn=>days.map(fn));
+  const max=Math.max(10,...data.flat())*1.12, min=Math.min(0,...data.flat());
+  const X=i=>P.l+(W-P.l-P.r)*(days.length===1?0.5:i/(days.length-1));
+  const Y=v=>P.t+(H-P.t-P.b)*(1-(v-min)/(max-min));
+  let g="";
+  for(let k=0;k<=4;k++){const v=min+(max-min)*k/4, y=Y(v);
+    g+=`<line class="gridln" x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}"/><text class="axis" x="${P.l-6}" y="${y+3}" text-anchor="end">${GBP0(v)}</text>`}
+  const paths=data.map((arr,si)=>{
+    const pts=arr.map((v,i)=>`${X(i)},${Y(v)}`).join(" ");
+    const area=`M${X(0)},${Y(0)} L${arr.map((v,i)=>X(i)+","+Y(v)).join(" L")} L${X(arr.length-1)},${Y(0)} Z`;
+    return `<path d="${area}" fill="${colors[si]}" opacity="0.10"/>
+      <polyline points="${pts}" fill="none" stroke="${colors[si]}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+      ${arr.map((v,i)=>days.length<=16?`<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${colors[si]}"/>`:"").join("")}`;
+  }).join("");
+  const step=Math.ceil(days.length/8);
+  const xlab=days.map((d,i)=>i%step?"":`<text class="axis" x="${X(i)}" y="${H-8}" text-anchor="middle">${d.getDate()}/${d.getMonth()+1}</text>`).join("");
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${paths}${xlab}</svg>`;
+}
+function gauge(el, roas){
+  const ok=roas>=5, col=ok?"var(--green)":(roas>=4?"var(--amber)":"var(--rose)");
+  const frac=Math.min(1,roas/8), a0=-Math.PI, a1=-Math.PI+Math.PI*frac;
+  const cx=80,cy=84,r=62;
+  const arc=(s,e,c,w,o)=>{const x1=cx+r*Math.cos(s),y1=cy+r*Math.sin(s),x2=cx+r*Math.cos(e),y2=cy+r*Math.sin(e);
+    return `<path d="M${x1},${y1} A${r},${r} 0 ${e-s>Math.PI?1:0} 1 ${x2},${y2}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" opacity="${o||1}"/>`}
+  el.innerHTML=`<svg viewBox="0 0 160 100" style="width:170px">${arc(-Math.PI,0,"rgba(255,255,255,.08)",13)}
+    ${arc(a0,Math.max(a0+0.01,a1),col,13)}
+    <text x="80" y="72" text-anchor="middle" style="font:700 21px Sora;fill:${col}">${roas.toFixed(1)}</text>
+    <text x="80" y="90" text-anchor="middle" class="axis">DASHBOARD ROAS · TARGET ≥ 5</text></svg>
+    <div class="g-side"><div><b>Ad spend (range)</b><span class="num" id="gSpend"></span></div>
+    <div style="margin-top:9px"><b>Ad waste inside</b><span class="num" id="gWaste" style="color:var(--amber)"></span></div>
+    <div style="margin-top:9px"><b>TACoS</b><span class="num" id="gTacos"></span></div></div>`;
+}
+function miniRows(el, rows, color, fmt){
+  const max=Math.max(...rows.map(r=>Math.abs(r.v)),1);
+  el.innerHTML=rows.map(r=>{const c=typeof color==="function"?color(r):color;
+    return `<div class="mini-row"><span class="n">${r.n}</span><span class="b"><i style="width:${Math.abs(r.v)/max*100}%;background:${c}"></i></span><span class="v num" style="color:${r.v<0?'var(--rose)':'var(--text)'}">${fmt(r.v)}</span></div>`}).join("");
+}
+
+/* ================= RENDER ================= */
+function renderAll(){
+  const days=Math.round((R.b-R.a)/MS)+1;
+  document.getElementById('rangeLabel').innerHTML=`Showing <b>${R.label}</b> — ${R.a.toDateString().slice(4)} → ${R.b.toDateString().slice(4)} (${days} day${days>1?"s":""}) · compared with the previous ${days} day${days>1?"s":""} and the same window last month`;
+  const P=prevRange(), M=monthAgoRange();
+  /* KPIs collective */
+  const acct=null;
+  const F=f=>sum(acct,f,R.a,R.b), Fp=f=>sum(acct,f,P.a,P.b), Fm=f=>sum(acct,f,M.a,M.b);
+  const sold=F("sold"), profit=F("profit"), ali=F("ali"), ads=F("ads"), waste=F("waste"), rets=F("returns");
+  const margin=sold?profit/sold:0, roi=ali?profit/ali:0;
+  const K=[
+   {l:"Sold", v:GBP0(sold), d:delta(sold,Fp("sold")), s:"vs prev "+delta(sold,Fm("sold")).t+" vs last month", tone:"var(--blue)"},
+   {l:"Actual Profit", v:GBP(profit), d:delta(profit,Fp("profit")), s:"vs prev · "+delta(profit,Fm("profit")).t+" vs last month", tone:"var(--gold)", gold:1},
+   {l:"AliExpress Cost", v:GBP0(ali), d:delta(ali,Fp("ali")), s:"supplier spend", tone:"var(--teal)"},
+   {l:"All Ads incl VAT", v:GBP0(ads), d:delta(ads,Fp("ads")), s:"waste inside: "+GBP(waste), tone:"var(--amber)"},
+   {l:"Returns", v:GBP(rets), d:delta(rets,Fp("returns")), s:"period + old refunds", tone:"var(--rose)", badUp:1},
+   {l:"Margin", v:pc(margin), d:{t:"on sold",c:"mut"}, s:"profit ÷ sold", tone:"var(--peri)"},
+   {l:"ROI on AliExpress", v:pc(roi), d:{t:"profit ÷ Ali cost",c:"mut"}, s:"your gate metric", tone:"var(--green)"}
+  ];
+  document.getElementById('kpis').innerHTML=K.map(k=>`<div class="kpi" style="--tone:${k.tone}">
+    <div class="kpi-l">${k.l}</div><div class="kpi-v num ${k.gold?"gold":""}">${k.v}</div>
+    <div class="kpi-d ${k.badUp?(k.d.c==="up"?"dn":k.d.c==="dn"?"up":"mut"):k.d.c}">${k.d.t}</div><div class="kpi-s">${k.s}</div></div>`).join("");
+  document.getElementById('kpiHint').textContent=`${R.label} · every figure recalculates with the date engine`;
+  /* today strip */
+  miniRows(document.getElementById('todaySales'), ACCOUNTS.map(a=>({n:a.n, v:SERIES[a.n][DAYS-1].sold, c:a.c})), r=>ACCOUNTS.find(x=>x.n===r.n).c, GBP0);
+  miniRows(document.getElementById('ydayProfit'), ACCOUNTS.map(a=>({n:a.n, v:SERIES[a.n][DAYS-2].profit})), r=>r.v<0?"var(--rose)":"linear-gradient(90deg,var(--gold-lo),var(--gold-hi))", GBP);
+  miniRows(document.getElementById('ydayAds'), ACCOUNTS.map(a=>({n:a.n, v:SERIES[a.n][DAYS-2].ads})), "linear-gradient(90deg,#2E5E96,var(--blue))", GBP);
+  renderProfit(); renderAdv(); renderReturns(); renderHealth(); renderStaff(); renderSops();
+}
+function setMode(m){MODE=m; document.getElementById('mAll').classList.toggle('on',m==='all');
+  document.getElementById('mAcct').classList.toggle('on',m==='acct');
+  document.getElementById('acctChips').style.display=m==='acct'?'flex':'none'; renderProfit()}
+function renderProfit(){
+  const chips=document.getElementById('acctChips');
+  if(!chips.dataset.done){chips.innerHTML=ACCOUNTS.map(a=>`<button class="${a.n===ACCT?'on':''}" onclick="ACCT='${a.n}';renderProfit();this.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.textContent==='${a.n}'))">${a.n}</button>`).join(""); chips.dataset.done=1}
+  const P=prevRange(), M=monthAgoRange(), right=document.getElementById('rightPanel');
+  if(MODE==='all'){
+    areaChart(document.getElementById('profitChart'), [i=>{let t=0;ACCOUNTS.forEach(a=>{const p=SERIES[a.n].find(x=>+x.d===+i);if(p)t+=p.profit});return t}], ["#D8B24C"]);
+    document.getElementById('profitLegend').innerHTML=`<span><i style="background:#D8B24C"></i>Daily actual profit — all accounts (${R.label})</span>`;
+    const rank=ACCOUNTS.map(a=>({n:a.n, v:sum(a.n,"profit",R.a,R.b), p:sum(a.n,"profit",P.a,P.b)})).sort((x,y)=>y.v-x.v);
+    const max=Math.max(...rank.map(r=>r.v),1);
+    right.innerHTML=`<b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">BEST PERFORMING ACCOUNTS — ${R.label.toUpperCase()}</b>
+      <div class="rank" style="margin-top:10px">${rank.map((r,i)=>{const d=delta(r.v,r.p);
+      return `<div class="rank-row ${i===0?'top':''}"><span class="rank-n">${i===0?"👑":i+1}</span><span class="rank-name">${r.n}</span>
+      <span class="rank-bar"><i style="width:${Math.max(4,r.v/max*100)}%"></i></span><span class="rank-v num">${GBP(r.v)}</span>
+      <span class="rank-d ${d.c}">${d.t}</span></div>`}).join("")}</div>`;
+    const sold=sum(null,"sold",R.a,R.b), ali=sum(null,"ali",R.a,R.b), profit=sum(null,"profit",R.a,R.b);
+    tiles(sold, profit, ali, sum(null,"ads",R.a,R.b), sum(null,"returns",R.a,R.b));
+  }else{
+    const a=ACCOUNTS.find(x=>x.n===ACCT);
+    areaChart(document.getElementById('profitChart'), [i=>{const p=SERIES[a.n].find(x=>+x.d===+i);return p?p.profit:0}], [a.c]);
+    document.getElementById('profitLegend').innerHTML=`<span><i style="background:${a.c}"></i>${a.n} — daily actual profit</span>`;
+    const tw=sum(a.n,"profit",monday(today),today), lwB=new Date(monday(today)-MS), lw=sum(a.n,"profit",new Date(+lwB-6*MS),lwB);
+    const cur=sum(a.n,"profit",R.a,R.b), prv=sum(a.n,"profit",P.a,P.b), mon=sum(a.n,"profit",M.a,M.b);
+    const y=SERIES[a.n][DAYS-2];
+    right.innerHTML=`<b style="font-size:11px;letter-spacing:.07em;color:var(--text-3)">${a.n.toUpperCase()} — PROFIT VIEW</b>
+     <div class="rank" style="margin-top:10px">
+      <div class="rank-row top"><span class="rank-name" style="flex:1">Profit — this week</span><span class="rank-v num">${GBP(tw)}</span></div>
+      <div class="rank-row"><span class="rank-name" style="flex:1">Profit — last week</span><span class="rank-v num">${GBP(lw)}</span><span class="rank-d ${delta(tw,lw).c}">${delta(tw,lw).t}</span></div>
+      <div class="rank-row"><span class="rank-name" style="flex:1">Yesterday's profit</span><span class="rank-v num" style="color:${y.profit<0?'var(--rose)':'var(--text)'}">${GBP(y.profit)}</span></div>
+      <div class="rank-row"><span class="rank-name" style="flex:1">Yesterday's ad spend</span><span class="rank-v num">${GBP(y.ads)}</span></div>
+      <div class="rank-row"><span class="rank-name" style="flex:1">${R.label} vs previous</span><span class="rank-d ${delta(cur,prv).c}">${delta(cur,prv).t}</span></div>
+      <div class="rank-row"><span class="rank-name" style="flex:1">${R.label} vs last month</span><span class="rank-d ${delta(cur,mon).c}">${delta(cur,mon).t}</span></div></div>`;
+    tiles(sum(a.n,"sold",R.a,R.b), cur, sum(a.n,"ali",R.a,R.b), sum(a.n,"ads",R.a,R.b), sum(a.n,"returns",R.a,R.b));
+  }
+}
+function tiles(sold,profit,ali,ads,rets){
+  const t=[["Sold",GBP0(sold)],["Actual Profit",GBP(profit)],["AliExpress Cost",GBP0(ali)],["All Ads incl VAT",GBP0(ads)],["Returns",GBP(rets)],["Margin",pc(sold?profit/sold:0)],["ROI (÷ Ali)",pc(ali?profit/ali:0)]];
+  document.getElementById('tileRow').innerHTML=t.map(x=>`<div class="tile"><b>${x[0]}</b><span class="num">${x[1]}</span></div>`).join("");
+}
+function renderAdv(){
+  areaChart(document.getElementById('advChart'),
+    [i=>{let t=0;ACCOUNTS.forEach(a=>{const p=SERIES[a.n].find(x=>+x.d===+i);if(p)t+=p.ads});return t},
+     i=>{let t=0;ACCOUNTS.forEach(a=>{const p=SERIES[a.n].find(x=>+x.d===+i);if(p)t+=p.sold/6});return t}],
+    ["#4D9CF5","#D8B24C"]);
+  document.getElementById('advLegend').innerHTML=`<span><i style="background:#4D9CF5"></i>Daily ad spend incl VAT</span><span><i style="background:#D8B24C"></i>Ad-attributed sales (scaled ÷6)</span>`;
+  const ads=sum(null,"ads",R.a,R.b), waste=sum(null,"waste",R.a,R.b), sold=sum(null,"sold",R.a,R.b);
+  const roas=ads?(sold*0.62)/ads:0;
+  gauge(document.getElementById('roasGauge'), roas);
+  document.getElementById('gSpend').textContent=GBP(ads); document.getElementById('gWaste').textContent=GBP(waste);
+  document.getElementById('gTacos').textContent=pc(sold?ads/sold:0);
+  miniRows(document.getElementById('advPerAcct'), ACCOUNTS.map(a=>({n:a.n, v:sum(a.n,"ads",R.a,R.b)})), "linear-gradient(90deg,#2E5E96,var(--blue))", GBP0);
+}
+function renderReturns(){
+  const rows=ACCOUNTS.map(a=>({n:a.n, v:sum(a.n,"returns",R.a,R.b)}));
+  miniRows(document.getElementById('retPerAcct'), rows, "linear-gradient(90deg,#8C3A40,var(--rose))", GBP);
+  const inRange=CASES.filter(c=>inR(c.d,R.a,R.b)).sort((a,b)=>b.d-a.d);
+  document.getElementById('retHint').textContent=`${inRange.length} cases in range · ${inRange.filter(c=>c.open).length} open · refunds ${GBP(inRange.reduce((t,c)=>t+c.refund,0))}`;
+  document.getElementById('casesTable').innerHTML=`<thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Item</th><th>Reason</th><th>Refund</th><th>Status</th></tr></thead>
+   <tbody>${inRange.slice(0,9).map(c=>`<tr><td class="mono" style="color:var(--text-3)">${c.d.getDate()}/${c.d.getMonth()+1}</td><td><b>${c.acct}</b></td>
+   <td><span class="tag ${c.type==='INAD'?'inad':'ret'}">${c.type}</span></td><td>${c.item}</td><td style="color:var(--text-2)">${c.reason}</td>
+   <td class="num">${GBP(c.refund)}</td><td><span class="tag ${c.open?'open':'done'}">${c.open?'Open':'Resolved'}</span></td></tr>`).join("")||`<tr><td colspan="7" class="empty">No cases in this range</td></tr>`}</tbody>`;
+}
+function renderHealth(){
+  document.getElementById('healthGrid').innerHTML=HEALTH.map(h=>`<div class="h-card">
+   <div class="hn"><span class="h-dot h-${h.s}"></span>${h.a}</div>
+   <div class="h-rows"><div>INAD rate <b>${h.inad}</b></div><div>Late delivery <b>${h.late}</b></div>
+   <div>Positive FB <b>${h.fb}</b></div><div>Aug proj. LDR <b>${h.pLDR}</b></div><div>Aug proj. INAD <b>${h.pINAD}</b></div></div></div>`).join("");
+}
+function setStaffP(p,btn){STAFF_P=p; document.querySelectorAll('#staffMode button').forEach(b=>b.classList.toggle('on',b===btn)); renderStaff()}
+function renderStaff(){
+  const n=STAFF_P==="day"?1:STAFF_P==="week"?7:30;
+  const cur=s=>s.series.slice(-n).reduce((t,d)=>t+d.out,0);
+  const prev=s=>s.series.slice(-2*n,-n).reduce((t,d)=>t+d.out,0);
+  const hrs=s=>s.series.slice(-n).reduce((t,d)=>t+d.hours,0);
+  const score=s=>hrs(s)*0.9+cur(s)*1.6;
+  const top=[...STAFF].sort((a,b)=>score(b)-score(a))[0];
+  document.getElementById('topStaff').innerHTML=`<div class="hero-ava">${top.n.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
+   <div><h3>🏆 ${top.n} — highest value addition</h3><div class="why">"${top.va}" · ${top.r} · most combined working time + output this ${STAFF_P}</div></div>
+   <div class="hero-stats"><div class="hstat"><b>Hours (${STAFF_P})</b><span class="num">${hrs(top).toFixed(1)}h</span></div>
+   <div class="hstat"><b>Output units</b><span class="num">${cur(top)}</span></div>
+   <div class="hstat"><b>Trend</b><span class="${cur(top)>=prev(top)?'trend-up':'trend-dn'}">${cur(top)>=prev(top)?"▲ rising":"▼ falling"}</span></div></div>`;
+  const rows=[...STAFF].sort((a,b)=>cur(b)-cur(a)).map(s=>{
+    const c=cur(s), p=prev(s), d=delta(c,p);
+    const spark=s.series.slice(-14).map(x=>x.out);
+    const mx=Math.max(...spark,1);
+    const pts=spark.map((v,i)=>`${i*8},${22-v/mx*20}`).join(" ");
+    const detail=Object.keys(s.f).map(k=>`${k.replace(/([A-Z])/g," $1").toLowerCase()}: <b class="num">${s.series.slice(-n).reduce((t,x)=>t+(x[k]||0),0)}</b>`).join(" · ");
+    const rateCls=s.rate>=85?"pr-g":s.rate>=72?"pr-a":"pr-r";
+    return `<tr><td><b>${s.n}</b><div class="role">${s.r}</div></td>
+     <td class="num">${s.series[DAYS-1].hours.toFixed(1)}h</td>
+     <td class="num"><b>${c}</b> <span class="${d.c==='up'?'trend-up':d.c==='dn'?'trend-dn':''}" style="font-size:11px">${d.t}</span></td>
+     <td><svg width="110" height="24" style="display:block"><polyline points="${pts}" fill="none" stroke="${c>=p?'var(--green)':'var(--rose)'}" stroke-width="1.8"/></svg></td>
+     <td style="white-space:normal;min-width:220px;color:var(--text-2);font-size:11.5px">${detail}</td>
+     <td><span class="pillrate ${rateCls} num">${s.rate}%</span></td>
+     <td class="va">${s.va}</td></tr>`}).join("");
+  document.getElementById('staffTable').innerHTML=`<thead><tr><th>Staff (management excluded)</th><th>Hours today</th><th>Output (${STAFF_P})</th><th>14-day trend</th><th>Work detail (${STAFF_P})</th><th>Approval rate</th><th>Latest value addition</th></tr></thead><tbody>${rows}</tbody>`;
+}
+function renderSops(){
+  const list=SOPS.map(s=>({...s, date:new Date(+today+s.d*MS)})).filter(s=>inR(s.date,R.a,R.b));
+  document.getElementById('sopHint').textContent=`${list.length} issued in ${R.label}`;
+  document.getElementById('sopsList').innerHTML=list.length?list.map(s=>`<div class="sop-row">
+   <span class="sop-date">${s.date.getDate()}/${s.date.getMonth()+1}</span><span class="sop-dept">${s.dept}</span>
+   <span class="sop-t">${s.t}</span><span class="sop-by">by ${s.by}</span>
+   <span class="ack" style="color:${s.ack===100?'var(--green)':s.ack>=80?'var(--amber)':'var(--rose)'}">${s.ack}% understood</span></div>`).join("")
+   :`<div class="card empty">No SOPs or instructions were issued in this period</div>`;
+}
+
+/* ================= PORTAL FEED HOOK ================= */
+window.M98M_OVERVIEW={ load(payload){ /* schema: {series:{acct:[{d,sold,ali,ads,waste,profit,returns,orders}]},
+  staff:[...], sops:[...], cases:[...], health:[...]} — replace demo arrays, then renderAll() */
+  try{ if(payload.series){for(const k in payload.series){SERIES[k]=payload.series[k].map(p=>({...p,d:new Date(p.d)}))}}
+    if(payload.staff)STAFF.splice(0,STAFF.length,...payload.staff);
+    if(payload.sops)SOPS.splice(0,SOPS.length,...payload.sops);
+    if(payload.cases){CASES.length=0;payload.cases.forEach(c=>CASES.push({...c,d:new Date(c.d)}))}
+    if(payload.health)HEALTH.splice(0,HEALTH.length,...payload.health);
+    document.getElementById('dataBadge').textContent="LIVE — portal feed connected";
+    document.getElementById('dataBadge').style.color="var(--green)";
+    document.getElementById('dataBadge').style.borderColor="var(--green-line)";
+    document.getElementById('dataBadge').style.background="var(--green-veil)";
+    renderAll();
+  }catch(e){console.error("M98M feed error",e)} }};
+window.addEventListener("message",e=>{if(e.data&&e.data.type==="M98M_DATA")window.M98M_OVERVIEW.load(e.data.payload)});
+
+/* boot */
+document.getElementById('presets').innerHTML=PRESETS.map(p=>`<button>${p[0]}</button>`).join("");
+document.querySelectorAll('#presets button').forEach(b=>b.onclick=()=>setPreset(b.textContent));
+
+/* ===== LIVE LISTINGS — CURRENT DATA (the portal's primary purpose) ===== */
+const LISTINGS=[
+ {acct:"Saif Bhai", t:"MagSafe stand case iPhone 15", id:"336706129041", sold:8.99, ali:3.21, oe:7.06, camp:"2 · Scaling"},
+ {acct:"Saif Bhai", t:"Silicone oven mitts pair", id:"336707893310", sold:11.49, ali:4.05, oe:9.04, camp:"3 · Testing"},
+ {acct:"Azhar Bhai", t:"Foldable laundry basket 45L", id:"336698240117", sold:12.99, ali:6.90, oe:10.31, camp:"3 · Testing"},
+ {acct:"Azhar Bhai", t:"Pet grooming clippers kit", id:"336708221904", sold:16.49, ali:5.84, oe:13.02, camp:"5 · General 7%"},
+ {acct:"Sir Hasib", t:"Car boot tidy organiser XL", id:"336712897552", sold:34.99, ali:11.20, oe:27.71, camp:"5 · General 5%"},
+ {acct:"Sir Hasib", t:"LED strip lights 5m kit", id:"336704118820", sold:9.99, ali:6.71, oe:7.85, camp:"6 · Dynamic"},
+ {acct:"Hafiza Sadia", t:"Posture corrector shoulder support", id:"225653376155", sold:9.49, ali:2.71, oe:7.41, camp:"1 · Top"},
+ {acct:"ABRT", t:"Rechargeable head torch COB 2-pack", id:"336712889034", sold:10.99, ali:3.18, oe:8.63, camp:"3 · Testing"},
+ {acct:"ABRT", t:"Vacuum storage bags 6-pack", id:"336709114327", sold:8.99, ali:3.42, oe:7.02, camp:"2 · Scaling"},
+ {acct:"Amna Baji", t:"Kids night light projector", id:"336712004518", sold:13.99, ali:4.88, oe:11.02, camp:"4 · Seasonal"}
+];
+LISTINGS.forEach(l=>{l.pf=+(l.oe-l.ali).toFixed(2); l.roi=l.ali?l.pf/l.ali:0; l.mg=l.sold?l.pf/l.sold:0});
+let L_ACCT="All", L_Q="";
+function fmtGBP(v){return "£"+(+v).toFixed(2)}
+function listChips(elId){const A=["All",...new Set(LISTINGS.map(l=>l.acct))];
+  document.getElementById(elId).innerHTML=A.map(a=>`<button class="${a===L_ACCT?'on':''}" onclick="L_ACCT='${a}';listChips('${elId}');renderListings()">${a}</button>`).join("")}
+function renderListings(){
+  const rows=LISTINGS.filter(l=>(L_ACCT==="All"||l.acct===L_ACCT)&&(!L_Q||l.t.toLowerCase().includes(L_Q)||l.id.includes(L_Q)));
+  document.getElementById('llBody').innerHTML=rows.map((l,i)=>{const idx=LISTINGS.indexOf(l);
+   const neg=l.pf<0;
+   return `<tr ${neg?'style="background:rgba(240,97,109,.07)"':''}>
+    <td><b>${l.t}</b><div class="mono" style="font-size:10.5px;color:var(--text-3)">${l.id}</div></td>
+    <td style="font-weight:700;font-size:11px;color:var(--text-2)">${l.acct}</td>
+    <td class="num">${fmtGBP(l.sold)}</td>
+    <td class="num" style="color:var(--teal)">${fmtGBP(l.ali)}</td>
+    <td class="num">${fmtGBP(l.oe)}</td>
+    <td class="num" style="font-weight:800;color:${neg?'var(--rose)':'var(--gold-hi)'}">${fmtGBP(l.pf)}</td>
+    <td class="num" style="color:${l.roi>=1?'var(--green)':l.roi>0?'var(--text-2)':'var(--rose)'}">${(l.roi*100).toFixed(0)}%</td>
+    <td class="num" style="color:var(--text-2)">${(l.mg*100).toFixed(1)}%</td>
+    ${window.L_EDITABLE
+      ?`<td><select class="campSel" onchange="campEdit(${idx},this.value)">${["1 · Top","2 · Scaling","3 · Testing","4 · Seasonal","5 · General 7%","5 · General 5%","5 · General 10%","6 · Dynamic","7 · Sales Pick","Organic"].map(c=>`<option ${c===l.camp?"selected":""}>${c}</option>`).join("")}</select></td>
+       <td><button class="b-blue" onclick="nominate(${idx})">Nominate CPC</button></td>`
+      :`<td><span class="campchip">${l.camp}</span></td>`}
+   </tr>`}).join("")||`<tr><td colspan="10" style="text-align:center;color:var(--text-3);padding:16px;font-weight:600">No listings match</td></tr>`;
+}
+
+listChips("llChips"); renderListings();
+setPreset("This week");
+</script>
+</body>
+</html>
