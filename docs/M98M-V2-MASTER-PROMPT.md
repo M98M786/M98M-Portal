@@ -184,15 +184,28 @@ agent's per-account settings; nothing sends for an account switched off._
 9. Permission for a guided Node LTS install on this Mac (checksum-verified .pkg, same as gh).
 10. Optional: move AI insights to Engine later (needs the Anthropic key topped up — parked).
 
-## 11. OPEN QUESTIONS (answer in one message, numbers only is fine)
-Q1 Which accounts have WORKING eBay API access today — all six except Sir Hasib, or fewer?
-Q2 Production keyset in hand, or do we apply for it now?
-Q3 Cloudflare (recommended) or your PC as the server?
-Q4 Couriers per account?
-Q5 Auto-messages ON at launch for which accounts?
-Q6 Loss-ping hours 2–11 PM PKT — confirm or change.
-Q7 Team Lead for loss-task routing today = Yousaf?
-Q8 Exact portal emails for auto-tasks: Hamza = ? · Umar = ? (m98m…@gmail.com — confirm which).
-Q9 Confirm: TL may see per-item ads spend (never account totals).
-Q10 Anything in the six reference dashboards' demo numbers that is wrong for your business
-    (they were invented for design — the build uses real data, but layouts lock now).
+## 11. ANSWERS RECEIVED (13 Aug) — now law
+- **A1 (API accounts):** Hafiza Sadia · AZHAR ABRT · Saif Bhai · Azhar Bhai · Amna Saif (Baji)
+  have API. **Sir Hasib = sheet-fed only**, as designed (G-2).
+- **A4 (couriers):** NO manual mapping. trackingPush reads each account's eBay-accepted-carrier
+  list and auto-selects; the processor sees eBay's own suggestions in the courier dropdown.
+- **A7 (Team Lead):** TWO team leads — **Yousaf AND Husnain**. Loss tasks route to both.
+  Implemented via modules (Husnain keeps CS role, gains team-lead module) — proof the
+  modules-per-user model is required, not optional.
+- **Access control:** Management (Hasib) selects from a staff-email list and assigns names,
+  roles and modules himself — the desk must make every staff email pickable, nothing typed.
+- **T-1 TIMEZONE LAW (new, portal-wide):** staff performance (checkpoints, attendance,
+  evaluations, shift tracking) displays in **Pakistan time**; business working timings and
+  dates (listing clock, sales days, order dates, working-day boundaries, campaign windows)
+  display in **UK time and UK dates**. Every date on screen states which it is.
+- **A8 (auto-task routing):** NEVER hardcode Hamza's/Umar's emails. The 72h-CPC-revision and
+  7-day-zero-sales tasks route to whoever currently holds the lister/revision module —
+  Management reassigns holders from the Access-Control desk.
+- **A9 (TL visibility, clarified):** TL sees per-item ad spend and per-item profit/loss, but
+  NEVER collective profit — no daily, monthly or account totals. Enforced server-side.
+
+## 12. STILL OPEN (build proceeds around them; these gate Phase B/C/D only)
+Q2 eBay production keyset in hand, or apply now? · Q3 Cloudflare (recommended) or PC? ·
+Q5 Auto-messages ON at launch for which accounts? · Q6 Loss-ping hours (suggest 2–11 PM PKT) ·
+Q10 Design-layout objections before lock · Data items: keyset ⛔, per-account OAuth clicks ⛔,
+"hamza - listing revision required" sheet share ⛔ (gates req 37 only), Node install permission.
