@@ -14341,6 +14341,10 @@ function saveSchedule() {
     '.st-tbl tbody tr.st-r:hover{background:var(--blue-soft)}',
     '.st-nm{font-weight:800}',
     '.st-sub{font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:2px}',
+    '.ax-grid{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}',
+    '.ax-chip{padding:5px 12px;border-radius:20px;border:1px solid var(--line-2,rgba(255,255,255,.14));font-size:11.5px;font-weight:600;color:var(--text-2);cursor:pointer;user-select:none}',
+    '.ax-chip.on{border-color:var(--gold);background:rgba(212,175,55,.14);color:var(--gold)}',
+    '.ax-chip.off{text-decoration:line-through;opacity:.55;border-color:var(--bad,#f06d6d);color:var(--bad,#f06d6d)}',
     '.st-right{text-align:right;white-space:nowrap}',
     '.st-card{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:linear-gradient(180deg,var(--panel-2),var(--panel))}',
     '.st-card+.st-card{margin-top:12px}',
@@ -14655,6 +14659,105 @@ function saveSchedule() {
       btn.disabled = false;
       toast('Could not add them: ' + e.message);
     });
+  }
+
+  /* ============================ ACCESS CONTROL (V2 §8/§24) ============================ */
+  var AX = { dir: null, who: '' };
+
+  function axLoad() {
+    var box = $('stAccess');
+    if (!box) { return; }
+    var c = cachedCall('staffDirectory', {}, function (d) { AX.dir = d; axPaint(); });
+    if (!c.painted) { box.innerHTML = spinnerCard('Reading the directory…'); }
+    c.done.catch(function (e) {
+      if (c.painted) { return; }
+      box.innerHTML = '<div class="st-empty">The directory could not be loaded.<span>' + esc(e.message) + '</span></div>';
+    });
+  }
+
+  function axPerson() {
+    var d = AX.dir; if (!d) { return null; }
+    for (var i = 0; i < d.staff.length; i++) { if (d.staff[i].email === AX.who) { return d.staff[i]; } }
+    return null;
+  }
+
+  function axPaint() {
+    var box = $('stAccess'), d = AX.dir;
+    if (!box || !d) { return; }
+    if (!AX.who && d.staff.length) { AX.who = d.staff[0].email; }
+    var p = axPerson();
+    var h = '<div class="st-form" style="grid-template-columns:2fr 1fr 1fr">' +
+      '<label>Person<select id="axWho">' + d.staff.map(function (s) {
+        return '<option value="' + esc(s.email) + '"' + (s.email === AX.who ? ' selected' : '') + '>' +
+          esc(s.name || s.email) + ' — ' + esc(s.role) + (s.status !== 'approved' ? ' (' + esc(s.status) + ')' : '') + '</option>';
+      }).join('') + '</select></label>' +
+      (d.may_set_roles
+        ? '<label>Role<select id="axRole">' + d.roles.map(function (r) {
+            return '<option' + (p && p.role === r ? ' selected' : '') + '>' + esc(r) + '</option>';
+          }).join('') + '</select></label>'
+        : '<label>Role<input value="' + esc(p ? p.role : '') + '" disabled></label>') +
+      '<label>Email<input value="' + esc(AX.who) + '" disabled></label></div>';
+
+    // The role's own screens stay implicit; these boxes are the EXTRAS (tick = grant) and the
+    // withdrawals (a granted box unticked writes nothing; to take a role-default away, the
+    // Minus button flips it to a '-key' entry shown struck through).
+    h += '<div class="st-sub" style="margin-top:14px">Extra screens for this person <span class="hint">their role’s screens stay; ticking adds, − takes a default away</span></div>' +
+      '<div class="ax-grid" id="axMods">';
+    var mods = (p && p.modules) || [];
+    Object.keys(d.module_registry).forEach(function (k) {
+      var granted = mods.indexOf(k) >= 0, denied = mods.indexOf('-' + k) >= 0;
+      h += '<span class="ax-chip' + (granted ? ' on' : '') + (denied ? ' off' : '') + '" data-mod="' + esc(k) + '">' +
+        esc(d.module_registry[k]) + '</span>';
+    });
+    h += '</div>';
+
+    h += '<div class="st-sub" style="margin-top:14px">Tools</div><div class="ax-grid" id="axTools">';
+    var tls = (p && p.tools) || [];
+    d.tool_registry.forEach(function (k) {
+      var granted = tls.indexOf(k) >= 0, denied = tls.indexOf('-' + k) >= 0;
+      h += '<span class="ax-chip' + (granted ? ' on' : '') + (denied ? ' off' : '') + '" data-tool="' + esc(k) + '">' +
+        esc(k.replace('tool_', '').replace(/_/g, ' ')) + '</span>';
+    });
+    h += '</div><div style="margin-top:14px"><button class="btn-gold" id="axSave">Save access</button>' +
+      '<span class="hint" style="margin-left:10px">click a chip: grey = role default · gold = granted · struck = taken away</span></div>';
+
+    box.innerHTML = h;
+    $('axWho').onchange = function () { AX.who = this.value; axPaint(); };
+    box.querySelectorAll('.ax-chip').forEach(function (chip) {
+      chip.onclick = function () {
+        // grey -> granted -> denied -> grey
+        if (chip.classList.contains('on')) { chip.classList.remove('on'); chip.classList.add('off'); }
+        else if (chip.classList.contains('off')) { chip.classList.remove('off'); }
+        else { chip.classList.add('on'); }
+      };
+    });
+    var sv = $('axSave');
+    if (sv) { sv.onclick = axSave; }
+  }
+
+  function axCollect(sel, attr) {
+    var out = [];
+    document.querySelectorAll(sel).forEach(function (chip) {
+      var k = chip.getAttribute(attr);
+      if (chip.classList.contains('on')) { out.push(k); }
+      else if (chip.classList.contains('off')) { out.push('-' + k); }
+    });
+    return out.join(',');
+  }
+
+  function axSave() {
+    var btn = $('axSave'), p = axPerson();
+    if (!p) { return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    var payload = { email: AX.who, modules: axCollect('#axMods .ax-chip', 'data-mod'), tools: axCollect('#axTools .ax-chip', 'data-tool') };
+    var roleSel = $('axRole');
+    if (roleSel && roleSel.value !== p.role) { payload.role = roleSel.value; }
+    api('updateStaff', payload).then(function () {
+      toast('Access saved — takes effect at ' + (p.name || 'their') + '’s next sign-in');
+      AX.dir = null; cacheWrite('staffDirectory', {}, null); axLoad();
+    }).catch(function (e) {
+      toast(e.message);
+    }).then(function () { btn.disabled = false; btn.textContent = 'Save access'; });
   }
 
   /* ============================ THE STAFF LIST ============================ */
@@ -15251,6 +15354,12 @@ function saveSchedule() {
         h += '<div class="card enter d3" style="margin-top:16px"><div class="bd" id="stAdd"></div></div>';
       }
 
+      if (mgr) {
+        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">Access control ' +
+          '<span class="hint">pick a person · grant or take away screens and tools · applies at their next sign-in</span></div>' +
+          '<div class="bd" id="stAccess">' + spinnerCard('Reading the directory…') + '</div></div>';
+      }
+
       h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">The team ' +
           '<span class="hint">timetables live on the Rota screen</span></div>' +
           '<div class="bd" id="stList">' + spinnerCard('Reading the staff list…') + '</div></div>';
@@ -15277,9 +15386,11 @@ function saveSchedule() {
         r.onclick = function () {
           S.editing = ''; S.removing = ''; S.handover = null; S.archHand = '';
           loadAll();
+          if (canManage()) { axLoad(); }
         };
       }
       loadAll();
+      if (canManage()) { axLoad(); }
     }
   };
 })();
@@ -15347,6 +15458,16 @@ function saveSchedule() {
     '.tk-lag{background:rgba(120,132,152,.16);color:var(--text-2)}' +
     '.tk-lag.tk-w{background:var(--warn-soft);color:var(--warn)}' +
     '.tk-lag.tk-b{background:var(--bad-soft);color:var(--bad)}' +
+    '.tk-dt-title{font-size:15px;font-weight:800;line-height:1.4}' +
+    '.tk-dt-grid{display:grid;gap:0;margin-top:10px;border:1px solid var(--gold-line);border-radius:10px;overflow:hidden}' +
+    '.tk-dt-row{display:flex;gap:14px;padding:8px 12px;font-size:12.5px}' +
+    '.tk-dt-row:nth-child(even){background:rgba(120,132,152,.07)}' +
+    '.tk-dt-row .k{flex:0 0 44%;color:var(--text-3);font-weight:700;font-size:11.5px;text-transform:none;letter-spacing:0}' +
+    '.tk-dt-row .v{flex:1;font-weight:600;word-break:break-word}' +
+    '.tk-dt-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
+    '.tk-dt-lnk{padding:6px 12px;border:1px solid rgba(61,155,240,.4);border-radius:20px;font-size:11.5px;font-weight:800;color:var(--blue-2);background:var(--blue-soft)}' +
+    '.tk-dt-desc{margin-top:12px;font-size:12.5px;line-height:1.6;white-space:pre-wrap}' +
+    '.tk-dt-desc .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-3);margin-bottom:5px}' +
     '@media (max-width:880px){' +
       '.tk-grid{grid-template-columns:1fr}' +
       '.tk-tbl{min-width:0}.tk-tbl thead{display:none}' +
@@ -15580,6 +15701,50 @@ function saveSchedule() {
     });
   }
 
+  /* V2 req 27 — a listing task's details used to be the raw JSON shown as one paragraph, and
+     nobody could read it. This renders the same payload as a grid: title first, links as
+     buttons, the description as prose, every other filled field as label→value. Header names
+     from the live sheet carry trailing spaces/newlines/typos, so matching is by normalized
+     name, never byte-for-byte. Anything that is not the known payload falls back to plain text. */
+  function tkNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+
+  function tkDetailsHtml(details) {
+    var obj = null;
+    try { obj = JSON.parse(details); } catch (e) { return tkText(details); }
+    if (!obj || typeof obj !== 'object') { return tkText(details); }
+    var lim = obj.limited || obj.listing || obj;
+    if (!lim || typeof lim !== 'object' || Array.isArray(lim)) { return tkText(details); }
+
+    var title = '', desc = '', links = [], facts = [], huntId = tkStr(obj.hunt_id);
+    Object.keys(lim).forEach(function (k) {
+      var v = tkStr(lim[k]);
+      if (!v) { return; }
+      var n = tkNorm(k), label = String(k).replace(/\s+/g, ' ').trim();
+      if (n === 'title') { title = v; return; }
+      if (n === 'description') { desc = v; return; }
+      if (/^https?:\/\//i.test(v)) { links.push({ label: label, url: v }); return; }
+      facts.push({ label: label, value: v });
+    });
+    if (!title && !links.length && !facts.length) { return tkText(details); }
+
+    var h = '';
+    if (title) { h += '<div class="tk-dt-title">' + esc(title) + '</div>'; }
+    if (huntId) { h += '<div class="tk-sub mono" style="margin-top:2px">' + esc(huntId) + '</div>'; }
+    if (facts.length) {
+      h += '<div class="tk-dt-grid">' + facts.map(function (f) {
+        return '<div class="tk-dt-row"><span class="k">' + esc(f.label) + '</span><span class="v">' + esc(f.value) + '</span></div>';
+      }).join('') + '</div>';
+    }
+    if (links.length) {
+      h += '<div class="tk-dt-links">' + links.map(function (l) {
+        var u = safeUrl(l.url);
+        return u ? '<a class="tk-dt-lnk" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(l.label) + ' ↗</a>' : '';
+      }).join('') + '</div>';
+    }
+    if (desc) { h += '<div class="tk-dt-desc"><div class="k">Description</div>' + tkText(desc) + '</div>'; }
+    return h;
+  }
+
   function tkRow(t) {
     var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
     var ret = (status === TK_WORKING || status === TK_UPDATED) ? tkReturned(t.comments) : null;
@@ -15606,7 +15771,7 @@ function saveSchedule() {
     }
     if (details) {
       extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
-        '<div class="tk-txt">' + tkText(details) + '</div></div>';
+        '<div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>';
     }
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
@@ -15746,7 +15911,7 @@ function saveSchedule() {
       '<div class="tl-row"><span class="k">Deadline</span>' + tkDueCell(t) + '</div>' +
       '<div class="tl-row"><span class="k">Submitted</span><span class="num">' + esc(tkWhen(t.submitted_at)) + '</span></div>' +
       (mins ? '<div class="tl-row"><span class="k">Time taken</span><span class="num">' + esc(tkMins(mins)) + '</span></div>' : '') +
-      (details ? '<div class="tk-box tk-det"><div class="k">Task details</div><div class="tk-txt">' + tkText(details) + '</div></div>' : '') +
+      (details ? '<div class="tk-box tk-det"><div class="k">Task details</div><div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>' : '') +
       '<div class="tk-box tk-note"><div class="k">Submission note</div><div class="tk-txt">' + tkText(note) + '</div></div>' +
       '<div class="field" style="margin-top:12px"><label>Comment (required to return)</label>' +
         '<textarea class="tk-ta" data-cmt="' + tkAttr(id) + '" placeholder="What must be fixed before this can be approved"></textarea></div>' +
@@ -16193,7 +16358,15 @@ function saveSchedule() {
 
 })();
 
-function canSee(v){ if(!v.roles||v.roles==='*') return true; return v.roles.indexOf(STATE.user.role)>=0; }
+/* A person's screens = their role's defaults PLUS the modules Management granted them on the
+   Access desk; a '-key' module takes a default away. The server rechecks every action, so this
+   gate is presentation — but the desk's changes take effect on the next sign-in with no deploy. */
+function canSee(v){
+  var mods=(STATE.user&&STATE.user.modules)||[];
+  if(mods.indexOf('-'+v.key)>=0) return false;
+  if(!v.roles||v.roles==='*') return true;
+  return v.roles.indexOf(STATE.user.role)>=0 || mods.indexOf(v.key)>=0;
+}
 function viewList(){
   return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
     .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });
