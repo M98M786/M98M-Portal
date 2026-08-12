@@ -60,6 +60,16 @@
     '.tk-lag{background:rgba(120,132,152,.16);color:var(--text-2)}' +
     '.tk-lag.tk-w{background:var(--warn-soft);color:var(--warn)}' +
     '.tk-lag.tk-b{background:var(--bad-soft);color:var(--bad)}' +
+    '.tk-dt-title{font-size:15px;font-weight:800;line-height:1.4}' +
+    '.tk-dt-grid{display:grid;gap:0;margin-top:10px;border:1px solid var(--gold-line);border-radius:10px;overflow:hidden}' +
+    '.tk-dt-row{display:flex;gap:14px;padding:8px 12px;font-size:12.5px}' +
+    '.tk-dt-row:nth-child(even){background:rgba(120,132,152,.07)}' +
+    '.tk-dt-row .k{flex:0 0 44%;color:var(--text-3);font-weight:700;font-size:11.5px;text-transform:none;letter-spacing:0}' +
+    '.tk-dt-row .v{flex:1;font-weight:600;word-break:break-word}' +
+    '.tk-dt-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
+    '.tk-dt-lnk{padding:6px 12px;border:1px solid rgba(61,155,240,.4);border-radius:20px;font-size:11.5px;font-weight:800;color:var(--blue-2);background:var(--blue-soft)}' +
+    '.tk-dt-desc{margin-top:12px;font-size:12.5px;line-height:1.6;white-space:pre-wrap}' +
+    '.tk-dt-desc .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-3);margin-bottom:5px}' +
     '@media (max-width:880px){' +
       '.tk-grid{grid-template-columns:1fr}' +
       '.tk-tbl{min-width:0}.tk-tbl thead{display:none}' +
@@ -293,6 +303,50 @@
     });
   }
 
+  /* V2 req 27 — a listing task's details used to be the raw JSON shown as one paragraph, and
+     nobody could read it. This renders the same payload as a grid: title first, links as
+     buttons, the description as prose, every other filled field as label→value. Header names
+     from the live sheet carry trailing spaces/newlines/typos, so matching is by normalized
+     name, never byte-for-byte. Anything that is not the known payload falls back to plain text. */
+  function tkNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+
+  function tkDetailsHtml(details) {
+    var obj = null;
+    try { obj = JSON.parse(details); } catch (e) { return tkText(details); }
+    if (!obj || typeof obj !== 'object') { return tkText(details); }
+    var lim = obj.limited || obj.listing || obj;
+    if (!lim || typeof lim !== 'object' || Array.isArray(lim)) { return tkText(details); }
+
+    var title = '', desc = '', links = [], facts = [], huntId = tkStr(obj.hunt_id);
+    Object.keys(lim).forEach(function (k) {
+      var v = tkStr(lim[k]);
+      if (!v) { return; }
+      var n = tkNorm(k), label = String(k).replace(/\s+/g, ' ').trim();
+      if (n === 'title') { title = v; return; }
+      if (n === 'description') { desc = v; return; }
+      if (/^https?:\/\//i.test(v)) { links.push({ label: label, url: v }); return; }
+      facts.push({ label: label, value: v });
+    });
+    if (!title && !links.length && !facts.length) { return tkText(details); }
+
+    var h = '';
+    if (title) { h += '<div class="tk-dt-title">' + esc(title) + '</div>'; }
+    if (huntId) { h += '<div class="tk-sub mono" style="margin-top:2px">' + esc(huntId) + '</div>'; }
+    if (facts.length) {
+      h += '<div class="tk-dt-grid">' + facts.map(function (f) {
+        return '<div class="tk-dt-row"><span class="k">' + esc(f.label) + '</span><span class="v">' + esc(f.value) + '</span></div>';
+      }).join('') + '</div>';
+    }
+    if (links.length) {
+      h += '<div class="tk-dt-links">' + links.map(function (l) {
+        var u = safeUrl(l.url);
+        return u ? '<a class="tk-dt-lnk" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(l.label) + ' ↗</a>' : '';
+      }).join('') + '</div>';
+    }
+    if (desc) { h += '<div class="tk-dt-desc"><div class="k">Description</div>' + tkText(desc) + '</div>'; }
+    return h;
+  }
+
   function tkRow(t) {
     var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
     var ret = (status === TK_WORKING || status === TK_UPDATED) ? tkReturned(t.comments) : null;
@@ -319,7 +373,7 @@
     }
     if (details) {
       extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
-        '<div class="tk-txt">' + tkText(details) + '</div></div>';
+        '<div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>';
     }
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
@@ -459,7 +513,7 @@
       '<div class="tl-row"><span class="k">Deadline</span>' + tkDueCell(t) + '</div>' +
       '<div class="tl-row"><span class="k">Submitted</span><span class="num">' + esc(tkWhen(t.submitted_at)) + '</span></div>' +
       (mins ? '<div class="tl-row"><span class="k">Time taken</span><span class="num">' + esc(tkMins(mins)) + '</span></div>' : '') +
-      (details ? '<div class="tk-box tk-det"><div class="k">Task details</div><div class="tk-txt">' + tkText(details) + '</div></div>' : '') +
+      (details ? '<div class="tk-box tk-det"><div class="k">Task details</div><div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>' : '') +
       '<div class="tk-box tk-note"><div class="k">Submission note</div><div class="tk-txt">' + tkText(note) + '</div></div>' +
       '<div class="field" style="margin-top:12px"><label>Comment (required to return)</label>' +
         '<textarea class="tk-ta" data-cmt="' + tkAttr(id) + '" placeholder="What must be fixed before this can be approved"></textarea></div>' +
