@@ -220,14 +220,30 @@
   }
   function plSkip() { return Promise.resolve({ ok: false, skip: true }); }
 
+  /** The board asks for four things at once and cannot draw a column until they all land, so on a
+      slow answer every column sits spinning. If this board has been opened before, it draws the
+      previous cards immediately and replaces them when the fresh answer arrives — the same
+      paint-now-refresh-underneath idea used on the business overview. Read-only board, so a
+      briefly stale card can mislead nobody into acting on it: the screen that owns the item
+      re-checks before anything is decided. */
+  function plCached() {
+    return (typeof cacheRead === 'function') ? cacheRead('pipelineBoard', {}) : null;
+  }
+
   function plLoad() {
     var role = plRole();
-    PL_COLS.forEach(function (c) {
-      var b = $('plB-' + c.key);
-      if (b) { b.innerHTML = '<div class="spinner"></div>'; }
-    });
-    var conn = $('plConn');
-    if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
+    var had = plCached();
+    if (had) {
+      try { plPaint(had[0], had[1], had[2]); plPaintConn(had[3]); } catch (e) { had = null; }
+    }
+    if (!had) {
+      PL_COLS.forEach(function (c) {
+        var b = $('plB-' + c.key);
+        if (b) { b.innerHTML = '<div class="spinner"></div>'; }
+      });
+      var conn = $('plConn');
+      if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
+    }
 
     Promise.all([
       plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
@@ -237,6 +253,7 @@
     ]).then(function (res) {
       plPaint(res[0], res[1], res[2]);
       plPaintConn(res[3]);
+      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
     });
   }
 
