@@ -164,6 +164,7 @@
     icon: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
     roles: '*',
     order: 20,
+    prefetch: function () { return tkFetchTasks(); },
     badge: function () { return (STATE.counts && STATE.counts.tasks) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>My tasks</h1>' +
@@ -253,22 +254,39 @@
     };
   }
 
+  /** Shared by the screen and the sign-in warm-up. Starting/submitting a cached row is safe for
+      the same reason as the hunt queue: the server re-validates every action against the current
+      task, so a stale row can only earn a readable error, never a wrong write. */
+  function tkFetchTasks() {
+    return api('myTasks').then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('myTasks', {}, d); }
+      return d;
+    });
+  }
+
+  function tkPaintTasks(box, d) {
+    var tasks = (d && d.tasks) || [], open = 0, i;
+    for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
+    tkCount('tasks', open);
+    if (!tasks.length) {
+      box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
+      return;
+    }
+    box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
+      '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
+      '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
+    tkWireRows(box);
+  }
+
   function tkLoadTasks() {
     var box = $('tkBody');
     if (!box) { return; }
-    api('myTasks').then(function (d) {
-      var tasks = (d && d.tasks) || [], open = 0, i;
-      for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
-      tkCount('tasks', open);
-      if (!tasks.length) {
-        box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
-        return;
-      }
-      box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
-        '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
-        '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
-      tkWireRows(box);
+    var had = (typeof cacheRead === 'function') ? cacheRead('myTasks', {}) : null;
+    if (had) { try { tkPaintTasks(box, had); } catch (e) { had = null; } }
+    tkFetchTasks().then(function (d) {
+      tkPaintTasks(box, d);
     }).catch(function (e) {
+      if (had) { toast('Showing your last task list — could not refresh just now.'); return; }
       box.innerHTML = '<div class="tk-empty">Your tasks could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="tkRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('tkRetry'); if (r) { r.onclick = tkLoadTasks; }
