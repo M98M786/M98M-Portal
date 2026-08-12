@@ -5950,6 +5950,12 @@ VIEWS.dashboard = {
   order: 5,
   roles: DB_VIEW_ROLES,
   icon: '<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>',
+  prefetch: function () {
+    return api('dashboard').then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('dashboard', {}, d); }
+      return d;
+    });
+  },
   render: function () {
     return '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
       '<span class="sub" id="dbStamp">loading…</span>' +
@@ -10227,6 +10233,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     icon: '<path d="M4 4h5v16H4z"/><path d="M10 4h5v11h-5z"/><path d="M16 4h4v7h-4z"/>',
     roles: PL_ROLES,
     order: 22,
+    prefetch: plFetch,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Pipeline</h1>' +
           '<span class="sub">The whole machine, one board · read only · a card opens the screen that owns it</span>' +
@@ -10292,8 +10299,23 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     return (typeof cacheRead === 'function') ? cacheRead('pipelineBoard', {}) : null;
   }
 
-  function plLoad() {
+  /** The four requests this board needs. Kept in one place so the warm-up at sign-in asks for
+      exactly what the board itself would ask for — including the role gating — and the cached
+      array can never end up in a different shape from what plPaint expects. */
+  function plFetch() {
     var role = plRole();
+    return Promise.all([
+      plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
+      plWrap(api('myListingWork', { include_completed: 'true' })),
+      plHas(PL_POTCPC_ROLES, role) ? plWrap(api('potentialCpcQueue', { status: 'ALL', limit: 200 })) : plSkip(),
+      plWrap(api('connectionHealth'))
+    ]).then(function (res) {
+      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
+      return res;
+    });
+  }
+
+  function plLoad() {
     var had = plCached();
     if (had) {
       try { plPaint(had[0], had[1], had[2]); plPaintConn(had[3]); } catch (e) { had = null; }
@@ -10307,15 +10329,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
     }
 
-    Promise.all([
-      plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
-      plWrap(api('myListingWork', { include_completed: 'true' })),
-      plHas(PL_POTCPC_ROLES, role) ? plWrap(api('potentialCpcQueue', { status: 'ALL', limit: 200 })) : plSkip(),
-      plWrap(api('connectionHealth'))
-    ]).then(function (res) {
+    plFetch().then(function (res) {
       plPaint(res[0], res[1], res[2]);
       plPaintConn(res[3]);
-      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
     });
   }
 
@@ -15967,6 +15983,28 @@ function enterApp(user){
   });
   show('appShell'); renderView('home');
   if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
+  warmUp();
+}
+
+/* The backend charges its ~3 seconds per REQUEST, not per question asked — a request that
+   answers eight things costs about the same as one that answers one. So at sign-in we ask for
+   the heavy screens up front, in a single batched request, and put the answers in the cache.
+   By the time anyone clicks Business overview or Pipeline, the figures are already here and the
+   screen opens at once instead of starting a three-second wait.
+
+   Only screens this person is allowed to see are asked for — viewList() is the same gate the
+   navigation uses — so the warm-up can never fetch something the role could not open, and each
+   answer still passes the server's own role check on the way out. Failures are ignored on
+   purpose: a warm-up is a courtesy, and every screen still loads normally on its own. */
+function warmUp(){
+  if(!STATE.idToken) return;
+  try{
+    viewList().forEach(function(v){
+      var view = VIEWS[v.key];
+      if(!view || typeof view.prefetch !== 'function') return;
+      try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+    });
+  }catch(e){}
 }
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
