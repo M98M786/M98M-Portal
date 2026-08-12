@@ -274,6 +274,7 @@
     icon: '<path d="M11.6 3H5a2 2 0 0 0-2 2v6.6a2 2 0 0 0 .6 1.4l7.4 7.4a2 2 0 0 0 2.8 0l6.6-6.6a2 2 0 0 0 0-2.8L13 3.6A2 2 0 0 0 11.6 3z"/><path d="M7.5 7.5h.01"/>',
     roles: LS_VIEW_ROLES,
     order: 17,
+    prefetch: function () { return lsFetch(); },
     badge: function () { return (STATE.counts && STATE.counts.listing) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>My listings</h1>' +
@@ -338,13 +339,40 @@
   }
 
   // ---------- load ----------
+  /** Fetch shared with the sign-in warm-up. The cache key carries the include_completed flag, so
+      the "show done" toggle never paints the wrong list. Item-ID entry and revision actions are
+      re-validated by the server, so a briefly stale card cannot cause a wrong write. */
+  function lsFetch() {
+    var payload = LS_SHOW_DONE ? { include_completed: 'true' } : {};
+    return api('myListingWork', payload).then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('myListingWork', payload, d); }
+      return d;
+    });
+  }
+
   function lsLoad() {
     var jobs = $('lsJobs'), revs = $('lsRevs');
     if (!jobs || !revs) { return; }
-    jobs.innerHTML = '<div class="spinner"></div>';
-    revs.innerHTML = '<div class="spinner"></div>';
+    var had = (typeof cacheRead === 'function') ? cacheRead('myListingWork', LS_SHOW_DONE ? { include_completed: 'true' } : {}) : null;
+    if (had) { try { lsPaint(had); } catch (e) { had = null; } }
+    if (!had) {
+      jobs.innerHTML = '<div class="spinner"></div>';
+      revs.innerHTML = '<div class="spinner"></div>';
+    }
+    lsFetch().then(function (d) {
+      lsPaint(d);
+    }).catch(function (e) {
+      if (had) { toast('Showing your last listing work — could not refresh just now.'); return; }
+      jobs.innerHTML = '<div class="ls-empty">Could not load your listing work.<span>' + esc(e.message) + '</span></div>';
+      revs.innerHTML = '';
+    });
+  }
+
+  function lsPaint(d) {
+    var jobs = $('lsJobs'), revs = $('lsRevs');
+    if (!jobs || !revs) { return; }
     LS_COPY = {};
-    api('myListingWork', LS_SHOW_DONE ? { include_completed: 'true' } : {}).then(function (d) {
+    (function (d) {
       var listings = (d && d.listings) || [], revisions = (d && d.revisions) || [], open = 0, i;
       LS_COLUMNS = (d && d.columns) || [];
       LS_TIMING = (d && d.timing) || null;
@@ -360,11 +388,7 @@
         '<div class="ls-empty">No revision on you right now.<span>The 72-hour revision is created automatically when you enter an Item ID.</span></div>';
       lsWire(jobs);
       lsWire(revs);
-    }).catch(function (e) {
-      jobs.innerHTML = lsRetry('Your listing jobs could not be loaded just now.', e.message, 'lsRetryJobs');
-      revs.innerHTML = '<div class="ls-empty">Not loaded.<span>' + esc(e.message) + '</span></div>';
-      var r = $('lsRetryJobs'); if (r) { r.onclick = lsLoad; }
-    });
+    })(d);
   }
   function lsRetry(msg, err, id) {
     return '<div class="ls-empty">' + esc(msg) + '<span>' + esc(err) + '</span>' +

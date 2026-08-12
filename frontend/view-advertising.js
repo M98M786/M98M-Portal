@@ -214,17 +214,26 @@
   }
 
   // ---------- accounts (§3 — from the registry, never a list in this file) ----------
+  function adApplyAccounts(d) {
+    var list = (d && d.accounts) || [], i, a;
+    AD.accounts = [];
+    AD.health = {};
+    for (i = 0; i < list.length; i++) {
+      a = list[i];
+      if (!adStr(a.account)) { continue; }
+      AD.accounts.push(adStr(a.account));
+      AD.health[adNorm(a.account)] = { linked: Number(a.linked) || 0, of: Number(a.of) || 0 };
+    }
+  }
+
   function adLoadAccounts(then) {
+    // The account strip changes about never — paint it from the last answer at once ("Loading
+    // accounts…" was the first thing Zain saw every single visit), refresh underneath.
+    var had = (typeof cacheRead === 'function') ? cacheRead('accountList', {}) : null;
+    if (had) { adApplyAccounts(had); if (typeof then === 'function') { then(); then = null; } }
     return api('accountList').then(function (d) {
-      var list = (d && d.accounts) || [], i, a;
-      AD.accounts = [];
-      AD.health = {};
-      for (i = 0; i < list.length; i++) {
-        a = list[i];
-        if (!adStr(a.account)) { continue; }
-        AD.accounts.push(adStr(a.account));
-        AD.health[adNorm(a.account)] = { linked: Number(a.linked) || 0, of: Number(a.of) || 0 };
-      }
+      if (typeof cacheWrite === 'function') { cacheWrite('accountList', {}, d); }
+      adApplyAccounts(d);
       if (typeof then === 'function') { then(); }
     }).catch(function () { if (typeof then === 'function') { then(); } });
   }
@@ -259,6 +268,14 @@
     icon: '<path d="M4 10v4a1 1 0 0 0 1 1h2.5l4.5 4V5L7.5 9H5a1 1 0 0 0-1 1z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.8 6a8 8 0 0 1 0 12"/>',
     roles: AD_VIEW_ROLES,
     order: 23,
+    /* Warm the account strip and the Management instructions; the PPC table itself waits for an
+       account to be picked, and is then cached per account. */
+    prefetch: function () {
+      return Promise.all([
+        api('accountList').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('accountList', {}, d); } }),
+        adFetchInstructions()
+      ]);
+    },
     badge: function () { return (STATE.counts && STATE.counts.advertising) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Advertising</h1>' +
@@ -309,11 +326,14 @@
   }
 
   // ---------- §8.5 the read-only instructions feed, pinned ----------
-  function adLoadInstructions() {
-    var box = $('adIns');
-    if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('instructionsFeed', {}).then(function (d) {
+  function adFetchInstructions() {
+    return api('instructionsFeed', {}).then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('instructionsFeed', {}, d); }
+      return d;
+    });
+  }
+
+  function adPaintInstructions(box, d) {
       var list = (d && d.instructions) || [], i, h = '';
       adCount('advertising', Number(d && d.unacknowledged) || 0);
       if ($('adInsHint')) {
@@ -332,7 +352,18 @@
         (d && !d.connected ? ' The PPC Central instructions tab is <b>' + esc(adStr(d.reason) || 'not connected yet') + '</b>, so only the portal&#39;s own instructions are listed.' : '') +
         '</div></div>';
       box.innerHTML = h;
+  }
+
+  function adLoadInstructions() {
+    var box = $('adIns');
+    if (!box) { return; }
+    var had = (typeof cacheRead === 'function') ? cacheRead('instructionsFeed', {}) : null;
+    if (had) { try { adPaintInstructions(box, had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
+    adFetchInstructions().then(function (d) {
+      adPaintInstructions(box, d);
     }).catch(function (e) {
+      if (had) { return; }
       box.innerHTML = adRetry('The instructions feed could not be loaded just now.', e.message, 'adInsRetry');
       var r = $('adInsRetry');
       if (r) { r.onclick = adLoadInstructions; }
@@ -361,14 +392,23 @@
       if (ed) { ed.innerHTML = '<div class="ad-empty">Pick an account to change a campaign.</div>'; }
       return;
     }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('ppcTable', { account: AD.account, limit: AD.ppcLimit }).then(function (d) {
+    // Cached per account+limit, so switching between accounts repaints each one's table at once.
+    var pk = { account: AD.account, limit: AD.ppcLimit };
+    var had = (typeof cacheRead === 'function') ? cacheRead('ppcTable', pk) : null;
+    var applyPpc = function (d) {
       AD.ppc = d || null;
       AD.suggest = (d && d.suggestions) || null;
       AD.mayWrite = !!(d && d.may_write);
       adRenderEditor();
       adRenderPpc(d);
+    };
+    if (had) { try { applyPpc(had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
+    api('ppcTable', pk).then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('ppcTable', pk, d); }
+      applyPpc(d);
     }).catch(function (e) {
+      if (had) { toast('Showing the last table for this account — could not refresh just now.'); return; }
       box.innerHTML = adRetry('That account&#39;s PPC tab could not be read just now.', e.message, 'adPpcRetry');
       var r = $('adPpcRetry');
       if (r) { r.onclick = adLoadPpc; }

@@ -191,6 +191,7 @@ VIEWS.agenda = {
   label: 'Daily agenda',
   order: 10,
   roles: '*',
+  prefetch: function () { return agFetch(); },
   icon: '<path d="M8 3v3M16 3v3"/><rect x="3" y="6" width="18" height="15" rx="2"/><path d="M3 11h18"/><path d="M8 15.5l2.2 2.2L16 12"/>',
   render: function () {
     return '<div class="hgroup enter d1"><h1>Daily <span class="goldtext">agenda</span></h1>' +
@@ -218,21 +219,37 @@ VIEWS.agenda = {
   }
 };
 
-function load(silent) {
+/* Fetch and paint are separated so the sign-in warm-up can share the fetch, and so a return
+   visit paints the last agenda at once and lets the fresh one replace it — same rhythm as the
+   business overview. */
+function agFetch() {
   return api('todayAgenda').then(function (a) {
-    agenda = a;
-    var s = a.shoutouts || [];
-    for (var i = 0; i < s.length; i++) { learnPerson(s[i].from, s[i].from_name); learnPerson(s[i].to, s[i].to_name); }
-    paintPeople('agPeopleList');
-    paintHeader();
-    paintTargets();
-    paintYesterday();
-    paintShoutouts();
-    paintNotes();
-    buildComposer();
-    checkCelebration();
+    if (typeof cacheWrite === 'function') { cacheWrite('todayAgenda', {}, a); }
+    return a;
+  });
+}
+
+function agApply(a) {
+  agenda = a;
+  var s = a.shoutouts || [];
+  for (var i = 0; i < s.length; i++) { learnPerson(s[i].from, s[i].from_name); learnPerson(s[i].to, s[i].to_name); }
+  paintPeople('agPeopleList');
+  paintHeader();
+  paintTargets();
+  paintYesterday();
+  paintShoutouts();
+  paintNotes();
+  buildComposer();
+  checkCelebration();
+}
+
+function load(silent) {
+  var had = (typeof cacheRead === 'function') ? cacheRead('todayAgenda', {}) : null;
+  if (had && !silent) { try { agApply(had); } catch (e) { had = null; } }
+  return agFetch().then(function (a) {
+    agApply(a);
   }).catch(function (e) {
-    if (silent) return;
+    if (silent || had) return;
     var box = $('agTargets');
     if (box) box.innerHTML = '<div class="ag-empty">Could not load the agenda. Nothing was changed.</div>';
     fail('Could not load the agenda', e);
