@@ -241,10 +241,41 @@ var API_BATCH_MAX = 10;
 var apiQueue = [];
 var apiTimer = null;
 
+/* A spinner that never explains itself is the difference between "slow" and "broken". Google's
+   backend answers in about 3 seconds on a good run and has been measured at 13 on a bad one, so
+   when anything has been outstanding past SLOW_AFTER_MS we say so plainly instead of letting the
+   screen look dead. */
+var SLOW_AFTER_MS = 6000;
+var apiInflight = 0, apiSlowTimer = null;
+function slowBanner(on){
+  var el = $('slowNote');
+  if(!el){
+    if(!on) return;
+    el = document.createElement('div');
+    el.id = 'slowNote';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;'+
+      'background:rgba(20,24,34,.96);border:1px solid rgba(212,175,55,.45);color:#e8e4dc;'+
+      'padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;box-shadow:0 8px 26px rgba(0,0,0,.5)';
+    document.body.appendChild(el);
+  }
+  el.textContent = 'Still loading — the Google server is being slow right now.';
+  el.style.display = on ? 'block' : 'none';
+}
+function apiStarted(){
+  apiInflight++;
+  if(!apiSlowTimer){ apiSlowTimer = setTimeout(function(){ slowBanner(true); }, SLOW_AFTER_MS); }
+}
+function apiFinished(){
+  apiInflight = Math.max(0, apiInflight - 1);
+  if(apiInflight === 0){ clearTimeout(apiSlowTimer); apiSlowTimer = null; slowBanner(false); }
+}
+
 function apiSend(action, payload){
   var body = JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} });
+  apiStarted();
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
-    .then(function(r){ return r.json(); });
+    .then(function(r){ return r.json(); })
+    .then(function(j){ apiFinished(); return j; }, function(e){ apiFinished(); throw e; });
 }
 
 function apiFlush(){
@@ -10251,14 +10282,30 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
   function plSkip() { return Promise.resolve({ ok: false, skip: true }); }
 
+  /** The board asks for four things at once and cannot draw a column until they all land, so on a
+      slow answer every column sits spinning. If this board has been opened before, it draws the
+      previous cards immediately and replaces them when the fresh answer arrives — the same
+      paint-now-refresh-underneath idea used on the business overview. Read-only board, so a
+      briefly stale card can mislead nobody into acting on it: the screen that owns the item
+      re-checks before anything is decided. */
+  function plCached() {
+    return (typeof cacheRead === 'function') ? cacheRead('pipelineBoard', {}) : null;
+  }
+
   function plLoad() {
     var role = plRole();
-    PL_COLS.forEach(function (c) {
-      var b = $('plB-' + c.key);
-      if (b) { b.innerHTML = '<div class="spinner"></div>'; }
-    });
-    var conn = $('plConn');
-    if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
+    var had = plCached();
+    if (had) {
+      try { plPaint(had[0], had[1], had[2]); plPaintConn(had[3]); } catch (e) { had = null; }
+    }
+    if (!had) {
+      PL_COLS.forEach(function (c) {
+        var b = $('plB-' + c.key);
+        if (b) { b.innerHTML = '<div class="spinner"></div>'; }
+      });
+      var conn = $('plConn');
+      if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
+    }
 
     Promise.all([
       plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
@@ -10268,6 +10315,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     ]).then(function (res) {
       plPaint(res[0], res[1], res[2]);
       plPaintConn(res[3]);
+      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
     });
   }
 
