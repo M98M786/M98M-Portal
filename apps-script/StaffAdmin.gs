@@ -27,8 +27,9 @@ const SADM_TASK_DONE = 'Completed';
 
 // RL-6 column ownership: the only USERS columns this module writes, and the two that a super
 // admin alone may touch (§4.1 — role and email changes are super-admin only).
-const SADM_USER_WRITABLE = ['name', 'shift', 'accounts_access', 'status', 'approved_by', 'deactivated_at', 'notes'];
+const SADM_USER_WRITABLE = ['name', 'shift', 'accounts_access', 'status', 'approved_by', 'deactivated_at', 'notes', 'modules', 'tools'];
 const SADM_USER_SUPER_ONLY = ['email', 'role'];
+const SADM_TOOL_KINDS = ['tool_listing','tool_defense','tool_reply','tool_recovery','tool_cpc_keyword','tool_order_ops'];
 
 // RL-6 column ownership for the handover: assigned_to and nothing else. In particular NOT
 // updated_at — while a task is Working that column is the start-of-stint stamp Tasks.gs reads to
@@ -163,6 +164,53 @@ function sadmWrite_(sh, found, patch, extra) {
 function sadmNote_(existing, line) {
   const prior = String(existing || '').trim();
   return (prior ? prior + ' · ' : '') + line;
+}
+
+/* ---------- V2 modules & tools (contract §5 req 8/24/26) ---------- */
+/** CSV of module keys; '-key' subtracts a role default. Unknown keys THROW so a typo in the
+ * desk can never silently grant nothing. */
+function sadmModules_(v) {
+  const keys = parseAccessCsv_(v);
+  keys.forEach(function (k) {
+    const bare = k.charAt(0) === '-' ? k.slice(1) : k;
+    if (!MODULE_KEYS[bare]) throw new Error(SAFE_ERROR_PREFIX + 'unknown module: ' + bare);
+  });
+  return keys.join(',');
+}
+
+function sadmTools_(v) {
+  const keys = parseAccessCsv_(v);
+  keys.forEach(function (k) {
+    const bare = k.charAt(0) === '-' ? k.slice(1) : k;
+    if (SADM_TOOL_KINDS.indexOf(bare) < 0) throw new Error(SAFE_ERROR_PREFIX + 'unknown tool: ' + bare);
+  });
+  return keys.join(',');
+}
+
+/** The desk's one read: every active/pending person with their access, plus the registries the
+ * checkboxes are built from. Also the self-healing migration — appends the two V2 columns to an
+ * older USERS sheet the first time Management opens the desk. */
+function actionStaffDirectory_(payload, ctx) {
+  sadmAssertStaffAdmin_(ctx);
+  const sh = sadmUsersSheet_();
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  ['modules', 'tools'].forEach(function (col) {
+    if (head.indexOf(col) < 0) {
+      sh.getRange(1, head.length + 1).setValue(col);
+      head.push(col);
+      logActivity_(ctx.ident.email, 'USERS_MIGRATE_V2', col, '', 'column appended', '');
+    }
+  });
+  sadmForgetUsers_();
+  const staff = [];
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.status) === SADM_STATUS_DISABLED) return;
+    staff.push({ email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''),
+      shift: String(u.shift || ''), status: String(u.status || ''), accounts: String(u.accounts_access || ''),
+      modules: parseAccessCsv_(u.modules), tools: parseAccessCsv_(u.tools) });
+  });
+  return { staff: staff, module_registry: MODULE_KEYS, tool_registry: SADM_TOOL_KINDS,
+    roles: ROLES, may_set_roles: isSuperAdmin(ctx.ident.email) };
 }
 
 /** USERS is memoised for the rest of the request (Setup.gs EXEC_MEMO_TABS), so anything reading
@@ -315,6 +363,8 @@ function actionUpdateStaff_(payload, ctx) {
   if (payload.shift !== undefined) patch.shift = sadmShift_(payload.shift);
   if (payload.accounts !== undefined) patch.accounts_access = sadmAccounts_(payload.accounts);
   if (payload.notes !== undefined) patch.notes = sadmText_(payload.notes, SADM_MAX_NOTE);
+  if (payload.modules !== undefined) patch.modules = sadmModules_(payload.modules);
+  if (payload.tools !== undefined) patch.tools = sadmTools_(payload.tools);
   if (!Object.keys(patch).length) throw new Error(SAFE_ERROR_PREFIX + 'nothing to change');
 
   let person = null;
@@ -783,6 +833,7 @@ function actionSaveAccount_(payload, ctx) {
 const ACTIONS_STAFFADMIN = {
   addStaff:        [actionAddStaff_, 'any'],        // Management gated inside — §4.4 keeps Ops Head out
   updateStaff:     [actionUpdateStaff_, 'any'],
+  staffDirectory:  [actionStaffDirectory_, 'any'],  // Management gated inside; self-migrates USERS
   deactivateStaff: [actionDeactivateStaff_, 'any'],
   reactivateStaff: [actionReactivateStaff_, 'super'],
   removedStaff:    [actionRemovedStaff_, 'any'],

@@ -7,7 +7,7 @@ const PROP_DB_ID = 'PORTAL_DB_ID';
 
 // §7 — every Portal DB tab and its exact header row.
 const DB_TABS = {
-  USERS: ['email','name','role','shift','accounts_access','status','joined_at','approved_by','deactivated_at','notes'],
+  USERS: ['email','name','role','shift','accounts_access','status','joined_at','approved_by','deactivated_at','notes','modules','tools'],
   TASKS: ['task_id','type','account','item_id','title','details','comments','assigned_by','assigned_to','priority','deadline_pkt','status','created_at','updated_at','submitted_at','submission_note','approved_by','decided_at','time_taken_min'],
   REPORTS_2H: ['report_id','email','role','shift','date','checkpoint','work_summary','count_1','count_2','count_3','count_4','submitted_at','flag'],
   HUNTING_DB: ['hunt_id','hunter_email','ts'], // + 33 real hunting cols appended at setup from HUNTING_COLS
@@ -38,6 +38,26 @@ const DB_TABS = {
 const HUNTING_COLS = ['Selected By','Approval Status','Comments','Date Added','Account Selected','Listing Status','Seasonal','Main Keyword Terapeak link','Image Link of avg sold price','Image Link of Zik analytics','Terapeak overview','Temu Link','Product Link 1 Main supplier','Product Link 2','Product Link 3','Ebay Link','Title','Image Link','IMAGE','DESCRIPTION','Category','Source Price','E-Bey Caluclator + £4','CPC Selling Chance','Sell Through','Competitors','TOP THREE SALES','Total Competitors on main keyword','Price Range ANALYSIS','Sold Unit ANALYSIS','Our Profit','ROI','Comment'];
 
 const ROLES = ['Management','Ops Head','Team Lead','Listing Manager','Advertising Manager','CS','Product Hunter','Item Lister','Order Processor','Pricing'];
+
+/* V2 access model (§8/§24 of the V2 contract): a person's screens = their role's defaults
+ * PLUS the modules on their USERS row; '-key' entries subtract a default. 'team-lead' is a
+ * routing-only module (loss tasks etc.), not a screen. Keys match VIEWS keys in the frontend. */
+const MODULE_KEYS = {
+  dashboard:'Business overview', pipeline:'Pipeline', agenda:'Daily agenda', tasks:'My tasks',
+  hunting:'Product hunting', huntQueue:'Hunt approvals', listing:'My listings', cpc:'CPC research',
+  keywordApprovals:'Keyword approvals', potentialCpc:'Potential CPC', advertising:'Advertising',
+  wrongAds:'Wrong advertising', orders:'Orders', dispatch:'Dispatch', recheck:'Order rechecking',
+  wrongOrders:'Wrong orders', returns:'Returns & INAD', cs:'Customer service', inbox:'Inbox',
+  meetings:'Meetings', reports:'My reports', reportsGrid:'Reports grid', rota:'Rota & timetable',
+  rules:'Rules & instructions', perf:'My performance', team:'Team performance', kpis:'Account KPIs',
+  alerts:'Alerts centre', signals:'My signals', staffAdmin:'Staff & approvals', approvals:'Approvals desk',
+  tools:'Tools', home:'Home', 'team-lead':'Team-lead duties (routing)',
+};
+
+function parseAccessCsv_(s) {
+  return String(s == null ? '' : s).split(',').map(function (x) { return x.trim(); })
+    .filter(function (x) { return x !== ''; });
+}
 const PROFIT_ROLES = ['Management','Ops Head','Team Lead','Advertising Manager','CS'];       // §4.2
 const SUPER_ADMINS = ['mrhasibullah91@googlemail.com','zaidkaleem987@gmail.com'];
 

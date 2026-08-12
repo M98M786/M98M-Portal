@@ -175,7 +175,9 @@ function loadUser_(email) {
   const rows = getPortalDb_(false).getSheetByName('USERS').getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (normalizeEmail(rows[i][0]) === n) {
-      return { email: rows[i][0], name: rows[i][1], role: rows[i][2], shift: rows[i][3], accounts: rows[i][4], status: rows[i][5], row: i + 1 };
+      return { email: rows[i][0], name: rows[i][1], role: rows[i][2], shift: rows[i][3], accounts: rows[i][4], status: rows[i][5],
+        modules: rows[i][10] === undefined ? '' : String(rows[i][10]),
+        tools: rows[i][11] === undefined ? '' : String(rows[i][11]), row: i + 1 };
     }
   }
   return null;

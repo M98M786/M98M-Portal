@@ -74,8 +74,13 @@ function embedTool_(kind) {
   return null;
 }
 
-function embedMayOpen_(def, role, email) {
+function embedMayOpen_(def, role, email, user) {
   if (!def) return false;
+  // Per-person overrides from the Access-Control desk beat the role defaults both ways:
+  // 'kind' grants a tool the role would not have, '-kind' takes one away (V2 req 10/26).
+  const grants = parseAccessCsv_(user && user.tools);
+  if (grants.indexOf('-' + def.kind) >= 0) return false;
+  if (grants.indexOf(def.kind) >= 0) return true;
   if (isMgmt_(role, email)) return true;
   return def.roles.indexOf(String(role)) >= 0;
 }
@@ -184,7 +189,7 @@ function actionToolManifest_(payload, ctx) {
   const registered = embedRegisteredKinds_();
   const tools = [];
   EMBED_TOOLS.forEach(function (t) {
-    if (!embedMayOpen_(t, role, email)) return;
+    if (!embedMayOpen_(t, role, email, ctx.user)) return;
     const ready = registered[t.kind] === true;
     tools.push({
       tool: t.kind,
@@ -208,7 +213,7 @@ function actionToolHtml_(payload, ctx) {
     logActivity_(email, 'TOOL_DENY', kind || '(none)', '', '', 'unknown tool requested by role ' + role);
     throw new Error('unknown tool');
   }
-  if (!embedMayOpen_(def, role, email)) {
+  if (!embedMayOpen_(def, role, email, ctx.user)) {
     logActivity_(email, 'TOOL_DENY', def.kind, '', '', 'role ' + role + ' may not open this tool');
     throw new Error('role may not open this tool');
   }

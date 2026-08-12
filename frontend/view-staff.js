@@ -65,6 +65,10 @@
     '.st-tbl tbody tr.st-r:hover{background:var(--blue-soft)}',
     '.st-nm{font-weight:800}',
     '.st-sub{font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:2px}',
+    '.ax-grid{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}',
+    '.ax-chip{padding:5px 12px;border-radius:20px;border:1px solid var(--line-2,rgba(255,255,255,.14));font-size:11.5px;font-weight:600;color:var(--text-2);cursor:pointer;user-select:none}',
+    '.ax-chip.on{border-color:var(--gold);background:rgba(212,175,55,.14);color:var(--gold)}',
+    '.ax-chip.off{text-decoration:line-through;opacity:.55;border-color:var(--bad,#f06d6d);color:var(--bad,#f06d6d)}',
     '.st-right{text-align:right;white-space:nowrap}',
     '.st-card{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:linear-gradient(180deg,var(--panel-2),var(--panel))}',
     '.st-card+.st-card{margin-top:12px}',
@@ -379,6 +383,105 @@
       btn.disabled = false;
       toast('Could not add them: ' + e.message);
     });
+  }
+
+  /* ============================ ACCESS CONTROL (V2 §8/§24) ============================ */
+  var AX = { dir: null, who: '' };
+
+  function axLoad() {
+    var box = $('stAccess');
+    if (!box) { return; }
+    var c = cachedCall('staffDirectory', {}, function (d) { AX.dir = d; axPaint(); });
+    if (!c.painted) { box.innerHTML = spinnerCard('Reading the directory…'); }
+    c.done.catch(function (e) {
+      if (c.painted) { return; }
+      box.innerHTML = '<div class="st-empty">The directory could not be loaded.<span>' + esc(e.message) + '</span></div>';
+    });
+  }
+
+  function axPerson() {
+    var d = AX.dir; if (!d) { return null; }
+    for (var i = 0; i < d.staff.length; i++) { if (d.staff[i].email === AX.who) { return d.staff[i]; } }
+    return null;
+  }
+
+  function axPaint() {
+    var box = $('stAccess'), d = AX.dir;
+    if (!box || !d) { return; }
+    if (!AX.who && d.staff.length) { AX.who = d.staff[0].email; }
+    var p = axPerson();
+    var h = '<div class="st-form" style="grid-template-columns:2fr 1fr 1fr">' +
+      '<label>Person<select id="axWho">' + d.staff.map(function (s) {
+        return '<option value="' + esc(s.email) + '"' + (s.email === AX.who ? ' selected' : '') + '>' +
+          esc(s.name || s.email) + ' — ' + esc(s.role) + (s.status !== 'approved' ? ' (' + esc(s.status) + ')' : '') + '</option>';
+      }).join('') + '</select></label>' +
+      (d.may_set_roles
+        ? '<label>Role<select id="axRole">' + d.roles.map(function (r) {
+            return '<option' + (p && p.role === r ? ' selected' : '') + '>' + esc(r) + '</option>';
+          }).join('') + '</select></label>'
+        : '<label>Role<input value="' + esc(p ? p.role : '') + '" disabled></label>') +
+      '<label>Email<input value="' + esc(AX.who) + '" disabled></label></div>';
+
+    // The role's own screens stay implicit; these boxes are the EXTRAS (tick = grant) and the
+    // withdrawals (a granted box unticked writes nothing; to take a role-default away, the
+    // Minus button flips it to a '-key' entry shown struck through).
+    h += '<div class="st-sub" style="margin-top:14px">Extra screens for this person <span class="hint">their role’s screens stay; ticking adds, − takes a default away</span></div>' +
+      '<div class="ax-grid" id="axMods">';
+    var mods = (p && p.modules) || [];
+    Object.keys(d.module_registry).forEach(function (k) {
+      var granted = mods.indexOf(k) >= 0, denied = mods.indexOf('-' + k) >= 0;
+      h += '<span class="ax-chip' + (granted ? ' on' : '') + (denied ? ' off' : '') + '" data-mod="' + esc(k) + '">' +
+        esc(d.module_registry[k]) + '</span>';
+    });
+    h += '</div>';
+
+    h += '<div class="st-sub" style="margin-top:14px">Tools</div><div class="ax-grid" id="axTools">';
+    var tls = (p && p.tools) || [];
+    d.tool_registry.forEach(function (k) {
+      var granted = tls.indexOf(k) >= 0, denied = tls.indexOf('-' + k) >= 0;
+      h += '<span class="ax-chip' + (granted ? ' on' : '') + (denied ? ' off' : '') + '" data-tool="' + esc(k) + '">' +
+        esc(k.replace('tool_', '').replace(/_/g, ' ')) + '</span>';
+    });
+    h += '</div><div style="margin-top:14px"><button class="btn-gold" id="axSave">Save access</button>' +
+      '<span class="hint" style="margin-left:10px">click a chip: grey = role default · gold = granted · struck = taken away</span></div>';
+
+    box.innerHTML = h;
+    $('axWho').onchange = function () { AX.who = this.value; axPaint(); };
+    box.querySelectorAll('.ax-chip').forEach(function (chip) {
+      chip.onclick = function () {
+        // grey -> granted -> denied -> grey
+        if (chip.classList.contains('on')) { chip.classList.remove('on'); chip.classList.add('off'); }
+        else if (chip.classList.contains('off')) { chip.classList.remove('off'); }
+        else { chip.classList.add('on'); }
+      };
+    });
+    var sv = $('axSave');
+    if (sv) { sv.onclick = axSave; }
+  }
+
+  function axCollect(sel, attr) {
+    var out = [];
+    document.querySelectorAll(sel).forEach(function (chip) {
+      var k = chip.getAttribute(attr);
+      if (chip.classList.contains('on')) { out.push(k); }
+      else if (chip.classList.contains('off')) { out.push('-' + k); }
+    });
+    return out.join(',');
+  }
+
+  function axSave() {
+    var btn = $('axSave'), p = axPerson();
+    if (!p) { return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    var payload = { email: AX.who, modules: axCollect('#axMods .ax-chip', 'data-mod'), tools: axCollect('#axTools .ax-chip', 'data-tool') };
+    var roleSel = $('axRole');
+    if (roleSel && roleSel.value !== p.role) { payload.role = roleSel.value; }
+    api('updateStaff', payload).then(function () {
+      toast('Access saved — takes effect at ' + (p.name || 'their') + '’s next sign-in');
+      AX.dir = null; cacheWrite('staffDirectory', {}, null); axLoad();
+    }).catch(function (e) {
+      toast(e.message);
+    }).then(function () { btn.disabled = false; btn.textContent = 'Save access'; });
   }
 
   /* ============================ THE STAFF LIST ============================ */
@@ -975,6 +1078,12 @@
         h += '<div class="card enter d3" style="margin-top:16px"><div class="bd" id="stAdd"></div></div>';
       }
 
+      if (mgr) {
+        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">Access control ' +
+          '<span class="hint">pick a person · grant or take away screens and tools · applies at their next sign-in</span></div>' +
+          '<div class="bd" id="stAccess">' + spinnerCard('Reading the directory…') + '</div></div>';
+      }
+
       h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">The team ' +
           '<span class="hint">timetables live on the Rota screen</span></div>' +
           '<div class="bd" id="stList">' + spinnerCard('Reading the staff list…') + '</div></div>';
@@ -1001,9 +1110,11 @@
         r.onclick = function () {
           S.editing = ''; S.removing = ''; S.handover = null; S.archHand = '';
           loadAll();
+          if (canManage()) { axLoad(); }
         };
       }
       loadAll();
+      if (canManage()) { axLoad(); }
     }
   };
 })();

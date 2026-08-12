@@ -491,7 +491,15 @@ VIEWS.home = {
 
 /* === PHASE 3 VIEW MODULES SPLICED HERE === */
 
-function canSee(v){ if(!v.roles||v.roles==='*') return true; return v.roles.indexOf(STATE.user.role)>=0; }
+/* A person's screens = their role's defaults PLUS the modules Management granted them on the
+   Access desk; a '-key' module takes a default away. The server rechecks every action, so this
+   gate is presentation — but the desk's changes take effect on the next sign-in with no deploy. */
+function canSee(v){
+  var mods=(STATE.user&&STATE.user.modules)||[];
+  if(mods.indexOf('-'+v.key)>=0) return false;
+  if(!v.roles||v.roles==='*') return true;
+  return v.roles.indexOf(STATE.user.role)>=0 || mods.indexOf(v.key)>=0;
+}
 function viewList(){
   return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
     .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });

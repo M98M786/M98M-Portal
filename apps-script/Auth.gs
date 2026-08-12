@@ -50,11 +50,25 @@ function actionWhoami_(payload, ctx) {
   const email = ctx.ident.email;
   if (isSuperAdmin(email)) {
     const su = ctx.user || {};
-    return { status: 'approved', email: email, name: su.name || ctx.ident.name, role: 'Management', shift: su.shift || '', accounts: 'ALL', isSuper: true };
+    return { status: 'approved', email: email, name: su.name || ctx.ident.name, role: 'Management', shift: su.shift || '', accounts: 'ALL', isSuper: true, modules: [], tools: [] };
   }
   if (!ctx.user) return { status: 'none', email: email, name: ctx.ident.name, prefillRole: ROLE_PREFILL[normalizeEmail(email)] || '' };
   const u = ctx.user;
-  return { status: u.status, email: u.email, name: u.name, role: u.role, shift: u.shift, accounts: u.accounts };
+  return { status: u.status, email: u.email, name: u.name, role: u.role, shift: u.shift, accounts: u.accounts,
+    modules: parseAccessCsv_(u.modules), tools: parseAccessCsv_(u.tools) };
+}
+
+/** V2 routing helper: everyone who holds a module — role defaults come from the roles the
+ * frontend view declares (passed in), explicit grants add, '-key' subtracts. */
+function usersWithModule_(moduleKey, defaultRoles) {
+  const out = [];
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.status) !== 'approved') return;
+    const mods = parseAccessCsv_(u.modules);
+    if (mods.indexOf('-' + moduleKey) >= 0) return;
+    if (mods.indexOf(moduleKey) >= 0 || (defaultRoles || []).indexOf(String(u.role)) >= 0) out.push(normalizeEmail(u.email));
+  });
+  return out;
 }
 
 function actionRegister_(payload, ctx) {
