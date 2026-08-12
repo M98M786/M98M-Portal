@@ -307,9 +307,10 @@ function actionSwitchPotentialCpcCampaign_(payload, ctx) {
   logActivity_(ctx.ident.email, 'CAMPAIGN_SWITCH', rec.account + '!' + rec.listing_item_id, old, POTCPC_CAMPAIGN_CPC,
     'potential-cpc ' + rec.row_id + (write.shadow ? ' · pilot gate: live sheet not written' : ''));
 
-  const msg = ctx.user.name + ' switched item ' + rec.listing_item_id + ' on ' + rec.account
-    + ' from ' + (old || 'no campaign') + ' to ' + POTCPC_CAMPAIGN_CPC + '.'
-    + (write.shadow ? ' (recorded in the portal — the live sheet write is held by the pilot gate.)' : '');
+  const msg = '🟠 Campaign switched by ' + ctx.user.name + ' · ' + rec.account + ' · ' + rec.listing_item_id
+    + ' — ' + (old || 'no campaign') + ' → ' + POTCPC_CAMPAIGN_CPC
+    + '. This was the approved Potential-CPC promotion; CPC fees now apply on every sale.'
+    + (write.shadow ? ' (Recorded in the portal — the live sheet write is held by the pilot gate.)' : '');
   // §14 cross-notification, both directions: changed by Zain → Management, by Management → Zain.
   advertising.forEach(function (e) { notify_(e, 'Campaign changed', msg, POTCPC_REF + rec.row_id); });
   if (!mgmt) notifyManagement_('Campaign changed', msg, POTCPC_REF + rec.row_id);

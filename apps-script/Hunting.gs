@@ -318,11 +318,15 @@ function actionDecideHunt_(payload, ctx) {
   if (approving) {
     central = huntCopyToCentral_(account, limited, ctx.ident.email);
     notify_(rec.hunter_email, 'Hunt approved',
-      '"' + title + '" is approved for ' + account + ' — ' + advertising + ', listing by ' + lister.name + '.', 'hunt:' + rec.hunt_id);
+      '🔵 Your hunt "' + title + '" · ' + account + ' — approved as ' + advertising + '. ' + lister.name +
+      ' lists it next; you will see it move through the pipeline.', 'hunt:' + rec.hunt_id);
     notify_(lister.email, 'Task assigned',
-      'listing_new: ' + title + ' (' + account + ', ' + advertising + ') — due ' + deadline, 'task:' + taskId);
+      '🔵 New listing task · ' + account + ' — "' + title + '" (' + advertising + '), due ' + deadline +
+      ' (Pakistan time). The full product pack is inside the task → open My tasks.', 'task:' + taskId);
   } else {
-    notify_(rec.hunter_email, 'Hunt not approved', '"' + title + '" was not approved: ' + comment, 'hunt:' + rec.hunt_id);
+    notify_(rec.hunter_email, 'Hunt not approved',
+      '🟠 Your hunt "' + title + '" — not approved. Reason: ' + comment +
+      '. Read the reason before hunting the next one; it counts toward your approval rate.', 'hunt:' + rec.hunt_id);
   }
 
   return {

@@ -553,7 +553,9 @@ function actionSubmitCpcResearch_(payload, ctx) {
 
   const approvers = cpcKeywordApprovers_();
   const assigner = normalizeEmail(rec.assigned_by);
-  const msg = ctx.user.name + ' submitted CPC keywords/working for approval — ' + (finalTitle || String(rec.title || ''));
+  const msg = '🔵 CPC keywords ready for approval · ' + String(rec.account || '') + (String(rec.item_id || '') ? ' · ' + String(rec.item_id) : '') +
+    ' — "' + (finalTitle || String(rec.title || '')).slice(0, 60) + '" by ' + ctx.user.name +
+    '. The campaign cannot start until this is decided → open Keyword approvals.';
   approvers.forEach(function (a) {
     if (normalizeEmail(a.email) === assigner) return;                  // actionSubmitTask_ already told the assigner
     notify_(a.email, 'Keyword approval needed', msg, 'task:' + rec.task_id);
@@ -587,11 +589,15 @@ function actionApproveKeywords_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   const itemId = String(rec.item_id || '');
-  notify_(rec.assigned_to, 'Keywords approved', 'Your CPC keywords/working for "' + String(rec.title || '') + '" are approved.', 'task:' + rec.task_id);
+  notify_(rec.assigned_to, 'Keywords approved',
+    '🔵 Your CPC keywords for "' + String(rec.title || '').slice(0, 60) + '"' + (itemId ? ' · ' + itemId : '') +
+    ' — approved by ' + ctx.user.name + '. Zain sets the campaign next; nothing more on you.', 'task:' + rec.task_id);
 
   // §9: once the research is approved, Zain switches the campaign to CPC. Management approving
   // therefore has to reach Zain, and Zain approving has to reach Management (§14 cross-notify).
-  const msg = ctx.user.name + ' approved the CPC keywords for "' + String(rec.title || '') + '"' + (itemId ? ' (item ' + itemId + ')' : '') + '.';
+  const msg = '🟠 Keywords approved · ' + String(rec.account || '') + (itemId ? ' · ' + itemId : '') +
+    ' — "' + String(rec.title || '').slice(0, 60) + '" cleared by ' + ctx.user.name +
+    '. Next step: switch the campaign to CPC in the testing window.';
   if (ctx.user.role === 'Advertising Manager') {
     notifyManagement_('Keywords approved', msg, 'task:' + rec.task_id);
   } else {
@@ -625,7 +631,8 @@ function actionReturnKeywords_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   notify_(rec.assigned_to, 'Keywords returned',
-    '"' + String(rec.title || '') + '" was returned for rework: ' + comment.slice(0, 500), 'task:' + rec.task_id);
+    '🟠 "' + String(rec.title || '').slice(0, 60) + '"' + (String(rec.item_id || '') ? ' · ' + String(rec.item_id) : '') +
+    ' — keywords returned by ' + ctx.user.name + '. Fix this first: ' + comment.slice(0, 500) + ' → open CPC research.', 'task:' + rec.task_id);
   return { task_id: rec.task_id, status: TASK_STATUS_WORKING, decided_at: stamp, comment: comment };
 }
 

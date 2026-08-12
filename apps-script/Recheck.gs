@@ -622,7 +622,9 @@ function recheckNotifyCheckers_(ymd, stageLabels) {
     if (String(u.status) !== 'approved') return;
     if (String(u.role) !== 'Order Processor') return;
     if (!recheckCheckerName_({ name: u.name })) return;
-    notify_(u.email, 'Order rechecking due', ymd + ' — ' + stageLabels.length + ' stage(s) ready: ' + stageLabels.join(' · '), ref);
+    notify_(u.email, 'Order rechecking due',
+      '🔵 Rechecking ready for ' + ymd + ' — ' + stageLabels.length + ' stage(s) waiting on you: ' + stageLabels.join(' · ') +
+      '. Orders in these stages are not confirmed delivered until checked → open Order rechecking.', ref);
   });
 }
 

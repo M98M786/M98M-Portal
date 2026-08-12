@@ -398,21 +398,34 @@ function actionEnterItemId_(payload, ctx) {
 
   if (made.campaign_set && !made.campaign_set.existing) {
     notify_(made.campaign_set.assigned_to, 'Task assigned',
-      'campaign_set: Item ID ' + itemId + ' — testing window ' + chain.campaign.uk + ' (' + chain.campaign.pkt + ') on ' + chain.campaign.uk_date + ', once the 72-hour revision is approved.',
+      '🔵 Campaign task queued · ' + String(rec.account || '') + ' · ' + itemId +
+      (rec.title ? ' · ' + String(rec.title).slice(0, 55) : '') + ' — set the campaign in the UK testing window ' +
+      chain.campaign.uk + ' (' + chain.campaign.pkt + ' Pakistan) on ' + chain.campaign.uk_date +
+      ', once the 72-hour revision is approved. It will unlock by itself.',
       'task:' + made.campaign_set.task_id);
   } else if (!made.campaign_set) {
-    notifyManagement_('Task assigned', 'campaign_set for Item ID ' + itemId + ' could not be routed — no approved Advertising Manager.', 'task:' + String(rec.task_id));
+    notifyManagement_('Task assigned',
+      '🔴 Nobody to set the campaign · ' + String(rec.account || '') + ' · ' + itemId +
+      ' — there is no approved Advertising Manager to route the campaign_set task to. The item will list but never advertise → approve or assign an Advertising Manager.',
+      'task:' + String(rec.task_id));
   }
   if (made.supplier_add && !made.supplier_add.existing) {
     notify_(made.supplier_add.assigned_to, 'Task assigned',
-      'supplier_add: Item ID ' + itemId + ' — fill Current Supplier Working and Supplier 1/2/3 on the Central Main Sheet.',
+      '🔵 Supplier details needed · ' + String(rec.account || '') + ' · ' + itemId +
+      (rec.title ? ' · ' + String(rec.title).slice(0, 55) : '') +
+      ' — fill Current Supplier Working and Supplier 1/2/3 on the Central Main Sheet so the first order does not stall.',
       'task:' + made.supplier_add.task_id);
   } else if (!made.supplier_add) {
-    notifyManagement_('Task assigned', 'supplier_add for Item ID ' + itemId + ' could not be routed — no approved Order Processor.', 'task:' + String(rec.task_id));
+    notifyManagement_('Task assigned',
+      '🔴 Nobody to add suppliers · ' + String(rec.account || '') + ' · ' + itemId +
+      ' — no approved Order Processor to route the supplier task to. The first order on this item will have no supplier link → approve or assign an Order Processor.',
+      'task:' + String(rec.task_id));
   }
   if (made.revision && !made.revision.existing) {
     notify_(made.revision.assigned_to, 'Task assigned',
-      LISTING_KIND_72H + ': Item ID ' + itemId + ' — window ' + chain.revision.uk + ' (' + chain.revision.pkt + ') on ' + chain.revision.uk_date + '.',
+      '🔵 72-hour revision due · ' + String(rec.account || '') + ' · ' + itemId +
+      (rec.title ? ' · ' + String(rec.title).slice(0, 55) : '') + ' — selected for revision by the automated system. UK window ' +
+      chain.revision.uk + ' (' + chain.revision.pkt + ' Pakistan) on ' + chain.revision.uk_date + ' → open My tasks.',
       'task:' + made.revision.task_id);
   }
 
@@ -473,7 +486,8 @@ function actionCreateRevision_(payload, ctx) {
 
   logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + employee.email + ' · ' + changes.slice(0, 120));
   notify_(employee.email, 'Task assigned',
-    'listing_revision: Item ID ' + itemId + ' — ' + changes.slice(0, 200) + ' · window ' + win.uk + ' (' + win.pkt + ') on ' + win.uk_date,
+    '🔵 Revision requested by ' + ctx.user.name + ' · ' + itemId + ' — change this: ' + changes.slice(0, 200) +
+    '. UK window ' + win.uk + ' (' + win.pkt + ' Pakistan) on ' + win.uk_date + ' → open My tasks.',
     'task:' + taskId);
 
   const mirror = listingMirrorRevision_(account, {
@@ -562,7 +576,9 @@ function releaseCampaignAfterRevision() {
     const id = String(t.item_id || '').trim();
     if (!id || !revised[id] || done[id]) return;
     notify_(String(t.assigned_to || ''), 'Task assigned',
-      'The 72-hour revision for Item ID ' + id + ' is approved — set the campaign in the testing window ' + win.uk + ' (' + win.pkt + ').',
+      '🟠 Campaign window OPEN · ' + String(t.account || '') + ' · ' + id +
+      ' — the 72-hour revision is approved. Set the campaign inside the UK testing window ' + win.uk +
+      ' (' + win.pkt + ' Pakistan) or the slot is missed → open My tasks.',
       LISTING_CAMPAIGN_RELEASE_REF + id);
     logActivity_('system', 'CAMPAIGN_WINDOW_OPEN', String(t.task_id || ''), '', 'released', 'item ' + id + ' · ' + win.uk);
     count++;

@@ -1184,15 +1184,17 @@ function alertsNotifyFresh_(fresh) {
   });
   fresh.slice(0, ALERTS_NOTIFY_MAX).forEach(function (f) {
     const a = f.alert;
-    const msg = a.account + ' · ' + (a.severity || 'alert') + ' · ' + (a.category ? a.category + ' — ' : '')
-      + a.message + (a.action ? ' · Do this: ' + a.action : '');
+    const sev = String(a.severity || '').toLowerCase();
+    const dot = sev === 'high' || sev === 'critical' ? '🔴 ' : sev === 'medium' ? '🟠 ' : '🔵 ';
+    const msg = dot + (a.category ? a.category + ' alert' : 'Account alert') + ' · ' + a.account + ' — '
+      + a.message + (a.action ? ' → ' + a.action : '');
     notifyManagement_('Account report ACTIVE alert', msg, f.ref);
     logActivity_('system', 'ACCOUNT_ALERT_RAISED', a.account + '!' + (a.fingerprint || a.raised_at), '', a.severity, a.message.slice(0, 200));
   });
   if (fresh.length > ALERTS_NOTIFY_MAX) {
     const extra = fresh.length - ALERTS_NOTIFY_MAX;
     notifyManagement_('Account report ACTIVE alert',
-      extra + ' further account alerts are open — open the Alerts Centre to work through them.',
+      '🟠 ' + extra + ' more account alerts are open beyond the ones just sent → open the Alerts Centre and work through them by account.',
       ALERTS_NOTIFY_REF + 'batch:' + alertsToday_());
   }
 }

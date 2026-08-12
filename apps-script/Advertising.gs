@@ -393,9 +393,12 @@ function actionSetCampaign_(payload, ctx) {
 
   const ppc = advRecordPpcDecision_(account, itemId, before, ppcSpec, ctx);
 
-  const message = ctx.user.name + ' changed item ' + itemId + ' on ' + account + ' from '
-    + (old || 'no campaign') + ' to ' + campaign + '.' + (note ? ' — ' + note : '')
-    + (write.shadow ? ' (recorded in the portal — the live sheet write is held by the pilot gate.)' : '');
+  const advTitle = String(before && before.listing_title || '').slice(0, 55);
+  const message = '🟠 Campaign changed by ' + ctx.user.name + ' · ' + account + ' · ' + itemId +
+    (advTitle ? ' · ' + advTitle : '') + ' — ' + (old || 'no campaign') + ' → ' + campaign + '.' +
+    (note ? ' Reason: ' + note + '.' : '') +
+    ' Ad fees and visibility change from the next click.' +
+    (write.shadow ? ' (Recorded in the portal — the live sheet write is held by the pilot gate.)' : '');
   // §14, both directions: a Management change reaches Zain, Zain's change reaches Management, and
   // a CS record-update reaches both.
   targets.emails.forEach(function (e) { notify_(e, 'Campaign changed', message, ADV_CAMPAIGN_REF + itemId); });
@@ -653,16 +656,17 @@ function advRaiseAlarmSignals_(alarms, actor) {
   if (!fresh.length) return fresh;
   const advertising = advAdvertisingEmails_('');
   fresh.slice(0, ADV_ALARM_NOTIFY_MAX).forEach(function (a) {
-    const msg = 'Wrong Advertising ALARM · ' + a.account + ' · item ' + a.item_id
-      + ' — live on eBay: ' + (a.live_on_ebay || 'unknown')
-      + (a.manager_wants ? ' · manager wants: ' + a.manager_wants : '') + '.';
+    const msg = '🔴 Wrong advertising · ' + a.account + ' · ' + a.item_id
+      + ' — running on eBay as ' + (a.live_on_ebay || 'unknown')
+      + (a.manager_wants ? ' but the manager decided ' + a.manager_wants : ' with no decision recorded')
+      + '. Every sale pays the wrong fee until it is fixed → open Wrong advertising and clear it.';
     notifyManagement_('Wrong Advertising ALARM', msg, ADV_ALARM_REF + a.signal_key);
     advertising.forEach(function (e) { notify_(e, 'Wrong Advertising ALARM', msg, ADV_ALARM_REF + a.signal_key); });
     logActivity_(actor, 'WRONG_ADVERTISING_ALARM', a.account + '!' + a.item_id, '', a.live_on_ebay, a.date);
   });
   if (fresh.length > ADV_ALARM_NOTIFY_MAX) {
     const extra = fresh.length - ADV_ALARM_NOTIFY_MAX;
-    const msg = extra + ' further Wrong Advertising alarms are open — open the Advertising alerts to work through them.';
+    const msg = '🔴 ' + extra + ' more wrong-advertising alarms are open beyond the ones just sent — each is paying the wrong fee right now → open Wrong advertising and work through the list.';
     notifyManagement_('Wrong Advertising ALARM', msg, ADV_ALARM_REF + 'batch');
     advertising.forEach(function (e) { notify_(e, 'Wrong Advertising ALARM', msg, ADV_ALARM_REF + 'batch'); });
     logActivity_(actor, 'WRONG_ADVERTISING_ALARM_BATCH', 'SIGNALS', '', String(fresh.length), 'notified ' + ADV_ALARM_NOTIFY_MAX + ' individually');
@@ -703,8 +707,8 @@ function advAcknowledgeAlarm_(payload, ctx) {
   if (!row) throw new Error('alarm not found');
   logActivity_(ctx.ident.email, 'WRONG_ADVERTISING_RESOLVED', account + '!' + itemId, old, next, date);
 
-  const msg = ctx.user.name + ' cleared the Wrong Advertising alarm on item ' + itemId + ' (' + account + ')'
-    + (note ? ' — ' + note : '') + '.';
+  const msg = '🔵 Wrong-advertising alarm cleared by ' + ctx.user.name + ' · ' + account + ' · ' + itemId +
+    (note ? ' — ' + note : '') + '. Alarm open → resolved; logged with name and time.';
   advAdvertisingEmails_(ctx.ident.email).forEach(function (e) { notify_(e, 'Wrong Advertising cleared', msg, ADV_ALARM_REF + key); });
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) notifyManagement_('Wrong Advertising cleared', msg, ADV_ALARM_REF + key);
 

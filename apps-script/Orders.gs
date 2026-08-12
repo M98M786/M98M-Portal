@@ -903,9 +903,9 @@ function dispatchOverdueSweep() {
     const ref = ORDERS_OVERDUE_REF + account + ':' + today;
     if (sent[ref]) continue;
 
-    const msg = account + ': ' + overdue + ' order(s) past their ship-by date, '
-      + (Number(dash.tiles[ORDERS_TILE_DUE]) || 0) + ' due within ' + ORDERS_DUE_WINDOW_DAYS + ' days, '
-      + (Number(dash.tiles[ORDERS_TILE_AWAITING]) || 0) + ' awaiting dispatch.';
+    const msg = '🔴 Dispatch overdue · ' + account + ' — ' + overdue + ' order(s) past their ship-by date, '
+      + (Number(dash.tiles[ORDERS_TILE_DUE]) || 0) + ' more due within ' + ORDERS_DUE_WINDOW_DAYS + ' days, '
+      + (Number(dash.tiles[ORDERS_TILE_AWAITING]) || 0) + ' awaiting dispatch. Late dispatch damages the account\'s seller rating → open Dispatch and clear the overdue list first.';
     notifyManagement_('Dispatch OVERDUE', msg, ref);
     ordersProcessorsFor_(account).forEach(function (p) { notify_(p.email, 'Dispatch OVERDUE', msg, ref); });
     logActivity_('system', 'DISPATCH_OVERDUE', account, '', String(overdue), msg);

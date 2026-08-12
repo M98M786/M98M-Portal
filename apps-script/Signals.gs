@@ -740,20 +740,25 @@ function signalsNotify_(fresh, actor) {
   }
 }
 
+/* V2 §4 notification law: what happened · account · item (ID + short title) · figures ·
+ * why it matters · what to do. The old "value 1.03 baseline 3.03" format is banned. */
 function signalsMessage_(f) {
-  const item = f.item_id ? 'item ' + f.item_id : signalsText_(f.title, 60);
+  const title = signalsText_(f.title, 55);
+  const item = (f.item_id ? f.item_id : '') + (title ? (f.item_id ? ' · ' : '') + title : '');
+  const head = f.account + (item ? ' · ' + item : '');
   if (f.type === SIG_TYPE_NEGATIVE) {
-    return f.type + ' · ' + f.account + ' · ' + item + ' — Actual Profit ' + signalsGbp_(f.value) + ' on ' + f.date + '.';
+    return '🔴 Loss item on ' + head + ' — made ' + signalsGbp_(f.value) + ' on ' + f.date +
+      '. Every sale at this price loses money. Change the price or the advertising, or Management decides to keep it.';
   }
   if (f.type === SIG_TYPE_WORST_CPC) {
-    return f.type + ' · ' + f.account + ' · ' + item + ' — ad fees ' + signalsGbp_(f.value)
-      + ' against ' + signalsGbp_(f.baseline) + ' earning on ' + f.date + '.';
+    return '🟠 Ads ate the margin on ' + head + ' — ' + signalsGbp_(f.value) + ' ad fees against ' +
+      signalsGbp_(f.baseline) + ' earned on ' + f.date + '. The campaign is costing more than the item brings in — review the bid or the campaign type.';
   }
   if (f.type === SIG_TYPE_RETURNS) {
-    return f.type + ' · ' + f.account + ' · ' + item + ' — ' + f.value + ' return(s) on ' + f.date
-      + ' against its own ' + f.card.baseline_days + '-day rate of ' + f.baseline + ' a day.';
+    return '🟠 Returns spike on ' + head + ' — ' + f.value + ' return(s) on ' + f.date +
+      ' against its own ' + f.card.baseline_days + '-day rate of ' + f.baseline + ' a day. Check the listing photos/description and the supplier batch before it costs more.';
   }
-  return f.type + ' · ' + f.account + ' · ' + item + ' on ' + f.date + '.';
+  return '🔵 ' + f.type + ' · ' + head + ' on ' + f.date + '.';
 }
 
 // ---------- what one person sees ----------

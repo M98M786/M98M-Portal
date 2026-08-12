@@ -50,7 +50,10 @@ function actionCreateTask_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   logActivity_(ctx.ident.email, 'CREATE_TASK', taskId, '', TASK_STATUS_PENDING, type + ' → ' + assignee.email + ' due ' + deadline);
-  notify_(assignee.email, 'Task assigned', type + ': ' + title + ' — due ' + deadline, 'task:' + taskId);
+  notify_(assignee.email, 'Task assigned',
+    '🔵 New ' + type.replace(/_/g, ' ') + ' task' + (payload.account ? ' · ' + payload.account : '') +
+    (itemId ? ' · ' + itemId : '') + ' — "' + title + '" from ' + (ctx.ident.name || ctx.ident.email) +
+    ', due ' + deadline + ' (Pakistan time). Open My tasks to start it.', 'task:' + taskId);
   return { task_id: taskId, status: TASK_STATUS_PENDING, assigned_to: assignee.email, deadline_pkt: deadline };
 }
 
@@ -134,7 +137,9 @@ function actionSubmitTask_(payload, ctx) {
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
   } finally { lock.releaseLock(); }
 
-  const msg = ctx.user.name + ' submitted "' + rec.title + '" for approval — ' + note.slice(0, 200);
+  const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
+    (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
+    ' for approval — took ' + total + ' min. Note: ' + note.slice(0, 200) + ' → approve or return it on the Approvals desk.';
   if (approver) notify_(approver, 'Task submitted', msg, 'task:' + rec.task_id);
   else notifyManagement_('Task submitted', msg, 'task:' + rec.task_id);
   return { task_id: rec.task_id, status: TASK_STATUS_SUBMITTED, submitted_at: stamp };
@@ -180,7 +185,9 @@ function actionApproveTask_(payload, ctx) {
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)));
   } finally { lock.releaseLock(); }
 
-  notify_(rec.assigned_to, 'Task approved', '"' + rec.title + '" is approved and Completed.', 'task:' + rec.task_id);
+  notify_(rec.assigned_to, 'Task approved',
+    '🔵 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
+    ' — approved by ' + (ctx.user.name || ctx.ident.email) + '. Submitted → Completed. Nothing more to do on this one.', 'task:' + rec.task_id);
   return { task_id: rec.task_id, status: TASK_STATUS_COMPLETED, decided_at: stamp };
 }
 
@@ -207,7 +214,9 @@ function actionReturnTask_(payload, ctx) {
     logActivity_(ctx.ident.email, 'RETURN_TASK', rec.task_id, old, TASK_STATUS_WORKING, comment.slice(0, 200));
   } finally { lock.releaseLock(); }
 
-  notify_(rec.assigned_to, 'Task returned', '"' + rec.title + '" was returned: ' + comment.slice(0, 500), 'task:' + rec.task_id);
+  notify_(rec.assigned_to, 'Task returned',
+    '🟠 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
+    ' — returned by ' + (ctx.user.name || ctx.ident.email) + '. Submitted → back to Working. Fix this first: ' + comment.slice(0, 500), 'task:' + rec.task_id);
   return { task_id: rec.task_id, status: TASK_STATUS_WORKING, decided_at: stamp };
 }
 
@@ -233,7 +242,10 @@ function escalateStaleSubmissions() {
     if (isNaN(sub) || sub > cutoff) return;
     const waited = Math.round((nowMs - sub) / 60000);
     notifyManagement_('Submission unactioned',
-      '"' + String(t.title || id) + '" has waited ' + waited + ' min for approval by ' + String(t.assigned_by || 'unassigned approver') + '.',
+      '🟠 "' + String(t.title || id) + '"' + (t.account ? ' · ' + String(t.account) : '') +
+      (t.item_id ? ' · ' + String(t.item_id) : '') + ' — submitted by ' + String(t.assigned_to || '?') +
+      ' has waited ' + Math.round(waited / 60) + 'h ' + (waited % 60) + 'm on ' + String(t.assigned_by || 'an unassigned approver') +
+      '. The person cannot move on until it is decided → open the Approvals desk.',
       TASK_ESCALATION_REF + id);
     logActivity_('system', 'ESCALATE_TASK', id, TASK_STATUS_SUBMITTED, 'escalated', 'waited ' + waited + ' min; approver ' + String(t.assigned_by || ''));
     count++;
