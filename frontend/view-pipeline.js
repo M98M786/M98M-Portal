@@ -165,6 +165,7 @@
     icon: '<path d="M4 4h5v16H4z"/><path d="M10 4h5v11h-5z"/><path d="M16 4h4v7h-4z"/>',
     roles: PL_ROLES,
     order: 22,
+    prefetch: plFetch,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Pipeline</h1>' +
           '<span class="sub">The whole machine, one board · read only · a card opens the screen that owns it</span>' +
@@ -230,8 +231,23 @@
     return (typeof cacheRead === 'function') ? cacheRead('pipelineBoard', {}) : null;
   }
 
-  function plLoad() {
+  /** The four requests this board needs. Kept in one place so the warm-up at sign-in asks for
+      exactly what the board itself would ask for — including the role gating — and the cached
+      array can never end up in a different shape from what plPaint expects. */
+  function plFetch() {
     var role = plRole();
+    return Promise.all([
+      plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
+      plWrap(api('myListingWork', { include_completed: 'true' })),
+      plHas(PL_POTCPC_ROLES, role) ? plWrap(api('potentialCpcQueue', { status: 'ALL', limit: 200 })) : plSkip(),
+      plWrap(api('connectionHealth'))
+    ]).then(function (res) {
+      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
+      return res;
+    });
+  }
+
+  function plLoad() {
     var had = plCached();
     if (had) {
       try { plPaint(had[0], had[1], had[2]); plPaintConn(had[3]); } catch (e) { had = null; }
@@ -245,15 +261,9 @@
       if (conn) { conn.innerHTML = '<div class="spinner"></div>'; }
     }
 
-    Promise.all([
-      plHas(PL_HUNT_ROLES, role) ? plWrap(api('huntQueue', { status: 'all' })) : plSkip(),
-      plWrap(api('myListingWork', { include_completed: 'true' })),
-      plHas(PL_POTCPC_ROLES, role) ? plWrap(api('potentialCpcQueue', { status: 'ALL', limit: 200 })) : plSkip(),
-      plWrap(api('connectionHealth'))
-    ]).then(function (res) {
+    plFetch().then(function (res) {
       plPaint(res[0], res[1], res[2]);
       plPaintConn(res[3]);
-      if (typeof cacheWrite === 'function') { cacheWrite('pipelineBoard', {}, res); }
     });
   }
 

@@ -303,6 +303,12 @@ VIEWS.dashboard = {
   order: 5,
   roles: DB_VIEW_ROLES,
   icon: '<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>',
+  prefetch: function () {
+    return api('dashboard').then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('dashboard', {}, d); }
+      return d;
+    });
+  },
   render: function () {
     return '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
       '<span class="sub" id="dbStamp">loading…</span>' +

@@ -495,6 +495,28 @@ function enterApp(user){
   });
   show('appShell'); renderView('home');
   if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
+  warmUp();
+}
+
+/* The backend charges its ~3 seconds per REQUEST, not per question asked — a request that
+   answers eight things costs about the same as one that answers one. So at sign-in we ask for
+   the heavy screens up front, in a single batched request, and put the answers in the cache.
+   By the time anyone clicks Business overview or Pipeline, the figures are already here and the
+   screen opens at once instead of starting a three-second wait.
+
+   Only screens this person is allowed to see are asked for — viewList() is the same gate the
+   navigation uses — so the warm-up can never fetch something the role could not open, and each
+   answer still passes the server's own role check on the way out. Failures are ignored on
+   purpose: a warm-up is a courtesy, and every screen still loads normally on its own. */
+function warmUp(){
+  if(!STATE.idToken) return;
+  try{
+    viewList().forEach(function(v){
+      var view = VIEWS[v.key];
+      if(!view || typeof view.prefetch !== 'function') return;
+      try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+    });
+  }catch(e){}
 }
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
