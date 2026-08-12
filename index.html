@@ -361,6 +361,23 @@ function cacheClearAll(){
   }catch(e){}
 }
 
+/* The one-line version for view loaders: paint(d, isStale) runs at once from the last answer
+   when there is one, then again with the fresh one. Returns { painted, done } — `painted` says
+   whether something is already on screen (the caller skips its spinner), `done` is the fetch
+   promise, which only rejects when there was nothing cached to fall back on. */
+function cachedCall(action, payload, paint){
+  var had = cacheRead(action, payload);
+  var painted = false;
+  if(had != null){ try{ paint(had, true); painted = true; }catch(e){ painted = false; } }
+  var p = api(action, payload).then(function(d){
+    cacheWrite(action, payload, d);
+    paint(d, false);
+    return d;
+  });
+  if(painted){ p = p.catch(function(){ toast('Showing the last answer — could not refresh just now.'); return had; }); }
+  return { painted: painted, done: p };
+}
+
 /* onData(data, isStale) may be called twice: once from cache, once with the truth. */
 function apiCached(action, payload, onData){
   var had = cacheRead(action, payload);
@@ -462,11 +479,13 @@ VIEWS.home = {
       api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
         .catch(function(e){ toast('Could not send: '+e.message); });
     };
-    api('todayAgenda').then(function(a){
-      var b=$('agendaBox'); var items=(a&&a.items)||[];
+    var hc = cachedCall('todayAgenda', {}, function(a){
+      var b=$('agendaBox'); if(!b){ return; }
+      var items=(a&&a.items)||[];
       if(!items.length){ b.textContent='No agenda posted for today yet.'; return; }
       b.innerHTML=items.map(function(x){ return '<div class="tl-row">'+esc(typeof x==='string'?x:(x.text||''))+'</div>'; }).join('');
-    }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; });
+    });
+    hc.done.catch(function(){ if(!hc.painted && $('agendaBox')){ $('agendaBox').textContent='No agenda posted for today yet.'; } });
   }
 };
 

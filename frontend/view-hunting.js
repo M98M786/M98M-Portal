@@ -461,15 +461,16 @@
   function huLoadMine() {
     var box = huEl('huMineBody'), filter = huEl('huFilter');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('myHunts', { status: filter ? filter.value : 'all' }).then(function (d) {
+    var hc = cachedCall('myHunts', { status: filter ? filter.value : 'all' }, function (d) {
       var hunts = (d && d.hunts) || [];
       if (!hunts.length) {
         box.innerHTML = '<div class="hu-empty">Nothing here yet.<span>Every hunt you submit stays on this list with its decision and any comment.</span></div>';
         return;
       }
       box.innerHTML = hunts.map(huMineItem).join('');
-    }).catch(function (e) {
+    });
+    if (!hc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    hc.done.catch(function (e) {
       box.innerHTML = '<div class="hu-empty">Your hunts could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="huMineRetry" style="margin-top:10px">Try again</button></div>';
       var r = huEl('huMineRetry'); if (r) { r.onclick = huLoadMine; }

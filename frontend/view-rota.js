@@ -117,7 +117,9 @@ VIEWS.rules = {
   },
   init: function () {
     loadLaw();
-    api('mySops').then(renderSops).catch(function () {
+    var sc = cachedCall('mySops', {}, renderSops);
+    sc.done.catch(function () {
+      if (sc.painted) { return; }
       put('rlSops', noteCard('SOPs could not be loaded right now.'));
     });
     if (isMgmt()) { renderAdmin(); loadAckGrid(); }
@@ -125,7 +127,7 @@ VIEWS.rules = {
 };
 
 function loadLaw() {
-  return api('myRules').then(function (d) {
+  var lc = cachedCall('myRules', {}, function (d) {
     law = d;
     var scope = $('rlScope');
     if (scope) {
@@ -136,7 +138,9 @@ function loadLaw() {
     renderLaw(d);
     STATE.counts.rules = Number(d.unacknowledged) || 0;
     if (typeof refreshBadges === 'function') refreshBadges();
-  }).catch(function () {
+  });
+  return lc.done.catch(function () {
+    if (lc.painted) { return; }
     put('rlLaw', noteCard('Your rules could not be loaded. Nothing has changed — try again shortly.'));
   });
 }
@@ -430,7 +434,9 @@ VIEWS.rota = {
       '<div id="rtGrid" style="margin-top:16px">' + loadingCard('Loading the rota…') + '</div>';
   },
   init: function () {
-    api('myTimetable').then(renderMine).catch(function () {
+    var tc = cachedCall('myTimetable', {}, renderMine);
+    tc.done.catch(function () {
+      if (tc.painted) { return; }
       put('rtMine', noteCard('Your timetable could not be loaded right now.'));
     });
     loadRota();
@@ -461,10 +467,12 @@ function renderMine(d) {
 }
 
 function loadRota() {
-  return api('rotaGrid').then(function (d) {
+  var rc = cachedCall('rotaGrid', {}, function (d) {
     rota = d;
     renderRota(d);
-  }).catch(function () {
+  });
+  return rc.done.catch(function () {
+    if (rc.painted) { return; }
     put('rtGrid', noteCard('The rota could not be loaded. Nothing has changed — try again shortly.'));
   });
 }

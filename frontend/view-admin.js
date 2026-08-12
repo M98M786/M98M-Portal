@@ -66,8 +66,7 @@
   function adLoadPending() {
     var box = $('adPending');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('listPending').then(function (d) {
+    var pc = cachedCall('listPending', {}, function (d) {
       var list = (d && d.pending) || [];
       STATE.counts.staffAdmin = list.length;
       if (typeof refreshBadges === 'function') { refreshBadges(); }
@@ -79,7 +78,9 @@
       box.innerHTML = list.map(adPendingCard).join('');
       var btns = box.querySelectorAll('[data-approve]');
       for (var i = 0; i < btns.length; i++) { btns[i].onclick = adApprove; }
-    }).catch(function (e) {
+    });
+    if (!pc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    pc.done.catch(function (e) {
       box.innerHTML = '<div class="ad-empty">Could not load the queue.<span>' + esc(e.message) + '</span></div>';
     });
   }

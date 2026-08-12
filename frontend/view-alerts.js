@@ -319,7 +319,6 @@
   function alLoadCentre(refresh) {
     var list = $('alList');
     if (!list) { return; }
-    list.innerHTML = '<div class="spinner"></div>';
 
     var payload = { limit: AL.limit };
     if (AL.account) { payload.account = AL.account; }
@@ -327,7 +326,7 @@
     if (AL.category) { payload.category = AL.category; }
     if (refresh && alMayRefresh()) { payload.refresh = true; }
 
-    api('alertsCentre', payload).then(function (d) {
+    var ac = cachedCall('alertsCentre', payload, function (d) {
       AL.data = d || null;
       AL.rows = (d && d.alerts) || [];
       alRememberVocab(d);
@@ -342,7 +341,9 @@
           (d && d.from_cache ? 'from the 5-minute cache' : 'read just now') +
           ' · ' + alPortalStamp(d && d.computed_at);
       }
-    }).catch(function (e) {
+    });
+    if (!ac.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    ac.done.catch(function (e) {
       AL.data = null;
       AL.rows = [];
       list.innerHTML = alRetry('The alerts could not be read just now.', e.message, 'alRetryBtn');
@@ -637,8 +638,6 @@
    *  Google's ~2.5s backend load is paid per request, not per action. */
   function alkLoad(refresh) {
     var body = $('alkBody'), ops = $('alkOps');
-    if (body) { body.innerHTML = '<div class="card"><div class="bd"><div class="spinner"></div></div></div>'; }
-    if (ops) { ops.innerHTML = '<div class="spinner"></div>'; }
     var force = refresh && alMayRefresh();
 
     var kpiPayload = {};
@@ -647,11 +646,13 @@
     var opsPayload = { date: ALK.date || alTodayPkt() };
     if (force) { opsPayload.refresh = true; }
 
-    api('accountKpis', kpiPayload).then(function (d) {
+    var kc = cachedCall('accountKpis', kpiPayload, function (d) {
       ALK.kpi = d || null;
       alkFillAccounts(d);
       if (ALK.account) { alkRenderAccount(d); } else { alkRenderFleet(d); }
-    }).catch(function (e) {
+    });
+    if (!kc.painted && body) { body.innerHTML = '<div class="card"><div class="bd"><div class="spinner"></div></div></div>'; }
+    kc.done.catch(function (e) {
       ALK.kpi = null;
       if (body) {
         body.innerHTML = '<div class="card"><div class="bd">' +
@@ -661,10 +662,12 @@
       }
     });
 
-    api('opsCounters', opsPayload).then(function (d) {
+    var oc = cachedCall('opsCounters', opsPayload, function (d) {
       ALK.ops = d || null;
       alkRenderOps(d);
-    }).catch(function (e) {
+    });
+    if (!oc.painted && ops) { ops.innerHTML = '<div class="spinner"></div>'; }
+    oc.done.catch(function (e) {
       ALK.ops = null;
       if (ops) {
         ops.innerHTML = alRetry('The operations counters could not be computed just now.', e.message, 'alkOpsRetry');

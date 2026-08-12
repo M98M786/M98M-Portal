@@ -232,11 +232,11 @@
      the built page is public (RL-2/RL-9), and the registry stays the single source of truth. */
   var OD_ACCOUNTS = [];
   function odLoadAccounts(then) {
-    api('accountList').then(function (d) {
+    cachedCall('accountList', {}, function (d) {
       OD_ACCOUNTS = ((d && d.accounts) || []).map(function (a) { return odStr(a.account); })
         .filter(function (a) { return !!a; });
-      if (typeof then === 'function') { then(); }
-    }).catch(function () { if (typeof then === 'function') { then(); } });
+      if (typeof then === 'function') { then(); then = null; }
+    }).done.catch(function () { if (typeof then === 'function') { then(); } });
   }
   function odAccountOptions(selected) {
     var opts = OD_ACCOUNTS.map(function (a) {
@@ -359,11 +359,10 @@
       odSummary(null);
       return;
     }
-    box.innerHTML = '<div class="spinner"></div>';
     var payload = { account: OD_ACCOUNT };
     if (OD_REPLACEMENT) { payload.tab = OD_REPLACEMENT_TAB; } else { payload.date = OD_DATE || odTodayPkt(); }
 
-    api('todayOrders', payload).then(function (d) {
+    var oc = cachedCall('todayOrders', payload, function (d) {
       OD_DATA = d || null;
       if (!d || !d.ok) {
         odSummary(d);
@@ -384,7 +383,9 @@
       box.innerHTML = orders.map(odCard).join('');
       odWire(box);
       odCount('orders', odOutstanding(orders));
-    }).catch(function (e) {
+    });
+    if (!oc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    oc.done.catch(function (e) {
       OD_DATA = null;
       odSummary(null);
       box.innerHTML = odRetry('The day could not be opened just now.', e.message, 'odRetry');
@@ -852,6 +853,10 @@
     icon: '<path d="M1 3h13v13H1z"/><path d="M14 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/>',
     roles: OD_DISPATCH_ROLES,
     order: 27,
+    prefetch: function () {
+      var payload = { month: odTodayPkt().slice(0, 7) };
+      return api('dispatchDashboard', payload).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('dispatchDashboard', payload, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.dispatch) || 0; },
     render: function () {
       OD_MONTH = OD_MONTH || odTodayPkt().slice(0, 7);
@@ -898,16 +903,13 @@
   function odDashLoad(refresh) {
     var top = $('odDsTop'), cards = $('odDsAccounts'), alarm = $('odDsAlarm');
     if (!top) { return; }
-    top.innerHTML = '<div class="spinner"></div>';
-    if (cards) { cards.innerHTML = ''; }
-    if (alarm) { alarm.innerHTML = ''; }
 
     var one = odStr($('odDsAccount') && $('odDsAccount').value);
     var payload = { month: OD_MONTH || odTodayPkt().slice(0, 7) };
     if (one) { payload.account = one; }
     if (refresh) { payload.refresh = true; }
 
-    api('dispatchDashboard', payload).then(function (d) {
+    var dc = cachedCall('dispatchDashboard', payload, function (d) {
       OD_DASH = d || null;
       var agg = (d && d.aggregate) || {};
       var overdue = Number(agg[OD_TILE_OVERDUE]) || 0;
@@ -920,7 +922,13 @@
       top.innerHTML = odTiles(agg, false) + odDispatchTable(d && d.dispatch_status);
       if (cards) { cards.innerHTML = ((d && d.accounts) || []).map(odAccountCard).join(''); }
       odCount('dispatch', overdue);
-    }).catch(function (e) {
+    });
+    if (!dc.painted) {
+      top.innerHTML = '<div class="spinner"></div>';
+      if (cards) { cards.innerHTML = ''; }
+      if (alarm) { alarm.innerHTML = ''; }
+    }
+    dc.done.catch(function (e) {
       OD_DASH = null;
       top.innerHTML = odRetry('The dispatch figures could not be computed just now.', e.message, 'odDsRetry');
       var r = $('odDsRetry'); if (r) { r.onclick = function () { odDashLoad(false); }; }

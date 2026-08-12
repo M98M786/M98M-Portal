@@ -342,10 +342,12 @@
   }
 
   function myLoad() {
-    return api('myPerformance').then(function (d) {
+    var mc = cachedCall('myPerformance', {}, function (d) {
       MY = d || {};
       myPaint();
-    }).catch(function (e) {
+    });
+    return mc.done.catch(function (e) {
+      if (mc.painted) { return; }
       var host = $('pfBody');
       if (!host) { return; }
       host.innerHTML = '<div class="card enter d2"><div class="bd pf-note">' +
@@ -553,19 +555,19 @@
    * has already made fresh, so the toggle afterwards costs nothing (§13.4). */
   function teamLoad(force) {
     var host = $('pfTeamGrid');
-    if (host) { host.innerHTML = '<div class="spinner"></div>'; }
-    var a = api('teamPerformance', force ? { period: TEAM_KIND, refresh: true } : { period: TEAM_KIND });
+    var tc = cachedCall('teamPerformance', force ? { period: TEAM_KIND, refresh: true } : { period: TEAM_KIND },
+      function (d) { TEAM[TEAM_KIND] = d || null; teamPaint(); });
+    if (!tc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
     var other = TEAM_KIND === 'day' ? 'week' : 'day';
     var b = api('teamPerformance', { period: other });
-    a.then(function (d) { TEAM[TEAM_KIND] = d || null; teamPaint(); })
-      .catch(function (e) {
-        if (!$('pfTeamGrid')) { return; }
-        $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
-          esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-            : 'The grid could not be loaded. Please try again.') + '</div>';
-      });
-    b.then(function (d) { TEAM[other] = d || null; }).catch(function () {});
-    return a;
+    tc.done.catch(function (e) {
+      if (tc.painted || !$('pfTeamGrid')) { return; }
+      $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
+        esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
+          : 'The grid could not be loaded. Please try again.') + '</div>';
+    });
+    b.then(function (d) { TEAM[other] = d || null; if (typeof cacheWrite === 'function') { cacheWrite('teamPerformance', { period: other }, d); } }).catch(function () {});
+    return tc.done;
   }
 
   /* ---------- §12.2 the rubric ---------- */
@@ -786,13 +788,14 @@
 
   function evalLoad() {
     var hist = $('pfEvHist');
-    if (hist) { hist.innerHTML = '<div class="spinner"></div>'; }
-    return api('evaluations', { month: EVAL_MONTH }).then(function (d) {
+    var ec = cachedCall('evaluations', { month: EVAL_MONTH }, function (d) {
       EVAL = d || {};
       evalPaint();
-    }).catch(function (e) {
+    });
+    if (!ec.painted && hist) { hist.innerHTML = '<div class="spinner"></div>'; }
+    return ec.done.catch(function (e) {
       EVAL = EVAL || {};
-      if (!$('pfEvHist')) { return; }
+      if (ec.painted || !$('pfEvHist')) { return; }
       $('pfEvHist').innerHTML = '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
           : 'The evaluation history could not be loaded. Please try again.') + '</div>';

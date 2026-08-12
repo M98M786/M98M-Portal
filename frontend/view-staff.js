@@ -226,11 +226,23 @@
 
   function loadAll() {
     var mgr = canManage();
+    // The composed answer set is what gets cached — one shape, one instant repaint.
+    var had = (typeof cacheRead === 'function') ? cacheRead('staffAll', { mgr: mgr }) : null;
+    if (had) { try { applyAll(had, mgr); } catch (e) { had = null; } }
+
     /* Fired in one tick on purpose — the shell gathers them into a single round trip. */
     var calls = [soft(api('listPending')), soft(api('assignableStaff')), soft(api('accountList'))];
     if (mgr) { calls.push(soft(api('removedStaff'))); calls.push(soft(api('accountsAdmin'))); }
 
     Promise.all(calls).then(function (r) {
+      var allOk = r.every(function (x) { return x.ok; });
+      if (allOk && typeof cacheWrite === 'function') { cacheWrite('staffAll', { mgr: mgr }, r); }
+      applyAll(r, mgr);
+    });
+  }
+
+  function applyAll(r, mgr) {
+    (function (r) {
       S.loaded = true;
       S.pending = (r[0].ok && r[0].d && r[0].d.pending) || [];
       STATE.counts.staffAdmin = S.pending.length;
@@ -255,7 +267,7 @@
       paintList(r[1].ok ? '' : 'The staff list could not be loaded.');
       paintRemoved(mgr && r[3] && !r[3].ok ? 'The archive could not be loaded.' : '');
       paintAccounts(mgr && r[4] && !r[4].ok ? 'The accounts could not be loaded.' : '');
-    });
+    })(r);
   }
 
   /* ============================ APPROVAL QUEUE ============================ */

@@ -334,10 +334,15 @@
   }
 
   function load() {
-    return api('myCheckpoints').then(function (d) {
+    var first = true;
+    var lc = cachedCall('myCheckpoints', {}, function (d) {
+      // The fresh answer must never repaint over a half-typed report — same guard the ticker uses.
+      if (!first && touched(d || {}, pickTarget(d || {}))) { return; }
+      first = false;
       paint(d || {});
-      return d;
-    }).catch(function (e) {
+    });
+    return lc.done.catch(function (e) {
+      if (lc.painted) { return; }
       var rail = $('rpRail');
       if (rail) { rail.innerHTML = '<div class="rp-note">Your checkpoints could not be loaded. Please try again.</div>'; }
       var form = $('rpForm');
@@ -515,11 +520,12 @@
 
   function loadGrid(date) {
     var body = $('rgBody');
-    if (body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
-    api('reportsGrid', date ? { date: date } : {}).then(function (d) {
+    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d) {
       paintGrid(d || {});
-    }).catch(function (e) {
-      if (!$('rgBody')) { return; }
+    });
+    if (!gc.painted && body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+    gc.done.catch(function (e) {
+      if (gc.painted || !$('rgBody')) { return; }
       $('rgBody').innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'The grid could not be loaded. Please try again.') +
         '</div></div>';

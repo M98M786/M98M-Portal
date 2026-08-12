@@ -336,6 +336,9 @@
       '<path d="M20 14h-3v6h1a2 2 0 0 0 2-2z"/><path d="M17 20a3 3 0 0 1-3 2h-2"/>',
     roles: CS_ROLES,
     order: 30,
+    prefetch: function () {
+      return api('accountList').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('accountList', {}, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.cs) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Customer service</h1>' +
@@ -403,14 +406,16 @@
   }
 
   function csLoadAccounts(after) {
-    api('accountList').then(function (d) {
+    // Same cache key as the advertising screen's account strip — whoever fetched it last,
+    // both screens open with the list already in hand.
+    cachedCall('accountList', {}, function (d) {
       CS_ACCOUNTS = ((d && d.accounts) || []).map(function (a) { return csStr(a.account); })
         .filter(function (a) { return !!a; });
       if (!CS_ACCOUNT && CS_ACCOUNTS.length === 1) { CS_ACCOUNT = CS_ACCOUNTS[0]; }
       csFillAccounts($('csAcc'));
       csFillAccounts($('csRAcc'));
-      if (typeof after === 'function') { after(); }
-    }).catch(function () {
+      if (typeof after === 'function') { after(); after = null; }
+    }).done.catch(function () {
       csFillAccounts($('csAcc'));
       csFillAccounts($('csRAcc'));
       if (typeof after === 'function') { after(); }
@@ -813,8 +818,7 @@
       if ($('csWhere')) { $('csWhere').textContent = 'Choose an account to load its cases.'; }
       return;
     }
-    list.innerHTML = '<div class="spinner"></div>';
-    api('csCases', { account: CS_ACCOUNT }).then(function (d) {
+    var cc = cachedCall('csCases', { account: CS_ACCOUNT }, function (d) {
       if (d && d.ok === false) {
         CS_CASES = [];
         list.innerHTML = '<div class="cs-empty">Not connected yet.<span>' +
@@ -832,7 +836,9 @@
           (d && d.truncated ? ' · showing the newest rows only' : '');
       }
       csRenderCases(list);
-    }).catch(function (e) {
+    });
+    if (!cc.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    cc.done.catch(function (e) {
       CS_CASES = [];
       list.innerHTML = '<div class="cs-empty">The cases could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="csRetry" style="margin-top:10px">Try again</button></div>';
@@ -979,7 +985,7 @@
       return;
     }
     if (hint) { hint.textContent = 'loading the live listings…'; }
-    api('csLiveData', { account: CS_ACCOUNT }).then(function (d) {
+    cachedCall('csLiveData', { account: CS_ACCOUNT }, function (d) {
       if (d && d.ok === false) {
         CS_LIVE = [];
         CS_LIVE_STATE = csStr(d.reason) || 'not connected yet';
@@ -989,7 +995,7 @@
       }
       if (hint) { hint.textContent = CS_LIVE_STATE; }
       csFillProducts();
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       CS_LIVE = [];
       CS_LIVE_STATE = 'live listings not loaded — ' + e.message;
       if (hint) { hint.textContent = 'live listings not loaded'; }
@@ -1076,11 +1082,10 @@
       if ($('csRTiles')) { $('csRTiles').innerHTML = ''; }
       return;
     }
-    list.innerHTML = '<div class="spinner"></div>';
     var payload = { account: CS_ACCOUNT };
     if (CS_R_FILTER.type) { payload.type = CS_R_FILTER.type; }
     if (CS_R_FILTER.status) { payload.status = CS_R_FILTER.status; }
-    api('returnsFeed', payload).then(function (d) {
+    var rc = cachedCall('returnsFeed', payload, function (d) {
       if (d && d.ok === false) {
         CS_RETURNS = [];
         list.innerHTML = '<div class="cs-empty">Not connected yet.<span>' +
@@ -1095,7 +1100,9 @@
           (d && d.truncated ? ' · newest rows only' : '');
       }
       csRenderReturns();
-    }).catch(function (e) {
+    });
+    if (!rc.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    rc.done.catch(function (e) {
       CS_RETURNS = [];
       list.innerHTML = '<div class="cs-empty">The feed could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="csRRetry" style="margin-top:10px">Try again</button></div>';

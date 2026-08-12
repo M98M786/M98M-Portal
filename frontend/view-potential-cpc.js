@@ -380,8 +380,7 @@
   function pcLoadMine() {
     var box = $('pcMineBody'), sel = $('pcMineStatus');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('myPotentialCpc', { status: sel ? sel.value : '' }).then(function (d) {
+    var mc = cachedCall('myPotentialCpc', { status: sel ? sel.value : '' }, function (d) {
       var rows = (d && d.nominations) || [], ready = 0, i;
       if (d && d.accounts && d.accounts.length) { PC.accounts = d.accounts; }
       if (d && d.reasons && d.reasons.length) { PC.reasons = d.reasons; }
@@ -397,7 +396,9 @@
         '<thead><tr><th>Item</th><th>Account</th><th>Reason for Selection</th><th>Our price</th><th>Avg Sold Price</th><th>Status</th><th></th></tr></thead>' +
         '<tbody>' + rows.map(pcMineRow).join('') + '</tbody></table></div>';
       pcWireMine(box);
-    }).catch(function (e) {
+    });
+    if (!mc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    mc.done.catch(function (e) {
       pcFillAccounts();                       // the form still works — the backend validates the account
       box.innerHTML = '<div class="pc-empty">Your nominations could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="pcMineRetry" style="margin-top:10px">Try again</button></div>';
@@ -492,14 +493,15 @@
   function pcLoadQueue() {
     var box = $('pcQBody'), sel = $('pcQStatus');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('potentialCpcQueue', { status: sel ? sel.value : PC_SUBMITTED, limit: PC_QUEUE_LIMIT }).then(function (d) {
+    var qc = cachedCall('potentialCpcQueue', { status: sel ? sel.value : PC_SUBMITTED, limit: PC_QUEUE_LIMIT }, function (d) {
       PC.queue = (d && d.queue) || [];
       PC.mayDecide = !!(d && d.may_decide);
       pcFillQueueAccounts();
       if ((sel ? sel.value : PC_SUBMITTED) === PC_SUBMITTED) { pcCount(PC.queue.length); }
       pcPaintQueue();
-    }).catch(function (e) {
+    });
+    if (!qc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    qc.done.catch(function (e) {
       box.innerHTML = '<div class="pc-empty">The review queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="pcQRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('pcQRetry'); if (r) { r.onclick = pcLoadQueue; }

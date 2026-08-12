@@ -701,6 +701,9 @@ VIEWS.meetings = {
   label: 'Meetings',
   order: 45,
   roles: '*',
+  prefetch: function () {
+    return api('myMeetings').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('myMeetings', {}, d); } });
+  },
   icon: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M5 3 2.5 5.5M19 3l2.5 2.5"/>',
   render: function () {
     return '<div class="hgroup enter d1"><h1>Meetings</h1>' +
@@ -718,7 +721,7 @@ VIEWS.meetings = {
 };
 
 function loadMeetings(silent) {
-  return api('myMeetings').then(function (res) {
+  var mc = cachedCall('myMeetings', {}, function (res) {
     meetings = res.meetings || [];
     for (var i = 0; i < meetings.length; i++) learnPerson(meetings[i].created_by, meetings[i].created_by);
     paintPeople('mtPeopleList');
@@ -728,8 +731,9 @@ function loadMeetings(silent) {
     STATE.counts.meetings = pending;
     if (typeof refreshBadges === 'function') refreshBadges();
     if (gridOpenId) loadGrid(gridOpenId, true);
-  }).catch(function (e) {
-    if (silent) return;
+  });
+  return mc.done.catch(function (e) {
+    if (silent || mc.painted) return;
     var box = $('mtList');
     if (box) box.innerHTML = '<div class="ag-empty">Could not load your meetings.</div>';
     fail('Could not load your meetings', e);

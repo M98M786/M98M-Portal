@@ -228,10 +228,17 @@
       throttles it to the dashboard's own cadence, so it is sent on an explicit tap and never here. */
   function sgLoad(opts) {
     var o = opts || {}, now = Date.now(), p;
+    // First look of the session: seed from the last visit so the cards paint at once, but mark
+    // the copy stale so the refresh underneath still happens.
+    if (!SG.data && typeof cacheRead === 'function') {
+      var had = cacheRead('mySignals', {});
+      if (had) { SG.data = had; SG.at = now - SG_TTL_MS - 1; sgBadge(Number(had.count) || 0); }
+    }
     if (!o.fresh && !o.recompute && SG.data && now - SG.at < SG_TTL_MS) { return Promise.resolve(SG.data); }
     if (!o.recompute && SG.loading) { return SG.loading; }
     p = api('mySignals', o.recompute ? { refresh: true } : {}).then(function (d) {
       SG.data = d || {}; SG.at = Date.now(); SG.loading = null;
+      if (typeof cacheWrite === 'function') { cacheWrite('mySignals', {}, SG.data); }
       sgBadge(Number(SG.data.count) || 0);
       return SG.data;
     })['catch'](function (e) { SG.loading = null; throw e; });

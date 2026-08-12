@@ -231,13 +231,25 @@
   function cpLoadTasks() {
     var box = $('cpList');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
+    // Paint the combined list from the last visit at once; the two live calls repaint underneath.
+    var had = (typeof cacheRead === 'function') ? cacheRead('cpCombined', {}) : null;
+    if (had) { try { cpApplyTasks(had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     var calls = [api('myTasks').catch(function () { return { tasks: [] }; })];
     calls.push(cpIsApprover() || cpRole() === 'Listing Manager'
       ? api('pendingApprovals').catch(function () { return { tasks: [] }; })
       : Promise.resolve({ tasks: [] }));
 
     Promise.all(calls).then(function (res) {
+      if (typeof cacheWrite === 'function') { cacheWrite('cpCombined', {}, res); }
+      cpApplyTasks(res);
+    });
+  }
+
+  function cpApplyTasks(res) {
+    var box = $('cpList');
+    if (!box) { return; }
+    (function (res) {
       var seen = {}, rows = [], open = 0;
       res.forEach(function (d) {
         ((d && d.tasks) || []).forEach(function (t) {
@@ -259,11 +271,7 @@
         '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
         '<tbody>' + rows.map(cpTaskRow).join('') + '</tbody></table></div>';
       cpWireList(box);
-    }).catch(function (e) {
-      box.innerHTML = '<div class="cp-empty">The list could not be loaded just now.<span>' + esc(e.message) + '</span>' +
-        '<button class="minibtn" id="cpListRetry" style="margin-top:10px">Try again</button></div>';
-      var r = $('cpListRetry'); if (r) { r.onclick = cpLoadTasks; }
-    });
+    })(res);
   }
 
   function cpTaskRow(t) {
@@ -670,16 +678,32 @@
 
   /** pendingApprovals scopes a non-Management approver to the tasks they themselves assigned, so
       Zain reaches a submission raised by Hamza through the notification's task ID (the box above). */
+  /** The queue is a composition (pendingApprovals + one workspace per task), so what gets cached
+      is the finished card list — the only shape that can paint instantly without re-fetching. */
+  function kaApply(items) {
+    var box = $('kaBody');
+    if (!box) { return; }
+    cpCount('keywordApprovals', items.length);
+    if (!items.length) {
+      box.innerHTML = '<div class="cp-empty">No CPC keywords are waiting on you.' +
+        '<span>The queue is clear — a lister’s submission lands here the moment it is sent.</span></div>';
+      return;
+    }
+    box.innerHTML = items.map(function (it) { return kaCard(it.task, it.work); }).join('');
+    kaWire(box);
+  }
+
   function kaLoad() {
     var box = $('kaBody');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
+    var had = (typeof cacheRead === 'function') ? cacheRead('kaItems', {}) : null;
+    if (had) { try { kaApply(had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     api('pendingApprovals').then(function (d) {
       var tasks = ((d && d.tasks) || []).filter(function (t) { return cpStr(t.type) === CP_TYPE; });
-      cpCount('keywordApprovals', tasks.length);
       if (!tasks.length) {
-        box.innerHTML = '<div class="cp-empty">No CPC keywords are waiting on you.' +
-          '<span>The queue is clear — a lister’s submission lands here the moment it is sent.</span></div>';
+        if (typeof cacheWrite === 'function') { cacheWrite('kaItems', {}, []); }
+        kaApply([]);
         return;
       }
       return Promise.all(tasks.map(function (t) {
@@ -687,10 +711,11 @@
           .then(function (w) { return { task: t, work: w }; })
           .catch(function () { return { task: t, work: null }; });
       })).then(function (items) {
-        box.innerHTML = items.map(function (it) { return kaCard(it.task, it.work); }).join('');
-        kaWire(box);
+        if (typeof cacheWrite === 'function') { cacheWrite('kaItems', {}, items); }
+        kaApply(items);
       });
     }).catch(function (e) {
+      if (had) { toast('Showing the last queue — could not refresh just now.'); return; }
       box.innerHTML = '<div class="cp-empty">The queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="kaRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('kaRetry'); if (r) { r.onclick = kaLoad; }

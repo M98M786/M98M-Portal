@@ -190,6 +190,9 @@
     icon: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/><path d="m9 12 2 2 4-4"/>',
     roles: RC_ROLES,
     order: 28,
+    prefetch: function () {
+      return api('recheckQueue', {}).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('recheckQueue', {}, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.recheck) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Order rechecking</h1>' +
@@ -213,8 +216,7 @@
   function rcLoad() {
     var box = $('rcStages'), why = $('rcWhy'), want = rcStr($('rcDate') ? $('rcDate').value : '');
     if (!box) { return; }
-    box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>';
-    api('recheckQueue', want ? { date: want } : {}).then(function (d) {
+    var rq = cachedCall('recheckQueue', want ? { date: want } : {}, function (d) {
       RC_DATE = rcStr(d && d.date);
       RC_NOTE = rcStr(d && d.offset_note);
       RC_ME = rcStr(d && d.me);
@@ -226,7 +228,9 @@
         '<span>The Order Rechecking workbook is registered in CONNECTIONS — until it is, every stage reads “not connected yet”.</span></div></div></div>';
       rcWire(box);
       rcCount(rcOpenCount());
-    }).catch(function (e) {
+    });
+    if (!rq.painted) { box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+    rq.done.catch(function (e) {
       if (why) { why.innerHTML = '<div class="rc-empty">Offsets not loaded.<span>' + esc(e.message) + '</span></div>'; }
       box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="rc-empty">The recheck queue could not be loaded just now.' +
         '<span>' + esc(e.message) + '</span><button class="minibtn" id="rcRetry" style="margin-top:10px">Try again</button></div></div></div>';

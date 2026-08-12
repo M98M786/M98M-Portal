@@ -148,15 +148,16 @@
   function tkLoad() {
     var box = $('tkList');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('toolManifest', {}).then(function (d) {
+    var tc = cachedCall('toolManifest', {}, function (d) {
       TK_TOOLS = (d && d.tools) || [];
       TK_ARM = '';
       box.innerHTML = TK_TOOLS.length ? '<div class="tk-grid">' + TK_TOOLS.map(tkCard).join('') + '</div>' + tkFootNote()
         : '<div class="tk-empty">No tool is part of your version.' +
           '<span>Tools are attached to a role — Management can tell you which one you should have.</span></div>';
       tkWire(box);
-    }).catch(function (e) {
+    });
+    if (!tc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    tc.done.catch(function (e) {
       box.innerHTML = '<div class="tk-empty">Your tools could not be listed just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="tkRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('tkRetry');

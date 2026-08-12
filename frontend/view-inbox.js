@@ -93,6 +93,9 @@ VIEWS.inbox = {
   icon: '<path d="M3 6.5h18v11H3z"/><path d="m3.7 7.2 8.3 6 8.3-6"/>',
   roles: '*',
   order: 40,
+  prefetch: function () {
+    return api('listThreads').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('listThreads', {}, d); } });
+  },
   render: function () {
     return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
         '<span class="sub">Direct messages and your notifications · all times PKT</span></div>' +
@@ -174,12 +177,12 @@ VIEWS.inbox = {
     ibDrawThreads(); ibDrawNotifs(); ibDrawTabCounts();
     if (IB.open) { ibDrawHead(); ibDrawMsgs(); }
 
-    api('listThreads').then(function (d) {
+    cachedCall('listThreads', {}, function (d) {
       IB.loaded = true;
       ibMergeThreads(d.threads || [], true);
       ibDrawThreads();
-    })['catch'](function () {
-      if ($('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
+    }).done['catch'](function () {
+      if (!IB.loaded && $('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
     });
     ibPollNow();
   }
