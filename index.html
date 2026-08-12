@@ -361,6 +361,23 @@ function cacheClearAll(){
   }catch(e){}
 }
 
+/* The one-line version for view loaders: paint(d, isStale) runs at once from the last answer
+   when there is one, then again with the fresh one. Returns { painted, done } — `painted` says
+   whether something is already on screen (the caller skips its spinner), `done` is the fetch
+   promise, which only rejects when there was nothing cached to fall back on. */
+function cachedCall(action, payload, paint){
+  var had = cacheRead(action, payload);
+  var painted = false;
+  if(had != null){ try{ paint(had, true); painted = true; }catch(e){ painted = false; } }
+  var p = api(action, payload).then(function(d){
+    cacheWrite(action, payload, d);
+    paint(d, false);
+    return d;
+  });
+  if(painted){ p = p.catch(function(){ toast('Showing the last answer — could not refresh just now.'); return had; }); }
+  return { painted: painted, done: p };
+}
+
 /* onData(data, isStale) may be called twice: once from cache, once with the truth. */
 function apiCached(action, payload, onData){
   var had = cacheRead(action, payload);
@@ -462,11 +479,13 @@ VIEWS.home = {
       api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
         .catch(function(e){ toast('Could not send: '+e.message); });
     };
-    api('todayAgenda').then(function(a){
-      var b=$('agendaBox'); var items=(a&&a.items)||[];
+    var hc = cachedCall('todayAgenda', {}, function(a){
+      var b=$('agendaBox'); if(!b){ return; }
+      var items=(a&&a.items)||[];
       if(!items.length){ b.textContent='No agenda posted for today yet.'; return; }
       b.innerHTML=items.map(function(x){ return '<div class="tl-row">'+esc(typeof x==='string'?x:(x.text||''))+'</div>'; }).join('');
-    }).catch(function(){ $('agendaBox').textContent='No agenda posted for today yet.'; });
+    });
+    hc.done.catch(function(){ if(!hc.painted && $('agendaBox')){ $('agendaBox').textContent='No agenda posted for today yet.'; } });
   }
 };
 
@@ -539,8 +558,7 @@ VIEWS.home = {
   function adLoadPending() {
     var box = $('adPending');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('listPending').then(function (d) {
+    var pc = cachedCall('listPending', {}, function (d) {
       var list = (d && d.pending) || [];
       STATE.counts.staffAdmin = list.length;
       if (typeof refreshBadges === 'function') { refreshBadges(); }
@@ -552,7 +570,9 @@ VIEWS.home = {
       box.innerHTML = list.map(adPendingCard).join('');
       var btns = box.querySelectorAll('[data-approve]');
       for (var i = 0; i < btns.length; i++) { btns[i].onclick = adApprove; }
-    }).catch(function (e) {
+    });
+    if (!pc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    pc.done.catch(function (e) {
       box.innerHTML = '<div class="ad-empty">Could not load the queue.<span>' + esc(e.message) + '</span></div>';
     });
   }
@@ -2389,6 +2409,9 @@ VIEWS.meetings = {
   label: 'Meetings',
   order: 45,
   roles: '*',
+  prefetch: function () {
+    return api('myMeetings').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('myMeetings', {}, d); } });
+  },
   icon: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M5 3 2.5 5.5M19 3l2.5 2.5"/>',
   render: function () {
     return '<div class="hgroup enter d1"><h1>Meetings</h1>' +
@@ -2406,7 +2429,7 @@ VIEWS.meetings = {
 };
 
 function loadMeetings(silent) {
-  return api('myMeetings').then(function (res) {
+  var mc = cachedCall('myMeetings', {}, function (res) {
     meetings = res.meetings || [];
     for (var i = 0; i < meetings.length; i++) learnPerson(meetings[i].created_by, meetings[i].created_by);
     paintPeople('mtPeopleList');
@@ -2416,8 +2439,9 @@ function loadMeetings(silent) {
     STATE.counts.meetings = pending;
     if (typeof refreshBadges === 'function') refreshBadges();
     if (gridOpenId) loadGrid(gridOpenId, true);
-  }).catch(function (e) {
-    if (silent) return;
+  });
+  return mc.done.catch(function (e) {
+    if (silent || mc.painted) return;
     var box = $('mtList');
     if (box) box.innerHTML = '<div class="ag-empty">Could not load your meetings.</div>';
     fail('Could not load your meetings', e);
@@ -2967,7 +2991,6 @@ function createMeeting() {
   function alLoadCentre(refresh) {
     var list = $('alList');
     if (!list) { return; }
-    list.innerHTML = '<div class="spinner"></div>';
 
     var payload = { limit: AL.limit };
     if (AL.account) { payload.account = AL.account; }
@@ -2975,7 +2998,7 @@ function createMeeting() {
     if (AL.category) { payload.category = AL.category; }
     if (refresh && alMayRefresh()) { payload.refresh = true; }
 
-    api('alertsCentre', payload).then(function (d) {
+    var ac = cachedCall('alertsCentre', payload, function (d) {
       AL.data = d || null;
       AL.rows = (d && d.alerts) || [];
       alRememberVocab(d);
@@ -2990,7 +3013,9 @@ function createMeeting() {
           (d && d.from_cache ? 'from the 5-minute cache' : 'read just now') +
           ' · ' + alPortalStamp(d && d.computed_at);
       }
-    }).catch(function (e) {
+    });
+    if (!ac.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    ac.done.catch(function (e) {
       AL.data = null;
       AL.rows = [];
       list.innerHTML = alRetry('The alerts could not be read just now.', e.message, 'alRetryBtn');
@@ -3285,8 +3310,6 @@ function createMeeting() {
    *  Google's ~2.5s backend load is paid per request, not per action. */
   function alkLoad(refresh) {
     var body = $('alkBody'), ops = $('alkOps');
-    if (body) { body.innerHTML = '<div class="card"><div class="bd"><div class="spinner"></div></div></div>'; }
-    if (ops) { ops.innerHTML = '<div class="spinner"></div>'; }
     var force = refresh && alMayRefresh();
 
     var kpiPayload = {};
@@ -3295,11 +3318,13 @@ function createMeeting() {
     var opsPayload = { date: ALK.date || alTodayPkt() };
     if (force) { opsPayload.refresh = true; }
 
-    api('accountKpis', kpiPayload).then(function (d) {
+    var kc = cachedCall('accountKpis', kpiPayload, function (d) {
       ALK.kpi = d || null;
       alkFillAccounts(d);
       if (ALK.account) { alkRenderAccount(d); } else { alkRenderFleet(d); }
-    }).catch(function (e) {
+    });
+    if (!kc.painted && body) { body.innerHTML = '<div class="card"><div class="bd"><div class="spinner"></div></div></div>'; }
+    kc.done.catch(function (e) {
       ALK.kpi = null;
       if (body) {
         body.innerHTML = '<div class="card"><div class="bd">' +
@@ -3309,10 +3334,12 @@ function createMeeting() {
       }
     });
 
-    api('opsCounters', opsPayload).then(function (d) {
+    var oc = cachedCall('opsCounters', opsPayload, function (d) {
       ALK.ops = d || null;
       alkRenderOps(d);
-    }).catch(function (e) {
+    });
+    if (!oc.painted && ops) { ops.innerHTML = '<div class="spinner"></div>'; }
+    oc.done.catch(function (e) {
       ALK.ops = null;
       if (ops) {
         ops.innerHTML = alRetry('The operations counters could not be computed just now.', e.message, 'alkOpsRetry');
@@ -3865,13 +3892,25 @@ function createMeeting() {
   function cpLoadTasks() {
     var box = $('cpList');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
+    // Paint the combined list from the last visit at once; the two live calls repaint underneath.
+    var had = (typeof cacheRead === 'function') ? cacheRead('cpCombined', {}) : null;
+    if (had) { try { cpApplyTasks(had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     var calls = [api('myTasks').catch(function () { return { tasks: [] }; })];
     calls.push(cpIsApprover() || cpRole() === 'Listing Manager'
       ? api('pendingApprovals').catch(function () { return { tasks: [] }; })
       : Promise.resolve({ tasks: [] }));
 
     Promise.all(calls).then(function (res) {
+      if (typeof cacheWrite === 'function') { cacheWrite('cpCombined', {}, res); }
+      cpApplyTasks(res);
+    });
+  }
+
+  function cpApplyTasks(res) {
+    var box = $('cpList');
+    if (!box) { return; }
+    (function (res) {
       var seen = {}, rows = [], open = 0;
       res.forEach(function (d) {
         ((d && d.tasks) || []).forEach(function (t) {
@@ -3893,11 +3932,7 @@ function createMeeting() {
         '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
         '<tbody>' + rows.map(cpTaskRow).join('') + '</tbody></table></div>';
       cpWireList(box);
-    }).catch(function (e) {
-      box.innerHTML = '<div class="cp-empty">The list could not be loaded just now.<span>' + esc(e.message) + '</span>' +
-        '<button class="minibtn" id="cpListRetry" style="margin-top:10px">Try again</button></div>';
-      var r = $('cpListRetry'); if (r) { r.onclick = cpLoadTasks; }
-    });
+    })(res);
   }
 
   function cpTaskRow(t) {
@@ -4304,16 +4339,32 @@ function createMeeting() {
 
   /** pendingApprovals scopes a non-Management approver to the tasks they themselves assigned, so
       Zain reaches a submission raised by Hamza through the notification's task ID (the box above). */
+  /** The queue is a composition (pendingApprovals + one workspace per task), so what gets cached
+      is the finished card list — the only shape that can paint instantly without re-fetching. */
+  function kaApply(items) {
+    var box = $('kaBody');
+    if (!box) { return; }
+    cpCount('keywordApprovals', items.length);
+    if (!items.length) {
+      box.innerHTML = '<div class="cp-empty">No CPC keywords are waiting on you.' +
+        '<span>The queue is clear — a lister’s submission lands here the moment it is sent.</span></div>';
+      return;
+    }
+    box.innerHTML = items.map(function (it) { return kaCard(it.task, it.work); }).join('');
+    kaWire(box);
+  }
+
   function kaLoad() {
     var box = $('kaBody');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
+    var had = (typeof cacheRead === 'function') ? cacheRead('kaItems', {}) : null;
+    if (had) { try { kaApply(had); } catch (e) { had = null; } }
+    if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     api('pendingApprovals').then(function (d) {
       var tasks = ((d && d.tasks) || []).filter(function (t) { return cpStr(t.type) === CP_TYPE; });
-      cpCount('keywordApprovals', tasks.length);
       if (!tasks.length) {
-        box.innerHTML = '<div class="cp-empty">No CPC keywords are waiting on you.' +
-          '<span>The queue is clear — a lister’s submission lands here the moment it is sent.</span></div>';
+        if (typeof cacheWrite === 'function') { cacheWrite('kaItems', {}, []); }
+        kaApply([]);
         return;
       }
       return Promise.all(tasks.map(function (t) {
@@ -4321,10 +4372,11 @@ function createMeeting() {
           .then(function (w) { return { task: t, work: w }; })
           .catch(function () { return { task: t, work: null }; });
       })).then(function (items) {
-        box.innerHTML = items.map(function (it) { return kaCard(it.task, it.work); }).join('');
-        kaWire(box);
+        if (typeof cacheWrite === 'function') { cacheWrite('kaItems', {}, items); }
+        kaApply(items);
       });
     }).catch(function (e) {
+      if (had) { toast('Showing the last queue — could not refresh just now.'); return; }
       box.innerHTML = '<div class="cp-empty">The queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="kaRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('kaRetry'); if (r) { r.onclick = kaLoad; }
@@ -4788,6 +4840,9 @@ function createMeeting() {
       '<path d="M20 14h-3v6h1a2 2 0 0 0 2-2z"/><path d="M17 20a3 3 0 0 1-3 2h-2"/>',
     roles: CS_ROLES,
     order: 30,
+    prefetch: function () {
+      return api('accountList').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('accountList', {}, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.cs) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Customer service</h1>' +
@@ -4855,14 +4910,16 @@ function createMeeting() {
   }
 
   function csLoadAccounts(after) {
-    api('accountList').then(function (d) {
+    // Same cache key as the advertising screen's account strip — whoever fetched it last,
+    // both screens open with the list already in hand.
+    cachedCall('accountList', {}, function (d) {
       CS_ACCOUNTS = ((d && d.accounts) || []).map(function (a) { return csStr(a.account); })
         .filter(function (a) { return !!a; });
       if (!CS_ACCOUNT && CS_ACCOUNTS.length === 1) { CS_ACCOUNT = CS_ACCOUNTS[0]; }
       csFillAccounts($('csAcc'));
       csFillAccounts($('csRAcc'));
-      if (typeof after === 'function') { after(); }
-    }).catch(function () {
+      if (typeof after === 'function') { after(); after = null; }
+    }).done.catch(function () {
       csFillAccounts($('csAcc'));
       csFillAccounts($('csRAcc'));
       if (typeof after === 'function') { after(); }
@@ -5265,8 +5322,7 @@ function createMeeting() {
       if ($('csWhere')) { $('csWhere').textContent = 'Choose an account to load its cases.'; }
       return;
     }
-    list.innerHTML = '<div class="spinner"></div>';
-    api('csCases', { account: CS_ACCOUNT }).then(function (d) {
+    var cc = cachedCall('csCases', { account: CS_ACCOUNT }, function (d) {
       if (d && d.ok === false) {
         CS_CASES = [];
         list.innerHTML = '<div class="cs-empty">Not connected yet.<span>' +
@@ -5284,7 +5340,9 @@ function createMeeting() {
           (d && d.truncated ? ' · showing the newest rows only' : '');
       }
       csRenderCases(list);
-    }).catch(function (e) {
+    });
+    if (!cc.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    cc.done.catch(function (e) {
       CS_CASES = [];
       list.innerHTML = '<div class="cs-empty">The cases could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="csRetry" style="margin-top:10px">Try again</button></div>';
@@ -5431,7 +5489,7 @@ function createMeeting() {
       return;
     }
     if (hint) { hint.textContent = 'loading the live listings…'; }
-    api('csLiveData', { account: CS_ACCOUNT }).then(function (d) {
+    cachedCall('csLiveData', { account: CS_ACCOUNT }, function (d) {
       if (d && d.ok === false) {
         CS_LIVE = [];
         CS_LIVE_STATE = csStr(d.reason) || 'not connected yet';
@@ -5441,7 +5499,7 @@ function createMeeting() {
       }
       if (hint) { hint.textContent = CS_LIVE_STATE; }
       csFillProducts();
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       CS_LIVE = [];
       CS_LIVE_STATE = 'live listings not loaded — ' + e.message;
       if (hint) { hint.textContent = 'live listings not loaded'; }
@@ -5528,11 +5586,10 @@ function createMeeting() {
       if ($('csRTiles')) { $('csRTiles').innerHTML = ''; }
       return;
     }
-    list.innerHTML = '<div class="spinner"></div>';
     var payload = { account: CS_ACCOUNT };
     if (CS_R_FILTER.type) { payload.type = CS_R_FILTER.type; }
     if (CS_R_FILTER.status) { payload.status = CS_R_FILTER.status; }
-    api('returnsFeed', payload).then(function (d) {
+    var rc = cachedCall('returnsFeed', payload, function (d) {
       if (d && d.ok === false) {
         CS_RETURNS = [];
         list.innerHTML = '<div class="cs-empty">Not connected yet.<span>' +
@@ -5547,7 +5604,9 @@ function createMeeting() {
           (d && d.truncated ? ' · newest rows only' : '');
       }
       csRenderReturns();
-    }).catch(function (e) {
+    });
+    if (!rc.painted) { list.innerHTML = '<div class="spinner"></div>'; }
+    rc.done.catch(function (e) {
       CS_RETURNS = [];
       list.innerHTML = '<div class="cs-empty">The feed could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="csRRetry" style="margin-top:10px">Try again</button></div>';
@@ -6494,15 +6553,16 @@ VIEWS.dashboard = {
   function huLoadMine() {
     var box = huEl('huMineBody'), filter = huEl('huFilter');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('myHunts', { status: filter ? filter.value : 'all' }).then(function (d) {
+    var hc = cachedCall('myHunts', { status: filter ? filter.value : 'all' }, function (d) {
       var hunts = (d && d.hunts) || [];
       if (!hunts.length) {
         box.innerHTML = '<div class="hu-empty">Nothing here yet.<span>Every hunt you submit stays on this list with its decision and any comment.</span></div>';
         return;
       }
       box.innerHTML = hunts.map(huMineItem).join('');
-    }).catch(function (e) {
+    });
+    if (!hc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    hc.done.catch(function (e) {
       box.innerHTML = '<div class="hu-empty">Your hunts could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="huMineRetry" style="margin-top:10px">Try again</button></div>';
       var r = huEl('huMineRetry'); if (r) { r.onclick = huLoadMine; }
@@ -6824,6 +6884,9 @@ VIEWS.inbox = {
   icon: '<path d="M3 6.5h18v11H3z"/><path d="m3.7 7.2 8.3 6 8.3-6"/>',
   roles: '*',
   order: 40,
+  prefetch: function () {
+    return api('listThreads').then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('listThreads', {}, d); } });
+  },
   render: function () {
     return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
         '<span class="sub">Direct messages and your notifications · all times PKT</span></div>' +
@@ -6905,12 +6968,12 @@ VIEWS.inbox = {
     ibDrawThreads(); ibDrawNotifs(); ibDrawTabCounts();
     if (IB.open) { ibDrawHead(); ibDrawMsgs(); }
 
-    api('listThreads').then(function (d) {
+    cachedCall('listThreads', {}, function (d) {
       IB.loaded = true;
       ibMergeThreads(d.threads || [], true);
       ibDrawThreads();
-    })['catch'](function () {
-      if ($('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
+    }).done['catch'](function () {
+      if (!IB.loaded && $('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
     });
     ibPollNow();
   }
@@ -8450,11 +8513,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
      the built page is public (RL-2/RL-9), and the registry stays the single source of truth. */
   var OD_ACCOUNTS = [];
   function odLoadAccounts(then) {
-    api('accountList').then(function (d) {
+    cachedCall('accountList', {}, function (d) {
       OD_ACCOUNTS = ((d && d.accounts) || []).map(function (a) { return odStr(a.account); })
         .filter(function (a) { return !!a; });
-      if (typeof then === 'function') { then(); }
-    }).catch(function () { if (typeof then === 'function') { then(); } });
+      if (typeof then === 'function') { then(); then = null; }
+    }).done.catch(function () { if (typeof then === 'function') { then(); } });
   }
   function odAccountOptions(selected) {
     var opts = OD_ACCOUNTS.map(function (a) {
@@ -8577,11 +8640,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       odSummary(null);
       return;
     }
-    box.innerHTML = '<div class="spinner"></div>';
     var payload = { account: OD_ACCOUNT };
     if (OD_REPLACEMENT) { payload.tab = OD_REPLACEMENT_TAB; } else { payload.date = OD_DATE || odTodayPkt(); }
 
-    api('todayOrders', payload).then(function (d) {
+    var oc = cachedCall('todayOrders', payload, function (d) {
       OD_DATA = d || null;
       if (!d || !d.ok) {
         odSummary(d);
@@ -8602,7 +8664,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       box.innerHTML = orders.map(odCard).join('');
       odWire(box);
       odCount('orders', odOutstanding(orders));
-    }).catch(function (e) {
+    });
+    if (!oc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    oc.done.catch(function (e) {
       OD_DATA = null;
       odSummary(null);
       box.innerHTML = odRetry('The day could not be opened just now.', e.message, 'odRetry');
@@ -9070,6 +9134,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     icon: '<path d="M1 3h13v13H1z"/><path d="M14 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/>',
     roles: OD_DISPATCH_ROLES,
     order: 27,
+    prefetch: function () {
+      var payload = { month: odTodayPkt().slice(0, 7) };
+      return api('dispatchDashboard', payload).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('dispatchDashboard', payload, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.dispatch) || 0; },
     render: function () {
       OD_MONTH = OD_MONTH || odTodayPkt().slice(0, 7);
@@ -9116,16 +9184,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function odDashLoad(refresh) {
     var top = $('odDsTop'), cards = $('odDsAccounts'), alarm = $('odDsAlarm');
     if (!top) { return; }
-    top.innerHTML = '<div class="spinner"></div>';
-    if (cards) { cards.innerHTML = ''; }
-    if (alarm) { alarm.innerHTML = ''; }
 
     var one = odStr($('odDsAccount') && $('odDsAccount').value);
     var payload = { month: OD_MONTH || odTodayPkt().slice(0, 7) };
     if (one) { payload.account = one; }
     if (refresh) { payload.refresh = true; }
 
-    api('dispatchDashboard', payload).then(function (d) {
+    var dc = cachedCall('dispatchDashboard', payload, function (d) {
       OD_DASH = d || null;
       var agg = (d && d.aggregate) || {};
       var overdue = Number(agg[OD_TILE_OVERDUE]) || 0;
@@ -9138,7 +9203,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       top.innerHTML = odTiles(agg, false) + odDispatchTable(d && d.dispatch_status);
       if (cards) { cards.innerHTML = ((d && d.accounts) || []).map(odAccountCard).join(''); }
       odCount('dispatch', overdue);
-    }).catch(function (e) {
+    });
+    if (!dc.painted) {
+      top.innerHTML = '<div class="spinner"></div>';
+      if (cards) { cards.innerHTML = ''; }
+      if (alarm) { alarm.innerHTML = ''; }
+    }
+    dc.done.catch(function (e) {
       OD_DASH = null;
       top.innerHTML = odRetry('The dispatch figures could not be computed just now.', e.message, 'odDsRetry');
       var r = $('odDsRetry'); if (r) { r.onclick = function () { odDashLoad(false); }; }
@@ -9613,10 +9684,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   function myLoad() {
-    return api('myPerformance').then(function (d) {
+    var mc = cachedCall('myPerformance', {}, function (d) {
       MY = d || {};
       myPaint();
-    }).catch(function (e) {
+    });
+    return mc.done.catch(function (e) {
+      if (mc.painted) { return; }
       var host = $('pfBody');
       if (!host) { return; }
       host.innerHTML = '<div class="card enter d2"><div class="bd pf-note">' +
@@ -9824,19 +9897,19 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
    * has already made fresh, so the toggle afterwards costs nothing (§13.4). */
   function teamLoad(force) {
     var host = $('pfTeamGrid');
-    if (host) { host.innerHTML = '<div class="spinner"></div>'; }
-    var a = api('teamPerformance', force ? { period: TEAM_KIND, refresh: true } : { period: TEAM_KIND });
+    var tc = cachedCall('teamPerformance', force ? { period: TEAM_KIND, refresh: true } : { period: TEAM_KIND },
+      function (d) { TEAM[TEAM_KIND] = d || null; teamPaint(); });
+    if (!tc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
     var other = TEAM_KIND === 'day' ? 'week' : 'day';
     var b = api('teamPerformance', { period: other });
-    a.then(function (d) { TEAM[TEAM_KIND] = d || null; teamPaint(); })
-      .catch(function (e) {
-        if (!$('pfTeamGrid')) { return; }
-        $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
-          esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-            : 'The grid could not be loaded. Please try again.') + '</div>';
-      });
-    b.then(function (d) { TEAM[other] = d || null; }).catch(function () {});
-    return a;
+    tc.done.catch(function (e) {
+      if (tc.painted || !$('pfTeamGrid')) { return; }
+      $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
+        esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
+          : 'The grid could not be loaded. Please try again.') + '</div>';
+    });
+    b.then(function (d) { TEAM[other] = d || null; if (typeof cacheWrite === 'function') { cacheWrite('teamPerformance', { period: other }, d); } }).catch(function () {});
+    return tc.done;
   }
 
   /* ---------- §12.2 the rubric ---------- */
@@ -10057,13 +10130,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   function evalLoad() {
     var hist = $('pfEvHist');
-    if (hist) { hist.innerHTML = '<div class="spinner"></div>'; }
-    return api('evaluations', { month: EVAL_MONTH }).then(function (d) {
+    var ec = cachedCall('evaluations', { month: EVAL_MONTH }, function (d) {
       EVAL = d || {};
       evalPaint();
-    }).catch(function (e) {
+    });
+    if (!ec.painted && hist) { hist.innerHTML = '<div class="spinner"></div>'; }
+    return ec.done.catch(function (e) {
       EVAL = EVAL || {};
-      if (!$('pfEvHist')) { return; }
+      if (ec.painted || !$('pfEvHist')) { return; }
       $('pfEvHist').innerHTML = '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
           : 'The evaluation history could not be loaded. Please try again.') + '</div>';
@@ -11086,8 +11160,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function pcLoadMine() {
     var box = $('pcMineBody'), sel = $('pcMineStatus');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('myPotentialCpc', { status: sel ? sel.value : '' }).then(function (d) {
+    var mc = cachedCall('myPotentialCpc', { status: sel ? sel.value : '' }, function (d) {
       var rows = (d && d.nominations) || [], ready = 0, i;
       if (d && d.accounts && d.accounts.length) { PC.accounts = d.accounts; }
       if (d && d.reasons && d.reasons.length) { PC.reasons = d.reasons; }
@@ -11103,7 +11176,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<thead><tr><th>Item</th><th>Account</th><th>Reason for Selection</th><th>Our price</th><th>Avg Sold Price</th><th>Status</th><th></th></tr></thead>' +
         '<tbody>' + rows.map(pcMineRow).join('') + '</tbody></table></div>';
       pcWireMine(box);
-    }).catch(function (e) {
+    });
+    if (!mc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    mc.done.catch(function (e) {
       pcFillAccounts();                       // the form still works — the backend validates the account
       box.innerHTML = '<div class="pc-empty">Your nominations could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="pcMineRetry" style="margin-top:10px">Try again</button></div>';
@@ -11198,14 +11273,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function pcLoadQueue() {
     var box = $('pcQBody'), sel = $('pcQStatus');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('potentialCpcQueue', { status: sel ? sel.value : PC_SUBMITTED, limit: PC_QUEUE_LIMIT }).then(function (d) {
+    var qc = cachedCall('potentialCpcQueue', { status: sel ? sel.value : PC_SUBMITTED, limit: PC_QUEUE_LIMIT }, function (d) {
       PC.queue = (d && d.queue) || [];
       PC.mayDecide = !!(d && d.may_decide);
       pcFillQueueAccounts();
       if ((sel ? sel.value : PC_SUBMITTED) === PC_SUBMITTED) { pcCount(PC.queue.length); }
       pcPaintQueue();
-    }).catch(function (e) {
+    });
+    if (!qc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    qc.done.catch(function (e) {
       box.innerHTML = '<div class="pc-empty">The review queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="pcQRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('pcQRetry'); if (r) { r.onclick = pcLoadQueue; }
@@ -11648,6 +11724,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     icon: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/><path d="m9 12 2 2 4-4"/>',
     roles: RC_ROLES,
     order: 28,
+    prefetch: function () {
+      return api('recheckQueue', {}).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('recheckQueue', {}, d); } });
+    },
     badge: function () { return (STATE.counts && STATE.counts.recheck) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Order rechecking</h1>' +
@@ -11671,8 +11750,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function rcLoad() {
     var box = $('rcStages'), why = $('rcWhy'), want = rcStr($('rcDate') ? $('rcDate').value : '');
     if (!box) { return; }
-    box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>';
-    api('recheckQueue', want ? { date: want } : {}).then(function (d) {
+    var rq = cachedCall('recheckQueue', want ? { date: want } : {}, function (d) {
       RC_DATE = rcStr(d && d.date);
       RC_NOTE = rcStr(d && d.offset_note);
       RC_ME = rcStr(d && d.me);
@@ -11684,7 +11762,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span>The Order Rechecking workbook is registered in CONNECTIONS — until it is, every stage reads “not connected yet”.</span></div></div></div>';
       rcWire(box);
       rcCount(rcOpenCount());
-    }).catch(function (e) {
+    });
+    if (!rq.painted) { box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+    rq.done.catch(function (e) {
       if (why) { why.innerHTML = '<div class="rc-empty">Offsets not loaded.<span>' + esc(e.message) + '</span></div>'; }
       box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="rc-empty">The recheck queue could not be loaded just now.' +
         '<span>' + esc(e.message) + '</span><button class="minibtn" id="rcRetry" style="margin-top:10px">Try again</button></div></div></div>';
@@ -12613,10 +12693,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   function load() {
-    return api('myCheckpoints').then(function (d) {
+    var first = true;
+    var lc = cachedCall('myCheckpoints', {}, function (d) {
+      // The fresh answer must never repaint over a half-typed report — same guard the ticker uses.
+      if (!first && touched(d || {}, pickTarget(d || {}))) { return; }
+      first = false;
       paint(d || {});
-      return d;
-    }).catch(function (e) {
+    });
+    return lc.done.catch(function (e) {
+      if (lc.painted) { return; }
       var rail = $('rpRail');
       if (rail) { rail.innerHTML = '<div class="rp-note">Your checkpoints could not be loaded. Please try again.</div>'; }
       var form = $('rpForm');
@@ -12794,11 +12879,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   function loadGrid(date) {
     var body = $('rgBody');
-    if (body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
-    api('reportsGrid', date ? { date: date } : {}).then(function (d) {
+    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d) {
       paintGrid(d || {});
-    }).catch(function (e) {
-      if (!$('rgBody')) { return; }
+    });
+    if (!gc.painted && body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+    gc.done.catch(function (e) {
+      if (gc.painted || !$('rgBody')) { return; }
       $('rgBody').innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'The grid could not be loaded. Please try again.') +
         '</div></div>';
@@ -12953,7 +13039,9 @@ VIEWS.rules = {
   },
   init: function () {
     loadLaw();
-    api('mySops').then(renderSops).catch(function () {
+    var sc = cachedCall('mySops', {}, renderSops);
+    sc.done.catch(function () {
+      if (sc.painted) { return; }
       put('rlSops', noteCard('SOPs could not be loaded right now.'));
     });
     if (isMgmt()) { renderAdmin(); loadAckGrid(); }
@@ -12961,7 +13049,7 @@ VIEWS.rules = {
 };
 
 function loadLaw() {
-  return api('myRules').then(function (d) {
+  var lc = cachedCall('myRules', {}, function (d) {
     law = d;
     var scope = $('rlScope');
     if (scope) {
@@ -12972,7 +13060,9 @@ function loadLaw() {
     renderLaw(d);
     STATE.counts.rules = Number(d.unacknowledged) || 0;
     if (typeof refreshBadges === 'function') refreshBadges();
-  }).catch(function () {
+  });
+  return lc.done.catch(function () {
+    if (lc.painted) { return; }
     put('rlLaw', noteCard('Your rules could not be loaded. Nothing has changed — try again shortly.'));
   });
 }
@@ -13266,7 +13356,9 @@ VIEWS.rota = {
       '<div id="rtGrid" style="margin-top:16px">' + loadingCard('Loading the rota…') + '</div>';
   },
   init: function () {
-    api('myTimetable').then(renderMine).catch(function () {
+    var tc = cachedCall('myTimetable', {}, renderMine);
+    tc.done.catch(function () {
+      if (tc.painted) { return; }
       put('rtMine', noteCard('Your timetable could not be loaded right now.'));
     });
     loadRota();
@@ -13297,10 +13389,12 @@ function renderMine(d) {
 }
 
 function loadRota() {
-  return api('rotaGrid').then(function (d) {
+  var rc = cachedCall('rotaGrid', {}, function (d) {
     rota = d;
     renderRota(d);
-  }).catch(function () {
+  });
+  return rc.done.catch(function () {
+    if (rc.painted) { return; }
     put('rtGrid', noteCard('The rota could not be loaded. Nothing has changed — try again shortly.'));
   });
 }
@@ -13667,10 +13761,17 @@ function saveSchedule() {
       throttles it to the dashboard's own cadence, so it is sent on an explicit tap and never here. */
   function sgLoad(opts) {
     var o = opts || {}, now = Date.now(), p;
+    // First look of the session: seed from the last visit so the cards paint at once, but mark
+    // the copy stale so the refresh underneath still happens.
+    if (!SG.data && typeof cacheRead === 'function') {
+      var had = cacheRead('mySignals', {});
+      if (had) { SG.data = had; SG.at = now - SG_TTL_MS - 1; sgBadge(Number(had.count) || 0); }
+    }
     if (!o.fresh && !o.recompute && SG.data && now - SG.at < SG_TTL_MS) { return Promise.resolve(SG.data); }
     if (!o.recompute && SG.loading) { return SG.loading; }
     p = api('mySignals', o.recompute ? { refresh: true } : {}).then(function (d) {
       SG.data = d || {}; SG.at = Date.now(); SG.loading = null;
+      if (typeof cacheWrite === 'function') { cacheWrite('mySignals', {}, SG.data); }
       sgBadge(Number(SG.data.count) || 0);
       return SG.data;
     })['catch'](function (e) { SG.loading = null; throw e; });
@@ -14401,11 +14502,23 @@ function saveSchedule() {
 
   function loadAll() {
     var mgr = canManage();
+    // The composed answer set is what gets cached — one shape, one instant repaint.
+    var had = (typeof cacheRead === 'function') ? cacheRead('staffAll', { mgr: mgr }) : null;
+    if (had) { try { applyAll(had, mgr); } catch (e) { had = null; } }
+
     /* Fired in one tick on purpose — the shell gathers them into a single round trip. */
     var calls = [soft(api('listPending')), soft(api('assignableStaff')), soft(api('accountList'))];
     if (mgr) { calls.push(soft(api('removedStaff'))); calls.push(soft(api('accountsAdmin'))); }
 
     Promise.all(calls).then(function (r) {
+      var allOk = r.every(function (x) { return x.ok; });
+      if (allOk && typeof cacheWrite === 'function') { cacheWrite('staffAll', { mgr: mgr }, r); }
+      applyAll(r, mgr);
+    });
+  }
+
+  function applyAll(r, mgr) {
+    (function (r) {
       S.loaded = true;
       S.pending = (r[0].ok && r[0].d && r[0].d.pending) || [];
       STATE.counts.staffAdmin = S.pending.length;
@@ -14430,7 +14543,7 @@ function saveSchedule() {
       paintList(r[1].ok ? '' : 'The staff list could not be loaded.');
       paintRemoved(mgr && r[3] && !r[3].ok ? 'The archive could not be loaded.' : '');
       paintAccounts(mgr && r[4] && !r[4].ok ? 'The accounts could not be loaded.' : '');
-    });
+    })(r);
   }
 
   /* ============================ APPROVAL QUEUE ============================ */
@@ -15820,15 +15933,16 @@ function saveSchedule() {
   function tkLoad() {
     var box = $('tkList');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
-    api('toolManifest', {}).then(function (d) {
+    var tc = cachedCall('toolManifest', {}, function (d) {
       TK_TOOLS = (d && d.tools) || [];
       TK_ARM = '';
       box.innerHTML = TK_TOOLS.length ? '<div class="tk-grid">' + TK_TOOLS.map(tkCard).join('') + '</div>' + tkFootNote()
         : '<div class="tk-empty">No tool is part of your version.' +
           '<span>Tools are attached to a role — Management can tell you which one you should have.</span></div>';
       tkWire(box);
-    }).catch(function (e) {
+    });
+    if (!tc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    tc.done.catch(function (e) {
       box.innerHTML = '<div class="tk-empty">Your tools could not be listed just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="tkRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('tkRetry');
