@@ -47,12 +47,44 @@ and the next session must treat these as the ground truth, not as complaints to 
 2. **Tools not registered.** Six HTML files staged in `~/Desktop/M98M Portal Tools/`; owner must
    drag into Drive (keep .html, no conversion), then run `bootstrapRegisterTools()` — it finds
    them by filename and reports what's missing.
-3. **Speed.** Options, in order of value: (a) split the monolith — the dashboard/read paths could
-   be a SEPARATE tiny deployment (~50KB) so the parse toll on the hot path collapses; (b) serve
-   DASH_CACHE via a published-to-web CSV/gviz read (no Apps Script invocation at all for the
-   dashboard); (c) prune Seed.gs (26KB of one-time seed data still parsed on every request —
-   move to a Drive JSON read at setup time only). Do NOT try comment-stripping minification
+3. **Speed — now MEASURED, 12 Aug. Read this before optimising anything.**
+   A 472-byte throwaway web app was deployed in the same account and timed against our 927KB
+   backend, 10 interleaved calls each, same tab, same minute:
+
+   | | tiny (472 B) | ours (927 KB) |
+   |---|---|---|
+   | best | 981 ms | 2,449 ms |
+   | **median** | **1,282 ms** | **2,895 ms** |
+   | worst | 4.0 s | 13.5 s |
+
+   So roughly **1.3s is Google's fixed toll (unavoidable) and ~1.6s is our script's size**, and
+   the big script's tail is far worse (13.5s vs 4.0s) — that tail is what makes screens look
+   hung. Splitting the hot read paths into a small second deployment is therefore worth about
+   **2.3× on every read**, and is the single biggest remaining win.
+   The probe is still deployed as an unnamed Apps Script project ("Untitled project",
+   1t7Whhvy8_CjbSiRCo1YlDifoxxIGmFNLvz7adh3wEdL0v0Dsxj8d-uww). It returns only `{ok,t}` and
+   touches nothing — keep it for future benchmarking or delete it, but do not be puzzled by it.
+
+   **What did NOT work (do not repeat):** trying to pick a subset of modules for the small
+   deployment by static dependency analysis. The modules are too interlinked and a naive scan
+   returns "all 31 modules, 892KB" — it also produces nonsense edges (Config.gs "needing"
+   Advertising.gs) because local variable names collide with other modules' identifiers. Doing
+   the split properly means choosing a small set of ACTIONS and writing a purpose-built small
+   backend for them, accepting that the role gate must be re-implemented and re-tested — the
+   profit-visibility rule (§4.2 PROFIT_ROLES) is the thing that must not be got wrong. Start with
+   `poll` (the most frequent call in the system: every 90s per signed-in user) because it returns
+   only the user's own notifications and messages, so it carries no profit data and its gate is
+   simply "rows addressed to me".
+
+   Other options: (b) serve DASH_CACHE via a published CSV/gviz read — REJECTED, it would require
+   giving staff Drive access to the Portal DB, which holds profit and PII; (c) prune Seed.gs
+   (25KB of one-time data parsed on every request). Do NOT try comment-stripping minification
    again — a previous attempt silently dropped 47 functions and was discarded.
+
+   Already shipped on the client, and worth knowing before adding more: read-only screens paint
+   from the last answer and refresh underneath (business overview, pipeline board), and anything
+   outstanding past 6s raises a "the Google server is being slow" notice so a spinner is never
+   mistaken for a broken screen.
 4. **Phase 6 screens exist but are thin** vs the owner's real bar: his Running Score dashboard
    (docs/reference-running-score-dashboard.html) is the design standard. view-dashboard.js was
    rebuilt to it; alerts/kpis/perf/staff/signals were agent-written and NOT visually reviewed.
