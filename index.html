@@ -6488,6 +6488,7 @@ VIEWS.dashboard = {
     icon: '<path d="M4 5h16v14H4z"/><path d="M8 10h8M8 14h5"/><path d="m15.5 17.5 1.7 1.7 3.3-3.4"/>',
     roles: HU_QUEUE_ROLES,
     order: 16,
+    prefetch: function () { return huFetchQueue(); },
     badge: function () { return (STATE.counts && STATE.counts.huntQueue) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Hunt approvals</h1>' +
@@ -6508,23 +6509,42 @@ VIEWS.dashboard = {
     }
   };
 
+  /** One fetch used by the screen, the sign-in warm-up and the badge alike, so the queue is
+      already in hand when the screen opens. Painting a cached queue is safe on a DECISION screen
+      only because every decision is re-validated by the server against the current row — acting
+      on a card that has since been decided returns a readable error, never a second write — and
+      the fresh answer replaces the cards within a few seconds anyway. */
+  function huFetchQueue() {
+    return api('huntQueue').then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('huntQueue', {}, d); }
+      return d;
+    });
+  }
+
+  function huPaintQueue(box, d) {
+    var hunts = (d && d.hunts) || [];
+    var types = (d && d.advertising_types && d.advertising_types.length) ? d.advertising_types : HU_ADV_TYPES;
+    var can = !!(d && d.can_decide);
+    huCount('huntQueue', hunts.length);
+    if (!hunts.length) {
+      box.innerHTML = '<div class="hu-empty">No hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
+      return;
+    }
+    box.innerHTML = (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
+        'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
+      hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
+    if (can) { huWireQueue(box); }
+  }
+
   function huLoadQueue() {
     var box = huEl('huQBody');
     if (!box) { return; }
-    api('huntQueue').then(function (d) {
-      var hunts = (d && d.hunts) || [];
-      var types = (d && d.advertising_types && d.advertising_types.length) ? d.advertising_types : HU_ADV_TYPES;
-      var can = !!(d && d.can_decide);
-      huCount('huntQueue', hunts.length);
-      if (!hunts.length) {
-        box.innerHTML = '<div class="hu-empty">No hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
-        return;
-      }
-      box.innerHTML = (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
-          'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
-        hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
-      if (can) { huWireQueue(box); }
+    var had = (typeof cacheRead === 'function') ? cacheRead('huntQueue', {}) : null;
+    if (had) { try { huPaintQueue(box, had); } catch (e) { had = null; } }
+    huFetchQueue().then(function (d) {
+      huPaintQueue(box, d);
     }).catch(function (e) {
+      if (had) { toast('Showing the last queue — could not refresh just now.'); return; }
       box.innerHTML = '<div class="hu-empty">The queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="huQRetry" style="margin-top:10px">Try again</button></div>';
       var r = huEl('huQRetry'); if (r) { r.onclick = huLoadQueue; }
@@ -15237,6 +15257,7 @@ function saveSchedule() {
     icon: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
     roles: '*',
     order: 20,
+    prefetch: function () { return tkFetchTasks(); },
     badge: function () { return (STATE.counts && STATE.counts.tasks) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>My tasks</h1>' +
@@ -15326,22 +15347,39 @@ function saveSchedule() {
     };
   }
 
+  /** Shared by the screen and the sign-in warm-up. Starting/submitting a cached row is safe for
+      the same reason as the hunt queue: the server re-validates every action against the current
+      task, so a stale row can only earn a readable error, never a wrong write. */
+  function tkFetchTasks() {
+    return api('myTasks').then(function (d) {
+      if (typeof cacheWrite === 'function') { cacheWrite('myTasks', {}, d); }
+      return d;
+    });
+  }
+
+  function tkPaintTasks(box, d) {
+    var tasks = (d && d.tasks) || [], open = 0, i;
+    for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
+    tkCount('tasks', open);
+    if (!tasks.length) {
+      box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
+      return;
+    }
+    box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
+      '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
+      '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
+    tkWireRows(box);
+  }
+
   function tkLoadTasks() {
     var box = $('tkBody');
     if (!box) { return; }
-    api('myTasks').then(function (d) {
-      var tasks = (d && d.tasks) || [], open = 0, i;
-      for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
-      tkCount('tasks', open);
-      if (!tasks.length) {
-        box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
-        return;
-      }
-      box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
-        '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
-        '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
-      tkWireRows(box);
+    var had = (typeof cacheRead === 'function') ? cacheRead('myTasks', {}) : null;
+    if (had) { try { tkPaintTasks(box, had); } catch (e) { had = null; } }
+    tkFetchTasks().then(function (d) {
+      tkPaintTasks(box, d);
     }).catch(function (e) {
+      if (had) { toast('Showing your last task list — could not refresh just now.'); return; }
       box.innerHTML = '<div class="tk-empty">Your tasks could not be loaded just now.<span>' + esc(e.message) + '</span>' +
         '<button class="minibtn" id="tkRetry" style="margin-top:10px">Try again</button></div>';
       var r = $('tkRetry'); if (r) { r.onclick = tkLoadTasks; }
