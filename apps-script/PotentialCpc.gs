@@ -719,7 +719,22 @@ function potcpcResearchBrief_(rec, comment) {
   ];
   if (String(rec.comments).trim()) lines.push('Advertising comments: ' + String(rec.comments).trim());
   if (comment) lines.push('Management comment: ' + comment.slice(0, 500));
-  return lines.join('\n').slice(0, 4000);
+  /* V2 req 34 — the full promotion flow rides on the task itself (Tasks.gs taskChainNext_):
+   * research approved → listing revision → Team-Lead price revision → Zain adds the campaign. */
+  return JSON.stringify({
+    note: lines.join('\n').slice(0, 3000),
+    chain: [
+      { type: 'listing_revision', module: 'listing', module_roles: ['Listing Manager', 'Item Lister'],
+        title: 'Revision for CPC promotion — item ' + rec.listing_item_id + ' (' + rec.account + ')',
+        details: 'Approved Potential-CPC. Revise the listing for the CPC campaign: title/keywords per the approved research.', deadline_hours: 24 },
+      { type: 'general', module: 'team-lead', module_roles: ['Team Lead'],
+        title: 'Price revision — item ' + rec.listing_item_id + ' (' + rec.account + ')',
+        details: 'CPC promotion step 3 (§ req 34): review and set the price before the campaign switches to CPC.', deadline_hours: 24 },
+      { type: 'campaign_set', module: 'advertising', module_roles: ['Advertising Manager'],
+        title: 'Add to CPC campaign — item ' + rec.listing_item_id + ' (' + rec.account + ')',
+        details: 'Final step: revision and price are approved — add the item to the CPC campaign in the testing window.', deadline_hours: 24 },
+    ],
+  });
 }
 
 const ACTIONS_POTENTIALCPC = {

@@ -952,6 +952,62 @@ function advDateMs_(value) {
   return isNaN(d.getTime()) ? NaN : d.getTime();
 }
 
+/* ---------- V2 req 29: 7-day zero-sales sweep (daily trigger: runZeroSalesSweep) ----------
+ * The PPC tab's own 'Past behaviour (7 days)' column IS the seven-day sales figure, so an item
+ * in a General campaign showing 0 there has had its week and sold nothing. One revision task per
+ * item goes to the current lister-module holder; an open task on the same item blocks a repeat,
+ * so nobody gets the same item twice while they work on it. */
+function runZeroSalesSweep() {
+  const holders = usersWithModule_('listing', ['Listing Manager', 'Item Lister']);
+  if (!holders.length) {
+    notifyManagement_('Task assigned', '🔴 Zero-sales sweep found nobody holding the listing module — grant it on the Access desk.', 'zerosales:noholder');
+    return 'no lister-module holder';
+  }
+  const open = {};
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type) !== 'listing_revision') return;
+    if (String(t.status) === TASK_STATUS_COMPLETED) return;
+    const id = String(t.item_id || '').trim();
+    if (id) open[id] = true;
+  });
+
+  let made = 0, scanned = 0;
+  (connectionHealth().perAccount || []).forEach(function (a) {
+    const account = String(a.account || '');
+    const read = advReadPpcTab_(account, ADV_ALARM_MAX);
+    if (!read.ok) return;
+    const layout = advPpcLayout_(read.headers);
+    (read.rows || []).forEach(function (r) {
+      const rec = advPpcRow_(r, layout, '');
+      if (!rec.item_id || open[rec.item_id]) return;
+      if (!/general/i.test(rec.campaign)) return;
+      const past = String(rec.past_behaviour || '').replace(/[^\d.]/g, '');
+      if (past === '' || Number(past) !== 0) return;
+      scanned++;
+      if (made >= 15) return;                                   // a drip, not a flood — next run takes more
+      const stamp = now_();
+      const taskId = 'T' + Utilities.getUuid().slice(0, 8);
+      const due = Utilities.formatDate(new Date(Date.now() + 48 * 3600000), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ssXXX");
+      tasksSheet_().appendRow([
+        taskId, 'listing_revision', account, rec.item_id,
+        'Zero sales in 7 days — ' + (rec.listing_title || rec.item_id).slice(0, 80),
+        'Selected for revision by the automated system: 7 days in a General campaign with 0 sales. Revise the title, price or photos — or recommend removal.',
+        '', 'system:zero-sales', holders[0], '', due, TASK_STATUS_PENDING, stamp, stamp, '', '', '', '', '',
+      ]);
+      open[rec.item_id] = true;
+      made++;
+      notify_(holders[0], 'Task assigned',
+        '🟠 Zero sales in 7 days · ' + account + ' · ' + rec.item_id +
+        (rec.listing_title ? ' · ' + rec.listing_title.slice(0, 55) : '') +
+        ' — a week in a General campaign and nothing sold; it is paying listing space for nothing. Revise it or recommend removal, due in 48h → open My tasks.',
+        'zerosales:' + rec.item_id);
+      logActivity_('system', 'ZERO_SALES_TASK', taskId, '', rec.item_id, account);
+    });
+  });
+  logActivity_('system', 'ZERO_SALES_SWEEP', 'PPC', '', made + ' task(s)', scanned + ' candidate(s)');
+  return made + ' task(s) created from ' + scanned + ' zero-sales candidate(s)';
+}
+
 const ACTIONS_ADVERTISING = {
   ppcTable:         [actionPpcTable_, 'any'],
   setCampaign:      [actionSetCampaign_, 'any'],

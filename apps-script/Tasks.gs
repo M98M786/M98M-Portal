@@ -168,6 +168,47 @@ function actionPendingApprovals_(payload, ctx) {
   return { tasks: stripForRole_(tasks, ctx.user.role, ctx.ident.email) };
 }
 
+/* ---------- V2 req 34: the task chain ----------
+ * A task whose details JSON carries {chain:[{type,title,module,module_roles,deadline_hours,
+ * details}, …]} spawns the next link the moment it is approved — the remaining chain rides
+ * along, so a three-step flow needs no engine state anywhere but the task itself. The next
+ * link goes to the first approved holder of `module` (role defaults + Access-desk grants). */
+function taskChainNext_(rec, ctx) {
+  let parsed = null;
+  try { parsed = JSON.parse(String(rec.details || '')); } catch (e) { return; }
+  const chain = parsed && parsed.chain;
+  if (!chain || !chain.length) return;
+
+  const step = chain[0], rest = chain.slice(1);
+  const holders = usersWithModule_(String(step.module || ''), step.module_roles || []);
+  if (!holders.length) {
+    notifyManagement_('Task assigned',
+      '🔴 A chained task could not be routed · ' + String(rec.account || '') + ' · ' + String(rec.item_id || '') +
+      ' — nobody holds "' + String(step.module || '') + '". The ' + String(step.type || 'next') +
+      ' step of this flow is stuck → grant the module on the Access desk.', 'task:' + rec.task_id);
+    return;
+  }
+  const stamp = now_();
+  const nextId = 'T' + Utilities.getUuid().slice(0, 8);
+  const hours = Number(step.deadline_hours) || 24;
+  const due = Utilities.formatDate(new Date(Date.now() + hours * 3600000), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ssXXX");
+  const nextDetails = {};
+  if (step.details) nextDetails.note = String(step.details);
+  if (rest.length) nextDetails.chain = rest;
+  nextDetails.chained_from = String(rec.task_id);
+  tasksSheet_().appendRow([
+    nextId, String(step.type || 'general'), String(rec.account || ''), String(rec.item_id || ''),
+    String(step.title || rec.title || ''), JSON.stringify(nextDetails), '', 'system:chain', holders[0],
+    String(rec.priority || ''), due, TASK_STATUS_PENDING, stamp, stamp, '', '', '', '', '',
+  ]);
+  logActivity_('system', 'CHAIN_TASK', nextId, rec.task_id, String(step.type || ''), 'to ' + holders[0]);
+  notify_(holders[0], 'Task assigned',
+    '🔵 Next step of the flow · ' + String(rec.account || '') + (String(rec.item_id || '') ? ' · ' + String(rec.item_id) : '') +
+    ' — "' + String(step.title || rec.title || '') + '". The previous step was just approved' +
+    (ctx ? ' by ' + (ctx.user.name || ctx.ident.email) : '') + '; this one is due in ' + hours + 'h → open My tasks.',
+    'task:' + nextId);
+}
+
 /** The only path to Completed anywhere in the portal (§8.0b). */
 function actionApproveTask_(payload, ctx) {
   const sh = tasksSheet_();
@@ -184,6 +225,8 @@ function actionApproveTask_(payload, ctx) {
     taskWrite_(sh, found, { status: TASK_STATUS_COMPLETED, approved_by: ctx.ident.email, decided_at: stamp, updated_at: stamp });
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)));
   } finally { lock.releaseLock(); }
+
+  taskChainNext_(rec, ctx);
 
   notify_(rec.assigned_to, 'Task approved',
     '🔵 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +

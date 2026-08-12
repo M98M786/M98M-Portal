@@ -314,6 +314,18 @@
     var obj = null;
     try { obj = JSON.parse(details); } catch (e) { return tkText(details); }
     if (!obj || typeof obj !== 'object') { return tkText(details); }
+    // Chained-flow tasks (req 34): {note, chain} — the note as prose, the remaining steps listed.
+    if (obj.note || obj.chain) {
+      var ch = '';
+      if (obj.note) { ch += '<div class="tk-dt-desc">' + tkText(String(obj.note)) + '</div>'; }
+      if (obj.chain && obj.chain.length) {
+        ch += '<div class="tk-dt-grid" style="margin-top:10px">' + obj.chain.map(function (st, i) {
+          return '<div class="tk-dt-row"><span class="k">After this: step ' + (i + 1) + '</span><span class="v">' +
+            esc(tkStr(st.title || st.type)) + '</span></div>';
+        }).join('') + '</div>';
+      }
+      return ch || tkText(details);
+    }
     var lim = obj.limited || obj.listing || obj;
     if (!lim || typeof lim !== 'object' || Array.isArray(lim)) { return tkText(details); }
 

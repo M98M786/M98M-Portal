@@ -398,10 +398,17 @@ function cpcLoadTask_(taskId) {
   return found;
 }
 
+/** Chained tasks (V2 req 34) store {note, chain} JSON in details; the human text is the note. */
+function cpcTaskText_(details) {
+  const s = String(details || '');
+  try { const o = JSON.parse(s); if (o && typeof o === 'object' && o.note) return String(o.note); } catch (e) {}
+  return s;
+}
+
 function cpcTaskCard_(rec) {
   return {
     task_id: String(rec.task_id || ''), type: String(rec.type || ''), account: String(rec.account || ''),
-    item_id: String(rec.item_id || ''), title: String(rec.title || ''), details: String(rec.details || ''),
+    item_id: String(rec.item_id || ''), title: String(rec.title || ''), details: cpcTaskText_(rec.details),
     comments: String(rec.comments || ''), status: String(rec.status || ''),
     assigned_by: String(rec.assigned_by || ''), assigned_to: String(rec.assigned_to || ''),
     deadline_pkt: taskPktIso_(rec.deadline_pkt), submitted_at: taskPktIso_(rec.submitted_at),
@@ -412,7 +419,7 @@ function cpcTaskCard_(rec) {
 /** "Keywords link provided by Zain" reaches the lister inside the task the approver wrote —
  * an explicitly labelled line wins, otherwise the first http(s) link in the task text. */
 function cpcKeywordsLinkFromTask_(rec) {
-  const text = String(rec.details || '') + '\n' + String(rec.comments || '');
+  const text = cpcTaskText_(rec.details) + '\n' + String(rec.comments || '');
   const labelled = text.match(/keywords?\s*(?:link|doc[^\n:]*)?\s*[:\-]\s*(https?:\/\/\S+)/i);
   if (labelled) return labelled[1];
   const any = text.match(/https?:\/\/\S+/);
