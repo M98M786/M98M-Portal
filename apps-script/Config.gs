@@ -51,7 +51,8 @@ const MODULE_KEYS = {
   meetings:'Meetings', reports:'My reports', reportsGrid:'Reports grid', rota:'Rota & timetable',
   rules:'Rules & instructions', perf:'My performance', team:'Team performance', kpis:'Account KPIs',
   alerts:'Alerts centre', signals:'My signals', staffAdmin:'Staff & approvals', approvals:'Approvals desk',
-  tools:'Tools', home:'Home', calculator:'Order earning calculator', 'team-lead':'Team-lead duties (routing)',
+  tools:'Tools', home:'Home', calculator:'Order earning calculator', activeListings:'Active listings (Engine)',
+  'team-lead':'Team-lead duties (routing)',
 };
 
 function parseAccessCsv_(s) {

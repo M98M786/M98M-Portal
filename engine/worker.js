@@ -251,32 +251,63 @@ async function perAccount(env, job, fn) {
   }
 }
 
+/* Listings live on the Trading API (GetMyeBaySelling) — the Inventory API only knows migrated
+   listings, and none of these accounts migrated. XML in, regex out (Workers have no XML parser
+   and this worker stays dependency-free). One page per account per tick keeps CPU inside the
+   free plan; the page cursor rides sync_state.cursor, so the whole active list refreshes in a
+   rolling cycle and a huge account can never blow the invocation budget. */
+function xmlTag(block, tag) {
+  const m = block.match(new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>'));
+  return m ? m[1].trim() : '';
+}
+
 async function listingSync(env) {
   await perAccount(env, 'listingSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
-    let href = 'https://api.ebay.com/sell/inventory/v1/inventory_item?limit=200';
-    // eBay Inventory API only covers migrated listings; GetMyeBaySelling via the
-    // Trading API covers the rest — Phase B2 decides per account after a probe.
-    let n = 0;
-    while (href && n < 25) {
-      const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
-      if (!r.ok) throw new Error(acct + ' inventory ' + r.status);
-      const page = await r.json();
-      const rows = page.inventoryItems || [];
-      for (const it of rows) {
-        await env.DB.prepare(
-          'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at) ' +
-          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) " +
-          'ON CONFLICT(item_id) DO UPDATE SET title=?3, price=?4, qty=?5, status=?6, image=?7, api_synced_at=datetime(\'now\')'
-        ).bind(
-          String(it.sku || it.inventoryItemId || ''), acct,
-          String((it.product && it.product.title) || ''), 0,
-          Number((it.availability && it.availability.shipToLocationAvailability && it.availability.shipToLocationAvailability.quantity) || 0),
-          'ACTIVE', String((it.product && it.product.imageUrls && it.product.imageUrls[0]) || '')
-        ).run();
-      }
-      n++; href = page.next || '';
+    const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'listingSync' AND account = ?1").bind(acct).first();
+    const page = Math.max(1, Number(st && st.cursor) || 1);
+    const body = '<?xml version="1.0" encoding="utf-8"?>' +
+      '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+      '<ActiveList><Include>true</Include><Pagination><EntriesPerPage>200</EntriesPerPage>' +
+      '<PageNumber>' + page + '</PageNumber></Pagination></ActiveList>' +
+      '</GetMyeBaySellingRequest>';
+    const r = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: {
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1193',
+        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-SITEID': '3',
+        'X-EBAY-API-IAF-TOKEN': tok,
+        'content-type': 'text/xml',
+      },
+      body,
+    });
+    const xml = await r.text();
+    if (!r.ok || xml.indexOf('<Ack>Failure</Ack>') >= 0) {
+      throw new Error(acct + ' GetMyeBaySelling p' + page + ': ' + (xmlTag(xml, 'LongMessage') || ('HTTP ' + r.status)).slice(0, 160));
     }
+    const items = xml.match(/<Item>[\s\S]*?<\/Item>/g) || [];
+    for (const it of items) {
+      const id = xmlTag(it, 'ItemID');
+      if (!id) continue;
+      await env.DB.prepare(
+        'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now')) " +
+        "ON CONFLICT(item_id) DO UPDATE SET account=?2, title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now')"
+      ).bind(
+        id, acct,
+        xmlTag(it, 'Title'),
+        Number(xmlTag(it, 'CurrentPrice')) || 0,
+        Number(xmlTag(it, 'QuantityAvailable') || xmlTag(it, 'Quantity')) || 0,
+        xmlTag(it, 'GalleryURL')
+      ).run();
+    }
+    const totalPages = Number(xmlTag(xmlTag(xml, 'ActiveList'), 'TotalNumberOfPages')) || 1;
+    const next = page >= totalPages ? 1 : page + 1;
+    await env.DB.prepare(
+      "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('listingSync', ?1, ?2, datetime('now'), '') " +
+      "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2"
+    ).bind(acct, String(next)).run();
   });
 }
 
