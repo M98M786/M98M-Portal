@@ -232,8 +232,27 @@ async function apiAccounts(env) {
   return (rs.results || []).map(r => r.name);
 }
 
-async function listingSync(env) {
+/* One account's bad credentials must never starve the accounts after it — each account gets its
+ * own try/catch and its own sync_state row, so the job-level row stays for the job itself. */
+async function perAccount(env, job, fn) {
   for (const acct of await apiAccounts(env)) {
+    try {
+      await fn(acct);
+      await env.DB.prepare(
+        "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, '', datetime('now'), '') " +
+        "ON CONFLICT(job, account) DO UPDATE SET last_ok = datetime('now'), last_error = ''"
+      ).bind(job, acct).run();
+    } catch (e) {
+      await env.DB.prepare(
+        "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, '', '', ?3) " +
+        'ON CONFLICT(job, account) DO UPDATE SET last_error = ?3'
+      ).bind(job, acct, String(e && e.message || e).slice(0, 300)).run();
+    }
+  }
+}
+
+async function listingSync(env) {
+  await perAccount(env, 'listingSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
     let href = 'https://api.ebay.com/sell/inventory/v1/inventory_item?limit=200';
     // eBay Inventory API only covers migrated listings; GetMyeBaySelling via the
@@ -258,11 +277,11 @@ async function listingSync(env) {
       }
       n++; href = page.next || '';
     }
-  }
+  });
 }
 
 async function orderSync(env) {
-  for (const acct of await apiAccounts(env)) {
+  await perAccount(env, 'orderSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
     const since = new Date(Date.now() - 3 * 86400000).toISOString();
     let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
@@ -287,7 +306,7 @@ async function orderSync(env) {
       }
       n++; href = page.next || '';
     }
-  }
+  });
 }
 
 async function adsSync(env) { /* Phase C: Marketing API diff engine → campaign_events + notifications. */ }
