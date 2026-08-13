@@ -29,6 +29,30 @@ CREATE TABLE IF NOT EXISTS campaign_ads (
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads(account, listing_id);
 
+-- Adversarial-review fixes (14 Aug): per-campaign ads freshness, real units per order,
+-- durable notification queue (delivery is the fact, not the attempt), and D1-backed
+-- duplicate confirmation state (KV writes are capped at 1k/day on the free plan).
+ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT DEFAULT '';
+ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS notify_queue (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  to_addr    TEXT DEFAULT '',
+  type       TEXT DEFAULT '',
+  message    TEXT DEFAULT '',
+  ref        TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  tries      INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS dup_state (
+  account     TEXT NOT NULL,
+  listing_id  TEXT NOT NULL,
+  first_seen  TEXT DEFAULT '',     -- ms epoch; alert only after 90 min continuously duplicated
+  alerted_day TEXT DEFAULT '',     -- UK day of the last feed entry for this item
+  PRIMARY KEY (account, listing_id)
+);
+
 -- Nightly per-account health snapshot (rollups cron) — the trend behind the live view.
 CREATE TABLE IF NOT EXISTS daily_health (
   day        TEXT NOT NULL,

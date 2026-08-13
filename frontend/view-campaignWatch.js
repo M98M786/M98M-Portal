@@ -60,6 +60,7 @@
     var h = '';
     if (dups.length) {
       h += '<div class="cw-dupbox"><h3>🔴 ' + dups.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
+        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that.</p>' +
         '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Campaigns</th><th>Sits in</th></tr></thead><tbody>';
       dups.forEach(function (r) {
         h += '<tr><td>' + esc(cwStr(r.account)) + '</td>' +
@@ -91,8 +92,9 @@
     if (!events.length) { h += '<li style="color:var(--text-2)">Nothing yet — changes appear within 5 minutes of happening on eBay.</li>'; }
     events.slice(0, 30).forEach(function (e) {
       var what = cwStr(e.change_type);
+      /* RL-3: campaign names are free text typed on eBay — EVERY interpolation goes through esc(). */
       var line = what === 'duplicate_active'
-        ? '🔴 duplicate-ACTIVE: item ' + cwStr(e.item_id) + ' in ' + cwStr(e.new) + ' running campaigns (' + cwStr(e.campaign) + ')'
+        ? '🔴 duplicate-ACTIVE: item ' + esc(cwStr(e.item_id)) + ' in ' + esc(cwStr(e.new)) + ' running campaigns (' + esc(cwStr(e.campaign)) + ')'
         : esc(cwStr(e.campaign)) + ' — ' + esc(what) + (cwStr(e.old) || cwStr(e.new) ? ': ' + esc(cwStr(e.old)) + ' → ' + esc(cwStr(e.new)) : '');
       h += '<li><span class="cw-when">' + esc(cwPKT(e.at)) + '</span>' + esc(cwStr(e.account)) + ' · ' + line + (cwStr(e.actor) ? ' · by ' + esc(cwStr(e.actor)) : '') + '</li>';
     });

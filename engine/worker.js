@@ -64,17 +64,23 @@ export default {
     }
   },
 
-  /* Cron fan-out — each schedule set in the dashboard calls this with its own cron string. */
+  /* Cron fan-out — each schedule set in the dashboard calls this with its own cron string.
+     adsItems rides the 15-minute slot (with the light listingSync), NOT the 5-minute one:
+     orderSync + adsSync + item fetches + notifications in one invocation can cross the
+     50-subrequest cap, and a burst then kills whichever account happens to run last. The queue
+     flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
   async scheduled(event, env, ctx) {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync],
-      '*/15 * * * *': [listingSync],
+      '*/15 * * * *': [listingSync, adsItems],
       '0 * * * *': [financeSync, csSync],
       '0 2 * * *': [rollups, backup],
     };
-    for (const fn of (jobs[event.cron] || [])) {
-      ctx.waitUntil(runJob(env, fn));
-    }
+    const fns = jobs[event.cron] || [];
+    ctx.waitUntil((async () => {
+      await Promise.all(fns.map(fn => runJob(env, fn)));
+      await flushNotifyQueue(env);
+    })());
   },
 };
 
@@ -130,11 +136,23 @@ function stripItem(row, user) {
   return out;
 }
 
-/* ---------------- sync-state (§2 correction 3): resumable, visible jobs ------ */
+/* ---------------- sync-state (§2 correction 3): resumable, visible jobs ------
+   The '@lock' row is a cheap lease so a forced runJobNow can't race the cron tick it overlaps —
+   two concurrent runs of the same diff job would each see the old snapshot and double every
+   event and bell. The read-then-write pair is not atomic, but the window is milliseconds against
+   a 5-minute cadence, and a stale lease self-expires after 4 minutes. D1, not KV: the free plan
+   allows only 1k KV writes a day and a lease per run would eat them. */
 async function runJob(env, fn) {
   const name = fn.name;
+  const lock = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = ?1 AND account = '@lock'").bind(name).first();
+  if (lock && Number(lock.cursor) > Date.now()) return;
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, '@lock', ?2, '', '') " +
+    'ON CONFLICT(job, account) DO UPDATE SET cursor = ?2'
+  ).bind(name, String(Date.now() + 240000)).run();
   try {
     await fn(env);
+    await env.DB.prepare("UPDATE sync_state SET cursor = '0' WHERE job = ?1 AND account = '@lock'").bind(name).run();
     await env.DB.prepare(
       "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, '', '', datetime('now'), '') " +
       "ON CONFLICT(job, account) DO UPDATE SET last_ok = datetime('now'), last_error = ''"
@@ -318,21 +336,24 @@ async function orderSync(env) {
     let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
       encodeURIComponent('creationdate:[' + since + '..]');
     let n = 0;
-    while (href && n < 10) {
+    while (href && n < 3) {              // 300 orders per 3-day window per account — ample here
       const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
       if (!r.ok) throw new Error(acct + ' orders ' + r.status);
       const page = await r.json();
       for (const o of (page.orders || [])) {
         const line = (o.lineItems && o.lineItems[0]) || {};
+        // total units across every line; item_id stays the first line's (the sheet's own shape)
+        let qty = 0;
+        for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
-          'ON CONFLICT(order_id) DO UPDATE SET status=?5'
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ' +
+          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8'
         ).bind(
           String(o.orderId), acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           String(o.orderFulfillmentStatus || ''), String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || '')
+          String(o.creationDate || ''), Math.max(1, qty)
         ).run();
       }
       n++; href = page.next || '';
@@ -340,17 +361,44 @@ async function orderSync(env) {
   });
 }
 
-/* Engine → portal bell: events raised at the edge surface through the same Apps Script
-   notification law pipeline every other alert uses. Fire-and-forget with a hard timeout. */
-async function notifyAS(env, to, type, message, ref) {
-  try {
-    await fetch(env.AS_URL, {
-      method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'engineNotify',
-        payload: { key: await secret(env, 'SYNC_KEY'), to, type, message, ref } }),
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch (e) { console.log('notifyAS failed', String(e).slice(0, 120)); }
+/* Engine → portal bell, in two halves. Enqueue is a D1 write — it can never fail an eBay job,
+   never spends a fetch, and survives the invocation. The flush at the end of every scheduled
+   run delivers up to 8 oldest (bounded against the 50-subrequest budget); what does not go out
+   now goes out next tick, so a burst degrades to a trickle instead of silence. A message is
+   deleted only after Apps Script says ok — delivery is the fact, not the attempt — and one that
+   keeps failing is dropped after ~30 tries with its fate recorded in sync_state. */
+async function queueNotify(env, to, type, message, ref) {
+  await env.DB.prepare(
+    "INSERT INTO notify_queue (to_addr, type, message, ref, created_at, tries) VALUES (?1, ?2, ?3, ?4, datetime('now'), 0)"
+  ).bind(String(to), String(type), String(message).slice(0, 900), String(ref)).run();
+}
+
+async function flushNotifyQueue(env) {
+  const rs = await env.DB.prepare('SELECT id, to_addr, type, message, ref, tries FROM notify_queue ORDER BY id LIMIT 8').all();
+  for (const row of (rs.results || [])) {
+    let ok = false;
+    try {
+      const r = await fetch(env.AS_URL, {
+        method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'engineNotify',
+          payload: { key: await secret(env, 'SYNC_KEY'), to: row.to_addr, type: row.type, message: row.message, ref: row.ref } }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const body = r.ok ? await r.json().catch(() => ({})) : {};
+      ok = !!body.ok;
+    } catch (e) { ok = false; }
+    if (ok) {
+      await env.DB.prepare('DELETE FROM notify_queue WHERE id = ?1').bind(row.id).run();
+    } else if (Number(row.tries) >= 30) {
+      await env.DB.prepare('DELETE FROM notify_queue WHERE id = ?1').bind(row.id).run();
+      await env.DB.prepare(
+        "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('notifyQueue', '', '', '', ?1) " +
+        'ON CONFLICT(job, account) DO UPDATE SET last_error = ?1'
+      ).bind(('dropped after 30 tries: ' + row.type + ' → ' + row.to_addr).slice(0, 300)).run();
+    } else {
+      await env.DB.prepare('UPDATE notify_queue SET tries = tries + 1 WHERE id = ?1').bind(row.id).run();
+    }
+  }
 }
 
 /* Campaign watcher (V2 req 4/21/22, campaign level): every 5 minutes the live campaign list is
@@ -389,7 +437,12 @@ async function adsSync(env) {
       if (!live[id]) events.push({ id, type: 'removed', old: prev[id].status, nw: '', l: prev[id] });
     }
 
-    for (const ev of events.slice(0, 6)) {
+    /* Every event is recorded — a mass pause is exactly when the audit trail matters most, and
+       a D1 insert costs nothing. Bells are bounded: the first 4 changes ring by name, the rest
+       fold into one summary line, and the queue paces actual delivery. */
+    let evN = 0;
+    for (const ev of events) {
+      evN++;
       const nm = ev.l.name || ev.id;
       let msg = '';
       if (ev.type === 'status') {
@@ -411,8 +464,16 @@ async function adsSync(env) {
       await env.DB.prepare(
         "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, '', ?3, ?4, ?5, '', datetime('now'))"
       ).bind(acct, nm, ev.type, String(ev.old), String(ev.nw)).run();
-      await notifyAS(env, 'management', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
-      await notifyAS(env, 'advertising', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
+      if (evN <= 4) {
+        await queueNotify(env, 'management', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
+        await queueNotify(env, 'advertising', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
+      }
+    }
+    if (events.length > 4) {
+      const more = '🟠 ' + (events.length - 4) + ' more campaign change(s) on eBay · ' + acct +
+        ' in the same 5 minutes — open Campaign watch for the full list.';
+      await queueNotify(env, 'management', 'Campaign changed', more, 'engine:campmore:' + acct);
+      await queueNotify(env, 'advertising', 'Campaign changed', more, 'engine:campmore:' + acct);
     }
 
     for (const id of Object.keys(live)) {
@@ -426,108 +487,164 @@ async function adsSync(env) {
       if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
     }
 
-    await adsItemsTick(env, acct, tok, live);
   });
 }
 
-/* Item-level membership (req 22) — rolling: up to 3 RUNNING campaigns per account per tick, so
-   every campaign refreshes inside ~15-25 minutes while the whole 5-minute invocation stays far
-   from the 50-subrequest budget. Rule-based (dynamic/smart) campaigns have no ad list — eBay
-   answers 4xx — so they advance the cursor silently; manual campaigns diff add/remove/bid.
-   Duplicate-ACTIVE counts RUNNING only and re-alerts at most once a day per item (KV-deduped). */
-const ADS_ITEM_CAMPAIGNS_PER_TICK = 3;
-async function adsItemsTick(env, acct, tok, live) {
-  const running = Object.keys(live).filter(id => /RUNNING/i.test(live[id].status)).sort();
-  if (!running.length) return;
-  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'adsItems' AND account = ?1").bind(acct).first();
-  let idx = (Math.max(0, Number(st && st.cursor) || 0)) % running.length;
+/* Item-level membership (req 22) — its own 15-minute job so its fetches never share an
+   invocation with orderSync. Per account per tick: up to 2 RUNNING campaigns (from the D1
+   snapshot, so the two marketing-403 accounts cost zero fetches), rolling cursor, and only the
+   CHANGED rows are written — a full-table rewrite every tick would burn through D1's 100k
+   rows-written/day free budget by mid-morning. Rule-based (dynamic/smart) campaigns have no ad
+   list — eBay answers 4xx — and simply advance the cursor.
 
-  for (let k = 0; k < Math.min(ADS_ITEM_CAMPAIGNS_PER_TICK, running.length); k++) {
-    const cid = running[idx];
-    idx = (idx + 1) % running.length;
-    const nm = live[cid].name || cid;
+   Duplicate-ACTIVE (counts RUNNING only) is confirmed, not guessed: an item must stay
+   duplicated for 90+ minutes — longer than a full rotation — before anything fires, because a
+   normal move between campaigns looks duplicated until the old campaign's next refresh. State
+   lives in dup_state (D1), never KV: per-item KV markers would blow the 1k-writes/day KV cap.
+   Bells are one summary per account per UK day, not one per item — the full list lives on the
+   Campaign watch screen, which is the action link. */
+const ADS_ITEM_CAMPAIGNS_PER_TICK = 2;
+const DUP_CONFIRM_MS = 90 * 60000;
 
-    let ads = [];
-    let ok = true;
-    for (let page = 0; page < 2; page++) {           // 1000 ads ≫ any campaign here; capped, not silent
-      const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
-        '/ad?limit=500&offset=' + (page * 500), { headers: { authorization: 'Bearer ' + tok } });
-      if (!r.ok) {
-        if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
-        ok = false; break;                            // 4xx: rule-based campaign, no ad list — skip
+async function adsItems(env) {
+  await perAccount(env, 'adsItems', async (acct) => {
+    const camps = await env.DB.prepare(
+      "SELECT campaign_id, name FROM campaigns WHERE account = ?1 AND status LIKE '%RUNNING%' ORDER BY campaign_id"
+    ).bind(acct).all();
+    const running = (camps.results || []);
+    if (!running.length) return;
+    const tok = await ebayAccessToken(env, acct);
+
+    const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'adsItems' AND account = ?1").bind(acct).first();
+    let idx = (Math.max(0, Number(st && st.cursor) || 0)) % running.length;
+
+    for (let k = 0; k < Math.min(ADS_ITEM_CAMPAIGNS_PER_TICK, running.length); k++) {
+      const cid = running[idx].campaign_id;
+      const nm = running[idx].name || cid;
+      idx = (idx + 1) % running.length;
+
+      let ads = [];
+      let ok = true;
+      for (let page = 0; page < 2; page++) {          // 1000 ads covers any campaign here; capped, not silent
+        const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
+          '/ad?limit=500&offset=' + (page * 500), { headers: { authorization: 'Bearer ' + tok } });
+        if (!r.ok) {
+          if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
+          ok = false; break;                           // 4xx: rule-based campaign, no ad list — skip
+        }
+        const pj = await r.json();
+        ads = ads.concat(pj.ads || []);
+        if (ads.length >= Number(pj.total || 0) || !(pj.ads || []).length) break;
       }
-      const pj = await r.json();
-      ads = ads.concat(pj.ads || []);
-      if (ads.length >= Number(pj.total || 0) || !(pj.ads || []).length) break;
+      if (!ok) continue;
+
+      const now = {};
+      for (const ad of ads) {
+        const lid = String(ad.listingId || '');
+        if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || '') };
+      }
+      const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
+      const prev = {};
+      for (const row of (prevRs.results || [])) prev[row.listing_id] = String(row.bid_pct || '');
+      const first = Object.keys(prev).length === 0;
+
+      const added = Object.keys(now).filter(l => !(l in prev));
+      const removed = Object.keys(prev).filter(l => !(l in now));
+      const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
+
+      if (!first && (added.length || removed.length || bidMoved.length)) {
+        const sample = ids => ids.length ? ' (' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ', …' : '') + ')' : '';
+        const parts = [];
+        if (added.length) parts.push(added.length + ' item(s) added' + sample(added));
+        if (removed.length) parts.push(removed.length + ' removed' + sample(removed));
+        if (bidMoved.length) parts.push(bidMoved.length + ' bid change(s)' + sample(bidMoved));
+        const msg = '🔵 Campaign items changed on eBay · ' + acct + ' · "' + nm + '" — ' + parts.join(' · ') +
+          '. (Changed on eBay — the portal cannot see who.)';
+        await env.DB.prepare(
+          "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
+        ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
+        await queueNotify(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
+      }
+
+      const stmts = [];
+      for (const lid of added) {
+        stmts.push(env.DB.prepare(
+          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
+          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, synced_at = datetime('now')"
+        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid));
+      }
+      for (const lid of bidMoved) {
+        stmts.push(env.DB.prepare(
+          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
+        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id));
+      }
+      for (const lid of removed) {
+        stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+      await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
     }
-    if (!ok) continue;
 
-    const now = {};
-    for (const ad of ads) {
-      const lid = String(ad.listingId || '');
-      if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || '') };
-    }
-    const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
-    const prev = {};
-    for (const row of (prevRs.results || [])) prev[row.listing_id] = String(row.bid_pct || '');
-    const first = Object.keys(prev).length === 0;
+    await env.DB.prepare(
+      "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItems', ?1, ?2, datetime('now'), '') " +
+      "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
+    ).bind(acct, String(idx)).run();
 
-    const added = Object.keys(now).filter(l => !(l in prev));
-    const removed = Object.keys(prev).filter(l => !(l in now));
-    const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
+    await dupSweep(env, acct);
+  });
+}
 
-    if (!first && (added.length || removed.length || bidMoved.length)) {
-      const sample = ids => ids.length ? ' (' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ', …' : '') + ')' : '';
-      const parts = [];
-      if (added.length) parts.push(added.length + ' item(s) added' + sample(added));
-      if (removed.length) parts.push(removed.length + ' removed' + sample(removed));
-      if (bidMoved.length) parts.push(bidMoved.length + ' bid change(s)' + sample(bidMoved));
-      const msg = '🔵 Campaign items changed on eBay · ' + acct + ' · "' + nm + '" — ' + parts.join(' · ') +
-        '. (Changed on eBay — the portal cannot see who.)';
-      await env.DB.prepare(
-        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
-      ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
-      await notifyAS(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
-    }
-
-    const stmts = [];
-    for (const lid of Object.keys(now)) {
-      stmts.push(env.DB.prepare(
-        "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
-        "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, synced_at = datetime('now')"
-      ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid));
-    }
-    for (const lid of removed) {
-      stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
-    }
-    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  }
-
-  await env.DB.prepare(
-    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItems', ?1, ?2, datetime('now'), '') " +
-    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
-  ).bind(acct, String(idx)).run();
-
-  // Duplicate-ACTIVE (req 22, counts RUNNING only): one red alert per item per day.
+/* dup_state carries each currently-duplicated item: first_seen for the 90-minute confirmation,
+   alerted_day so the feed records an item once per UK day at most. Resolved items are deleted,
+   so the table is always exactly "what is duplicated right now". */
+async function dupSweep(env, acct) {
   const dups = await env.DB.prepare(
     'SELECT ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, GROUP_CONCAT(c.name, \' | \') AS names ' +
     'FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
     "WHERE ca.account = ?1 AND c.status LIKE '%RUNNING%' " +
     'GROUP BY ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
   ).bind(acct).all();
-  for (const d of (dups.results || []).slice(0, 5)) {
-    const kvKey = 'dup:' + acct + ':' + d.listing_id;
-    if (await env.HOT.get(kvKey)) continue;
-    await env.HOT.put(kvKey, '1', { expirationTtl: 72000 });
-    const msg = '🔴 Item in ' + d.n + ' ACTIVE campaigns · ' + acct + ' · ' + d.listing_id +
-      ' — sits in ' + String(d.names || '').slice(0, 120) + ' at the same time. eBay can charge it in each; keep it in ONE and remove the rest.';
-    await env.DB.prepare(
-      "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'duplicate_active', '', ?4, '', datetime('now'))"
-    ).bind(acct, String(d.names || '').slice(0, 200), String(d.listing_id), String(d.n)).run();
-    await notifyAS(env, 'advertising', 'Duplicate campaigns', msg, 'engine:dup:' + acct + ':' + d.listing_id);
-    await notifyAS(env, 'management', 'Duplicate campaigns', msg, 'engine:dup:' + acct + ':' + d.listing_id);
+  const liveDup = {};
+  for (const d of (dups.results || [])) liveDup[d.listing_id] = d;
+
+  const stRs = await env.DB.prepare('SELECT listing_id, first_seen, alerted_day FROM dup_state WHERE account = ?1').bind(acct).all();
+  const known = {};
+  for (const r of (stRs.results || [])) known[r.listing_id] = r;
+
+  const today = ukDate('');
+  const stmts = [];
+  let confirmedNew = 0;
+  for (const lid of Object.keys(liveDup)) {
+    const k = known[lid];
+    if (!k) {
+      stmts.push(env.DB.prepare(
+        "INSERT INTO dup_state (account, listing_id, first_seen, alerted_day) VALUES (?1, ?2, ?3, '')"
+      ).bind(acct, lid, String(Date.now())));
+      continue;
+    }
+    const confirmed = Date.now() - Number(k.first_seen || 0) > DUP_CONFIRM_MS;
+    if (confirmed && k.alerted_day !== today && confirmedNew < 10) {
+      confirmedNew++;
+      stmts.push(env.DB.prepare('UPDATE dup_state SET alerted_day = ?3 WHERE account = ?1 AND listing_id = ?2').bind(acct, lid, today));
+      stmts.push(env.DB.prepare(
+        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'duplicate_active', '', ?4, '', datetime('now'))"
+      ).bind(acct, String(liveDup[lid].names || '').slice(0, 200), lid, String(liveDup[lid].n)));
+    }
+  }
+  for (const lid of Object.keys(known)) {
+    if (!liveDup[lid]) stmts.push(env.DB.prepare('DELETE FROM dup_state WHERE account = ?1 AND listing_id = ?2').bind(acct, lid));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+
+  if (confirmedNew > 0) {
+    const total = Object.keys(liveDup).length;
+    const msg = '🔴 ' + total + ' item(s) sit in more than one ACTIVE campaign · ' + acct +
+      ' (' + confirmedNew + ' newly confirmed) — eBay can charge each of them in every campaign. Open Campaign watch and keep each item in ONE.';
+    await queueNotify(env, 'advertising', 'Duplicate campaigns', msg, 'engine:dupsum:' + acct + ':' + today);
+    await queueNotify(env, 'management', 'Duplicate campaigns', msg, 'engine:dupsum:' + acct + ':' + today);
   }
 }
+
 async function financeSync(env) { /* Phase C remainder: real fees vs Brain v17 drift. */ }
 async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
 
@@ -546,8 +663,12 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    times units, labelled an estimate wherever it is shown. */
 async function rollups(env) {
   const sinceIso = new Date(Date.now() - 8 * 86400000).toISOString();
-  const ors = await env.DB.prepare('SELECT account, item_id, sold, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
+  const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
+  /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
+     a UK day is not) — writing it would overwrite last night's correct full-day row with a
+     truncated one, permanently. That day is done and written; skip it. */
+  const edgeDay = ukDate(sinceIso);
 
   const ids = [...new Set(orders.map(o => String(o.item_id || '')).filter(Boolean))];
   const facts = {};
@@ -564,16 +685,17 @@ async function rollups(env) {
   const cut7 = Date.now() - 7 * 86400000;
   for (const o of orders) {
     const dte = ukDate(o.created_at);
-    if (!dte) continue;
+    if (!dte || dte <= edgeDay) continue;
+    const q = Math.max(1, Number(o.qty) || 0);       // per-unit facts × units actually sold
     const f = facts[o.item_id] || {};
     const k = o.account + '|' + dte;
     const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0 });
-    row.sold += Number(o.sold) || 0;
-    row.oe += Number(f.oe) || 0;
-    row.cost += Number(f.ali_cost) || 0;
-    row.profit += Number(f.profit) || 0;
+    row.sold += Number(o.sold) || 0;                  // order total is already all units
+    row.oe += (Number(f.oe) || 0) * q;
+    row.cost += (Number(f.ali_cost) || 0) * q;
+    row.profit += (Number(f.profit) || 0) * q;
     const t = new Date(o.created_at).getTime();
-    if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + 1;
+    if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + q;
   }
 
   const stmts = [];
@@ -585,7 +707,17 @@ async function rollups(env) {
       'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6'
     ).bind(k.slice(0, cut), k.slice(cut + 1), round2(v.sold), round2(v.oe), round2(v.cost), round2(v.profit)));
   }
-  stmts.push(env.DB.prepare('UPDATE items_facts SET avg_profit_7d = 0 WHERE avg_profit_7d != 0'));
+  /* avg_profit_7d: zero ONLY the items that stopped selling, by explicit list — a blanket
+     zero-then-set spans batches, and a failure between them would serve zeros all day. Every
+     statement here is independently correct, so partial failure never corrupts. */
+  const nz = await env.DB.prepare('SELECT item_id FROM items_facts WHERE avg_profit_7d != 0').all();
+  const stale = (nz.results || []).map(r => String(r.item_id)).filter(id => !(id in units7));
+  for (let i = 0; i < stale.length; i += 60) {
+    const chunk = stale.slice(i, i + 60);
+    stmts.push(env.DB.prepare(
+      'UPDATE items_facts SET avg_profit_7d = 0 WHERE item_id IN (' + chunk.map(() => '?').join(',') + ')'
+    ).bind(...chunk));
+  }
   for (const id of Object.keys(units7)) {
     const f = facts[id];
     if (!f) continue;
@@ -651,7 +783,7 @@ const ROUTES = {
     auth: 'mgmt', fn: async (p, ctx) => {
       const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job').all();
       const counts = {};
-      for (const t of ['users', 'accounts', 'items_api', 'items_facts', 'orders', 'campaigns', 'campaign_ads', 'trackings', 'sales_daily']) {
+      for (const t of ['users', 'accounts', 'items_api', 'items_facts', 'orders', 'campaigns', 'campaign_ads', 'trackings', 'sales_daily', 'notify_queue', 'dup_state']) {
         const r = await ctx.env.DB.prepare('SELECT COUNT(*) AS n FROM ' + t).first();
         counts[t] = r ? r.n : 0;
       }
@@ -830,10 +962,11 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, rollups, backup };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
+      await flushNotifyQueue(ctx.env);
       const st = await ctx.env.DB.prepare('SELECT job, account, cursor, last_ok, last_error FROM sync_state WHERE job = ?1').bind(String(p.job)).all();
       return { ran: String(p.job), state: st.results || [] };
     },

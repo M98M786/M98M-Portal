@@ -37,9 +37,13 @@
     var box = $('ahBody');
     if (!box) { return; }
     var now = (d && d.now) || [];
-    // previous nightly snapshot per account (trend rows arrive newest-first)
+    // "last night" must exclude today: a daytime forced rollup writes today's snapshot, and
+    // comparing live numbers against a minutes-old copy of themselves reads as "no change".
+    var todayUk = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
     var prev = {};
-    ((d && d.trend) || []).forEach(function (t) { if (!(t.account in prev)) { prev[t.account] = t; } });
+    ((d && d.trend) || []).forEach(function (t) {
+      if (String(t.day) < todayUk && !(t.account in prev)) { prev[t.account] = t; }
+    });
 
     var h = '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
       '<th>Account</th><th>Active listings</th><th>Orders 7d</th><th>Revenue 7d</th><th>Loss items</th><th>Campaigns</th></tr></thead><tbody>';
