@@ -42,7 +42,8 @@ function stripForRole_(records, role, email) {
 
 // ---------- public ----------
 function actionGetPublicConfig_() {
-  return { oauth_client_id: getConfig('oauth_client_id'), roles: ROLES, service: 'M98M Portal', phase: 2 };
+  return { oauth_client_id: getConfig('oauth_client_id'), roles: ROLES, service: 'M98M Portal', phase: 2,
+    engine_url: getConfig('engine_url') || '' };
 }
 
 // ---------- token-level ----------

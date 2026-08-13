@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com https://*.workers.dev; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
 <title>M98M Portal</title>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
@@ -324,7 +324,33 @@ function apiRetrySingly(batch){
   });
 }
 
+/* ---- Engine-first transport (V2 Phase B) --------------------------------------------------
+   When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
+   reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
+   Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent'];
+function engineApi(action, payload){
+  var url = STATE.config && STATE.config.engine_url;
+  var ac = new AbortController();
+  var t = setTimeout(function(){ ac.abort(); }, 2500);
+  return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} }), signal: ac.signal })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; })
+    .catch(function(e){
+      clearTimeout(t);
+      if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
+      return apiSend(action, payload).then(function(j){
+        if(!j.ok){ throw new Error(j.error||'request failed'); }
+        return j.data;
+      });
+    });
+}
+
 function api(action, payload){
+  if(STATE.idToken && STATE.config && STATE.config.engine_url && ENGINE_ACTIONS.indexOf(action)>=0){
+    return engineApi(action, payload);
+  }
   // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
   if(!STATE.idToken || action === 'batch'){
     return apiSend(action, payload).then(function(j){
