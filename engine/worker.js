@@ -357,7 +357,7 @@ async function notifyAS(env, to, type, message, ref) {
    diffed against the last snapshot — created, ended, paused, reactivated, renamed, budget moved.
    The honesty rule is structural here: the API never says WHO changed anything, so the message
    says "on eBay" and only the portal's own edits ever carry a name. Item-level membership and
-   duplicate-ACTIVE detection ride the next iteration (rolling per-account, subrequest budget). */
+   duplicate-ACTIVE detection ride adsItemsTick below (rolling per-account, subrequest budget). */
 async function adsSync(env) {
   await perAccount(env, 'adsSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
@@ -425,11 +425,211 @@ async function adsSync(env) {
     for (const id of Object.keys(prev)) {
       if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
     }
+
+    await adsItemsTick(env, acct, tok, live);
   });
 }
-async function financeSync(env) { /* Phase C: real fees vs Brain v17 drift. */ }
+
+/* Item-level membership (req 22) — rolling: up to 3 RUNNING campaigns per account per tick, so
+   every campaign refreshes inside ~15-25 minutes while the whole 5-minute invocation stays far
+   from the 50-subrequest budget. Rule-based (dynamic/smart) campaigns have no ad list — eBay
+   answers 4xx — so they advance the cursor silently; manual campaigns diff add/remove/bid.
+   Duplicate-ACTIVE counts RUNNING only and re-alerts at most once a day per item (KV-deduped). */
+const ADS_ITEM_CAMPAIGNS_PER_TICK = 3;
+async function adsItemsTick(env, acct, tok, live) {
+  const running = Object.keys(live).filter(id => /RUNNING/i.test(live[id].status)).sort();
+  if (!running.length) return;
+  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'adsItems' AND account = ?1").bind(acct).first();
+  let idx = (Math.max(0, Number(st && st.cursor) || 0)) % running.length;
+
+  for (let k = 0; k < Math.min(ADS_ITEM_CAMPAIGNS_PER_TICK, running.length); k++) {
+    const cid = running[idx];
+    idx = (idx + 1) % running.length;
+    const nm = live[cid].name || cid;
+
+    let ads = [];
+    let ok = true;
+    for (let page = 0; page < 2; page++) {           // 1000 ads ≫ any campaign here; capped, not silent
+      const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
+        '/ad?limit=500&offset=' + (page * 500), { headers: { authorization: 'Bearer ' + tok } });
+      if (!r.ok) {
+        if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
+        ok = false; break;                            // 4xx: rule-based campaign, no ad list — skip
+      }
+      const pj = await r.json();
+      ads = ads.concat(pj.ads || []);
+      if (ads.length >= Number(pj.total || 0) || !(pj.ads || []).length) break;
+    }
+    if (!ok) continue;
+
+    const now = {};
+    for (const ad of ads) {
+      const lid = String(ad.listingId || '');
+      if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || '') };
+    }
+    const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
+    const prev = {};
+    for (const row of (prevRs.results || [])) prev[row.listing_id] = String(row.bid_pct || '');
+    const first = Object.keys(prev).length === 0;
+
+    const added = Object.keys(now).filter(l => !(l in prev));
+    const removed = Object.keys(prev).filter(l => !(l in now));
+    const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
+
+    if (!first && (added.length || removed.length || bidMoved.length)) {
+      const sample = ids => ids.length ? ' (' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ', …' : '') + ')' : '';
+      const parts = [];
+      if (added.length) parts.push(added.length + ' item(s) added' + sample(added));
+      if (removed.length) parts.push(removed.length + ' removed' + sample(removed));
+      if (bidMoved.length) parts.push(bidMoved.length + ' bid change(s)' + sample(bidMoved));
+      const msg = '🔵 Campaign items changed on eBay · ' + acct + ' · "' + nm + '" — ' + parts.join(' · ') +
+        '. (Changed on eBay — the portal cannot see who.)';
+      await env.DB.prepare(
+        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
+      ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
+      await notifyAS(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
+    }
+
+    const stmts = [];
+    for (const lid of Object.keys(now)) {
+      stmts.push(env.DB.prepare(
+        "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
+        "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, synced_at = datetime('now')"
+      ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid));
+    }
+    for (const lid of removed) {
+      stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
+    }
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItems', ?1, ?2, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
+  ).bind(acct, String(idx)).run();
+
+  // Duplicate-ACTIVE (req 22, counts RUNNING only): one red alert per item per day.
+  const dups = await env.DB.prepare(
+    'SELECT ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, GROUP_CONCAT(c.name, \' | \') AS names ' +
+    'FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+    "WHERE ca.account = ?1 AND c.status LIKE '%RUNNING%' " +
+    'GROUP BY ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
+  ).bind(acct).all();
+  for (const d of (dups.results || []).slice(0, 5)) {
+    const kvKey = 'dup:' + acct + ':' + d.listing_id;
+    if (await env.HOT.get(kvKey)) continue;
+    await env.HOT.put(kvKey, '1', { expirationTtl: 72000 });
+    const msg = '🔴 Item in ' + d.n + ' ACTIVE campaigns · ' + acct + ' · ' + d.listing_id +
+      ' — sits in ' + String(d.names || '').slice(0, 120) + ' at the same time. eBay can charge it in each; keep it in ONE and remove the rest.';
+    await env.DB.prepare(
+      "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'duplicate_active', '', ?4, '', datetime('now'))"
+    ).bind(acct, String(d.names || '').slice(0, 200), String(d.listing_id), String(d.n)).run();
+    await notifyAS(env, 'advertising', 'Duplicate campaigns', msg, 'engine:dup:' + acct + ':' + d.listing_id);
+    await notifyAS(env, 'management', 'Duplicate campaigns', msg, 'engine:dup:' + acct + ':' + d.listing_id);
+  }
+}
+async function financeSync(env) { /* Phase C remainder: real fees vs Brain v17 drift. */ }
 async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
-async function rollups(env) { /* Phase C: sales_daily, CPQ, weekly/monthly KPIs, health snapshot. */ }
+
+/* Business dates are UK dates (timezone law T-1) — an order at 00:30 UK belongs to the UK day
+   it happened in, not the UTC one. */
+function ukDate(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
+
+/* Nightly rollups (§3): sales_daily per account per UK day (last 8 days re-rolled, so late
+   orders correct yesterday), avg_profit_7d per item, and the daily_health snapshot. Ads spend
+   stays 0 until the report-task feed lands — profit here is the sheet's own per-item projection
+   times units, labelled an estimate wherever it is shown. */
+async function rollups(env) {
+  const sinceIso = new Date(Date.now() - 8 * 86400000).toISOString();
+  const ors = await env.DB.prepare('SELECT account, item_id, sold, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
+  const orders = ors.results || [];
+
+  const ids = [...new Set(orders.map(o => String(o.item_id || '')).filter(Boolean))];
+  const facts = {};
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const rs = await env.DB.prepare(
+      'SELECT item_id, oe, ali_cost, profit FROM items_facts WHERE item_id IN (' + chunk.map(() => '?').join(',') + ')'
+    ).bind(...chunk).all();
+    for (const r of (rs.results || [])) facts[r.item_id] = r;
+  }
+
+  const day = {};
+  const units7 = {};
+  const cut7 = Date.now() - 7 * 86400000;
+  for (const o of orders) {
+    const dte = ukDate(o.created_at);
+    if (!dte) continue;
+    const f = facts[o.item_id] || {};
+    const k = o.account + '|' + dte;
+    const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0 });
+    row.sold += Number(o.sold) || 0;
+    row.oe += Number(f.oe) || 0;
+    row.cost += Number(f.ali_cost) || 0;
+    row.profit += Number(f.profit) || 0;
+    const t = new Date(o.created_at).getTime();
+    if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + 1;
+  }
+
+  const stmts = [];
+  for (const k of Object.keys(day)) {
+    const cut = k.indexOf('|');
+    const v = day[k];
+    stmts.push(env.DB.prepare(
+      'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) ' +
+      'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6'
+    ).bind(k.slice(0, cut), k.slice(cut + 1), round2(v.sold), round2(v.oe), round2(v.cost), round2(v.profit)));
+  }
+  stmts.push(env.DB.prepare('UPDATE items_facts SET avg_profit_7d = 0 WHERE avg_profit_7d != 0'));
+  for (const id of Object.keys(units7)) {
+    const f = facts[id];
+    if (!f) continue;
+    stmts.push(env.DB.prepare('UPDATE items_facts SET avg_profit_7d = ?2 WHERE item_id = ?1')
+      .bind(id, round2(units7[id] * (Number(f.profit) || 0) / 7)));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+
+  const rows = await computeHealth(env);
+  for (const h of rows) {
+    await env.DB.prepare(
+      'INSERT INTO daily_health (day, account, listings, orders_7d, revenue_7d, loss_items, json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+      'ON CONFLICT(day, account) DO UPDATE SET listings = ?3, orders_7d = ?4, revenue_7d = ?5, loss_items = ?6, json = ?7'
+    ).bind(ukDate(''), h.account, h.listings, h.orders_7d, h.revenue_7d, h.loss_items,
+      JSON.stringify({ campaigns_running: h.campaigns_running, campaigns_total: h.campaigns_total })).run();
+  }
+}
+
+/* One shape for both the nightly snapshot and the live Account-health screen. */
+async function computeHealth(env) {
+  const accs = await env.DB.prepare('SELECT name FROM accounts').all();
+  const cut7 = new Date(Date.now() - 7 * 86400000).toISOString();
+  const out = [];
+  for (const a of (accs.results || [])) {
+    const li = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE account = ?1 AND status = 'ACTIVE'").bind(a.name).first();
+    const od = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(sold), 0) AS rev FROM orders WHERE account = ?1 AND created_at >= ?2').bind(a.name, cut7).first();
+    const lo = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM items_facts f JOIN items_api i ON i.item_id = f.item_id WHERE i.account = ?1 AND f.profit < 0'
+    ).bind(a.name).first();
+    const ca = await env.DB.prepare(
+      "SELECT COALESCE(SUM(CASE WHEN status LIKE '%RUNNING%' THEN 1 ELSE 0 END), 0) AS run_n, COUNT(*) AS all_n FROM campaigns WHERE account = ?1"
+    ).bind(a.name).first();
+    out.push({
+      account: a.name,
+      listings: (li && li.n) || 0,
+      orders_7d: (od && od.n) || 0,
+      revenue_7d: round2((od && od.rev) || 0),
+      loss_items: (lo && lo.n) || 0,
+      campaigns_running: (ca && ca.run_n) || 0,
+      campaigns_total: (ca && ca.all_n) || 0,
+    });
+  }
+  return out;
+}
 async function backup(env) {
   if (!env.BACKUPS) return;
   const tabs = ['users', 'accounts', 'items_api', 'items_facts', 'orders', 'sync_state'];
@@ -451,7 +651,7 @@ const ROUTES = {
     auth: 'mgmt', fn: async (p, ctx) => {
       const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job').all();
       const counts = {};
-      for (const t of ['users', 'accounts', 'items_api', 'orders']) {
+      for (const t of ['users', 'accounts', 'items_api', 'items_facts', 'orders', 'campaigns', 'campaign_ads', 'trackings', 'sales_daily']) {
         const r = await ctx.env.DB.prepare('SELECT COUNT(*) AS n FROM ' + t).first();
         counts[t] = r ? r.n : 0;
       }
@@ -569,6 +769,73 @@ const ROUTES = {
         (account ? 'WHERE a.account = ?1 ' : '') + 'ORDER BY a.api_synced_at DESC LIMIT 500'
       ).bind(...(account ? [account] : [])).all();
       return { rows: (rs.results || []).map(r => stripItem(r, ctx.user)), source_note: 'API rows join sheet facts; SHEET rows are the bridge for the no-API account' };
+    },
+  },
+
+  /* Zain's campaign watch (req 21/22): campaigns with item counts, live duplicate-ACTIVE list,
+     recent event feed. Advertising Manager + Management only — Team Lead is per-item by §6/Q9
+     and campaign budgets are account-level spend, so TL stays out of this screen. */
+  campaignWatch: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const camps = await ctx.env.DB.prepare(
+        'SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.synced_at, ' +
+        '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.account = c.account AND ca.campaign_id = c.campaign_id) AS items ' +
+        'FROM campaigns c ORDER BY c.account, c.status, c.name'
+      ).all();
+      const dups = await ctx.env.DB.prepare(
+        'SELECT ca.account, ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, ' +
+        "GROUP_CONCAT(c.name, ' | ') AS names, MAX(ia.title) AS title " +
+        'FROM campaign_ads ca ' +
+        'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+        'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id ' +
+        "WHERE c.status LIKE '%RUNNING%' " +
+        'GROUP BY ca.account, ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
+      ).all();
+      const events = await ctx.env.DB.prepare(
+        'SELECT account, campaign, item_id, change_type, old, new, actor, at FROM campaign_events ORDER BY id DESC LIMIT 60'
+      ).all();
+      const state = await ctx.env.DB.prepare(
+        "SELECT account, last_ok, last_error FROM sync_state WHERE job = 'adsSync' AND account != ''"
+      ).all();
+      return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [] };
+    },
+  },
+
+  /* Account health (own menu, §9-C): live numbers plus the nightly trend. Management-only —
+     revenue and loss counts are account totals. */
+  accountHealth: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const now = await computeHealth(ctx.env);
+      const trend = await ctx.env.DB.prepare(
+        'SELECT day, account, listings, orders_7d, revenue_7d, loss_items, json FROM daily_health ORDER BY day DESC LIMIT 84'
+      ).all();
+      const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job, account').all();
+      return { now, trend: trend.results || [], sync: sync.results || [] };
+    },
+  },
+
+  /* Daily report (own dashboard, §9-C): sales_daily in UK business dates. Profit is the sheet's
+     per-item projection × units — an estimate until the fee/ads feeds land — and the auth gate
+     is the §6 law: only Management/Ops ever see collective profit. */
+  dailyReport: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-31 day') ORDER BY date DESC, account"
+      ).all();
+      return { rows: rs.results || [], note: 'profit = per-item sheet projection × units (estimate); ads spend joins when the report feed lands' };
+    },
+  },
+
+  /* Ops lever for the build session and the Management ops panel: run any cron job now. */
+  runJobNow: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const jobs = { listingSync, orderSync, adsSync, rollups, backup };
+      const fn = jobs[String(p.job || '')];
+      if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
+      await runJob(ctx.env, fn);
+      const st = await ctx.env.DB.prepare('SELECT job, account, cursor, last_ok, last_error FROM sync_state WHERE job = ?1').bind(String(p.job)).all();
+      return { ran: String(p.job), state: st.results || [] };
     },
   },
 
