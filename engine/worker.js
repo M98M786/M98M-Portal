@@ -340,7 +340,93 @@ async function orderSync(env) {
   });
 }
 
-async function adsSync(env) { /* Phase C: Marketing API diff engine → campaign_events + notifications. */ }
+/* Engine → portal bell: events raised at the edge surface through the same Apps Script
+   notification law pipeline every other alert uses. Fire-and-forget with a hard timeout. */
+async function notifyAS(env, to, type, message, ref) {
+  try {
+    await fetch(env.AS_URL, {
+      method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'engineNotify',
+        payload: { key: await secret(env, 'SYNC_KEY'), to, type, message, ref } }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) { console.log('notifyAS failed', String(e).slice(0, 120)); }
+}
+
+/* Campaign watcher (V2 req 4/21/22, campaign level): every 5 minutes the live campaign list is
+   diffed against the last snapshot — created, ended, paused, reactivated, renamed, budget moved.
+   The honesty rule is structural here: the API never says WHO changed anything, so the message
+   says "on eBay" and only the portal's own edits ever carry a name. Item-level membership and
+   duplicate-ACTIVE detection ride the next iteration (rolling per-account, subrequest budget). */
+async function adsSync(env) {
+  await perAccount(env, 'adsSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign?limit=100', {
+      headers: { authorization: 'Bearer ' + tok } });
+    if (!r.ok) throw new Error(acct + ' campaigns ' + r.status);
+    const page = await r.json();
+    const live = {};
+    for (const c of (page.campaigns || [])) {
+      const budget = String((c.budget && c.budget.daily && c.budget.daily.amount && c.budget.daily.amount.value) || '');
+      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget };
+    }
+    const prevRs = await env.DB.prepare('SELECT campaign_id, name, status, budget FROM campaigns WHERE account = ?1').bind(acct).all();
+    const prev = {};
+    for (const row of (prevRs.results || [])) prev[row.campaign_id] = row;
+    const firstSnapshot = Object.keys(prev).length === 0;
+
+    const events = [];
+    for (const id of Object.keys(live)) {
+      const l = live[id], p = prev[id];
+      if (!p) { if (!firstSnapshot) events.push({ id, type: 'created', old: '', nw: l.status, l }); }
+      else {
+        if (p.status !== l.status) events.push({ id, type: 'status', old: p.status, nw: l.status, l });
+        if (p.budget !== l.budget && (p.budget || l.budget)) events.push({ id, type: 'budget', old: p.budget, nw: l.budget, l });
+        if (p.name !== l.name) events.push({ id, type: 'renamed', old: p.name, nw: l.name, l });
+      }
+    }
+    for (const id of Object.keys(prev)) {
+      if (!live[id]) events.push({ id, type: 'removed', old: prev[id].status, nw: '', l: prev[id] });
+    }
+
+    for (const ev of events.slice(0, 6)) {
+      const nm = ev.l.name || ev.id;
+      let msg = '';
+      if (ev.type === 'status') {
+        const paused = /PAUSED|ENDED/i.test(ev.nw);
+        msg = (paused ? '🔴 Campaign ' + (/ENDED/i.test(ev.nw) ? 'ENDED' : 'PAUSED') : '🟠 Campaign ' + ev.nw) +
+          ' on eBay · ' + acct + ' · "' + nm + '" — ' + ev.old + ' → ' + ev.nw +
+          (paused ? '. Its items just lost ads coverage — if nobody intended this, reactivate it.' : '.') +
+          ' (Changed on eBay — the portal cannot see who.)';
+      } else if (ev.type === 'budget') {
+        msg = '🟠 Campaign budget changed on eBay · ' + acct + ' · "' + nm + '" — £' + (ev.old || '0') + ' → £' + (ev.nw || '0') +
+          '/day. Spend changes from today. (Changed on eBay — the portal cannot see who.)';
+      } else if (ev.type === 'created') {
+        msg = '🔵 New campaign on eBay · ' + acct + ' · "' + nm + '" (' + ev.nw + '). If Zain did not create this, ask who did.';
+      } else if (ev.type === 'removed') {
+        msg = '🟠 Campaign gone from eBay · ' + acct + ' · "' + nm + '" — it no longer appears in the account\'s campaign list.';
+      } else {
+        msg = '🔵 Campaign renamed on eBay · ' + acct + ' · "' + ev.old + '" → "' + ev.nw + '".';
+      }
+      await env.DB.prepare(
+        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, '', ?3, ?4, ?5, '', datetime('now'))"
+      ).bind(acct, nm, ev.type, String(ev.old), String(ev.nw)).run();
+      await notifyAS(env, 'management', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
+      await notifyAS(env, 'advertising', 'Campaign changed', msg, 'engine:camp:' + acct + ':' + ev.id + ':' + ev.type);
+    }
+
+    for (const id of Object.keys(live)) {
+      const l = live[id];
+      await env.DB.prepare(
+        "INSERT INTO campaigns (account, campaign_id, name, status, budget, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
+        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, synced_at=datetime('now')"
+      ).bind(acct, id, l.name, l.status, l.budget).run();
+    }
+    for (const id of Object.keys(prev)) {
+      if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
+    }
+  });
+}
 async function financeSync(env) { /* Phase C: real fees vs Brain v17 drift. */ }
 async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
 async function rollups(env) { /* Phase C: sales_daily, CPQ, weekly/monthly KPIs, health snapshot. */ }
@@ -400,6 +486,72 @@ const ROUTES = {
         ).bind(String(a.name || ''), a.api_enabled ? 1 : 0).run();
       }
       return { synced: (p.accounts || []).length };
+    },
+  },
+
+  /* Sheet facts (suppliers, OE, campaign decision) pushed from Apps Script — the sheets stay
+     the human truth, the Engine is their fast mirror (dual-run, G-1). */
+  syncFacts: {
+    auth: 'sync', fn: async (p, ctx) => {
+      let n = 0;
+      for (const f of (p.items || [])) {
+        const id = String(f.item_id || '').trim();
+        if (!id) continue;
+        await ctx.env.DB.prepare(
+          'INSERT INTO items_facts (item_id, account, source, ali_cost, oe, profit, campaign_name, campaign_type, current_sup, enriched_at) ' +
+          "VALUES (?1, ?2, 'SHEET', ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
+          'ON CONFLICT(item_id) DO UPDATE SET account=?2, ali_cost=?3, oe=?4, profit=?5, campaign_name=?6, campaign_type=?7, current_sup=?8, enriched_at=datetime(\'now\')'
+        ).bind(id, String(f.account || ''), Number(f.ali_cost) || 0, Number(f.oe) || 0,
+          Number(f.profit) || 0, String(f.campaign_name || ''), String(f.campaign_type || ''), String(f.current_sup || '')).run();
+        n++;
+      }
+      return { synced: n };
+    },
+  },
+
+  /* Tracking push (V2 req 3) — SHADOW until TRACKING_LIVE='true' (G-3): resolves the order,
+     auto-picks the carrier from the tracking number's own format, and reports exactly what it
+     WOULD send to eBay. Flip the var and the same call ships for real. */
+  ebayPushTracking: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
+      if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
+      const carriers = [
+        [/^[A-Z]{2}\d{9}GB$/i, 'ROYAL_MAIL'],
+        [/^(H0|C0|T0)\d{14}$/i, 'HERMES'],
+        [/^\d{16}$/, 'HERMES'],
+        [/^JD\d{16,}$/i, 'YODEL'],
+        [/^(JJD|JVGL)/i, 'DHL'],
+        [/^1Z/i, 'UPS'],
+      ];
+      let carrier = String(p.courier || '').trim().toUpperCase();
+      if (!carrier) { for (const [re, c] of carriers) { if (re.test(tracking)) { carrier = c; break; } } }
+      if (!carrier) carrier = 'OTHER';
+      const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
+      const tok = await ebayAccessToken(ctx.env, account);
+      const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
+      const order = await or_.json();
+      fulfillment.lineItems = (order.lineItems || []).map(li => ({ lineItemId: li.lineItemId, quantity: li.quantity }));
+      if (String(ctx.env.TRACKING_LIVE) !== 'true') {
+        await ctx.env.DB.prepare(
+          "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), 'SHADOW') " +
+          "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status='SHADOW'"
+        ).bind(orderId, tracking, carrier).run();
+        return { shadow: true, would_send: fulfillment, carrier_auto: carrier,
+          note: 'SHADOW — recorded, not sent to eBay. Set TRACKING_LIVE=true to arm.' };
+      }
+      const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment', {
+        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify(fulfillment) });
+      const ptxt = await pr.text();
+      await ctx.env.DB.prepare(
+        "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
+        "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
+      ).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
+      if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
+      return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status };
     },
   },
 

@@ -3,7 +3,9 @@
  * + mandatory comment). actionApproveTask_ is the ONLY path to Completed — nothing counts
  * toward targets, performance (§12.1) or shoutouts before an approval lands. */
 
-const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query'];
+const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'loss_review'];
+/* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
+const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
 const TASK_STATUS_PENDING = 'Pending';
 const TASK_STATUS_WORKING = 'Working';
 const TASK_STATUS_UPDATED = 'Updated';
@@ -123,6 +125,10 @@ function actionSubmitTask_(payload, ctx) {
 
     let itemId = taskItemId_(payload.item_id) || String(rec.item_id || '').trim();
     if (String(rec.type) === 'listing_new' && !itemId) throw new Error('item_id required to submit a listing');
+    // V2 loss escalation: the ping stops only on one of exactly three recorded decisions.
+    if (String(rec.type) === 'loss_review' && LOSS_RESOLUTIONS.indexOf(note) < 0) {
+      throw new Error(SAFE_ERROR_PREFIX + 'a loss review is closed with exactly one of: ' + LOSS_RESOLUTIONS.join(' · '));
+    }
 
     stamp = now_();
     const elapsed = taskElapsedMin_(rec.updated_at, taskMs_(stamp));

@@ -967,3 +967,72 @@ const ACTIONS_SIGNALS = {
   mySignals:         [actionMySignals_, 'any'],
   acknowledgeSignal: [actionAcknowledgeSignal_, 'any'],
 };
+
+
+/* ================= V2 §4 loss-item escalation (req 7) =================
+ * Every 5 minutes inside shift hours: yesterday's loss items each hold ONE open loss_review
+ * task on the advertising module holder, and the holder plus both team leads are re-pinged
+ * until somebody closes it with one of exactly three decisions. The resolution feed is the
+ * completed tasks themselves — visible to Management on the approvals/tasks screens. */
+const LOSS_PING_START = 14;                       // 2 PM PKT (Q6 default until Hasib answers)
+const LOSS_PING_END = 23;                         // 11 PM PKT
+
+function runLossEscalationSweep() {
+  const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
+  if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
+
+  const yesterday = Utilities.formatDate(new Date(Date.now() - 86400000), 'Asia/Karachi', 'yyyy-MM-dd');
+  const losses = [];
+  readTab_('SIGNALS').forEach(function (r) {
+    if (String(r.type) !== SIG_TYPE_NEGATIVE) return;
+    if (String(r.date) !== yesterday) return;
+    const id = String(r.item_id || '').trim();
+    if (id) losses.push({ item_id: id, account: String(r.account || ''), value: r.value });
+  });
+  if (!losses.length) return 'no loss items for ' + yesterday;
+
+  const advHolders = usersWithModule_('advertising', ['Advertising Manager']);
+  const tlHolders = usersWithModule_('team-lead', ['Team Lead']);
+  if (!advHolders.length) {
+    notifyManagement_('Loss item', '🔴 Loss items are waiting but nobody holds the advertising module — grant it on the Access desk.', 'loss:noholder');
+    return 'no advertising holder';
+  }
+
+  const open = {}, resolvedToday = {};
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type) !== 'loss_review') return;
+    const id = String(t.item_id || '').trim();
+    if (!id) return;
+    if (String(t.status) === TASK_STATUS_COMPLETED) {
+      if (String(t.decided_at || '').slice(0, 10) >= yesterday) resolvedToday[id] = true;
+    } else { open[id] = t; }
+  });
+
+  const bucket = Utilities.formatDate(new Date(), 'Asia/Karachi', 'HHmm');
+  let made = 0, pinged = 0;
+  losses.forEach(function (l) {
+    if (resolvedToday[l.item_id]) return;
+    const gbp = signalsGbp_(l.value);
+    if (!open[l.item_id]) {
+      const taskId = 'T' + Utilities.getUuid().slice(0, 8);
+      const stamp = now_();
+      const due = Utilities.formatDate(new Date(Date.now() + 6 * 3600000), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ssXXX");
+      tasksSheet_().appendRow([
+        taskId, 'loss_review', l.account, l.item_id,
+        'LOSS ITEM — made ' + gbp + ' yesterday (' + l.item_id + ')',
+        'This item lost money yesterday. Close this task by submitting with exactly one of: ' + LOSS_RESOLUTIONS.join(' · '),
+        '', 'system:loss', advHolders[0], 'High', due, TASK_STATUS_PENDING, stamp, stamp, '', '', '', '', '',
+      ]);
+      open[l.item_id] = { task_id: taskId, assigned_to: advHolders[0] };
+      made++;
+    }
+    const t = open[l.item_id];
+    const msg = '🔴 Loss item · ' + l.account + ' · ' + l.item_id + ' — made ' + gbp + ' yesterday and is still unresolved. ' +
+      'Close it with one of: ' + LOSS_RESOLUTIONS.join(' · ') + ' → open My tasks (' + String(t.task_id) + '). This alert repeats every 5 minutes until it is closed.';
+    notify_(String(t.assigned_to || advHolders[0]), 'Loss item', msg, 'loss:' + l.item_id + ':' + bucket);
+    tlHolders.forEach(function (e) { notify_(e, 'Loss item', msg, 'loss:' + l.item_id + ':' + bucket); });
+    pinged++;
+  });
+  logActivity_('system', 'LOSS_SWEEP', yesterday, '', made + ' new / ' + pinged + ' pinged', '');
+  return made + ' task(s) created, ' + pinged + ' item(s) pinged';
+}
