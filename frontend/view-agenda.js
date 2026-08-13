@@ -599,6 +599,7 @@ function buildHistory() {
   $('aghFrom').value = agDaysBefore(agenda.date, 13);
   $('aghAud').onchange = function () { $('aghPersonWrap').classList.toggle('hidden', this.value !== '__person'); };
   $('aghGo').onclick = browseHistory;
+  enhanceDateRange($('aghFrom'), $('aghTo'), { tz: 'Pakistan' });
 }
 
 function agDaysBefore(ymd, days) {

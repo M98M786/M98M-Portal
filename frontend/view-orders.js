@@ -328,6 +328,10 @@
         odMarkTabs();
         odLoad();
       };
+      if ($('odDate')) {
+        $('odDate').addEventListener('change', function () { OD_DATE = odStr(this.value); OD_REPLACEMENT = false; odMarkTabs(); odLoad(); });
+        enhanceDate($('odDate'), { kind: 'day' });
+      }
       $('odTabDay').onclick = function () { if (!OD_REPLACEMENT) { return; } OD_REPLACEMENT = false; odMarkTabs(); odLoad(); };
       $('odTabRep').onclick = function () { if (OD_REPLACEMENT) { return; } OD_REPLACEMENT = true; odMarkTabs(); odLoad(); };
       $('odDate').onchange = function () { OD_DATE = odStr(this.value); };
@@ -888,7 +892,8 @@
         OD_MONTH = odStr($('odDsMonth').value) || OD_MONTH;
         odDashLoad(false);
       };
-      $('odDsMonth').onchange = function () { OD_MONTH = odStr(this.value) || OD_MONTH; };
+      $('odDsMonth').onchange = function () { OD_MONTH = odStr(this.value) || OD_MONTH; odDashLoad(false); };
+      enhanceDate($('odDsMonth'), { kind: 'month' });
       odLoadAccounts(function () {
         var sel = $('odDsAccount');
         if (!sel) { return; }

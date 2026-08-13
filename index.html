@@ -133,6 +133,17 @@ input,select{font:inherit}
 .ideas{background:linear-gradient(135deg,rgba(233,169,60,.16),rgba(233,169,60,.03)); border:1px solid var(--gold-line-hi); box-shadow:var(--glow-gold)}
 .ideas textarea{width:100%;margin-top:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:66px}
 .toast{position:fixed; bottom:22px; left:50%; transform:translate(-50%,90px); z-index:50; background:linear-gradient(180deg,#1E2637,#161C2A); border:1px solid var(--gold-line-hi); color:var(--text); font-weight:700; font-size:13px; padding:12px 19px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.5); transition:transform .38s cubic-bezier(.2,.8,.2,1)}
+
+/* quick date presets (V2 req 32) */
+.dp-wrap{position:relative; display:inline-flex; align-items:center; gap:6px; margin-left:6px}
+.dp-btn{padding:7px 10px; border:1px solid var(--gold-line-hi); border-radius:8px; font-weight:800; font-size:12px; color:var(--gold-a); transition:all .15s}
+.dp-btn:hover{border-color:var(--gold-a); box-shadow:var(--glow-gold)}
+.dp-tz{font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.07em; color:var(--text-3); border:1px solid var(--gold-line); border-radius:99px; padding:2px 8px}
+.dp-pop{position:absolute; top:calc(100% + 6px); right:0; z-index:60; display:none; flex-wrap:wrap; gap:5px; width:220px; padding:10px;
+  background:var(--panel-2); border:1px solid var(--gold-line-hi); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.5)}
+.dp-pop.on{display:flex}
+.dp-pop button{padding:5px 11px; border:1px solid var(--gold-line); border-radius:99px; font-size:11.5px; font-weight:700; color:var(--text-2); transition:all .14s}
+.dp-pop button:hover{color:var(--gold-a); border-color:var(--gold-line-hi); background:rgba(233,169,60,.08)}
 .toast.show{transform:translate(-50%,0)}
 /* Grid items default to min-width:auto, so a wide child pushes the whole shell past the
    viewport. Zero them and let the scroll live inside the panel that owns the wide content. */
@@ -393,6 +404,65 @@ function apiCached(action, payload, onData){
     toast('Showing the last figures — could not reach the server just now.');
     return had;
   });
+}
+
+/* ---- quick date presets (V2 req 32) -------------------------------------------------------
+   One control for every date filter in the portal: the native input stays (arbitrary dates keep
+   working), and a ▾ beside it opens presets computed in Pakistan time — pick one and the view's
+   own change handler fires as if the date was typed. tz labels the calendar the screen lives on
+   (T-1: performance = Pakistan, business = UK). */
+function pktDate(daysAgo){
+  return new Date(Date.now() - (daysAgo||0)*86400000).toLocaleDateString('en-CA', { timeZone:'Asia/Karachi' });
+}
+function pktMonth(monthsAgo){
+  var d = new Date(); d = new Date(d.getFullYear(), d.getMonth() - (monthsAgo||0), 15);
+  return d.toLocaleDateString('en-CA', { timeZone:'Asia/Karachi' }).slice(0,7);
+}
+function dpSet(el, v){ if(!el) return; el.value = v; el.dispatchEvent(new Event('change')); }
+function enhanceDate(el, opts){
+  if(!el || el._dp) return; el._dp = true;
+  opts = opts || {};
+  var kind = opts.kind || 'day';
+  var sets = kind === 'month'
+    ? [['This month', function(){ dpSet(el, pktMonth(0)); }], ['Last month', function(){ dpSet(el, pktMonth(1)); }]]
+    : [['Today', function(){ dpSet(el, pktDate(0)); }], ['Yesterday', function(){ dpSet(el, pktDate(1)); }],
+       ['−7 days', function(){ dpSet(el, pktDate(7)); }], ['−30 days', function(){ dpSet(el, pktDate(30)); }]];
+  dpAttach(el, sets, opts.tz);
+}
+function enhanceDateRange(fromEl, toEl, opts){
+  if(!fromEl || !toEl || fromEl._dp) return; fromEl._dp = true;
+  var both = function(a, b){ return function(){ dpSet(fromEl, a()); dpSet(toEl, b()); }; };
+  var sets = [
+    ['Today', both(function(){return pktDate(0);}, function(){return pktDate(0);})],
+    ['Last 7 days', both(function(){return pktDate(6);}, function(){return pktDate(0);})],
+    ['Last 30 days', both(function(){return pktDate(29);}, function(){return pktDate(0);})],
+    ['This month', both(function(){return pktMonth(0)+'-01';}, function(){return pktDate(0);})],
+  ];
+  dpAttach(toEl, sets, (opts||{}).tz);
+}
+function dpAttach(el, sets, tz){
+  var wrap = document.createElement('span');
+  wrap.className = 'dp-wrap';
+  el.parentNode.insertBefore(wrap, el.nextSibling);
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'dp-btn'; btn.textContent = '▾'; btn.title = 'Quick ranges';
+  wrap.appendChild(btn);
+  if(tz){
+    var lab = document.createElement('span');
+    lab.className = 'dp-tz'; lab.textContent = tz;
+    wrap.appendChild(lab);
+  }
+  var pop = document.createElement('span');
+  pop.className = 'dp-pop';
+  sets.forEach(function(s){
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = s[0];
+    b.onclick = function(e){ e.stopPropagation(); s[1](); pop.classList.remove('on'); };
+    pop.appendChild(b);
+  });
+  wrap.appendChild(pop);
+  btn.onclick = function(e){ e.stopPropagation(); pop.classList.toggle('on'); };
+  document.addEventListener('click', function(){ pop.classList.remove('on'); });
 }
 
 /* ---- Google Identity Services ---- */

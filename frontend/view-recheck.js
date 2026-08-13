@@ -209,6 +209,7 @@
     init: function () {
       $('rcRefresh').onclick = function () { rcLoad(); };
       $('rcDate').onchange = function () { rcLoad(); };
+      enhanceDate($('rcDate'), { kind: 'day' });
       rcLoad();
     }
   };

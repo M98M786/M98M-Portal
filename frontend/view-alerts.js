@@ -630,6 +630,10 @@
         alkLoad(false);
       };
       $('alkAccount').onchange = function () { ALK.account = alStr(this.value); alkLoad(false); };
+      if ($('alkDate')) {
+        $('alkDate').addEventListener('change', function () { ALK.date = alStr(this.value) || ALK.date; alkLoad(false); });
+        enhanceDate($('alkDate'), { kind: 'day' });
+      }
       alkLoad(false);
     }
   };

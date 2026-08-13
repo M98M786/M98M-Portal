@@ -551,7 +551,7 @@
     },
     init: function () {
       var input = $('rgDate');
-      if (input) { input.onchange = function () { loadGrid(input.value); }; }
+      if (input) { input.onchange = function () { loadGrid(input.value); }; enhanceDate(input, { kind: 'day', tz: 'Pakistan' }); }
       var today = $('rgToday');
       if (today) { today.onclick = function () { if (input) { input.value = ''; } loadGrid(''); }; }
       loadGrid('');

@@ -874,6 +874,7 @@
       if (lbl) { lbl.textContent = monthLabel(EVAL_MONTH); }
       var mon = $('pfEvMonth');
       if (mon) {
+        enhanceDate(mon, { kind: 'month', tz: 'Pakistan' });
         mon.value = EVAL_MONTH;
         mon.onchange = function () {
           if (!/^\d{4}-\d{2}$/.test(mon.value)) { return; }
