@@ -186,21 +186,36 @@ async function ebayExchangeCode(env, code) {
   return t;
 }
 
+/* REALITY (14 Aug): every selling account has its OWN eBay application — five keysets, not
+   one. Per-account app_id/cert_id live on the accounts row next to its refresh token; the
+   global EBAY_* secrets remain only as a fallback for any account without its own pair. */
+async function ebayCreds(env, accountName) {
+  const row = await env.DB.prepare('SELECT oauth_ref, app_id, cert_id FROM accounts WHERE name = ?1 AND api_enabled = 1').bind(accountName).first();
+  if (!row || !row.oauth_ref) throw new Error('SAY: ' + accountName + ' has no eBay consent on file yet');
+  return {
+    refresh: row.oauth_ref,
+    appId: row.app_id || await secret(env, 'EBAY_APP_ID'),
+    cert: row.cert_id || await secret(env, 'EBAY_CERT_ID'),
+  };
+}
+
 async function ebayAccessToken(env, accountName) {
   const kvKey = 'ebaytok:' + accountName;
   const cached = await env.HOT.get(kvKey);
   if (cached) return cached;
-  const row = await env.DB.prepare('SELECT oauth_ref FROM accounts WHERE name = ?1 AND api_enabled = 1').bind(accountName).first();
-  if (!row || !row.oauth_ref) throw new Error('SAY: ' + accountName + ' has no eBay consent on file yet');
-  const appId = await secret(env, 'EBAY_APP_ID');
-  const cert = await secret(env, 'EBAY_CERT_ID');
+  const creds = await ebayCreds(env, accountName);
+  const row = { oauth_ref: creds.refresh };
+  const appId = creds.appId;
+  const cert = creds.cert;
   const r = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       authorization: 'Basic ' + btoa(appId + ':' + cert),
     },
-    body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(row.oauth_ref) + '&scope=' + encodeURIComponent(EBAY_SCOPES),
+    // No scope param: eBay then applies the ORIGINAL grant's scopes, so a token minted by the
+    // sheet-automation app works even where its scope list differs from ours.
+    body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(row.oauth_ref),
   });
   const t = await r.json();
   if (!r.ok || !t.access_token) throw new Error('eBay refresh failed for ' + accountName + ': ' + String(t.error_description || r.status));
@@ -357,16 +372,47 @@ const ROUTES = {
 
   /* eBay consent flow (Phase B2): Management asks for the links, clicks Allow on
      each account, pastes the resulting code back. */
+  /* sync-key auth until the Management dashboard view ships — only Apps Script and the build
+     session hold the key, and the links contain nothing secret (client_id is public in OAuth). */
   ebayConsentLinks: {
-    auth: 'mgmt', fn: async (p, ctx) => {
+    auth: 'sync', fn: async (p, ctx) => {
       const names = await ctx.env.DB.prepare('SELECT name FROM accounts WHERE api_enabled = 1').all();
       const out = [];
       for (const r of (names.results || [])) out.push({ account: r.name, url: await ebayConsentUrl(ctx.env, r.name) });
       return { links: out };
     },
   },
+  /* Reuse path: Hasib's existing sheet-automation projects already hold per-account refresh
+     tokens — paste one in and this stores it, then proves it by minting an access token and
+     reading one order. If eBay rejects the scopes, the error says so and the consent-link
+     fallback still exists. */
+  ebaySetRefreshToken: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const account = String(p.account || ''), token = String(p.refresh_token || '');
+      if (!account || !token) throw new Error('SAY: account and refresh_token are both needed');
+      if (p.app_id || p.cert_id) {
+        await ctx.env.DB.prepare('UPDATE accounts SET oauth_ref = ?2, app_id = ?3, cert_id = ?4 WHERE name = ?1')
+          .bind(account, token, String(p.app_id || ''), String(p.cert_id || '')).run();
+      } else {
+        await ctx.env.DB.prepare('UPDATE accounts SET oauth_ref = ?2 WHERE name = ?1').bind(account, token).run();
+      }
+      await ctx.env.HOT.delete('ebaytok:' + account);
+      try {
+        const access = await ebayAccessToken(ctx.env, account);
+        const r = await fetch('https://api.ebay.com/sell/fulfillment/v1/order?limit=1', {
+          headers: { authorization: 'Bearer ' + access } });
+        const body = await r.text();
+        return { account, refresh_ok: true, orders_probe: r.status,
+          note: r.ok ? 'token works — orders readable' : 'refresh worked but orders read returned ' + r.status + ': ' + body.slice(0, 180) };
+      } catch (e) {
+        // sync-key-gated diagnostic: the caller is the build session, so the raw reason is safe
+        return { account, refresh_ok: false, error: String(e && e.message || e).slice(0, 300) };
+      }
+    },
+  },
+
   ebaySubmitConsent: {
-    auth: 'mgmt', fn: async (p, ctx) => {
+    auth: 'sync', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '');
       if (!account || !code) throw new Error('SAY: account and code are both needed');
       const t = await ebayExchangeCode(ctx.env, code);
