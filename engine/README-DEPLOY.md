@@ -1,4 +1,4 @@
-# Engine deploy — dashboard-paste, no Node required
+# Engine deploy
 _Everything here happens in the Cloudflare dashboard (free plan is enough). ~20 minutes once._
 
 ## A. One-time setup (Hasib signs in; Claude drives the pane after that)
@@ -37,3 +37,21 @@ _Everything here happens in the Cloudflare dashboard (free plan is enough). ~20 
 - Sir Hasib rows carry the SHEET chip (items_facts.source).
 - Kill test: set CONFIG engine_url to a garbage URL → every screen still works via /exec
   (the client falls back on any network failure; an `auth` verdict never falls back).
+
+## DEPLOYED 13 Aug 2026 — and the paste method is now obsolete
+Live at **https://m98m-engine.m98m786.workers.dev/** (account 22159c26d5386e3ac543be2bbed95e6d).
+D1 `m98m-engine` = 83a5bb0f-d2d8-4c25-93fe-477d6e6ae452 (16 tables) · KV `m98m-hot` =
+86ae131b71684136b8860fd7bf86995d · bindings DB/HOT + ALLOWED_ORIGIN · SYNC_KEY secret set ·
+cron */5, */15, hourly, 02:00. Verified: enginePing 320ms; wrong sync key → auth; right key →
+syncUsers writes D1.
+
+**Future deploys are ONE command** (token file lives in the session scratchpad, chmod 600 —
+regenerate at dash.cloudflare.com → My Profile → API Tokens if lost):
+```
+curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/22159c26d5386e3ac543be2bbed95e6d/workers/scripts/m98m-engine" \
+  -H "Authorization: Bearer $(cat <scratchpad>/cf_token.txt)" \
+  -F "metadata=@<scratchpad>/metadata.json;type=application/json" \
+  -F "worker.js=@engine/worker.js;type=application/javascript+module"
+```
+(metadata.json carries the bindings above; keep it in sync if bindings change. Secrets are
+re-applied via the /secrets endpoint after upload if ever wiped.)
