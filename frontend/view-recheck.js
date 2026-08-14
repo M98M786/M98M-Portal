@@ -280,10 +280,16 @@
           });
           det += '</div></details>';
         }
+        var second = '';
+        if (s.reference_date2) {
+          var t2 = 0;
+          (s.accounts2 || []).forEach(function (a) { t2 += rcNum(a.orders); });
+          second = '<div style="font-size:12px;color:var(--text-3);margin-top:3px">+ the 3-days-after-delivery column: <b class="num">' + t2 + '</b> order(s) expected delivered by ' + esc(rcNice(s.reference_date2)) + '</div>';
+        }
         rows += '<div class="tl-row" style="display:block;padding:8px 0">' +
           '<div><span class="k">' + esc(names[s.stage] || s.stage) + '</span> orders from <b class="num">' + esc(rcNice(s.reference_date)) + '</b>' +
           ' — ' + total + ' order(s)' + (bad ? ', <b style="color:var(--bad)">' + bad + ' without tracking</b>' : total ? ', all carry tracking' : '') + '</div>' +
-          (chips ? '<div style="margin-top:5px">' + chips + '</div>' : '') + det + '</div>';
+          second + (chips ? '<div style="margin-top:5px">' + chips + '</div>' : '') + det + '</div>';
       });
       host.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="hd">Engine eyes — the real orders behind each checkpoint ' +
         '<span class="hint">live from eBay · refreshed with each sync</span></div><div class="bd">' + rows +

@@ -1296,6 +1296,22 @@ async function rollups(env) {
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
 
+  // sold_30d per item (change-only, like everything that writes daily) + queue hygiene
+  const s30 = {};
+  const o30 = await env.DB.prepare(
+    "SELECT item_id, SUM(MAX(1, qty)) AS u FROM orders WHERE created_at >= datetime('now', '-30 day') AND item_id != '' GROUP BY item_id"
+  ).all();
+  for (const r of (o30.results || [])) s30[r.item_id] = Number(r.u) || 0;
+  const cur30 = await env.DB.prepare('SELECT item_id, sold_30d FROM items_api').all();
+  const st30 = [];
+  for (const r of (cur30.results || [])) {
+    const want = s30[r.item_id] || 0;
+    if (Number(r.sold_30d) !== want) st30.push(env.DB.prepare('UPDATE items_api SET sold_30d = ?2 WHERE item_id = ?1').bind(r.item_id, want));
+  }
+  for (let i = 0; i < st30.length; i += 50) await env.DB.batch(st30.slice(i, i + 50));
+  await env.DB.prepare("DELETE FROM automsg_queue WHERE status != 'QUEUED' AND created_at < datetime('now', '-30 day')").run();
+  await env.DB.prepare("DELETE FROM ad_report_tasks WHERE status IN ('INGESTED', 'FAILED') AND created_at < datetime('now', '-30 day')").run();
+
   const rows = await computeHealth(env);
   for (const h of rows) {
     await env.DB.prepare(
@@ -1845,9 +1861,22 @@ const ROUTES = {
             }
           }
         }
-        stages.push({ stage: key, offset_days: offsets[key], reference_date: ref,
+        const stage = { stage: key, offset_days: offsets[key], reference_date: ref,
           beyond_refresh: offsets[key] > 5,   // orderSync refreshes 6 days back — older statuses freeze
-          accounts: Object.values(accounts).sort((x, y) => x.account < y.account ? -1 : 1) });
+          accounts: Object.values(accounts).sort((x, y) => x.account < y.account ? -1 : 1) };
+        if (key === 'uk2') {
+          // UK Second Check's col C carries the SAME "3 days after delivery" checkpoint as UK 3rd
+          const ref2 = shift(day, offsets.uk3);
+          const l2 = byEst[ref2] || [];
+          const acc2 = {};
+          for (const o of l2) {
+            const a = (acc2[o.account] = acc2[o.account] || { account: o.account, orders: 0 });
+            a.orders++;
+          }
+          stage.reference_date2 = ref2;
+          stage.accounts2 = Object.values(acc2).sort((x, y) => x.account < y.account ? -1 : 1);
+        }
+        stages.push(stage);
       }
       return { date: day, stages,
         note: 'API-side view: an order counts as "no tracking" while eBay\'s fulfillment status is not FULFILLED. UK 3rd counts from eBay\'s estimated delivery date (no carrier scans exist in the API). Dates are UK business days (the sheet clock is PKT — a midnight-hour order can sit one day apart).' };

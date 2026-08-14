@@ -333,11 +333,15 @@
       return out;
     }
 
-    // An extensible registry type (§27): show what the row carries, and assume nothing about it.
+    // An extensible registry type (§27) — but never raw metric labels: the notification law
+    // wants plain words, and "Value −0.27 · Baseline 1.73" is the exact format it bans.
     count = sgField(rec, 'value');
     base = sgField(rec, 'baseline');
-    if (count !== null) { out += sgFig('big loss', 'Value', sgNumText(count)); }
-    if (base !== null) { out += sgFig('', 'Baseline', sgNumText(base)); }
+    if (count !== null) { out += sgFig('big loss', 'Yesterday', sgNumText(count)); }
+    if (base !== null) { out += sgFig('', 'Its normal line', sgNumText(base)); }
+    if (count !== null && base !== null) {
+      out += '<div class="sig-vs">' + (Number(count) < Number(base) ? 'BELOW ITS NORMAL LINE' : 'ABOVE ITS NORMAL LINE') + '</div>';
+    }
     return out;
   }
 

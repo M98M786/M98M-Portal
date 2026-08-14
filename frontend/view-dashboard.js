@@ -299,7 +299,7 @@ function load(force) {
 }
 
 VIEWS.dashboard = {
-  label: 'Business overview',
+  label: 'Sales analysis',
   order: 5,
   roles: DB_VIEW_ROLES,
   icon: '<path d="M4 13h6V4H4zM14 20h6V4h-6zM4 20h6v-4H4z"/>',
