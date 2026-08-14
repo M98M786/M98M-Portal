@@ -53,7 +53,9 @@ export default {
         ctx2 = await authorize(env, String(body.idToken || ''));
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
+      const t0 = Date.now();
       const data = await route.fn(body.payload || {}, ctx2);
+      console.log('t', action, Date.now() - t0, 'ms');       // §9: server time per action, in the CF log
       return json({ ok: true, data }, 200, cors);
     } catch (e) {
       const msg = e instanceof AuthError ? 'auth'
@@ -85,6 +87,19 @@ export default {
 };
 
 class AuthError extends Error {}
+
+/* §9's 60-second hot cache — in-isolate memory, NOT KV (the free plan's 1k KV writes/day cannot
+   carry a per-minute cache). Best-effort by design: a fresh isolate simply misses. Only used for
+   responses that are identical for every caller who passes the route's gate. */
+const HOTMEM = new Map();
+async function memo(key, ttlMs, fn) {
+  const hit = HOTMEM.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.v;
+  const v = await fn();
+  HOTMEM.set(key, { v, at: Date.now() });
+  if (HOTMEM.size > 200) { HOTMEM.clear(); }               // crude bound; isolates recycle anyway
+  return v;
+}
 function json(obj, status, extra) {
   return new Response(JSON.stringify(obj), { status, headers: { ...JSON_HEADERS, ...(extra || {}) } });
 }
@@ -1552,6 +1567,7 @@ const ROUTES = {
   campaignWatch: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      return memo('campaignWatch', 60000, async () => {
       const camps = await ctx.env.DB.prepare(
         'SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.synced_at, ' +
         '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.account = c.account AND ca.campaign_id = c.campaign_id) AS items ' +
@@ -1587,6 +1603,7 @@ const ROUTES = {
         'ORDER BY (SUM(a.sales) = 0) DESC, SUM(a.spend) DESC LIMIT 60'
       ).all();
       return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
+      });
     },
   },
 
@@ -1767,7 +1784,7 @@ const ROUTES = {
      ROAS-5 target, live health, confirmed duplicates and the worst loss items. Sections whose
      feeds land in Phase D (returns/cases, staff) stay on their own screens — no fake numbers. */
   mgmtOverview: {
-    auth: 'mgmt', fn: async (p, ctx) => {
+    auth: 'mgmt', fn: async (p, ctx) => memo('mgmtOverview', 60000, async () => {
       const today = ukDate('');
       const shift = (ymd, days) => {
         const d = new Date(ymd + 'T12:00:00Z');
@@ -1838,6 +1855,27 @@ const ROUTES = {
         loss_items: losses.results || [],
         note: 'profit is the sheet projection × units; ROAS is account revenue ÷ ad spend for the day (per-item sale attribution lands with the finance feed)',
       };
+    }),
+  },
+
+  /* The instant first paint for the Orders screen (§10 step 1: "opens Orders, 240ms"): today's
+     eBay-side order list from D1 while the sheet workspace loads behind it. No profit fields,
+     so every signed-in role may read it; the sheet stays the write truth. */
+  ordersLive: {
+    auth: 'any', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      if (!account) throw new Error('SAY: which account?');
+      return memo('ordersLive:' + account, 60000, async () => {
+        const rs = await ctx.env.DB.prepare(
+          'SELECT o.order_id, o.buyer, o.item_id, o.sold, o.qty, o.status, o.created_at, o.est_delivery, i.title ' +
+          'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+          "WHERE o.account = ?1 AND o.created_at >= datetime('now', '-2 day') ORDER BY o.created_at DESC LIMIT 200"
+        ).bind(account).all();
+        const today = ukDate('');
+        const rows = (rs.results || []).filter(r => ukDate(r.created_at) === today);
+        return { account, date: today, rows,
+          note: 'live eBay orders — the sheet workspace below carries the processing columns' };
+      });
     },
   },
 
@@ -1963,6 +2001,7 @@ const ROUTES = {
       if (!r.ok && r.status !== 204) throw new Error('SAY: eBay refused the removal (' + r.status + '): ' + (await r.text()).slice(0, 160));
       await ctx.env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(account, cid, lid).run();
       await ctx.env.DB.prepare('DELETE FROM dup_state WHERE account = ?1 AND listing_id = ?2').bind(account, lid).run();
+      HOTMEM.delete('campaignWatch');                       // the desk must not show the removed item for 60s
       await ctx.env.DB.prepare(
         "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'remove_item', '', 'removed', ?4, datetime('now'))"
       ).bind(account, nm, lid, who).run();

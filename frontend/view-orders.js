@@ -388,7 +388,30 @@
       odWire(box);
       odCount('orders', odOutstanding(orders));
     });
-    if (!oc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
+    if (!oc.painted) {
+      box.innerHTML = '<div class="spinner"></div>';
+      /* Engine fast paint (§10 step 1): today's eBay-side orders in ~150ms while the sheet
+       * workspace loads. Replaced the moment the real payload lands; never overwrites it. */
+      if (OD_ACCOUNT) {
+        api('ordersLive', { account: OD_ACCOUNT }).then(function (d) {
+          var b2 = $('odList');
+          if (!b2 || OD_DATA) { return; }                  // the sheet answer already took over
+          var rows = (d && d.rows) || [];
+          if (!rows.length) { return; }
+          var h = '<div class="od-empty" style="padding:8px 0 12px">⚡ ' + rows.length + ' order(s) today, live from eBay — the sheet workspace is loading behind this…</div>';
+          rows.slice(0, 30).forEach(function (r) {
+            var st = odStr(r.status);
+            h += '<div class="od-fact" style="display:flex;gap:12px;align-items:center;margin-bottom:6px;flex-wrap:wrap">' +
+              '<span class="mono" style="font-size:11.5px">' + esc(odStr(r.order_id)) + '</span>' +
+              '<span style="flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">' + esc(odStr(r.title) || odStr(r.item_id)) + '</span>' +
+              '<span>' + esc(odStr(r.buyer)) + '</span>' +
+              '<span class="num" style="font-weight:800">£' + (Number(r.sold) || 0).toFixed(2) + '</span>' +
+              '<span style="font-size:10.5px;font-weight:800;color:' + (/FULFILLED/i.test(st) ? 'var(--ok)' : 'var(--warn)') + '">' + esc(st || '—') + '</span></div>';
+          });
+          b2.innerHTML = h;
+        }).catch(function () {});
+      }
+    }
     oc.done.catch(function (e) {
       OD_DATA = null;
       odSummary(null);
