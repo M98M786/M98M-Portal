@@ -155,7 +155,7 @@
     (d.triggers || []).forEach(function (k) {
       var r = byKind[k] || { enabled: 0, delay_min: 0, template: '' };
       h += '<tr data-cd-amrow="' + esc(k) + '">' +
-        '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">waits on delivery events</div>' : '') + '</td>' +
+        '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">fires when eBay\'s delivery estimate passes</div>' : '') + '</td>' +
         '<td><input type="checkbox" data-am-on ' + (Number(r.enabled) ? 'checked' : '') + '></td>' +
         '<td><input type="number" data-am-delay value="' + (Number(r.delay_min) || 0) + '" min="0" max="1440" style="width:70px" class="rc-in"></td>' +
         '<td><input type="text" data-am-tpl value="' + esc(cdStr(r.template)).replace(/"/g, '&quot;') + '" placeholder="Hi {{buyer}}, …" style="width:100%" class="rc-in"></td>' +

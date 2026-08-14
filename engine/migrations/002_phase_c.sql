@@ -34,6 +34,9 @@ CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads(account, lis
 -- duplicate confirmation state (KV writes are capped at 1k/day on the free plan).
 ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1;
+-- eBay's own estimated-delivery window (maxEstimatedDeliveryDate) — no delivery scans exist in
+-- the API, so "arrived" everywhere in this portal means "eBay's estimate has passed".
+ALTER TABLE orders ADD COLUMN est_delivery TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS notify_queue (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

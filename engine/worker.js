@@ -348,15 +348,17 @@ async function orderSync(env) {
         // total units across every line; item_id stays the first line's (the sheet's own shape)
         let qty = 0;
         for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
+        const fsi = (o.fulfillmentStartInstructions || [])[0] || {};
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ' +
-          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8'
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ' +
+          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9'
         ).bind(
           String(o.orderId), acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           String(o.orderFulfillmentStatus || ''), String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), Math.max(1, qty)
+          String(o.creationDate || ''), Math.max(1, qty),
+          String(fsi.maxEstimatedDeliveryDate || '')
         ).run();
       }
       n++; href = page.next || '';
@@ -806,6 +808,17 @@ async function autoMsgScan(env) {
       ).bind(acct).all();
       for (const m of (rs.results || [])) {
         await queue('buyer_query', 'q:' + m.msg_id, { buyer: m.buyer, order: '', item_id: '' });
+      }
+    }
+    if (cfg.arrived) {
+      // "arrived" = eBay's own delivery estimate has passed (the API exposes no carrier scans).
+      // The 2-day window keeps a first enable from messaging every historic order at once.
+      const rs = await env.DB.prepare(
+        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND est_delivery != '' " +
+        "AND est_delivery <= datetime('now') AND est_delivery >= datetime('now', '-2 day')"
+      ).bind(acct).all();
+      for (const o of (rs.results || [])) {
+        await queue('arrived', 'arr:' + o.order_id, { buyer: o.buyer, order: o.order_id, item_id: o.item_id });
       }
     }
     if (cfg.neg_fb || cfg.pos_fb) {
@@ -1395,7 +1408,7 @@ const ROUTES = {
       return { accounts: (accs.results || []).map(a => a.name), triggers: AUTOMSG_TRIGGERS,
         rows: rows.results || [], queue: tail.results || [],
         live: String(ctx.env.AUTOMSG_LIVE) === 'true',
-        note: "'arrived' waits on delivery events — its switch saves but nothing fires yet" };
+        note: "'arrived' fires when eBay's estimated delivery date passes — the API has no carrier scans, so it means 'should have arrived by now'" };
     },
   },
 
@@ -1527,12 +1540,17 @@ const ROUTES = {
       const maxBack = Math.max(offsets.china, offsets.uk1, offsets.uk2, offsets.uk3) + 2;
       const since = new Date(new Date(day + 'T12:00:00Z').getTime() - maxBack * 86400000).toISOString();
       const ors = await ctx.env.DB.prepare(
-        'SELECT order_id, account, item_id, sold, qty, status, created_at FROM orders WHERE created_at >= ?1'
+        'SELECT order_id, account, item_id, sold, qty, status, created_at, est_delivery FROM orders WHERE created_at >= ?1'
       ).bind(since).all();
       const byDate = {};
+      const byEst = {};
       for (const o of (ors.results || [])) {
         const d = ukDate(o.created_at);
         (byDate[d] = byDate[d] || []).push(o);
+        if (o.est_delivery) {
+          const e = ukDate(o.est_delivery);
+          (byEst[e] = byEst[e] || []).push(o);
+        }
       }
       const ids = [...new Set((ors.results || []).map(o => String(o.item_id || '')).filter(Boolean))];
       const titles = {};
@@ -1551,7 +1569,9 @@ const ROUTES = {
       const stages = [];
       for (const key of ['china', 'uk1', 'uk2', 'uk3']) {
         const ref = shift(day, offsets[key]);
-        const list = byDate[ref] || [];
+        // UK3 checks "3 days after DELIVERY" — its reference is the delivery estimate, not the
+        // order date. The other stages count from the order.
+        const list = (key === 'uk3' ? byEst[ref] : byDate[ref]) || [];
         const accounts = {};
         for (const o of list) {
           const a = (accounts[o.account] = accounts[o.account] || { account: o.account, orders: 0, no_tracking: 0, focus: [] });
@@ -1569,7 +1589,7 @@ const ROUTES = {
           accounts: Object.values(accounts).sort((x, y) => x.account < y.account ? -1 : 1) });
       }
       return { date: day, stages,
-        note: 'API-side view: an order counts as "no tracking" while eBay\'s fulfillment status is not FULFILLED. Dates are UK business days (the sheet clock is PKT — a midnight-hour order can sit one day apart).' };
+        note: 'API-side view: an order counts as "no tracking" while eBay\'s fulfillment status is not FULFILLED. UK 3rd counts from eBay\'s estimated delivery date (no carrier scans exist in the API). Dates are UK business days (the sheet clock is PKT — a midnight-hour order can sit one day apart).' };
     },
   },
 
