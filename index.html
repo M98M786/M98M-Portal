@@ -346,7 +346,7 @@ function engineApi(action, payload){
       clearTimeout(t);
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
-        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — check Campaign watch before retrying' : (e && e.message) || 'request failed');
+        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
       return apiSend(action, payload).then(function(j){
         if(!j.ok){ throw new Error(j.error||'request failed'); }

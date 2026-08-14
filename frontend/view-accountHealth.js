@@ -100,13 +100,15 @@
             var b = ev.target && ev.target.closest ? ev.target.closest('[data-ah-submit]') : null;
             if (!b) { return; }
             var acct = b.getAttribute('data-ah-submit');
-            var inp = host.querySelector('[data-ah-code="' + acct.replace(/"/g, '\\"') + '"]');
+            // row-scoped lookup: the input lives in the same row div — no selector-escaping games
+            var rowEl = b.parentElement;
+            var inp = rowEl ? rowEl.querySelector('input[data-ah-code]') : null;
             if (!inp || !inp.value.trim()) { toast('Paste the code first.'); return; }
             b.disabled = true;
             api('ebaySubmitConsent', { account: acct, code: inp.value }).then(function (res) {
-              b.disabled = false;
-              toast(acct + ' connected — ' + ahStr(res && res.marketing) + ' · token lives ~' + (res && res.expires_days) + ' days.');
-              ahLoad();
+              // mark THIS row done in place — a full repaint would wipe codes pasted for the others
+              if (rowEl) { rowEl.innerHTML = '<b style="min-width:110px">' + esc(acct) + '</b><span style="color:var(--ok);font-weight:800;font-size:12px">connected ✓ · ' + esc(ahStr(res && res.marketing)) + ' · token ~' + esc(String((res && res.expires_days) || '?')) + ' days</span>'; }
+              toast(acct + ' connected.');
             }).catch(function (e) {
               b.disabled = false;
               toast(e.message || 'eBay did not accept that code.');

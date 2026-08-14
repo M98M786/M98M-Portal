@@ -77,7 +77,7 @@
     open.forEach(function (r) {
       var due = cdDue(r.payload_json);
       var kind = cdStr(r.kind);
-      var writable = kind === 'RETURN' || kind === 'INR';
+      var writable = (kind === 'RETURN' || kind === 'INR') && !/REFUND_SENT/i.test(cdStr(r.status));
       var keyAttr = esc(cdStr(r.case_id)).replace(/"/g, '&quot;');
       h += '<tr><td><span class="cd-kind ' + esc(kind) + '">' + esc(kind) + '</span></td>' +
         '<td>' + esc(cdStr(r.account)) + '</td>' +
@@ -241,9 +241,15 @@
             if (!window.confirm('Issue the FULL refund on ' + rf.getAttribute('data-cd-refund') + '? This moves money when live.')) { return; }
             rf.disabled = true;
             api('csRefund', { case_key: rf.getAttribute('data-cd-refund') }).then(function (res) {
-              rf.disabled = false;
-              toast(res && res.shadow ? 'Shadow — recorded, no money moved: ' + (res.would_do || '') : 'Refund issued.');
-              cdLoad();
+              if (res && res.shadow) {
+                rf.disabled = false;
+                toast('Shadow — recorded, no money moved: ' + (res.would_do || ''));
+                return;
+              }
+              // money moved: kill the row's buttons in place — never re-arm from a stale paint
+              var cell = rf.parentElement;
+              if (cell) { cell.innerHTML = '<span style="font-size:10.5px;color:var(--ok);font-weight:800">refund sent ✓</span>'; }
+              toast('Refund issued.');
             }).catch(function (e) { rf.disabled = false; toast(e.message || 'Could not refund.'); });
           }
         };

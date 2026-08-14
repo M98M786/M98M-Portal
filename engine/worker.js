@@ -678,19 +678,32 @@ async function dupSweep(env, acct) {
 async function financeSync(env) {
   await perAccount(env, 'financeSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
-    const since = new Date(Date.now() - 3 * 86400000).toISOString();
-    const r = await fetch('https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&filter=' +
-      encodeURIComponent('transactionDate:[' + since + '..]'), { headers: { authorization: 'Bearer ' + tok } });
-    if (r.status === 403) throw new Error(acct + ' finances 403 — needs the extended-scope re-consent (Account health screen)');
-    if (!r.ok) throw new Error(acct + ' finances ' + r.status + ': ' + (await r.text()).slice(0, 120));
-    const d = await r.json();
+    // The window matches orderSync's: an order CREATED in-window has its fee history inside the
+    // same window, so the sum below is that order's COMPLETE fee picture. Orders older than the
+    // window are left alone entirely — a late adjustment must never let a partial in-window sum
+    // replace a complete stored total.
+    const sinceMs = Date.now() - 6 * 86400000;
+    const since = new Date(sinceMs).toISOString();
+    const txs = [];
+    for (let page = 0; page < 3; page++) {
+      const r = await fetch('https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&offset=' + (page * 100) +
+        '&filter=' + encodeURIComponent('transactionDate:[' + since + '..]'), { headers: { authorization: 'Bearer ' + tok } });
+      if (r.status === 403) throw new Error(acct + ' finances 403 — needs the extended-scope re-consent (Account health screen)');
+      if (!r.ok) throw new Error(acct + ' finances ' + r.status + ': ' + (await r.text()).slice(0, 120));
+      const d = await r.json();
+      txs.push(...(d.transactions || []));
+      if ((d.transactions || []).length < 100) break;
+    }
 
     const feesByOrder = {};
-    for (const t of (d.transactions || [])) {
+    for (const t of txs) {
       const oid = String(t.orderId || '');
       if (!oid) continue;
       const fee = Number((t.totalFeeAmount || {}).value || 0);
-      if (fee) feesByOrder[oid] = round2((feesByOrder[oid] || 0) + fee);
+      if (!fee) continue;
+      // bookingEntry says which way the money went: a refunded fee is a CREDIT and subtracts
+      const sign = /CREDIT/i.test(String(t.bookingEntry || '')) ? -1 : 1;
+      feesByOrder[oid] = round2((feesByOrder[oid] || 0) + sign * fee);
     }
     if (!Object.keys(feesByOrder).length) return;
 
@@ -699,7 +712,7 @@ async function financeSync(env) {
     for (let i = 0; i < ids.length; i += 90) {
       const chunk = ids.slice(i, i + 90);
       const rs = await env.DB.prepare(
-        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
+        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, o.created_at, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
         'WHERE o.order_id IN (' + chunk.map(() => '?').join(',') + ')'
       ).bind(...chunk).all();
       for (const row of (rs.results || [])) rows[row.order_id] = row;
@@ -709,10 +722,15 @@ async function financeSync(env) {
     for (const oid of ids) {
       const row = rows[oid];
       const fee = feesByOrder[oid];
-      if (!row || Number(row.ebay_fees) === fee) continue;             // unknown order or unchanged → no write
+      if (!row) continue;                                              // not an order we track
+      const createdMs = new Date(String(row.created_at)).getTime();
+      if (isNaN(createdMs) || createdMs < sinceMs) continue;           // straddles the window — never clobber
+      if (Math.abs(Number(row.ebay_fees) - fee) < 0.005) continue;     // unchanged → no write
       stmts.push(env.DB.prepare('UPDATE orders SET ebay_fees = ?2 WHERE order_id = ?1').bind(oid, fee));
-      const expected = round2((Number(row.sold) || 0) - (Number(row.oe) || 0) * Math.max(1, Number(row.qty) || 1));
-      if (row.oe && expected > 0 && fee > expected * 1.15 && fee - expected > 0.5) {
+      // drift is judged only on single-unit orders — multi-line orders mix items and the
+      // per-unit OE of the first line would cry wolf
+      const expected = round2((Number(row.sold) || 0) - (Number(row.oe) || 0));
+      if (row.oe && Number(row.qty) === 1 && expected > 0 && fee > expected * 1.15 && fee - expected > 0.5) {
         await queueNotify(env, 'management', 'Fee drift',
           '🟠 eBay charged £' + fee.toFixed(2) + ' on order ' + oid + ' · ' + acct + ' · item ' + row.item_id +
           ' — the calculator expected ~£' + expected.toFixed(2) + '. Re-check that item\'s pricing.',
@@ -1568,8 +1586,9 @@ const ROUTES = {
       const m = key.match(/^(RETURN|INR):(.+)$/);
       if (!m) throw new Error('SAY: replies work for returns and item-not-received inquiries — formal cases must be answered on eBay itself');
       if (!text) throw new Error('SAY: write the message first');
-      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id FROM cases WHERE case_id = ?1').bind(key).first();
+      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id, status FROM cases WHERE case_id = ?1').bind(key).first();
       if (!row) throw new Error('SAY: that record is not on the desk');
+      if (/CLOSED/i.test(String(row.status || ''))) throw new Error('SAY: that one is closed — refresh the desk');
       const who = String(ctx.user.name || ctx.email);
       const url = m[1] === 'RETURN'
         ? 'https://api.ebay.com/post-order/v2/return/' + encodeURIComponent(m[2]) + '/send_message'
@@ -1584,10 +1603,13 @@ const ROUTES = {
       const r = await fetch(url, { method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
         body: JSON.stringify({ message: { content: text } }) });
       if (!r.ok) throw new Error('SAY: eBay refused the reply (' + r.status + '): ' + (await r.text()).slice(0, 160));
-      await ctx.env.DB.prepare(
-        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REPLY', ?2, '', ?3, datetime('now'))"
-      ).bind(ctx.email, key, text.slice(0, 200)).run();
-      await queueNotify(ctx.env, 'management', 'CS reply', '🔵 ' + who + ' replied to ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.', 'engine:csreply:' + key);
+      // the message is on the thread — bookkeeping may not turn into a retry-inviting error
+      try {
+        await ctx.env.DB.prepare(
+          "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REPLY', ?2, '', ?3, datetime('now'))"
+        ).bind(ctx.email, key, text.slice(0, 200)).run();
+        await queueNotify(ctx.env, 'management', 'CS reply', '🔵 ' + who + ' replied to ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.', 'engine:csreply:' + key);
+      } catch (e) { console.log('post-reply bookkeeping failed', String(e).slice(0, 120)); }
       return { sent: true };
     },
   },
@@ -1598,8 +1620,9 @@ const ROUTES = {
       const key = String(p.case_key || '');
       const m = key.match(/^(RETURN|INR):(.+)$/);
       if (!m) throw new Error('SAY: portal refunds work for returns and inquiries — formal cases are decided on eBay itself');
-      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id, reason FROM cases WHERE case_id = ?1').bind(key).first();
+      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id, reason, status FROM cases WHERE case_id = ?1').bind(key).first();
       if (!row) throw new Error('SAY: that record is not on the desk');
+      if (/CLOSED|REFUND_SENT/i.test(String(row.status || ''))) throw new Error('SAY: that one is already closed or refunded — refresh the desk');
       const who = String(ctx.user.name || ctx.email);
       const url = m[1] === 'RETURN'
         ? 'https://api.ebay.com/post-order/v2/return/' + encodeURIComponent(m[2]) + '/issue_refund'
@@ -1610,16 +1633,38 @@ const ROUTES = {
         ).bind(ctx.email, key, String(row.reason || '').slice(0, 200)).run();
         return { shadow: true, would_do: 'POST ' + url + ' (full refund)', note: 'SHADOW — recorded, no money moved. CS_WRITE_LIVE=true arms refunds.' };
       }
-      const tok = await ebayAccessToken(ctx.env, row.account);
-      const r = await fetch(url, { method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
-        body: JSON.stringify({}) });                       // empty body = eBay's own full-refund default
-      if (!r.ok) throw new Error('SAY: eBay refused the refund (' + r.status + '): ' + (await r.text()).slice(0, 160));
+      /* CLAIM before money moves: the conditional UPDATE is the lock — a double-click, a
+         timed-out retry, or a concurrent session finds REFUND_SENT (or 0 changes) and stops.
+         eBay refusal rolls the claim back so a genuinely failed attempt stays actionable. */
+      const claim = await ctx.env.DB.prepare(
+        "UPDATE cases SET status = 'REFUND_SENT' WHERE case_id = ?1 AND status NOT LIKE '%CLOSED%' AND status != 'REFUND_SENT'"
+      ).bind(key).run();
+      if (!claim.meta || !claim.meta.changes) throw new Error('SAY: a refund for this one is already in flight — refresh the desk');
       await ctx.env.DB.prepare(
-        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REFUND', ?2, '', 'refunded', datetime('now'))"
-      ).bind(ctx.email, key).run();
-      const msg = '🟠 ' + who + ' issued the refund on ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.';
-      await queueNotify(ctx.env, 'management', 'Refund issued', msg, 'engine:csrefund:' + key);
-      await flushNotifyQueue(ctx.env);
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REFUND_ATTEMPT', ?2, ?3, 'sending', datetime('now'))"
+      ).bind(ctx.email, key, String(row.status || '')).run();
+      let r;
+      try {
+        const tok = await ebayAccessToken(ctx.env, row.account);
+        r = await fetch(url, { method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
+          body: JSON.stringify({}) });                     // empty body = eBay's own full-refund default
+      } catch (e) {
+        await ctx.env.DB.prepare('UPDATE cases SET status = ?2 WHERE case_id = ?1').bind(key, String(row.status || '')).run();
+        throw e;
+      }
+      if (!r.ok) {
+        await ctx.env.DB.prepare('UPDATE cases SET status = ?2 WHERE case_id = ?1').bind(key, String(row.status || '')).run();
+        throw new Error('SAY: eBay refused the refund (' + r.status + '): ' + (await r.text()).slice(0, 160));
+      }
+      /* Money has moved — nothing after this may turn into an error the operator would retry. */
+      try {
+        await ctx.env.DB.prepare(
+          "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REFUND', ?2, '', 'refunded', datetime('now'))"
+        ).bind(ctx.email, key).run();
+        const msg = '🟠 ' + who + ' issued the refund on ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.';
+        await queueNotify(ctx.env, 'management', 'Refund issued', msg, 'engine:csrefund:' + key);
+        await flushNotifyQueue(ctx.env);
+      } catch (e) { console.log('post-refund bookkeeping failed', String(e).slice(0, 120)); }
       return { refunded: true };
     },
   },
@@ -1907,18 +1952,28 @@ const ROUTES = {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
       if (!account || !code) throw new Error('SAY: account and code are both needed');
-      // a pasted URL is fine too — the code parameter is what matters
+      /* Everything checkable happens BEFORE the exchange — the consent code is single-use, and
+         burning it on a bad submit loses the whole click-through. The state parameter carries
+         the account the link was minted for; a URL pasted into the wrong row is refused, not
+         silently bound to the wrong eBay identity. */
+      const prior = await ctx.env.DB.prepare('SELECT app_id FROM accounts WHERE name = ?1 AND api_enabled = 1').bind(account).first();
+      if (!prior) throw new Error('SAY: unknown account row — refresh the screen and try again');
+      const st = code.match(/[?&]state=([^&\s]+)/);
+      if (st && decodeURIComponent(st[1]) !== account) {
+        throw new Error('SAY: that code belongs to "' + decodeURIComponent(st[1]).slice(0, 40) + '" — paste it into that account\'s row');
+      }
       const m = code.match(/[?&]code=([^&\s]+)/);
       const clean = decodeURIComponent(m ? m[1] : code);
       const t = await ebayExchangeCode(ctx.env, clean);
       // the new token was minted by the GLOBAL app — clear the per-account keyset so the
       // fallback in ebayCreds() applies; the sheet automations' own apps are untouched
-      await ctx.env.DB.prepare("UPDATE accounts SET oauth_ref = ?2, app_id = '', cert_id = '' WHERE name = ?1")
+      const upd = await ctx.env.DB.prepare("UPDATE accounts SET oauth_ref = ?2, app_id = '', cert_id = '' WHERE name = ?1")
         .bind(account, String(t.refresh_token)).run();
+      if (!upd.meta || !upd.meta.changes) throw new Error('SAY: the token could not be stored — the code is spent, redo the consent click');
       await ctx.env.HOT.delete('ebaytok:' + account);
       await ctx.env.DB.prepare(
-        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'EBAY_RECONSENT', ?2, '', 'extended scopes', datetime('now'))"
-      ).bind(ctx.email, account).run();
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'EBAY_RECONSENT', ?2, ?3, 'global app, extended scopes', datetime('now'))"
+      ).bind(ctx.email, account, ('was app: ' + String(prior.app_id || '(global)')).slice(0, 120)).run();
       // prove it immediately, on the scope that was missing before
       let marketing = 'not checked';
       try {
