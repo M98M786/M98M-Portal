@@ -1086,6 +1086,85 @@ const ROUTES = {
     },
   },
 
+  /* The Management overview in one read (§9-C "per-department overview", the parts with real
+     data behind them tonight): collective KPIs, per-account pulse, advertising vs the SOP
+     ROAS-5 target, live health, confirmed duplicates and the worst loss items. Sections whose
+     feeds land in Phase D (returns/cases, staff) stay on their own screens — no fake numbers. */
+  mgmtOverview: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const today = ukDate('');
+      const shift = (ymd, days) => {
+        const d = new Date(ymd + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() - days);
+        return d.toISOString().slice(0, 10);
+      };
+      const yday = shift(today, 1);
+      const d7 = shift(today, 6);
+
+      const sd = await ctx.env.DB.prepare(
+        'SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= ?1'
+      ).bind(shift(today, 8)).all();
+      const days = sd.results || [];
+      const sum = rows => rows.reduce((t, r) => ({ sold: t.sold + (Number(r.sold) || 0), profit: t.profit + (Number(r.profit) || 0), ads: t.ads + (Number(r.ads) || 0) }), { sold: 0, profit: 0, ads: 0 });
+      const kToday = sum(days.filter(r => r.date === today));
+      const kYday = sum(days.filter(r => r.date === yday));
+      const k7 = sum(days.filter(r => r.date >= d7));
+
+      // today's live pulse straight from orders — sales_daily only materialises at the rollup
+      const tOrders = await ctx.env.DB.prepare(
+        "SELECT account, sold, created_at FROM orders WHERE created_at >= datetime('now', '-2 day')"
+      ).all();
+      const todayAcct = {};
+      let todayCount = 0;
+      for (const o of (tOrders.results || [])) {
+        if (ukDate(o.created_at) !== today) continue;
+        todayCount++;
+        const a = (todayAcct[o.account] = todayAcct[o.account] || { account: o.account, orders: 0, revenue: 0 });
+        a.orders++; a.revenue = round2(a.revenue + (Number(o.sold) || 0));
+      }
+      kToday.sold = round2(Object.values(todayAcct).reduce((t, a) => t + a.revenue, 0)) || kToday.sold;
+
+      const ydayRows = days.filter(r => r.date === yday).map(r => ({ account: r.account, profit: r.profit, ads: r.ads, sold: r.sold }));
+
+      const adsSale = await ctx.env.DB.prepare(
+        'SELECT a.account, SUM(a.spend) AS spend, SUM(a.clicks) AS clicks, SUM(a.sales) AS units FROM ads_daily a WHERE a.date = ?1 GROUP BY a.account'
+      ).bind(yday).all();
+      // sale_amount is not stored per row — ROAS uses sales_daily revenue vs ads as the honest proxy
+      const adsRows = (adsSale.results || []).map(r => {
+        const rev = (days.find(x => x.account === r.account && x.date === yday) || {}).sold || 0;
+        const spend = round2(r.spend || 0);
+        return { account: r.account, spend, clicks: Number(r.clicks) || 0, units: Number(r.units) || 0,
+          revenue: round2(rev), roas: spend > 0 ? round2(rev / spend) : null,
+          cpq: (Number(r.units) || 0) > 0 ? round2(spend / Number(r.units)) : null };
+      });
+
+      const health = await computeHealth(ctx.env);
+      const dups = await ctx.env.DB.prepare(
+        "SELECT account, COUNT(*) AS n FROM dup_state WHERE alerted_day != '' GROUP BY account"
+      ).all();
+      const losses = await ctx.env.DB.prepare(
+        'SELECT f.item_id, f.account, f.profit, i.title FROM items_facts f JOIN items_api i ON i.item_id = f.item_id ' +
+        "WHERE f.profit < 0 AND i.status = 'ACTIVE' ORDER BY f.profit ASC LIMIT 5"
+      ).all();
+
+      return {
+        date: today,
+        kpis: {
+          today: { revenue: round2(kToday.sold), orders: todayCount },
+          yesterday: { revenue: round2(kYday.sold), profit_est: round2(kYday.profit), ads: round2(kYday.ads) },
+          week: { revenue: round2(k7.sold), profit_est: round2(k7.profit), ads: round2(k7.ads) },
+        },
+        today_by_account: Object.values(todayAcct).sort((a, b) => b.revenue - a.revenue),
+        yesterday_by_account: ydayRows,
+        ads_yesterday: adsRows,
+        health,
+        duplicates: dups.results || [],
+        loss_items: losses.results || [],
+        note: 'profit is the sheet projection × units; ROAS is account revenue ÷ ad spend for the day (per-item sale attribution lands with the finance feed)',
+      };
+    },
+  },
+
   /* Recheck, with Engine eyes (§3 recheckFeed): the sheet flow stays the human record — this
      serves the CONCRETE order list behind each checkpoint from live API data: which orders sit
      on the reference date, and which of them STILL have no tracking on eBay (fulfillment
