@@ -4266,6 +4266,23 @@ function createMeeting() {
     });
     h += '</tbody></table></div>';
 
+    var cpq = (d.cpq || []).filter(function (r) { return !acc || r.account === acc; });
+    if (cpq.length) {
+      h += '<h3 style="margin:16px 0 6px;font-size:13px">CPQ — ad cost per unit sold, last 14 days <span style="color:var(--text-3);font-weight:600">(burners first: spend with zero sales)</span></h3>' +
+        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Item</th><th>Account</th><th>Spend 14d</th><th>Clicks</th><th>Units</th><th>CPQ</th></tr></thead><tbody>';
+      cpq.forEach(function (r) {
+        var burner = !Number(r.units);
+        h += '<tr><td><div style="font-weight:700;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r.title) || '(title not synced)') + '</div>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r.item_id)) + '</div></td>' +
+          '<td>' + esc(cwStr(r.account)) + '</td>' +
+          '<td class="cw-num' + (burner ? '" style="color:var(--bad);font-weight:800' : '') + '">£' + (Number(r.spend) || 0).toFixed(2) + '</td>' +
+          '<td class="cw-num">' + (Number(r.clicks) || 0) + '</td>' +
+          '<td class="cw-num' + (burner ? '" style="color:var(--bad);font-weight:800' : '') + '">' + (Number(r.units) || 0) + '</td>' +
+          '<td class="cw-num">' + (burner ? '<span style="color:var(--bad);font-weight:800">burning</span>' : '£' + (Number(r.cpq) || 0).toFixed(2)) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
     h += '<h3 style="margin:16px 0 6px;font-size:13px">Recent changes <span style="color:var(--text-3);font-weight:600">(external edits say so — the portal cannot see who acts on eBay)</span></h3><ul class="cw-feed" style="margin:0;padding:0">';
     if (!events.length) { h += '<li style="color:var(--text-2)">Nothing yet — changes appear within 5 minutes of happening on eBay.</li>'; }
     events.slice(0, 30).forEach(function (e) {
