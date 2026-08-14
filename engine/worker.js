@@ -1470,7 +1470,23 @@ const ROUTES = {
         'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' +
         (account ? 'WHERE a.account = ?1 ' : '') + 'ORDER BY a.api_synced_at DESC LIMIT 500'
       ).bind(...(account ? [account] : [])).all();
-      return { rows: (rs.results || []).map(r => stripItem(r, ctx.user)), source_note: 'API rows join sheet facts; SHEET rows are the bridge for the no-API account' };
+      const rows = (rs.results || []).map(r => stripItem(r, ctx.user));
+      /* Req 33 / Q9: Team Lead (and the other campaign roles) see PER-ITEM ad spend — never
+         account totals. The 14-day per-item spend rides along only for those roles; the strip
+         law stays the single gate. */
+      if (CAMPAIGN_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super) {
+        const ads = await ctx.env.DB.prepare(
+          "SELECT item_id, ROUND(SUM(spend), 2) AS ad_spend_14d, SUM(sales) AS ad_units_14d FROM ads_daily " +
+          "WHERE date >= date('now', '-14 day') GROUP BY item_id"
+        ).all();
+        const byItem = {};
+        for (const r of (ads.results || [])) byItem[r.item_id] = r;
+        for (const r of rows) {
+          const a = byItem[r.item_id];
+          if (a) { r.ad_spend_14d = a.ad_spend_14d; r.ad_units_14d = a.ad_units_14d; }
+        }
+      }
+      return { rows, source_note: 'API rows join sheet facts; SHEET rows are the bridge for the no-API account' };
     },
   },
 
