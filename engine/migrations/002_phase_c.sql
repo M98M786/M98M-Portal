@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS dup_state (
   PRIMARY KEY (account, listing_id)
 );
 
+-- Ads spend report tasks (eBay's report API is async: create nightly, poll hourly, ingest
+-- into ads_daily + sales_daily.ads — CPQ becomes real numbers, not projections).
+CREATE TABLE IF NOT EXISTS ad_report_tasks (
+  account     TEXT NOT NULL,
+  task_id     TEXT NOT NULL,
+  report_date TEXT DEFAULT '',    -- the UK day the report covers
+  status      TEXT DEFAULT '',    -- PENDING → SUCCESS/FAILED → INGESTED
+  error       TEXT DEFAULT '',
+  created_at  TEXT DEFAULT '',
+  PRIMARY KEY (account, task_id)
+);
+
 -- Nightly per-account health snapshot (rollups cron) — the trend behind the live view.
 CREATE TABLE IF NOT EXISTS daily_health (
   day        TEXT NOT NULL,

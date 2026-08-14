@@ -73,8 +73,8 @@ export default {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync],
       '*/15 * * * *': [listingSync, adsItems],
-      '0 * * * *': [financeSync, csSync],
-      '0 2 * * *': [rollups, backup],
+      '0 * * * *': [financeSync, csSync, adsReportPoll],
+      '0 2 * * *': [rollups, backup, adsReportKick],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -648,6 +648,149 @@ async function dupSweep(env, acct) {
 async function financeSync(env) { /* Phase C remainder: real fees vs Brain v17 drift. */ }
 async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
 
+/* ---------------- ads spend (real CPQ) — eBay's report API is asynchronous ----------------
+   Nightly: ask each account for yesterday's listing-level performance report, choosing metric
+   keys from eBay's own metadata so a CPS account (ad_fees) and a CPC one (cost) both work.
+   Hourly: poll the tasks, download finished reports (gzip handled, zip refused honestly),
+   and land the numbers in ads_daily (CPQ = spend ÷ units sold) + sales_daily.ads. Every eBay
+   refusal is recorded verbatim in ad_report_tasks.error / sync_state — this is the one flow
+   built against a spec we cannot probe synchronously, so the errors ARE the iteration loop. */
+/* Probed live (14 Aug, Amna token): LISTING_PERFORMANCE_REPORT requires BOTH listing_id and
+   campaign_id dimensions (error 35119 otherwise); 'sales' is attributed sale COUNT (our units),
+   'sale_amount' the money, 'ad_fees' the spend. */
+const ADS_METRIC_WANTED = ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'];
+
+async function adsReportKick(env) {
+  await perAccount(env, 'adsReportKick', async (acct) => {
+    const camps = await env.DB.prepare('SELECT COUNT(*) AS n FROM campaigns WHERE account = ?1').bind(acct).first();
+    if (!camps || !camps.n) return;                       // no campaigns → nothing to report (or no marketing scope)
+    const tok = await ebayAccessToken(env, acct);
+
+    const md = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_metadata/listing_performance_report', {
+      headers: { authorization: 'Bearer ' + tok } });
+    if (!md.ok) throw new Error(acct + ' report metadata ' + md.status + ': ' + (await md.text()).slice(0, 140));
+    const meta = await md.json();
+    const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
+    const metricKeys = ADS_METRIC_WANTED.filter(m => mets.indexOf(m) >= 0);
+    if (!metricKeys.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
+
+    const y = new Date(Date.now() - 86400000);
+    const day = ukDate(y.toISOString());
+    const from = day + 'T00:00:00.000Z';
+    const to = day + 'T23:59:59.000Z';
+    const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+      method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+      body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+        dateFrom: from, dateTo: to,
+        dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys }),
+    });
+    if (cr.status !== 202 && !cr.ok) throw new Error(acct + ' report create ' + cr.status + ': ' + (await cr.text()).slice(0, 160));
+    const loc = cr.headers.get('location') || '';
+    const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now());
+    await env.DB.prepare(
+      "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at) VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now')) " +
+      'ON CONFLICT(account, task_id) DO NOTHING'
+    ).bind(acct, taskId, day).run();
+  });
+}
+
+async function adsReportPoll(env) {
+  await perAccount(env, 'adsReportPoll', async (acct) => {
+    const pend = await env.DB.prepare(
+      "SELECT task_id, report_date FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 3"
+    ).bind(acct).all();
+    const tasks = pend.results || [];
+    if (!tasks.length) return;
+    const tok = await ebayAccessToken(env, acct);
+
+    for (const t of tasks) {
+      const tr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task/' + encodeURIComponent(t.task_id), {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (!tr.ok) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = ?3 WHERE account = ?1 AND task_id = ?2")
+          .bind(acct, t.task_id, ('status read ' + tr.status + ': ' + (await tr.text()).slice(0, 160))).run();
+        continue;
+      }
+      const task = await tr.json();
+      const st = String(task.reportTaskStatus || task.status || '');
+      if (/FAIL|ERROR|EXPIRED/i.test(st)) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = ?3 WHERE account = ?1 AND task_id = ?2")
+          .bind(acct, t.task_id, st.slice(0, 160)).run();
+        continue;
+      }
+      if (!/SUCCESS|COMPLETED/i.test(st)) continue;        // still running — next hour
+
+      const href = String(task.reportHref || ('https://api.ebay.com/sell/marketing/v1/ad_report/' + t.task_id));
+      const rep = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
+      if (!rep.ok) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = ?3 WHERE account = ?1 AND task_id = ?2")
+          .bind(acct, t.task_id, ('download ' + rep.status).slice(0, 160)).run();
+        continue;
+      }
+      const buf = new Uint8Array(await rep.arrayBuffer());
+      let text = '';
+      if (buf[0] === 0x1f && buf[1] === 0x8b) {
+        const ds = new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')));
+        text = await ds.text();
+      } else if (buf[0] === 0x50 && buf[1] === 0x4b) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = 'report is a ZIP — need TSV_GZIP format' WHERE account = ?1 AND task_id = ?2")
+          .bind(acct, t.task_id).run();
+        continue;
+      } else {
+        text = new TextDecoder().decode(buf);
+      }
+
+      const ingested = await ingestAdsReport(env, acct, t.report_date, text);
+      await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = ?3 WHERE account = ?1 AND task_id = ?2")
+        .bind(acct, t.task_id, ingested + ' rows').run();
+    }
+  });
+}
+
+/* The report is TSV with a header row (eBay sometimes prefixes metadata lines — the header is
+   the first line that mentions a listing column). Column names come from the metric metadata,
+   so matching is by meaning, not position. */
+async function ingestAdsReport(env, acct, day, text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
+  if (hi < 0) return 0;
+  const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
+  const col = re => heads.findIndex(h => re.test(h));
+  const cListing = col(/listing/);
+  const cSpend = col(/ad_fee/);
+  const cClicks = col(/^clicks$/);
+  const cUnits = col(/^sales$/);          // eBay's 'sales' = attributed sale count
+  const cSales = col(/sale_amount/);
+  if (cListing < 0) return 0;
+
+  const agg = {};
+  for (let i = hi + 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    const lid = String(cells[cListing] || '').replace(/\D/g, '');
+    if (!lid) continue;
+    const a = (agg[lid] = agg[lid] || { spend: 0, clicks: 0, units: 0, sales: 0 });
+    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[£$,]/g, '')) || 0) : 0;
+    a.spend += num(cSpend); a.clicks += num(cClicks); a.units += num(cUnits); a.sales += num(cSales);
+  }
+
+  const stmts = [];
+  let total = 0;
+  for (const lid of Object.keys(agg)) {
+    const a = agg[lid];
+    total += a.spend;
+    stmts.push(env.DB.prepare(
+      'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+      'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
+    ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
+  }
+  stmts.push(env.DB.prepare(
+    'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, 0, 0, 0, ?3, 0) ' +
+    'ON CONFLICT(account, date) DO UPDATE SET ads = ?3'
+  ).bind(acct, day, round2(total)));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return Object.keys(agg).length;
+}
+
 /* Business dates are UK dates (timezone law T-1) — an order at 00:30 UK belongs to the UK day
    it happened in, not the UTC one. */
 function ukDate(iso) {
@@ -953,7 +1096,7 @@ const ROUTES = {
   dailyReport: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const rs = await ctx.env.DB.prepare(
-        "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-31 day') ORDER BY date DESC, account"
+        "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
       ).all();
       return { rows: rs.results || [], note: 'profit = per-item sheet projection × units (estimate); ads spend joins when the report feed lands' };
     },
@@ -962,7 +1105,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

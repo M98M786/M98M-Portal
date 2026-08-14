@@ -527,7 +527,23 @@ function actionRecordTracking_(payload, ctx) {
     throw new Error('no tracking number on this row yet');
   }
 
-  return ordersWriteRow_(ctx, account, target, payload, values, 'RECORD_TRACKING', found);
+  const res = ordersWriteRow_(ctx, account, target, payload, values, 'RECORD_TRACKING', found);
+  /* V2 req 3 (SHADOW until the Engine's TRACKING_LIVE flips): the moment a tracking number
+   * lands on the row, the Engine records exactly what it WOULD push to eBay for this order —
+   * courier auto-picked from the number's own format. Fire-and-log: the sheet write already
+   * happened, and the Engine being down must never take the dispatch flow down with it. */
+  if (res && res.ok !== false && values['Tracking number']) {
+    try {
+      enginePost_('ebayPushTracking', {
+        account: account,
+        order_id: String(payload.order_number || ''),
+        tracking: String(values['Tracking number']),
+      });
+    } catch (e) {
+      logActivity_('system', 'ENGINE_TRACK_FAIL', account, '', '', String(e && e.message || e).slice(0, 120));
+    }
+  }
+  return res;
 }
 
 /** CONFIG 'orders_tracking_uploader' names whoever uploads tracking to eBay (Wahab today).
