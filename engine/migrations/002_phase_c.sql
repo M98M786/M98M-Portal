@@ -68,6 +68,33 @@ CREATE TABLE IF NOT EXISTS ad_report_tasks (
   PRIMARY KEY (account, task_id)
 );
 
+-- Phase D: the CS feeds and the auto-message engine. The UNIQUE ref index is the whole
+-- "one event, one message, ever" guarantee — a constraint, not a code path (001's own rule).
+CREATE TABLE IF NOT EXISTS cs_standards (
+  account   TEXT PRIMARY KEY,
+  json      TEXT DEFAULT '',
+  synced_at TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS automsg_queue (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  account      TEXT NOT NULL,
+  trigger_kind TEXT NOT NULL,
+  ref          TEXT NOT NULL,       -- the event's identity: fb:<id>, ret:<id>, ship:<order>…
+  buyer        TEXT DEFAULT '',
+  order_id     TEXT DEFAULT '',
+  item_id      TEXT DEFAULT '',
+  body         TEXT DEFAULT '',
+  due_at       TEXT DEFAULT '',
+  status       TEXT DEFAULT 'QUEUED',  -- QUEUED → SENDING → SENT/FAIL · SHADOW · CANCELLED
+  detail       TEXT DEFAULT '',
+  created_at   TEXT DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automsg_ref ON automsg_queue(account, trigger_kind, ref);
+
+-- Buyer messages carry the item so a reply channel exists (AAQToPartner needs an ItemID).
+ALTER TABLE buyer_messages ADD COLUMN item_id TEXT DEFAULT '';
+
 -- Nightly per-account health snapshot (rollups cron) — the trend behind the live view.
 CREATE TABLE IF NOT EXISTS daily_health (
   day        TEXT NOT NULL,

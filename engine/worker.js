@@ -72,9 +72,9 @@ export default {
   async scheduled(event, env, ctx) {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync],
-      '*/15 * * * *': [listingSync, adsItems, autoMsgSend],
-      '0 * * * *': [financeSync, csSync, adsReportPoll, autoMsgScan],
-      '0 2 * * *': [rollups, backup, adsReportKick],
+      '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll],
+      '0 * * * *': [financeSync, csSync, autoMsgScan],
+      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -338,8 +338,14 @@ async function orderSync(env) {
     const since = new Date(Date.now() - 6 * 86400000).toISOString();
     let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
       encodeURIComponent('creationdate:[' + since + '..]');
+    // Known state up front: 288 ticks a day rewriting ~800 unchanged rows would burn the whole
+    // D1 write budget by itself. A row is written only when something about it changed.
+    const knownO = {};
+    const ko = await env.DB.prepare('SELECT order_id, status, qty, est_delivery FROM orders WHERE account = ?1 AND created_at >= ?2').bind(acct, since).all();
+    for (const r of (ko.results || [])) knownO[r.order_id] = String(r.status) + '|' + String(r.qty) + '|' + String(r.est_delivery);
+
     let n = 0;
-    while (href && n < 3) {              // 300 orders per 3-day window per account — ample here
+    while (href && n < 4) {              // 400 orders per 6-day window per account — ample here
       const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
       if (!r.ok) throw new Error(acct + ' orders ' + r.status);
       const page = await r.json();
@@ -348,17 +354,21 @@ async function orderSync(env) {
         // total units across every line; item_id stays the first line's (the sheet's own shape)
         let qty = 0;
         for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
+        qty = Math.max(1, qty);
         const fsi = (o.fulfillmentStartInstructions || [])[0] || {};
+        const est = String(fsi.maxEstimatedDeliveryDate || '');
+        const status = String(o.orderFulfillmentStatus || '');
+        const id = String(o.orderId);
+        if (knownO[id] === status + '|' + qty + '|' + est) continue;   // unchanged → no write
         await env.DB.prepare(
           'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery) ' +
           'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ' +
           'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9'
         ).bind(
-          String(o.orderId), acct, String(line.legacyItemId || ''),
+          id, acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
-          String(o.orderFulfillmentStatus || ''), String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), Math.max(1, qty),
-          String(fsi.maxEstimatedDeliveryDate || '')
+          status, String((o.buyer && o.buyer.username) || ''),
+          String(o.creationDate || ''), qty, est
         ).run();
       }
       n++; href = page.next || '';
@@ -376,6 +386,15 @@ async function queueNotify(env, to, type, message, ref) {
   await env.DB.prepare(
     "INSERT INTO notify_queue (to_addr, type, message, ref, created_at, tries) VALUES (?1, ?2, ?3, ?4, datetime('now'), 0)"
   ).bind(String(to), String(type), String(message).slice(0, 900), String(ref)).run();
+}
+
+/* The bell law fans out by role too: CS events must reach the CS people, not just management —
+   the users table is synced from the Portal DB, so the Worker can address them directly. */
+async function notifyRole(env, role, type, message, ref) {
+  const rs = await env.DB.prepare("SELECT email FROM users WHERE role = ?1 AND status = 'approved'").bind(role).all();
+  for (const u of (rs.results || []).slice(0, 6)) {
+    await queueNotify(env, u.email, type, message, ref);
+  }
 }
 
 async function flushNotifyQueue(env) {
@@ -682,32 +701,42 @@ async function csSync(env) {
         due: m => String((m.respondByDate || {}).value || ''), openish: s => !/CLOSED/i.test(s) },
     ];
 
+    // status per known id, so unchanged rows cost ZERO writes — D1's daily write budget is
+    // finite and rewriting 400 unchanged rows an hour was most of it.
     const known = {};
-    const kr = await env.DB.prepare('SELECT case_id FROM cases WHERE account = ?1').bind(acct).all();
-    for (const r of (kr.results || [])) known[r.case_id] = true;
+    const kr = await env.DB.prepare('SELECT case_id, status FROM cases WHERE account = ?1').bind(acct).all();
+    for (const r of (kr.results || [])) known[r.case_id] = String(r.status || '');
 
     for (const f of feeds) {
-      const r = await fetch(f.url, { headers: { authorization: 'IAF ' + tok } });
-      if (!r.ok) throw new Error(acct + ' ' + f.kind + ' ' + r.status + ': ' + (await r.text()).slice(0, 120));
-      const d = await r.json();
-      for (const m of f.list(d)) {
-        const id = f.id(m);
-        if (!id) continue;
-        const status = f.status(m);
-        const isNew = !known[f.kind + ':' + id] && !known[id];
-        await env.DB.prepare(
-          'INSERT INTO cases (case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, closed_at, payload_json) ' +
-          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '', ?10) " +
-          'ON CONFLICT(case_id) DO UPDATE SET status = ?8, payload_json = ?10'
-        ).bind(f.kind + ':' + id, acct, f.kind, String(m.orderId || ''), f.item(m), f.buyer(m),
-          f.reason(m).slice(0, 300), status, f.opened(m), JSON.stringify(m).slice(0, 4000)).run();
-        if (isNew && f.openish(status)) {
-          const label = f.kind === 'CASE' ? 'eBay case' : f.kind === 'RETURN' ? 'Return opened' : 'Item-not-received inquiry';
-          const due = f.due(m);
-          const msg = '🔴 ' + label + ' · ' + acct + ' · item ' + f.item(m) + ' · buyer ' + f.buyer(m) +
-            ' · ' + f.reason(m).slice(0, 140) + (due ? ' · RESPOND BY ' + due.slice(0, 10) : '') +
-            ' — open the CS desk.';
-          await queueNotify(env, 'management', label, msg, 'engine:cs:' + acct + ':' + f.kind + ':' + id);
+      const pages = [f.url];
+      for (let pi = 0; pi < pages.length && pi < 2; pi++) {
+        const r = await fetch(pages[pi], { headers: { authorization: 'IAF ' + tok } });
+        if (!r.ok) throw new Error(acct + ' ' + f.kind + ' ' + r.status + ': ' + (await r.text()).slice(0, 120));
+        const d = await r.json();
+        const total = Number(d.total || d.totalNumberOfCases || d.totalNumberOfInquiries || 0);
+        if (pi === 0 && total > 100) pages.push(f.url + '&offset=100');   // one more page covers these accounts
+        for (const m of f.list(d)) {
+          const id = f.id(m);
+          if (!id) continue;
+          const key = f.kind + ':' + id;
+          const status = f.status(m);
+          const isNew = !(key in known);
+          if (!isNew && known[key] === status) continue;               // nothing changed → no write
+          await env.DB.prepare(
+            'INSERT INTO cases (case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, closed_at, payload_json) ' +
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '', ?10) " +
+            'ON CONFLICT(case_id) DO UPDATE SET status = ?8, payload_json = ?10'
+          ).bind(key, acct, f.kind, String(m.orderId || ''), f.item(m), f.buyer(m),
+            f.reason(m).slice(0, 300), status, f.opened(m), JSON.stringify(m).slice(0, 4000)).run();
+          if (isNew && f.openish(status)) {
+            const label = f.kind === 'CASE' ? 'eBay case' : f.kind === 'RETURN' ? 'Return opened' : 'Item-not-received inquiry';
+            const due = f.due(m);
+            const msg = '🔴 ' + label + ' · ' + acct + ' · item ' + f.item(m) + ' · buyer ' + f.buyer(m) +
+              ' · ' + f.reason(m).slice(0, 140) + (due ? ' · RESPOND BY ' + due.slice(0, 10) : '') +
+              ' — open the CS desk.';
+            await queueNotify(env, 'management', label, msg, 'engine:cs:' + acct + ':' + f.kind + ':' + id);
+            await notifyRole(env, 'CS', label, msg, 'engine:cs:' + acct + ':' + f.kind + ':' + id);
+          }
         }
       }
     }
@@ -724,31 +753,41 @@ async function csSync(env) {
     });
     const mx = await mr.text();
     if (mr.ok && mx.indexOf('<Ack>Failure</Ack>') < 0) {
+      const seen = {};
+      const sm = await env.DB.prepare('SELECT msg_id, answered FROM buyer_messages WHERE account = ?1').bind(acct).all();
+      for (const r of (sm.results || [])) seen[r.msg_id] = Number(r.answered);
       const msgs = mx.match(/<Message>[\s\S]*?<\/Message>/g) || [];
       const stmts = [];
       for (const mm of msgs) {
         const id = xmlTag(mm, 'MessageID');
         if (!id) continue;
+        const read = /<Read>true<\/Read>/.test(mm) ? 1 : 0;
+        if (id in seen && seen[id] === read) continue;                 // unchanged → no write
         stmts.push(env.DB.prepare(
-          'INSERT INTO buyer_messages (msg_id, account, buyer, text, received_at, answered) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
+          'INSERT INTO buyer_messages (msg_id, account, buyer, text, received_at, answered, item_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
           'ON CONFLICT(msg_id) DO UPDATE SET answered = ?6'
         ).bind(id, acct, xmlTag(mm, 'Sender'), xmlTag(mm, 'Subject').slice(0, 300),
-          xmlTag(mm, 'ReceiveDate'), /<Read>true<\/Read>/.test(mm) ? 1 : 0));
+          xmlTag(mm, 'ReceiveDate'), read, xmlTag(mm, 'ItemID')));
       }
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
+  });
+}
 
-    // seller standards — the account-health truth eBay itself judges by
+/* Seller standards move slowly — eBay evaluates monthly — so one nightly read per account is
+   the honest cadence, and it keeps the hourly slot far from the subrequest cap. */
+async function standardsSync(env) {
+  await perAccount(env, 'standardsSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
     const sr = await fetch('https://api.ebay.com/sell/analytics/v1/seller_standards_profile', {
       headers: { authorization: 'Bearer ' + tok } });
-    if (sr.ok) {
-      const sd = await sr.json();
-      const uk = (sd.standardsProfiles || []).filter(x => String(x.program || '').indexOf('UK') >= 0);
-      await env.DB.prepare(
-        "INSERT INTO cs_standards (account, json, synced_at) VALUES (?1, ?2, datetime('now')) " +
-        "ON CONFLICT(account) DO UPDATE SET json = ?2, synced_at = datetime('now')"
-      ).bind(acct, JSON.stringify(uk.length ? uk : (sd.standardsProfiles || [])).slice(0, 8000)).run();
-    }
+    if (!sr.ok) return;                                // scope-gap accounts simply stay absent
+    const sd = await sr.json();
+    const uk = (sd.standardsProfiles || []).filter(x => String(x.program || '').indexOf('UK') >= 0);
+    await env.DB.prepare(
+      "INSERT INTO cs_standards (account, json, synced_at) VALUES (?1, ?2, datetime('now')) " +
+      "ON CONFLICT(account) DO UPDATE SET json = ?2, synced_at = datetime('now')"
+    ).bind(acct, JSON.stringify(uk.length ? uk : (sd.standardsProfiles || [])).slice(0, 8000)).run();
   });
 }
 
@@ -786,12 +825,19 @@ async function autoMsgScan(env) {
         body, String(Math.max(0, Number(c.delay_min) || 0))).run();
     };
 
+    // one titles map per account so {{item}} speaks the listing's name, not its number
+    const titles = {};
+    const tRs = await env.DB.prepare('SELECT item_id, title FROM items_api WHERE account = ?1').bind(acct).all();
+    for (const t of (tRs.results || [])) titles[t.item_id] = t.title;
+    const withTitle = v => ({ ...v, item: String(titles[v.item_id] || v.item_id || '') });
+
     if (cfg.shipped) {
+      // 6 days, matching the order window — a parcel fulfilled on day 4 still deserves its note
       const rs = await env.DB.prepare(
-        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND status LIKE '%FULFILLED%' AND created_at >= datetime('now', '-3 day')"
+        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND status LIKE '%FULFILLED%' AND created_at >= datetime('now', '-6 day')"
       ).bind(acct).all();
       for (const o of (rs.results || [])) {
-        await queue('shipped', 'ship:' + o.order_id, { buyer: o.buyer, order: o.order_id, item_id: o.item_id });
+        await queue('shipped', 'ship:' + o.order_id, withTitle({ buyer: o.buyer, order: o.order_id, item_id: o.item_id }));
       }
     }
     if (cfg.return_opened) {
@@ -799,26 +845,31 @@ async function autoMsgScan(env) {
         "SELECT case_id, buyer, item_id, order_id FROM cases WHERE account = ?1 AND kind = 'RETURN' AND opened_at >= datetime('now', '-3 day')"
       ).bind(acct).all();
       for (const c of (rs.results || [])) {
-        await queue('return_opened', 'ret:' + c.case_id, { buyer: c.buyer, order: c.order_id, item_id: c.item_id });
+        await queue('return_opened', 'ret:' + c.case_id, withTitle({ buyer: c.buyer, order: c.order_id, item_id: c.item_id }));
       }
     }
     if (cfg.buyer_query) {
+      // needs an item to answer against (the member-message channel demands one), and eBay's own
+      // system mail must never get an auto-reply — only real buyers with a real item qualify
       const rs = await env.DB.prepare(
-        "SELECT msg_id, buyer FROM buyer_messages WHERE account = ?1 AND answered = 0 AND received_at >= datetime('now', '-3 day')"
+        "SELECT msg_id, buyer, item_id FROM buyer_messages WHERE account = ?1 AND answered = 0 " +
+        "AND item_id != '' AND buyer != '' AND lower(buyer) != 'ebay' AND received_at >= datetime('now', '-3 day')"
       ).bind(acct).all();
       for (const m of (rs.results || [])) {
-        await queue('buyer_query', 'q:' + m.msg_id, { buyer: m.buyer, order: '', item_id: '' });
+        await queue('buyer_query', 'q:' + m.msg_id, withTitle({ buyer: m.buyer, order: '', item_id: m.item_id }));
       }
     }
     if (cfg.arrived) {
       // "arrived" = eBay's own delivery estimate has passed (the API exposes no carrier scans).
-      // The 2-day window keeps a first enable from messaging every historic order at once.
+      // Dates compare as dates — est_delivery is ISO with a 'T', datetime('now') is not, and a
+      // raw string compare would shift every same-day match. The 2-day window keeps a first
+      // enable from messaging every historic order at once.
       const rs = await env.DB.prepare(
         "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND est_delivery != '' " +
-        "AND est_delivery <= datetime('now') AND est_delivery >= datetime('now', '-2 day')"
+        "AND substr(est_delivery, 1, 10) <= date('now') AND substr(est_delivery, 1, 10) >= date('now', '-2 day')"
       ).bind(acct).all();
       for (const o of (rs.results || [])) {
-        await queue('arrived', 'arr:' + o.order_id, { buyer: o.buyer, order: o.order_id, item_id: o.item_id });
+        await queue('arrived', 'arr:' + o.order_id, withTitle({ buyer: o.buyer, order: o.order_id, item_id: o.item_id }));
       }
     }
     if (cfg.neg_fb || cfg.pos_fb) {
@@ -841,28 +892,50 @@ async function autoMsgScan(env) {
           const kind = xmlTag(fb, 'CommentType') === 'Negative' ? 'neg_fb'
             : xmlTag(fb, 'CommentType') === 'Positive' ? 'pos_fb' : '';
           if (!kind || !cfg[kind]) continue;
-          await queue(kind, 'fb:' + xmlTag(fb, 'FeedbackID'), {
+          await queue(kind, 'fb:' + xmlTag(fb, 'FeedbackID'), withTitle({
             buyer: xmlTag(fb, 'CommentingUser'), order: '', item_id: xmlTag(fb, 'ItemID'),
-          });
+          }));
         }
       }
     }
   });
 }
 
-/* Sender: paced, gated, honest. SHADOW records exactly what would go; LIVE picks the channel by
-   trigger — a return message rides Post-Order's return thread, everything else the member
-   message. eBay's refusal text lands in `detail` verbatim, so a wrong assumption about a write
-   endpoint surfaces as data, not silence. */
+/* Sender: paced, gated, honest — and defensive, because the far end is a real buyer.
+   Four review-driven guarantees:
+   1. SHADOW marks EVERY due row in one statement (no fetch budget spent, no QUEUED backlog
+      lingering) — so the day AUTOMSG_LIVE is armed, nothing from the shadow era can fire.
+   2. LIVE sends only rows whose trigger is STILL enabled — the OFF switch stops the queue too;
+      stopped rows are marked CANCELLED, visibly.
+   3. Each row is CLAIMED (QUEUED → SENDING, checked) before any network call — an overlapping
+      run or a crash-retry cannot double-message a buyer. A claim that never resolves is retried
+      as FAIL by hand, never silently.
+   4. Everything interpolated into Trading XML is XML-escaped — buyer names are attacker text. */
+function xmlEsc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
 async function autoMsgSend(env) {
+  if (String(env.AUTOMSG_LIVE) !== 'true') {
+    await env.DB.prepare(
+      "UPDATE automsg_queue SET status = 'SHADOW', detail = 'recorded, not sent — AUTOMSG_LIVE is off' " +
+      "WHERE status = 'QUEUED' AND due_at <= datetime('now')"
+    ).run();
+    return;
+  }
   const due = await env.DB.prepare(
-    "SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, body FROM automsg_queue WHERE status = 'QUEUED' AND due_at <= datetime('now') ORDER BY id LIMIT 5"
+    'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.body, ' +
+    '       COALESCE(a.enabled, 0) AS still_on ' +
+    'FROM automsg_queue q LEFT JOIN auto_msgs a ON a.account = q.account AND a.trigger_kind = q.trigger_kind ' +
+    "WHERE q.status = 'QUEUED' AND q.due_at <= datetime('now') ORDER BY q.id LIMIT 5"
   ).all();
   for (const q of (due.results || [])) {
-    if (String(env.AUTOMSG_LIVE) !== 'true') {
-      await env.DB.prepare("UPDATE automsg_queue SET status = 'SHADOW', detail = 'recorded, not sent — AUTOMSG_LIVE is off' WHERE id = ?1").bind(q.id).run();
+    if (!Number(q.still_on)) {
+      await env.DB.prepare("UPDATE automsg_queue SET status = 'CANCELLED', detail = 'trigger was switched off before sending' WHERE id = ?1 AND status = 'QUEUED'").bind(q.id).run();
       continue;
     }
+    const claim = await env.DB.prepare("UPDATE automsg_queue SET status = 'SENDING' WHERE id = ?1 AND status = 'QUEUED'").bind(q.id).run();
+    if (!claim.meta || !claim.meta.changes) continue;      // someone else holds it
     try {
       const tok = await ebayAccessToken(env, q.account);
       let ok = false, detail = '';
@@ -874,9 +947,9 @@ async function autoMsgSend(env) {
         ok = r.ok; detail = ok ? 'sent via return thread' : (r.status + ': ' + (await r.text()).slice(0, 200));
       } else {
         const xml = '<?xml version="1.0" encoding="utf-8"?><AddMemberMessageAAQToPartnerRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
-          '<ItemID>' + q.item_id + '</ItemID><MemberMessage><Subject>About your order</Subject><Body>' +
-          String(q.body).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</Body><QuestionType>General</QuestionType>' +
-          '<RecipientID>' + q.buyer + '</RecipientID></MemberMessage></AddMemberMessageAAQToPartnerRequest>';
+          '<ItemID>' + xmlEsc(q.item_id) + '</ItemID><MemberMessage><Subject>About your order</Subject><Body>' +
+          xmlEsc(q.body) + '</Body><QuestionType>General</QuestionType>' +
+          '<RecipientID>' + xmlEsc(q.buyer) + '</RecipientID></MemberMessage></AddMemberMessageAAQToPartnerRequest>';
         const r = await fetch('https://api.ebay.com/ws/api.dll', {
           method: 'POST',
           headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'AddMemberMessageAAQToPartner',
@@ -926,6 +999,7 @@ async function violationsSync(env) {
         ).bind(acct, item, typ, texts).run();
         const msg = '🔴 Listing violation · ' + acct + ' · item ' + item + ' · ' + typ + ' — eBay says: "' + texts.slice(0, 200) + '"';
         await queueNotify(env, 'management', 'Listing violation', msg, 'engine:viol:' + acct + ':' + item + ':' + typ);
+        await notifyRole(env, 'CS', 'Listing violation', msg, 'engine:viol:' + acct + ':' + item + ':' + typ);
       }
     }
   });
@@ -1530,12 +1604,9 @@ const ROUTES = {
      the spec's 4/2/1/3. Order lists carry no profit, so any signed-in user may read them. */
   recheckFeed: {
     auth: 'any', fn: async (p, ctx) => {
-      const offsets = {
-        china: Math.max(0, Number(p.china) || 4),
-        uk1: Math.max(0, Number(p.uk1) || 2),
-        uk2: Math.max(0, Number(p.uk2) || 1),
-        uk3: Math.max(0, Number(p.uk3) || 3),
-      };
+      // presence check, not truthiness — Management may legitimately tune a checkpoint to 0 days
+      const off = (v, dflt) => (v === undefined || v === null || v === '' ? dflt : Math.max(0, Number(v) || 0));
+      const offsets = { china: off(p.china, 4), uk1: off(p.uk1, 2), uk2: off(p.uk2, 1), uk3: off(p.uk3, 3) };
       const day = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? String(p.date) : ukDate('');
       const maxBack = Math.max(offsets.china, offsets.uk1, offsets.uk2, offsets.uk3) + 2;
       const since = new Date(new Date(day + 'T12:00:00Z').getTime() - maxBack * 86400000).toISOString();
@@ -1586,6 +1657,7 @@ const ROUTES = {
           }
         }
         stages.push({ stage: key, offset_days: offsets[key], reference_date: ref,
+          beyond_refresh: offsets[key] > 5,   // orderSync refreshes 6 days back — older statuses freeze
           accounts: Object.values(accounts).sort((x, y) => x.account < y.account ? -1 : 1) });
       }
       return { date: day, stages,
@@ -1660,7 +1732,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

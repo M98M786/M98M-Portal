@@ -86,7 +86,7 @@
     h += '</tbody></table></div>';
 
     var msgs = (d && d.messages) || [];
-    h += '<h3 style="margin:16px 0 6px;font-size:13px">Buyer messages waiting for an answer — ' + msgs.length + '</h3>';
+    h += '<h3 style="margin:16px 0 6px;font-size:13px">Unread buyer messages — ' + msgs.length + ' <span style="font-size:10.5px;color:var(--text-3);font-weight:600">(eBay reports read state, not replies — read it and it leaves this list)</span></h3>';
     if (msgs.length) {
       h += '<div class="scroll"><table class="cd-tbl"><thead><tr><th>Account</th><th>Buyer</th><th>Subject</th><th>Received</th></tr></thead><tbody>';
       msgs.slice(0, 50).forEach(function (m) {

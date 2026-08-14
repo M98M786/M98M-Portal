@@ -25,6 +25,9 @@
   );
 
   function cwStr(v) { return String(v == null ? '' : v).trim(); }
+  /* Attribute context needs more than esc(): esc() leaves quotes alone, and a campaign named
+   * on eBay with a double-quote would walk straight out of a data-attribute (RL-3). */
+  function cwAttr(v) { return esc(cwStr(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function cwPKT(sqlUtc) {
     if (!sqlUtc) { return ''; }
     var d = new Date(cwStr(sqlUtc).replace(' ', 'T') + 'Z');
@@ -75,7 +78,7 @@
         var r0 = list[0];
         var chips = list.map(function (r) {
           return '<span class="cw-pill run" style="margin:2px 6px 2px 0;display:inline-block">' + esc(cwStr(r.name) || cwStr(r.campaign_id)) +
-            ' <a href="#" data-cw-rm="1" data-acc="' + esc(cwStr(r.account)) + '" data-cid="' + esc(cwStr(r.campaign_id)) + '" data-lid="' + esc(cwStr(r.listing_id)) + '" data-nm="' + esc(cwStr(r.name)) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
+            ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
         }).join('');
         h += '<tr><td>' + esc(cwStr(r0.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
