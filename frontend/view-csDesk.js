@@ -72,16 +72,22 @@
       return da < db ? -1 : da > db ? 1 : 0;
     });
     h += '<h3 style="margin:0 0 6px;font-size:13px">Open on eBay right now — ' + open.length + ' · sorted by respond-by</h3>' +
-      '<div class="scroll"><table class="cd-tbl"><thead><tr><th>Kind</th><th>Account</th><th>Item / buyer</th><th>What eBay records</th><th>Status</th><th>Respond by</th></tr></thead><tbody>';
-    if (!open.length) { h += '<tr><td colspan="6" style="color:var(--ok);font-weight:800">✓ Nothing open — every case, return and inquiry is closed.</td></tr>'; }
+      '<div class="scroll"><table class="cd-tbl"><thead><tr><th>Kind</th><th>Account</th><th>Item / buyer</th><th>What eBay records</th><th>Status</th><th>Respond by</th><th></th></tr></thead><tbody>';
+    if (!open.length) { h += '<tr><td colspan="7" style="color:var(--ok);font-weight:800">✓ Nothing open — every case, return and inquiry is closed.</td></tr>'; }
     open.forEach(function (r) {
       var due = cdDue(r.payload_json);
-      h += '<tr><td><span class="cd-kind ' + esc(cdStr(r.kind)) + '">' + esc(cdStr(r.kind)) + '</span></td>' +
+      var kind = cdStr(r.kind);
+      var writable = kind === 'RETURN' || kind === 'INR';
+      var keyAttr = esc(cdStr(r.case_id)).replace(/"/g, '&quot;');
+      h += '<tr><td><span class="cd-kind ' + esc(kind) + '">' + esc(kind) + '</span></td>' +
         '<td>' + esc(cdStr(r.account)) + '</td>' +
         '<td><span class="mono">' + esc(cdStr(r.item_id)) + '</span><div style="font-size:11px;color:var(--text-3)">' + esc(cdStr(r.buyer)) + '</div></td>' +
-        '<td style="max-width:360px">' + esc(cdStr(r.reason)) + '</td>' +
+        '<td style="max-width:340px">' + esc(cdStr(r.reason)) + '</td>' +
         '<td>' + esc(cdStr(r.status)) + '</td>' +
-        '<td class="cd-due ' + cdDueCls(due) + '">' + (due ? esc(due) : '—') + '</td></tr>';
+        '<td class="cd-due ' + cdDueCls(due) + '">' + (due ? esc(due) : '—') + '</td>' +
+        '<td style="white-space:nowrap">' + (writable
+          ? '<button class="minibtn" data-cd-reply="' + keyAttr + '">Reply</button> <button class="minibtn" data-cd-refund="' + keyAttr + '">Refund</button>'
+          : '<span style="font-size:10.5px;color:var(--text-3)">on eBay</span>') + '</td></tr>';
     });
     h += '</tbody></table></div>';
 
@@ -209,13 +215,37 @@
       var body = $('cdBody');
       if (body) {
         body.onclick = function (ev) {
-          var a = ev.target && ev.target.closest ? ev.target.closest('[data-cd-ack]') : null;
-          if (!a) { return; }
-          ev.preventDefault();
-          api('ackViolation', { id: a.getAttribute('data-cd-ack') }).then(function () {
-            toast('Marked as seen under your name.');
-            cdLoad();
-          }).catch(function (e) { toast(e.message || 'Could not mark it.'); });
+          var t = ev.target;
+          var a = t && t.closest ? t.closest('[data-cd-ack]') : null;
+          if (a) {
+            ev.preventDefault();
+            api('ackViolation', { id: a.getAttribute('data-cd-ack') }).then(function () {
+              toast('Marked as seen under your name.');
+              cdLoad();
+            }).catch(function (e) { toast(e.message || 'Could not mark it.'); });
+            return;
+          }
+          var rp = t && t.closest ? t.closest('[data-cd-reply]') : null;
+          if (rp) {
+            var msg = window.prompt('Message to the buyer (goes on the eBay thread under the account):');
+            if (!msg || !msg.trim()) { return; }
+            rp.disabled = true;
+            api('csReply', { case_key: rp.getAttribute('data-cd-reply'), message: msg }).then(function (res) {
+              rp.disabled = false;
+              toast(res && res.shadow ? 'Shadow — recorded, nothing sent: ' + (res.would_do || '') : 'Reply sent on the eBay thread.');
+            }).catch(function (e) { rp.disabled = false; toast(e.message || 'Could not send it.'); });
+            return;
+          }
+          var rf = t && t.closest ? t.closest('[data-cd-refund]') : null;
+          if (rf) {
+            if (!window.confirm('Issue the FULL refund on ' + rf.getAttribute('data-cd-refund') + '? This moves money when live.')) { return; }
+            rf.disabled = true;
+            api('csRefund', { case_key: rf.getAttribute('data-cd-refund') }).then(function (res) {
+              rf.disabled = false;
+              toast(res && res.shadow ? 'Shadow — recorded, no money moved: ' + (res.would_do || '') : 'Refund issued.');
+              cdLoad();
+            }).catch(function (e) { rf.disabled = false; toast(e.message || 'Could not refund.'); });
+          }
         };
       }
       var auto = $('cdAuto');

@@ -1506,6 +1506,73 @@ const ROUTES = {
     },
   },
 
+  /* CS writes (§9-D, the desk's hands) — SHADOW until CS_WRITE_LIVE='true'. Post-Order lets a
+     seller message the buyer and issue the refund on RETURNS and INQUIRIES; formal CASES only
+     take appeals, so the desk says "open eBay" for those instead of pretending. Every action is
+     audited and belled under the actor's name — a refund is money moving. */
+  csReply: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const key = String(p.case_key || ''), text = String(p.message || '').trim().slice(0, 900);
+      const m = key.match(/^(RETURN|INR):(.+)$/);
+      if (!m) throw new Error('SAY: replies work for returns and item-not-received inquiries — formal cases must be answered on eBay itself');
+      if (!text) throw new Error('SAY: write the message first');
+      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id FROM cases WHERE case_id = ?1').bind(key).first();
+      if (!row) throw new Error('SAY: that record is not on the desk');
+      const who = String(ctx.user.name || ctx.email);
+      const url = m[1] === 'RETURN'
+        ? 'https://api.ebay.com/post-order/v2/return/' + encodeURIComponent(m[2]) + '/send_message'
+        : 'https://api.ebay.com/post-order/v2/inquiry/' + encodeURIComponent(m[2]) + '/send_message';
+      if (String(ctx.env.CS_WRITE_LIVE) !== 'true') {
+        await ctx.env.DB.prepare(
+          "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REPLY_SHADOW', ?2, '', ?3, datetime('now'))"
+        ).bind(ctx.email, key, text.slice(0, 200)).run();
+        return { shadow: true, would_do: 'POST ' + url, note: 'SHADOW — recorded, nothing sent. CS_WRITE_LIVE=true arms replies.' };
+      }
+      const tok = await ebayAccessToken(ctx.env, row.account);
+      const r = await fetch(url, { method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({ message: { content: text } }) });
+      if (!r.ok) throw new Error('SAY: eBay refused the reply (' + r.status + '): ' + (await r.text()).slice(0, 160));
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REPLY', ?2, '', ?3, datetime('now'))"
+      ).bind(ctx.email, key, text.slice(0, 200)).run();
+      await queueNotify(ctx.env, 'management', 'CS reply', '🔵 ' + who + ' replied to ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.', 'engine:csreply:' + key);
+      return { sent: true };
+    },
+  },
+
+  csRefund: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const key = String(p.case_key || '');
+      const m = key.match(/^(RETURN|INR):(.+)$/);
+      if (!m) throw new Error('SAY: portal refunds work for returns and inquiries — formal cases are decided on eBay itself');
+      const row = await ctx.env.DB.prepare('SELECT account, buyer, item_id, reason FROM cases WHERE case_id = ?1').bind(key).first();
+      if (!row) throw new Error('SAY: that record is not on the desk');
+      const who = String(ctx.user.name || ctx.email);
+      const url = m[1] === 'RETURN'
+        ? 'https://api.ebay.com/post-order/v2/return/' + encodeURIComponent(m[2]) + '/issue_refund'
+        : 'https://api.ebay.com/post-order/v2/inquiry/' + encodeURIComponent(m[2]) + '/issue_refund';
+      if (String(ctx.env.CS_WRITE_LIVE) !== 'true') {
+        await ctx.env.DB.prepare(
+          "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REFUND_SHADOW', ?2, '', ?3, datetime('now'))"
+        ).bind(ctx.email, key, String(row.reason || '').slice(0, 200)).run();
+        return { shadow: true, would_do: 'POST ' + url + ' (full refund)', note: 'SHADOW — recorded, no money moved. CS_WRITE_LIVE=true arms refunds.' };
+      }
+      const tok = await ebayAccessToken(ctx.env, row.account);
+      const r = await fetch(url, { method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({}) });                       // empty body = eBay's own full-refund default
+      if (!r.ok) throw new Error('SAY: eBay refused the refund (' + r.status + '): ' + (await r.text()).slice(0, 160));
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'CS_REFUND', ?2, '', 'refunded', datetime('now'))"
+      ).bind(ctx.email, key).run();
+      const msg = '🟠 ' + who + ' issued the refund on ' + key + ' (' + row.account + ', buyer ' + row.buyer + ') through the portal.';
+      await queueNotify(ctx.env, 'management', 'Refund issued', msg, 'engine:csrefund:' + key);
+      await flushNotifyQueue(ctx.env);
+      return { refunded: true };
+    },
+  },
+
   /* Violations carry an accountability field — §11.3's spirit: someone must SEE it. */
   ackViolation: {
     auth: 'any', fn: async (p, ctx) => {
