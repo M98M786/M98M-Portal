@@ -1504,7 +1504,17 @@ const ROUTES = {
       const state = await ctx.env.DB.prepare(
         "SELECT account, last_ok, last_error FROM sync_state WHERE job = 'adsSync' AND account != ''"
       ).all();
-      return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [] };
+      /* CPQ, last 14 days per item: what each listing COSTS in ads per unit it sells — and the
+         burners (spend, zero sales) float to the top, because that is the money leak. */
+      const cpq = await ctx.env.DB.prepare(
+        "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend), 2) AS spend, SUM(a.clicks) AS clicks, " +
+        'SUM(a.sales) AS units, ' +
+        'ROUND(SUM(a.spend) / MAX(1, SUM(a.sales)), 2) AS cpq ' +
+        'FROM ads_daily a LEFT JOIN items_api i ON i.item_id = a.item_id ' +
+        "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend) > 0 " +
+        'ORDER BY (SUM(a.sales) = 0) DESC, SUM(a.spend) DESC LIMIT 60'
+      ).all();
+      return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
     },
   },
 
