@@ -242,6 +242,36 @@ async function ebayAccessToken(env, accountName) {
   return t.access_token;
 }
 
+/* eBay's own accepted-carrier list (A4: never a manual mapping) — one Trading call per account
+   per week, cached on the accounts row. Falls back to the last cached list on any eBay hiccup. */
+async function acceptedCarriers(env, account, tok) {
+  const row = await env.DB.prepare('SELECT couriers_json FROM accounts WHERE name = ?1').bind(account).first();
+  let cached = null;
+  try { cached = row && row.couriers_json ? JSON.parse(row.couriers_json) : null; } catch (e) { cached = null; }
+  if (cached && cached.list && cached.list.length && Date.now() - Number(cached.at || 0) < 7 * 86400000) return cached.list;
+  try {
+    const r = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GeteBayDetails',
+        'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+      body: '<?xml version="1.0" encoding="utf-8"?><GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailName>ShippingCarrierDetails</DetailName></GeteBayDetailsRequest>',
+    });
+    const xml = await r.text();
+    // exact-tag match only: xmlTag's <ShippingCarrier[^>]*> would also swallow <ShippingCarrierID>
+    const list = [];
+    for (const m of (xml.match(/<ShippingCarrier>([^<]*)<\/ShippingCarrier>/g) || [])) {
+      const c = m.replace(/<\/?ShippingCarrier>/g, '').trim();
+      if (c) list.push(c);
+    }
+    if (list.length) {
+      await env.DB.prepare('UPDATE accounts SET couriers_json = ?2 WHERE name = ?1')
+        .bind(account, JSON.stringify({ list, at: Date.now() })).run();
+      return list;
+    }
+  } catch (e) { console.log('carrier list fetch failed', String(e).slice(0, 120)); }
+  return (cached && cached.list) || ['RoyalMail', 'Hermes', 'Yodel', 'DHL', 'UPS', 'DPD', 'Other'];
+}
+
 /* ---------------- sync jobs (G-2: skip api_enabled=0; G-3: 48h shadow) -------
    Each is complete for the data it can reach; each degrades to a sync_state
    error instead of throwing the whole cron. Bodies land in Phase B2/C as the
@@ -1427,26 +1457,36 @@ const ROUTES = {
     },
   },
 
-  /* Tracking push (V2 req 3) — SHADOW until TRACKING_LIVE='true' (G-3): resolves the order,
-     auto-picks the carrier from the tracking number's own format, and reports exactly what it
-     WOULD send to eBay. Flip the var and the same call ships for real. */
+  /* Tracking push (V2 req 3, A4) — SHADOW until TRACKING_LIVE='true' (G-3). The carrier comes
+     from eBay's OWN accepted-carrier list (GeteBayDetails, cached 7 days per account in
+     accounts.couriers_json — Hasib's A4 ruling: no manual mapping, ever). The tracking number's
+     format nominates a candidate; the list decides the exact enum eBay accepts. */
   ebayPushTracking: {
     auth: 'sync', fn: async (p, ctx) => {
       const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
       if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
-      const carriers = [
-        [/^[A-Z]{2}\d{9}GB$/i, 'ROYAL_MAIL'],
-        [/^(H0|C0|T0)\d{14}$/i, 'HERMES'],
-        [/^\d{16}$/, 'HERMES'],
-        [/^JD\d{16,}$/i, 'YODEL'],
-        [/^(JJD|JVGL)/i, 'DHL'],
-        [/^1Z/i, 'UPS'],
-      ];
-      let carrier = String(p.courier || '').trim().toUpperCase();
-      if (!carrier) { for (const [re, c] of carriers) { if (re.test(tracking)) { carrier = c; break; } } }
-      if (!carrier) carrier = 'OTHER';
+      const tok0 = await ebayAccessToken(ctx.env, account);
+      const accepted = await acceptedCarriers(ctx.env, account, tok0);
+      const nominate = () => {
+        if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
+        if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
+        if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
+        if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
+        if (/^1Z/i.test(tracking)) return 'UPS';
+        return '';
+      };
+      const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
+      const pickFromList = want => {
+        const w = alias[norm(want)] || norm(want);
+        if (!w) return '';
+        const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
+        return hit || '';
+      };
+      let carrier = pickFromList(p.courier) || pickFromList(nominate());
+      if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
       const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
-      const tok = await ebayAccessToken(ctx.env, account);
+      const tok = tok0;
       const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
         headers: { authorization: 'Bearer ' + tok } });
       if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
@@ -1798,6 +1838,16 @@ const ROUTES = {
         loss_items: losses.results || [],
         note: 'profit is the sheet projection × units; ROAS is account revenue ÷ ad spend for the day (per-item sale attribution lands with the finance feed)',
       };
+    },
+  },
+
+  /* The processor's courier dropdown speaks eBay's own list (A4) — per account, cached weekly. */
+  courierList: {
+    auth: 'any', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      if (!account) throw new Error('SAY: which account?');
+      const tok = await ebayAccessToken(ctx.env, account);
+      return { account, carriers: await acceptedCarriers(ctx.env, account, tok) };
     },
   },
 
