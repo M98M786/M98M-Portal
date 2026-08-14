@@ -346,7 +346,7 @@ function engineApi(action, payload){
       clearTimeout(t);
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
-        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — check Campaign watch before retrying' : (e && e.message) || 'request failed');
+        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
       return apiSend(action, payload).then(function(j){
         if(!j.ok){ throw new Error(j.error||'request failed'); }
@@ -696,13 +696,15 @@ VIEWS.home = {
             var b = ev.target && ev.target.closest ? ev.target.closest('[data-ah-submit]') : null;
             if (!b) { return; }
             var acct = b.getAttribute('data-ah-submit');
-            var inp = host.querySelector('[data-ah-code="' + acct.replace(/"/g, '\\"') + '"]');
+            // row-scoped lookup: the input lives in the same row div — no selector-escaping games
+            var rowEl = b.parentElement;
+            var inp = rowEl ? rowEl.querySelector('input[data-ah-code]') : null;
             if (!inp || !inp.value.trim()) { toast('Paste the code first.'); return; }
             b.disabled = true;
             api('ebaySubmitConsent', { account: acct, code: inp.value }).then(function (res) {
-              b.disabled = false;
-              toast(acct + ' connected — ' + ahStr(res && res.marketing) + ' · token lives ~' + (res && res.expires_days) + ' days.');
-              ahLoad();
+              // mark THIS row done in place — a full repaint would wipe codes pasted for the others
+              if (rowEl) { rowEl.innerHTML = '<b style="min-width:110px">' + esc(acct) + '</b><span style="color:var(--ok);font-weight:800;font-size:12px">connected ✓ · ' + esc(ahStr(res && res.marketing)) + ' · token ~' + esc(String((res && res.expires_days) || '?')) + ' days</span>'; }
+              toast(acct + ' connected.');
             }).catch(function (e) {
               b.disabled = false;
               toast(e.message || 'eBay did not accept that code.');
@@ -6528,7 +6530,7 @@ function createMeeting() {
     open.forEach(function (r) {
       var due = cdDue(r.payload_json);
       var kind = cdStr(r.kind);
-      var writable = kind === 'RETURN' || kind === 'INR';
+      var writable = (kind === 'RETURN' || kind === 'INR') && !/REFUND_SENT/i.test(cdStr(r.status));
       var keyAttr = esc(cdStr(r.case_id)).replace(/"/g, '&quot;');
       h += '<tr><td><span class="cd-kind ' + esc(kind) + '">' + esc(kind) + '</span></td>' +
         '<td>' + esc(cdStr(r.account)) + '</td>' +
@@ -6692,9 +6694,15 @@ function createMeeting() {
             if (!window.confirm('Issue the FULL refund on ' + rf.getAttribute('data-cd-refund') + '? This moves money when live.')) { return; }
             rf.disabled = true;
             api('csRefund', { case_key: rf.getAttribute('data-cd-refund') }).then(function (res) {
-              rf.disabled = false;
-              toast(res && res.shadow ? 'Shadow — recorded, no money moved: ' + (res.would_do || '') : 'Refund issued.');
-              cdLoad();
+              if (res && res.shadow) {
+                rf.disabled = false;
+                toast('Shadow — recorded, no money moved: ' + (res.would_do || ''));
+                return;
+              }
+              // money moved: kill the row's buttons in place — never re-arm from a stale paint
+              var cell = rf.parentElement;
+              if (cell) { cell.innerHTML = '<span style="font-size:10.5px;color:var(--ok);font-weight:800">refund sent ✓</span>'; }
+              toast('Refund issued.');
             }).catch(function (e) { rf.disabled = false; toast(e.message || 'Could not refund.'); });
           }
         };
