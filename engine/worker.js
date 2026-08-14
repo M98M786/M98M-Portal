@@ -769,7 +769,8 @@ async function ingestAdsReport(env, acct, day, text) {
     const lid = String(cells[cListing] || '').replace(/\D/g, '');
     if (!lid) continue;
     const a = (agg[lid] = agg[lid] || { spend: 0, clicks: 0, units: 0, sales: 0 });
-    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[£$,]/g, '')) || 0) : 0;
+    // eBay prints money as "GBP 3.27" (zeros sometimes as "USD 0.00") — strip everything non-numeric
+    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
     a.spend += num(cSpend); a.clicks += num(cClicks); a.units += num(cUnits); a.sales += num(cSales);
   }
 
