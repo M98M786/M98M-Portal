@@ -4138,6 +4138,9 @@ function createMeeting() {
   );
 
   function cwStr(v) { return String(v == null ? '' : v).trim(); }
+  /* Attribute context needs more than esc(): esc() leaves quotes alone, and a campaign named
+   * on eBay with a double-quote would walk straight out of a data-attribute (RL-3). */
+  function cwAttr(v) { return esc(cwStr(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function cwPKT(sqlUtc) {
     if (!sqlUtc) { return ''; }
     var d = new Date(cwStr(sqlUtc).replace(' ', 'T') + 'Z');
@@ -4188,7 +4191,7 @@ function createMeeting() {
         var r0 = list[0];
         var chips = list.map(function (r) {
           return '<span class="cw-pill run" style="margin:2px 6px 2px 0;display:inline-block">' + esc(cwStr(r.name) || cwStr(r.campaign_id)) +
-            ' <a href="#" data-cw-rm="1" data-acc="' + esc(cwStr(r.account)) + '" data-cid="' + esc(cwStr(r.campaign_id)) + '" data-lid="' + esc(cwStr(r.listing_id)) + '" data-nm="' + esc(cwStr(r.name)) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
+            ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
         }).join('');
         h += '<tr><td>' + esc(cwStr(r0.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
@@ -6487,7 +6490,7 @@ function createMeeting() {
     h += '</tbody></table></div>';
 
     var msgs = (d && d.messages) || [];
-    h += '<h3 style="margin:16px 0 6px;font-size:13px">Buyer messages waiting for an answer — ' + msgs.length + '</h3>';
+    h += '<h3 style="margin:16px 0 6px;font-size:13px">Unread buyer messages — ' + msgs.length + ' <span style="font-size:10.5px;color:var(--text-3);font-weight:600">(eBay reports read state, not replies — read it and it leaves this list)</span></h3>';
     if (msgs.length) {
       h += '<div class="scroll"><table class="cd-tbl"><thead><tr><th>Account</th><th>Buyer</th><th>Subject</th><th>Received</th></tr></thead><tbody>';
       msgs.slice(0, 50).forEach(function (m) {
@@ -6556,7 +6559,7 @@ function createMeeting() {
     (d.triggers || []).forEach(function (k) {
       var r = byKind[k] || { enabled: 0, delay_min: 0, template: '' };
       h += '<tr data-cd-amrow="' + esc(k) + '">' +
-        '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">waits on delivery events</div>' : '') + '</td>' +
+        '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">fires when eBay\'s delivery estimate passes</div>' : '') + '</td>' +
         '<td><input type="checkbox" data-am-on ' + (Number(r.enabled) ? 'checked' : '') + '></td>' +
         '<td><input type="number" data-am-delay value="' + (Number(r.delay_min) || 0) + '" min="0" max="1440" style="width:70px" class="rc-in"></td>' +
         '<td><input type="text" data-am-tpl value="' + esc(cdStr(r.template)).replace(/"/g, '&quot;') + '" placeholder="Hi {{buyer}}, …" style="width:100%" class="rc-in"></td>' +
