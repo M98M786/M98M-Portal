@@ -176,6 +176,7 @@ const EBAY_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.marketing',
   'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.finances',   // probed 403 on existing grants — future consents carry it
 ].join(' ');
 
 async function ebayConsentUrl(env, accountName) {
@@ -645,7 +646,8 @@ async function dupSweep(env, acct) {
   }
 }
 
-async function financeSync(env) { /* Phase C remainder: real fees vs Brain v17 drift. */ }
+async function financeSync(env) { /* BLOCKED on scope: existing grants lack sell.finances
+  (probed 403, 14 Aug). Re-consent with the extended EBAY_SCOPES unlocks it. */ }
 async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
 
 /* ---------------- ads spend (real CPQ) — eBay's report API is asynchronous ----------------
@@ -1059,14 +1061,18 @@ const ROUTES = {
         '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.account = c.account AND ca.campaign_id = c.campaign_id) AS items ' +
         'FROM campaigns c ORDER BY c.account, c.status, c.name'
       ).all();
+      /* One row per (item, campaign) so the screen can offer "remove from THIS one" — an
+         aggregated names string cannot carry campaign ids safely (names are free text). */
       const dups = await ctx.env.DB.prepare(
-        'SELECT ca.account, ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, ' +
-        "GROUP_CONCAT(c.name, ' | ') AS names, MAX(ia.title) AS title " +
+        'SELECT ca.account, ca.listing_id, ca.campaign_id, c.name, ia.title ' +
         'FROM campaign_ads ca ' +
         'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
         'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id ' +
-        "WHERE c.status LIKE '%RUNNING%' " +
-        'GROUP BY ca.account, ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
+        "WHERE c.status LIKE '%RUNNING%' AND EXISTS (" +
+        '  SELECT 1 FROM campaign_ads x JOIN campaigns cx ON cx.account = x.account AND cx.campaign_id = x.campaign_id ' +
+        "  WHERE x.account = ca.account AND x.listing_id = ca.listing_id AND cx.status LIKE '%RUNNING%' " +
+        '  GROUP BY x.listing_id HAVING COUNT(DISTINCT x.campaign_id) > 1) ' +
+        'ORDER BY ca.account, ca.listing_id'
       ).all();
       const events = await ctx.env.DB.prepare(
         'SELECT account, campaign, item_id, change_type, old, new, actor, at FROM campaign_events ORDER BY id DESC LIMIT 60'
@@ -1075,6 +1081,45 @@ const ROUTES = {
         "SELECT account, last_ok, last_error FROM sync_state WHERE job = 'adsSync' AND account != ''"
       ).all();
       return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [] };
+    },
+  },
+
+  /* Zain's duplicate fix (req 30, first write path): pull ONE item out of ONE campaign, from
+     the portal, with the actor's name on the event — the honesty rule's other half. SHADOW
+     until ADS_WRITE_LIVE='true' (G-3): records exactly what it would send. Their CPC campaigns
+     are smart-targeting, so DELETE-by-adId is the one write that works everywhere; add/move
+     lands after the shadow period proves this path. */
+  campaignRemoveItem: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || ''), cid = String(p.campaign_id || ''), lid = String(p.listing_id || '');
+      if (!account || !cid || !lid) throw new Error('SAY: account, campaign_id and listing_id are all needed');
+      const row = await ctx.env.DB.prepare('SELECT ad_id FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(account, cid, lid).first();
+      if (!row) throw new Error('SAY: that item is not in that campaign (or the Engine has not synced it yet)');
+      const camp = await ctx.env.DB.prepare('SELECT name FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(account, cid).first();
+      const nm = (camp && camp.name) || cid;
+      const who = String(ctx.user.name || ctx.email);
+
+      if (String(ctx.env.ADS_WRITE_LIVE) !== 'true') {
+        await ctx.env.DB.prepare(
+          "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'remove_item', '', 'SHADOW — not sent', ?4, datetime('now'))"
+        ).bind(account, nm, lid, who).run();
+        return { shadow: true, would_do: 'DELETE ad ' + String(row.ad_id) + ' (item ' + lid + ') from "' + nm + '" on ' + account,
+          note: 'SHADOW — recorded, nothing touched eBay. ADS_WRITE_LIVE=true arms this button.' };
+      }
+
+      const tok = await ebayAccessToken(ctx.env, account);
+      const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) + '/ad/' + encodeURIComponent(String(row.ad_id)), {
+        method: 'DELETE', headers: { authorization: 'Bearer ' + tok } });
+      if (!r.ok && r.status !== 204) throw new Error('SAY: eBay refused the removal (' + r.status + '): ' + (await r.text()).slice(0, 160));
+      await ctx.env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(account, cid, lid).run();
+      await ctx.env.DB.prepare('DELETE FROM dup_state WHERE account = ?1 AND listing_id = ?2').bind(account, lid).run();
+      await ctx.env.DB.prepare(
+        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'remove_item', '', 'removed', ?4, datetime('now'))"
+      ).bind(account, nm, lid, who).run();
+      await queueNotify(ctx.env, 'advertising', 'Campaign edited', '🔵 ' + who + ' removed item ' + lid + ' from "' + nm + '" · ' + account + ' — through the portal.', 'engine:rm:' + account + ':' + lid);
+      await flushNotifyQueue(ctx.env);
+      return { removed: true, campaign: nm };
     },
   },
 
