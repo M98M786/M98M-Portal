@@ -803,10 +803,12 @@ VIEWS.home = {
     var hasProfit = ALX.rows.some(function (r) { return r.profit !== undefined; });
     var hasCampaign = ALX.rows.some(function (r) { return r.campaign_type !== undefined; });
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
+    var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
       '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
+      (hasAds ? '<th>Ads 14d</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
       '<th>Supplier</th><th>Source</th></tr></thead><tbody>';
     ALX.rows.forEach(function (r) {
@@ -820,6 +822,7 @@ VIEWS.home = {
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
+        (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
         (hasCampaign ? '<td>' + esc(axStr(r.campaign_type) || '—') + (axStr(r.campaign_name) ? '<div style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.campaign_name)) + '</div>' : '') + '</td>' : '') +
         '<td>' + esc(axStr(r.current_sup) || '—') + '</td>' +
         '<td><span class="alx-src ' + (src === 'API' ? 'api' : 'sheet') + '">' + src + '</span></td>' +
