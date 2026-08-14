@@ -328,11 +328,11 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
-var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem'];
+var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation'];
 function engineApi(action, payload){
   var url = STATE.config && STATE.config.engine_url;
   var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
@@ -6459,7 +6459,10 @@ function createMeeting() {
       h += '<div class="cd-violbox"><b style="color:var(--bad)">🔴 ' + viols.length + ' listing violation(s) — eBay\'s own words:</b>';
       viols.slice(0, 6).forEach(function (v) {
         h += '<div style="margin-top:5px">' + esc(cdStr(v.account)) + ' · <span class="mono">' + esc(cdStr(v.item_id)) + '</span> · ' + esc(cdStr(v.type)) +
-          ' — “' + esc(cdStr(v.text).slice(0, 180)) + '”</div>';
+          ' — “' + esc(cdStr(v.text).slice(0, 180)) + '”' +
+          (cdStr(v.ack_by) ? ' <span style="color:var(--ok);font-weight:800">seen by ' + esc(cdStr(v.ack_by).split('@')[0]) + '</span>'
+            : ' <a href="#" data-cd-ack="' + esc(cdStr(v.id)) + '" style="font-weight:800">mark seen</a>') +
+          '</div>';
       });
       h += '</div>';
     }
@@ -6516,6 +6519,64 @@ function createMeeting() {
     h += '</div>';
 
     box.innerHTML = h;
+    cdAutoMsgs();
+  }
+
+  /* The auto-message switchboard (§9-D): CS owns it — per account, per trigger: on/off,
+   * template, delay. SHADOW until Management arms AUTOMSG_LIVE; the banner says which. */
+  var CD_AM = null;
+
+  function cdAutoMsgs() {
+    var host = $('cdAuto');
+    if (!host) { return; }
+    api('autoMsgConfig', {}).then(function (d) {
+      CD_AM = d || {};
+      cdAutoPaint();
+    }).catch(function () { host.innerHTML = ''; });
+  }
+
+  function cdAutoPaint() {
+    var host = $('cdAuto');
+    if (!host || !CD_AM) { return; }
+    var d = CD_AM;
+    var accs = d.accounts || [];
+    var sel = $('cdAmAcc');
+    var acct = (sel && sel.value) || accs[0] || '';
+    var byKind = {};
+    (d.rows || []).forEach(function (r) { if (r.account === acct) { byKind[r.trigger_kind] = r; } });
+    var labels = { shipped: 'Order shipped', arrived: 'Order arrived', return_opened: 'Return opened',
+      neg_fb: 'Negative feedback', pos_fb: 'Positive feedback', buyer_query: 'Buyer query received' };
+    var h = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+      '<b style="font-size:13px">Auto-messages</b>' +
+      '<span class="pill ' + (d.live ? 'rc-p-warn' : '') + '" style="font-size:10px;font-weight:800">' + (d.live ? 'LIVE — enabled triggers SEND' : 'SHADOW — records, never sends') + '</span>' +
+      '<select class="alx-sel" id="cdAmAcc" style="margin-left:auto">' + accs.map(function (a) {
+        return '<option' + (a === acct ? ' selected' : '') + '>' + esc(a) + '</option>';
+      }).join('') + '</select></div>';
+    h += '<div class="scroll"><table class="cd-tbl" style="min-width:640px"><thead><tr><th>Trigger</th><th>On</th><th>Delay (min)</th><th>Template — {{buyer}} {{item}} {{order}}</th><th></th></tr></thead><tbody>';
+    (d.triggers || []).forEach(function (k) {
+      var r = byKind[k] || { enabled: 0, delay_min: 0, template: '' };
+      h += '<tr data-cd-amrow="' + esc(k) + '">' +
+        '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">waits on delivery events</div>' : '') + '</td>' +
+        '<td><input type="checkbox" data-am-on ' + (Number(r.enabled) ? 'checked' : '') + '></td>' +
+        '<td><input type="number" data-am-delay value="' + (Number(r.delay_min) || 0) + '" min="0" max="1440" style="width:70px" class="rc-in"></td>' +
+        '<td><input type="text" data-am-tpl value="' + esc(cdStr(r.template)).replace(/"/g, '&quot;') + '" placeholder="Hi {{buyer}}, …" style="width:100%" class="rc-in"></td>' +
+        '<td><button class="minibtn" data-am-save>Save</button></td></tr>';
+    });
+    h += '</tbody></table></div>';
+
+    var q = d.queue || [];
+    if (q.length) {
+      h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;font-weight:700">Last ' + q.length + ' queued message(s) — what the engine did or would do</summary><div style="margin-top:6px">';
+      q.forEach(function (x) {
+        h += '<div style="padding:4px 0;border-bottom:1px solid var(--gold-line);font-size:12px">' +
+          '<b>' + esc(cdStr(x.status)) + '</b> · ' + esc(cdStr(x.account)) + ' · ' + esc(cdStr(x.trigger_kind)) + ' → ' + esc(cdStr(x.buyer)) +
+          ' · “' + esc(cdStr(x.body).slice(0, 90)) + '”' + (cdStr(x.detail) ? ' · <span style="color:var(--text-3)">' + esc(cdStr(x.detail)) + '</span>' : '') + '</div>';
+      });
+      h += '</div></details>';
+    }
+    host.innerHTML = h;
+    var s2 = $('cdAmAcc');
+    if (s2) { s2.onchange = cdAutoPaint; }
   }
 
   function cdLoad() {
@@ -6540,11 +6601,49 @@ function createMeeting() {
       return '<div class="hgroup enter d1"><h1>CS <span class="goldtext">live desk</span></h1>' +
           '<span class="sub">Straight from eBay every hour · violations checked every 5 minutes · respond-by clocks first</span>' +
           '<button class="minibtn" id="cdRefresh" style="margin-left:auto">Refresh</button></div>' +
-        '<div class="card enter d2"><div class="bd"><div id="cdBody"><div class="spinner"></div></div></div></div>';
+        '<div class="card enter d2"><div class="bd"><div id="cdBody"><div class="spinner"></div></div></div></div>' +
+        '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div id="cdAuto"></div></div></div>';
     },
     init: function () {
       var rf = $('cdRefresh');
       if (rf) { rf.onclick = cdLoad; }
+      var body = $('cdBody');
+      if (body) {
+        body.onclick = function (ev) {
+          var a = ev.target && ev.target.closest ? ev.target.closest('[data-cd-ack]') : null;
+          if (!a) { return; }
+          ev.preventDefault();
+          api('ackViolation', { id: a.getAttribute('data-cd-ack') }).then(function () {
+            toast('Marked as seen under your name.');
+            cdLoad();
+          }).catch(function (e) { toast(e.message || 'Could not mark it.'); });
+        };
+      }
+      var auto = $('cdAuto');
+      if (auto) {
+        auto.onclick = function (ev) {
+          var b = ev.target && ev.target.closest ? ev.target.closest('[data-am-save]') : null;
+          if (!b) { return; }
+          var tr = b.closest('[data-cd-amrow]');
+          var sel = $('cdAmAcc');
+          if (!tr || !sel) { return; }
+          b.textContent = '…';
+          api('autoMsgSet', {
+            account: sel.value,
+            trigger_kind: tr.getAttribute('data-cd-amrow'),
+            enabled: tr.querySelector('[data-am-on]').checked,
+            delay_min: tr.querySelector('[data-am-delay]').value,
+            template: tr.querySelector('[data-am-tpl]').value,
+          }).then(function (res) {
+            b.textContent = 'Save';
+            toast('Saved — ' + (res.enabled ? 'ON' : 'OFF') + ' for ' + res.account + '.');
+            cdAutoMsgs();
+          }).catch(function (e) {
+            b.textContent = 'Save';
+            toast(e.message || 'Could not save.');
+          });
+        };
+      }
       cdLoad();
     }
   };
