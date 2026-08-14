@@ -17732,16 +17732,20 @@ function enterApp(user){
   $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
   $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
   $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
-  $('shiftFoot').innerHTML= user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management';
+  $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
+    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build 15 Aug · V2</div>';
   if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
+  /* Management lands on the live Business overview, not the generic home — the screen that
+     answers "how is the business right now" should be the first thing the owner sees. */
+  var landing=(VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home';
   var nav=$('nav'); nav.innerHTML='';
   viewList().forEach(function(v,i){
-    var a=document.createElement('a'); if(i===0) a.className='on'; a.dataset.key=v.key;
+    var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
     a.onclick=function(){ var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); renderView(v.key); };
     nav.appendChild(a);
   });
-  show('appShell'); renderView('home');
+  show('appShell'); renderView(landing);
   if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
   warmUp();
 }
