@@ -328,11 +328,16 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem'];
+/* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
+   failure while the Engine finishes the change — the read path's resilience trick becomes a
+   lie on a mutation. The Engine is the ONLY server that knows these actions. */
+var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem'];
 function engineApi(action, payload){
   var url = STATE.config && STATE.config.engine_url;
+  var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
   var ac = new AbortController();
-  var t = setTimeout(function(){ ac.abort(); }, 2500);
+  var t = setTimeout(function(){ ac.abort(); }, isWrite ? 15000 : 2500);
   return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} }), signal: ac.signal })
     .then(function(r){ return r.json(); })
@@ -340,6 +345,9 @@ function engineApi(action, payload){
     .catch(function(e){
       clearTimeout(t);
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
+      if(isWrite){
+        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — check Campaign watch before retrying' : (e && e.message) || 'request failed');
+      }
       return apiSend(action, payload).then(function(j){
         if(!j.ok){ throw new Error(j.error||'request failed'); }
         return j.data;
@@ -4157,22 +4165,35 @@ function createMeeting() {
     CW.data = d || {};
     var acc = CW.account;
     var camps = (d.campaigns || []).filter(function (c) { return !acc || c.account === acc; });
-    var dups = (d.duplicates || []).filter(function (c) { return !acc || c.account === acc; });
+    var dupRows = (d.duplicates || []).filter(function (c) { return !acc || c.account === acc; });
     var events = (d.events || []).filter(function (e) { return !acc || e.account === acc; });
+
+    // one server row per (item, campaign) — group per item so each campaign gets its own ✕
+    var groups = {}, gOrder = [];
+    dupRows.forEach(function (r) {
+      var k = r.account + '|' + r.listing_id;
+      if (!groups[k]) { groups[k] = []; gOrder.push(k); }
+      groups[k].push(r);
+    });
     var cnt = $('cwCount');
-    if (cnt) { cnt.textContent = camps.length + ' campaign(s) · ' + dups.length + ' duplicate item(s)'; }
+    if (cnt) { cnt.textContent = camps.length + ' campaign(s) · ' + gOrder.length + ' duplicate item(s)'; }
 
     var h = '';
-    if (dups.length) {
-      h += '<div class="cw-dupbox"><h3>🔴 ' + dups.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
-        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that.</p>' +
-        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Campaigns</th><th>Sits in</th></tr></thead><tbody>';
-      dups.forEach(function (r) {
-        h += '<tr><td>' + esc(cwStr(r.account)) + '</td>' +
-          '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r.title) || '(title not synced yet)') + '</div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r.listing_id)) + '</div></td>' +
-          '<td class="cw-num">' + (Number(r.n) || 0) + '</td>' +
-          '<td style="max-width:340px">' + esc(cwStr(r.names)) + '</td></tr>';
+    if (gOrder.length) {
+      h += '<div class="cw-dupbox"><h3>🔴 ' + gOrder.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
+        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that. ✕ removes the item from that one campaign' + '.</p>' +
+        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — ✕ to remove from that campaign</th></tr></thead><tbody>';
+      gOrder.forEach(function (k) {
+        var list = groups[k];
+        var r0 = list[0];
+        var chips = list.map(function (r) {
+          return '<span class="cw-pill run" style="margin:2px 6px 2px 0;display:inline-block">' + esc(cwStr(r.name) || cwStr(r.campaign_id)) +
+            ' <a href="#" data-cw-rm="1" data-acc="' + esc(cwStr(r.account)) + '" data-cid="' + esc(cwStr(r.campaign_id)) + '" data-lid="' + esc(cwStr(r.listing_id)) + '" data-nm="' + esc(cwStr(r.name)) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
+        }).join('');
+        h += '<tr><td>' + esc(cwStr(r0.account)) + '</td>' +
+          '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + '</div></td>' +
+          '<td style="max-width:420px">' + chips + '</td></tr>';
       });
       h += '</tbody></table></div></div>';
     } else {
@@ -4248,6 +4269,28 @@ function createMeeting() {
       if (sel) { sel.onchange = function () { CW.account = cwStr(this.value); if (CW.data) { cwPaint(CW.data); } }; }
       var rf = $('cwRefresh');
       if (rf) { rf.onclick = cwLoad; }
+      var body = $('cwBody');
+      if (body) {
+        body.onclick = function (ev) {
+          var a = ev.target && ev.target.closest ? ev.target.closest('[data-cw-rm]') : null;
+          if (!a) { return; }
+          ev.preventDefault();
+          var nm = a.getAttribute('data-nm') || a.getAttribute('data-cid');
+          if (!window.confirm('Remove item ' + a.getAttribute('data-lid') + ' from "' + nm + '"?')) { return; }
+          a.textContent = '…';
+          api('campaignRemoveItem', {
+            account: a.getAttribute('data-acc'),
+            campaign_id: a.getAttribute('data-cid'),
+            listing_id: a.getAttribute('data-lid'),
+          }).then(function (res) {
+            toast(res && res.shadow ? 'Shadow mode — recorded, nothing sent: ' + (res.would_do || '') : 'Removed from "' + ((res && res.campaign) || nm) + '".');
+            cwLoad();
+          }).catch(function (e) {
+            a.textContent = '✕';
+            toast(e.message || 'Could not remove it.');
+          });
+        };
+      }
       cwLoad();
     }
   };
