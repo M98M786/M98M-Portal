@@ -70,7 +70,54 @@
       h += '<li><span class="ah-err">' + esc(ahStr(s.job)) + (ahStr(s.account) ? ' · ' + esc(ahStr(s.account)) : '') + '</span> — ' + esc(ahStr(s.last_error)) + '</li>';
     });
     h += '</ul></div>';
+
+    /* Self-service re-consent (extended scopes: campaigns, standards, fees). One click per
+     * account, done from here — no build session needed. */
+    h += '<div class="ah-sync"><h3 style="margin:14px 0 6px;font-size:13px">eBay connections</h3>' +
+      '<p style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 8px">A one-time re-consent per account unlocks campaign watching (ABRT, Hafiza), standards and real fees for everyone. Nothing existing breaks — the sheet automations keep their own keys.</p>' +
+      '<button class="minibtn" id="ahConsent">Get the consent links</button><div id="ahConsentBox" style="margin-top:8px"></div></div>';
     box.innerHTML = h;
+
+    var cb = $('ahConsent');
+    if (cb) {
+      cb.onclick = function () {
+        cb.disabled = true;
+        api('ebayConsentLinks', {}).then(function (r) {
+          cb.disabled = false;
+          var host = $('ahConsentBox');
+          if (!host) { return; }
+          var hh = '<p style="font-size:11.5px;color:var(--text-3);font-weight:600">' + esc(ahStr(r && r.note)) + '</p>';
+          ((r && r.links) || []).forEach(function (l) {
+            var aAttr = esc(ahStr(l.account)).replace(/"/g, '&quot;');
+            hh += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--gold-line)">' +
+              '<b style="min-width:110px">' + esc(ahStr(l.account)) + '</b>' +
+              '<a href="' + esc(ahStr(l.url)) + '" target="_blank" rel="noopener" class="minibtn">Open consent page ↗</a>' +
+              '<input type="text" placeholder="paste the code (or the whole URL)" data-ah-code="' + aAttr + '" style="flex:1;min-width:180px" class="rc-in">' +
+              '<button class="minibtn" data-ah-submit="' + aAttr + '">Connect</button></div>';
+          });
+          host.innerHTML = hh;
+          host.onclick = function (ev) {
+            var b = ev.target && ev.target.closest ? ev.target.closest('[data-ah-submit]') : null;
+            if (!b) { return; }
+            var acct = b.getAttribute('data-ah-submit');
+            var inp = host.querySelector('[data-ah-code="' + acct.replace(/"/g, '\\"') + '"]');
+            if (!inp || !inp.value.trim()) { toast('Paste the code first.'); return; }
+            b.disabled = true;
+            api('ebaySubmitConsent', { account: acct, code: inp.value }).then(function (res) {
+              b.disabled = false;
+              toast(acct + ' connected — ' + ahStr(res && res.marketing) + ' · token lives ~' + (res && res.expires_days) + ' days.');
+              ahLoad();
+            }).catch(function (e) {
+              b.disabled = false;
+              toast(e.message || 'eBay did not accept that code.');
+            });
+          };
+        }).catch(function (e) {
+          cb.disabled = false;
+          toast(e.message || 'Could not fetch the links.');
+        });
+      };
+    }
   }
 
   function ahLoad() {

@@ -95,6 +95,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_automsg_ref ON automsg_queue(account, trigg
 -- Buyer messages carry the item so a reply channel exists (AAQToPartner needs an ItemID).
 ALTER TABLE buyer_messages ADD COLUMN item_id TEXT DEFAULT '';
 
+-- Real eBay fees per order (financeSync, post-re-consent) — drift alerts compare against
+-- the sheet's own expectation (sold − OE×units).
+ALTER TABLE orders ADD COLUMN ebay_fees REAL DEFAULT 0;
+
 -- Nightly per-account health snapshot (rollups cron) — the trend behind the live view.
 CREATE TABLE IF NOT EXISTS daily_health (
   day        TEXT NOT NULL,

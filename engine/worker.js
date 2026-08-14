@@ -669,8 +669,59 @@ async function dupSweep(env, acct) {
   }
 }
 
-async function financeSync(env) { /* BLOCKED on scope: existing grants lack sell.finances
-  (probed 403, 14 Aug). Re-consent with the extended EBAY_SCOPES unlocks it. */ }
+/* Real eBay fees per order (§3 financeSync) — WAITS on the extended-scope re-consent (existing
+   grants 403 on sell.finances; that refusal is recorded per account, honestly, until the
+   consent lands — then fees flow with no code change). Drift rule: the sheet's OE already
+   encodes the fees the calculator EXPECTED (expected fees ≈ sold − OE×units), so when eBay's
+   real fee beats that expectation by 15%+ AND 50p+, management hears about the exact order —
+   that is the Brain-v17-drift alert the contract asks for. */
+async function financeSync(env) {
+  await perAccount(env, 'financeSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const since = new Date(Date.now() - 3 * 86400000).toISOString();
+    const r = await fetch('https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&filter=' +
+      encodeURIComponent('transactionDate:[' + since + '..]'), { headers: { authorization: 'Bearer ' + tok } });
+    if (r.status === 403) throw new Error(acct + ' finances 403 — needs the extended-scope re-consent (Account health screen)');
+    if (!r.ok) throw new Error(acct + ' finances ' + r.status + ': ' + (await r.text()).slice(0, 120));
+    const d = await r.json();
+
+    const feesByOrder = {};
+    for (const t of (d.transactions || [])) {
+      const oid = String(t.orderId || '');
+      if (!oid) continue;
+      const fee = Number((t.totalFeeAmount || {}).value || 0);
+      if (fee) feesByOrder[oid] = round2((feesByOrder[oid] || 0) + fee);
+    }
+    if (!Object.keys(feesByOrder).length) return;
+
+    const ids = Object.keys(feesByOrder);
+    const rows = {};
+    for (let i = 0; i < ids.length; i += 90) {
+      const chunk = ids.slice(i, i + 90);
+      const rs = await env.DB.prepare(
+        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
+        'WHERE o.order_id IN (' + chunk.map(() => '?').join(',') + ')'
+      ).bind(...chunk).all();
+      for (const row of (rs.results || [])) rows[row.order_id] = row;
+    }
+
+    const stmts = [];
+    for (const oid of ids) {
+      const row = rows[oid];
+      const fee = feesByOrder[oid];
+      if (!row || Number(row.ebay_fees) === fee) continue;             // unknown order or unchanged → no write
+      stmts.push(env.DB.prepare('UPDATE orders SET ebay_fees = ?2 WHERE order_id = ?1').bind(oid, fee));
+      const expected = round2((Number(row.sold) || 0) - (Number(row.oe) || 0) * Math.max(1, Number(row.qty) || 1));
+      if (row.oe && expected > 0 && fee > expected * 1.15 && fee - expected > 0.5) {
+        await queueNotify(env, 'management', 'Fee drift',
+          '🟠 eBay charged £' + fee.toFixed(2) + ' on order ' + oid + ' · ' + acct + ' · item ' + row.item_id +
+          ' — the calculator expected ~£' + expected.toFixed(2) + '. Re-check that item\'s pricing.',
+          'engine:feedrift:' + oid);
+      }
+    }
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  });
+}
 
 /* ---------------- Phase D: the CS feeds — probed live 14 Aug, shapes are real -------------
    Post-Order search endpoints answer the EXISTING tokens with 'IAF <token>' auth: cases
@@ -1799,7 +1850,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -1809,16 +1860,18 @@ const ROUTES = {
     },
   },
 
-  /* eBay consent flow (Phase B2): Management asks for the links, clicks Allow on
-     each account, pastes the resulting code back. */
-  /* sync-key auth until the Management dashboard view ships — only Apps Script and the build
-     session hold the key, and the links contain nothing secret (client_id is public in OAuth). */
+  /* eBay consent flow — now SELF-SERVICE on the Account health screen (mgmt-gated): Hasib
+     opens each link, clicks Allow while signed into that selling account, and pastes the code
+     back. All links use the ZAREENLT application with the EXTENDED scope list (marketing,
+     analytics, finances) — a fresh consent under one app is simpler than five RuNames, and
+     nothing in his sheet automations is touched: their own apps and tokens stay as they are. */
   ebayConsentLinks: {
-    auth: 'sync', fn: async (p, ctx) => {
+    auth: 'mgmt', fn: async (p, ctx) => {
       const names = await ctx.env.DB.prepare('SELECT name FROM accounts WHERE api_enabled = 1').all();
       const out = [];
       for (const r of (names.results || [])) out.push({ account: r.name, url: await ebayConsentUrl(ctx.env, r.name) });
-      return { links: out };
+      return { links: out,
+        note: 'Open a link SIGNED INTO that selling account, click Agree, then copy the code from the resulting page (or its URL, code=…) and paste it here. This adds campaign, standards and fee access — nothing existing breaks.' };
     },
   },
   /* Reuse path: Hasib's existing sheet-automation projects already hold per-account refresh
@@ -1851,12 +1904,29 @@ const ROUTES = {
   },
 
   ebaySubmitConsent: {
-    auth: 'sync', fn: async (p, ctx) => {
-      const account = String(p.account || ''), code = String(p.code || '');
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const account = String(p.account || ''), code = String(p.code || '').trim();
       if (!account || !code) throw new Error('SAY: account and code are both needed');
-      const t = await ebayExchangeCode(ctx.env, code);
-      await ctx.env.DB.prepare('UPDATE accounts SET oauth_ref = ?2 WHERE name = ?1').bind(account, String(t.refresh_token)).run();
-      return { account, connected: true, expires_days: Math.round(Number(t.refresh_token_expires_in || 0) / 86400) };
+      // a pasted URL is fine too — the code parameter is what matters
+      const m = code.match(/[?&]code=([^&\s]+)/);
+      const clean = decodeURIComponent(m ? m[1] : code);
+      const t = await ebayExchangeCode(ctx.env, clean);
+      // the new token was minted by the GLOBAL app — clear the per-account keyset so the
+      // fallback in ebayCreds() applies; the sheet automations' own apps are untouched
+      await ctx.env.DB.prepare("UPDATE accounts SET oauth_ref = ?2, app_id = '', cert_id = '' WHERE name = ?1")
+        .bind(account, String(t.refresh_token)).run();
+      await ctx.env.HOT.delete('ebaytok:' + account);
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'EBAY_RECONSENT', ?2, '', 'extended scopes', datetime('now'))"
+      ).bind(ctx.email, account).run();
+      // prove it immediately, on the scope that was missing before
+      let marketing = 'not checked';
+      try {
+        const tok = await ebayAccessToken(ctx.env, account);
+        const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign?limit=1', { headers: { authorization: 'Bearer ' + tok } });
+        marketing = r.ok ? 'campaigns readable ✓' : 'campaigns still refused (' + r.status + ')';
+      } catch (e) { marketing = String(e && e.message || e).slice(0, 120); }
+      return { account, connected: true, expires_days: Math.round(Number(t.refresh_token_expires_in || 0) / 86400), marketing };
     },
   },
 };
