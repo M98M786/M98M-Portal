@@ -107,7 +107,9 @@
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
-          '<button class="minibtn" id="alxRefresh">Refresh</button><span class="alx-count" id="alxCount"></span></div>' +
+          '<button class="minibtn" id="alxRefresh">Refresh</button>' +
+          '<button class="minibtn" id="alxExport">⬇ Export CSV</button>' +
+          '<span class="alx-count" id="alxCount"></span></div>' +
           '<div id="alxBody"><div class="spinner"></div></div>' +
         '</div></div>';
     },
@@ -125,6 +127,24 @@
       if (sel) { sel.onchange = function () { ALX.account = axStr(this.value); alxLoad(); }; }
       var rf = $('alxRefresh');
       if (rf) { rf.onclick = alxLoad; }
+      var ex = $('alxExport');
+      if (ex) {
+        ex.onclick = function () {
+          // export exactly what the server sent this role — the strip law rides along
+          var rows = ALX.rows || [];
+          if (!rows.length) { toast('Nothing to export for this filter.'); return; }
+          var cols = ['item_id', 'account', 'title', 'price', 'qty', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'source'];
+          cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
+          var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+          var out = cols.join(',') + '\n';
+          rows.forEach(function (r) { out += cols.map(function (c) { return esc1(r[c]); }).join(',') + '\n'; });
+          var a = document.createElement('a');
+          a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(out);
+          a.download = 'active-listings-' + new Date().toISOString().slice(0, 10) + '.csv';
+          document.body.appendChild(a); a.click(); a.remove();
+          toast(rows.length + ' listing(s) exported.');
+        };
+      }
       alxLoad();
     }
   };

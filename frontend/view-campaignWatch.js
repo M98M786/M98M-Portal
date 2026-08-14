@@ -42,6 +42,19 @@
 
   var CW = { account: '', data: null };
 
+  /* Zain's pull: everything this screen knows, as a CSV he can open in Sheets. The data has
+   * already been role-stripped server-side — the export can never carry more than the screen. */
+  function cwCsv(rows, cols, name) {
+    var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var out = cols.join(',') + '\n';
+    rows.forEach(function (r) { out += cols.map(function (c) { return esc1(r[c]); }).join(',') + '\n'; });
+    var a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(out);
+    a.download = name + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast(rows.length + ' row(s) exported.');
+  }
+
   function cwFetch() {
     return api('campaignWatch', {}).then(function (d) {
       if (typeof cacheWrite === 'function') { cacheWrite('campaignWatch', {}, d); }
@@ -158,7 +171,11 @@
           '<span class="sub">Live from eBay every 5 minutes · duplicate-ACTIVE items caught automatically · external changes carry no name</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="cw-bar"><select class="alx-sel" id="cwAcc"><option value="">All accounts</option></select>' +
-          '<button class="minibtn" id="cwRefresh">Refresh</button><span class="cw-count" id="cwCount"></span></div>' +
+          '<button class="minibtn" id="cwRefresh">Refresh</button>' +
+          '<button class="minibtn" id="cwExpCamps">⬇ Campaigns CSV</button>' +
+          '<button class="minibtn" id="cwExpDups">⬇ Duplicates CSV</button>' +
+          '<button class="minibtn" id="cwExpCpq">⬇ CPQ CSV</button>' +
+          '<span class="cw-count" id="cwCount"></span></div>' +
           '<div id="cwBody"><div class="spinner"></div></div>' +
         '</div></div>';
     },
@@ -176,6 +193,13 @@
       if (sel) { sel.onchange = function () { CW.account = cwStr(this.value); if (CW.data) { cwPaint(CW.data); } }; }
       var rf = $('cwRefresh');
       if (rf) { rf.onclick = cwLoad; }
+      var f = function (list) { return (list || []).filter(function (r) { return !CW.account || r.account === CW.account; }); };
+      var e1 = $('cwExpCamps');
+      if (e1) { e1.onclick = function () { cwCsv(f(CW.data && CW.data.campaigns), ['account', 'campaign_id', 'name', 'status', 'budget', 'items', 'synced_at'], 'campaigns'); }; }
+      var e2 = $('cwExpDups');
+      if (e2) { e2.onclick = function () { cwCsv(f(CW.data && CW.data.duplicates), ['account', 'listing_id', 'campaign_id', 'name', 'title'], 'duplicate-active'); }; }
+      var e3 = $('cwExpCpq');
+      if (e3) { e3.onclick = function () { cwCsv(f(CW.data && CW.data.cpq), ['account', 'item_id', 'title', 'spend', 'clicks', 'units', 'cpq'], 'cpq-14d'); }; }
       var body = $('cwBody');
       if (body) {
         body.onclick = function (ev) {
