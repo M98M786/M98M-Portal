@@ -204,6 +204,7 @@
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
           '<div class="bd" id="rcWhy"><div class="spinner"></div></div>' +
         '</div>' +
+        '<div id="rcEngine"></div>' +
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
@@ -229,6 +230,7 @@
         '<span>The Order Rechecking workbook is registered in CONNECTIONS — until it is, every stage reads “not connected yet”.</span></div></div></div>';
       rcWire(box);
       rcCount(rcOpenCount());
+      rcEngineFeed();
     });
     if (!rq.painted) { box.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
     rq.done.catch(function (e) {
@@ -238,6 +240,55 @@
       var r = $('rcRetry');
       if (r) { r.onclick = function () { rcLoad(); }; }
     });
+  }
+
+  /** Engine eyes (§3 recheckFeed): the concrete orders behind each checkpoint, live from eBay —
+   * which orders sit on each reference date and which STILL lack tracking. Best-effort: the
+   * sheet flow above never waits on this, and an Engine outage just leaves the card out. */
+  function rcEngineFeed() {
+    var host = $('rcEngine');
+    if (!host) { return; }
+    var offs = {};
+    RC_STAGES.forEach(function (s) {
+      if (s.config_offset_days !== undefined) { offs[rcStr(s.stage)] = rcNum(s.config_offset_days); }
+    });
+    var payload = { date: RC_DATE || rcStr($('rcDate') && $('rcDate').value) };
+    ['china', 'uk1', 'uk2', 'uk3'].forEach(function (k) { if (offs[k] !== undefined) { payload[k] = offs[k]; } });
+    api('recheckFeed', payload).then(function (d) {
+      var stages = (d && d.stages) || [];
+      var names = { china: 'CHINA', uk1: 'UK First Check', uk2: 'UK Second Check', uk3: 'UK 3rd Check' };
+      var rows = '';
+      stages.forEach(function (s) {
+        var accs = s.accounts || [];
+        var total = 0, bad = 0, focus = [];
+        accs.forEach(function (a) {
+          total += rcNum(a.orders); bad += rcNum(a.no_tracking);
+          (a.focus || []).forEach(function (f) { focus.push({ acc: a.account, f: f }); });
+        });
+        var chips = accs.map(function (a) {
+          return '<span class="pill ' + (rcNum(a.no_tracking) ? 'rc-p-warn' : 'rc-p-ok') + '">' + esc(rcStr(a.account)) + ' ' + rcNum(a.orders) +
+            (rcNum(a.no_tracking) ? ' · ' + rcNum(a.no_tracking) + ' no tracking' : '') + '</span>';
+        }).join(' ');
+        var det = '';
+        if (focus.length) {
+          det = '<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--bad)">' +
+            focus.length + ' order(s) still without tracking on eBay — the focus list</summary><div style="margin-top:6px">';
+          focus.slice(0, 40).forEach(function (x) {
+            det += '<div style="padding:4px 0;border-bottom:1px solid var(--gold-line);font-size:12px">' +
+              '<span class="mono">' + esc(rcStr(x.f.order_id)) + '</span> · ' + esc(rcStr(x.acc)) + ' · ' +
+              esc(rcStr(x.f.title) || rcStr(x.f.item_id)) + ' · <b>' + esc(rcStr(x.f.status) || 'no status') + '</b></div>';
+          });
+          det += '</div></details>';
+        }
+        rows += '<div class="tl-row" style="display:block;padding:8px 0">' +
+          '<div><span class="k">' + esc(names[s.stage] || s.stage) + '</span> orders from <b class="num">' + esc(rcNice(s.reference_date)) + '</b>' +
+          ' — ' + total + ' order(s)' + (bad ? ', <b style="color:var(--bad)">' + bad + ' without tracking</b>' : total ? ', all carry tracking' : '') + '</div>' +
+          (chips ? '<div style="margin-top:5px">' + chips + '</div>' : '') + det + '</div>';
+      });
+      host.innerHTML = '<div class="card enter d2" style="margin-top:16px"><div class="hd">Engine eyes — the real orders behind each checkpoint ' +
+        '<span class="hint">live from eBay · refreshed with each sync</span></div><div class="bd">' + rows +
+        '<div class="rc-sub" style="margin-top:6px;font-size:11px">' + esc(rcStr(d && d.note)) + '</div></div></div>';
+    }).catch(function () { host.innerHTML = ''; });
   }
 
   /** A stage still waiting on this user: connected, today's row exists, it is theirs, nothing filed. */

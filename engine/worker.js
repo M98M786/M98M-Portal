@@ -333,7 +333,9 @@ async function listingSync(env) {
 async function orderSync(env) {
   await perAccount(env, 'orderSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
-    const since = new Date(Date.now() - 3 * 86400000).toISOString();
+    // 6 days, not 3: the CHINA recheck looks at day-4 orders, and their fulfillment status must
+    // still be refreshing when that checkpoint reads them (2-3 pages per account at 100/page).
+    const since = new Date(Date.now() - 6 * 86400000).toISOString();
     let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
       encodeURIComponent('creationdate:[' + since + '..]');
     let n = 0;
@@ -1081,6 +1083,70 @@ const ROUTES = {
         "SELECT account, last_ok, last_error FROM sync_state WHERE job = 'adsSync' AND account != ''"
       ).all();
       return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [] };
+    },
+  },
+
+  /* Recheck, with Engine eyes (§3 recheckFeed): the sheet flow stays the human record — this
+     serves the CONCRETE order list behind each checkpoint from live API data: which orders sit
+     on the reference date, and which of them STILL have no tracking on eBay (fulfillment
+     status). At the CHINA check that is the "focus these" list nobody had before. Offsets
+     arrive from the caller (the screen already knows the CONFIG-tuned values); defaults are
+     the spec's 4/2/1/3. Order lists carry no profit, so any signed-in user may read them. */
+  recheckFeed: {
+    auth: 'any', fn: async (p, ctx) => {
+      const offsets = {
+        china: Math.max(0, Number(p.china) || 4),
+        uk1: Math.max(0, Number(p.uk1) || 2),
+        uk2: Math.max(0, Number(p.uk2) || 1),
+        uk3: Math.max(0, Number(p.uk3) || 3),
+      };
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? String(p.date) : ukDate('');
+      const maxBack = Math.max(offsets.china, offsets.uk1, offsets.uk2, offsets.uk3) + 2;
+      const since = new Date(new Date(day + 'T12:00:00Z').getTime() - maxBack * 86400000).toISOString();
+      const ors = await ctx.env.DB.prepare(
+        'SELECT order_id, account, item_id, sold, qty, status, created_at FROM orders WHERE created_at >= ?1'
+      ).bind(since).all();
+      const byDate = {};
+      for (const o of (ors.results || [])) {
+        const d = ukDate(o.created_at);
+        (byDate[d] = byDate[d] || []).push(o);
+      }
+      const ids = [...new Set((ors.results || []).map(o => String(o.item_id || '')).filter(Boolean))];
+      const titles = {};
+      for (let i = 0; i < ids.length; i += 90) {
+        const chunk = ids.slice(i, i + 90);
+        const rs = await ctx.env.DB.prepare(
+          'SELECT item_id, title FROM items_api WHERE item_id IN (' + chunk.map(() => '?').join(',') + ')'
+        ).bind(...chunk).all();
+        for (const r of (rs.results || [])) titles[r.item_id] = r.title;
+      }
+      const shift = (ymd, days) => {
+        const d = new Date(ymd + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() - days);
+        return d.toISOString().slice(0, 10);
+      };
+      const stages = [];
+      for (const key of ['china', 'uk1', 'uk2', 'uk3']) {
+        const ref = shift(day, offsets[key]);
+        const list = byDate[ref] || [];
+        const accounts = {};
+        for (const o of list) {
+          const a = (accounts[o.account] = accounts[o.account] || { account: o.account, orders: 0, no_tracking: 0, focus: [] });
+          a.orders++;
+          const fulfilled = /FULFILLED/i.test(String(o.status || ''));
+          if (!fulfilled) {
+            a.no_tracking++;
+            if (a.focus.length < 25) {
+              a.focus.push({ order_id: o.order_id, item_id: o.item_id, title: String(titles[o.item_id] || '').slice(0, 80),
+                sold: o.sold, status: o.status });
+            }
+          }
+        }
+        stages.push({ stage: key, offset_days: offsets[key], reference_date: ref,
+          accounts: Object.values(accounts).sort((x, y) => x.account < y.account ? -1 : 1) });
+      }
+      return { date: day, stages,
+        note: 'API-side view: an order counts as "no tracking" while eBay\'s fulfillment status is not FULFILLED. Dates are UK business days (the sheet clock is PKT — a midnight-hour order can sit one day apart).' };
     },
   },
 
