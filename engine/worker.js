@@ -72,8 +72,8 @@ export default {
   async scheduled(event, env, ctx) {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync],
-      '*/15 * * * *': [listingSync, adsItems],
-      '0 * * * *': [financeSync, csSync, adsReportPoll],
+      '*/15 * * * *': [listingSync, adsItems, autoMsgSend],
+      '0 * * * *': [financeSync, csSync, adsReportPoll, autoMsgScan],
       '0 2 * * *': [rollups, backup, adsReportKick],
     };
     const fns = jobs[event.cron] || [];
@@ -750,6 +750,138 @@ async function csSync(env) {
   });
 }
 
+/* ---------------- Phase D2: auto-messages (§9-D) — SHADOW until AUTOMSG_LIVE='true' ---------
+   The CS agent's controls are the product: per account, per trigger — on/off, template, delay.
+   Nothing is hardcoded and nothing sends unless that account's row says enabled AND the global
+   gate is armed. Detection reads data the Engine already holds (orders, cases, messages) plus
+   one GetFeedback page per account — and only when a feedback trigger is actually enabled, so
+   a fully-disabled account costs zero fetches. Every queued message is deduped by its event ref
+   (a feedback ID, a return ID…) — an event queues its message once, ever. Templates speak with
+   {{buyer}}, {{item}}, {{order}}. 'arrived' appears in the controls but detection waits on
+   delivery events — the desk says so instead of pretending. */
+const AUTOMSG_TRIGGERS = ['shipped', 'arrived', 'return_opened', 'neg_fb', 'pos_fb', 'buyer_query'];
+
+function renderTemplate(tpl, vars) {
+  return String(tpl || '').replace(/\{\{(\w+)\}\}/g, (m, k) => String(vars[k] || '')).slice(0, 900);
+}
+
+async function autoMsgScan(env) {
+  await perAccount(env, 'autoMsgScan', async (acct) => {
+    const cfgRs = await env.DB.prepare('SELECT trigger_kind, template, delay_min FROM auto_msgs WHERE account = ?1 AND enabled = 1').bind(acct).all();
+    const cfg = {};
+    for (const r of (cfgRs.results || [])) cfg[r.trigger_kind] = r;
+    if (!Object.keys(cfg).length) return;
+
+    const queue = async (kind, ref, vars) => {
+      const c = cfg[kind];
+      if (!c) return;
+      const body = renderTemplate(c.template, vars);
+      if (!body) return;
+      await env.DB.prepare(
+        'INSERT OR IGNORE INTO automsg_queue (account, trigger_kind, ref, buyer, order_id, item_id, body, due_at, status, detail, created_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now', '+' || ?8 || ' minutes'), 'QUEUED', '', datetime('now'))"
+      ).bind(acct, kind, ref, String(vars.buyer || ''), String(vars.order || ''), String(vars.item_id || ''),
+        body, String(Math.max(0, Number(c.delay_min) || 0))).run();
+    };
+
+    if (cfg.shipped) {
+      const rs = await env.DB.prepare(
+        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND status LIKE '%FULFILLED%' AND created_at >= datetime('now', '-3 day')"
+      ).bind(acct).all();
+      for (const o of (rs.results || [])) {
+        await queue('shipped', 'ship:' + o.order_id, { buyer: o.buyer, order: o.order_id, item_id: o.item_id });
+      }
+    }
+    if (cfg.return_opened) {
+      const rs = await env.DB.prepare(
+        "SELECT case_id, buyer, item_id, order_id FROM cases WHERE account = ?1 AND kind = 'RETURN' AND opened_at >= datetime('now', '-3 day')"
+      ).bind(acct).all();
+      for (const c of (rs.results || [])) {
+        await queue('return_opened', 'ret:' + c.case_id, { buyer: c.buyer, order: c.order_id, item_id: c.item_id });
+      }
+    }
+    if (cfg.buyer_query) {
+      const rs = await env.DB.prepare(
+        "SELECT msg_id, buyer FROM buyer_messages WHERE account = ?1 AND answered = 0 AND received_at >= datetime('now', '-3 day')"
+      ).bind(acct).all();
+      for (const m of (rs.results || [])) {
+        await queue('buyer_query', 'q:' + m.msg_id, { buyer: m.buyer, order: '', item_id: '' });
+      }
+    }
+    if (cfg.neg_fb || cfg.pos_fb) {
+      const tok = await ebayAccessToken(env, acct);
+      const r = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetFeedback',
+          'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+        body: '<?xml version="1.0" encoding="utf-8"?><GetFeedbackRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+          '<DetailLevel>ReturnAll</DetailLevel><Pagination><EntriesPerPage>50</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetFeedbackRequest>',
+      });
+      const xml = await r.text();
+      if (r.ok && xml.indexOf('<Ack>Failure</Ack>') < 0) {
+        const fbCut = Date.now() - 3 * 86400000;
+        for (const fb of (xml.match(/<FeedbackDetail>[\s\S]*?<\/FeedbackDetail>/g) || [])) {
+          if (xmlTag(fb, 'Role') !== 'Seller') continue;             // feedback we RECEIVED
+          // page 1 reaches back months — without this cut, first-enable would thank OLD buyers
+          const when = new Date(xmlTag(fb, 'CommentTime')).getTime();
+          if (isNaN(when) || when < fbCut) continue;
+          const kind = xmlTag(fb, 'CommentType') === 'Negative' ? 'neg_fb'
+            : xmlTag(fb, 'CommentType') === 'Positive' ? 'pos_fb' : '';
+          if (!kind || !cfg[kind]) continue;
+          await queue(kind, 'fb:' + xmlTag(fb, 'FeedbackID'), {
+            buyer: xmlTag(fb, 'CommentingUser'), order: '', item_id: xmlTag(fb, 'ItemID'),
+          });
+        }
+      }
+    }
+  });
+}
+
+/* Sender: paced, gated, honest. SHADOW records exactly what would go; LIVE picks the channel by
+   trigger — a return message rides Post-Order's return thread, everything else the member
+   message. eBay's refusal text lands in `detail` verbatim, so a wrong assumption about a write
+   endpoint surfaces as data, not silence. */
+async function autoMsgSend(env) {
+  const due = await env.DB.prepare(
+    "SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, body FROM automsg_queue WHERE status = 'QUEUED' AND due_at <= datetime('now') ORDER BY id LIMIT 5"
+  ).all();
+  for (const q of (due.results || [])) {
+    if (String(env.AUTOMSG_LIVE) !== 'true') {
+      await env.DB.prepare("UPDATE automsg_queue SET status = 'SHADOW', detail = 'recorded, not sent — AUTOMSG_LIVE is off' WHERE id = ?1").bind(q.id).run();
+      continue;
+    }
+    try {
+      const tok = await ebayAccessToken(env, q.account);
+      let ok = false, detail = '';
+      if (q.trigger_kind === 'return_opened' && q.ref.indexOf('ret:RETURN:') === 0) {
+        const rid = q.ref.slice('ret:RETURN:'.length);
+        const r = await fetch('https://api.ebay.com/post-order/v2/return/' + encodeURIComponent(rid) + '/send_message', {
+          method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
+          body: JSON.stringify({ message: { content: q.body } }) });
+        ok = r.ok; detail = ok ? 'sent via return thread' : (r.status + ': ' + (await r.text()).slice(0, 200));
+      } else {
+        const xml = '<?xml version="1.0" encoding="utf-8"?><AddMemberMessageAAQToPartnerRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+          '<ItemID>' + q.item_id + '</ItemID><MemberMessage><Subject>About your order</Subject><Body>' +
+          String(q.body).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</Body><QuestionType>General</QuestionType>' +
+          '<RecipientID>' + q.buyer + '</RecipientID></MemberMessage></AddMemberMessageAAQToPartnerRequest>';
+        const r = await fetch('https://api.ebay.com/ws/api.dll', {
+          method: 'POST',
+          headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'AddMemberMessageAAQToPartner',
+            'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+          body: xml });
+        const rx = await r.text();
+        ok = r.ok && rx.indexOf('<Ack>Failure</Ack>') < 0;
+        detail = ok ? 'sent as member message' : (xmlTag(rx, 'LongMessage') || ('HTTP ' + r.status)).slice(0, 200);
+      }
+      await env.DB.prepare('UPDATE automsg_queue SET status = ?2, detail = ?3 WHERE id = ?1')
+        .bind(q.id, ok ? 'SENT' : 'FAIL', detail).run();
+    } catch (e) {
+      await env.DB.prepare("UPDATE automsg_queue SET status = 'FAIL', detail = ?2 WHERE id = ?1")
+        .bind(q.id, String(e && e.message || e).slice(0, 200)).run();
+    }
+  }
+}
+
 /* Listing violations (§9-D: instant alert with eBay's exact text) — every 5 minutes, one cheap
    summary read per account; detail reads happen only when the summary says something exists,
    which for these accounts is the exception, not the rule. */
@@ -1243,10 +1375,58 @@ const ROUTES = {
       ).all();
       const std = await ctx.env.DB.prepare('SELECT account, json, synced_at FROM cs_standards').all();
       const viol = await ctx.env.DB.prepare(
-        'SELECT account, item_id, type, text, at FROM violations ORDER BY at DESC LIMIT 50'
+        'SELECT id, account, item_id, type, text, at, ack_by FROM violations ORDER BY at DESC LIMIT 50'
       ).all();
       return { open: open.results || [], counts: counts.results || [], messages: msgs.results || [],
         standards: std.results || [], violations: viol.results || [] };
+    },
+  },
+
+  /* Auto-message controls (§9-D): the CS agent owns the switchboard — per account, per
+     trigger: on/off, template, delay. Every change lands in the audit trail with a name. */
+  autoMsgConfig: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const accs = await ctx.env.DB.prepare('SELECT name FROM accounts ORDER BY name').all();
+      const rows = await ctx.env.DB.prepare('SELECT account, trigger_kind, template, delay_min, enabled FROM auto_msgs').all();
+      const tail = await ctx.env.DB.prepare(
+        'SELECT account, trigger_kind, buyer, body, due_at, status, detail FROM automsg_queue ORDER BY id DESC LIMIT 15'
+      ).all();
+      return { accounts: (accs.results || []).map(a => a.name), triggers: AUTOMSG_TRIGGERS,
+        rows: rows.results || [], queue: tail.results || [],
+        live: String(ctx.env.AUTOMSG_LIVE) === 'true',
+        note: "'arrived' waits on delivery events — its switch saves but nothing fires yet" };
+    },
+  },
+
+  autoMsgSet: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || ''), kind = String(p.trigger_kind || '');
+      if (!account || AUTOMSG_TRIGGERS.indexOf(kind) < 0) throw new Error('SAY: account and a known trigger are needed');
+      const enabled = p.enabled ? 1 : 0;
+      const tpl = String(p.template || '').slice(0, 900);
+      const delay = Math.max(0, Math.min(1440, Number(p.delay_min) || 0));
+      if (enabled && !tpl.trim()) throw new Error('SAY: an enabled trigger needs a template');
+      await ctx.env.DB.prepare(
+        'INSERT INTO auto_msgs (account, trigger_kind, template, delay_min, enabled) VALUES (?1, ?2, ?3, ?4, ?5) ' +
+        'ON CONFLICT(account, trigger_kind) DO UPDATE SET template = ?3, delay_min = ?4, enabled = ?5'
+      ).bind(account, kind, tpl, delay, enabled).run();
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'AUTOMSG_SET', ?2, '', ?3, datetime('now'))"
+      ).bind(ctx.email, account + ':' + kind, (enabled ? 'ON' : 'OFF') + ' delay ' + delay + 'm').run();
+      return { saved: true, account, trigger_kind: kind, enabled: !!enabled };
+    },
+  },
+
+  /* Violations carry an accountability field — §11.3's spirit: someone must SEE it. */
+  ackViolation: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const id = Number(p.id) || 0;
+      if (!id) throw new Error('SAY: which violation?');
+      await ctx.env.DB.prepare("UPDATE violations SET ack_by = ?2 WHERE id = ?1 AND ack_by = ''").bind(id, ctx.email).run();
+      return { acked: true };
     },
   },
 
@@ -1460,7 +1640,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
