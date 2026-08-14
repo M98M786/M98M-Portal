@@ -282,7 +282,7 @@
     label: 'Today\'s orders',
     icon: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
     roles: OD_VIEW_ROLES,
-    order: 26,
+    order: 3,
     badge: function () { return (STATE.counts && STATE.counts.orders) || 0; },
     render: function () {
       OD_DATE = OD_DATE || odTodayPkt();
@@ -856,7 +856,7 @@
     label: 'Dispatch',
     icon: '<path d="M1 3h13v13H1z"/><path d="M14 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/>',
     roles: OD_DISPATCH_ROLES,
-    order: 27,
+    order: 4,
     prefetch: function () {
       var payload = { month: odTodayPkt().slice(0, 7) };
       return api('dispatchDashboard', payload).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('dispatchDashboard', payload, d); } });

@@ -189,7 +189,7 @@
     label: 'Order rechecking',
     icon: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/><path d="m9 12 2 2 4-4"/>',
     roles: RC_ROLES,
-    order: 28,
+    order: 11,
     prefetch: function () {
       return api('recheckQueue', {}).then(function (d) { if (typeof cacheWrite === 'function') { cacheWrite('recheckQueue', {}, d); } });
     },
