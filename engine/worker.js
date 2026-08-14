@@ -71,7 +71,7 @@ export default {
      flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
   async scheduled(event, env, ctx) {
     const jobs = {
-      '*/5 * * * *': [orderSync, adsSync],
+      '*/5 * * * *': [orderSync, adsSync, violationsSync],
       '*/15 * * * *': [listingSync, adsItems],
       '0 * * * *': [financeSync, csSync, adsReportPoll],
       '0 2 * * *': [rollups, backup, adsReportKick],
@@ -650,7 +650,141 @@ async function dupSweep(env, acct) {
 
 async function financeSync(env) { /* BLOCKED on scope: existing grants lack sell.finances
   (probed 403, 14 Aug). Re-consent with the extended EBAY_SCOPES unlocks it. */ }
-async function csSync(env) { /* Phase D: Post-Order cases, buyer messages, violations. */ }
+
+/* ---------------- Phase D: the CS feeds — probed live 14 Aug, shapes are real -------------
+   Post-Order search endpoints answer the EXISTING tokens with 'IAF <token>' auth: cases
+   (members[].caseId/caseStatusEnum/respondByDate), returns (members[].returnId/state/
+   creationInfo.reason/comments.content), inquiries = INR (members[].inquiryId/
+   inquiryStatusEnum). Analytics seller_standards_profile answers Bearer. Buyer messages ride
+   Trading GetMyMessages headers. A NEW case/return/inquiry rings CS + management within the
+   hour, with the respond-by date in the message — the date is the whole game in CS. */
+async function csSync(env) {
+  await perAccount(env, 'csSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const feeds = [
+      { kind: 'CASE', url: 'https://api.ebay.com/post-order/v2/casemanagement/search?limit=100&sort=-caselastmodifieddate',
+        list: d => d.members || [], id: m => String(m.caseId || ''), status: m => String(m.caseStatusEnum || ''),
+        opened: m => String((m.creationDate || {}).value || ''), buyer: m => String(m.buyer || ''),
+        item: m => String(m.itemId || ''), reason: m => 'claim £' + String(((m.claimAmount || {}).value) || '?'),
+        due: m => String((m.respondByDate || {}).value || ''), openish: s => !/CLOSED|CS_CLOSED/i.test(s) },
+      { kind: 'RETURN', url: 'https://api.ebay.com/post-order/v2/return/search?limit=100&sort=-creationdate',
+        list: d => d.members || [], id: m => String(m.returnId || ''), status: m => String(m.state || m.status || ''),
+        opened: m => String((((m.creationInfo || {}).creationDate || {}).value) || ''), buyer: m => String(m.buyerLoginName || ''),
+        item: m => String((((m.creationInfo || {}).item || {}).itemId) || ''),
+        reason: m => String((m.creationInfo || {}).reason || '') + (((m.creationInfo || {}).comments || {}).content ? ' — "' + String(m.creationInfo.comments.content).slice(0, 120) + '"' : ''),
+        due: m => '', openish: s => !/CLOSED/i.test(s) },
+      { kind: 'INR', url: 'https://api.ebay.com/post-order/v2/inquiry/search?limit=100&sort=-inquirylastmodifieddate',
+        list: d => d.members || [], id: m => String(m.inquiryId || ''), status: m => String(m.inquiryStatusEnum || ''),
+        opened: m => String((m.creationDate || {}).value || ''), buyer: m => String(m.buyer || ''),
+        item: m => String(m.itemId || ''), reason: m => 'item not received · £' + String(((m.claimAmount || {}).value) || '?'),
+        due: m => String((m.respondByDate || {}).value || ''), openish: s => !/CLOSED/i.test(s) },
+    ];
+
+    const known = {};
+    const kr = await env.DB.prepare('SELECT case_id FROM cases WHERE account = ?1').bind(acct).all();
+    for (const r of (kr.results || [])) known[r.case_id] = true;
+
+    for (const f of feeds) {
+      const r = await fetch(f.url, { headers: { authorization: 'IAF ' + tok } });
+      if (!r.ok) throw new Error(acct + ' ' + f.kind + ' ' + r.status + ': ' + (await r.text()).slice(0, 120));
+      const d = await r.json();
+      for (const m of f.list(d)) {
+        const id = f.id(m);
+        if (!id) continue;
+        const status = f.status(m);
+        const isNew = !known[f.kind + ':' + id] && !known[id];
+        await env.DB.prepare(
+          'INSERT INTO cases (case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, closed_at, payload_json) ' +
+          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '', ?10) " +
+          'ON CONFLICT(case_id) DO UPDATE SET status = ?8, payload_json = ?10'
+        ).bind(f.kind + ':' + id, acct, f.kind, String(m.orderId || ''), f.item(m), f.buyer(m),
+          f.reason(m).slice(0, 300), status, f.opened(m), JSON.stringify(m).slice(0, 4000)).run();
+        if (isNew && f.openish(status)) {
+          const label = f.kind === 'CASE' ? 'eBay case' : f.kind === 'RETURN' ? 'Return opened' : 'Item-not-received inquiry';
+          const due = f.due(m);
+          const msg = '🔴 ' + label + ' · ' + acct + ' · item ' + f.item(m) + ' · buyer ' + f.buyer(m) +
+            ' · ' + f.reason(m).slice(0, 140) + (due ? ' · RESPOND BY ' + due.slice(0, 10) : '') +
+            ' — open the CS desk.';
+          await queueNotify(env, 'management', label, msg, 'engine:cs:' + acct + ':' + f.kind + ':' + id);
+        }
+      }
+    }
+
+    // buyer messages RECEIVED (headers only — subject + sender is what the desk lists)
+    const mb = '<?xml version="1.0" encoding="utf-8"?>' +
+      '<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnHeaders</DetailLevel>' +
+      '<Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetMyMessagesRequest>';
+    const mr = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetMyMessages',
+        'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+      body: mb,
+    });
+    const mx = await mr.text();
+    if (mr.ok && mx.indexOf('<Ack>Failure</Ack>') < 0) {
+      const msgs = mx.match(/<Message>[\s\S]*?<\/Message>/g) || [];
+      const stmts = [];
+      for (const mm of msgs) {
+        const id = xmlTag(mm, 'MessageID');
+        if (!id) continue;
+        stmts.push(env.DB.prepare(
+          'INSERT INTO buyer_messages (msg_id, account, buyer, text, received_at, answered) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
+          'ON CONFLICT(msg_id) DO UPDATE SET answered = ?6'
+        ).bind(id, acct, xmlTag(mm, 'Sender'), xmlTag(mm, 'Subject').slice(0, 300),
+          xmlTag(mm, 'ReceiveDate'), /<Read>true<\/Read>/.test(mm) ? 1 : 0));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    }
+
+    // seller standards — the account-health truth eBay itself judges by
+    const sr = await fetch('https://api.ebay.com/sell/analytics/v1/seller_standards_profile', {
+      headers: { authorization: 'Bearer ' + tok } });
+    if (sr.ok) {
+      const sd = await sr.json();
+      const uk = (sd.standardsProfiles || []).filter(x => String(x.program || '').indexOf('UK') >= 0);
+      await env.DB.prepare(
+        "INSERT INTO cs_standards (account, json, synced_at) VALUES (?1, ?2, datetime('now')) " +
+        "ON CONFLICT(account) DO UPDATE SET json = ?2, synced_at = datetime('now')"
+      ).bind(acct, JSON.stringify(uk.length ? uk : (sd.standardsProfiles || [])).slice(0, 8000)).run();
+    }
+  });
+}
+
+/* Listing violations (§9-D: instant alert with eBay's exact text) — every 5 minutes, one cheap
+   summary read per account; detail reads happen only when the summary says something exists,
+   which for these accounts is the exception, not the rule. */
+const VIOLATION_TYPES = ['PRODUCT_ADOPTION', 'RETURNS_POLICY', 'HTTPS', 'OUTSIDE_EBAY_BUYING_AND_SELLING', 'ASPECTS_ADOPTION'];
+async function violationsSync(env) {
+  await perAccount(env, 'violationsSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const sr = await fetch('https://api.ebay.com/sell/compliance/v1/listing_violation_summary', {
+      headers: { authorization: 'Bearer ' + tok, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' } });
+    // Probed live: a seller with NO violations on file gets 404 (empty body), not the documented
+    // 204 — all five healthy accounts answer 404 identically while every other API answers 200.
+    if (sr.status === 204 || sr.status === 404) return;
+    if (!sr.ok) throw new Error(acct + ' violation summary ' + sr.status + ': ' + (await sr.text()).slice(0, 120));
+    const sum = await sr.json();
+    for (const v of (sum.violationSummaries || [])) {
+      if (!Number(v.listingCount)) continue;
+      const typ = String(v.complianceType || '');
+      const dr = await fetch('https://api.ebay.com/sell/compliance/v1/listing_violation?compliance_type=' + encodeURIComponent(typ) + '&limit=50', {
+        headers: { authorization: 'Bearer ' + tok, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' } });
+      if (!dr.ok) continue;
+      const det = await dr.json();
+      for (const lv of (det.listingViolations || [])) {
+        const item = String(lv.listingId || '');
+        const texts = (lv.violations || []).map(x => String(x.message || x.reasonCode || '')).join(' | ').slice(0, 500);
+        const seen = await env.DB.prepare('SELECT id FROM violations WHERE account = ?1 AND item_id = ?2 AND type = ?3').bind(acct, item, typ).first();
+        if (seen) continue;
+        await env.DB.prepare(
+          "INSERT INTO violations (account, item_id, type, text, at, ack_by) VALUES (?1, ?2, ?3, ?4, datetime('now'), '')"
+        ).bind(acct, item, typ, texts).run();
+        const msg = '🔴 Listing violation · ' + acct + ' · item ' + item + ' · ' + typ + ' — eBay says: "' + texts.slice(0, 200) + '"';
+        await queueNotify(env, 'management', 'Listing violation', msg, 'engine:viol:' + acct + ':' + item + ':' + typ);
+      }
+    }
+  });
+}
 
 /* ---------------- ads spend (real CPQ) — eBay's report API is asynchronous ----------------
    Nightly: ask each account for yesterday's listing-level performance report, choosing metric
@@ -1086,6 +1220,36 @@ const ROUTES = {
     },
   },
 
+  /* The CS live desk in one read (§9-D): open cases / returns / INR sorted by respond-by,
+     30/90-day open-closed counts, unanswered received messages, eBay's own seller-standards
+     verdict per account, and any listing violations. No profit fields anywhere here — CS and
+     Management/Ops read it. */
+  csDesk: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const open = await ctx.env.DB.prepare(
+        "SELECT case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, payload_json FROM cases " +
+        "WHERE status NOT LIKE '%CLOSED%' ORDER BY opened_at DESC LIMIT 200"
+      ).all();
+      const counts = await ctx.env.DB.prepare(
+        "SELECT kind, account, " +
+        "SUM(CASE WHEN status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS open_n, " +
+        "SUM(CASE WHEN opened_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS d30, " +
+        "SUM(CASE WHEN opened_at >= datetime('now', '-90 day') THEN 1 ELSE 0 END) AS d90 " +
+        'FROM cases GROUP BY kind, account'
+      ).all();
+      const msgs = await ctx.env.DB.prepare(
+        'SELECT msg_id, account, buyer, text, received_at FROM buyer_messages WHERE answered = 0 ORDER BY received_at DESC LIMIT 100'
+      ).all();
+      const std = await ctx.env.DB.prepare('SELECT account, json, synced_at FROM cs_standards').all();
+      const viol = await ctx.env.DB.prepare(
+        'SELECT account, item_id, type, text, at FROM violations ORDER BY at DESC LIMIT 50'
+      ).all();
+      return { open: open.results || [], counts: counts.results || [], messages: msgs.results || [],
+        standards: std.results || [], violations: viol.results || [] };
+    },
+  },
+
   /* The Management overview in one read (§9-C "per-department overview", the parts with real
      data behind them tonight): collective KPIs, per-account pulse, advertising vs the SOP
      ROAS-5 target, live health, confirmed duplicates and the worst loss items. Sections whose
@@ -1296,7 +1460,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
