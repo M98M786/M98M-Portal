@@ -956,7 +956,34 @@ function actionRefreshDashboard_(payload, ctx) {
 
 /** Router.gs merges feature modules by name: ACTIONS_DASHBOARD must be added to its groups list,
  * and buildDashboardCache registered as a 15-minute time trigger, or §13 stays dark. */
+/** The Monthly Sheet itself, day rows on screen (Hasib's walkthrough ask): the Sales analysis
+ * screen shows the P&L table the workbook actually holds — headers verbatim, portal computes
+ * nothing here, discrepancy against the tiles stays the dashboard's job. Management gate. */
+function actionSalesAnalysisRows_(payload, ctx) {
+  dashAssertViewer_(ctx);
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('the day-row P&L is Management only');
+  const account = String(payload.account || '');
+  if (!account) throw new Error('SAY: which account?');
+  const read = bridgeReadRows_({ scope: 'account', account: account, kind: 'sales_analysis',
+    tab: DASH_MONTHLY_TAB, limit: DASH_MONTHLY_LIMIT });
+  if (!read || read.ok === false) return { ok: false, reason: String((read && read.reason) || 'not connected yet') };
+  return { ok: true, account: account, tab: read.tab, headers: read.headers, rows: read.rows.slice(-120) };
+}
+
+/** The Daily Account Report workbook as its own screen feed — raw rows, headers verbatim,
+ * newest first. The Alerts centre keeps the alarm workflow; this is the READING desk. */
+function actionAccountReportRows_(payload, ctx) {
+  dashAssertViewer_(ctx);
+  const account = String(payload.account || '');
+  if (!account) throw new Error('SAY: which account?');
+  const read = bridgeReadRows_({ scope: 'account', account: account, kind: 'account_report', limit: 400 });
+  if (!read || read.ok === false) return { ok: false, reason: String((read && read.reason) || 'not connected yet') };
+  return { ok: true, account: account, tab: read.tab, headers: read.headers, rows: read.rows.slice(-200).reverse() };
+}
+
 const ACTIONS_DASHBOARD = {
-  dashboard:        [actionDashboard_, 'any'],          // gated to the §4.3 roles inside
-  refreshDashboard: [actionRefreshDashboard_, 'any'],   // gated to Management inside
+  dashboard:          [actionDashboard_, 'any'],          // gated to the §4.3 roles inside
+  refreshDashboard:   [actionRefreshDashboard_, 'any'],   // gated to Management inside
+  salesAnalysisRows:  [actionSalesAnalysisRows_, 'any'],  // Management gated inside
+  accountReportRows:  [actionAccountReportRows_, 'any'],  // §4.3 dashboard roles inside
 };

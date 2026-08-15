@@ -60,8 +60,35 @@ function actionEngineNotify_(payload) {
   return { delivered: true };
 }
 
+/** Engine → sheets, under the SAME law as every human write (§0.4): header-addressed, column
+ * whitelisted per workflow, shadow-gated by pipeline_write_external, old→new logged. The Worker
+ * never touches a workbook directly — it asks this action, and this action asks SheetBridge.
+ * Key-gated like engineNotify; the whitelist TAG picks the exact columns a caller may touch,
+ * so a compromised key still cannot write outside the named workflow's columns. */
+const ENGINE_SHEET_WHITELISTS = {
+  // the day-tab columns the orders workspace may write — identical to ORDERS_WRITABLE_COLS
+  orders_day: { scope: 'account', kind: 'order_processing', cols: ['Cost', 'Order Number', 'Tracking number', 'Email', 'Delivery Status', 'New Ali Link'] },
+};
+
+function actionEngineSheetWrite_(payload) {
+  const key = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');
+  if (!key || String(payload.key || '') !== key) throw new Error('auth');
+  const spec = ENGINE_SHEET_WHITELISTS[String(payload.whitelist || '')];
+  if (!spec) throw new Error('SAY: unknown whitelist tag');
+  const account = String(payload.account || ''), tab = payload.tab, matchValue = String(payload.match_value || '');
+  const values = payload.values || {};
+  const bad = Object.keys(values).filter(function (c) { return spec.cols.indexOf(c) < 0; });
+  if (bad.length) throw new Error('SAY: column not writable for this workflow: ' + bad.join(', '));
+  if (!account || !matchValue || !Object.keys(values).length) throw new Error('SAY: account, match_value and values are all needed');
+  const wbSpec = { scope: spec.scope, account: account, kind: spec.kind, tab: tab || undefined };
+  const res = bridgeUpdateRow_(wbSpec, String(payload.match_header || 'Order number'), matchValue, values, spec.cols, 'engine@worker');
+  logActivity_('system', 'ENGINE_SHEET_WRITE', spec.kind + '!' + account, '', JSON.stringify(values).slice(0, 180), res.shadow ? 'shadow' : 'written');
+  return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '' };
+}
+
 const ACTIONS_ENGINE = {
-  engineNotify: [actionEngineNotify_, 'public'],   // key-checked inside — the Worker has no Google token
+  engineNotify: [actionEngineNotify_, 'public'],       // key-checked inside — the Worker has no Google token
+  engineSheetWrite: [actionEngineSheetWrite_, 'public'], // key-checked inside; whitelist tag picks the columns
 };
 
 /** Facts for the Active Listings screen: the Central Main Sheet's own numbers per item, pushed

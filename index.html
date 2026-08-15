@@ -506,13 +506,41 @@ function initGsi(){
   google.accounts.id.renderButton($('gbtn'), { theme:'filled_black', size:'large', shape:'pill', text:'signin_with', width:280 });
 }
 function onCredential(resp){
+  var wasIn = !!(STATE.user && STATE.user.status === 'approved');
   STATE.idToken = resp.credential;
+  if(wasIn){ hideReauth(); toast('Session refreshed — carry on.'); return; }
   $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Checking your access…';
   api('whoami').then(routeUser).catch(function(e){
     $('loginStatus').className='auth-status err';
     $('loginStatus').textContent = (e.message==='auth') ? 'Sign-in could not be verified. Please try again.' : e.message;
   });
 }
+
+/* ---- session freshness (the Zaid lesson: a soured token scatters auth errors across every
+   screen while caches keep painting — one banner BEFORE expiry beats twenty mysteries) ---- */
+function tokenMsLeft(){
+  var j = decodeJwt(STATE.idToken || '');
+  return j && j.exp ? j.exp * 1000 - Date.now() : 0;
+}
+function showReauth(){
+  if($('reauthBar')){ return; }
+  var d = document.createElement('div');
+  d.id = 'reauthBar';
+  d.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:9999;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--gold-line-hi);border-radius:14px;padding:14px 16px;box-shadow:0 18px 50px rgba(0,0,0,.5);max-width:320px';
+  d.innerHTML = '<div style="font-weight:800;font-size:13px">Your session is about to expire</div>' +
+    '<div style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:4px 0 10px">One click keeps everything loading — your screen stays exactly where it is.</div>' +
+    '<div id="reauthBtn"></div>';
+  document.body.appendChild(d);
+  try{ google.accounts.id.renderButton($('reauthBtn'), { theme:'filled_black', size:'medium', shape:'pill', text:'signin_with', width:240 }); }
+  catch(e){ $('reauthBtn').innerHTML = '<button class="btn-gold" onclick="location.reload()">Reload to sign in</button>'; }
+}
+function hideReauth(){ var b = $('reauthBar'); if(b){ b.remove(); } }
+setInterval(function(){
+  if(!STATE.user || STATE.user.status !== 'approved' || !STATE.idToken){ return; }
+  var left = tokenMsLeft();
+  if(left > 0 && left < 5 * 60000){ showReauth(); }
+  if(left <= 0){ showReauth(); }
+}, 60000);
 function decodeJwt(t){ try{ return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return {}; } }
 
 function routeUser(user){

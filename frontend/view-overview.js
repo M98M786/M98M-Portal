@@ -126,12 +126,67 @@
     return t;
   }
 
-  // ---------- fetches (all Engine; each section paints as its feed lands) ----------
+  // ---------- fetches (each section paints as its feed lands) ----------
   function oFetchAll() {
     api('dailyReport', {}).then(function (d) { O.days = (d && d.rows) || []; oPaintDated(); }).catch(function () { O.days = []; oPaintDated(); });
     api('mgmtOverview', {}).then(function (d) { O.ov = d || {}; oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth(); }).catch(function () {});
     api('activeListings', {}).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); }).catch(function () {});
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); }).catch(function () {});
+    api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
+      var b = $('o2Staff');
+      if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
+    });
+  }
+
+  /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
+   * the same numbers the Team performance desk shows). Top producer gets the hero band. */
+  function oPaintStaff(d) {
+    var box = $('o2Staff');
+    if (!box) { return; }
+    var people = null;
+    if (d) {
+      ['people', 'staff', 'rows', 'members', 'team'].some(function (k) {
+        if (Object.prototype.toString.call(d[k]) === '[object Array]' && d[k].length) { people = d[k]; return true; }
+        return false;
+      });
+      if (!people) {
+        Object.keys(d).some(function (k) {
+          var v = d[k];
+          if (Object.prototype.toString.call(v) === '[object Array]' && v.length && typeof v[0] === 'object' && (v[0].name || v[0].email)) { people = v; return true; }
+          return false;
+        });
+      }
+    }
+    if (!people || !people.length) {
+      box.innerHTML = '<div class="o-card"><div class="empty">No staff activity recorded for this week yet — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>';
+      return;
+    }
+    var score = function (p) { return oN(p.tasks_completed) + oN(p.listings) + oN(p.orders_processed) + oN(p.replies_sent) + oN(p.hunts) + oN(p.revisions_done); };
+    people = people.slice().sort(function (a, b) { return score(b) - score(a); });
+    var top = people[0];
+    var initials = oS(top.name || top.email).split(/[\s@.]+/).map(function (w) { return (w[0] || '').toUpperCase(); }).slice(0, 2).join('');
+    var h = '<div class="o-card" style="background:linear-gradient(135deg,rgba(233,169,60,.12),transparent 60%);border-color:var(--gold-line-hi);display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:12px">' +
+      '<div style="width:52px;height:52px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:16px;color:var(--gold-ink);background:linear-gradient(135deg,var(--gold-a),var(--gold-c))">' + esc(initials) + '</div>' +
+      '<div><h3 style="font-size:16px;font-weight:800">' + esc(oS(top.name || top.email)) + '</h3><div style="font-size:12px;color:var(--text-2);font-weight:600">' + esc(oS(top.role)) + ' · the week\'s highest recorded output</div></div>' +
+      '<div style="margin-left:auto;display:flex;gap:18px;flex-wrap:wrap">' +
+        '<div><b style="display:block;font-size:9.5px;letter-spacing:.08em;color:var(--gold-a);font-weight:800;text-transform:uppercase">Tasks done</b><span style="font-weight:800;font-size:16px">' + oN(top.tasks_completed) + '</span></div>' +
+        '<div><b style="display:block;font-size:9.5px;letter-spacing:.08em;color:var(--gold-a);font-weight:800;text-transform:uppercase">On time</b><span style="font-weight:800;font-size:16px">' + (top.on_time_pct !== undefined && top.on_time_pct !== '' ? oN(top.on_time_pct) + '%' : '—') + '</span></div>' +
+      '</div></div>';
+    h += '<div class="o-card scroll" style="padding:10px"><table class="cases-table" style="min-width:860px"><thead><tr>' +
+      '<th>Person</th><th>Tasks</th><th>On time</th><th>Listings</th><th>Revisions</th><th>Hunts</th><th>Orders</th><th>CS replies</th><th>Wrong orders caused</th></tr></thead><tbody>';
+    people.forEach(function (p) {
+      h += '<tr><td><b>' + esc(oS(p.name || p.email)) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(oS(p.role)) + '</div></td>' +
+        '<td class="num">' + oN(p.tasks_completed) + '</td>' +
+        '<td class="num">' + (p.on_time_pct !== undefined && p.on_time_pct !== '' ? oN(p.on_time_pct) + '%' : '—') + '</td>' +
+        '<td class="num">' + oN(p.listings) + '</td>' +
+        '<td class="num">' + oN(p.revisions_done) + '</td>' +
+        '<td class="num">' + oN(p.hunts) + '</td>' +
+        '<td class="num">' + oN(p.orders_processed) + '</td>' +
+        '<td class="num">' + oN(p.replies_sent) + '</td>' +
+        '<td class="num" style="' + (oN(p.wrong_orders_caused) ? 'color:var(--bad);font-weight:800' : '') + '">' + oN(p.wrong_orders_caused) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    box.innerHTML = h;
   }
 
   // ---------- date-driven block: KPIs + profitability ----------
@@ -438,8 +493,7 @@
         '<div class="sec enter d3"><div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">judged against the SOP main target — ROAS ≥ 5</span></div><div id="o2Ads"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Returns, refunds &amp; cases</h2><span class="hint">live from eBay via the Engine</span></div><div id="o2Cases"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Account health</h2><span class="hint">live Engine numbers · loss items red · quiet accounts amber</span></div><div id="o2Health"><div class="empty">Loading…</div></div></div>' +
-        '<div class="sec enter d3"><div class="sec-h"><h2>Staff performance</h2><span class="hint">the My/Team performance screens carry this today — it joins this page with the v19 backend work</span></div>' +
-          '<div class="o-card"><div class="empty">Per-worker output lives on <a href="#" data-o2-nav="perf" style="font-weight:800">My performance</a> and <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> until the per-department feed lands here — no invented numbers on this page.</div></div></div>' +
+        '<div class="sec enter d3"><div class="sec-h"><h2>Staff performance</h2><span class="hint">this week · from the portal\'s own activity ledger · management excluded</span></div><div id="o2Staff"><div class="empty">Loading…</div></div></div>' +
         '</div>';
     },
     init: function () {
