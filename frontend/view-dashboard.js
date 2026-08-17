@@ -310,10 +310,16 @@ VIEWS.dashboard = {
     });
   },
   render: function () {
-    return '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
+    return '<div class="hgroup enter d1"><h1>Sales <span class="goldtext">analysis</span></h1>' +
       '<span class="sub" id="dbStamp">loading…</span>' +
       '<button class="btn-ghost hidden" id="dbRefresh" style="margin-left:auto">Refresh now</button></div>' +
-      '<div id="dbBody"><div class="spinner"></div></div>';
+      '<div id="dbBody"><div class="spinner"></div></div>' +
+      '<div class="card enter d3" style="margin-top:16px"><div class="hd">The Monthly Sheet itself ' +
+        '<span class="hint">day rows, headers verbatim — what the workbook actually holds (Management only)</span></div>' +
+        '<div class="bd"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">' +
+          '<select class="alx-sel" id="dbRowsAcc"><option value="">Choose an account…</option></select>' +
+          '<button class="minibtn" id="dbRowsGo">Show the day rows</button></div>' +
+        '<div id="dbRowsBody"></div></div></div>';
   },
   init: function () {
     var b = $('dbRefresh');
@@ -321,6 +327,33 @@ VIEWS.dashboard = {
       api('refreshDashboard').then(function (d) { dbData = d; paint(); })
         .catch(function (e) { toast('Could not refresh: ' + e.message); })
         .then(function () { b.disabled = false; b.textContent = 'Refresh now'; }); };
+    cachedCall('accountList', {}, function (d) {
+      var sel = $('dbRowsAcc');
+      if (!sel) { return; }
+      sel.innerHTML = '<option value="">Choose an account…</option>' + (((d && d.accounts) || []).map(function (a) {
+        var n = String(a.account || '').trim();
+        return n ? '<option>' + esc(n) + '</option>' : '';
+      }).join(''));
+    });
+    var go = $('dbRowsGo');
+    if (go) {
+      go.onclick = function () {
+        var acc = $('dbRowsAcc') ? $('dbRowsAcc').value : '';
+        var host = $('dbRowsBody');
+        if (!acc) { toast('Choose an account first.'); return; }
+        host.innerHTML = '<div class="spinner"></div>';
+        api('salesAnalysisRows', { account: acc }).then(function (r) {
+          if (!r || r.ok === false) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(String((r && r.reason) || 'Could not read it.')) + '</div>'; return; }
+          var heads = r.headers || [];
+          var h = '<div class="scroll"><table class="cw-tbl" style="min-width:900px"><thead><tr>' +
+            heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+          (r.rows || []).slice().reverse().forEach(function (row) {
+            h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+          });
+          host.innerHTML = h + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from “' + esc(String(r.tab || 'Monthly Sheet')) + '” — the portal computes nothing here.</p>';
+        }).catch(function (e) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(e.message) + '</div>'; });
+      };
+    }
     load(false);
   }
 };

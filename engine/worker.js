@@ -1879,6 +1879,39 @@ const ROUTES = {
     },
   },
 
+  /* Req 16, the missing-Ali-link capture: the processor pastes the seller link once on the
+     first order and it lands in BOTH truths — D1 and the day tab's own 'New Ali Link' column,
+     through the v19 bridge under the full sheet law (whitelisted column, shadow via
+     pipeline_write_external, old→new logged on the Apps Script side). */
+  orderAddAliLink: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || ''), orderId = String(p.order_id || '').trim(), link = String(p.ali_link || '').trim();
+      if (!account || !orderId || !link) throw new Error('SAY: account, order_id and the link are all needed');
+      if (!/^https:\/\/([a-z0-9-]+\.)*aliexpress\.[a-z.]+\//i.test(link)) throw new Error('SAY: that does not look like an AliExpress link');
+      await ctx.env.DB.prepare('UPDATE orders SET ali_link = ?2 WHERE order_id = ?1').bind(orderId, link.slice(0, 400)).run();
+      let sheet = { ok: false, reason: 'bridge did not answer' };
+      try {
+        const r = await fetch(ctx.env.AS_URL, {
+          method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'engineSheetWrite', payload: {
+            key: await secret(ctx.env, 'SYNC_KEY'), whitelist: 'orders_day', account,
+            match_header: 'Order number', match_value: orderId,
+            values: { 'New Ali Link': link.slice(0, 400) } } }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const body = await r.json().catch(() => ({}));
+        sheet = body.ok ? body.data : { ok: false, reason: String(body.error || r.status) };
+      } catch (e) { sheet = { ok: false, reason: String(e && e.message || e).slice(0, 120) }; }
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ALI_LINK_ADDED', ?2, '', ?3, datetime('now'))"
+      ).bind(ctx.email, account + ':' + orderId, link.slice(0, 200)).run();
+      return { saved: true, sheet,
+        note: sheet.ok ? (sheet.shadow ? 'recorded in the Engine; the sheet write is in SHADOW (logged, not written) until the shadow flip' : 'written to the Engine AND the day tab')
+          : 'saved in the Engine; the sheet side answered: ' + String(sheet.reason || '') };
+    },
+  },
+
   /* The processor's courier dropdown speaks eBay's own list (A4) — per account, cached weekly. */
   courierList: {
     auth: 'any', fn: async (p, ctx) => {

@@ -386,6 +386,24 @@
       }
       box.innerHTML = orders.map(odCard).join('');
       odWire(box);
+      /* req 16 capture — delegated, wired once (odLoad repaints must not stack listeners) */
+      if (!box.dataset.aliWired) { box.dataset.aliWired = '1';
+      box.addEventListener('click', function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-alilink-save]') : null;
+        if (!b) { return; }
+        var ono = b.getAttribute('data-od-alilink-save');
+        var inp = box.querySelector('[data-od-alilink-in="' + ono.replace(/"/g, '\\"') + '"]');
+        if (!inp || !inp.value.trim()) { toast('Paste the AliExpress link first.'); return; }
+        b.disabled = true;
+        api('orderAddAliLink', { account: OD_ACCOUNT, order_id: ono, ali_link: inp.value.trim() }).then(function (res) {
+          b.disabled = false;
+          toast(odStr(res && res.note) || 'Link saved.');
+          b.parentNode.innerHTML = '<span class="od-note" style="color:var(--ok);font-weight:800">link saved ✓</span>';
+        }).catch(function (e) {
+          b.disabled = false;
+          toast(e.message || 'Could not save the link.');
+        });
+      }); }
       odCount('orders', odOutstanding(orders));
     });
     if (!oc.painted) {
@@ -505,8 +523,16 @@
     var links = '';
     if (ali) {
       links += '<a class="od-ali" href="' + odAttr(ali) + '" target="_blank" rel="noopener noreferrer">Open ' + esc(OD_H.aliLink) + '</a>';
-    } else {
+    } else if (newAli) {
       links += '<span class="od-note od-warn">No ' + esc(OD_H.aliLink) + ' on this row</span>';
+    } else {
+      /* Req 16: the seller link is captured ONCE, here, on the first order — it lands in the
+       * Engine and (through the v19 bridge, under the sheet law) in the day tab's own
+       * 'New Ali Link' column. */
+      links += '<span class="od-note od-warn">No ' + esc(OD_H.aliLink) + ' yet</span>' +
+        '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;max-width:100%">' +
+        '<input class="od-in" style="width:220px;padding:6px 9px;font-size:12px" placeholder="paste the AliExpress link once" data-od-alilink-in="' + odAttr(odStr(o[OD_H.orderNo])) + '">' +
+        '<button class="minibtn" data-od-alilink-save="' + odAttr(odStr(o[OD_H.orderNo])) + '">Save link</button></span>';
     }
     if (newAli) {
       links += '<a class="minibtn" href="' + odAttr(newAli) + '" target="_blank" rel="noopener noreferrer">' + esc(OD_H.newAliLink) + '</a>';
