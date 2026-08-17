@@ -328,11 +328,11 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
-var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent'];
+var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink'];
 function engineApi(action, payload){
   var url = STATE.config && STATE.config.engine_url;
   var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
@@ -770,6 +770,77 @@ VIEWS.home = {
         '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>';
     },
     init: function () { ahLoad(); }
+  };
+})();
+
+/* ---------- view-accountReport.js ---------- */
+/* view-accountReport.js — the Daily Account Report workbook as its own READING desk
+ * (Hasib's walkthrough ask: "where is account daily report?"). The Alerts centre keeps the
+ * alarm workflow; this screen shows the report rows themselves, headers verbatim, newest
+ * first. Feed: v19's accountReportRows (bridge read, §4.3 dashboard roles). */
+(function () {
+
+  VIEW_CSS.push(
+    '.ar-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:860px}' +
+    '.ar-tbl th{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.ar-tbl td{padding:8px 10px;border-bottom:1px solid var(--gold-line);vertical-align:top;max-width:340px;word-break:break-word}' +
+    '.ar-tbl tbody tr:hover{background:var(--blue-soft)}'
+  );
+
+  function arLoad() {
+    var acc = $('arAcc') ? $('arAcc').value : '';
+    var host = $('arBody');
+    if (!host) { return; }
+    if (!acc) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Choose an account to open its report.</div>'; return; }
+    host.innerHTML = '<div class="spinner"></div>';
+    api('accountReportRows', { account: acc }).then(function (r) {
+      if (!r || r.ok === false) {
+        host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(String((r && r.reason) || 'Could not read it.')) +
+          '<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">"not connected yet" means this account\'s Daily Account Report workbook is missing from CONNECTIONS.</span></div>';
+        return;
+      }
+      var heads = r.headers || [];
+      var h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+        heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      (r.rows || []).forEach(function (row) {
+        h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+      });
+      host.innerHTML = h + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from "' + esc(String(r.tab || '')) + '" · resolving alarms stays on the Alerts centre.</p>';
+    }).catch(function (e) {
+      host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(e.message) + '</div>';
+    });
+  }
+
+  VIEWS.accountReport = {
+    label: 'Account report',
+    order: 9.5,
+    roles: ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'],
+    icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/><circle cx="17" cy="16" r="0.5"/>',
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">report</span></h1>' +
+          '<span class="sub">each account\'s Daily Account Report workbook, as written · alarms resolve on the Alerts centre</span></div>' +
+        '<div class="card enter d2"><div class="bd">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+            '<select class="alx-sel" id="arAcc"><option value="">Choose an account…</option></select>' +
+            '<button class="minibtn" id="arGo">Open the report</button></div>' +
+          '<div id="arBody"><div style="color:var(--text-2);font-weight:700;padding:12px 0">Choose an account to open its report.</div></div>' +
+        '</div></div>';
+    },
+    init: function () {
+      cachedCall('accountList', {}, function (d) {
+        var sel = $('arAcc');
+        if (!sel) { return; }
+        sel.innerHTML = '<option value="">Choose an account…</option>' + (((d && d.accounts) || []).map(function (a) {
+          var n = String(a.account || '').trim();
+          return n ? '<option>' + esc(n) + '</option>' : '';
+        }).join(''));
+      });
+      var go = $('arGo');
+      if (go) { go.onclick = arLoad; }
+      var sel = $('arAcc');
+      if (sel) { sel.onchange = arLoad; }
+    }
   };
 })();
 
@@ -7279,10 +7350,16 @@ VIEWS.dashboard = {
     });
   },
   render: function () {
-    return '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
+    return '<div class="hgroup enter d1"><h1>Sales <span class="goldtext">analysis</span></h1>' +
       '<span class="sub" id="dbStamp">loading…</span>' +
       '<button class="btn-ghost hidden" id="dbRefresh" style="margin-left:auto">Refresh now</button></div>' +
-      '<div id="dbBody"><div class="spinner"></div></div>';
+      '<div id="dbBody"><div class="spinner"></div></div>' +
+      '<div class="card enter d3" style="margin-top:16px"><div class="hd">The Monthly Sheet itself ' +
+        '<span class="hint">day rows, headers verbatim — what the workbook actually holds (Management only)</span></div>' +
+        '<div class="bd"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">' +
+          '<select class="alx-sel" id="dbRowsAcc"><option value="">Choose an account…</option></select>' +
+          '<button class="minibtn" id="dbRowsGo">Show the day rows</button></div>' +
+        '<div id="dbRowsBody"></div></div></div>';
   },
   init: function () {
     var b = $('dbRefresh');
@@ -7290,6 +7367,33 @@ VIEWS.dashboard = {
       api('refreshDashboard').then(function (d) { dbData = d; paint(); })
         .catch(function (e) { toast('Could not refresh: ' + e.message); })
         .then(function () { b.disabled = false; b.textContent = 'Refresh now'; }); };
+    cachedCall('accountList', {}, function (d) {
+      var sel = $('dbRowsAcc');
+      if (!sel) { return; }
+      sel.innerHTML = '<option value="">Choose an account…</option>' + (((d && d.accounts) || []).map(function (a) {
+        var n = String(a.account || '').trim();
+        return n ? '<option>' + esc(n) + '</option>' : '';
+      }).join(''));
+    });
+    var go = $('dbRowsGo');
+    if (go) {
+      go.onclick = function () {
+        var acc = $('dbRowsAcc') ? $('dbRowsAcc').value : '';
+        var host = $('dbRowsBody');
+        if (!acc) { toast('Choose an account first.'); return; }
+        host.innerHTML = '<div class="spinner"></div>';
+        api('salesAnalysisRows', { account: acc }).then(function (r) {
+          if (!r || r.ok === false) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(String((r && r.reason) || 'Could not read it.')) + '</div>'; return; }
+          var heads = r.headers || [];
+          var h = '<div class="scroll"><table class="cw-tbl" style="min-width:900px"><thead><tr>' +
+            heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+          (r.rows || []).slice().reverse().forEach(function (row) {
+            h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+          });
+          host.innerHTML = h + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from “' + esc(String(r.tab || 'Monthly Sheet')) + '” — the portal computes nothing here.</p>';
+        }).catch(function (e) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(e.message) + '</div>'; });
+      };
+    }
     load(false);
   }
 };
@@ -9873,6 +9977,24 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       }
       box.innerHTML = orders.map(odCard).join('');
       odWire(box);
+      /* req 16 capture — delegated, wired once (odLoad repaints must not stack listeners) */
+      if (!box.dataset.aliWired) { box.dataset.aliWired = '1';
+      box.addEventListener('click', function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-alilink-save]') : null;
+        if (!b) { return; }
+        var ono = b.getAttribute('data-od-alilink-save');
+        var inp = box.querySelector('[data-od-alilink-in="' + ono.replace(/"/g, '\\"') + '"]');
+        if (!inp || !inp.value.trim()) { toast('Paste the AliExpress link first.'); return; }
+        b.disabled = true;
+        api('orderAddAliLink', { account: OD_ACCOUNT, order_id: ono, ali_link: inp.value.trim() }).then(function (res) {
+          b.disabled = false;
+          toast(odStr(res && res.note) || 'Link saved.');
+          b.parentNode.innerHTML = '<span class="od-note" style="color:var(--ok);font-weight:800">link saved ✓</span>';
+        }).catch(function (e) {
+          b.disabled = false;
+          toast(e.message || 'Could not save the link.');
+        });
+      }); }
       odCount('orders', odOutstanding(orders));
     });
     if (!oc.painted) {
@@ -9992,8 +10114,16 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var links = '';
     if (ali) {
       links += '<a class="od-ali" href="' + odAttr(ali) + '" target="_blank" rel="noopener noreferrer">Open ' + esc(OD_H.aliLink) + '</a>';
-    } else {
+    } else if (newAli) {
       links += '<span class="od-note od-warn">No ' + esc(OD_H.aliLink) + ' on this row</span>';
+    } else {
+      /* Req 16: the seller link is captured ONCE, here, on the first order — it lands in the
+       * Engine and (through the v19 bridge, under the sheet law) in the day tab's own
+       * 'New Ali Link' column. */
+      links += '<span class="od-note od-warn">No ' + esc(OD_H.aliLink) + ' yet</span>' +
+        '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;max-width:100%">' +
+        '<input class="od-in" style="width:220px;padding:6px 9px;font-size:12px" placeholder="paste the AliExpress link once" data-od-alilink-in="' + odAttr(odStr(o[OD_H.orderNo])) + '">' +
+        '<button class="minibtn" data-od-alilink-save="' + odAttr(odStr(o[OD_H.orderNo])) + '">Save link</button></span>';
     }
     if (newAli) {
       links += '<a class="minibtn" href="' + odAttr(newAli) + '" target="_blank" rel="noopener noreferrer">' + esc(OD_H.newAliLink) + '</a>';
