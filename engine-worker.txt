@@ -1192,9 +1192,9 @@ async function violationsSync(env) {
    the CPC charge is 'cpc_ad_fees_listingsite_currency', and its payout-currency twin is the same
    money again and is deliberately never requested. */
 const ADS_FAMILIES = {
-  std: ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'],
-  cpc: ['cpc_ad_fees_listingsite_currency', 'cpc_clicks', 'cpc_impressions',
-    'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency'],
+  std: { model: 'COST_PER_SALE', keys: ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'] },
+  cpc: { model: 'COST_PER_CLICK', keys: ['cpc_ad_fees_listingsite_currency', 'cpc_clicks',
+    'cpc_impressions', 'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency'] },
 };
 
 async function adsReportKick(env) {
@@ -1209,7 +1209,7 @@ async function adsReportKick(env) {
     const meta = await md.json();
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
     const families = Object.keys(ADS_FAMILIES)
-      .map(f => ({ family: f, keys: ADS_FAMILIES[f].filter(m => mets.indexOf(m) >= 0) }))
+      .map(f => ({ family: f, model: ADS_FAMILIES[f].model, keys: ADS_FAMILIES[f].keys.filter(m => mets.indexOf(m) >= 0) }))
       .filter(x => x.keys.length);
     if (!families.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
     /* Which metrics this account's report actually offers, kept where it can be read without a
@@ -1226,8 +1226,13 @@ async function adsReportKick(env) {
     for (const fam of families) {
       const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
         method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        /* fundingModels is the missing half of the request. eBay's answer to asking for CPC
+           metrics without it is "the metric key is not supported for the funding model" — it
+           defaults the report to cost-per-sale campaigns, for which a per-click charge does not
+           exist. 60 of the 68 running campaigns on this fleet are COST_PER_CLICK, so leaving
+           this out meant the spend screen was reporting the other 8 and calling it the total. */
         body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
-          dateFrom: from, dateTo: to,
+          dateFrom: from, dateTo: to, fundingModels: [fam.model],
           dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys: fam.keys }),
       });
       if (cr.status !== 202 && !cr.ok) {
