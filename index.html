@@ -1438,8 +1438,32 @@ VIEWS.home = {
   /** PROFIT_FIELDS keeps this key with its space, so it is read by name and never assumed. */
   function adRawProfit(a) { return a && a['Raw Profit'] !== undefined ? a['Raw Profit'] : ''; }
 
+  /* A raw transport string ("Failed to fetch") tells a manager nothing and makes a screen look
+     broken when the real answer is that a workbook was never registered. The known causes are
+     named in plain words, with whose job it is to fix them. */
+  function adWhy(err) {
+    var e = String(err || '').toLowerCase();
+    if (e.indexOf('not connected') >= 0 || e.indexOf('no such sheet') >= 0 || e.indexOf('sheet id') >= 0) {
+      return 'The PPC Central workbook is not registered in CONNECTIONS yet, so there is nothing for this screen to read. ' +
+        'Sir Hasib registers it once and every account on this screen fills in.';
+    }
+    if (e.indexOf('failed to fetch') >= 0 || e.indexOf('networkerror') >= 0 || e.indexOf('load failed') >= 0) {
+      return 'The portal server did not answer. This is the connection, not your data — the figures are safe.';
+    }
+    if (e.indexOf('auth') >= 0 || e.indexOf('role') >= 0) {
+      return 'Your role is not cleared for this screen. Management grants it on the Access desk.';
+    }
+    if (e.indexOf('timed out') >= 0 || e.indexOf('timeout') >= 0) {
+      return 'The workbook took too long to answer. It is usually free again within a minute.';
+    }
+    return '';
+  }
+
   function adRetry(msg, err, id) {
-    return '<div class="ad-empty">' + esc(msg) + '<span>' + esc(err) + '</span>' +
+    var why = adWhy(err);
+    return '<div class="ad-empty">' + esc(msg) +
+      (why ? '<span style="font-weight:700;color:var(--text-2)">' + esc(why) + '</span>' : '') +
+      '<span style="opacity:.75">' + esc(err) + '</span>' +
       '<button class="minibtn" id="' + id + '" style="margin-top:10px">Try again</button></div>';
   }
 
@@ -1642,7 +1666,7 @@ VIEWS.home = {
       box.innerHTML = adRetry('That account&#39;s PPC tab could not be read just now.', e.message, 'adPpcRetry');
       var r = $('adPpcRetry');
       if (r) { r.onclick = adLoadPpc; }
-      if (ed) { ed.innerHTML = '<div class="ad-empty">The campaign editor needs the account&#39;s tab first.<span>' + esc(e.message) + '</span></div>'; }
+      if (ed) { ed.innerHTML = '<div class="ad-empty">The campaign editor needs the account&#39;s tab first.<span>' + esc(adWhy(e.message) || e.message) + '</span></div>'; }
     });
   }
 
