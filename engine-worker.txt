@@ -1208,6 +1208,13 @@ async function adsReportKick(env) {
     if (!md.ok) throw new Error(acct + ' report metadata ' + md.status + ': ' + (await md.text()).slice(0, 140));
     const meta = await md.json();
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
+    /* eBay's dimension rules differ per funding model, and its refusals name the report type but
+       truncate before the required set. Record what it actually offers so the next question is
+       answered by evidence rather than another guess-and-deploy cycle. */
+    const dims = (meta.dimensionMetadata || []).map(d => String(d.dimensionKey || '') +
+      (d.fundingModels ? '(' + [].concat(d.fundingModels).join('/') + ')' : '') +
+      (d.required ? '*' : ''));
+    await ctx_setSync(env, 'adsDims', acct, dims.join(' '));
     const families = Object.keys(ADS_FAMILIES)
       .map(f => ({ family: f, model: ADS_FAMILIES[f].model, keys: ADS_FAMILIES[f].keys.filter(m => mets.indexOf(m) >= 0) }))
       .filter(x => x.keys.length);
@@ -1236,7 +1243,7 @@ async function adsReportKick(env) {
           dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys: fam.keys }),
       });
       if (cr.status !== 202 && !cr.ok) {
-        problems.push(fam.family + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 120));
+        problems.push(fam.family + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 320));
         continue;
       }
       const loc = cr.headers.get('location') || '';
