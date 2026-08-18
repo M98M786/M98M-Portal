@@ -1596,6 +1596,17 @@ const ROUTES = {
         (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
+      /* Orders eBay has never seen a dispatch for, 30+ days on. These predate the ship-by capture
+         so they carry no deadline and would otherwise vanish from every count on this screen —
+         yet they are the ones that actually threaten the accounts: eBay measures us on late
+         dispatch. Every one is a real order eBay believes never shipped. */
+      const staleRows = await ctx.env.DB.prepare(
+        "SELECT o.account, COUNT(*) AS n, ROUND(SUM(o.sold), 2) AS value, MIN(date(o.created_at)) AS oldest " +
+        "FROM orders o WHERE o.status != 'FULFILLED' AND o.created_at < date('now', '-30 day')" +
+        (account ? ' AND o.account = ?1' : '') + ' GROUP BY o.account ORDER BY n DESC'
+      ).bind(...(account ? [account] : [])).all();
+      const stale = staleRows.results || [];
+
       return {
         as_of: new Date().toISOString(),
         late_count: (cnt && cnt.late_n) || 0,
@@ -1605,6 +1616,9 @@ const ROUTES = {
         orders_today: (todayRow && todayRow.n) || 0,
         // orders eBay has not given a deadline for — shown so the board never implies it saw them
         no_deadline_count: (noDeadline && noDeadline.n) || 0,
+        stale_count: stale.reduce((a, r) => a + (Number(r.n) || 0), 0),
+        stale_value: round2(stale.reduce((a, r) => a + (Number(r.value) || 0), 0)),
+        stale_by_account: stale,
         late: late.slice(0, 120),
         due_soon: dueSoon.slice(0, 120),
       };
