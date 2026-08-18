@@ -157,6 +157,15 @@ function stripItem(row, user) {
    event and bell. The read-then-write pair is not atomic, but the window is milliseconds against
    a 5-minute cadence, and a stale lease self-expires after 4 minutes. D1, not KV: the free plan
    allows only 1k KV writes a day and a lease per run would eat them. */
+/* sync_state as a visible notebook: a job can leave a fact where a human can read it without a
+   redeploy or a log dive. */
+async function ctx_setSync(env, job, account, text) {
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, ?3, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?3, last_ok = datetime('now')"
+  ).bind(String(job), String(account), String(text).slice(0, 400)).run();
+}
+
 async function runJob(env, fn) {
   const name = fn.name;
   const lock = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = ?1 AND account = '@lock'").bind(name).first();
@@ -1155,7 +1164,16 @@ async function violationsSync(env) {
 /* Probed live (14 Aug, Amna token): LISTING_PERFORMANCE_REPORT requires BOTH listing_id and
    campaign_id dimensions (error 35119 otherwise); 'sales' is attributed sale COUNT (our units),
    'sale_amount' the money, 'ad_fees' the spend. */
-const ADS_METRIC_WANTED = ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'];
+/* 19 Aug — the spend on this account fleet was reading ~£11 a day against £1.7k of revenue, and
+   Hafiza showed 29 clicks against £0.00. The cause: 'ad_fees' is the PROMOTED LISTINGS STANDARD
+   fee, charged as a share of an attributed SALE. Every campaign here is CPC (Advanced), where the
+   charge is per CLICK and lands under a different metric — which the comment above claimed was
+   handled but which was never actually in this list. So spend appeared only where an item sold,
+   and a click that cost money but made no sale cost nothing at all in the portal.
+   Every key is filtered against eBay's own metadata before it is asked for, so listing keys that
+   an account does not offer costs nothing; the ones it does offer are summed into spend. */
+const ADS_METRIC_WANTED = ['ad_fees', 'cost', 'cpc_ad_fees', 'cpc_clicks', 'cpc_impressions',
+  'cpc_sale_amount', 'cpc_sales', 'clicks', 'impressions', 'sales', 'sale_amount'];
 
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
@@ -1170,6 +1188,9 @@ async function adsReportKick(env) {
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
     const metricKeys = ADS_METRIC_WANTED.filter(m => mets.indexOf(m) >= 0);
     if (!metricKeys.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
+    /* Which metrics this account's report actually offers, kept where it can be read without a
+       redeploy. Spend was wrong for weeks precisely because nobody could see this list. */
+    await ctx_setSync(env, 'adsMetrics', acct, mets.join(','));
 
     const y = new Date(Date.now() - 86400000);
     const day = ukDate(y.toISOString());
@@ -1254,10 +1275,14 @@ async function ingestAdsReport(env, acct, day, text) {
   const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
   const col = re => heads.findIndex(h => re.test(h));
   const cListing = col(/listing/);
-  const cSpend = col(/ad_fee/);
-  const cClicks = col(/^clicks$/);
-  const cUnits = col(/^sales$/);          // eBay's 'sales' = attributed sale count
-  const cSales = col(/sale_amount/);
+  /* Spend is the SUM of every money-charged column the report carries: the Standard sale fee and
+     the CPC click cost are different charges on the same listing and a seller running both pays
+     both. Reading only ad_fees is what made a CPC-only account look free. */
+  const cols = (re) => heads.map((h, i) => (re.test(h) ? i : -1)).filter(i => i >= 0);
+  const cSpendAll = cols(/ad_fee|^cost$|^cpc_cost$/);
+  const cClicksAll = cols(/^clicks$|^cpc_clicks$/);
+  const cUnitsAll = cols(/^sales$|^cpc_sales$/);   // eBay's 'sales' = attributed sale COUNT
+  const cSalesAll = cols(/sale_amount/);
   if (cListing < 0) return 0;
 
   const agg = {};
@@ -1268,7 +1293,8 @@ async function ingestAdsReport(env, acct, day, text) {
     const a = (agg[lid] = agg[lid] || { spend: 0, clicks: 0, units: 0, sales: 0 });
     // eBay prints money as "GBP 3.27" (zeros sometimes as "USD 0.00") — strip everything non-numeric
     const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
-    a.spend += num(cSpend); a.clicks += num(cClicks); a.units += num(cUnits); a.sales += num(cSales);
+    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
+    a.spend += sum(cSpendAll); a.clicks += sum(cClicksAll); a.units += sum(cUnitsAll); a.sales += sum(cSalesAll);
   }
 
   const stmts = [];
