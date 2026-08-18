@@ -82,6 +82,10 @@
     '.od-lt.bad{border-color:var(--bad);background:var(--bad-soft,var(--panel-2))}' +
     '.od-lt.bad b{color:var(--bad)}' +
     '.od-lt.good b{color:var(--ok)}' +
+    '.od-stale{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid var(--warn,#b8860b);background:var(--warn-soft,var(--panel-2))}' +
+    '.od-stale b{display:block;font-size:13.5px;margin-bottom:4px}' +
+    '.od-stale div{font-size:12px;color:var(--text-2);font-weight:600}' +
+    '.od-stale ul{margin:8px 0 0 18px;font-size:12px;font-weight:600;color:var(--text-2)}' +
     '.od-late{font-size:11px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,var(--panel-2));color:var(--bad)}' +
     '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
@@ -1002,6 +1006,18 @@
           '<div class="od-lt"><b>' + (Number(d.orders_today) || 0) + '</b><span>came in today</span></div>' +
         '</div>';
       var rows = (d.late || []).map(odLiveRow).join('');
+      var stale = Number(d.stale_count) || 0;
+      var staleBlock = '';
+      if (stale) {
+        var per = (d.stale_by_account || []).map(function (r) {
+          return '<li><b>' + esc(String(r.account)) + '</b> — ' + Number(r.n) + ' order(s), £' +
+            (Number(r.value) || 0).toFixed(2) + ', oldest ' + esc(String(r.oldest || '')) + '</li>';
+        }).join('');
+        staleBlock = '<div class="od-stale"><b>' + stale + ' order(s) eBay has never seen a dispatch for</b>' +
+          '<div>Over 30 days old, £' + (Number(d.stale_value) || 0).toFixed(2) + ' of sales. eBay measures the ' +
+          'accounts on late dispatch, so these are worth clearing or cancelling properly rather than leaving open.</div>' +
+          (per ? '<ul>' + per + '</ul>' : '') + '</div>';
+      }
       var caveat = Number(d.no_deadline_count)
         ? '<div class="od-note" style="margin-top:8px">' + Number(d.no_deadline_count) +
           ' open order(s) carry no ship-by from eBay yet — they are not counted above rather than guessed at.</div>' : '';
@@ -1012,7 +1028,7 @@
             '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th><th>Tracking</th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty" style="margin-top:10px">Nothing is past its eBay deadline. That is the number that matters.</div>') +
-          caveat +
+          staleBlock + caveat +
         '</div></div>';
     }).catch(function (e) {
       box.innerHTML = '<div class="card"><div class="bd"><div class="empty">The live dispatch feed did not answer — ' +
