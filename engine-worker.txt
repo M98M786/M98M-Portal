@@ -1537,6 +1537,80 @@ const ROUTES = {
 
   /* Sheet facts (suppliers, OE, campaign decision) pushed from Apps Script — the sheets stay
      the human truth, the Engine is their fast mirror (dual-run, G-1). */
+  /* DISPATCH, from eBay rather than from the day tabs (19 Aug). The sheet-scanning board had four
+     separate reasons to be wrong at once: it invented ship-by as a flat five days, it only ever
+     scanned the current calendar month (so OVERDUE reset itself to zero every 1st), it counted
+     each line of a multi-line order as its own order, and it called an order dispatched merely
+     because the tracking cell had text in it. Every one of those is answered by the orders table:
+     one row per order, eBay's own ship-by, and eBay's own fulfilment status.
+
+     LATE means eBay's deadline has passed and eBay has not seen a dispatch. That is the number
+     that costs money, and it is deliberately NOT bounded to a month. */
+  dispatchLive: {
+    auth: 'any', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      const where = ["o.status != 'FULFILLED'", "o.ship_by != ''"];
+      const bind = [];
+      if (account) { bind.push(account); where.push('o.account = ?' + bind.length); }
+      const open = await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.item_id, o.sold, o.qty, o.status, o.ship_by, o.created_at, ' +
+        '       o.tracking, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+        'WHERE ' + where.join(' AND ') + ' ORDER BY o.ship_by ASC LIMIT 400'
+      ).bind(...bind).all();
+
+      const now = Date.now();
+      const soon = now + 3 * 86400000;
+      const late = [], dueSoon = [];
+      for (const r of (open.results || [])) {
+        const t = new Date(String(r.ship_by)).getTime();
+        if (isNaN(t)) continue;
+        const row = {
+          order_id: r.order_id, account: r.account, item_id: r.item_id, title: r.title || '',
+          sold: r.sold, qty: r.qty, ship_by: r.ship_by, created_at: r.created_at,
+          status: r.status, has_tracking: !!String(r.tracking || ''),
+          hours_late: Math.round((now - t) / 36000) / 100,
+        };
+        if (t < now) late.push(row); else if (t <= soon) dueSoon.push(row);
+      }
+
+      /* Counts come from SQL, not from the capped list above — a 400-row page must never be
+         allowed to under-report how many orders are actually late. */
+      const cnt = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS late_n, COALESCE(SUM(sold), 0) AS late_value FROM orders o " +
+        "WHERE o.status != 'FULFILLED' AND o.ship_by != '' AND o.ship_by < ?1" +
+        (account ? ' AND o.account = ?2' : '')
+      ).bind(...[new Date(now).toISOString()].concat(account ? [account] : [])).first();
+
+      const awaiting = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED'" + (account ? ' AND o.account = ?1' : '')
+      ).bind(...(account ? [account] : [])).first();
+
+      const today = ukDate(new Date().toISOString());
+      const todayRow = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders o WHERE date(o.created_at) = ?1" + (account ? ' AND o.account = ?2' : '')
+      ).bind(...[today].concat(account ? [account] : [])).first();
+
+      const noDeadline = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED' AND o.ship_by = ''" +
+        (account ? ' AND o.account = ?1' : '')
+      ).bind(...(account ? [account] : [])).first();
+
+      return {
+        as_of: new Date().toISOString(),
+        late_count: (cnt && cnt.late_n) || 0,
+        late_value: round2((cnt && cnt.late_value) || 0),
+        due_soon_count: dueSoon.length,
+        awaiting_count: (awaiting && awaiting.n) || 0,
+        orders_today: (todayRow && todayRow.n) || 0,
+        // orders eBay has not given a deadline for — shown so the board never implies it saw them
+        no_deadline_count: (noDeadline && noDeadline.n) || 0,
+        late: late.slice(0, 120),
+        due_soon: dueSoon.slice(0, 120),
+      };
+    },
+  },
+
   /* Order COST — the number that made every profit figure in the portal a fiction (19 Aug).
      eBay knows what an order sold for and what it charged in fees; it has no idea what we paid
      AliExpress for the goods. That number lives only where the processor typed it: the 'Cost'
