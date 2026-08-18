@@ -1237,8 +1237,6 @@ async function adsReportKick(env) {
     }
     if (problems.length === families.length) throw new Error(acct + ' report create failed — ' + problems.join(' | '));
     if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | '));
-    return;
-    await env.DB.prepare(
   });
 }
 
