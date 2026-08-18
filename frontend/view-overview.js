@@ -126,12 +126,36 @@
     return t;
   }
 
+  /* One honest failure panel, reused. It names the feed, quotes the server, and offers a retry —
+     never a spinner that never stops. */
+  function oFeedFailed(boxId, label, err) {
+    var b = $(boxId);
+    if (!b) { return; }
+    var msg = (err && err.message) ? String(err.message) : 'no answer from the server';
+    b.innerHTML = '<div class="o-card"><div class="empty">Could not load ' + esc(label) + '.' +
+      '<div style="margin-top:6px;color:var(--text-3);font-weight:600;font-size:12px">' + esc(msg) + '</div>' +
+      '<button class="minibtn" id="' + boxId + 'Retry" style="margin-top:10px">Try again</button></div></div>';
+    var r = $(boxId + 'Retry');
+    if (r) { r.onclick = function () { b.innerHTML = '<div class="spinner"></div>'; oFetchAll(); }; }
+  }
+
   // ---------- fetches (each section paints as its feed lands) ----------
   function oFetchAll() {
-    api('dailyReport', {}).then(function (d) { O.days = (d && d.rows) || []; oPaintDated(); }).catch(function () { O.days = []; oPaintDated(); });
-    api('mgmtOverview', {}).then(function (d) { O.ov = d || {}; oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth(); }).catch(function () {});
-    api('activeListings', {}).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); }).catch(function () {});
-    api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); }).catch(function () {});
+    /* Every feed here used to end in an empty catch, so a failure left its panel spinning on
+       "Loading…" for ever — indistinguishable from a slow network, and the reason this screen
+       looked dead rather than broken. A feed that fails now says so, in its own panel, with a
+       way back. */
+    api('dailyReport', {}).then(function (d) { O.days = (d && d.rows) || []; oPaintDated(); })
+      .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
+    api('mgmtOverview', {}).then(function (d) {
+      O.ov = d || {};
+      oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth();
+      oPaintDated();          // the live "today" tile rides on this feed, not on dailyReport
+    }).catch(function (e) { oFeedFailed('o2Today', 'today\u2019s live figures', e); });
+    api('activeListings', {}).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
+      .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
+    api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
+      .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
