@@ -671,6 +671,7 @@ function alertsWrongAdvertising_(accounts) {
   const out = [];
   (scan.alarms || []).forEach(function (a) {
     if (a.resolved_on_sheet) return;
+    if (a.sides_agree) return;                 // corrected since it was written — not an alarm
     const sig = acknowledged[a.signal_key];
     if (sig && String(sig.acknowledged_by || '')) return;
     out.push({

@@ -94,15 +94,116 @@ const ACTIONS_ENGINE = {
 /** Facts for the Active Listings screen: the Central Main Sheet's own numbers per item, pushed
  * hourly with the users/accounts sync. Header names are the sheet's, verbatim (trailing space
  * on 'Profit ' included). Suppliers follow once their exact headers are confirmed on-sheet. */
+/* ---------------- order COST feed (19 Aug) ----------------------------------
+ * eBay's API can tell us what an order sold for and what eBay charged us. It cannot tell us what
+ * we PAID for the goods — that number exists in exactly one place, the 'Cost' column the order
+ * processor fills on the day tab. Without it every profit figure in the portal was revenue minus
+ * eBay fees, which is not profit at all, and all 16k orders in the Engine carried cost = 0.
+ *
+ * The walk is deliberately incremental. Five accounts × a 45-day window is 225 sheet reads, far
+ * past a trigger's 6-minute ceiling, so each run picks up where the last stopped and stops on a
+ * time budget. Recent days are visited first because those are the ones staff are looking at.
+ * Multi-line orders are summed: three lines of one order is one order that cost the sum. */
+const COST_LOOKBACK_DAYS = 45;
+const COST_BUDGET_MS = 200000;
+const COST_CURSOR_KEY = 'COST_SYNC_CURSOR';
+const COST_COL_ORDER = 'Order Number';
+const COST_COL_COST = 'Cost';
+
+function costAccounts_() {
+  return (connectionHealth().perAccount || []).filter(function (a) {
+    return (a.items || []).some(function (i) { return i.kind === 'order_processing' && i.status === 'linked'; });
+  }).map(function (a) { return String(a.account || ''); }).filter(String);
+}
+
+function pushEngineCosts() {
+  const started = Date.now();
+  const props = PropertiesService.getScriptProperties();
+  const accounts = costAccounts_();
+  if (!accounts.length) return 'cost sync: no linked order_processing workbook';
+
+  let cur = {};
+  try { cur = JSON.parse(props.getProperty(COST_CURSOR_KEY) || '{}'); } catch (e) { cur = {}; }
+  let ai = Number(cur.a) || 0, di = Number(cur.d) || 0;
+  if (ai >= accounts.length) ai = 0;
+  if (di >= COST_LOOKBACK_DAYS) di = 0;
+
+  const today = ordersToday_();          // day tabs are named on the PKT day, like the processors' shift
+  let tabs = 0, sent = 0, landed = 0, misses = 0;
+
+  while (Date.now() - started < COST_BUDGET_MS) {
+    const account = accounts[ai];
+    const ymd = ordersAddDays_(today, -di);
+    let read = null;
+    try {
+      read = ordersReadTab_(account, ordersDayTabCandidates_(ymd), 600, [COST_COL_ORDER, COST_COL_COST]);
+    } catch (e) { read = null; }
+    tabs++;
+
+    if (read && read.ok && read.rows && read.rows.length) {
+      const byOrder = {};
+      read.rows.forEach(function (r) {
+        const id = costOrderId_(r[COST_COL_ORDER]);
+        const c = costNumber_(r[COST_COL_COST]);
+        if (!id || !(c > 0)) return;
+        byOrder[id] = (byOrder[id] || 0) + c;
+      });
+      const costs = Object.keys(byOrder).map(function (id) { return { order_id: id, cost: Math.round(byOrder[id] * 100) / 100 }; });
+      if (costs.length) {
+        for (let i = 0; i < costs.length; i += 200) {
+          try {
+            const res = enginePost_('syncCosts', { costs: costs.slice(i, i + 200), account: account, tab: read.tab });
+            sent += Math.min(200, costs.length - i);
+            landed += Number(res && res.updated) || 0;
+          } catch (e) {
+            logActivity_('system', 'ENGINE_COST_FAIL', account + '!' + ymd, '', '', String(e && e.message || e).slice(0, 160));
+          }
+        }
+      }
+    } else { misses++; }
+
+    di++;
+    if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; }
+  }
+
+  props.setProperty(COST_CURSOR_KEY, JSON.stringify({ a: ai, d: di }));
+  const summary = 'cost sync: ' + tabs + ' day tab(s) read, ' + sent + ' order cost(s) posted, '
+    + landed + ' changed in the Engine' + (misses ? ', ' + misses + ' tab(s) not present' : '');
+  logActivity_('system', 'ENGINE_COST_SYNC', accounts[ai] || '', '', String(landed), summary);
+  return summary;
+}
+
+/* The sheet writes order numbers in several shapes — a leading apostrophe from a text-formatted
+ * cell, stray spaces, occasionally a trailing note. eBay's own ids are digits and dashes only. */
+function costOrderId_(v) {
+  const raw = String(v == null ? '' : v).replace(/^'/, '').trim();
+  const m = raw.match(/\d{2}-\d{5}-\d{5}/);
+  if (m) return m[0];
+  return /^[\d-]{8,}$/.test(raw) ? raw : '';
+}
+
+/* '£4.20', '4,20', ' 4.2 ' and a real number all mean the same thing to a processor. */
+function costNumber_(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  const t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '').replace(/,(\d{2})$/, '.$1').replace(/,/g, '');
+  const n = Number(t);
+  return isFinite(n) ? n : 0;
+}
+
 function enrichEngineFacts_() {
+  /* Headers copied from the live Main Sheet, verbatim. 'Profit ' carries a trailing space and
+   * 'Suuplier 2' is genuinely spelled with two u's — matching the typo is the only reason the
+   * second supplier arrives at all. The four supplier columns and the category have been sitting
+   * in the sheet unread this whole time, which is why the portal never showed a supplier. */
   const spec = ['Image Link', 'Listing Title', 'Sold For', 'Order Earning', 'Aliexpress Cost', 'Profit ',
-    'Campaign Selection', 'Current Campaign Selection', 'eBay Item No'];
+    'Campaign Selection', 'Current Campaign Selection', 'eBay Item No',
+    'Current Supplier Working', 'Ali Express Link 1', 'Suuplier 2', 'Supplier 3', 'eBay Category (FVF %)'];
   let pushed = 0;
   (connectionHealth().perAccount || []).forEach(function (a) {
     const account = String(a.account || '');
     let read = null;
     try {
-      read = bridgeReadRows_({ scope: 'account', account: account, kind: 'central', tab: ['Main Sheet'], expect: spec, limit: 500 });
+      read = bridgeReadRows_({ scope: 'account', account: account, kind: 'central', tab: ['Main Sheet'], expect: spec, limit: 3000 });   // 903 live items — 500 dropped a third of them
     } catch (e) { return; }
     if (!read || read.ok === false || !read.rows) return;
     const items = [];
@@ -111,11 +212,16 @@ function enrichEngineFacts_() {
       if (!id) return;
       items.push({
         item_id: id, account: account,
-        oe: Number(r['Order Earning']) || 0,
-        ali_cost: Number(r['Aliexpress Cost']) || 0,
-        profit: Number(r['Profit ']) || 0,
+        oe: costNumber_(r['Order Earning']),
+        ali_cost: costNumber_(r['Aliexpress Cost']),
+        profit: costNumber_(r['Profit ']),
         campaign_type: String(r['Campaign Selection'] || ''),
         campaign_name: String(r['Current Campaign Selection'] || ''),
+        current_sup: String(r['Current Supplier Working'] || ''),
+        sup1_link: String(r['Ali Express Link 1'] || ''),
+        sup2_link: String(r['Suuplier 2'] || ''),
+        sup3_link: String(r['Supplier 3'] || ''),
+        category: String(r['eBay Category (FVF %)'] || ''),
       });
     });
     for (let i = 0; i < items.length; i += 150) {

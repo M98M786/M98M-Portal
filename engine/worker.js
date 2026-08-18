@@ -1299,7 +1299,7 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    covers 3 days (yesterday can still be corrected) instead of 8. */
 async function rollups(env) {
   const sinceIso = new Date(Date.now() - 3 * 86400000).toISOString();
-  const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
+  const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, cost, ebay_fees, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
   /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
      a UK day is not) — writing it would overwrite last night's correct full-day row with a
@@ -1325,11 +1325,30 @@ async function rollups(env) {
     const q = Math.max(1, Number(o.qty) || 0);       // per-unit facts × units actually sold
     const f = facts[o.item_id] || {};
     const k = o.account + '|' + dte;
-    const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0 });
+    const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0, real: 0, n: 0 });
     row.sold += Number(o.sold) || 0;                  // order total is already all units
-    row.oe += (Number(f.oe) || 0) * q;
-    row.cost += (Number(f.ali_cost) || 0) * q;
-    row.profit += (Number(f.profit) || 0) * q;
+    const oe = (Number(f.oe) || 0) * q;
+    row.oe += oe;
+    row.n++;
+
+    /* COST, in order of how much we trust it (19 Aug):
+       1. orders.cost — what the processor actually paid, typed on the day tab. Real money.
+       2. items_facts.ali_cost × units — the Main Sheet's standing cost for that item.
+       The sheet's cost column is blank for most items, and treating blank as zero is exactly how
+       this rollup used to report a day's profit as if the goods were free. When neither is known
+       the order contributes NO profit rather than a flattering one. */
+    const realCost = Number(o.cost) || 0;
+    const cost = realCost > 0 ? realCost : (Number(f.ali_cost) || 0) * q;
+    row.cost += cost;
+    if (realCost > 0) row.real++;
+
+    if (cost > 0) {
+      // Order Earning is already net of eBay's cut, so profit is simply earning minus goods.
+      // Without an OE we fall back to eBay's own fee figure for the order.
+      row.profit += oe > 0 ? oe - cost : (Number(o.sold) || 0) - (Number(o.ebay_fees) || 0) - cost;
+    } else if (Number(f.profit)) {
+      row.profit += Number(f.profit) * q;             // sheet stated a profit outright
+    }
     const t = new Date(o.created_at).getTime();
     if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + q;
   }
@@ -1508,21 +1527,56 @@ const ROUTES = {
 
   /* Sheet facts (suppliers, OE, campaign decision) pushed from Apps Script — the sheets stay
      the human truth, the Engine is their fast mirror (dual-run, G-1). */
+  /* Order COST — the number that made every profit figure in the portal a fiction (19 Aug).
+     eBay knows what an order sold for and what it charged in fees; it has no idea what we paid
+     AliExpress for the goods. That number lives only where the processor typed it: the 'Cost'
+     column of the order_processing day tab. Until this action existed, all 16,259 orders carried
+     cost = 0, so 'profit' meant revenue minus eBay fees and overstated every day, every account
+     and every item. Apps Script walks the day tabs on a cursor and posts them here. */
+  syncCosts: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rows = (p.costs || []).filter((c) => String(c.order_id || '').trim() && Number(c.cost) > 0);
+      if (!rows.length) return { updated: 0, matched: 0 };
+      const stmt = ctx.env.DB.prepare('UPDATE orders SET cost = ?2 WHERE order_id = ?1 AND cost != ?2');
+      let matched = 0;
+      const batch = rows.map((c) => stmt.bind(String(c.order_id).trim(), Number(c.cost)));
+      for (let i = 0; i < batch.length; i += 50) {
+        const res = await ctx.env.DB.batch(batch.slice(i, i + 50));
+        for (const r of res) matched += (r.meta && r.meta.changes) || 0;
+      }
+      if (p.account) {
+        await ctx.env.DB.prepare(
+          "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('costSync', ?1, ?2, datetime('now'), '') " +
+          "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
+        ).bind(String(p.account), matched + ' of ' + rows.length + ' cost(s)' + (p.tab ? ' from ' + p.tab : '')).run();
+      }
+      return { updated: matched, seen: rows.length };
+    },
+  },
+
+  /* The Main Sheet's supplier and category columns ride in here too (19 Aug). Their headers are
+     taken from the live sheet verbatim — 'Suuplier 2' really is spelled with two u's, and matching
+     it exactly is the only reason supplier 2 arrives at all. The writes are batched: 150 items used
+     to mean 150 sequential D1 round trips, which is most of why a facts push took minutes. */
   syncFacts: {
     auth: 'sync', fn: async (p, ctx) => {
-      let n = 0;
-      for (const f of (p.items || [])) {
-        const id = String(f.item_id || '').trim();
-        if (!id) continue;
-        await ctx.env.DB.prepare(
-          'INSERT INTO items_facts (item_id, account, source, ali_cost, oe, profit, campaign_name, campaign_type, current_sup, enriched_at) ' +
-          "VALUES (?1, ?2, 'SHEET', ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
-          'ON CONFLICT(item_id) DO UPDATE SET account=?2, ali_cost=?3, oe=?4, profit=?5, campaign_name=?6, campaign_type=?7, current_sup=?8, enriched_at=datetime(\'now\')'
-        ).bind(id, String(f.account || ''), Number(f.ali_cost) || 0, Number(f.oe) || 0,
-          Number(f.profit) || 0, String(f.campaign_name || ''), String(f.campaign_type || ''), String(f.current_sup || '')).run();
-        n++;
-      }
-      return { synced: n };
+      const items = (p.items || []).filter((f) => String(f.item_id || '').trim());
+      if (!items.length) return { synced: 0 };
+      const stmt = ctx.env.DB.prepare(
+        'INSERT INTO items_facts (item_id, account, source, ali_cost, oe, profit, campaign_name, campaign_type, ' +
+        'current_sup, sup1_link, sup2_link, sup3_link, category, enriched_at) ' +
+        "VALUES (?1, ?2, 'SHEET', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now')) " +
+        'ON CONFLICT(item_id) DO UPDATE SET account=?2, ali_cost=?3, oe=?4, profit=?5, campaign_name=?6, ' +
+        'campaign_type=?7, current_sup=?8, sup1_link=?9, sup2_link=?10, sup3_link=?11, category=?12, ' +
+        "enriched_at=datetime('now')"
+      );
+      const batch = items.map((f) => stmt.bind(
+        String(f.item_id).trim(), String(f.account || ''), Number(f.ali_cost) || 0, Number(f.oe) || 0,
+        Number(f.profit) || 0, String(f.campaign_name || ''), String(f.campaign_type || ''),
+        String(f.current_sup || ''), String(f.sup1_link || ''), String(f.sup2_link || ''),
+        String(f.sup3_link || ''), String(f.category || '')));
+      for (let i = 0; i < batch.length; i += 50) await ctx.env.DB.batch(batch.slice(i, i + 50));
+      return { synced: batch.length };
     },
   },
 
@@ -1588,13 +1642,28 @@ const ROUTES = {
   activeListings: {
     auth: 'any', fn: async (p, ctx) => {
       const account = String(p.account || '');
+      /* Search runs in D1, not in the browser: the fleet is ~900 live listings and climbing, and
+         a client-side filter can only search the page it was given. An item-number lookup has to
+         reach every listing, so `q` is pushed down to SQL and the row cap only bounds the reply. */
+      const q = String(p.q || '').trim();
+      const where = [];
+      const bind = [];
+      if (account) { bind.push(account); where.push('a.account = ?' + bind.length); }
+      if (q) {
+        bind.push('%' + q.toLowerCase() + '%');
+        const n = bind.length;
+        where.push('(a.item_id LIKE ?' + n + ' OR lower(a.title) LIKE ?' + n +
+          ' OR lower(f.campaign_name) LIKE ?' + n + ' OR lower(f.campaign_type) LIKE ?' + n + ')');
+      }
       const rs = await ctx.env.DB.prepare(
         'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, ' +
-        '       f.ali_cost, f.sup1, f.sup2, f.sup3, f.current_sup, f.oe, f.profit, f.roi, f.margin, ' +
+        '       f.ali_cost, f.sup1, f.sup2, f.sup3, f.sup1_link, f.sup2_link, f.sup3_link, ' +
+        '       f.current_sup, f.category, f.oe, f.profit, f.roi, f.margin, ' +
         '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ' +
         'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' +
-        (account ? 'WHERE a.account = ?1 ' : '') + 'ORDER BY a.api_synced_at DESC LIMIT 500'
-      ).bind(...(account ? [account] : [])).all();
+        (where.length ? 'WHERE ' + where.join(' AND ') + ' ' : '') +
+        'ORDER BY a.api_synced_at DESC LIMIT 1500'
+      ).bind(...bind).all();
       const rows = (rs.results || []).map(r => stripItem(r, ctx.user));
       /* Req 33 / Q9: Team Lead (and the other campaign roles) see PER-ITEM ad spend — never
          account totals. The 14-day per-item spend rides along only for those roles; the strip

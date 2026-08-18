@@ -630,8 +630,20 @@ function buildDashboardCache() {
   const rows = [];
   let computed = 0, missing = 0, failed = 0, skipped = 0;
 
-  for (let i = 0; i < accounts.length; i++) {
-    if (Date.now() - started > DASH_SWEEP_BUDGET_MS) { skipped = accounts.length - i; break; }
+  /* ROUND-ROBIN (19 Aug). This loop used to start at accounts[0] every run, so when the time
+   * budget ran out mid-sweep it was ALWAYS the same tail accounts that got dropped — they read
+   * "not computed yet" on the KPI and Sales-analysis screens for ever, no matter how often the
+   * sweep ran. Each run now begins where the last one stopped, so every account is refreshed
+   * within a couple of sweeps. */
+  const props = PropertiesService.getScriptProperties();
+  let startAt = Number(props.getProperty('DASH_SWEEP_CURSOR') || 0);
+  if (!(startAt >= 0) || startAt >= accounts.length) startAt = 0;
+  let stoppedAt = startAt;
+
+  for (let n = 0; n < accounts.length; n++) {
+    const i = (startAt + n) % accounts.length;
+    stoppedAt = i;
+    if (Date.now() - started > DASH_SWEEP_BUDGET_MS) { skipped = accounts.length - n; break; }
     const account = accounts[i].account;
     if (!accounts[i].linked) {
       [curMonth, prevMonth].forEach(function (p) { dashPush_(rows, DASH_METRIC_CONNECTION, account, p, DASH_NOT_CONNECTED); });
@@ -656,6 +668,10 @@ function buildDashboardCache() {
       });
     }
   }
+
+  // Next sweep starts at the account after the last one this run touched, so a time-budget cut
+  // rotates through the fleet instead of starving the same tail every time.
+  props.setProperty('DASH_SWEEP_CURSOR', String((stoppedAt + 1) % Math.max(1, accounts.length)));
 
   const written = dashCacheWrite_(rows, stamp, today);
   const summary = 'dashboard cache: ' + computed + ' account(s) computed, ' + missing + ' ' + DASH_NOT_CONNECTED

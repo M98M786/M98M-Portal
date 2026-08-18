@@ -606,6 +606,12 @@ function advAlarmRecord_(account, r, mainSheets) {
     status: status,
     resolved_at: advCellText_(advPick_(r, 'Resolved')),
     resolved_on_sheet: advNorm_(status) === advNorm_(ADV_ALARM_RESOLVED),
+    // A row on the Wrong Advertising tab is a HISTORY entry, not a live verdict: once the Main
+    // Sheet was corrected the two sides agree, and an alarm saying "live: Campaign CPC · manager
+    // wants: Campaign CPC" is noise that destroys trust in the whole Alerts centre. The alarm is
+    // only live while the two sides genuinely differ.
+    sides_agree: !!(wants && advCellText_(advPick_(r, 'Live on eBay')) &&
+      advNorm_(wants) === advNorm_(advCellText_(advPick_(r, 'Live on eBay')))),
     signal_key: advSignalKey_(account, itemId, date),
   };
 }
