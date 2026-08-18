@@ -202,6 +202,14 @@
     if (!box) { return; }
     if (O.days === null) { box.innerHTML = '<div class="empty">Loading the books…</div>'; return; }
     var cur = oSum(oRows(r.from, r.to));
+    /* The nightly book cannot know about today — orders that landed since 2am are only in the
+     * live feed. Whenever the range reaches today, today's revenue comes from the feed. */
+    var liveT = O.ov && O.ov.kpis && O.ov.kpis.today;
+    if (liveT && r.to >= ukToday()) {
+      var bookToday = oSum(oRows(ukToday(), ukToday()));
+      var live = oN(liveT.revenue);
+      if (live > bookToday.sold) { cur.sold += (live - bookToday.sold); }
+    }
     var span = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
     var prev = oSum(oRows(dShift(r.from, -span), dShift(r.from, -1)));
     function delta(c, p) {

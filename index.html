@@ -508,6 +508,7 @@ function initGsi(){
 function onCredential(resp){
   var wasIn = !!(STATE.user && STATE.user.status === 'approved');
   STATE.idToken = resp.credential;
+  sessSave(resp.credential);
   if(wasIn){ hideReauth(); toast('Session refreshed — carry on.'); return; }
   $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Checking your access…';
   api('whoami').then(routeUser).catch(function(e){
@@ -714,14 +715,36 @@ function fmtPkt(iso, withDate){
 function safeUrl(u){ u=String(u||''); return /^https?:\/\//i.test(u) ? u : ''; }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
-function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} cacheClearAll(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} cacheClearAll(); sessClear(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
 /* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
+/* ---- the session survives a reload (RL-11 still holds: the token is Google's own, it is
+   checked by BOTH servers on every call, and it is kept in sessionStorage — this tab only,
+   gone when the tab closes, never written to disk-backed localStorage). Reloading a page is
+   not signing out, and staff should never be thrown back to the login screen mid-shift. ---- */
+var SESS_KEY = 'm98m:sess';
+function sessSave(tok){ try{ sessionStorage.setItem(SESS_KEY, tok); }catch(e){} }
+function sessClear(){ try{ sessionStorage.removeItem(SESS_KEY); }catch(e){} }
+function sessLoad(){
+  try{
+    var t = sessionStorage.getItem(SESS_KEY);
+    if(!t){ return null; }
+    var j = decodeJwt(t);
+    if(!j || !j.exp || j.exp*1000 - Date.now() < 60000){ sessClear(); return null; }  // expired or about to
+    return t;
+  }catch(e){ return null; }
+}
 function boot(){
   api('getPublicConfig').then(function(cfg){
     STATE.config=cfg;
     if(!cfg.oauth_client_id){ $('loginStatus').className='auth-status info'; $('loginStatus').textContent='Sign-in is being switched on by setup — almost there.'; return; }
     initGsi();
+    var kept = sessLoad();
+    if(kept){
+      STATE.idToken = kept;
+      $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Welcome back…';
+      api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; $('loginStatus').textContent=''; });
+    }
   }).catch(function(e){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.'; });
 }
 window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };

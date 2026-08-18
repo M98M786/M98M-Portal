@@ -30,7 +30,7 @@
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [] };
+  var ALX = { account: '', rows: [], q: '' };
 
   function alxFetch() {
     var payload = ALX.account ? { account: ALX.account } : {};
@@ -43,10 +43,17 @@
   function alxPaint(d) {
     var box = $('alxBody');
     if (!box) { return; }
-    ALX.rows = (d && d.rows) || [];
+    if (d) { ALX.rows = d.rows || []; }
+    var all = ALX.rows;
+    var q = axStr(ALX.q).toLowerCase();
+    if (q) {
+      all = all.filter(function (r) {
+        return (axStr(r.item_id) + ' ' + axStr(r.title) + ' ' + axStr(r.campaign_type) + ' ' + axStr(r.campaign_name)).toLowerCase().indexOf(q) >= 0;
+      });
+    }
     var cnt = $('alxCount');
-    if (cnt) { cnt.textContent = ALX.rows.length + ' listing(s)' + (ALX.rows.length >= 500 ? ' · newest 500 shown' : ''); }
-    if (!ALX.rows.length) {
+    if (cnt) { cnt.textContent = all.length + (q ? ' of ' + ALX.rows.length : '') + ' listing(s)' + (ALX.rows.length >= 500 ? ' · newest 500 synced' : ''); }
+    if (!all.length) {
       box.innerHTML = '<div class="alx-empty">Nothing here yet for this filter.' +
         '<span>The Engine refreshes listings on a rolling 15-minute cycle — a freshly connected account fills up over the first hour.</span></div>';
       return;
@@ -65,7 +72,10 @@
       '<th>Supplier</th><th>Source</th></tr></thead><tbody>';
     ALX.rows.forEach(function (r) {
       var img = axStr(r.image);
-      var src = axStr(r.source) === 'SHEET' || !axStr(r.api_synced_at) ? 'SHEET' : 'API';
+      /* The chip answers "where did this ROW come from": a row eBay itself synced is API, even
+       * though its sheet facts ride along. Only a row with no API sync at all is SHEET (Sir
+       * Hasib's bridge). Reading items_facts.source here made every listing claim SHEET. */
+      var src = axStr(r.api_synced_at) ? 'API' : 'SHEET';
       h += '<tr>' +
         '<td>' + (img && safeUrl(img) ? '<img class="alx-img" loading="lazy" src="' + esc(safeUrl(img)) + '" alt="">' : '<div class="alx-img"></div>') + '</td>' +
         '<td><div class="alx-title">' + esc(axStr(r.title) || '(no title)') + '</div><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + '</div></td>' +

@@ -73,10 +73,10 @@ export default {
      flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
   async scheduled(event, env, ctx) {
     const jobs = {
-      '*/5 * * * *': [orderSync, adsSync, violationsSync],
+      '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
-      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync],
+      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -1292,14 +1292,19 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    orders correct yesterday), avg_profit_7d per item, and the daily_health snapshot. Ads spend
    stays 0 until the report-task feed lands — profit here is the sheet's own per-item projection
    times units, labelled an estimate wherever it is shown. */
+/* BOUNDED (19 Aug): the 8-day rebuild plus a full sold_30d pass plus computeHealth in ONE
+   invocation started dying silently once orders passed 16k rows — the Worker was killed
+   mid-run, so the books simply stopped updating and every money screen went stale with no
+   error anywhere. Each piece now runs in its own job with its own lease, and the day rebuild
+   covers 3 days (yesterday can still be corrected) instead of 8. */
 async function rollups(env) {
-  const sinceIso = new Date(Date.now() - 8 * 86400000).toISOString();
+  const sinceIso = new Date(Date.now() - 3 * 86400000).toISOString();
   const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
   /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
      a UK day is not) — writing it would overwrite last night's correct full-day row with a
      truncated one, permanently. That day is done and written; skip it. */
-  const edgeDay = ukDate(sinceIso);
+  const edgeDay = '';                                   // 3-day window: every day in it is complete enough to write
 
   const ids = [...new Set(orders.map(o => String(o.item_id || '')).filter(Boolean))];
   const facts = {};
@@ -1357,22 +1362,6 @@ async function rollups(env) {
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
 
-  // sold_30d per item (change-only, like everything that writes daily) + queue hygiene
-  const s30 = {};
-  const o30 = await env.DB.prepare(
-    "SELECT item_id, SUM(MAX(1, qty)) AS u FROM orders WHERE created_at >= datetime('now', '-30 day') AND item_id != '' GROUP BY item_id"
-  ).all();
-  for (const r of (o30.results || [])) s30[r.item_id] = Number(r.u) || 0;
-  const cur30 = await env.DB.prepare('SELECT item_id, sold_30d FROM items_api').all();
-  const st30 = [];
-  for (const r of (cur30.results || [])) {
-    const want = s30[r.item_id] || 0;
-    if (Number(r.sold_30d) !== want) st30.push(env.DB.prepare('UPDATE items_api SET sold_30d = ?2 WHERE item_id = ?1').bind(r.item_id, want));
-  }
-  for (let i = 0; i < st30.length; i += 50) await env.DB.batch(st30.slice(i, i + 50));
-  await env.DB.prepare("DELETE FROM automsg_queue WHERE status != 'QUEUED' AND created_at < datetime('now', '-30 day')").run();
-  await env.DB.prepare("DELETE FROM ad_report_tasks WHERE status IN ('INGESTED', 'FAILED') AND created_at < datetime('now', '-30 day')").run();
-
   const rows = await computeHealth(env);
   for (const h of rows) {
     await env.DB.prepare(
@@ -1380,6 +1369,55 @@ async function rollups(env) {
       'ON CONFLICT(day, account) DO UPDATE SET listings = ?3, orders_7d = ?4, revenue_7d = ?5, loss_items = ?6, json = ?7'
     ).bind(ukDate(''), h.account, h.listings, h.orders_7d, h.revenue_7d, h.loss_items,
       JSON.stringify({ campaigns_running: h.campaigns_running, campaigns_total: h.campaigns_total })).run();
+  }
+}
+
+/* Split out of rollups so one heavy pass can never kill the books again. */
+async function itemStats(env) {
+  const s30 = {};
+  const o30 = await env.DB.prepare(
+    "SELECT item_id, SUM(MAX(1, qty)) AS u FROM orders WHERE created_at >= datetime('now', '-30 day') AND item_id != '' GROUP BY item_id"
+  ).all();
+  for (const r of (o30.results || [])) s30[r.item_id] = Number(r.u) || 0;
+  const cur30 = await env.DB.prepare('SELECT item_id, sold_30d FROM items_api').all();
+  const st = [];
+  for (const r of (cur30.results || [])) {
+    const want = s30[r.item_id] || 0;
+    if (Number(r.sold_30d) !== want) st.push(env.DB.prepare('UPDATE items_api SET sold_30d = ?2 WHERE item_id = ?1').bind(r.item_id, want));
+  }
+  for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
+  await env.DB.prepare("DELETE FROM automsg_queue WHERE status != 'QUEUED' AND created_at < datetime('now', '-30 day')").run();
+  await env.DB.prepare("DELETE FROM ad_report_tasks WHERE status IN ('INGESTED', 'FAILED') AND created_at < datetime('now', '-30 day')").run();
+}
+
+/* THE CPC RULE (Hasib, 19 Aug): an item whose raw profit after VAT is under £3.30 has no
+   business in a CPC campaign. The moment the portal sees one, Zain and Management hear about
+   it — that is a money leak running on every sale, so it rings within the 5-minute tick, not
+   tomorrow. One bell per item per day; it clears itself when the item leaves CPC or earns. */
+const CPC_MIN_PROFIT = 3.30;
+async function cpcAudit(env) {
+  const bad = await env.DB.prepare(
+    "SELECT f.item_id, f.account, f.profit, f.campaign_type, f.campaign_name, i.title, i.price " +
+    'FROM items_facts f JOIN items_api i ON i.item_id = f.item_id ' +
+    "WHERE i.status = 'ACTIVE' AND f.campaign_type LIKE '%CPC%' AND f.profit > 0 AND f.profit < ?1 " +
+    'ORDER BY f.profit ASC LIMIT 40'
+  ).bind(CPC_MIN_PROFIT).all();
+  const today = ukDate('');
+  for (const r of (bad.results || [])) {
+    const seen = await env.DB.prepare(
+      "SELECT 1 AS x FROM campaign_events WHERE change_type = 'cpc_rule' AND item_id = ?1 AND date(at) = date('now')"
+    ).bind(String(r.item_id)).first();
+    if (seen) continue;
+    const msg = '🔴 Wrong CPC decision · ' + r.account + ' · ' + String(r.title || '').slice(0, 60) +
+      ' (' + r.item_id + ') — raw profit £' + Number(r.profit).toFixed(2) + ' is under the £' +
+      CPC_MIN_PROFIT.toFixed(2) + ' CPC floor, but it sits in "' + (r.campaign_name || r.campaign_type) +
+      '". Every CPC sale on it loses money. Move it out of CPC or reprice it.';
+    await env.DB.prepare(
+      "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'cpc_rule', ?4, ?5, '', datetime('now'))"
+    ).bind(String(r.account), String(r.campaign_name || r.campaign_type), String(r.item_id),
+      'profit £' + Number(r.profit).toFixed(2), 'below £' + CPC_MIN_PROFIT.toFixed(2)).run();
+    await queueNotify(env, 'advertising', 'Wrong CPC decision', msg, 'engine:cpcrule:' + r.item_id + ':' + today);
+    await queueNotify(env, 'management', 'Wrong CPC decision', msg, 'engine:cpcrule:' + r.item_id + ':' + today);
   }
 }
 
@@ -2088,7 +2126,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
