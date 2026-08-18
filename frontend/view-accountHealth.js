@@ -61,13 +61,21 @@
     });
     h += '</tbody></table></div>';
 
-    var bad = ((d && d.sync) || []).filter(function (s) { return ahStr(s.last_error); });
+    /* 'adsEnrolment' rows are a STATE, not a failure — eBay simply refuses the campaign list
+     * for a seller who is not in Promoted Listings. Never paint those red. */
+    var all = (d && d.sync) || [];
+    var notes = all.filter(function (s) { return ahStr(s.job) === 'adsEnrolment'; });
+    var bad = all.filter(function (s) { return ahStr(s.job) !== 'adsEnrolment' && ahStr(s.last_error); });
     h += '<div class="ah-sync"><h3 style="margin:0 0 6px;font-size:13px">Engine sync</h3><ul style="margin:0;padding:0">';
     if (!bad.length) {
       h += '<li class="ah-ok">✓ Every sync job is green.</li>';
     }
     bad.forEach(function (s) {
       h += '<li><span class="ah-err">' + esc(ahStr(s.job)) + (ahStr(s.account) ? ' · ' + esc(ahStr(s.account)) : '') + '</span> — ' + esc(ahStr(s.last_error)) + '</li>';
+    });
+    notes.forEach(function (s) {
+      h += '<li><span style="color:var(--warn);font-weight:800">' + esc(ahStr(s.account)) + '</span> — ' + esc(ahStr(s.last_error)) +
+        '<span style="display:block;color:var(--text-3);font-weight:600;font-size:11.5px">Its orders, listings and CS keep syncing normally. Enrol that shop in Promoted Listings and campaign watching starts on the next tick.</span></li>';
     });
     h += '</ul></div>';
 

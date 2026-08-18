@@ -480,7 +480,23 @@ async function adsSync(env) {
     const tok = await ebayAccessToken(env, acct);
     const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign?limit=100', {
       headers: { authorization: 'Bearer ' + tok } });
-    if (!r.ok) throw new Error(acct + ' campaigns ' + r.status);
+    if (!r.ok) {
+      const body = (await r.text()).slice(0, 400);
+      /* A 403 here is usually a STATUS, not a fault: eBay refuses the campaign list outright
+         for sellers who are not enrolled in Promoted Listings. Say what eBay said, verbatim,
+         and record it as a known state so the screens stop calling it an error. */
+      if (r.status === 403) {
+        let said = '';
+        try { const j = JSON.parse(body); said = String((j.errors || [{}])[0].message || (j.errors || [{}])[0].longMessage || ''); } catch (e) { said = body.slice(0, 160); }
+        await env.DB.prepare(
+          "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsEnrolment', ?1, '', datetime('now'), ?2) " +
+          'ON CONFLICT(job, account) DO UPDATE SET last_ok = datetime(\'now\'), last_error = ?2'
+        ).bind(acct, ('not enrolled in Promoted Listings — eBay says: ' + said).slice(0, 300)).run();
+        return;                                   // not an error: nothing to diff, nothing to alarm
+      }
+      throw new Error(acct + ' campaigns ' + r.status + ': ' + body.slice(0, 160));
+    }
+    await env.DB.prepare("DELETE FROM sync_state WHERE job = 'adsEnrolment' AND account = ?1").bind(acct).run();
     const page = await r.json();
     const live = {};
     for (const c of (page.campaigns || [])) {
@@ -1590,7 +1606,7 @@ const ROUTES = {
         'SELECT account, campaign, item_id, change_type, old, new, actor, at FROM campaign_events ORDER BY id DESC LIMIT 60'
       ).all();
       const state = await ctx.env.DB.prepare(
-        "SELECT account, last_ok, last_error FROM sync_state WHERE job = 'adsSync' AND account != ''"
+        "SELECT job, account, last_ok, last_error FROM sync_state WHERE job IN ('adsSync', 'adsEnrolment') AND account != ''"
       ).all();
       /* CPQ, last 14 days per item: what each listing COSTS in ads per unit it sells — and the
          burners (spend, zero sales) float to the top, because that is the money leak. */

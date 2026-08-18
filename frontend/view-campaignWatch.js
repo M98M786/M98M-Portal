@@ -82,6 +82,13 @@
     if (cnt) { cnt.textContent = camps.length + ' campaign(s) · ' + gOrder.length + ' duplicate item(s)'; }
 
     var h = '';
+    (d.sync || []).forEach(function (s) {
+      if (cwStr(s.job) !== 'adsEnrolment') { return; }
+      if (acc && cwStr(s.account) !== acc) { return; }
+      h += '<div class="cw-dupbox" style="border-color:var(--warn);background:var(--warn-soft)">' +
+        '<h3 style="color:var(--warn)">' + esc(cwStr(s.account)) + ' — ' + esc(cwStr(s.last_error)) + '</h3>' +
+        '<p style="margin:0;font-size:11.5px;color:var(--text-3);font-weight:600">Nothing is broken: that shop\'s orders, listings and CS keep syncing. Enrol it in Promoted Listings on eBay and its campaigns appear here on the next 5-minute tick.</p></div>';
+    });
     if (gOrder.length) {
       h += '<div class="cw-dupbox"><h3>🔴 ' + gOrder.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
         '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that. ✕ removes the item from that one campaign' + '.</p>' +
