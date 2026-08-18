@@ -7142,11 +7142,15 @@ function marginOf(sold, profit) {
 }
 
 function kpiStrip(d) {
-  var m = (d.collective && d.collective.month) || {};
+  /* dashCollective_ answers {tiles, accounts_included} — the metrics live one level down. Reading
+     the wrapper made every figure undefined, which is why this whole strip sat on '—' while the
+     per-account rows below it (which do hop through .tiles) showed real money. */
+  var m = (d.collective && d.collective.month && d.collective.month.tiles) || {};
   var sold = tile(m, T_SOLD), profit = tile(m, T_PROFIT), ads = tile(m, T_ADS);
   var ali = tile(m, T_ALI), units = tile(m, C_UNITS), orders = tile(m, C_ORDERS);
-  var lastProfit = tile((d.collective && d.collective.last_month) || {}, T_PROFIT);
-  var margin = isFinite(tile(m, T_MARGIN)) ? tile(m, T_MARGIN) : marginOf(sold, profit);
+  var lastProfit = tile((d.collective && d.collective.last_month && d.collective.last_month.tiles) || {}, T_PROFIT);
+  // The workbook stores Margin as a fraction (0.099 = 9.9%), so it needs scaling; marginOf already returns percent.
+  var margin = isFinite(tile(m, T_MARGIN)) ? tile(m, T_MARGIN) * 100 : marginOf(sold, profit);
   var nt = (isFinite(ads) && isFinite(profit) && profit > 0) ? ads / profit : NaN;
 
   return '<div class="db-kpis">' +
@@ -7254,9 +7258,13 @@ function chart(d) {
 function ledger(d) {
   var rows = (d.accounts || []).map(function (a) {
     var mo = (a.month && a.month.tiles) || {};
-    var yd = (a.yesterday && a.yesterday.tiles) || {};
+    // The card's key is profit_yesterday and it carries .values — there is no a.yesterday, so this
+    // column read undefined for every account, every load.
+    var yd = (a.profit_yesterday && a.profit_yesterday.values) || {};
+    var ydLate = !!(a.profit_yesterday && a.profit_yesterday.latest_available);
+    var ydWhen = String((a.profit_yesterday && a.profit_yesterday.period) || '');
     var sold = tile(mo, T_SOLD), profit = tile(mo, T_PROFIT), ads = tile(mo, T_ADS);
-    var margin = isFinite(tile(mo, T_MARGIN)) ? tile(mo, T_MARGIN) : marginOf(sold, profit);
+    var margin = isFinite(tile(mo, T_MARGIN)) ? tile(mo, T_MARGIN) * 100 : marginOf(sold, profit);
     var nt = isFinite(tile(mo, C_RATIO)) ? tile(mo, C_RATIO)
       : (isFinite(profit) && profit > 0 && isFinite(ads) ? ads / profit : NaN);
     var quiet = a.reason ? '<div style="font-size:11.5px;color:var(--text-3);font-weight:600">' + esc(a.reason) + '</div>' : '';
@@ -7270,13 +7278,16 @@ function ledger(d) {
       '<td class="num">' + pct(margin) + '</td>' +
       '<td class="num" style="color:var(--blue-2)">' + gbp(ads) + '</td>' +
       '<td class="num"><span class="db-nt ' + ntClass(nt) + '">' + (isFinite(nt) ? nt.toFixed(2) : '—') + '</span></td>' +
-      '<td class="num" style="color:var(--gold-a)">' + gbp(tile(yd, C_ACTUAL)) + '</td>' +
+      '<td class="num" style="color:var(--gold-a)">' + gbp(tile(yd, C_ACTUAL)) +
+        // when the workbook has no row for yesterday this is the newest day it holds — say which
+        (ydLate && ydWhen ? '<div style="font-size:10.5px;color:var(--text-3);font-weight:600">' + esc(ydWhen) + '</div>' : '') +
+      '</td>' +
     '</tr>';
   }).join('');
 
-  var m = (d.collective && d.collective.month) || {};
+  var m = (d.collective && d.collective.month && d.collective.month.tiles) || {};
   var cSold = tile(m, T_SOLD), cProfit = tile(m, T_PROFIT), cAds = tile(m, T_ADS);
-  var cMargin = isFinite(tile(m, T_MARGIN)) ? tile(m, T_MARGIN) : marginOf(cSold, cProfit);
+  var cMargin = isFinite(tile(m, T_MARGIN)) ? tile(m, T_MARGIN) * 100 : marginOf(cSold, cProfit);
   var cNt = (isFinite(cAds) && isFinite(cProfit) && cProfit > 0) ? cAds / cProfit : NaN;
 
   return '<div class="scroll"><table>' +
