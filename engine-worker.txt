@@ -163,7 +163,7 @@ async function ctx_setSync(env, job, account, text) {
   await env.DB.prepare(
     "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, ?3, datetime('now'), '') " +
     "ON CONFLICT(job, account) DO UPDATE SET cursor = ?3, last_ok = datetime('now')"
-  ).bind(String(job), String(account), String(text).slice(0, 400)).run();
+  ).bind(String(job), String(account), String(text).slice(0, 1400)).run();
 }
 
 async function runJob(env, fn) {
@@ -1172,8 +1172,16 @@ async function violationsSync(env) {
    and a click that cost money but made no sale cost nothing at all in the portal.
    Every key is filtered against eBay's own metadata before it is asked for, so listing keys that
    an account does not offer costs nothing; the ones it does offer are summed into spend. */
-const ADS_METRIC_WANTED = ['ad_fees', 'cost', 'cpc_ad_fees', 'cpc_clicks', 'cpc_impressions',
-  'cpc_sale_amount', 'cpc_sales', 'clicks', 'impressions', 'sales', 'sale_amount'];
+/* Read off eBay's own metadata for these accounts (recorded in sync_state 'adsMetrics'), so these
+   are the real keys and not a guess. The CPC charge is 'cpc_ad_fees_listingsite_currency' —
+   nothing shorter exists, which is why an earlier guess at 'cpc_ad_fees' silently matched nothing.
+   listingsite currency is GBP on EBAY_GB; the payout-currency twins are THE SAME MONEY again and
+   are deliberately not requested, because summing both would double every figure. */
+const ADS_METRIC_WANTED = [
+  'ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount',
+  'cpc_ad_fees_listingsite_currency', 'cpc_clicks', 'cpc_impressions',
+  'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency',
+];
 
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
@@ -1190,7 +1198,7 @@ async function adsReportKick(env) {
     if (!metricKeys.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
     /* Which metrics this account's report actually offers, kept where it can be read without a
        redeploy. Spend was wrong for weeks precisely because nobody could see this list. */
-    await ctx_setSync(env, 'adsMetrics', acct, mets.join(','));
+    await ctx_setSync(env, 'adsMetrics', acct, 'asked[' + metricKeys.join(' ') + '] offered[' + mets.join(' ') + ']');
 
     const y = new Date(Date.now() - 86400000);
     const day = ukDate(y.toISOString());
@@ -1278,10 +1286,11 @@ async function ingestAdsReport(env, acct, day, text) {
   /* Spend is the SUM of every money-charged column the report carries: the Standard sale fee and
      the CPC click cost are different charges on the same listing and a seller running both pays
      both. Reading only ad_fees is what made a CPC-only account look free. */
-  const cols = (re) => heads.map((h, i) => (re.test(h) ? i : -1)).filter(i => i >= 0);
-  const cSpendAll = cols(/ad_fee|^cost$|^cpc_cost$/);
+  /* payout-currency columns restate the same money in a second currency — never summed. */
+  const cols = (re) => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
+  const cSpendAll = cols(/ad_fee/);                             // Standard sale fee + CPC click cost
   const cClicksAll = cols(/^clicks$|^cpc_clicks$/);
-  const cUnitsAll = cols(/^sales$|^cpc_sales$/);   // eBay's 'sales' = attributed sale COUNT
+  const cUnitsAll = cols(/^sales$|^cpc_attributed_sales$/);     // eBay's 'sales' = attributed sale COUNT
   const cSalesAll = cols(/sale_amount/);
   if (cListing < 0) return 0;
 
