@@ -1177,11 +1177,18 @@ async function violationsSync(env) {
    nothing shorter exists, which is why an earlier guess at 'cpc_ad_fees' silently matched nothing.
    listingsite currency is GBP on EBAY_GB; the payout-currency twins are THE SAME MONEY again and
    are deliberately not requested, because summing both would double every figure. */
-const ADS_METRIC_WANTED = [
-  'ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount',
-  'cpc_ad_fees_listingsite_currency', 'cpc_clicks', 'cpc_impressions',
-  'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency',
-];
+/* eBay refuses (error 35122) to put Promoted Listings STANDARD metrics and Promoted Listings
+   ADVANCED (CPC) metrics in one report — they are two different products billed two different
+   ways, and asking for both at once fails the whole request. So each account gets TWO report
+   tasks a day, one per family, and the two land in separate columns of ads_daily. Total spend is
+   the sum: a seller running both pays both. Keys are eBay's own, read from its report metadata —
+   the CPC charge is 'cpc_ad_fees_listingsite_currency', and its payout-currency twin is the same
+   money again and is deliberately never requested. */
+const ADS_FAMILIES = {
+  std: ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'],
+  cpc: ['cpc_ad_fees_listingsite_currency', 'cpc_clicks', 'cpc_impressions',
+    'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency'],
+};
 
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
@@ -1194,36 +1201,51 @@ async function adsReportKick(env) {
     if (!md.ok) throw new Error(acct + ' report metadata ' + md.status + ': ' + (await md.text()).slice(0, 140));
     const meta = await md.json();
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
-    const metricKeys = ADS_METRIC_WANTED.filter(m => mets.indexOf(m) >= 0);
-    if (!metricKeys.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
+    const families = Object.keys(ADS_FAMILIES)
+      .map(f => ({ family: f, keys: ADS_FAMILIES[f].filter(m => mets.indexOf(m) >= 0) }))
+      .filter(x => x.keys.length);
+    if (!families.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
     /* Which metrics this account's report actually offers, kept where it can be read without a
        redeploy. Spend was wrong for weeks precisely because nobody could see this list. */
-    await ctx_setSync(env, 'adsMetrics', acct, 'asked[' + metricKeys.join(' ') + '] offered[' + mets.join(' ') + ']');
+    await ctx_setSync(env, 'adsMetrics', acct, families.map(f => f.family + '[' + f.keys.join(' ') + ']').join(' ') + ' offered[' + mets.join(' ') + ']');
 
     const y = new Date(Date.now() - 86400000);
     const day = ukDate(y.toISOString());
     const from = day + 'T00:00:00.000Z';
     const to = day + 'T23:59:59.000Z';
-    const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
-      method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
-      body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
-        dateFrom: from, dateTo: to,
-        dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys }),
-    });
-    if (cr.status !== 202 && !cr.ok) throw new Error(acct + ' report create ' + cr.status + ': ' + (await cr.text()).slice(0, 160));
-    const loc = cr.headers.get('location') || '';
-    const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now());
+    /* One family failing must not cost us the other — a CPC-only seller and a Standard-only
+       seller both have one family that legitimately returns nothing. */
+    const problems = [];
+    for (const fam of families) {
+      const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+          dateFrom: from, dateTo: to,
+          dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys: fam.keys }),
+      });
+      if (cr.status !== 202 && !cr.ok) {
+        problems.push(fam.family + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 120));
+        continue;
+      }
+      const loc = cr.headers.get('location') || '';
+      const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now() + fam.family);
+      await env.DB.prepare(
+        "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
+        "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) " +
+        'ON CONFLICT(account, task_id) DO NOTHING'
+      ).bind(acct, taskId, day, fam.family).run();
+    }
+    if (problems.length === families.length) throw new Error(acct + ' report create failed — ' + problems.join(' | '));
+    if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | '));
+    return;
     await env.DB.prepare(
-      "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at) VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now')) " +
-      'ON CONFLICT(account, task_id) DO NOTHING'
-    ).bind(acct, taskId, day).run();
   });
 }
 
 async function adsReportPoll(env) {
   await perAccount(env, 'adsReportPoll', async (acct) => {
     const pend = await env.DB.prepare(
-      "SELECT task_id, report_date FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 3"
+      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 6"
     ).bind(acct).all();
     const tasks = pend.results || [];
     if (!tasks.length) return;
@@ -1266,7 +1288,7 @@ async function adsReportPoll(env) {
         text = new TextDecoder().decode(buf);
       }
 
-      const ingested = await ingestAdsReport(env, acct, t.report_date, text);
+      const ingested = await ingestAdsReport(env, acct, t.report_date, text, String(t.family || 'std'));
       await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = ?3 WHERE account = ?1 AND task_id = ?2")
         .bind(acct, t.task_id, ingested + ' rows').run();
     }
@@ -1276,7 +1298,7 @@ async function adsReportPoll(env) {
 /* The report is TSV with a header row (eBay sometimes prefixes metadata lines — the header is
    the first line that mentions a listing column). Column names come from the metric metadata,
    so matching is by meaning, not position. */
-async function ingestAdsReport(env, acct, day, text) {
+async function ingestAdsReport(env, acct, day, text, family) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
   if (hi < 0) return 0;
@@ -1288,10 +1310,11 @@ async function ingestAdsReport(env, acct, day, text) {
      both. Reading only ad_fees is what made a CPC-only account look free. */
   /* payout-currency columns restate the same money in a second currency — never summed. */
   const cols = (re) => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
-  const cSpendAll = cols(/ad_fee/);                             // Standard sale fee + CPC click cost
+  const cSpendAll = cols(/ad_fee/);
   const cClicksAll = cols(/^clicks$|^cpc_clicks$/);
   const cUnitsAll = cols(/^sales$|^cpc_attributed_sales$/);     // eBay's 'sales' = attributed sale COUNT
   const cSalesAll = cols(/sale_amount/);
+  const isCpc = String(family || 'std') === 'cpc';
   if (cListing < 0) return 0;
 
   const agg = {};
@@ -1311,18 +1334,32 @@ async function ingestAdsReport(env, acct, day, text) {
   for (const lid of Object.keys(agg)) {
     const a = agg[lid];
     total += a.spend;
-    stmts.push(env.DB.prepare(
-      'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
-      'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
-    ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
+    /* The two billing families are written to their own columns. Sending both to `spend` would
+       mean whichever report ingested second silently erased the other. */
+    stmts.push(isCpc
+      ? env.DB.prepare(
+          'INSERT INTO ads_daily (account, item_id, date, cpc_spend, cpc_clicks, cpc_sales) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET cpc_spend = ?4, cpc_clicks = ?5, cpc_sales = ?6'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units))
+      : env.DB.prepare(
+          'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
   }
-  stmts.push(env.DB.prepare(
+  /* The day's ad spend is BOTH families added together, read back from the table rather than from
+     this report alone — otherwise ingesting the Standard report would overwrite the day's total
+     with only its own half, and the CPC spend would vanish until the next poll. */
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  const dayTotal = await env.DB.prepare(
+    'SELECT ROUND(SUM(spend + cpc_spend), 2) AS ads FROM ads_daily WHERE account = ?1 AND date = ?2'
+  ).bind(acct, day).first();
+  await env.DB.prepare(
     'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, 0, 0, 0, ?3, 0) ' +
     'ON CONFLICT(account, date) DO UPDATE SET ads = ?3'
-  ).bind(acct, day, round2(total)));
-  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  ).bind(acct, day, round2((dayTotal && dayTotal.ads) || 0)).run();
   return Object.keys(agg).length;
 }
+
 
 /* Business dates are UK dates (timezone law T-1) — an order at 00:30 UK belongs to the UK day
    it happened in, not the UTC one. */
@@ -1803,7 +1840,7 @@ const ROUTES = {
          law stays the single gate. */
       if (CAMPAIGN_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super) {
         const ads = await ctx.env.DB.prepare(
-          "SELECT item_id, ROUND(SUM(spend), 2) AS ad_spend_14d, SUM(sales) AS ad_units_14d FROM ads_daily " +
+          "SELECT item_id, ROUND(SUM(spend + cpc_spend), 2) AS ad_spend_14d, SUM(sales + cpc_sales) AS ad_units_14d FROM ads_daily " +
           "WHERE date >= date('now', '-14 day') GROUP BY item_id"
         ).all();
         const byItem = {};
@@ -1851,12 +1888,12 @@ const ROUTES = {
       /* CPQ, last 14 days per item: what each listing COSTS in ads per unit it sells — and the
          burners (spend, zero sales) float to the top, because that is the money leak. */
       const cpq = await ctx.env.DB.prepare(
-        "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend), 2) AS spend, SUM(a.clicks) AS clicks, " +
+        "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend, SUM(a.clicks + a.cpc_clicks) AS clicks, " +
         'SUM(a.sales) AS units, ' +
-        'ROUND(SUM(a.spend) / MAX(1, SUM(a.sales)), 2) AS cpq ' +
+        'ROUND(SUM(a.spend + a.cpc_spend) / MAX(1, SUM(a.sales + a.cpc_sales)), 2) AS cpq ' +
         'FROM ads_daily a LEFT JOIN items_api i ON i.item_id = a.item_id ' +
-        "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend) > 0 " +
-        'ORDER BY (SUM(a.sales) = 0) DESC, SUM(a.spend) DESC LIMIT 60'
+        "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend + a.cpc_spend) > 0 " +
+        'ORDER BY (SUM(a.sales + a.cpc_sales) = 0) DESC, SUM(a.spend + a.cpc_spend) DESC LIMIT 60'
       ).all();
       return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
       });
@@ -2076,7 +2113,7 @@ const ROUTES = {
       const ydayRows = days.filter(r => r.date === yday).map(r => ({ account: r.account, profit: r.profit, ads: r.ads, sold: r.sold }));
 
       const adsSale = await ctx.env.DB.prepare(
-        'SELECT a.account, SUM(a.spend) AS spend, SUM(a.clicks) AS clicks, SUM(a.sales) AS units FROM ads_daily a WHERE a.date = ?1 GROUP BY a.account'
+        'SELECT a.account, SUM(a.spend + a.cpc_spend) AS spend, SUM(a.clicks + a.cpc_clicks) AS clicks, SUM(a.sales + a.cpc_sales) AS units FROM ads_daily a WHERE a.date = ?1 GROUP BY a.account'
       ).bind(yday).all();
       // sale_amount is not stored per row — ROAS uses sales_daily revenue vs ads as the honest proxy
       const adsRows = (adsSale.results || []).map(r => {
