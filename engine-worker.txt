@@ -386,8 +386,8 @@ async function orderSync(env) {
     // Known state up front: 288 ticks a day rewriting ~800 unchanged rows would burn the whole
     // D1 write budget by itself. A row is written only when something about it changed.
     const knownO = {};
-    const ko = await env.DB.prepare('SELECT order_id, status, qty, est_delivery FROM orders WHERE account = ?1 AND created_at >= ?2').bind(acct, since).all();
-    for (const r of (ko.results || [])) knownO[r.order_id] = String(r.status) + '|' + String(r.qty) + '|' + String(r.est_delivery);
+    const ko = await env.DB.prepare('SELECT order_id, status, qty, est_delivery, ship_by FROM orders WHERE account = ?1 AND created_at >= ?2').bind(acct, since).all();
+    for (const r of (ko.results || [])) knownO[r.order_id] = String(r.status) + '|' + String(r.qty) + '|' + String(r.est_delivery) + '|' + String(r.ship_by || '');
 
     let n = 0;
     while (href && n < 4) {              // 400 orders per 6-day window per account — ample here
@@ -402,18 +402,28 @@ async function orderSync(env) {
         qty = Math.max(1, qty);
         const fsi = (o.fulfillmentStartInstructions || [])[0] || {};
         const est = String(fsi.maxEstimatedDeliveryDate || '');
+        /* SHIP-BY is eBay's own deadline for this order, per line item. The portal used to invent
+           it as "order date + 5 days" for every order alike, which is simply not what eBay
+           promised the buyer: the handling time is set per listing, so a 1-day-handling item was
+           being called on time four days after it was already late. Earliest line wins — the
+           order is late as soon as any part of it is. */
+        let shipBy = '';
+        for (const li of (o.lineItems || [])) {
+          const d = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
+          if (d && (!shipBy || d < shipBy)) shipBy = d;
+        }
         const status = String(o.orderFulfillmentStatus || '');
         const id = String(o.orderId);
-        if (knownO[id] === status + '|' + qty + '|' + est) continue;   // unchanged → no write
+        if (knownO[id] === status + '|' + qty + '|' + est + '|' + shipBy) continue;   // unchanged → no write
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ' +
-          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9'
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery, ship_by) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ' +
+          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10'
         ).bind(
           id, acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           status, String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), qty, est
+          String(o.creationDate || ''), qty, est, shipBy
         ).run();
       }
       n++; href = page.next || '';
