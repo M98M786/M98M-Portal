@@ -1133,8 +1133,19 @@ function alertsRefresh() {
 
   const puts = [], fresh = [];
   let scanned = 0, skipped = 0;
-  for (let i = 0; i < accounts.length; i++) {
-    if (Date.now() - started > ALERTS_SWEEP_BUDGET_MS) { skipped = accounts.length - i; break; }
+  /* Same starvation the dashboard sweep had: this loop restarted at accounts[0] every run, so the
+   * accounts that happened to sit past the time budget were skipped on EVERY run and their KPI
+   * cards never appeared at all. The comment claimed the leftovers were "picked up by the next
+   * run" — nothing made that true. Each run now resumes where the last one stopped. */
+  const alertProps = PropertiesService.getScriptProperties();
+  let alertStart = Number(alertProps.getProperty('ALERTS_SWEEP_CURSOR') || 0);
+  if (!(alertStart >= 0) || alertStart >= accounts.length) alertStart = 0;
+  let alertStopped = alertStart;
+
+  for (let n = 0; n < accounts.length; n++) {
+    const i = (alertStart + n) % accounts.length;
+    alertStopped = i;
+    if (Date.now() - started > ALERTS_SWEEP_BUDGET_MS) { skipped = accounts.length - n; break; }
     const account = accounts[i];
     let got = null, kpis = null;
     try {
@@ -1164,6 +1175,8 @@ function alertsRefresh() {
       fresh.push({ ref: ref, account: account, alert: a });
     });
   }
+
+  alertProps.setProperty('ALERTS_SWEEP_CURSOR', String((alertStopped + 1) % Math.max(1, accounts.length)));
 
   if (puts.length) alertsCachePut_(puts);
   alertsNotifyFresh_(fresh);

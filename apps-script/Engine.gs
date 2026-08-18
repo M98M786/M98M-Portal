@@ -39,8 +39,15 @@ function pushEngineSync() {
   let facts = 0;
   try { facts = enrichEngineFacts_(); } catch (e) { logActivity_('system', 'ENGINE_FACTS_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
 
-  logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', '');
-  return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts';
+  /* Order costs ride the same hourly push. They are the difference between a profit figure and a
+   * revenue figure, so they are not an optional extra — but both passes are cursor-driven and
+   * budgeted, so neither can starve the other or run the trigger out of time. */
+  let costs = '';
+  try { costs = pushEngineCosts(); }
+  catch (e) { logActivity_('system', 'ENGINE_COST_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
+
+  logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
+  return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs;
 }
 
 
@@ -105,7 +112,8 @@ const ACTIONS_ENGINE = {
  * time budget. Recent days are visited first because those are the ones staff are looking at.
  * Multi-line orders are summed: three lines of one order is one order that cost the sum. */
 const COST_LOOKBACK_DAYS = 45;
-const COST_BUDGET_MS = 200000;
+const COST_BUDGET_MS = 110000;         // shares pushEngineSync's 6-minute life with the facts pass
+const FACTS_BUDGET_MS = 110000;
 const COST_CURSOR_KEY = 'COST_SYNC_CURSOR';
 const COST_COL_ORDER = 'Order Number';
 const COST_COL_COST = 'Cost';
@@ -199,7 +207,20 @@ function enrichEngineFacts_() {
     'Campaign Selection', 'Current Campaign Selection', 'eBay Item No',
     'Current Supplier Working', 'Ali Express Link 1', 'Suuplier 2', 'Supplier 3', 'eBay Category (FVF %)'];
   let pushed = 0;
-  (connectionHealth().perAccount || []).forEach(function (a) {
+  /* Budgeted and rotating, like the other sweeps. Reading five Main Sheets in one pass is what
+   * pushed this job to 317 seconds against a 360-second ceiling and gave it a 28.8% failure
+   * rate; whichever account came last simply never made it. */
+  const factStarted = Date.now();
+  const factProps = PropertiesService.getScriptProperties();
+  const allAccounts = (connectionHealth().perAccount || []);
+  let factStart = Number(factProps.getProperty('FACTS_CURSOR') || 0);
+  if (!(factStart >= 0) || factStart >= allAccounts.length) factStart = 0;
+  let factStopped = factStart;
+
+  allAccounts.forEach(function (_ignored, n) {
+    if (Date.now() - factStarted > FACTS_BUDGET_MS) return;
+    const a = allAccounts[(factStart + n) % allAccounts.length];
+    factStopped = (factStart + n) % allAccounts.length;
     const account = String(a.account || '');
     let read = null;
     try {
@@ -229,5 +250,6 @@ function enrichEngineFacts_() {
       catch (e) { logActivity_('system', 'ENGINE_FACTS_FAIL', account, '', '', String(e && e.message || e).slice(0, 160)); return; }
     }
   });
+  factProps.setProperty('FACTS_CURSOR', String((factStopped + 1) % Math.max(1, allAccounts.length)));
   return pushed;
 }
