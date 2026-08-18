@@ -520,7 +520,14 @@ async function adsSync(env) {
     const live = {};
     for (const c of (page.campaigns || [])) {
       const budget = String((c.budget && c.budget.daily && c.budget.daily.amount && c.budget.daily.amount.value) || '');
-      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget };
+      /* COST_PER_SALE (Promoted Listings Standard) or COST_PER_CLICK (Advanced). Nothing recorded
+         this before, which is why nobody could answer why the ad-spend report refused the CPC
+         metrics: eBay's own words were "the metric key is not supported for the funding model".
+         Under COST_PER_SALE a click that never sells genuinely costs nothing, so an account can
+         truthfully show clicks against £0.00 — that is a fact about the campaign, not a bug, and
+         the portal should be able to say so. */
+      const funding = String((c.fundingStrategy && c.fundingStrategy.fundingModel) || '');
+      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget, funding };
     }
     const prevRs = await env.DB.prepare('SELECT campaign_id, name, status, budget FROM campaigns WHERE account = ?1').bind(acct).all();
     const prev = {};
@@ -583,9 +590,9 @@ async function adsSync(env) {
     for (const id of Object.keys(live)) {
       const l = live[id];
       await env.DB.prepare(
-        "INSERT INTO campaigns (account, campaign_id, name, status, budget, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
-        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, synced_at=datetime('now')"
-      ).bind(acct, id, l.name, l.status, l.budget).run();
+        "INSERT INTO campaigns (account, campaign_id, name, status, budget, funding_model, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, synced_at=datetime('now')"
+      ).bind(acct, id, l.name, l.status, l.budget, l.funding || '').run();
     }
     for (const id of Object.keys(prev)) {
       if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
