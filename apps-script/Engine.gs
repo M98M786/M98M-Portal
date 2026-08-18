@@ -115,7 +115,12 @@ const COST_LOOKBACK_DAYS = 45;
 const COST_BUDGET_MS = 110000;         // shares pushEngineSync's 6-minute life with the facts pass
 const FACTS_BUDGET_MS = 110000;
 const COST_CURSOR_KEY = 'COST_SYNC_CURSOR';
-const COST_COL_ORDER = 'Order Number';
+/* A day tab carries TWO order-number columns and they differ only in one letter's case:
+ * 'Order number' in column B is eBay's, 'Order Number' in column M is the AliExpress order the
+ * processor placed. Reading the wrong one matched nothing at all — 18 costs read, 0 landed. They
+ * are told apart by POSITION, not spelling, so the sheet's own resolver decides, exactly as the
+ * rest of the order code does. */
+const COST_COL_ORDER = 'Order number';        // eBay's, col B — never the AliExpress one at col M
 const COST_COL_COST = 'Cost';
 
 function costAccounts_() {
@@ -144,15 +149,23 @@ function pushEngineCosts() {
     const ymd = ordersAddDays_(today, -di);
     let read = null;
     try {
-      read = ordersReadTab_(account, ordersDayTabCandidates_(ymd), 600, [COST_COL_ORDER, COST_COL_COST]);
+      read = ordersReadTab_(account, ordersDayTabCandidates_(ymd), 600, ORDERS_EXPECT_DAY);
     } catch (e) { read = null; }
     tabs++;
 
     if (read && read.ok && read.rows && read.rows.length) {
+      const map = ordersResolveFields_(read.headers || []);
+      if (!map[COST_COL_ORDER] || !map[COST_COL_COST]) {
+        logActivity_('system', 'ENGINE_COST_HEADERS', account + '!' + ymd, '', '',
+          'day tab has no ' + (map[COST_COL_ORDER] ? COST_COL_COST : COST_COL_ORDER) + ' column');
+        di++;
+        if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; }
+        continue;
+      }
       const byOrder = {};
       read.rows.forEach(function (r) {
-        const id = costOrderId_(r[COST_COL_ORDER]);
-        const c = costNumber_(r[COST_COL_COST]);
+        const id = costOrderId_(ordersCell_(r, map, COST_COL_ORDER));
+        const c = costNumber_(ordersCell_(r, map, COST_COL_COST));
         if (!id || !(c > 0)) return;
         byOrder[id] = (byOrder[id] || 0) + c;
       });

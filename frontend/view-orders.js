@@ -74,6 +74,15 @@
   var OD_DUE_COLS = ['Day Tab', 'Order No', 'Item', 'Order Date', 'Ship By', 'Days Left', 'Status'];
 
   VIEW_CSS.push(
+    '.od-livetiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}' +
+    '.od-lt{background:var(--panel-2);border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px}' +
+    '.od-lt b{display:block;font-size:26px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}' +
+    '.od-lt span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;margin-top:3px}' +
+    '.od-lt i{display:block;font-style:normal;font-size:11.5px;color:var(--text-2);font-weight:700;margin-top:4px}' +
+    '.od-lt.bad{border-color:var(--bad);background:var(--bad-soft,var(--panel-2))}' +
+    '.od-lt.bad b{color:var(--bad)}' +
+    '.od-lt.good b{color:var(--ok)}' +
+    '.od-late{font-size:11px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,var(--panel-2));color:var(--bad)}' +
     '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
     '.minibtn:hover{color:var(--blue-2);border-color:var(--blue)}' +
@@ -928,6 +937,7 @@
             '<span class="od-note" id="odDsWhen" style="align-self:center"></span>' +
           '</div></div>' +
         '</div>' +
+        '<div id="odDsLive" style="margin-top:16px"><div class="spinner"></div></div>' +
         '<div id="odDsAlarm" style="margin-top:16px"></div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">All accounts ' +
           '<span class="hint">§10.2 tiles · dispatch status</span></div>' +
@@ -936,10 +946,12 @@
         '<div id="odDsAccounts"></div>';
     },
     init: function () {
-      $('odDsRefresh').onclick = function () { odDashLoad(true); };
+      $('odDsRefresh').onclick = function () { odDashLoad(true); odLivePaint(); };
+      odLivePaint();
       $('odDsLoad').onclick = function () {
         OD_MONTH = odStr($('odDsMonth').value) || OD_MONTH;
         odDashLoad(false);
+        odLivePaint();
       };
       $('odDsMonth').onchange = function () { OD_MONTH = odStr(this.value) || OD_MONTH; odDashLoad(false); };
       enhanceDate($('odDsMonth'), { kind: 'month' });
@@ -953,6 +965,60 @@
       });
     }
   };
+
+  /* LATE NOW, straight from eBay. The board below this strip is built by scanning the day tabs,
+     which cannot see a deadline eBay set per listing, resets its overdue count every 1st of the
+     month, and counts each line of a multi-line order separately. This strip asks the orders
+     table instead: one row per order, eBay's own ship-by, eBay's own fulfilment status. Where the
+     two disagree, this one is the one to act on. */
+  function odLiveRow(r) {
+    var late = Number(r.hours_late) || 0;
+    var days = Math.floor(late / 24);
+    var when = days >= 1 ? days + (days === 1 ? ' day' : ' days') + ' late' : Math.max(1, Math.round(late)) + 'h late';
+    return '<tr>' +
+      '<td><b>' + esc(String(r.order_id)) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
+      '<td><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(String(r.title || r.item_id || '')) + '</div></td>' +
+      '<td class="num">' + (Number(r.sold) ? '£' + Number(r.sold).toFixed(2) : '—') + '</td>' +
+      '<td>' + esc(String(r.ship_by || '').slice(0, 10)) + '</td>' +
+      '<td><span class="od-late">' + esc(when) + '</span></td>' +
+      '<td>' + (r.has_tracking ? 'tracking on the sheet' : '<span style="color:var(--bad);font-weight:700">no tracking</span>') + '</td>' +
+    '</tr>';
+  }
+
+  function odLivePaint() {
+    var box = $('odDsLive');
+    if (!box) { return; }
+    var one = odStr($('odDsAccount') && $('odDsAccount').value);
+    var payload = one ? { account: one } : {};
+    api('dispatchLive', payload).then(function (d) {
+      d = d || {};
+      var late = Number(d.late_count) || 0;
+      var tiles =
+        '<div class="od-livetiles">' +
+          '<div class="od-lt ' + (late ? 'bad' : 'good') + '"><b>' + late + '</b><span>late right now</span>' +
+            (Number(d.late_value) ? '<i>£' + Number(d.late_value).toFixed(2) + ' of orders</i>' : '') + '</div>' +
+          '<div class="od-lt"><b>' + (Number(d.due_soon_count) || 0) + '</b><span>due within 3 days</span></div>' +
+          '<div class="od-lt"><b>' + (Number(d.awaiting_count) || 0) + '</b><span>awaiting dispatch</span></div>' +
+          '<div class="od-lt"><b>' + (Number(d.orders_today) || 0) + '</b><span>came in today</span></div>' +
+        '</div>';
+      var rows = (d.late || []).map(odLiveRow).join('');
+      var caveat = Number(d.no_deadline_count)
+        ? '<div class="od-note" style="margin-top:8px">' + Number(d.no_deadline_count) +
+          ' open order(s) carry no ship-by from eBay yet — they are not counted above rather than guessed at.</div>' : '';
+      box.innerHTML = '<div class="card"><div class="hd">Late right now ' +
+          '<span class="hint">eBay\u2019s own ship-by deadline · not bounded to a month</span></div>' +
+          '<div class="bd">' + tiles +
+          (rows ? '<div class="scroll" style="margin-top:12px"><table class="od-tbl"><thead><tr>' +
+            '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th><th>Tracking</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+            : '<div class="empty" style="margin-top:10px">Nothing is past its eBay deadline. That is the number that matters.</div>') +
+          caveat +
+        '</div></div>';
+    }).catch(function (e) {
+      box.innerHTML = '<div class="card"><div class="bd"><div class="empty">The live dispatch feed did not answer — ' +
+        esc(e && e.message ? e.message : 'no answer') + '</div></div></div>';
+    });
+  }
 
   function odDashLoad(refresh) {
     var top = $('odDsTop'), cards = $('odDsAccounts'), alarm = $('odDsAlarm');
