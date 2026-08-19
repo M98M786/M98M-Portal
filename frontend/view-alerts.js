@@ -285,6 +285,10 @@
             (alMayRefresh() ? 'Recompute' : 'Reload') + '</button>' +
         '</div>' +
         '<div id="alHeads"></div>' +
+        '<div class="card enter d1" style="margin-top:16px"><div class="hd">The Engine&#39;s letters ' +
+          '<span class="hint">every alarm the portal itself raised — waste, CPC rule, violations, zero-sale, digests — kept until handled</span></div>' +
+          '<div class="bd" id="alMailBox"><div class="spinner"></div></div>' +
+        '</div>' +
         '<div class="card enter d1" style="margin-top:16px"><div class="hd">Filter ' +
           '<span class="hint" id="alWhen">reading the accounts…</span></div>' +
           '<div class="bd">' +
@@ -314,8 +318,49 @@
         alRenderList();
       };
       alLoadCentre(false);
+      alLoadMail();
     }
   };
+
+  /* Hasib item 7: the Engine's own bells, shown like mail — subject, body, when, to whom —
+     each opening into its detail with a Mark handled that records who. */
+  function alLoadMail() {
+    var box = $('alMailBox');
+    if (!box) { return; }
+    api('alertMail', {}).then(function (d) {
+      d = d || {};
+      var rows = d.rows || [];
+      if (!rows.length) {
+        box.innerHTML = '<div class="al-calm">The Engine has raised nothing yet.' +
+          '<span>Waste alarms, CPC-rule bells, violations and digests all file here the moment they ring.</span></div>';
+        return;
+      }
+      box.innerHTML = '<div style="max-height:420px;overflow-y:auto">' + rows.map(function (r) {
+        var openR = !alStr(r.resolved_at);
+        return '<article class="al-card' + (openR ? ' al-money' : '') + '" style="' + (openR ? '' : 'opacity:.6') + '">' +
+          '<div class="al-hd"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
+            '<span class="al-acct">' + esc(alStr(r.type)) + '</span>' +
+            (d.mgmt ? '<span class="pill al-p-cat">to ' + esc(alStr(r.to_addr).split('@')[0]) + '</span>' : '') +
+            '<span class="al-when">' + esc(alStr(r.created_at).slice(0, 16)) + ' UTC</span></div>' +
+          '<div class="al-bd"><div class="al-msg">' + esc(alStr(r.message)) + '</div>' +
+            '<div class="al-from">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
+              (openR ? '' : esc(' · handled by ' + alStr(r.resolved_by).split('@')[0] + ' · ' + alStr(r.resolved_at).slice(0, 16)) +
+                (alStr(r.note) ? esc(' · ' + alStr(r.note)) : '')) + '</div>' +
+            (openR ? '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Mark handled</button></div>' : '') +
+          '</div></article>';
+      }).join('') + '</div>';
+      box.querySelectorAll('[data-al-mail]').forEach(function (b) {
+        b.onclick = function () {
+          this.disabled = true;
+          api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
+            .then(function () { toast('Handled.'); alLoadMail(); })
+            .catch(function (e) { toast(e.message); alLoadMail(); });
+        };
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<div class="al-note">Could not read the Engine letters: ' + esc(e.message) + '</div>';
+    });
+  }
 
   function alLoadCentre(refresh) {
     var list = $('alList');
