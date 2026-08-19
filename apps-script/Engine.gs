@@ -270,22 +270,59 @@ function enrichEngineFacts_() {
       read = bridgeReadRows_({ scope: 'account', account: account, kind: 'central', tab: ['Main Sheet'], expect: spec, limit: 3000 });   // 903 live items — 500 dropped a third of them
     } catch (e) { return; }
     if (!read || read.ok === false || !read.rows) return;
+    /* Every workbook spells its headers its own way — ABRT writes 'Suuplier 2', another writes
+     * 'Supplier 2', one adds a trailing space to 'Profit '. Exact-key lookups landed supplier
+     * data for exactly ONE account (the one whose spellings were copied) and silently read
+     * nothing from the other four. Headers are resolved through the bridge's normalizer against
+     * per-field alias lists, and the fields a workbook does NOT offer are logged once per pass
+     * so the next gap is a log line, not a mystery. */
+    const norm = {};
+    (read.headers || []).forEach(function (h) {
+      const n = bridgeNormalizeHeader_(h);
+      if (n && norm[n] === undefined) norm[n] = String(h);
+    });
+    const pick = function (aliases) {
+      for (let i = 0; i < aliases.length; i++) {
+        const hit = norm[bridgeNormalizeHeader_(aliases[i])];
+        if (hit !== undefined) return hit;
+      }
+      return null;
+    };
+    const FIELDS = {
+      id: pick(['eBay Item No', 'eBay Item Number', 'Item No']),
+      oe: pick(['Order Earning']),
+      ali_cost: pick(['Aliexpress Cost', 'AliExpress Cost', 'Ali Express Cost']),
+      profit: pick(['Profit']),
+      campaign_type: pick(['Campaign Selection']),
+      campaign_name: pick(['Current Campaign Selection']),
+      current_sup: pick(['Current Supplier Working', 'Current Supplier']),
+      sup1_link: pick(['Ali Express Link 1', 'AliExpress Link 1', 'Supplier Link 1', 'Ali Express Link']),
+      sup2_link: pick(['Suuplier 2', 'Supplier 2', 'Supplier Link 2']),
+      sup3_link: pick(['Supplier 3', 'Suuplier 3', 'Supplier Link 3']),
+      category: pick(['eBay Category (FVF %)', 'eBay Category', 'Category (FVF %)']),
+    };
+    const missing = Object.keys(FIELDS).filter(function (k) { return !FIELDS[k]; });
+    if (missing.length) {
+      logActivity_('system', 'ENGINE_FACTS_MAP', account, '', '', 'Main Sheet offers no: ' + missing.join(', '));
+    }
+    if (!FIELDS.id) return;
+    const cell = function (r, k) { return FIELDS[k] ? r[FIELDS[k]] : ''; };
     const items = [];
     read.rows.forEach(function (r) {
-      const id = String(r['eBay Item No'] || '').replace(/\D/g, '');
+      const id = String(cell(r, 'id') || '').replace(/\D/g, '');
       if (!id) return;
       items.push({
         item_id: id, account: account,
-        oe: costNumber_(r['Order Earning']),
-        ali_cost: costNumber_(r['Aliexpress Cost']),
-        profit: costNumber_(r['Profit ']),
-        campaign_type: String(r['Campaign Selection'] || ''),
-        campaign_name: String(r['Current Campaign Selection'] || ''),
-        current_sup: String(r['Current Supplier Working'] || ''),
-        sup1_link: String(r['Ali Express Link 1'] || ''),
-        sup2_link: String(r['Suuplier 2'] || ''),
-        sup3_link: String(r['Supplier 3'] || ''),
-        category: String(r['eBay Category (FVF %)'] || ''),
+        oe: costNumber_(cell(r, 'oe')),
+        ali_cost: costNumber_(cell(r, 'ali_cost')),
+        profit: costNumber_(cell(r, 'profit')),
+        campaign_type: String(cell(r, 'campaign_type') || ''),
+        campaign_name: String(cell(r, 'campaign_name') || ''),
+        current_sup: String(cell(r, 'current_sup') || ''),
+        sup1_link: String(cell(r, 'sup1_link') || ''),
+        sup2_link: String(cell(r, 'sup2_link') || ''),
+        sup3_link: String(cell(r, 'sup3_link') || ''),
+        category: String(cell(r, 'category') || ''),
       });
     });
     for (let i = 0; i < items.length; i += 150) {
