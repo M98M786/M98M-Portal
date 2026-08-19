@@ -140,10 +140,22 @@ async function sha256(s) {
 }
 
 /* ---------------- role strippers (§6) — applied at the edge, not in views ---- */
+/* Who may see per-item COST/earning and the AliExpress sourcing links (§6 matrix row 4). It is a
+   superset of nobody's business but the order/ads/CS chain: a Lister or Hunter who receives
+   oe AND ali_cost can compute profit = oe − ali_cost (the Main Sheet's own formula) and walk
+   straight through the profit strip. So cost data is stripped for anyone outside this list. */
+const ITEM_COST_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
+
 function stripItem(row, user) {
   const out = { ...row };
   if (ITEM_PROFIT_ROLES.indexOf(user.role) < 0 && !user.super) {
     delete out.profit; delete out.roi; delete out.margin; delete out.avg_profit_7d;
+  }
+  if (ITEM_COST_ROLES.indexOf(user.role) < 0 && !user.super) {
+    // oe + ali_cost reconstruct the stripped profit exactly; suppliers are the cost's sourcing
+    delete out.oe; delete out.ali_cost; delete out.current_sup; delete out.category;
+    delete out.sup1; delete out.sup2; delete out.sup3;
+    delete out.sup1_link; delete out.sup2_link; delete out.sup3_link;
   }
   if (CAMPAIGN_ROLES.indexOf(user.role) < 0 && !user.super) {
     delete out.campaign_name; delete out.campaign_type;
@@ -1741,6 +1753,9 @@ const TRACKING_PUSH_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team 
 /* Who may read per-order data (buyer, value, deadline): the order-handling chain and CS —
    mirrors ordersView_'s PII rule on the sheet side and the Orders/Dispatch screens' role lists. */
 const ORDER_DATA_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead', 'CS'];
+/* Who may see the buyer USERNAME (PII) — mirrors ordersView_: management, Ops Head, CS,
+   Order Processor. A Team Lead reads orders but never the buyer's name. */
+const ORDER_PII_ROLES = ['Management', 'Ops Head', 'CS', 'Order Processor'];
 
 const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
@@ -2019,8 +2034,12 @@ const ROUTES = {
       if (q) {
         bind.push('%' + q.toLowerCase() + '%');
         const n = bind.length;
+        /* Campaign columns are searchable ONLY for the roles that may SEE them — otherwise a
+           stripped column still leaks membership through the filter: search "Scaling", get a
+           hit, and you have learned an item is in that campaign the row never showed you. */
+        const canCamp = CAMPAIGN_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super;
         where.push('(a.item_id LIKE ?' + n + ' OR lower(a.title) LIKE ?' + n +
-          ' OR lower(f.campaign_name) LIKE ?' + n + ' OR lower(f.campaign_type) LIKE ?' + n + ')');
+          (canCamp ? ' OR lower(f.campaign_name) LIKE ?' + n + ' OR lower(f.campaign_type) LIKE ?' + n : '') + ')');
       }
       const rs = await ctx.env.DB.prepare(
         'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, ' +
@@ -2359,20 +2378,26 @@ const ROUTES = {
   },
 
   /* The instant first paint for the Orders screen (§10 step 1: "opens Orders, 240ms"): today's
-     eBay-side order list from D1 while the sheet workspace loads behind it. No profit fields,
-     so every signed-in role may read it; the sheet stays the write truth. */
+     eBay-side order list from D1 while the sheet workspace loads behind it. Order VALUES and the
+     buyer USERNAME are per-order data, so the gate matches the Orders workspace: the order chain
+     + CS reads it, and the buyer name is stripped for anyone outside the PII set (the same rule
+     ordersView_ enforces sheet-side). The memo is keyed by the PII verdict so a stripped copy is
+     never served to someone who may see the name, or the reverse. */
   ordersLive: {
     auth: 'any', fn: async (p, ctx) => {
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || '');
       if (!account) throw new Error('SAY: which account?');
-      return memo('ordersLive:' + account, 60000, async () => {
+      const seesPII = ORDER_PII_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      return memo('ordersLive:' + account + ':' + (seesPII ? 'pii' : 'nopii'), 60000, async () => {
         const rs = await ctx.env.DB.prepare(
           'SELECT o.order_id, o.buyer, o.item_id, o.sold, o.qty, o.status, o.created_at, o.est_delivery, i.title ' +
           'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
           "WHERE o.account = ?1 AND o.created_at >= datetime('now', '-2 day') ORDER BY o.created_at DESC LIMIT 200"
         ).bind(account).all();
         const today = ukDate('');
-        const rows = (rs.results || []).filter(r => ukDate(r.created_at) === today);
+        const rows = (rs.results || []).filter(r => ukDate(r.created_at) === today)
+          .map(r => { if (!seesPII) { const c = { ...r }; delete c.buyer; return c; } return r; });
         return { account, date: today, rows,
           note: 'live eBay orders — the sheet workspace below carries the processing columns' };
       });
