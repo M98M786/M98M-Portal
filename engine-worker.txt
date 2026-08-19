@@ -401,11 +401,11 @@ async function listingSync(env) {
    delivered — 476 'awaiting' here against Seller Hub's 14. This sweeper walks the OLDEST open
    orders first, ~35 per run inside the subrequest budget, re-reading eBay's current status and
    ship-by. An order eBay no longer serves (404) is marked NOT_FOUND so it stops resurfacing.
-   The 476-order backlog converges in a few hours at the */15 cadence, then stays converged. */
+   The 476-order backlog converges in a few hours at the 15-minute cadence, then stays converged. */
 /* Ended listings never left: listingSync upserts what eBay returns and nothing ever marked the
    rows that stopped returning. The sync's page cursor makes a same-run diff unreliable, but
    api_synced_at is a clean proxy — every live listing is re-touched within a couple of hours at
-   the */15 cadence, so an ACTIVE row untouched for a day is an ended item. Marked, not deleted:
+   the 15-minute cadence, so an ACTIVE row untouched for a day is an ended item. Marked, not deleted:
    its history still joins orders and ads. */
 async function markEndedListings(env) {
   await env.DB.prepare(
