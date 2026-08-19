@@ -79,7 +79,7 @@ export default {
        5-minute treadmill. */
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, standardsSync], /* standardsSync TEMPORARY here for one verification pass — remove after cs_metrics confirmed */
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
