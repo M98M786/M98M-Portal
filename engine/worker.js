@@ -770,7 +770,14 @@ async function dupSweep(env, acct) {
    just means a fresh mint. Proven by hand against seller_funds_summary before being wired in. */
 async function ebaySigningKey(env) {
   const row = await env.DB.prepare("SELECT v FROM engine_config WHERE k = 'ebay_sign_key'").first();
-  if (row && row.v) return JSON.parse(row.v);
+  if (row && row.v) {
+    // a corrupt or half-written row must degrade to a fresh mint, not wedge every finances call
+    try {
+      const k = JSON.parse(row.v);
+      if (k && k.privateKey && k.jwe) return k;
+    } catch (e) { /* fall through to re-mint */ }
+    await env.DB.prepare("DELETE FROM engine_config WHERE k = 'ebay_sign_key'").run();
+  }
 
   const appId = await secret(env, 'EBAY_APP_ID');
   const cert = await secret(env, 'EBAY_CERT_ID');
@@ -832,7 +839,9 @@ async function financeSync(env) {
     const sinceMs = Date.now() - 6 * 86400000;
     const since = new Date(sinceMs).toISOString();
     const txs = [];
-    for (let page = 0; page < 3; page++) {
+    /* 10 pages = 1,000 transactions per account per run. Three pages was under one busy week's
+       volume (Hafiza alone holds 8,404 lifetime), and a silent cap reads as "covered". */
+    for (let page = 0; page < 10; page++) {
       const r = await ebaySignedFetch(env,
         'https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&offset=' + (page * 100) +
         '&filter=' + encodeURIComponent('transactionDate:[' + since + '..]'), tok);
@@ -1485,13 +1494,17 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    error anywhere. Each piece now runs in its own job with its own lease, and the day rebuild
    covers 3 days (yesterday can still be corrected) instead of 8. */
 async function rollups(env) {
-  const sinceIso = new Date(Date.now() - 3 * 86400000).toISOString();
+  /* Eight days again: the 3-day shrink was triage for the run that died at 16k orders, but the
+     kill was the per-row writes, and those batch in fifties now. The wider window means a late
+     cost or fee landing up to a week back still reaches the books on the next nightly pass. */
+  const sinceIso = new Date(Date.now() - 8 * 86400000).toISOString();
   const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, cost, ebay_fees, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
   /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
-     a UK day is not) — writing it would overwrite last night's correct full-day row with a
-     truncated one, permanently. That day is done and written; skip it. */
-  const edgeDay = '';                                   // 3-day window: every day in it is complete enough to write
+     a UK day is not) — writing it would overwrite a correct full-day row with a truncated one,
+     permanently. Briefly disabled in the 3-day triage, which is exactly how 15 Aug's books shrank
+     to a third of the real day. That day is done and written; skip it. */
+  const edgeDay = ukDate(sinceIso);
 
   const ids = [...new Set(orders.map(o => String(o.item_id || '')).filter(Boolean))];
   const facts = {};
@@ -1812,8 +1825,7 @@ const ROUTES = {
       const bind = [];
       if (account) { bind.push(account); where.push('o.account = ?' + bind.length); }
       const open = await ctx.env.DB.prepare(
-        'SELECT o.order_id, o.account, o.item_id, o.sold, o.qty, o.status, o.ship_by, o.created_at, ' +
-        '       o.tracking, i.title ' +
+        'SELECT o.order_id, o.account, o.item_id, o.sold, o.qty, o.status, o.ship_by, o.created_at, i.title ' +
         'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
         'WHERE ' + where.join(' AND ') + ' ORDER BY o.ship_by ASC LIMIT 400'
       ).bind(...bind).all();
@@ -1824,10 +1836,12 @@ const ROUTES = {
       for (const r of (open.results || [])) {
         const t = new Date(String(r.ship_by)).getTime();
         if (isNaN(t)) continue;
+        /* No has_tracking here: orders.tracking is a column nothing fills — claiming "no
+           tracking" from it was an invented fact. LATE already means eBay saw no dispatch. */
         const row = {
           order_id: r.order_id, account: r.account, item_id: r.item_id, title: r.title || '',
           sold: r.sold, qty: r.qty, ship_by: r.ship_by, created_at: r.created_at,
-          status: r.status, has_tracking: !!String(r.tracking || ''),
+          status: r.status,
           hours_late: Math.round((now - t) / 36000) / 100,
         };
         if (t < now) late.push(row); else if (t <= soon) dueSoon.push(row);
@@ -1845,10 +1859,27 @@ const ROUTES = {
         "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED'" + (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
+      /* due-soon counted in SQL like its siblings — the 400-row page must never under-report */
+      const soonIso = new Date(soon).toISOString();
+      const dueCnt = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED' AND o.ship_by != '' AND o.ship_by >= ?1 AND o.ship_by <= ?2" +
+        (account ? ' AND o.account = ?3' : '')
+      ).bind(...[new Date(now).toISOString(), soonIso].concat(account ? [account] : [])).first();
+
+      /* "today" is the UK trading day; created_at is UTC. date() on the raw stamp calls a 23:30
+         UK-summer order "tomorrow". The boundary instant is found by asking ukDate itself. */
       const today = ukDate(new Date().toISOString());
+      let dayStartMs = Date.parse(today + 'T00:00:00Z');
+      for (const offMs of [0, -3600000]) {           // GMT, then BST
+        if (ukDate(new Date(Date.parse(today + 'T00:00:00Z') + offMs).toISOString()) === today &&
+            ukDate(new Date(Date.parse(today + 'T00:00:00Z') + offMs - 1000).toISOString()) !== today) {
+          dayStartMs = Date.parse(today + 'T00:00:00Z') + offMs;
+          break;
+        }
+      }
       const todayRow = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE date(o.created_at) = ?1" + (account ? ' AND o.account = ?2' : '')
-      ).bind(...[today].concat(account ? [account] : [])).first();
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.created_at >= ?1" + (account ? ' AND o.account = ?2' : '')
+      ).bind(...[new Date(dayStartMs).toISOString()].concat(account ? [account] : [])).first();
 
       const noDeadline = await ctx.env.DB.prepare(
         "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED' AND o.ship_by = ''" +
@@ -1870,7 +1901,7 @@ const ROUTES = {
         as_of: new Date().toISOString(),
         late_count: (cnt && cnt.late_n) || 0,
         late_value: round2((cnt && cnt.late_value) || 0),
-        due_soon_count: dueSoon.length,
+        due_soon_count: (dueCnt && dueCnt.n) || 0,
         awaiting_count: (awaiting && awaiting.n) || 0,
         orders_today: (todayRow && todayRow.n) || 0,
         // orders eBay has not given a deadline for — shown so the board never implies it saw them
@@ -2041,7 +2072,7 @@ const ROUTES = {
          burners (spend, zero sales) float to the top, because that is the money leak. */
       const cpq = await ctx.env.DB.prepare(
         "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend, SUM(a.clicks + a.cpc_clicks) AS clicks, " +
-        'SUM(a.sales) AS units, ' +
+        'SUM(a.sales + a.cpc_sales) AS units, ' +
         'ROUND(SUM(a.spend + a.cpc_spend) / MAX(1, SUM(a.sales + a.cpc_sales)), 2) AS cpq ' +
         'FROM ads_daily a LEFT JOIN items_api i ON i.item_id = a.item_id ' +
         "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend + a.cpc_spend) > 0 " +

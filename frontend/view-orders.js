@@ -853,7 +853,10 @@
         var used = (d && d.carrier_auto) || courier || 'auto';
         odMsg(box, 't' + row, 'eBay accepted it — sent as ' + used + '.', 'od-ok');
         toast('Tracking ' + number + ' is on eBay (' + used + ').');
-        odSaveTracking(box, row, btn, true);     // keep the sheet's own record in step
+        /* The sheet record rides the PLAIN tracking path: the uploaded:true checkpoint belongs to
+           the configured uploader alone and the server refuses it for anyone else — which would
+           have thrown an error at the exact moment the eBay push had already succeeded. */
+        odSaveTracking(box, row, btn, false);
       })
       .catch(function (e) {
         btn.disabled = false; btn.textContent = label;
@@ -1109,7 +1112,6 @@
       '<td class="num">' + (Number(r.sold) ? '£' + Number(r.sold).toFixed(2) : '—') + '</td>' +
       '<td>' + esc(String(r.ship_by || '').slice(0, 10)) + '</td>' +
       '<td><span class="od-late">' + esc(when) + '</span></td>' +
-      '<td>' + (r.has_tracking ? 'tracking on the sheet' : '<span style="color:var(--bad);font-weight:700">no tracking</span>') + '</td>' +
     '</tr>';
   }
 
@@ -1149,7 +1151,7 @@
           '<span class="hint">eBay\u2019s own ship-by deadline · not bounded to a month</span></div>' +
           '<div class="bd">' + tiles +
           (rows ? '<div class="scroll" style="margin-top:12px"><table class="od-tbl"><thead><tr>' +
-            '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th><th>Tracking</th>' +
+            '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty" style="margin-top:10px">Nothing is past its eBay deadline. That is the number that matters.</div>') +
           staleBlock + caveat +
