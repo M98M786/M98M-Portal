@@ -89,6 +89,8 @@ input,select{font:inherit}
 .brand-text span{font-size:11px; color:var(--text-3); letter-spacing:.14em; text-transform:uppercase}
 .nav{display:flex; flex-direction:column; gap:3px}
 .nav a{display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; color:#9AA6B6; text-decoration:none; font-weight:600; font-size:13.5px; position:relative; transition:all .18s ease; cursor:pointer}
+.nav-dept{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b7687;padding:14px 12px 5px;border-top:1px solid rgba(233,169,60,.08);margin-top:6px}
+.nav-dept:first-child{border-top:none;margin-top:0;padding-top:4px}
 .nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .nav a:hover{background:rgba(61,155,240,.08); color:#DCE5EE}
 .nav a.on{background:linear-gradient(90deg,rgba(233,169,60,.14),rgba(233,169,60,.02)); color:#F6D989}
@@ -702,13 +704,43 @@ function enterApp(user){
      answers "how is the business right now" should be the first thing the owner sees. */
   var landing=(VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home';
   var nav=$('nav'); nav.innerHTML='';
-  viewList().forEach(function(v,i){
+  /* Night list: "make a main dashboard of every department... i don't want tools to be treated
+     as separate tools". The nav is grouped BY DEPARTMENT, each group led by that department's
+     main dashboard; a role only sees the groups it can open, so nothing is hidden — the
+     duplicates are simply no longer scattered as one flat pile. */
+  var NAV_DEPTS = [
+    { name:'Management',  keys:['overview','kpis','dailyReport','accountReport','accountHealth','alerts','reports','reportsGrid','perf','signals','approvals','staffAdmin','rota','team','meetings','agenda'] },
+    { name:'Advertising', keys:['adsCentre','campaignWatch','traffic','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Orders',      keys:['ordersBoard','orders','dispatch','recheck','returns','wrongOrders'] },
+    { name:'Listings',    keys:['activeListings','listingDecisions','listing','hunting','huntQueue','pipeline','calculator'] },
+    { name:'CS',          keys:['csDesk','cs','inbox'] },
+    { name:'My desk',     keys:['home','dashboard','tasks','rules','tools'] }
+  ];
+  var placed = {};
+  function navLink(v){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
     a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
     a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
-    nav.appendChild(a);
+    return a;
+  }
+  var visible = viewList();
+  var byKey = {}; visible.forEach(function(v){ byKey[v.key] = v; });
+  NAV_DEPTS.forEach(function(dept){
+    var members = dept.keys.filter(function(k){ return byKey[k]; });
+    if(!members.length) return;
+    var h = document.createElement('div');
+    h.className = 'nav-dept';
+    h.textContent = dept.name;
+    nav.appendChild(h);
+    members.forEach(function(k){ placed[k]=1; nav.appendChild(navLink(byKey[k])); });
   });
+  var rest = visible.filter(function(v){ return !placed[v.key]; });
+  if(rest.length){
+    var h2 = document.createElement('div'); h2.className='nav-dept'; h2.textContent='More';
+    nav.appendChild(h2);
+    rest.forEach(function(v){ nav.appendChild(navLink(v)); });
+  }
   /* A #view hash wins over the default landing: a reload lands where you were, and a link
      opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
   var fromHash = (location.hash || '').replace(/^#/, '');
