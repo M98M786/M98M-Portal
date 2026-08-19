@@ -16,6 +16,13 @@
  * a single setValues. Every viewer then reads DASH_CACHE only; no viewer ever opens a workbook. */
 
 const DASH_TZ_PKT = 'Asia/Karachi';
+/* The workbooks this screen mirrors are kept on UK trading days — the Monthly Sheet's rows, its
+ * month tabs, its "yesterday" are all London dates. Computing "today" in Karachi meant that for
+ * five hours every night (7pm–midnight UK) the portal asked the sheets about a day they did not
+ * have yet, and on the evening of the 31st it asked about a MONTH that did not exist — dashes
+ * across the whole screen, on a schedule. PKT stays for staff-facing day tabs; business dates
+ * are UK. */
+const DASH_TZ_UK = 'Europe/London';
 
 // ---------- who sees this (§4.3 "Business dashboard (all accounts)": Mgmt ✅ TL ✅ Adv ads view
 // CS ✅ · Hunter/Lister/OrdProc ❌; Ops Head per §4.4 gets all dashboards incl. profit) ----------
@@ -132,7 +139,7 @@ function dashStrip_(record, ctx) {
 }
 
 // ---------- dates (PKT — the portal's one clock for staff-facing days) ----------
-function dashToday_() { return Utilities.formatDate(new Date(), DASH_TZ_PKT, 'yyyy-MM-dd'); }
+function dashToday_() { return Utilities.formatDate(new Date(), DASH_TZ_UK, 'yyyy-MM-dd'); }
 function dashPad2_(n) { return (n < 10 ? '0' : '') + n; }
 function dashYmd_(y, m, d) { return y + '-' + dashPad2_(m) + '-' + dashPad2_(d); }
 function dashMonthDays_(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
@@ -596,7 +603,7 @@ function dashCacheWrite_(rows, stamp, today) {
 /** A key cell that Sheets already coerced to a Date comes back as one; it is rendered in the
  * portal's own clock so the row still carries a readable key rather than a locale string. */
 function dashCacheText_(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, DASH_TZ_PKT, 'yyyy-MM-dd');
+  if (v instanceof Date) return Utilities.formatDate(v, DASH_TZ_UK, 'yyyy-MM-dd');   // a sheet Date cell is a UK business day
   return String(v === null || v === undefined ? '' : v);
 }
 

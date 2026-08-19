@@ -672,9 +672,12 @@ function alertsWrongAdvertising_(accounts) {
   (scan.alarms || []).forEach(function (a) {
     if (a.resolved_on_sheet) return;
     if (a.sides_agree) return;                 // corrected since it was written — not an alarm
+    /* An acknowledgement is one person saying "seen" — it must not erase the alarm for everyone
+       else (this feed is cached and SHARED). The ack rides along; whether to hide it is decided
+       per caller in actionAlertsCentre_. */
     const sig = acknowledged[a.signal_key];
-    if (sig && String(sig.acknowledged_by || '')) return;
     out.push({
+      acknowledged_by: sig ? String(sig.acknowledged_by || '') : '',
       account: a.account, source: 'Wrong Advertising', row: a.row,
       fingerprint: ALERTS_ADV_PREFIX + a.signal_key,
       raised_at: a.date, last_seen: '',
@@ -733,8 +736,19 @@ function actionAlertsCentre_(payload, ctx) {
 
   const resolvedBy = alertsResolutionIndex_();
   const filtered = [];
+  const advAllowed = advMaySeeAlarms_(ctx);
+  const meNorm = normalizeEmail(ctx.ident.email);
   alertsSort_(rows).forEach(function (r) {
     if (adsOnly && r.fingerprint.indexOf(ALERTS_ADS_PREFIX) !== 0 && r.fingerprint.indexOf(ALERTS_ADV_PREFIX) !== 0) return;
+    if (r.fingerprint.indexOf(ALERTS_ADV_PREFIX) === 0) {
+      // §8.7 — Wrong Advertising alarms are for the advertising chain; the feed itself is shared
+      // and unscoped, so the per-caller gate lives here.
+      if (!advAllowed) return;
+      // hidden only for the person who acknowledged it; everyone else sees it with their name on
+      var ack = String(r.acknowledged_by || '');
+      if (ack && ack.toLowerCase().indexOf(meNorm) >= 0) return;
+      r.seen_by = ack;
+    }
     if (wantSeverity && alertsNorm_(r.severity) !== wantSeverity) return;
     if (wantCategory && alertsNorm_(r.category) !== wantCategory) return;
     const trail = resolvedBy[alertsKey_(r.account, r.fingerprint, r.raised_at)];

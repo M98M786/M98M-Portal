@@ -780,6 +780,11 @@ function actionMySignals_(payload, ctx) {
     const date = signalsDateKey_(s.date);
     const itemKey = String(s.item_id === null || s.item_id === undefined ? '' : s.item_id);
     if (!type) return;
+    /* SIGNALS doubles as a resolution LEDGER: alertsRecordResolution_ appends 'Account Report
+       Alert' rows whose value is a category name and whose baseline is a message — bookkeeping,
+       not a signal. Rendering those as cards put "Yesterday: Payment disputes / Its normal line:
+       <a sentence>" on every manager's home screen. Only registered card types become cards. */
+    if (SIG_LAUNCH_TYPES.indexOf(type) < 0 && type !== ADV_SIGNAL_TYPE) return;
     const card = cards[account + '|' + signalsPeriod_(type, date, itemKey)] || null;
     if (!signalsVisible_(type, account, String(s.targeted_roles || ''), card, viewer)) return;
 

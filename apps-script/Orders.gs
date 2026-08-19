@@ -96,9 +96,12 @@ const ORDERS_DELIVERY_STATUS_REPLACEMENT = 'REPLACEMENT';
 // Wahab's tracking upload is what moves a row off 'Pending'; 'Tracking' is the dropdown token
 // that records it.
 const ORDERS_STATUS_TRACKING = 'Tracking';
-// Dispatch is evidenced by a tracking number or by any status past 'Pending'.
+// Dispatch is evidenced by a tracking number or by any status past 'Pending'. 'Contact
+// Customer/ Late' is the sheet's own word for an order that is IN TROUBLE — counting it as
+// dispatched was hiding exactly the orders this screen exists to surface.
 const ORDERS_DISPATCHED_STATUS = ['Tracking', 'Left China', 'IN UK', 'Custom Stuck', 'Delivered',
-  'Complete', 'Contact Customer/ Late'];
+  'Complete'];
+const ORDERS_TROUBLE_STATUS = 'Contact Customer/ Late';
 
 const ORDERS_RETURNS_TYPES = ['INAD', 'Return'];
 const ORDERS_RETURNS_STATUS = ['Opened', 'Sent by Buyer', 'Waiting for Refund', 'Refunded'];
@@ -718,27 +721,47 @@ function ordersComputeDashboard_(account, monthKey, today) {
 
   const counts = { dispatched: 0, safe: 0, due: 0, overdue: 0 };
   const days = [], due = [];
-  const seenTabs = {};
+  const seenTabs = {}, seenOrders = {};
   let total = 0, tabsRead = 0;
 
-  for (let d = 1; d <= cap; d++) {
-    const ymd = ordersMakeYmd_(y, m, d);
+  /* [OVERDUE ROLLS OVER] A calendar-month scan reset OVERDUE NOW to zero every 1st — an order
+   * from the 29th, still not sent on the 2nd, simply vanished. For the current month the scan
+   * begins far enough inside the previous month to catch anything that could still be open;
+   * those tail days feed the dispatch buckets but not the month's own order count. */
+  const scanDays = [];
+  if (monthKey === thisMonth) {
+    const first = dashYmd_ ? dashYmd_(y, m, 1) : (monthKey + '-01');
+    let ymd = ordersAddDays_(first, -(sla + ORDERS_DUE_WINDOW_DAYS + 3));
+    while (ymd <= today) { scanDays.push(ymd); ymd = ordersAddDays_(ymd, 1); }
+  } else {
+    for (let d = 1; d <= cap; d++) scanDays.push(ordersMakeYmd_(y, m, d));
+  }
+
+  for (let di = 0; di < scanDays.length; di++) {
+    const ymd = scanDays[di];
+    const inMonth = ymd.slice(0, 7) === monthKey;
     const candidates = ordersDayTabCandidates_(ymd);
     const read = ordersReadTab_(account, candidates, ORDERS_DAY_LIMIT, ORDERS_EXPECT_DAY);
     if (!read.ok) continue;
     if (seenTabs[read.tab]) continue;                  // a combined tab ('5-6 JULY') answers twice
     seenTabs[read.tab] = true;
-    tabsRead++;
+    if (inMonth) tabsRead++;
 
     const map = ordersResolveFields_(read.headers);
     let dayCount = 0;
     read.rows.forEach(function (r) {
       if (!ordersIsOrderRow_(r, map)) return;
-      dayCount++;
-      total++;
+      /* [ONE ORDER, ONE COUNT] A multi-variation eBay order is several sheet rows sharing one
+       * order number. Counting rows counted the same order twice everywhere on this screen. */
+      const ono = bridgeMatchKey_(ordersCell_(r, map, 'Order number'));
+      if (ono) {
+        if (seenOrders[ono]) return;
+        seenOrders[ono] = true;
+      }
+      if (inMonth) { dayCount++; total++; }
       const status = String(ordersCell_(r, map, 'Delivery Status')).trim();
       const tracking = String(ordersCell_(r, map, 'Tracking number')).trim();
-      if (ordersIsDispatched_(status, tracking)) { counts.dispatched++; return; }
+      if (ordersIsDispatched_(status, tracking)) { if (inMonth) counts.dispatched++; return; }
 
       // A two-day tab is dated by its FIRST day: the earlier deadline is the safe one to show.
       const shipBy = ordersAddDays_(ymd, sla);
@@ -759,7 +782,7 @@ function ordersComputeDashboard_(account, monthKey, today) {
     });
     // The workbook's own Day/Orders table numbers the days; tab names are used instead because
     // two of them cover two dates each and a number would have to lie about one of them.
-    days.push({ 'Day': read.tab, 'Orders': dayCount });
+    if (inMonth) days.push({ 'Day': read.tab, 'Orders': dayCount });
   }
 
   due.sort(function (a, b) { return a['Days Left'] - b['Days Left']; });
@@ -783,6 +806,9 @@ function ordersComputeDashboard_(account, monthKey, today) {
 }
 
 function ordersIsDispatched_(status, tracking) {
+  // A processor sets 'Contact Customer/ Late' precisely when something went wrong AFTER a
+  // tracking number existed — the number must not outvote the person.
+  if (status === ORDERS_TROUBLE_STATUS) return false;
   if (tracking) return true;
   for (let i = 0; i < ORDERS_DISPATCHED_STATUS.length; i++) {
     if (ORDERS_DISPATCHED_STATUS[i] === status) return true;
@@ -950,8 +976,15 @@ function ordersCacheTiles_(account, monthKey, dash) {
     Object.keys(dash.tiles).forEach(function (metric) {
       const key = metric + '|' + account + '|' + monthKey;
       const row = [metric, account, monthKey, dash.tiles[metric], stamp];
-      if (at[key]) sh.getRange(at[key], 1, 1, 5).setValues([row]);
-      else { sh.appendRow(row); at[key] = sh.getLastRow(); }
+      /* The period cell must stay the literal text '2026-08'. Left to itself Sheets re-parses it
+       * into a Date, the read-back key becomes 'Aug 2026', nothing matches metric|account|period
+       * again, and every sweep appends a fresh duplicate row for ever. Text format FIRST, then
+       * the value. */
+      let r = at[key];
+      if (!r) { r = sh.getLastRow() + 1; at[key] = r; }
+      const rng = sh.getRange(r, 1, 1, 5);
+      rng.setNumberFormats([['@', '@', '@', '0.###', '@']]);
+      rng.setValues([row]);
     });
   } finally { lock.releaseLock(); }
 }

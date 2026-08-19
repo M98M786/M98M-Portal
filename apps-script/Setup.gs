@@ -114,9 +114,25 @@ function bootstrapApproveUser(email, role, accounts) {
  *
  * Each handler is defensive — a module that is not deployed is simply skipped. */
 function runMissedCheckpointSweep() {
-  if (typeof flagMissedCheckpoints !== 'function') return;
-  try { flagMissedCheckpoints(); }
-  catch (e) { logActivity_('trigger', 'ERROR:missedCheckpoints', '', '', '', String(e && e.stack || e)); }
+  if (typeof flagMissedCheckpoints === 'function') {
+    try { flagMissedCheckpoints(); }
+    catch (e) { logActivity_('trigger', 'ERROR:missedCheckpoints', '', '', '', String(e && e.stack || e)); }
+  }
+  /* Two sweeps were written and never wired to anything: alertsRefresh (the Account-KPI cards —
+   * "Account KPI page all dead" was literally this) and dispatchOverdueSweep (the overdue bells
+   * and tiles). New triggers need the scriptapp scope this project deliberately avoids, so they
+   * ride this hourly trigger instead — alternating by hour, because each carries a 240-second
+   * budget of its own and two of those must never share one 6-minute run. */
+  const hour = new Date().getHours();
+  if (hour % 2 === 0) {
+    if (typeof alertsRefresh === 'function') {
+      try { alertsRefresh(); }
+      catch (e) { logActivity_('trigger', 'ERROR:alertsRefresh', '', '', '', String(e && e.stack || e)); }
+    }
+  } else if (typeof dispatchOverdueSweep === 'function') {
+    try { dispatchOverdueSweep(); }
+    catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e)); }
+  }
 }
 
 function runSubmissionEscalationSweep() {

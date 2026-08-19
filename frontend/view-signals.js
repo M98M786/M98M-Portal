@@ -333,6 +333,24 @@
       return out;
     }
 
+    if (type === 'Wrong Advertising') {
+      /* This card's row stores money, not a metric-vs-baseline pair: value is the item's net
+         after the CPC allowance, baseline its raw profit. The generic wording below rendered it
+         as "Yesterday −0.27 · Its normal line 1.73 · BELOW ITS NORMAL LINE" — the exact nonsense
+         Sir Hasib circled. It reads as an advertising verdict now. */
+      var live = sgField(rec, 'live_on_ebay'), wants = sgField(rec, 'manager_wants');
+      if (live !== null || wants !== null) {
+        if (live !== null) { out += sgFig('big loss', 'Live on eBay', sgStr(live) || 'unknown'); }
+        out += '<div class="sig-vs">AGAINST</div>';
+        if (wants !== null) { out += sgFig('big gold', 'Manager wants', sgStr(wants) || 'unknown'); }
+      }
+      var net = sgField(rec, 'value');
+      if (net !== null) { out += sgFig(Number(net) < 0 ? 'loss' : '', 'Net after CPC', sgGbp(net)); }
+      var rawp = sgField(rec, 'baseline');
+      if (rawp !== null) { out += sgFig('', 'Raw profit', sgGbp(rawp)); }
+      return out;
+    }
+
     // An extensible registry type (§27) — but never raw metric labels: the notification law
     // wants plain words, and "Value −0.27 · Baseline 1.73" is the exact format it bans.
     count = sgField(rec, 'value');

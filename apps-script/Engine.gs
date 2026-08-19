@@ -104,6 +104,7 @@ const ENGINE_RUNNABLE = {
   pushEngineCosts: function () { return pushEngineCosts(); },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
+  dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
 };
 
 function actionEngineRunJob_(payload) {
