@@ -105,6 +105,7 @@ const ENGINE_RUNNABLE = {
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
+  runZeroSalesSweep: function () { return runZeroSalesSweep(); },
 };
 
 function actionEngineRunJob_(payload) {

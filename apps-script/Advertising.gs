@@ -964,6 +964,17 @@ function advDateMs_(value) {
  * item goes to the current lister-module holder; an open task on the same item blocks a repeat,
  * so nobody gets the same item twice while they work on it. */
 function runZeroSalesSweep() {
+  /* The daily trigger has been failing at a 100% rate with its error visible only in a UI page
+     nobody reads. The real work moves into an inner function; this wrapper records the actual
+     error and stack in the activity log — a failing sweep must leave a note, not a mystery. */
+  try { return runZeroSalesSweepInner_(); }
+  catch (e) {
+    logActivity_('trigger', 'ERROR:zeroSales', '', '', '', String(e && e.stack || e).slice(0, 500));
+    return 'zero-sales sweep failed: ' + String(e && e.message || e).slice(0, 200);
+  }
+}
+
+function runZeroSalesSweepInner_() {
   const holders = usersWithModule_('listing', ['Listing Manager', 'Item Lister']);
   if (!holders.length) {
     notifyManagement_('Task assigned', '🔴 Zero-sales sweep found nobody holding the listing module — grant it on the Access desk.', 'zerosales:noholder');
