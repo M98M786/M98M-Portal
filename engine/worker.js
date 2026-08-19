@@ -1166,6 +1166,21 @@ async function standardsSync(env) {
       "INSERT INTO cs_standards (account, json, synced_at) VALUES (?1, ?2, datetime('now')) " +
       "ON CONFLICT(account) DO UPDATE SET json = ?2, synced_at = datetime('now')"
     ).bind(acct, JSON.stringify(uk.length ? uk : (sd.standardsProfiles || [])).slice(0, 8000)).run();
+
+    /* Hasib item 13: the Seller Hub service-metrics panel — your "item not as described" and
+       "item not received" rates against eBay's peer benchmark. Same nightly cadence: eBay
+       re-evaluates these monthly, so nightly is already generous. A scope-gap account simply
+       stays absent, like the standards above. */
+    for (const mt of ['ITEM_NOT_AS_DESCRIBED', 'ITEM_NOT_RECEIVED']) {
+      const mr = await fetch('https://api.ebay.com/sell/analytics/v1/customer_service_metric/' + mt + '/CURRENT?evaluation_marketplace_id=EBAY_GB', {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (!mr.ok) continue;
+      const md = await mr.json();
+      await env.DB.prepare(
+        "INSERT INTO cs_metrics (account, metric_type, json, synced_at) VALUES (?1, ?2, ?3, datetime('now')) " +
+        "ON CONFLICT(account, metric_type) DO UPDATE SET json = ?3, synced_at = datetime('now')"
+      ).bind(acct, mt, JSON.stringify(md).slice(0, 8000)).run();
+    }
   });
 }
 
@@ -3228,7 +3243,23 @@ const ROUTES = {
         try { profiles = JSON.parse(r.json || '[]'); } catch (e) { profiles = []; }
         return { account: r.account, synced_at: r.synced_at, profiles };
       });
-      return { now, trend: trend.results || [], sync: sync.results || [], standards };
+      /* Item 13: the two service-metric rates vs eBay's peer benchmark, per account. The raw
+         evaluation JSON is parsed here so the screen only ever sees clean numbers. */
+      const metRs = await ctx.env.DB.prepare('SELECT account, metric_type, json, synced_at FROM cs_metrics ORDER BY account, metric_type').all();
+      const metrics = (metRs.results || []).map((r) => {
+        let you = null, peer = null, rating = '', count = null;
+        try {
+          const j = JSON.parse(r.json || '{}');
+          const dm = ((j.dimensionMetrics || [])[0] || {});
+          const m = ((dm.metrics || [])[0] || {});
+          you = m.value != null ? Number(m.value) : null;
+          peer = m.benchmark && m.benchmark.value != null ? Number(m.benchmark.value) : null;
+          rating = String((m.benchmark || {}).basis || m.rating || '');
+          count = m.transactionCount != null ? Number(m.transactionCount) : null;
+        } catch (e) { /* an unparsable evaluation stays as nulls, never a crash */ }
+        return { account: r.account, metric_type: r.metric_type, you, peer, rating, count, synced_at: r.synced_at };
+      });
+      return { now, trend: trend.results || [], sync: sync.results || [], standards, metrics };
     },
   },
 
