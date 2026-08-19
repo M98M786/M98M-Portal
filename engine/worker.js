@@ -74,7 +74,7 @@ export default {
   async scheduled(event, env, ctx) {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit],
-      '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll],
+      '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
@@ -394,6 +394,60 @@ async function listingSync(env) {
       "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2"
     ).bind(acct, String(next)).run();
   });
+}
+
+/* The false-overdue root (Hasib's 19 Aug review, item 3): orderSync re-reads only the last 6
+   days, so an order synced in May kept its NOT_STARTED for ever while eBay itself showed it
+   delivered — 476 'awaiting' here against Seller Hub's 14. This sweeper walks the OLDEST open
+   orders first, ~35 per run inside the subrequest budget, re-reading eBay's current status and
+   ship-by. An order eBay no longer serves (404) is marked NOT_FOUND so it stops resurfacing.
+   The 476-order backlog converges in a few hours at the */15 cadence, then stays converged. */
+/* Ended listings never left: listingSync upserts what eBay returns and nothing ever marked the
+   rows that stopped returning. The sync's page cursor makes a same-run diff unreliable, but
+   api_synced_at is a clean proxy — every live listing is re-touched within a couple of hours at
+   the */15 cadence, so an ACTIVE row untouched for a day is an ended item. Marked, not deleted:
+   its history still joins orders and ads. */
+async function markEndedListings(env) {
+  await env.DB.prepare(
+    "UPDATE items_api SET status = 'ENDED' WHERE status = 'ACTIVE' AND api_synced_at < datetime('now', '-1 day')"
+  ).run();
+}
+
+async function statusRefresh(env) {
+  const rs = await env.DB.prepare(
+    "SELECT order_id, account FROM orders WHERE status NOT IN ('FULFILLED','NOT_FOUND') AND created_at < datetime('now', '-6 day') ORDER BY created_at ASC LIMIT 35"
+  ).all();
+  const rows = rs.results || [];
+  if (!rows.length) return;
+  const byAcct = {};
+  for (const r of rows) (byAcct[r.account] = byAcct[r.account] || []).push(r.order_id);
+  let refreshed = 0;
+  for (const acct of Object.keys(byAcct)) {
+    let tok;
+    try { tok = await ebayAccessToken(env, acct); } catch (e) { continue; }
+    for (const oid of byAcct[acct]) {
+      const r = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(oid), {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (r.status === 404) {
+        await env.DB.prepare("UPDATE orders SET status = 'NOT_FOUND' WHERE order_id = ?1").bind(oid).run();
+        continue;
+      }
+      if (!r.ok) continue;
+      const o = await r.json();
+      let shipBy = '';
+      for (const li of (o.lineItems || [])) {
+        const d = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
+        if (d && (!shipBy || d < shipBy)) shipBy = d;
+      }
+      await env.DB.prepare('UPDATE orders SET status = ?2, ship_by = ?3 WHERE order_id = ?1')
+        .bind(oid, String(o.orderFulfillmentStatus || ''), shipBy).run();
+      refreshed++;
+    }
+  }
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('statusRefresh', '', ?1, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now'), last_error = ''"
+  ).bind(refreshed + ' refreshed, ' + rows.length + ' scanned').run();
 }
 
 async function orderSync(env) {
@@ -721,9 +775,13 @@ async function adsItems(env) {
    alerted_day so the feed records an item once per UK day at most. Resolved items are deleted,
    so the table is always exactly "what is duplicated right now". */
 async function dupSweep(env, acct) {
+  /* Hasib's rule, restated 19 Aug: duplication exists only when the ITEM ITSELF is currently
+     an ACTIVE listing sitting in more than one RUNNING campaign — an ended or unsold item in two
+     stale campaign memberships is history, not a leak. The items_api join enforces it. */
   const dups = await env.DB.prepare(
     'SELECT ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, GROUP_CONCAT(c.name, \' | \') AS names ' +
     'FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+    "JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' " +
     "WHERE ca.account = ?1 AND c.status LIKE '%RUNNING%' " +
     'GROUP BY ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
   ).bind(acct).all();
@@ -1860,7 +1918,7 @@ const ROUTES = {
       // late orders carry buyer-adjacent detail and order values — the Dispatch screen's own roles
       if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || '');
-      const where = ["o.status != 'FULFILLED'", "o.ship_by != ''"];
+      const where = ["o.status NOT IN ('FULFILLED','NOT_FOUND')", "o.ship_by != ''"];
       const bind = [];
       if (account) { bind.push(account); where.push('o.account = ?' + bind.length); }
       const open = await ctx.env.DB.prepare(
@@ -1890,18 +1948,18 @@ const ROUTES = {
          allowed to under-report how many orders are actually late. */
       const cnt = await ctx.env.DB.prepare(
         "SELECT COUNT(*) AS late_n, COALESCE(SUM(sold), 0) AS late_value FROM orders o " +
-        "WHERE o.status != 'FULFILLED' AND o.ship_by != '' AND o.ship_by < ?1" +
+        "WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by < ?1" +
         (account ? ' AND o.account = ?2' : '')
       ).bind(...[new Date(now).toISOString()].concat(account ? [account] : [])).first();
 
       const awaiting = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED'" + (account ? ' AND o.account = ?1' : '')
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND')" + (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
       /* due-soon counted in SQL like its siblings — the 400-row page must never under-report */
       const soonIso = new Date(soon).toISOString();
       const dueCnt = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED' AND o.ship_by != '' AND o.ship_by >= ?1 AND o.ship_by <= ?2" +
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by >= ?1 AND o.ship_by <= ?2" +
         (account ? ' AND o.account = ?3' : '')
       ).bind(...[new Date(now).toISOString(), soonIso].concat(account ? [account] : [])).first();
 
@@ -1921,7 +1979,7 @@ const ROUTES = {
       ).bind(...[new Date(dayStartMs).toISOString()].concat(account ? [account] : [])).first();
 
       const noDeadline = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status != 'FULFILLED' AND o.ship_by = ''" +
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by = ''" +
         (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
@@ -1931,7 +1989,7 @@ const ROUTES = {
          dispatch. Every one is a real order eBay believes never shipped. */
       const staleRows = await ctx.env.DB.prepare(
         "SELECT o.account, COUNT(*) AS n, ROUND(SUM(o.sold), 2) AS value, MIN(date(o.created_at)) AS oldest " +
-        "FROM orders o WHERE o.status != 'FULFILLED' AND o.created_at < date('now', '-30 day')" +
+        "FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.created_at < date('now', '-30 day')" +
         (account ? ' AND o.account = ?1' : '') + ' GROUP BY o.account ORDER BY n DESC'
       ).bind(...(account ? [account] : [])).all();
       const stale = staleRows.results || [];
@@ -2057,7 +2115,7 @@ const ROUTES = {
         '       f.current_sup, f.category, f.oe, f.profit, f.roi, f.margin, ' +
         '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ' +
         'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' +
-        (where.length ? 'WHERE ' + where.join(' AND ') + ' ' : '') +
+        "WHERE a.status = 'ACTIVE' " + (where.length ? 'AND ' + where.join(' AND ') + ' ' : '') +
         'ORDER BY a.api_synced_at DESC LIMIT 1500'
       ).bind(...bind).all();
       const rows = (rs.results || []).map(r => stripItem(r, ctx.user));
@@ -2616,7 +2674,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

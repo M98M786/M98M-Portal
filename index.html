@@ -502,13 +502,25 @@ function dpAttach(el, sets, tz){
 /* ---- Google Identity Services ---- */
 function initGsi(){
   if(!window.google || !google.accounts || !STATE.config || !STATE.config.oauth_client_id){ return; }
-  google.accounts.id.initialize({ client_id: STATE.config.oauth_client_id, callback: onCredential, auto_select:false });
+  google.accounts.id.initialize({ client_id: STATE.config.oauth_client_id, callback: onCredential, auto_select:true, use_fedcm_for_prompt:true });
   google.accounts.id.renderButton($('gbtn'), { theme:'filled_black', size:'large', shape:'pill', text:'signin_with', width:280 });
 }
+function trySilentSignIn(){
+  try {
+    $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Signing you back in…';
+    google.accounts.id.prompt(function(n){
+      if (n && (n.isNotDisplayed && n.isNotDisplayed() || n.isSkippedMoment && n.isSkippedMoment())) {
+        $('loginStatus').textContent='';
+      }
+    });
+  } catch(e) { $('loginStatus').textContent=''; }
+}
+
 function onCredential(resp){
   var wasIn = !!(STATE.user && STATE.user.status === 'approved');
   STATE.idToken = resp.credential;
   sessSave(resp.credential);
+  try { localStorage.setItem('m98m:knows', '1'); } catch(e) {}
   if(wasIn){ hideReauth(); toast('Session refreshed — carry on.'); return; }
   $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Checking your access…';
   api('whoami').then(routeUser).catch(function(e){
@@ -693,10 +705,24 @@ function enterApp(user){
   viewList().forEach(function(v,i){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
-    a.onclick=function(){ var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); renderView(v.key); };
+    a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
+    a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
     nav.appendChild(a);
   });
-  show('appShell'); renderView(landing);
+  /* A #view hash wins over the default landing: a reload lands where you were, and a link
+     opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
+  var fromHash = (location.hash || '').replace(/^#/, '');
+  if (fromHash && VIEWS[fromHash] && canSee(VIEWS[fromHash])) { landing = fromHash; }
+  show('appShell'); location.hash = landing; renderView(landing);
+  var navTo = function(key){
+    var links = document.querySelectorAll('.nav a');
+    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
+    renderView(key);
+  };
+  window.addEventListener('hashchange', function(){
+    var k = (location.hash || '').replace(/^#/, '');
+    if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
+  });
   if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
   warmUp();
 }
@@ -754,7 +780,7 @@ function fmtPkt(iso, withDate){
 function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
-function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} cacheClearAll(); sessClear(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
 /* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
 /* ---- the session survives a reload (RL-11 still holds: the token is Google's own, it is
@@ -782,7 +808,13 @@ function boot(){
     if(kept){
       STATE.idToken = kept;
       $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Welcome back…';
-      api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; $('loginStatus').textContent=''; });
+      api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; trySilentSignIn(); });
+    } else if (localStorage.getItem('m98m:knows')) {
+      /* The reload-logout complaint: sessionStorage dies with the tab and Google's token dies in
+         an hour, but the GOOGLE SESSION in this browser is still alive. One silent prompt
+         re-mints the credential without the user touching anything; only if Google itself says
+         no do they see the sign-in button. */
+      trySilentSignIn();
     }
   }).catch(function(e){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.'; });
 }

@@ -108,7 +108,7 @@
       var src = axStr(r.api_synced_at) ? 'API' : 'SHEET';
       h += '<tr>' +
         '<td>' + (img && safeUrl(img) ? '<img class="alx-img" loading="lazy" src="' + esc(safeUrl(img)) + '" alt="">' : '<div class="alx-img"></div>') + '</td>' +
-        '<td><div class="alx-title">' + esc(axStr(r.title) || '(no title)') + '</div><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + '</div></td>' +
+        '<td><a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" title="Open on eBay">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + '</div></td>' +
         '<td>' + esc(axStr(r.account)) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
