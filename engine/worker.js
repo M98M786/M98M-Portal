@@ -73,9 +73,9 @@ export default {
      flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
   async scheduled(event, env, ctx) {
     const jobs = {
-      '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit],
+      '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
@@ -1357,6 +1357,185 @@ const ADS_FAMILIES = {
       'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency'] },
 };
 
+/* ---------------- INTRADAY ADS (Hasib items 1/10/22): today's spend, as fresh as eBay builds
+   reports. eBay accepted a today-dated report task in the live probe, so every 5-minute tick
+   either polls the pending intraday tasks or kicks fresh ones — effective refresh is 5-10
+   minutes, which is the honest floor of eBay's report pipeline, not the wished-for 2. Results
+   land in ads_today (replaced wholesale — partial-day totals), never in ads_daily. */
+async function adsIntraday(env) {
+  const day = ukDate('');
+  const accs = await env.DB.prepare('SELECT name FROM accounts WHERE api_enabled = 1').all();
+  for (const a of (accs.results || [])) {
+    const acct = a.name;
+    let tok;
+    try { tok = await ebayAccessToken(env, acct); } catch (e) { continue; }
+
+    // 1) poll anything pending for this account
+    const pend = await env.DB.prepare(
+      "SELECT task_id, family FROM ad_report_tasks WHERE account = ?1 AND status = 'PENDING' AND family LIKE '%_intra'"
+    ).bind(acct).all();
+    let polled = 0;
+    for (const t of (pend.results || [])) {
+      const tr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task/' + encodeURIComponent(t.task_id), {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (!tr.ok) continue;
+      const task = await tr.json();
+      const st = String(task.reportTaskStatus || '');
+      if (st === 'FAILED') {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = 'report failed' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
+        continue;
+      }
+      if (st !== 'SUCCESS' && !task.reportHref) continue;
+      const rep = await fetch(String(task.reportHref || ('https://api.ebay.com/sell/marketing/v1/ad_report/' + t.task_id)), {
+        headers: { authorization: 'Bearer ' + tok } });
+      if (!rep.ok) continue;
+      const buf = new Uint8Array(await rep.arrayBuffer());
+      let text = '';
+      if (buf[0] === 0x1f && buf[1] === 0x8b) {
+        const ds = new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')));
+        text = await ds.text();
+      } else { text = new TextDecoder().decode(buf); }
+      await ingestAdsToday(env, acct, day, text, String(t.family).indexOf('cpc') === 0);
+      await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = 'intraday' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
+      polled++;
+    }
+    if ((pend.results || []).length && !polled) continue;   // still building — try next tick
+
+    // 2) nothing pending → kick both families for today
+    for (const fam of Object.keys(ADS_FAMILIES)) {
+      const F = ADS_FAMILIES[fam];
+      const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+          dateFrom: day + 'T00:00:00.000Z', dateTo: day + 'T23:59:59.000Z', fundingModels: [F.model],
+          dimensions: F.dims.map(d => ({ dimensionKey: d })), metricKeys: F.keys }),
+      });
+      if (cr.status !== 202 && !cr.ok) continue;
+      const loc = cr.headers.get('location') || '';
+      const taskId = loc.split('/').filter(Boolean).pop() || ('ti' + fam);
+      await env.DB.prepare(
+        "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
+        "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) ON CONFLICT(account, task_id) DO NOTHING"
+      ).bind(acct, taskId, day, fam + '_intra').run();
+    }
+  }
+  await wasteAlarm(env);
+}
+
+/* One family's partial-day rows replace that family's columns wholesale — a snapshot, never a sum. */
+async function ingestAdsToday(env, acct, day, tsv, isCpc) {
+  const lines = String(tsv || '').split(/\r?\n/).filter(l => l.trim() !== '');
+  let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
+  if (hi < 0) return 0;
+  const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
+  const col = re => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
+  const cL = heads.findIndex(h => /listing/.test(h));
+  const cS = col(/ad_fee/), cC = col(/^clicks$|^cpc_clicks$/), cU = col(/^sales$|^cpc_attributed_sales$/);
+  const agg = {};
+  for (let i = hi + 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    const lid = String(cells[cL] || '').replace(/\D/g, '');
+    if (!lid) continue;
+    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
+    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
+    const a = (agg[lid] = agg[lid] || { s: 0, c: 0, u: 0 });
+    a.s += sum(cS); a.c += sum(cC); a.u += sum(cU);
+  }
+  // zero this family's columns for the account first: an item that stopped spending must not
+  // keep yesterday's snapshot
+  if (isCpc) await env.DB.prepare('UPDATE ads_today SET cpc_spend = 0, cpc_clicks = 0, cpc_sales = 0 WHERE account = ?1 AND day != ?2').bind(acct, day).run();
+  else await env.DB.prepare('UPDATE ads_today SET spend = 0, clicks = 0, sales = 0 WHERE account = ?1 AND day != ?2').bind(acct, day).run();
+  const stmts = [];
+  for (const lid of Object.keys(agg)) {
+    const a = agg[lid];
+    stmts.push(isCpc
+      ? env.DB.prepare(
+          "INSERT INTO ads_today (account, item_id, cpc_spend, cpc_clicks, cpc_sales, day, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+          "ON CONFLICT(account, item_id) DO UPDATE SET cpc_spend = ?3, cpc_clicks = ?4, cpc_sales = ?5, day = ?6, updated_at = datetime('now')"
+        ).bind(acct, lid, round2(a.s), Math.round(a.c), Math.round(a.u), day)
+      : env.DB.prepare(
+          "INSERT INTO ads_today (account, item_id, spend, clicks, sales, day, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+          "ON CONFLICT(account, item_id) DO UPDATE SET spend = ?3, clicks = ?4, sales = ?5, day = ?6, updated_at = datetime('now')"
+        ).bind(acct, lid, round2(a.s), Math.round(a.c), Math.round(a.u), day));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return Object.keys(agg).length;
+}
+
+/* Hasib's waste rule (item 10): an item that has taken £3+ today and returned NOTHING is burning
+   the budget — the Advertising Manager hears about it within minutes, once per item per day. */
+async function wasteAlarm(env) {
+  const day = ukDate('');
+  const rs = await env.DB.prepare(
+    'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS sp, (t.sales + t.cpc_sales) AS sold, i.title ' +
+    'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id ' +
+    'WHERE t.day = ?1 AND (t.spend + t.cpc_spend) >= 3 AND (t.sales + t.cpc_sales) = 0 LIMIT 20'
+  ).bind(day).all();
+  for (const r of (rs.results || [])) {
+    await queueNotify(env, 'advertising', 'Ad waste',
+      '🔴 £' + Number(r.sp).toFixed(2) + ' spent TODAY on ' + r.item_id + ' · ' + r.account +
+      (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
+      ' — and not one order. Pause it or fix it: every hour it runs is money gone.',
+      'waste:' + r.item_id + ':' + day);
+    await queueNotify(env, 'management', 'Ad waste',
+      '🔴 £' + Number(r.sp).toFixed(2) + ' today, zero orders — ' + r.item_id + ' · ' + r.account + ' (advertising has been told).',
+      'waste-m:' + r.item_id + ':' + day);
+  }
+}
+
+/* ---------------- TRAFFIC (Hasib item 11): eBay's own Traffic Report, proven in the probe.
+   Per-day account series + per-listing drilldown for 7 and 30 days. eBay refreshes this data on
+   its own slow clock — hourly here is already ahead of it. */
+async function trafficSync(env) {
+  await perAccount(env, 'trafficSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const d8 = (n) => ukDate(new Date(Date.now() - n * 86400000).toISOString()).replace(/-/g, '');
+    const dayUrl = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=DAY' +
+      '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(30) + '..' + d8(0) + ']') +
+      '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION,CLICK_THROUGH_RATE,SALES_CONVERSION_RATE';
+    const dr = await fetch(dayUrl, { headers: { authorization: 'Bearer ' + tok } });
+    if (dr.ok) {
+      const d = await dr.json();
+      const keys = ((d.header || {}).metrics || []).map(m => m.key);
+      const idx = k => keys.indexOf(k);
+      const stmts = [];
+      for (const rec of (d.records || [])) {
+        const day = String(((rec.dimensionValues || [])[0] || {}).value || '');
+        if (!/^\d{8}$/.test(day)) continue;
+        const v = i => i >= 0 ? Number(((rec.metricValues || [])[i] || {}).value || 0) : 0;
+        stmts.push(env.DB.prepare(
+          'INSERT INTO traffic_daily (account, date, impressions, views, transactions, ctr, cvr) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+          'ON CONFLICT(account, date) DO UPDATE SET impressions=?3, views=?4, transactions=?5, ctr=?6, cvr=?7'
+        ).bind(acct, day.slice(0,4) + '-' + day.slice(4,6) + '-' + day.slice(6,8),
+          v(idx('LISTING_IMPRESSION_TOTAL')), v(idx('LISTING_VIEWS_TOTAL')), v(idx('TRANSACTION')),
+          v(idx('CLICK_THROUGH_RATE')), v(idx('SALES_CONVERSION_RATE'))));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    }
+    for (const range of [7, 30]) {
+      const lUrl = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=LISTING' +
+        '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(range) + '..' + d8(0) + ']') +
+        '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION&sort=-LISTING_IMPRESSION_TOTAL';
+      const lr = await fetch(lUrl, { headers: { authorization: 'Bearer ' + tok } });
+      if (!lr.ok) continue;
+      const d = await lr.json();
+      const keys = ((d.header || {}).metrics || []).map(m => m.key);
+      const idx = k => keys.indexOf(k);
+      const stmts = [];
+      for (const rec of (d.records || []).slice(0, 300)) {
+        const lid = String(((rec.dimensionValues || [])[0] || {}).value || '').replace(/\D/g, '');
+        if (!lid) continue;
+        const v = i => i >= 0 ? Number(((rec.metricValues || [])[i] || {}).value || 0) : 0;
+        stmts.push(env.DB.prepare(
+          "INSERT INTO traffic_listing (account, item_id, range_days, impressions, views, transactions, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+          'ON CONFLICT(account, item_id, range_days) DO UPDATE SET impressions=?4, views=?5, transactions=?6, updated_at=datetime(\'now\')'
+        ).bind(acct, lid, range, v(idx('LISTING_IMPRESSION_TOTAL')), v(idx('LISTING_VIEWS_TOTAL')), v(idx('TRANSACTION'))));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    }
+  });
+}
+
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
     const camps = await env.DB.prepare('SELECT COUNT(*) AS n FROM campaigns WHERE account = ?1').bind(acct).first();
@@ -1438,7 +1617,7 @@ async function adsReportKick(env) {
 async function adsReportPoll(env) {
   await perAccount(env, 'adsReportPoll', async (acct) => {
     const pend = await env.DB.prepare(
-      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 20"
+      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') AND family NOT LIKE '%_intra' ORDER BY created_at LIMIT 20"
     ).bind(acct).all();
     const tasks = pend.results || [];
     if (!tasks.length) return;
@@ -1910,6 +2089,90 @@ const ROUTES = {
           sold: r.sold, status: r.status, has_tracking: !!String(r.tracking || ''), day };
       });
       return { rows };
+    },
+  },
+
+  /* THE ADVERTISING COMMAND CENTRE (Hasib items 10/18/22): combined → account → item, in eBay's
+     own vocabulary, from the intraday snapshot + the 14-day daily history. The updated stamp is
+     the honest cadence — the data is as fresh as eBay built its last report, nothing pretended. */
+  adsBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (CAMPAIGN_ROLES.indexOf(ctx.user.role) < 0 && MGMT_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const day = ukDate('');
+      const today = await ctx.env.DB.prepare(
+        'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS spend_t, (t.clicks + t.cpc_clicks) AS clicks_t, ' +
+        '(t.sales + t.cpc_sales) AS sold_t, t.updated_at, i.title, i.price, i.status AS listing_status ' +
+        'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.day = ?1'
+      ).bind(day).all();
+      const hist = await ctx.env.DB.prepare(
+        "SELECT a.item_id, a.account, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend_14, SUM(a.clicks + a.cpc_clicks) AS clicks_14, " +
+        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= date('now', '-14 day') GROUP BY a.item_id, a.account"
+      ).all();
+      const hBy = {};
+      for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
+      const items = [];
+      const accounts = {};
+      let updated = '';
+      for (const t of (today.results || [])) {
+        const h = hBy[t.account + '|' + t.item_id] || {};
+        if (String(t.updated_at || '') > updated) updated = String(t.updated_at || '');
+        const row = {
+          account: t.account, item_id: t.item_id, title: t.title || '', price: t.price,
+          listing_status: t.listing_status || '',
+          spend_today: t.spend_t || 0, clicks_today: t.clicks_t || 0, sold_today: t.sold_t || 0,
+          cpc_today: t.clicks_t ? round2(t.spend_t / t.clicks_t) : 0,
+          spend_14d: h.spend_14 || 0, clicks_14d: h.clicks_14 || 0, sold_14d: h.sold_14 || 0,
+          waste: (t.spend_t || 0) >= 3 && !(t.sold_t || 0),
+        };
+        items.push(row);
+        const a = (accounts[t.account] = accounts[t.account] || { account: t.account, spend: 0, clicks: 0, sold: 0, waste_n: 0 });
+        a.spend = round2(a.spend + row.spend_today); a.clicks += row.clicks_today; a.sold += row.sold_today;
+        if (row.waste) a.waste_n++;
+      }
+      // an item spending over 14d but silent today still belongs on the board
+      for (const k of Object.keys(hBy)) {
+        const h = hBy[k];
+        if (items.some(i => i.account === h.account && i.item_id === h.item_id)) continue;
+        if (!(h.spend_14 > 0)) continue;
+        items.push({ account: h.account, item_id: h.item_id, title: '', price: null, listing_status: '',
+          spend_today: 0, clicks_today: 0, sold_today: 0, cpc_today: 0,
+          spend_14d: h.spend_14, clicks_14d: h.clicks_14 || 0, sold_14d: h.sold_14 || 0, waste: false });
+      }
+      items.sort((a, b) => (b.waste - a.waste) || (b.spend_today - a.spend_today) || (b.spend_14d - a.spend_14d));
+      const combined = {
+        spend_today: round2(items.reduce((s, i) => s + i.spend_today, 0)),
+        clicks_today: items.reduce((s, i) => s + i.clicks_today, 0),
+        sold_today: items.reduce((s, i) => s + i.sold_today, 0),
+        waste_n: items.filter(i => i.waste).length,
+        spend_14d: round2(items.reduce((s, i) => s + i.spend_14d, 0)),
+      };
+      return { day, updated_at: updated, combined,
+        accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
+        items: items.slice(0, 300),
+        note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live)' };
+    },
+  },
+
+  /* THE TRAFFIC BOARD (Hasib item 11): eBay's own Traffic Report — impressions, views, CTR,
+     conversion — per account per day, with the 7/30-day listing drilldown. */
+  trafficBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const allowed = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager'];
+      if (allowed.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || '');
+      const range = Number(p.range) === 30 ? 30 : 7;
+      const days = await ctx.env.DB.prepare(
+        "SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily " +
+        "WHERE date >= date('now', '-30 day')" + (account ? ' AND account = ?1' : '') + ' ORDER BY date'
+      ).bind(...(account ? [account] : [])).all();
+      const listings = await ctx.env.DB.prepare(
+        'SELECT t.account, t.item_id, t.impressions, t.views, t.transactions, i.title, i.status AS listing_status ' +
+        'FROM traffic_listing t LEFT JOIN items_api i ON i.item_id = t.item_id ' +
+        'WHERE t.range_days = ?1' + (account ? ' AND t.account = ?2' : '') +
+        ' ORDER BY t.impressions DESC LIMIT 200'
+      ).bind(...[range].concat(account ? [account] : [])).all();
+      return { days: days.results || [], listings: listings.results || [], range,
+        note: 'eBay refreshes traffic data on its own clock (up to a day behind); the portal re-reads it hourly' };
     },
   },
 
@@ -2829,7 +3092,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
