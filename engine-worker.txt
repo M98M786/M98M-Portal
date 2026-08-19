@@ -1699,6 +1699,16 @@ async function backup(env) {
 async function pushTracking(p, ctx) {
 const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
 if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
+/* Idempotency: eBay emails the buyer when tracking lands, so a double-press must not send the
+   same number twice. If this exact order+number was already pushed LIVE, report the earlier
+   success instead of firing again. A DIFFERENT number is a genuine correction and goes through. */
+const prior = await ctx.env.DB.prepare(
+  'SELECT tracking, courier_ebay, push_status, pushed_at FROM trackings WHERE order_id = ?1'
+).bind(orderId).first();
+if (prior && String(prior.tracking) === tracking && /^LIVE/.test(String(prior.push_status || ''))) {
+  return { shadow: false, pushed: true, already: true, carrier_auto: prior.courier_ebay,
+    note: 'already on eBay — sent ' + prior.pushed_at + ', not re-sent' };
+}
 const tok0 = await ebayAccessToken(ctx.env, account);
 const accepted = await acceptedCarriers(ctx.env, account, tok0);
 const nominate = () => {
