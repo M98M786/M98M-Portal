@@ -642,13 +642,19 @@ async function notifyRole(env, role, type, message, ref) {
 }
 
 async function flushNotifyQueue(env) {
-  const rs = await env.DB.prepare('SELECT id, to_addr, type, message, ref, tries FROM notify_queue ORDER BY id LIMIT 8').all();
+  /* CLAIM-AS-LEASE before send: the five cron slots coincide at every quarter-hour and each ends
+     in a flush. A bare tries compare-and-swap still double-sent when the second flush SELECTed
+     mid-send (it read the post-claim tries and won its own swap) — the lease closes that window:
+     a claimed row is invisible to other flushes for 60 seconds, far past the 8-second send. */
+  const rs = await env.DB.prepare(
+    "SELECT id, to_addr, type, message, ref, tries FROM notify_queue " +
+    "WHERE claimed_at = '' OR claimed_at < datetime('now', '-60 second') ORDER BY id LIMIT 8"
+  ).all();
   for (const row of (rs.results || [])) {
-    /* CLAIM before send: the five cron slots coincide at every quarter-hour and each ends in a
-       flush — two overlapping flushes both read the same rows and staff got the bell twice.
-       The tries counter doubles as a compare-and-swap; the loser skips the row. */
-    const claim = await env.DB.prepare('UPDATE notify_queue SET tries = tries + 1 WHERE id = ?1 AND tries = ?2')
-      .bind(row.id, Number(row.tries) || 0).run();
+    const claim = await env.DB.prepare(
+      "UPDATE notify_queue SET tries = tries + 1, claimed_at = datetime('now') " +
+      "WHERE id = ?1 AND tries = ?2 AND (claimed_at = '' OR claimed_at < datetime('now', '-60 second'))"
+    ).bind(row.id, Number(row.tries) || 0).run();
     if (!claim.meta || !claim.meta.changes) continue;
     let ok = false;
     try {
@@ -1711,11 +1717,14 @@ async function trafficSync(env) {
       }
       /* Replace, don't accrete: the report is top-300 by impressions, and a listing that ended
          or fell out would otherwise keep its stale window forever and crowd live listings off
-         the board. Deleted only AFTER a good fetch, so a bad hour never blanks the screen. */
+         the board. The DELETE rides INSIDE the first batch (a D1 batch is one transaction), so
+         neither a bad fetch nor a mid-run kill can ever leave the board emptier than before —
+         worst case is a partially refreshed board, never a blank one. */
       if (stmts.length) {
-        await env.DB.prepare('DELETE FROM traffic_listing WHERE account = ?1 AND range_days = ?2').bind(acct, range).run();
+        const del = env.DB.prepare('DELETE FROM traffic_listing WHERE account = ?1 AND range_days = ?2').bind(acct, range);
+        await env.DB.batch([del].concat(stmts.slice(0, 49)));
+        for (let i = 49; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
       }
-      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
   });
 }
