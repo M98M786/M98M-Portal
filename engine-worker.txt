@@ -1904,6 +1904,149 @@ const ROUTES = {
     },
   },
 
+  /* THE ORDERS BOARD (Hasib's item 2, 19 Aug review): eBay's own status dropdown as a screen —
+     every bucket across ALL dates, counted in SQL, from the same statusRefresh-converged truth.
+     'Archived' is the honest home for the old orders eBay holds no dispatch record for: they were
+     dispatched and delivered in the real world (Hasib's word) but tracking never reached eBay, so
+     they must never read as LATE NOW. Overdue means: a RECENT order past its live ship-by. */
+  ordersBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || '');
+      const bucket = String(p.bucket || 'awaiting');
+      const seesPII = ORDER_PII_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const acctSql = account ? ' AND o.account = ?A' : '';
+      const nowIso = new Date().toISOString();
+      const horizonIso = new Date(Date.now() - 14 * 86400000).toISOString();  // 'recent' = ship-by within 14 days
+
+      const OPEN = "o.status NOT IN ('FULFILLED','NOT_FOUND')";
+      const B = {
+        all:       "o.created_at >= datetime('now','-90 day')",
+        awaiting:  OPEN + " AND (o.ship_by = '' OR o.ship_by >= ?H)",
+        overdue:   OPEN + " AND o.ship_by != '' AND o.ship_by < ?N AND o.ship_by >= ?H",
+        due24:     OPEN + " AND o.ship_by != '' AND o.ship_by >= ?N AND o.ship_by < datetime(?N, '+1 day')",
+        due2d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+1 day') AND o.ship_by < datetime(?N, '+2 day')",
+        due3d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+2 day') AND o.ship_by < datetime(?N, '+3 day')",
+        dispatched:"o.status = 'FULFILLED' AND o.created_at >= datetime('now','-30 day')",
+        archived:  OPEN + " AND o.ship_by != '' AND o.ship_by < ?H",
+      };
+
+      const bindFor = (sql) => {
+        const bind = [];
+        let s = sql;
+        // positional rewrite: ?N → now, ?H → horizon, ?A → account, in first-appearance order
+        s = s.replace(/\?[NHA]/g, (m) => {
+          bind.push(m === '?N' ? nowIso : m === '?H' ? horizonIso : account);
+          return '?' + bind.length;
+        });
+        return { s, bind };
+      };
+
+      const counts = {};
+      for (const k of Object.keys(B)) {
+        const q = bindFor('SELECT COUNT(*) AS n FROM orders o WHERE ' + B[k] + acctSql.replace('?A', '?A'));
+        const row = await ctx.env.DB.prepare(q.s).bind(...q.bind).first();
+        counts[k] = (row && row.n) || 0;
+      }
+
+      const sel = B[bucket] ? bucket : 'awaiting';
+      const listQ = bindFor(
+        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE ' + B[sel] + acctSql +
+        " ORDER BY CASE WHEN o.ship_by != '' THEN o.ship_by ELSE o.created_at END " +
+        (sel === 'dispatched' || sel === 'all' ? 'DESC' : 'ASC') + ' LIMIT 150');
+      const rs = await ctx.env.DB.prepare(listQ.s).bind(...listQ.bind).all();
+      const rows = (rs.results || []).map(r => {
+        if (!seesPII) { const c = { ...r }; delete c.buyer; return c; }
+        return r;
+      });
+      return { bucket: sel, counts, rows, as_of: nowIso,
+        note: sel === 'archived' ? 'Orders eBay holds no dispatch record for — dispatched and delivered in the real world, but tracking never reached eBay. They are history, not workload.' : '' };
+    },
+  },
+
+  /* THE PER-ITEM P&L (Hasib's items 4 and 21): his Sales Analysis sheet's own anatomy, computed
+     from real data. Chain verified to the penny against his Saif Bhai GRAND TOTAL row:
+       eBay Order Earning  = revenue − real eBay fees   (fees INCLUDE the Standard/General ad fee,
+                                                          because eBay charges it inside the order)
+       True Order Earning  = OE − AliExpress cost − Priority(CPC) ads × 1.2 VAT
+                                                         (CPC is billed separately, so it is
+                                                          subtracted here; General is not — it is
+                                                          already inside the fees)
+       VAT to HMRC         = revenue×20% − feesVAT − aliVAT − cpcVAT   (each reclaim = amount ÷ 6
+                                                          for incl-VAT figures, ×0.2 for ex-VAT)
+       Raw Profit          = True OE − VAT to HMRC
+     Returns ride as a per-item refund column when the cases data carries an amount. */
+  itemPnl: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (ITEM_PROFIT_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || '');
+      const from = String(p.from || '').slice(0, 10) || ukDate(new Date(Date.now() - 6 * 86400000).toISOString());
+      const to = String(p.to || '').slice(0, 10) || ukDate('');
+      const acctSql = account ? ' AND o.account = ?4' : '';
+      const bind = [from, to];
+
+      const ord = await ctx.env.DB.prepare(
+        'SELECT o.item_id, o.account, SUM(o.sold) AS revenue, SUM(o.qty) AS qty, COUNT(*) AS orders_n, ' +
+        '       SUM(CASE WHEN o.ebay_fees > 0 THEN o.ebay_fees ELSE 0 END) AS fees, ' +
+        '       SUM(CASE WHEN o.ebay_fees > 0 THEN 1 ELSE 0 END) AS fees_n, ' +
+        '       SUM(o.cost) AS cost, SUM(CASE WHEN o.cost > 0 THEN 1 ELSE 0 END) AS cost_n ' +
+        "FROM orders o WHERE o.status != 'NOT_FOUND' AND date(o.created_at) >= ?1 AND date(o.created_at) <= ?2" +
+        (account ? ' AND o.account = ?3' : '') + ' GROUP BY o.item_id, o.account'
+      ).bind(...[from, to].concat(account ? [account] : [])).all();
+
+      const ads = await ctx.env.DB.prepare(
+        'SELECT a.item_id, SUM(a.spend) AS gen, SUM(a.sales) AS gen_qty, SUM(a.cpc_spend) AS pri, SUM(a.cpc_sales) AS pri_qty ' +
+        'FROM ads_daily a WHERE a.date >= ?1 AND a.date <= ?2' + (account ? ' AND a.account = ?3' : '') +
+        ' GROUP BY a.item_id'
+      ).bind(...[from, to].concat(account ? [account] : [])).all();
+      const adBy = {};
+      for (const a of (ads.results || [])) adBy[a.item_id] = a;
+
+      const ttl = await ctx.env.DB.prepare('SELECT item_id, title, status FROM items_api').all();
+      const titleBy = {};
+      for (const t of (ttl.results || [])) titleBy[t.item_id] = t;
+
+      const rows = [];
+      for (const o of (ord.results || [])) {
+        const a = adBy[o.item_id] || {};
+        const revenue = round2(o.revenue || 0);
+        const fees = round2(o.fees || 0);
+        const cost = round2(o.cost || 0);
+        const pri = round2(a.pri || 0), gen = round2(a.gen || 0);
+        const priIncl = round2(pri * 1.2), genIncl = round2(gen * 1.2);
+        const oe = round2(revenue - fees);
+        const trueOe = round2(oe - cost - priIncl);
+        const vatOut = round2(revenue * 0.2);
+        const vatBack = round2(fees / 6 + cost / 6 + pri * 0.2);
+        const vatHmrc = round2(vatOut - vatBack);
+        const raw = round2(trueOe - vatHmrc);
+        rows.push({
+          item_id: o.item_id, account: o.account,
+          title: (titleBy[o.item_id] || {}).title || '',
+          listing_status: (titleBy[o.item_id] || {}).status || '',
+          revenue, qty: o.qty || 0, orders_n: o.orders_n || 0,
+          vat_out: vatOut, fees, fees_vat: round2(fees / 6), fees_n: o.fees_n || 0,
+          oe,
+          ali_cost: cost, ali_vat: round2(cost / 6), cost_n: o.cost_n || 0,
+          pri_qty: a.pri_qty || 0, pri_fees: pri, pri_incl: priIncl,
+          gen_qty: a.gen_qty || 0, gen_incl: genIncl, gen_ex: gen,
+          true_oe: trueOe, vat_hmrc: vatHmrc, raw_profit: raw,
+          // completeness flags — a row missing real fees or costs says so instead of lying
+          fees_complete: (o.fees_n || 0) >= (o.orders_n || 0),
+          cost_complete: (o.cost_n || 0) >= (o.orders_n || 0),
+        });
+      }
+      rows.sort((x, y) => y.revenue - x.revenue);
+      const tot = {};
+      for (const k of ['revenue','qty','orders_n','vat_out','fees','fees_vat','oe','ali_cost','ali_vat','pri_qty','pri_fees','pri_incl','gen_qty','gen_incl','gen_ex','true_oe','vat_hmrc','raw_profit']) {
+        tot[k] = round2(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0));
+      }
+      return { from, to, account, rows: rows.slice(0, 400), total: tot,
+        note: 'True OE = OE − AliExpress − Priority ads incl VAT · Raw Profit = True OE − VAT to HMRC · General ad fees already sit inside the eBay fees' };
+    },
+  },
+
   /* DISPATCH, from eBay rather than from the day tabs (19 Aug). The sheet-scanning board had four
      separate reasons to be wrong at once: it invented ship-by as a flat five days, it only ever
      scanned the current calendar month (so OVERDUE reset itself to zero every 1st), it counted

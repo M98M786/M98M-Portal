@@ -328,7 +328,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking','orderAddAliLink'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -7771,6 +7771,19 @@ function paint() {
     '<div class="card enter d2"><div class="hd">Profit against ad spend ' +
       '<span class="hint">gold is what the business kept · blue is what the ads took · below N/T 1.00 profit outran the ads</span></div>' +
       '<div class="bd">' + chart(d) + '</div></div>' +
+    '<div class="card enter d3" style="margin-top:16px"><div class="hd">Item-by-item P&L ' +
+      '<span class="hint">the Sales Analysis sheet\u2019s own columns \u00b7 real fees, real costs, both ad families</span></div>' +
+      '<div class="bd">' +
+        '<div class="pnl-chips">' +
+          '<button class="minibtn" data-pnl-r="1">Today</button>' +
+          '<button class="minibtn" data-pnl-r="2">Yesterday</button>' +
+          '<button class="minibtn on" data-pnl-r="7">7 days</button>' +
+          '<button class="minibtn" data-pnl-r="30">30 days</button>' +
+          '<select class="alx-sel" id="pnlAcc"><option value="">All accounts</option></select>' +
+          '<span id="pnlWhen" style="margin-left:auto;font-size:11px;color:var(--text-3);font-weight:700"></span>' +
+        '</div>' +
+        '<div id="pnlBody"><div class="spinner"></div></div>' +
+      '</div></div>' +
     '<div class="card enter d3" style="margin-top:16px"><div class="hd">The ledger ' +
       '<span class="hint">' + esc(d.period.current_label) + ' · straight from your Sales Analysis sheets</span></div>' +
       '<div class="bd">' + ledger(d) + '</div></div>' +
@@ -7864,6 +7877,94 @@ VIEWS.dashboard = {
     load(false);
   }
 };
+
+  /* ---- the per-item P&L (Hasib item 4/21): his sheet's chain, verified to the penny ----
+     True OE = OE − AliExpress − Priority ads incl VAT · Raw = True OE − VAT to HMRC.
+     Rows missing real fees or costs carry a flag instead of quietly pretending. */
+  var PNL = { days: 7, account: '' };
+
+  function pnlGBP(v) { var n = Number(v) || 0; return (n < 0 ? '−£' + Math.abs(n).toFixed(2) : '£' + n.toFixed(2)); }
+
+  function pnlLoad() {
+    var box = $('pnlBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    var ukDay = function (off) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(Date.now() - off * 86400000)); };
+    var from, to;
+    if (PNL.days === 2) { from = to = ukDay(1); }
+    else if (PNL.days === 1) { from = to = ukDay(0); }
+    else { from = ukDay(PNL.days - 1); to = ukDay(0); }
+    var payload = { from: from, to: to };
+    if (PNL.account) { payload.account = PNL.account; }
+    api('itemPnl', payload).then(function (d) {
+      d = d || {};
+      var when = $('pnlWhen');
+      if (when) { when.textContent = d.from + ' \u2192 ' + d.to; }
+      var rows = d.rows || [];
+      if (!rows.length) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No orders in this range.</div>'; return; }
+      var head = '<tr><th>Item</th><th class="pnl-g-sale">Sold</th><th>Qty</th><th class="pnl-g-sale">HMRC VAT</th>' +
+        '<th class="pnl-g-fee">eBay fees (real)</th><th class="pnl-g-fee">Fee VAT</th><th class="pnl-g-fee">Order earning</th>' +
+        '<th class="pnl-g-ali">AliExpress</th><th class="pnl-g-ali">Ali VAT</th>' +
+        '<th>Qty via Priority</th><th class="pnl-g-pri">Priority fees</th><th class="pnl-g-pri">Priority incl VAT</th>' +
+        '<th>Qty via General</th><th class="pnl-g-gen">General incl VAT</th>' +
+        '<th class="pnl-g-out">True earning</th><th>VAT to HMRC</th><th class="pnl-g-out">Raw profit</th></tr>';
+      var body = rows.map(function (r) {
+        var flags = [];
+        if (!r.fees_complete) { flags.push('fees partial'); }
+        if (!r.cost_complete) { flags.push('cost partial'); }
+        return '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+            esc(String(r.title || r.item_id).slice(0, 90)) + '</a>' +
+            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) +
+            (flags.length ? ' \u00b7 <span class="pnl-flag">' + flags.join(' \u00b7 ') + '</span>' : '') + '</div></td>' +
+          '<td class="pnl-g-sale">' + pnlGBP(r.revenue) + '</td><td>' + (r.qty || 0) + '</td><td class="pnl-g-sale">' + pnlGBP(r.vat_out) + '</td>' +
+          '<td class="pnl-g-fee">' + pnlGBP(r.fees) + '</td><td class="pnl-g-fee">' + pnlGBP(r.fees_vat) + '</td><td class="pnl-g-fee">' + pnlGBP(r.oe) + '</td>' +
+          '<td class="pnl-g-ali">' + pnlGBP(r.ali_cost) + '</td><td class="pnl-g-ali">' + pnlGBP(r.ali_vat) + '</td>' +
+          '<td>' + (r.pri_qty || 0) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_fees) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_incl) + '</td>' +
+          '<td>' + (r.gen_qty || 0) + '</td><td class="pnl-g-gen">' + pnlGBP(r.gen_incl) + '</td>' +
+          '<td class="pnl-g-out">' + pnlGBP(r.true_oe) + '</td><td>' + pnlGBP(r.vat_hmrc) + '</td>' +
+          '<td class="pnl-g-out' + (Number(r.raw_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.raw_profit) + '</td></tr>';
+      }).join('');
+      var t = d.total || {};
+      var totalRow = '<tr class="pnl-total"><td>GRAND TOTAL \u00b7 ' + rows.length + ' item(s)</td>' +
+        '<td>' + pnlGBP(t.revenue) + '</td><td>' + (t.qty || 0) + '</td><td>' + pnlGBP(t.vat_out) + '</td>' +
+        '<td>' + pnlGBP(t.fees) + '</td><td>' + pnlGBP(t.fees_vat) + '</td><td>' + pnlGBP(t.oe) + '</td>' +
+        '<td>' + pnlGBP(t.ali_cost) + '</td><td>' + pnlGBP(t.ali_vat) + '</td>' +
+        '<td>' + (t.pri_qty || 0) + '</td><td>' + pnlGBP(t.pri_fees) + '</td><td>' + pnlGBP(t.pri_incl) + '</td>' +
+        '<td>' + (t.gen_qty || 0) + '</td><td>' + pnlGBP(t.gen_incl) + '</td>' +
+        '<td>' + pnlGBP(t.true_oe) + '</td><td>' + pnlGBP(t.vat_hmrc) + '</td>' +
+        '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td></tr>';
+      box.innerHTML = '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">True earning = order earning \u2212 AliExpress \u2212 Priority ads incl VAT \u00b7 Raw profit = true earning \u2212 VAT to HMRC \u00b7 General ad fees already sit inside the eBay fees.</p>';
+    }).catch(function (e) {
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not compute the P&L.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
+    });
+  }
+
+  (function wirePnl() {
+    var orig = VIEWS.dashboard.init;
+    VIEWS.dashboard.init = function () {
+      if (orig) { orig.apply(this, arguments); }
+      document.querySelectorAll('[data-pnl-r]').forEach(function (b) {
+        b.onclick = function () {
+          document.querySelectorAll('[data-pnl-r]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          PNL.days = Number(this.getAttribute('data-pnl-r')) || 7;
+          pnlLoad();
+        };
+      });
+      cachedCall('accountList', {}, function (d) {
+        var sel = $('pnlAcc');
+        if (!sel) { return; }
+        sel.innerHTML = '<option value="">All accounts</option>' + (((d && d.accounts) || []).map(function (a) {
+          var n = String(a.account || '').trim();
+          return n ? '<option>' + esc(n) + '</option>' : '';
+        }).join(''));
+        sel.onchange = function () { PNL.account = String(this.value || ''); pnlLoad(); };
+      });
+      pnlLoad();
+    };
+  })();
+
 })();
 
 /* ---------- view-hunting.js ---------- */
@@ -11376,6 +11477,134 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       '<div class="scroll"><table class="od-ds">' + body + '</table></div></div>';
   }
 
+})();
+
+/* ---------- view-ordersBoard.js ---------- */
+/* view-ordersBoard.js — Hasib's item 2 (19 Aug review): eBay's own order-status dropdown as a
+ * screen. Every bucket counted across ALL dates from the statusRefresh-converged Engine truth —
+ * not day tabs. 'Archived' holds the old orders eBay has no dispatch record for: dispatched and
+ * delivered in the real world, but never tracked on eBay — history, never LATE NOW. */
+(function () {
+
+  var OB_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead', 'CS'];
+  var OB = { bucket: 'awaiting', account: '' };
+
+  var OB_LABELS = [
+    ['all', 'All orders'],
+    ['awaiting', 'Awaiting dispatch'],
+    ['overdue', 'Overdue'],
+    ['due24', 'Send in next 24h'],
+    ['due2d', 'Due in 2 days'],
+    ['due3d', 'Due in 3 days'],
+    ['dispatched', 'Dispatched'],
+    ['archived', 'Archived · no eBay record'],
+  ];
+
+  VIEW_CSS.push(
+    '.ob-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}' +
+    '.ob-chip{border:1px solid var(--gold-line);background:var(--panel);color:var(--text);border-radius:99px;padding:7px 14px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}' +
+    '.ob-chip.on{background:var(--gold-soft,rgba(246,208,107,.15));border-color:var(--gold-line-hi);color:var(--gold-a)}' +
+    '.ob-chip b{font-variant-numeric:tabular-nums;margin-left:5px}' +
+    '.ob-chip.bad{border-color:var(--bad)}.ob-chip.bad b{color:var(--bad)}' +
+    '.ob-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:840px}' +
+    '.ob-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:9px 11px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.ob-tbl td{padding:8px 11px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
+    '.ob-tbl tbody tr:hover{background:var(--blue-soft)}' +
+    '.ob-late{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}' +
+    '.ob-due{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--warn-soft,rgba(246,208,107,.12));color:var(--warn,#d9a021)}' +
+    '.ob-ok{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--ok-soft,rgba(60,200,120,.12));color:var(--ok)}'
+  );
+
+  function obStr(v) { return String(v == null ? '' : v).trim(); }
+  function obGBP(v) { var n = Number(v); return isFinite(n) && n ? '£' + n.toFixed(2) : '—'; }
+
+  function obWhen(r) {
+    var sb = obStr(r.ship_by);
+    if (!sb) { return '<span style="color:var(--text-3)">no deadline yet</span>'; }
+    var ms = Date.parse(sb) - Date.now();
+    if (r.status === 'FULFILLED') { return '<span class="ob-ok">dispatched</span>'; }
+    if (ms < 0) {
+      var d = Math.floor(-ms / 86400000);
+      return '<span class="ob-late">' + (d >= 1 ? d + 'd late' : Math.max(1, Math.round(-ms / 3600000)) + 'h late') + '</span>';
+    }
+    var h = Math.round(ms / 3600000);
+    return '<span class="' + (h <= 24 ? 'ob-due' : 'ob-ok') + '">' + (h < 48 ? h + 'h left' : Math.round(h / 24) + 'd left') + '</span>';
+  }
+
+  function obLoad() {
+    var box = $('obBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    var payload = { bucket: OB.bucket };
+    if (OB.account) { payload.account = OB.account; }
+    api('ordersBoard', payload).then(function (d) {
+      d = d || {};
+      var chips = OB_LABELS.map(function (pair) {
+        var n = (d.counts || {})[pair[0]];
+        return '<button class="ob-chip' + (d.bucket === pair[0] ? ' on' : '') + (pair[0] === 'overdue' && n ? ' bad' : '') +
+          '" data-ob="' + pair[0] + '">' + esc(pair[1]) + '<b>' + (n == null ? '—' : n) + '</b></button>';
+      }).join('');
+      var hasBuyer = (d.rows || []).some(function (r) { return r.buyer !== undefined; });
+      var h = '<div class="ob-chips">' + chips + '</div>';
+      if (d.note) { h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">' + esc(d.note) + '</p>'; }
+      if (!(d.rows || []).length) {
+        h += '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Nothing in this bucket' + (OB.account ? ' for ' + esc(OB.account) : '') + '.</div>';
+      } else {
+        h += '<div class="scroll"><table class="ob-tbl"><thead><tr>' +
+          '<th>Order</th><th>Account</th><th>Item</th>' + (hasBuyer ? '<th>Buyer</th>' : '') +
+          '<th>Value</th><th>Ordered</th><th>Ship by</th><th>State</th></tr></thead><tbody>';
+        (d.rows || []).forEach(function (r) {
+          h += '<tr><td class="mono">' + esc(obStr(r.order_id)) + '</td>' +
+            '<td>' + esc(obStr(r.account)) + '</td>' +
+            '<td><a href="https://www.ebay.co.uk/itm/' + esc(obStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(obStr(r.title) || obStr(r.item_id)) + '</div></a></td>' +
+            (hasBuyer ? '<td>' + esc(obStr(r.buyer)) + '</td>' : '') +
+            '<td class="mono">' + obGBP(r.sold) + '</td>' +
+            '<td>' + esc(obStr(r.created_at).slice(0, 10)) + '</td>' +
+            '<td>' + esc(obStr(r.ship_by).slice(0, 10) || '—') + '</td>' +
+            '<td>' + obWhen(r) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+      box.innerHTML = h;
+      box.querySelectorAll('[data-ob]').forEach(function (b) {
+        b.onclick = function () { OB.bucket = this.getAttribute('data-ob'); obLoad(); };
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
+    });
+  }
+
+  VIEWS.ordersBoard = {
+    label: 'All orders',
+    order: 3.5,
+    roles: OB_ROLES,
+    icon: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
+    prefetch: function () { return api('ordersBoard', { bucket: 'awaiting' }); },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>All <span class="goldtext">orders</span></h1>' +
+          '<span class="sub">every date, straight from eBay’s own statuses · refreshed every 15 minutes</span></div>' +
+        '<div class="card enter d2"><div class="bd">' +
+          '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">' +
+            '<select class="alx-sel" id="obAcc"><option value="">All accounts</option></select>' +
+            '<button class="minibtn" id="obRefresh">Refresh</button></div>' +
+          '<div id="obBody"><div class="spinner"></div></div>' +
+        '</div></div>';
+    },
+    init: function () {
+      cachedCall('accountList', {}, function (d) {
+        var sel = $('obAcc');
+        if (!sel) { return; }
+        sel.innerHTML = '<option value="">All accounts</option>' + (((d && d.accounts) || []).map(function (a) {
+          var n = String(a.account || '').trim();
+          return n ? '<option>' + esc(n) + '</option>' : '';
+        }).join(''));
+        sel.onchange = function () { OB.account = String(this.value || ''); obLoad(); };
+      });
+      var rf = $('obRefresh');
+      if (rf) { rf.onclick = obLoad; }
+      obLoad();
+    }
+  };
 })();
 
 /* ---------- view-overview.js ---------- */
