@@ -3461,21 +3461,32 @@ const ROUTES = {
         try { profiles = JSON.parse(r.json || '[]'); } catch (e) { profiles = []; }
         return { account: r.account, synced_at: r.synced_at, profiles };
       });
-      /* Item 13: the two service-metric rates vs eBay's peer benchmark, per account. The raw
-         evaluation JSON is parsed here so the screen only ever sees clean numbers. */
+      /* Item 13: the two service-metric rates vs eBay's peer benchmark, per account. Parsed
+         against the REAL response shape (verified live 19 Aug): each dimensionMetric is one
+         evaluation row — INAD comes per LISTING CATEGORY, INR per shipping region — and inside
+         it RATE / COUNT / TRANSACTION_COUNT are sibling metrics; the peer average rides at
+         benchmark.metadata.average and the verdict at benchmark.rating (LOW is good here). */
       const metRs = await ctx.env.DB.prepare('SELECT account, metric_type, json, synced_at FROM cs_metrics ORDER BY account, metric_type').all();
       const metrics = (metRs.results || []).map((r) => {
-        let you = null, peer = null, rating = '', count = null;
+        const dims = [];
         try {
           const j = JSON.parse(r.json || '{}');
-          const dm = ((j.dimensionMetrics || [])[0] || {});
-          const m = ((dm.metrics || [])[0] || {});
-          you = m.value != null ? Number(m.value) : null;
-          peer = m.benchmark && m.benchmark.value != null ? Number(m.benchmark.value) : null;
-          rating = String((m.benchmark || {}).basis || m.rating || '');
-          count = m.transactionCount != null ? Number(m.transactionCount) : null;
-        } catch (e) { /* an unparsable evaluation stays as nulls, never a crash */ }
-        return { account: r.account, metric_type: r.metric_type, you, peer, rating, count, synced_at: r.synced_at };
+          for (const dm of (j.dimensionMetrics || [])) {
+            const ms = dm.metrics || [];
+            const find = (k) => ms.filter((m) => String(m.metricKey) === k)[0] || {};
+            const rate = find('RATE'), tx = find('TRANSACTION_COUNT'), cnt = find('COUNT');
+            const bench = rate.benchmark || {};
+            dims.push({
+              dim: String((dm.dimension || {}).name || (dm.dimension || {}).value || ''),
+              you: rate.value != null ? Number(rate.value) : null,
+              peer: bench.metadata && bench.metadata.average != null ? Number(bench.metadata.average) : null,
+              rating: String(bench.rating || ''),
+              count: cnt.value != null ? Number(cnt.value) : null,
+              transactions: tx.value != null ? Number(tx.value) : null,
+            });
+          }
+        } catch (e) { /* an unparsable evaluation stays empty, never a crash */ }
+        return { account: r.account, metric_type: r.metric_type, dims, synced_at: r.synced_at };
       });
       return { now, trend: trend.results || [], sync: sync.results || [], standards, metrics };
     },
