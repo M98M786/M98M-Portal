@@ -328,11 +328,11 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive','orderAddAliLink'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
-var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink'];
+var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking'];
 function engineApi(action, payload){
   var url = STATE.config && STATE.config.engine_url;
   var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
@@ -10015,6 +10015,16 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
               '<button class="btn-gold" id="odLoad">Open the day</button>' +
               '<button class="minibtn" id="odToday">Today</button>' +
             '</div>' +
+            /* Finding one order used to mean knowing which day tab it landed on. This asks the
+               Engine, which holds every order across every account, and answers with the day —
+               then opens it and jumps to the row. */
+            '<div class="od-bar" style="margin-top:8px">' +
+              '<div class="field" style="margin-top:0;flex:1"><label>Find an order</label>' +
+                '<input class="od-in" id="odFind" type="search" autocomplete="off" ' +
+                  'placeholder="Paste an eBay order number, buyer or item number…"></div>' +
+              '<button class="minibtn" id="odFindGo">Find</button>' +
+            '</div>' +
+            '<div id="odFindOut"></div>' +
             '<div class="od-tabs">' +
               '<button class="od-tab on" id="odTabDay">Daily orders</button>' +
               '<button class="od-tab" id="odTabRep">' + esc(OD_REPLACEMENT_TAB) + '</button>' +
@@ -10046,6 +10056,48 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         $('odDate').addEventListener('change', function () { OD_DATE = odStr(this.value); OD_REPLACEMENT = false; odMarkTabs(); odLoad(); });
         enhanceDate($('odDate'), { kind: 'day' });
       }
+      var findGo = function () {
+        var q = odStr($('odFind') && $('odFind').value);
+        var out = $('odFindOut');
+        if (!out) { return; }
+        if (q.length < 3) { out.innerHTML = '<div class="od-note od-warn">Type at least three characters.</div>'; return; }
+        out.innerHTML = '<div class="spinner"></div>';
+        api('orderFind', { q: q }).then(function (d) {
+          var rows = (d && d.rows) || [];
+          if (!rows.length) {
+            out.innerHTML = '<div class="od-note">Nothing matches “' + esc(q) + '” in any account you can see.</div>';
+            return;
+          }
+          out.innerHTML = '<div class="scroll"><table class="od-tbl"><thead><tr>' +
+              '<th>Order</th><th>Account</th><th>Day</th><th>Item</th><th>Value</th><th>eBay status</th><th></th>' +
+            '</tr></thead><tbody>' +
+            rows.map(function (r) {
+              return '<tr><td class="mono">' + esc(odStr(r.order_id)) + '</td>' +
+                '<td>' + esc(odStr(r.account)) + '</td>' +
+                '<td>' + esc(odStr(r.day)) + '</td>' +
+                '<td><div style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+                  esc(odStr(r.title || r.item_id)) + '</div></td>' +
+                '<td class="num">' + (Number(r.sold) ? '£' + Number(r.sold).toFixed(2) : '—') + '</td>' +
+                '<td>' + esc(odStr(r.status)) + '</td>' +
+                '<td><button class="minibtn" data-od-open-day="' + odAttr(odStr(r.day)) +
+                  '" data-od-open-acc="' + odAttr(odStr(r.account)) + '">Open that day</button></td></tr>';
+            }).join('') + '</tbody></table></div>';
+          out.querySelectorAll('[data-od-open-day]').forEach(function (b) {
+            b.onclick = function () {
+              var day = this.getAttribute('data-od-open-day');
+              var acc = this.getAttribute('data-od-open-acc');
+              if (acc) { OD_ACCOUNT = acc; var sa = $('odAccount'); if (sa) { sa.value = acc; } }
+              if (day) { OD_DATE = day; var sd = $('odDate'); if (sd) { sd.value = day; } }
+              OD_REPLACEMENT = false; odMarkTabs(); odLoad();
+            };
+          });
+        }).catch(function (e) {
+          out.innerHTML = '<div class="od-note od-warn">Could not search just now — ' + esc(e && e.message ? e.message : 'no answer') + '</div>';
+        });
+      };
+      if ($('odFindGo')) { $('odFindGo').onclick = findGo; }
+      if ($('odFind')) { $('odFind').onkeydown = function (e) { if (e.key === 'Enter') { findGo(); } }; }
+
       $('odTabDay').onclick = function () { if (!OD_REPLACEMENT) { return; } OD_REPLACEMENT = false; odMarkTabs(); odLoad(); };
       $('odTabRep').onclick = function () { if (OD_REPLACEMENT) { return; } OD_REPLACEMENT = true; odMarkTabs(); odLoad(); };
       $('odDate').onchange = function () { OD_DATE = odStr(this.value); };
@@ -10100,6 +10152,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       }
       box.innerHTML = orders.map(odCard).join('');
       odWire(box);
+      /* eBay's accepted-carrier list for this account, fetched once and shared by every card. */
+      (function () {
+        var acct = odStr(OD_ACCOUNT);
+        if (!acct) { return; }
+        box.querySelectorAll('[data-courier]').forEach(function (el) {
+          odFillCouriers(box, el.getAttribute('data-courier'), acct);
+        });
+      })();
       /* req 16 capture — delegated, wired once (odLoad repaints must not stack listeners) */
       if (!box.dataset.aliWired) { box.dataset.aliWired = '1';
       box.addEventListener('click', function (ev) {
@@ -10333,10 +10393,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<button class="btn-gold" data-act="purchase" data-row="' + odAttr(row) + '"' + dis + '>Record purchase</button>' +
           '<span class="od-note" data-msg="p' + odAttr(row) + '"></span>' +
         '</div>' : '') +
-      (track ? '<div class="' + (purchase ? 'od-sep' : '') + '"><span class="k">Tracking</span><div class="od-grid">' + track + '</div>' +
+      (track ? '<div class="' + (purchase ? 'od-sep' : '') + '"><span class="k">Tracking</span><div class="od-grid">' + track +
+        /* The courier eBay will be told. The list is eBay's OWN accepted-carrier list for this
+           account, so whatever is chosen here is a name eBay will accept; leaving it on "work it
+           out" lets the tracking number's own format nominate one. */
+        odField('Courier', 'eBay\u2019s own list', '<select class="od-sel" data-courier="' + odAttr(row) + '"' + dis + '>' +
+          '<option value="">Work it out from the number</option></select>') +
+        '</div>' +
         '<div class="od-btns">' +
           '<button class="btn-gold" data-act="tracking" data-row="' + odAttr(row) + '"' + dis + '>Record tracking</button>' +
-          '<button class="btn-ghost" data-act="uploaded" data-row="' + odAttr(row) + '"' + dis + '>Uploaded to eBay</button>' +
+          '<button class="btn-gold" data-act="pushebay" data-row="' + odAttr(row) + '"' + dis + '>Upload to eBay</button>' +
+          '<button class="btn-ghost" data-act="uploaded" data-row="' + odAttr(row) + '"' + dis + '>Mark uploaded</button>' +
           '<span class="od-note" data-msg="t' + odAttr(row) + '"></span>' +
         '</div></div>' : '') +
       (carrier ? '<div class="od-sep"><span class="k">Carrier note</span>' +
@@ -10436,6 +10503,63 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (act === 'purchase') { odSavePurchase(box, row, btn); return; }
     if (act === 'tracking') { odSaveTracking(box, row, btn, false); return; }
     if (act === 'uploaded') { odSaveTracking(box, row, btn, true); return; }
+    if (act === 'pushebay') { odPushToEbay(box, row, btn); return; }
+  }
+
+  /* The courier list is eBay's own, per account, fetched once and reused. Filling it lazily keeps
+     the order cards fast; until it lands the picker still works on "work it out from the number". */
+  var OD_COURIERS = {};
+  function odFillCouriers(box, row, account) {
+    var sel = odPick(box, 'data-courier', row);
+    if (!sel || sel.dataset.filled === '1') { return; }
+    var apply = function (list) {
+      if (!list || !list.length) { return; }
+      sel.dataset.filled = '1';
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">Work it out from the number</option>' +
+        list.map(function (c) { return '<option' + (c === keep ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+    };
+    if (OD_COURIERS[account]) { apply(OD_COURIERS[account]); return; }
+    api('courierList', { account: account }).then(function (d) {
+      OD_COURIERS[account] = (d && d.carriers) || [];
+      apply(OD_COURIERS[account]);
+    }).catch(function () { /* picker stays on auto-detect — not worth an error here */ });
+  }
+
+  /* Hand the tracking number to eBay for real. This is a deliberate press on one order with a
+     courier the operator picked, which is why it sends even though the automatic bulk push is
+     still in shadow mode. eBay tells the buyer, so the confirm names the order and the courier. */
+  function odPushToEbay(box, row, btn) {
+    var o = odFind(row);
+    if (!o) { return; }
+    var tracking = odCurrent(box, row, 'tracking', o, OD_H.tracking);
+    var number = odStr(tracking.value) || odStr(o[OD_H.tracking]);
+    // col B, eBay's own order number — NOT the AliExpress 'Order Number' at col M
+    var orderId = odStr(o[OD_H.orderNo]);
+    var sel = odPick(box, 'data-courier', row);
+    var courier = sel ? odStr(sel.value) : '';
+    var account = odStr(OD_ACCOUNT || (o && o.account) || '');
+
+    if (!number || number.length < 6) { odMsg(box, 't' + row, 'Paste the tracking number first.', 'od-warn'); return; }
+    if (!orderId) { odMsg(box, 't' + row, 'This row has no eBay order number to upload against.', 'od-warn'); return; }
+    if (!confirm('Upload tracking ' + number + ' to eBay for order ' + orderId + '?\n\nCourier: ' +
+        (courier || 'worked out from the number') + '\n\neBay will mark the order dispatched and email the buyer.')) { return; }
+
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    odMsg(box, 't' + row, '', '');
+    api('orderPushTracking', { account: account, order_id: orderId, tracking: number, courier: courier })
+      .then(function (d) {
+        btn.disabled = false; btn.textContent = label;
+        var used = (d && d.carrier_auto) || courier || 'auto';
+        odMsg(box, 't' + row, 'eBay accepted it — sent as ' + used + '.', 'od-ok');
+        toast('Tracking ' + number + ' is on eBay (' + used + ').');
+        odSaveTracking(box, row, btn, true);     // keep the sheet's own record in step
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = label;
+        odMsg(box, 't' + row, 'eBay refused it: ' + (e && e.message ? e.message : 'no answer'), 'od-warn');
+      });
   }
 
   function odCopy(box, row, btn) {

@@ -1583,6 +1583,61 @@ async function backup(env) {
 }
 
 /* ---------------- actions ---------------- */
+async function pushTracking(p, ctx) {
+const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
+if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
+const tok0 = await ebayAccessToken(ctx.env, account);
+const accepted = await acceptedCarriers(ctx.env, account, tok0);
+const nominate = () => {
+  if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
+  if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
+  if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
+  if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
+  if (/^1Z/i.test(tracking)) return 'UPS';
+  return '';
+};
+const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
+const pickFromList = want => {
+  const w = alias[norm(want)] || norm(want);
+  if (!w) return '';
+  const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
+  return hit || '';
+};
+let carrier = pickFromList(p.courier) || pickFromList(nominate());
+if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
+const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
+const tok = tok0;
+const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
+  headers: { authorization: 'Bearer ' + tok } });
+if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
+const order = await or_.json();
+fulfillment.lineItems = (order.lineItems || []).map(li => ({ lineItemId: li.lineItemId, quantity: li.quantity }));
+if (String(ctx.env.TRACKING_LIVE) !== 'true' && !p.force_live) {
+  await ctx.env.DB.prepare(
+    "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), 'SHADOW') " +
+    "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status='SHADOW'"
+  ).bind(orderId, tracking, carrier).run();
+  return { shadow: true, would_send: fulfillment, carrier_auto: carrier,
+    note: 'SHADOW — recorded, not sent to eBay. Set TRACKING_LIVE=true to arm.' };
+}
+const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment', {
+  method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+  body: JSON.stringify(fulfillment) });
+const ptxt = await pr.text();
+await ctx.env.DB.prepare(
+  "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
+  "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
+).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
+if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
+return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status,
+  carriers: accepted.slice(0, 200) };
+}
+
+/* Who may hand a tracking number to eBay. The processors who type them, and the people who
+   answer for the accounts. */
+const TRACKING_PUSH_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
+
 const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
   enginePing: { auth: 'public', fn: async () => ({ pong: Date.now() }) },
@@ -1631,6 +1686,33 @@ const ROUTES = {
 
   /* Sheet facts (suppliers, OE, campaign decision) pushed from Apps Script — the sheets stay
      the human truth, the Engine is their fast mirror (dual-run, G-1). */
+  /* Find one order anywhere in the fleet (req 19 Aug: "there is not option of searching order by
+     order id"). Until now a lookup meant knowing which account and which day tab an order landed
+     on. This searches every order the Engine holds — by order number, buyer username or item
+     number — and answers with the UK day, so the Orders screen can open that exact tab. */
+  orderFind: {
+    auth: 'any', fn: async (p, ctx) => {
+      const q = String(p.q || '').trim();
+      if (q.length < 3) throw new Error('SAY: type at least three characters');
+      const like = '%' + q.toLowerCase() + '%';
+      const rs = await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.item_id, o.sold, o.status, o.tracking, o.created_at, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+        'WHERE o.order_id LIKE ?1 OR lower(o.buyer) LIKE ?1 OR o.item_id LIKE ?1 OR o.tracking LIKE ?1 ' +
+        'ORDER BY o.created_at DESC LIMIT 25'
+      ).bind(like).all();
+      /* The day tab an order lives on is the PKT day it arrived — the processors' shift clock,
+         the same rule ordersToday_ uses on the sheet side. */
+      const rows = (rs.results || []).map(r => {
+        const t = new Date(String(r.created_at)).getTime();
+        const day = isNaN(t) ? '' : new Date(t + 5 * 3600000).toISOString().slice(0, 10);
+        return { order_id: r.order_id, account: r.account, item_id: r.item_id, title: r.title || '',
+          sold: r.sold, status: r.status, has_tracking: !!String(r.tracking || ''), day };
+      });
+      return { rows };
+    },
+  },
+
   /* DISPATCH, from eBay rather than from the day tabs (19 Aug). The sheet-scanning board had four
      separate reasons to be wrong at once: it invented ship-by as a flat five days, it only ever
      scanned the current calendar month (so OVERDUE reset itself to zero every 1st), it counted
@@ -1777,56 +1859,21 @@ const ROUTES = {
      accounts.couriers_json — Hasib's A4 ruling: no manual mapping, ever). The tracking number's
      format nominates a candidate; the list decides the exact enum eBay accepts. */
   ebayPushTracking: {
-    auth: 'sync', fn: async (p, ctx) => {
-      const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
-      if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
-      const tok0 = await ebayAccessToken(ctx.env, account);
-      const accepted = await acceptedCarriers(ctx.env, account, tok0);
-      const nominate = () => {
-        if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
-        if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
-        if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
-        if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
-        if (/^1Z/i.test(tracking)) return 'UPS';
-        return '';
-      };
-      const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
-      const pickFromList = want => {
-        const w = alias[norm(want)] || norm(want);
-        if (!w) return '';
-        const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
-        return hit || '';
-      };
-      let carrier = pickFromList(p.courier) || pickFromList(nominate());
-      if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
-      const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
-      const tok = tok0;
-      const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
-        headers: { authorization: 'Bearer ' + tok } });
-      if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
-      const order = await or_.json();
-      fulfillment.lineItems = (order.lineItems || []).map(li => ({ lineItemId: li.lineItemId, quantity: li.quantity }));
-      if (String(ctx.env.TRACKING_LIVE) !== 'true') {
-        await ctx.env.DB.prepare(
-          "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), 'SHADOW') " +
-          "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status='SHADOW'"
-        ).bind(orderId, tracking, carrier).run();
-        return { shadow: true, would_send: fulfillment, carrier_auto: carrier,
-          note: 'SHADOW — recorded, not sent to eBay. Set TRACKING_LIVE=true to arm.' };
-      }
-      const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment', {
-        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
-        body: JSON.stringify(fulfillment) });
-      const ptxt = await pr.text();
-      await ctx.env.DB.prepare(
-        "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
-        "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
-      ).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
-      if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
-      return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status };
+    auth: 'sync', fn: async (p, ctx) => pushTracking(p, ctx),
+  },
+
+  /* The same push, but reachable by a PERSON (req: "give an option there to paste tracking and
+     than a button there to upload it on ebay by choosing courier"). The automatic bulk path stays
+     behind TRACKING_LIVE; this one is a deliberate per-order press with a courier the operator
+     chose, so it sends for real. Every send is written to `trackings` with eBay's own answer. */
+  orderPushTracking: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (TRACKING_PUSH_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      return pushTracking({ ...p, force_live: true, by: ctx.email }, ctx);
     },
   },
+
+
 
   /* Active Listings dashboard read (§5 second-module 2/3): API truth + sheet facts
      joined at the edge, stripped per §6 before it leaves. Sir Hasib rows arrive via
