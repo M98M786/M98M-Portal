@@ -849,8 +849,14 @@ async function financeSync(env) {
       if (!oid) continue;
       const fee = Number((t.totalFeeAmount || {}).value || 0);
       if (!fee) continue;
-      // bookingEntry says which way the money went: a refunded fee is a CREDIT and subtracts
-      const sign = /CREDIT/i.test(String(t.bookingEntry || '')) ? -1 : 1;
+      /* bookingEntry describes the ORDER MONEY, not the fee: a SALE books CREDIT (money to us,
+         fee charged alongside) and a REFUND books DEBIT (money out, part of the fee handed
+         back). Keying the sign on bookingEntry read both backwards and wrote 618 orders with
+         NEGATIVE fees before the live data made it obvious. The transaction type is the truth:
+         a SALE's fee is charged, a REFUND's fee is returned; other types carry no order fee. */
+      const tt = String(t.transactionType || '');
+      const sign = tt === 'SALE' ? 1 : tt === 'REFUND' ? -1 : 0;
+      if (!sign) continue;
       feesByOrder[oid] = round2((feesByOrder[oid] || 0) + sign * fee);
     }
     if (!Object.keys(feesByOrder).length) return;
