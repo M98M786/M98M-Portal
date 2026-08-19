@@ -157,6 +157,15 @@ function stripItem(row, user) {
    event and bell. The read-then-write pair is not atomic, but the window is milliseconds against
    a 5-minute cadence, and a stale lease self-expires after 4 minutes. D1, not KV: the free plan
    allows only 1k KV writes a day and a lease per run would eat them. */
+/* sync_state as a visible notebook: a job can leave a fact where a human can read it without a
+   redeploy or a log dive. */
+async function ctx_setSync(env, job, account, text) {
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, ?3, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?3, last_ok = datetime('now')"
+  ).bind(String(job), String(account), String(text).slice(0, 1400)).run();
+}
+
 async function runJob(env, fn) {
   const name = fn.name;
   const lock = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = ?1 AND account = '@lock'").bind(name).first();
@@ -511,7 +520,14 @@ async function adsSync(env) {
     const live = {};
     for (const c of (page.campaigns || [])) {
       const budget = String((c.budget && c.budget.daily && c.budget.daily.amount && c.budget.daily.amount.value) || '');
-      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget };
+      /* COST_PER_SALE (Promoted Listings Standard) or COST_PER_CLICK (Advanced). Nothing recorded
+         this before, which is why nobody could answer why the ad-spend report refused the CPC
+         metrics: eBay's own words were "the metric key is not supported for the funding model".
+         Under COST_PER_SALE a click that never sells genuinely costs nothing, so an account can
+         truthfully show clicks against £0.00 — that is a fact about the campaign, not a bug, and
+         the portal should be able to say so. */
+      const funding = String((c.fundingStrategy && c.fundingStrategy.fundingModel) || '');
+      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget, funding };
     }
     const prevRs = await env.DB.prepare('SELECT campaign_id, name, status, budget FROM campaigns WHERE account = ?1').bind(acct).all();
     const prev = {};
@@ -574,9 +590,9 @@ async function adsSync(env) {
     for (const id of Object.keys(live)) {
       const l = live[id];
       await env.DB.prepare(
-        "INSERT INTO campaigns (account, campaign_id, name, status, budget, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
-        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, synced_at=datetime('now')"
-      ).bind(acct, id, l.name, l.status, l.budget).run();
+        "INSERT INTO campaigns (account, campaign_id, name, status, budget, funding_model, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, synced_at=datetime('now')"
+      ).bind(acct, id, l.name, l.status, l.budget, l.funding || '').run();
     }
     for (const id of Object.keys(prev)) {
       if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
@@ -1155,7 +1171,36 @@ async function violationsSync(env) {
 /* Probed live (14 Aug, Amna token): LISTING_PERFORMANCE_REPORT requires BOTH listing_id and
    campaign_id dimensions (error 35119 otherwise); 'sales' is attributed sale COUNT (our units),
    'sale_amount' the money, 'ad_fees' the spend. */
-const ADS_METRIC_WANTED = ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'];
+/* 19 Aug — the spend on this account fleet was reading ~£11 a day against £1.7k of revenue, and
+   Hafiza showed 29 clicks against £0.00. The cause: 'ad_fees' is the PROMOTED LISTINGS STANDARD
+   fee, charged as a share of an attributed SALE. Every campaign here is CPC (Advanced), where the
+   charge is per CLICK and lands under a different metric — which the comment above claimed was
+   handled but which was never actually in this list. So spend appeared only where an item sold,
+   and a click that cost money but made no sale cost nothing at all in the portal.
+   Every key is filtered against eBay's own metadata before it is asked for, so listing keys that
+   an account does not offer costs nothing; the ones it does offer are summed into spend. */
+/* Read off eBay's own metadata for these accounts (recorded in sync_state 'adsMetrics'), so these
+   are the real keys and not a guess. The CPC charge is 'cpc_ad_fees_listingsite_currency' —
+   nothing shorter exists, which is why an earlier guess at 'cpc_ad_fees' silently matched nothing.
+   listingsite currency is GBP on EBAY_GB; the payout-currency twins are THE SAME MONEY again and
+   are deliberately not requested, because summing both would double every figure. */
+/* eBay refuses (error 35122) to put Promoted Listings STANDARD metrics and Promoted Listings
+   ADVANCED (CPC) metrics in one report — they are two different products billed two different
+   ways, and asking for both at once fails the whole request. So each account gets TWO report
+   tasks a day, one per family, and the two land in separate columns of ads_daily. Total spend is
+   the sum: a seller running both pays both. Keys are eBay's own, read from its report metadata —
+   the CPC charge is 'cpc_ad_fees_listingsite_currency', and its payout-currency twin is the same
+   money again and is deliberately never requested. */
+/* Dimensions differ per funding model, in eBay's own words: "Minimum required dimensionKeys are:
+   listing_id,ad_group_id,campaign_id" for the CPC request. Advanced campaigns are organised into
+   ad groups; Standard ones have none, and asking for that dimension there fails instead. */
+const ADS_FAMILIES = {
+  std: { model: 'COST_PER_SALE', dims: ['listing_id', 'campaign_id'],
+    keys: ['ad_fees', 'clicks', 'impressions', 'sales', 'sale_amount'] },
+  cpc: { model: 'COST_PER_CLICK', dims: ['listing_id', 'ad_group_id', 'campaign_id'],
+    keys: ['cpc_ad_fees_listingsite_currency', 'cpc_clicks', 'cpc_impressions',
+      'cpc_attributed_sales', 'cpc_sale_amount_listingsite_currency'] },
+};
 
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
@@ -1168,33 +1213,61 @@ async function adsReportKick(env) {
     if (!md.ok) throw new Error(acct + ' report metadata ' + md.status + ': ' + (await md.text()).slice(0, 140));
     const meta = await md.json();
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
-    const metricKeys = ADS_METRIC_WANTED.filter(m => mets.indexOf(m) >= 0);
-    if (!metricKeys.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
+    /* eBay's dimension rules differ per funding model, and its refusals name the report type but
+       truncate before the required set. Record what it actually offers so the next question is
+       answered by evidence rather than another guess-and-deploy cycle. */
+    const dims = (meta.dimensionMetadata || []).map(d => String(d.dimensionKey || '') +
+      (d.fundingModels ? '(' + [].concat(d.fundingModels).join('/') + ')' : '') +
+      (d.required ? '*' : ''));
+    await ctx_setSync(env, 'adsDims', acct, dims.join(' '));
+    const families = Object.keys(ADS_FAMILIES)
+      .map(f => ({ family: f, model: ADS_FAMILIES[f].model, dims: ADS_FAMILIES[f].dims, keys: ADS_FAMILIES[f].keys.filter(m => mets.indexOf(m) >= 0) }))
+      .filter(x => x.keys.length);
+    if (!families.length) throw new Error(acct + ' report metadata offers no known metrics: ' + mets.join(',').slice(0, 120));
+    /* Which metrics this account's report actually offers, kept where it can be read without a
+       redeploy. Spend was wrong for weeks precisely because nobody could see this list. */
+    await ctx_setSync(env, 'adsMetrics', acct, families.map(f => f.family + '[' + f.keys.join(' ') + ']').join(' ') + ' offered[' + mets.join(' ') + ']');
 
     const y = new Date(Date.now() - 86400000);
     const day = ukDate(y.toISOString());
     const from = day + 'T00:00:00.000Z';
     const to = day + 'T23:59:59.000Z';
-    const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
-      method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
-      body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
-        dateFrom: from, dateTo: to,
-        dimensions: [{ dimensionKey: 'listing_id' }, { dimensionKey: 'campaign_id' }], metricKeys }),
-    });
-    if (cr.status !== 202 && !cr.ok) throw new Error(acct + ' report create ' + cr.status + ': ' + (await cr.text()).slice(0, 160));
-    const loc = cr.headers.get('location') || '';
-    const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now());
-    await env.DB.prepare(
-      "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at) VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now')) " +
-      'ON CONFLICT(account, task_id) DO NOTHING'
-    ).bind(acct, taskId, day).run();
+    /* One family failing must not cost us the other — a CPC-only seller and a Standard-only
+       seller both have one family that legitimately returns nothing. */
+    const problems = [];
+    for (const fam of families) {
+      const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        /* fundingModels is the missing half of the request. eBay's answer to asking for CPC
+           metrics without it is "the metric key is not supported for the funding model" — it
+           defaults the report to cost-per-sale campaigns, for which a per-click charge does not
+           exist. 60 of the 68 running campaigns on this fleet are COST_PER_CLICK, so leaving
+           this out meant the spend screen was reporting the other 8 and calling it the total. */
+        body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+          dateFrom: from, dateTo: to, fundingModels: [fam.model],
+          dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
+      });
+      if (cr.status !== 202 && !cr.ok) {
+        problems.push(fam.family + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 320));
+        continue;
+      }
+      const loc = cr.headers.get('location') || '';
+      const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now() + fam.family);
+      await env.DB.prepare(
+        "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
+        "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) " +
+        'ON CONFLICT(account, task_id) DO NOTHING'
+      ).bind(acct, taskId, day, fam.family).run();
+    }
+    if (problems.length === families.length) throw new Error(acct + ' report create failed — ' + problems.join(' | '));
+    if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | '));
   });
 }
 
 async function adsReportPoll(env) {
   await perAccount(env, 'adsReportPoll', async (acct) => {
     const pend = await env.DB.prepare(
-      "SELECT task_id, report_date FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 3"
+      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 6"
     ).bind(acct).all();
     const tasks = pend.results || [];
     if (!tasks.length) return;
@@ -1237,7 +1310,7 @@ async function adsReportPoll(env) {
         text = new TextDecoder().decode(buf);
       }
 
-      const ingested = await ingestAdsReport(env, acct, t.report_date, text);
+      const ingested = await ingestAdsReport(env, acct, t.report_date, text, String(t.family || 'std'));
       await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = ?3 WHERE account = ?1 AND task_id = ?2")
         .bind(acct, t.task_id, ingested + ' rows').run();
     }
@@ -1247,17 +1320,23 @@ async function adsReportPoll(env) {
 /* The report is TSV with a header row (eBay sometimes prefixes metadata lines — the header is
    the first line that mentions a listing column). Column names come from the metric metadata,
    so matching is by meaning, not position. */
-async function ingestAdsReport(env, acct, day, text) {
+async function ingestAdsReport(env, acct, day, text, family) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
   if (hi < 0) return 0;
   const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
   const col = re => heads.findIndex(h => re.test(h));
   const cListing = col(/listing/);
-  const cSpend = col(/ad_fee/);
-  const cClicks = col(/^clicks$/);
-  const cUnits = col(/^sales$/);          // eBay's 'sales' = attributed sale count
-  const cSales = col(/sale_amount/);
+  /* Spend is the SUM of every money-charged column the report carries: the Standard sale fee and
+     the CPC click cost are different charges on the same listing and a seller running both pays
+     both. Reading only ad_fees is what made a CPC-only account look free. */
+  /* payout-currency columns restate the same money in a second currency — never summed. */
+  const cols = (re) => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
+  const cSpendAll = cols(/ad_fee/);
+  const cClicksAll = cols(/^clicks$|^cpc_clicks$/);
+  const cUnitsAll = cols(/^sales$|^cpc_attributed_sales$/);     // eBay's 'sales' = attributed sale COUNT
+  const cSalesAll = cols(/sale_amount/);
+  const isCpc = String(family || 'std') === 'cpc';
   if (cListing < 0) return 0;
 
   const agg = {};
@@ -1268,7 +1347,8 @@ async function ingestAdsReport(env, acct, day, text) {
     const a = (agg[lid] = agg[lid] || { spend: 0, clicks: 0, units: 0, sales: 0 });
     // eBay prints money as "GBP 3.27" (zeros sometimes as "USD 0.00") — strip everything non-numeric
     const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
-    a.spend += num(cSpend); a.clicks += num(cClicks); a.units += num(cUnits); a.sales += num(cSales);
+    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
+    a.spend += sum(cSpendAll); a.clicks += sum(cClicksAll); a.units += sum(cUnitsAll); a.sales += sum(cSalesAll);
   }
 
   const stmts = [];
@@ -1276,18 +1356,32 @@ async function ingestAdsReport(env, acct, day, text) {
   for (const lid of Object.keys(agg)) {
     const a = agg[lid];
     total += a.spend;
-    stmts.push(env.DB.prepare(
-      'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
-      'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
-    ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
+    /* The two billing families are written to their own columns. Sending both to `spend` would
+       mean whichever report ingested second silently erased the other. */
+    stmts.push(isCpc
+      ? env.DB.prepare(
+          'INSERT INTO ads_daily (account, item_id, date, cpc_spend, cpc_clicks, cpc_sales) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET cpc_spend = ?4, cpc_clicks = ?5, cpc_sales = ?6'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units))
+      : env.DB.prepare(
+          'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
   }
-  stmts.push(env.DB.prepare(
+  /* The day's ad spend is BOTH families added together, read back from the table rather than from
+     this report alone — otherwise ingesting the Standard report would overwrite the day's total
+     with only its own half, and the CPC spend would vanish until the next poll. */
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  const dayTotal = await env.DB.prepare(
+    'SELECT ROUND(SUM(spend + cpc_spend), 2) AS ads FROM ads_daily WHERE account = ?1 AND date = ?2'
+  ).bind(acct, day).first();
+  await env.DB.prepare(
     'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, 0, 0, 0, ?3, 0) ' +
     'ON CONFLICT(account, date) DO UPDATE SET ads = ?3'
-  ).bind(acct, day, round2(total)));
-  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  ).bind(acct, day, round2((dayTotal && dayTotal.ads) || 0)).run();
   return Object.keys(agg).length;
 }
+
 
 /* Business dates are UK dates (timezone law T-1) — an order at 00:30 UK belongs to the UK day
    it happened in, not the UTC one. */
@@ -1489,6 +1583,61 @@ async function backup(env) {
 }
 
 /* ---------------- actions ---------------- */
+async function pushTracking(p, ctx) {
+const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
+if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
+const tok0 = await ebayAccessToken(ctx.env, account);
+const accepted = await acceptedCarriers(ctx.env, account, tok0);
+const nominate = () => {
+  if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
+  if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
+  if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
+  if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
+  if (/^1Z/i.test(tracking)) return 'UPS';
+  return '';
+};
+const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
+const pickFromList = want => {
+  const w = alias[norm(want)] || norm(want);
+  if (!w) return '';
+  const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
+  return hit || '';
+};
+let carrier = pickFromList(p.courier) || pickFromList(nominate());
+if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
+const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
+const tok = tok0;
+const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
+  headers: { authorization: 'Bearer ' + tok } });
+if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
+const order = await or_.json();
+fulfillment.lineItems = (order.lineItems || []).map(li => ({ lineItemId: li.lineItemId, quantity: li.quantity }));
+if (String(ctx.env.TRACKING_LIVE) !== 'true' && !p.force_live) {
+  await ctx.env.DB.prepare(
+    "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), 'SHADOW') " +
+    "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status='SHADOW'"
+  ).bind(orderId, tracking, carrier).run();
+  return { shadow: true, would_send: fulfillment, carrier_auto: carrier,
+    note: 'SHADOW — recorded, not sent to eBay. Set TRACKING_LIVE=true to arm.' };
+}
+const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment', {
+  method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+  body: JSON.stringify(fulfillment) });
+const ptxt = await pr.text();
+await ctx.env.DB.prepare(
+  "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
+  "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
+).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
+if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
+return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status,
+  carriers: accepted.slice(0, 200) };
+}
+
+/* Who may hand a tracking number to eBay. The processors who type them, and the people who
+   answer for the accounts. */
+const TRACKING_PUSH_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
+
 const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
   enginePing: { auth: 'public', fn: async () => ({ pong: Date.now() }) },
@@ -1537,6 +1686,33 @@ const ROUTES = {
 
   /* Sheet facts (suppliers, OE, campaign decision) pushed from Apps Script — the sheets stay
      the human truth, the Engine is their fast mirror (dual-run, G-1). */
+  /* Find one order anywhere in the fleet (req 19 Aug: "there is not option of searching order by
+     order id"). Until now a lookup meant knowing which account and which day tab an order landed
+     on. This searches every order the Engine holds — by order number, buyer username or item
+     number — and answers with the UK day, so the Orders screen can open that exact tab. */
+  orderFind: {
+    auth: 'any', fn: async (p, ctx) => {
+      const q = String(p.q || '').trim();
+      if (q.length < 3) throw new Error('SAY: type at least three characters');
+      const like = '%' + q.toLowerCase() + '%';
+      const rs = await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.item_id, o.sold, o.status, o.tracking, o.created_at, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+        'WHERE o.order_id LIKE ?1 OR lower(o.buyer) LIKE ?1 OR o.item_id LIKE ?1 OR o.tracking LIKE ?1 ' +
+        'ORDER BY o.created_at DESC LIMIT 25'
+      ).bind(like).all();
+      /* The day tab an order lives on is the PKT day it arrived — the processors' shift clock,
+         the same rule ordersToday_ uses on the sheet side. */
+      const rows = (rs.results || []).map(r => {
+        const t = new Date(String(r.created_at)).getTime();
+        const day = isNaN(t) ? '' : new Date(t + 5 * 3600000).toISOString().slice(0, 10);
+        return { order_id: r.order_id, account: r.account, item_id: r.item_id, title: r.title || '',
+          sold: r.sold, status: r.status, has_tracking: !!String(r.tracking || ''), day };
+      });
+      return { rows };
+    },
+  },
+
   /* DISPATCH, from eBay rather than from the day tabs (19 Aug). The sheet-scanning board had four
      separate reasons to be wrong at once: it invented ship-by as a flat five days, it only ever
      scanned the current calendar month (so OVERDUE reset itself to zero every 1st), it counted
@@ -1683,56 +1859,21 @@ const ROUTES = {
      accounts.couriers_json — Hasib's A4 ruling: no manual mapping, ever). The tracking number's
      format nominates a candidate; the list decides the exact enum eBay accepts. */
   ebayPushTracking: {
-    auth: 'sync', fn: async (p, ctx) => {
-      const account = String(p.account || ''), orderId = String(p.order_id || ''), tracking = String(p.tracking || '').trim();
-      if (!account || !orderId || !tracking) throw new Error('SAY: account, order_id and tracking are all needed');
-      const tok0 = await ebayAccessToken(ctx.env, account);
-      const accepted = await acceptedCarriers(ctx.env, account, tok0);
-      const nominate = () => {
-        if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
-        if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
-        if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
-        if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
-        if (/^1Z/i.test(tracking)) return 'UPS';
-        return '';
-      };
-      const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
-      const pickFromList = want => {
-        const w = alias[norm(want)] || norm(want);
-        if (!w) return '';
-        const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
-        return hit || '';
-      };
-      let carrier = pickFromList(p.courier) || pickFromList(nominate());
-      if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
-      const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
-      const tok = tok0;
-      const or_ = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId), {
-        headers: { authorization: 'Bearer ' + tok } });
-      if (!or_.ok) throw new Error('SAY: order ' + orderId + ' not found on ' + account + ' (' + or_.status + ')');
-      const order = await or_.json();
-      fulfillment.lineItems = (order.lineItems || []).map(li => ({ lineItemId: li.lineItemId, quantity: li.quantity }));
-      if (String(ctx.env.TRACKING_LIVE) !== 'true') {
-        await ctx.env.DB.prepare(
-          "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), 'SHADOW') " +
-          "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status='SHADOW'"
-        ).bind(orderId, tracking, carrier).run();
-        return { shadow: true, would_send: fulfillment, carrier_auto: carrier,
-          note: 'SHADOW — recorded, not sent to eBay. Set TRACKING_LIVE=true to arm.' };
-      }
-      const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment', {
-        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
-        body: JSON.stringify(fulfillment) });
-      const ptxt = await pr.text();
-      await ctx.env.DB.prepare(
-        "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
-        "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
-      ).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
-      if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
-      return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status };
+    auth: 'sync', fn: async (p, ctx) => pushTracking(p, ctx),
+  },
+
+  /* The same push, but reachable by a PERSON (req: "give an option there to paste tracking and
+     than a button there to upload it on ebay by choosing courier"). The automatic bulk path stays
+     behind TRACKING_LIVE; this one is a deliberate per-order press with a courier the operator
+     chose, so it sends for real. Every send is written to `trackings` with eBay's own answer. */
+  orderPushTracking: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (TRACKING_PUSH_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      return pushTracking({ ...p, force_live: true, by: ctx.email }, ctx);
     },
   },
+
+
 
   /* Active Listings dashboard read (§5 second-module 2/3): API truth + sheet facts
      joined at the edge, stripped per §6 before it leaves. Sir Hasib rows arrive via
@@ -1768,7 +1909,7 @@ const ROUTES = {
          law stays the single gate. */
       if (CAMPAIGN_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super) {
         const ads = await ctx.env.DB.prepare(
-          "SELECT item_id, ROUND(SUM(spend), 2) AS ad_spend_14d, SUM(sales) AS ad_units_14d FROM ads_daily " +
+          "SELECT item_id, ROUND(SUM(spend + cpc_spend), 2) AS ad_spend_14d, SUM(sales + cpc_sales) AS ad_units_14d FROM ads_daily " +
           "WHERE date >= date('now', '-14 day') GROUP BY item_id"
         ).all();
         const byItem = {};
@@ -1816,12 +1957,12 @@ const ROUTES = {
       /* CPQ, last 14 days per item: what each listing COSTS in ads per unit it sells — and the
          burners (spend, zero sales) float to the top, because that is the money leak. */
       const cpq = await ctx.env.DB.prepare(
-        "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend), 2) AS spend, SUM(a.clicks) AS clicks, " +
+        "SELECT a.account, a.item_id, MAX(i.title) AS title, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend, SUM(a.clicks + a.cpc_clicks) AS clicks, " +
         'SUM(a.sales) AS units, ' +
-        'ROUND(SUM(a.spend) / MAX(1, SUM(a.sales)), 2) AS cpq ' +
+        'ROUND(SUM(a.spend + a.cpc_spend) / MAX(1, SUM(a.sales + a.cpc_sales)), 2) AS cpq ' +
         'FROM ads_daily a LEFT JOIN items_api i ON i.item_id = a.item_id ' +
-        "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend) > 0 " +
-        'ORDER BY (SUM(a.sales) = 0) DESC, SUM(a.spend) DESC LIMIT 60'
+        "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend + a.cpc_spend) > 0 " +
+        'ORDER BY (SUM(a.sales + a.cpc_sales) = 0) DESC, SUM(a.spend + a.cpc_spend) DESC LIMIT 60'
       ).all();
       return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
       });
@@ -2041,7 +2182,7 @@ const ROUTES = {
       const ydayRows = days.filter(r => r.date === yday).map(r => ({ account: r.account, profit: r.profit, ads: r.ads, sold: r.sold }));
 
       const adsSale = await ctx.env.DB.prepare(
-        'SELECT a.account, SUM(a.spend) AS spend, SUM(a.clicks) AS clicks, SUM(a.sales) AS units FROM ads_daily a WHERE a.date = ?1 GROUP BY a.account'
+        'SELECT a.account, SUM(a.spend + a.cpc_spend) AS spend, SUM(a.clicks + a.cpc_clicks) AS clicks, SUM(a.sales + a.cpc_sales) AS units FROM ads_daily a WHERE a.date = ?1 GROUP BY a.account'
       ).bind(yday).all();
       // sale_amount is not stored per row — ROAS uses sales_daily revenue vs ads as the honest proxy
       const adsRows = (adsSale.results || []).map(r => {

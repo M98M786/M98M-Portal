@@ -93,9 +93,38 @@ function actionEngineSheetWrite_(payload) {
   return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '' };
 }
 
+/* Run one background job on demand, key-gated (19 Aug). Apps Script's Run button and its trigger
+ * dialog cannot be driven reliably from an automated pane — the function picker silently reverts
+ * and neither clicks nor arrow keys reach its listbox — so a newly written maintenance job could
+ * only ever be observed on its own hourly schedule. That made every fix to a background job a
+ * one-hour feedback loop. The list is a closed whitelist of read-and-sync jobs: no job here
+ * writes to a business sheet, and the shared Engine key is required. */
+const ENGINE_RUNNABLE = {
+  pushEngineSync: function () { return pushEngineSync(); },
+  pushEngineCosts: function () { return pushEngineCosts(); },
+  buildDashboardCache: function () { return buildDashboardCache(); },
+  alertsRefresh: function () { return alertsRefresh(); },
+};
+
+function actionEngineRunJob_(payload) {
+  const key = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');
+  if (!key || String(payload.key_check || payload.key || '') !== key) throw new Error('auth');
+  const name = String(payload.job || '');
+  const fn = Object.prototype.hasOwnProperty.call(ENGINE_RUNNABLE, name) ? ENGINE_RUNNABLE[name] : null;
+  if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(ENGINE_RUNNABLE).join(', '));
+  const started = Date.now();
+  let result = '', failed = '';
+  try { result = String(fn()); }
+  catch (e) { failed = String(e && e.message || e).slice(0, 300); }
+  logActivity_('system', 'ENGINE_RUN_JOB', name, '', String(Math.round((Date.now() - started) / 1000)) + 's', failed || result);
+  if (failed) throw new Error('SAY: ' + name + ' failed — ' + failed);
+  return { ran: name, seconds: Math.round((Date.now() - started) / 1000), result: result };
+}
+
 const ACTIONS_ENGINE = {
   engineNotify: [actionEngineNotify_, 'public'],       // key-checked inside — the Worker has no Google token
   engineSheetWrite: [actionEngineSheetWrite_, 'public'], // key-checked inside; whitelist tag picks the columns
+  engineRunJob: [actionEngineRunJob_, 'public'],       // key-checked inside; closed whitelist of sync jobs
 };
 
 /** Facts for the Active Listings screen: the Central Main Sheet's own numbers per item, pushed
