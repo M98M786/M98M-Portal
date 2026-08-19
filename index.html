@@ -328,7 +328,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd','orderAddAliLink'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -954,10 +954,35 @@ VIEWS.home = {
     prefetch: function () { return ahFetch(); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">health</span></h1>' +
-          '<span class="sub">Live Engine numbers · arrows compare with last night\'s snapshot · sync problems surface here first</span></div>' +
+          '<span class="sub">Live Engine numbers · arrows compare with last night\'s snapshot · sync problems surface here first</span>' +
+          '<button class="minibtn" id="ahSelfTest" style="margin-left:auto">Run validation</button></div>' +
+        '<div id="ahSelfTestOut"></div>' +
         '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>';
     },
-    init: function () { ahLoad(); }
+    init: function () {
+      ahLoad();
+      /* The night list's validation setup, one press: every calculation invariant answers. The
+         same battery runs nightly on its own and files a letter for every failure. */
+      var st = $('ahSelfTest');
+      if (st) {
+        st.onclick = function () {
+          var out = $('ahSelfTestOut');
+          out.innerHTML = '<div class="card enter d1" style="margin-bottom:14px"><div class="bd"><div class="spinner"></div></div></div>';
+          api('selfTest', {}).then(function (d) {
+            var rows = (d && d.results) || [];
+            var h = '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Validation — ' +
+              ((d.failed || 0) === 0 ? '<span style="color:var(--ok)">all ' + rows.length + ' checks pass</span>' : '<span style="color:var(--bad)">' + d.failed + ' of ' + rows.length + ' checks FAILED</span>') +
+              '<span class="hint">runs nightly on its own — failures land as letters in the Alerts centre</span></div><div class="bd">';
+            rows.forEach(function (r) {
+              h += '<div class="tl-row"><span class="k">' + (r.pass ? '✅' : '🔴') + ' ' + esc(String(r.check)) + '</span><span style="color:var(--text-3);font-weight:600">' + esc(String(r.detail)) + '</span></div>';
+            });
+            out.innerHTML = h + '</div></div>';
+          }).catch(function (e) {
+            out.innerHTML = '<div class="card enter d1" style="margin-bottom:14px"><div class="bd" style="color:var(--bad);font-weight:700">Validation could not run: ' + esc(e.message) + '</div></div>';
+          });
+        };
+      }
+    }
   };
 })();
 
@@ -8075,6 +8100,11 @@ function paint() {
           '<button class="minibtn" data-pnl-r="2">Yesterday</button>' +
           '<button class="minibtn on" data-pnl-r="7">7 days</button>' +
           '<button class="minibtn" data-pnl-r="30">30 days</button>' +
+          '<select class="alx-sel" id="pnlSort" title="Order of the rows">' +
+            '<option value="asc">Profit: min \u2192 max (losses first)</option>' +
+            '<option value="desc">Profit: max \u2192 min</option>' +
+            '<option value="rev">Revenue: biggest first</option>' +
+          '</select>' +
           '<select class="alx-sel" id="pnlAcc"><option value="">All accounts</option></select>' +
           '<span id="pnlWhen" style="margin-left:auto;font-size:11px;color:var(--text-3);font-weight:700"></span>' +
         '</div>' +
@@ -8198,6 +8228,14 @@ VIEWS.dashboard = {
       if (when) { when.textContent = d.from + ' \u2192 ' + d.to; }
       var rows = d.rows || [];
       if (!rows.length) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No orders in this range.</div>'; return; }
+      /* Hasib's night list, verbatim: "i need profits calculated from min to max" — losses lead
+         by default, so the money leaks are the first thing every morning. */
+      var sortKey = PNL.sort || 'asc';
+      rows.sort(function (a, b) {
+        if (sortKey === 'rev') { return (Number(b.revenue) || 0) - (Number(a.revenue) || 0); }
+        var d2 = (Number(a.actual_profit) || 0) - (Number(b.actual_profit) || 0);
+        return sortKey === 'desc' ? -d2 : d2;
+      });
       var head = '<tr><th>Item</th><th class="pnl-g-sale">Sold</th><th>Qty</th><th class="pnl-g-sale">HMRC VAT</th>' +
         '<th class="pnl-g-fee">eBay fees (real)</th><th class="pnl-g-fee">Fee VAT</th><th class="pnl-g-fee">Order earning</th>' +
         '<th class="pnl-g-ali">AliExpress</th><th class="pnl-g-ali">Ali VAT</th>' +
@@ -8245,6 +8283,8 @@ VIEWS.dashboard = {
     var orig = VIEWS.dashboard.init;
     VIEWS.dashboard.init = function () {
       if (orig) { orig.apply(this, arguments); }
+      var srt = $('pnlSort');
+      if (srt) { srt.onchange = function () { PNL.sort = String(this.value || 'asc'); pnlLoad(); }; }
       document.querySelectorAll('[data-pnl-r]').forEach(function (b) {
         b.onclick = function () {
           document.querySelectorAll('[data-pnl-r]').forEach(function (x) { x.classList.remove('on'); });
@@ -12132,6 +12172,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function oSum(rows) {
     var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
     rows.forEach(function (r) { t.sold += oN(r.sold); t.oe += oN(r.oe); t.cost += oN(r.cost); t.ads += oN(r.ads); t.profit += oN(r.profit); });
+    t.net = t.profit - t.ads;               // the min-to-max truth: what is left AFTER advertising
     return t;
   }
 
@@ -12154,7 +12195,25 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
        "Loading…" for ever — indistinguishable from a slow network, and the reason this screen
        looked dead rather than broken. A feed that fails now says so, in its own panel, with a
        way back. */
-    api('dailyReport', {}).then(function (d) { O.days = (d && d.rows) || []; oPaintDated(); })
+    api('dailyReport', {}).then(function (d) {
+      O.days = (d && d.rows) || [];
+      /* Night-list fix ("wrong stats"): the nightly book knows nothing of today — merge the
+         server's LIVE overlay in: real revenue/cost from orders, INTRADAY ad spend, and order
+         earning from fee-landed orders only. Larger value wins so a late rollup never shrinks. */
+      var live = (d && d.today_live) || [], today = (d && d.today) || ukToday();
+      var by = {};
+      O.days.forEach(function (r) { if (r.date === today) { by[r.account] = r; } });
+      live.forEach(function (l) {
+        var b = by[l.account];
+        if (!b) { b = { account: l.account, date: today, sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 }; by[l.account] = b; O.days.push(b); }
+        b.sold = Math.max(oN(b.sold), oN(l.sold));
+        b.cost = Math.max(oN(b.cost), oN(l.cost));
+        b.ads = Math.max(oN(b.ads), oN(l.ads));
+        if (!oN(b.oe)) { b.oe = oN(l.oe_known); }
+        b.profit = oN(b.oe) - oN(b.cost);
+      });
+      oPaintDated();
+    })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
       O.ov = d || {};
@@ -12253,7 +12312,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var todayLive = O.ov && O.ov.kpis && O.ov.kpis.today;
     box.innerHTML =
       '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.sold) + '</div>' + delta(cur.sold, prev.sold) + '<div class="kpi-s">orders money in the range</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">sheet projection × units</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">order earning − goods cost</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Net after ads</div><div class="kpi-v' + (cur.net < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.net) + '</div>' + delta(cur.net, prev.net) + '<div class="kpi-s">profit minus ad spend — the keep-money</div></div>' +
       '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">after eBay, before AliExpress</div></div>' +
       '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(cur.ads) + '</div>' + delta(cur.ads, prev.ads) + '<div class="kpi-s">real spend where consented</div></div>' +
       '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.cost) + '</div>' + delta(cur.cost, prev.cost) + '<div class="kpi-s">per-unit sheet cost × units</div></div>' +
