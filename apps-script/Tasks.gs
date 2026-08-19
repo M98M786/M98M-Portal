@@ -65,7 +65,9 @@ function taskCanCreate_(role, email, type) {
   if (isMgmt_(role, email)) return true;
   if (role === 'Team Lead') return true;
   if (role === 'Advertising Manager') return type === 'listing_revision';
-  return false;
+  /* Hasib item 19: every approved staff member can hand a task or a lead to anyone. The open
+     types only — the privileged types above keep their gates. */
+  return type === 'general' || type === 'query' || type === 'supplier_add';
 }
 
 // ---------- employee flow ----------

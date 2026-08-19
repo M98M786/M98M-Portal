@@ -105,7 +105,11 @@
   }
   function tkHas(arr, v) { return arr.indexOf(v) >= 0; }
   function tkRole() { return (STATE.user && STATE.user.role) || ''; }
-  function tkCanCreate() { return tkHas(TK_CREATE_ROLES, tkRole()); }
+  /* Hasib item 19: EVERY approved staff member can hand a task or lead to anyone. Roles outside
+     TK_CREATE_ROLES get the open types only (general / query / supplier_add) — the server
+     enforces the same line. */
+  function tkCanCreate() { return true; }
+  function tkPrivileged() { return tkHas(TK_CREATE_ROLES, tkRole()); }
   function tkStr(v) { return String(v == null ? '' : v).trim(); }
 
   function tkCount(key, n) {
@@ -198,7 +202,9 @@
 
   function tkComposer() {
     var role = tkRole();
-    var types = (role === 'Advertising Manager') ? ['listing_revision'] : TK_TYPES;   // §4.3: revisions only
+    var types = (role === 'Advertising Manager') ? ['listing_revision']               // §4.3: revisions only
+      : tkPrivileged() ? TK_TYPES
+      : ['general', 'query', 'supplier_add'];                                         // item 19: the open types
     var opts = types.map(function (t) { return '<option value="' + tkAttr(t) + '">' + esc(t) + '</option>'; }).join('');
     var accounts = tkStr(STATE.user && STATE.user.accounts);
     var accField;
