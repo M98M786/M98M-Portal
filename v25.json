@@ -1,0 +1,22 @@
+[
+ {
+  "file": "Router.gs",
+  "find": "    const ctx = authorizeFor_(entry[1], req.idToken);\n    ctx.idToken = req.idToken;                              // batch re-authorises each inner call\n",
+  "replace": "    const ctx = authorizeFor_(entry[1], req.idToken, req.session);\n    ctx.idToken = req.idToken;                              // batch re-authorises each inner call\n    ctx.session = req.session;\n"
+ },
+ {
+  "file": "Router.gs",
+  "find": "function authorizeFor_(level, idToken) {\n  if (level === 'public') return { ident: null, user: null };\n  const ident = verifyGoogleToken_(idToken);              // RL-1: throws on any token failure\n",
+  "replace": "function authorizeFor_(level, idToken, session) {\n  if (level === 'public') return { ident: null, user: null };\n  /* Portal sessions (the night list's reload fix): a reload or a new tab arrives with the\n     Engine's own 7-day session instead of a fresh Google pass. The Engine is asked whose it is\n     (sync-key gated, answer cached five minutes); every gate below still reads the USERS row\n     fresh on every request, so deactivation still bites on the very next action. */\n  const ident = sessionIdent_(session) || verifyGoogleToken_(idToken);   // RL-1 either way\n"
+ },
+ {
+  "file": "Router.gs",
+  "find": "      const inner = authorizeFor_(entry[1], ctx.idToken);\n",
+  "replace": "      const inner = authorizeFor_(entry[1], ctx.idToken, ctx.session);\n"
+ },
+ {
+  "file": "Router.gs",
+  "find": "/** RL-1 identity: verify Google ID token (signature+aud+exp via Google), return {email,name,...}. */\nfunction verifyGoogleToken_(idToken) {\n",
+  "replace": "/** Portal-session identity: ask the Engine whose session this is. Returns an ident shaped like\n * verifyGoogleToken_'s, or null \u2014 it NEVER throws, so the Google path stays the fallback. */\nfunction sessionIdent_(session) {\n  if (!session || !/^[0-9a-f]{64}$/.test(String(session))) return null;\n  try {\n    const cache = CacheService.getScriptCache();\n    const key = 'sess_' + String(session).slice(0, 32);\n    const hit = cache.get(key);\n    if (hit) { const h = JSON.parse(hit); return (h && h.email) ? h : null; }\n    const engineUrl = getConfig('engine_url');\n    const syncKey = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');\n    if (!engineUrl || !syncKey) return null;\n    const resp = UrlFetchApp.fetch(engineUrl, { method: 'post', contentType: 'application/json',\n      payload: JSON.stringify({ action: 'sessionCheck', key: syncKey, payload: { session: String(session) } }),\n      muteHttpExceptions: true });\n    if (resp.getResponseCode() !== 200) return null;\n    const j = JSON.parse(resp.getContentText());\n    if (!j || !j.ok || !j.data || !j.data.ok || !j.data.email) { cache.put(key, '{}', 60); return null; }\n    const ident = { email: String(j.data.email), name: String(j.data.email), given_name: '', picture: '' };\n    cache.put(key, JSON.stringify(ident), 300);\n    return ident;\n  } catch (e) { return null; }\n}\n\n/** RL-1 identity: verify Google ID token (signature+aud+exp via Google), return {email,name,...}. */\nfunction verifyGoogleToken_(idToken) {\n"
+ }
+]

@@ -236,7 +236,7 @@ input,select{font:inherit}
 <script>
 /* ============ M98M Portal — client. Knows ONLY the backend URL (RL-9). ============ */
 var BACKEND = "https://script.google.com/macros/s/AKfycbx1_6VpJUMVEJeifbwq79DIhNwhZgzHmPxRuC2oj6my3b1Kl2mpowSGjNMAM8D3bLP1wg/exec";
-var STATE = { idToken:null, user:null, config:null, counts:{} };
+var STATE = { idToken:null, session:null, user:null, config:null, counts:{} };
 var $ = function(id){ return document.getElementById(id); };
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
@@ -282,7 +282,7 @@ function apiFinished(){
 }
 
 function apiSend(action, payload){
-  var body = JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} });
+  var body = JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} });
   apiStarted();
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
     .then(function(r){ return r.json(); })
@@ -328,7 +328,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse','orderAddAliLink'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -339,7 +339,7 @@ function engineApi(action, payload){
   var ac = new AbortController();
   var t = setTimeout(function(){ ac.abort(); }, isWrite ? 15000 : 2500);
   return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:action, idToken:STATE.idToken, payload:payload||{} }), signal: ac.signal })
+      body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
     .then(function(r){ return r.json(); })
     .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; })
     .catch(function(e){
@@ -356,11 +356,11 @@ function engineApi(action, payload){
 }
 
 function api(action, payload){
-  if(STATE.idToken && STATE.config && STATE.config.engine_url && ENGINE_ACTIONS.indexOf(action)>=0){
+  if((STATE.idToken || STATE.session) && STATE.config && STATE.config.engine_url && ENGINE_ACTIONS.indexOf(action)>=0){
     return engineApi(action, payload);
   }
   // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
-  if(!STATE.idToken || action === 'batch'){
+  if((!STATE.idToken && !STATE.session) || action === 'batch'){
     return apiSend(action, payload).then(function(j){
       if(!j.ok){ throw new Error(j.error||'request failed'); }
       return j.data;
@@ -549,7 +549,7 @@ function showReauth(){
 }
 function hideReauth(){ var b = $('reauthBar'); if(b){ b.remove(); } }
 setInterval(function(){
-  if(!STATE.user || STATE.user.status !== 'approved' || !STATE.idToken){ return; }
+  if(!STATE.user || STATE.user.status !== 'approved' || !STATE.idToken || STATE.session){ return; }
   var left = tokenMsLeft();
   if(left > 0 && left < 5 * 60000){ showReauth(); }
   if(left <= 0){ showReauth(); }
@@ -560,7 +560,7 @@ function routeUser(user){
   STATE.user = user;
   if(!user || user.status==='none' || user.needsRegister){ beginRegister(); return; }
   if(user.status==='pending'){ showPending(user); return; }
-  if(user.status==='approved'){ enterApp(user); return; }
+  if(user.status==='approved'){ enterApp(user); mintPortalSession(); return; }
   if(user.status==='disabled'){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='This account has been deactivated. Contact Management.'; return; }
   beginRegister();
 }
@@ -19972,7 +19972,7 @@ function fmtPkt(iso, withDate){
 function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
-function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); STATE.idToken=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+function signOut(){ try{ if(STATE.session){ api('sessionEnd', { session: STATE.session }).catch(function(){}); } }catch(e){} try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); psessClear(); STATE.idToken=null; STATE.session=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
 /* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
 /* ---- the session survives a reload (RL-11 still holds: the token is Google's own, it is
@@ -19980,6 +19980,28 @@ function signOut(){ try{ google.accounts.id.disableAutoSelect(); }catch(e){} try
    gone when the tab closes, never written to disk-backed localStorage). Reloading a page is
    not signing out, and staff should never be thrown back to the login screen mid-shift. ---- */
 var SESS_KEY = 'm98m:sess';
+/* ---- the PORTAL session (night list: "one refresh and it goes to login") ----
+   Minted by the Engine at sign-in, held 7 days, stored in localStorage so EVERY tab and every
+   reload boots straight into the app. Google's token becomes a sign-in ceremony, not a leash:
+   the Engine checks the session against its own table on every call, and the role still comes
+   from the users table server-side — storing identity here only paints the shell faster. */
+var PSESS_KEY = 'm98m:psess', PIDENT_KEY = 'm98m:pident';
+function psessSave(tok, user){ try{ localStorage.setItem(PSESS_KEY, tok); localStorage.setItem(PIDENT_KEY, JSON.stringify(user||{})); }catch(e){} }
+function psessClear(){ try{ localStorage.removeItem(PSESS_KEY); localStorage.removeItem(PIDENT_KEY); }catch(e){} }
+function psessLoad(){
+  try{
+    var t = localStorage.getItem(PSESS_KEY);
+    if(!t || !/^[0-9a-f]{64}$/.test(t)){ return null; }
+    var u = JSON.parse(localStorage.getItem(PIDENT_KEY) || 'null');
+    return (u && u.email) ? { token:t, user:u } : null;
+  }catch(e){ return null; }
+}
+function mintPortalSession(){
+  if(STATE.session || !(STATE.config && STATE.config.engine_url)){ return; }
+  api('sessionMint').then(function(d){
+    if(d && d.session){ STATE.session = d.session; psessSave(d.session, d.user || STATE.user); }
+  }).catch(function(){});
+}
 function sessSave(tok){ try{ sessionStorage.setItem(SESS_KEY, tok); }catch(e){} }
 function sessClear(){ try{ sessionStorage.removeItem(SESS_KEY); }catch(e){} }
 function sessLoad(){
@@ -19996,6 +20018,26 @@ function boot(){
     STATE.config=cfg;
     if(!cfg.oauth_client_id){ $('loginStatus').className='auth-status info'; $('loginStatus').textContent='Sign-in is being switched on by setup — almost there.'; return; }
     initGsi();
+    /* Portal session first: instant app on every reload and every new tab. The Engine re-checks
+       it in the background; only a real refusal sends anyone back to the sign-in screen. */
+    var ps = psessLoad();
+    if(ps){
+      STATE.session = ps.token;
+      STATE.user = ps.user;
+      enterApp(ps.user);
+      api('sessionHello').then(function(d){
+        if(d && d.user){ STATE.user = d.user; psessSave(ps.token, d.user); }
+      }).catch(function(e){
+        if(e && e.message === 'auth'){
+          psessClear(); STATE.session = null; STATE.user = null;
+          show('loginScreen'); trySilentSignIn();
+        }
+      });
+      /* quietly fetch a Google credential too — the sheet backend still likes one while its
+         session support rolls out; nothing here touches the visible screen */
+      try{ google.accounts.id.prompt(); }catch(e){}
+      return;
+    }
     var kept = sessLoad();
     if(kept){
       STATE.idToken = kept;

@@ -50,7 +50,7 @@ export default {
       if (route.auth === 'sync') {
         if (String(body.key || '') !== (await secret(env, 'SYNC_KEY'))) throw new AuthError('auth');
       } else if (route.auth !== 'public') {
-        ctx2 = await authorize(env, String(body.idToken || ''));
+        ctx2 = await authorize(env, String(body.idToken || ''), String(body.session || ''));
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
       const t0 = Date.now();
@@ -135,19 +135,34 @@ async function secret(env, name) {
    Same trust chain as Apps Script: verify with Google's tokeninfo, then the role
    comes from OUR users table, never from the client. Token verdicts are cached
    in KV for 5 minutes keyed by a digest, mirroring verifyGoogleToken_. */
-async function authorize(env, idToken) {
-  if (!idToken) throw new AuthError('auth');
-  const digest = await sha256(idToken);
-  const kvKey = 'tok:' + digest;
-  let email = await env.HOT.get(kvKey);
+async function authorize(env, idToken, session) {
+  let email = '';
+  /* PORTAL SESSIONS (Hasib's night list: "one refresh and it goes to login"): the Engine mints
+     its own 7-day token at sign-in, so a reload or a new tab never begs Google again. The role
+     STILL comes from the users table on every call — a session only answers "who", never "may". */
+  if (session && /^[0-9a-f]{64}$/.test(String(session))) {
+    email = await memo('sess:' + session, 300000, async () => {
+      const row = await env.DB.prepare('SELECT email, expires_at FROM sessions WHERE token = ?1').bind(String(session)).first();
+      if (!row) return '';
+      const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      if (String(row.expires_at) <= nowStr) return '';
+      return String(row.email).toLowerCase();
+    });
+  }
   if (!email) {
-    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken));
-    if (!r.ok) throw new AuthError('auth');
-    const t = await r.json();
-    if (String(t.email_verified) !== 'true' || !t.email) throw new AuthError('auth');
-    if (Number(t.exp) * 1000 < Date.now()) throw new AuthError('auth');
-    email = String(t.email).toLowerCase();
-    await env.HOT.put(kvKey, email, { expirationTtl: 300 });
+    if (!idToken) throw new AuthError('auth');
+    const digest = await sha256(idToken);
+    const kvKey = 'tok:' + digest;
+    email = await env.HOT.get(kvKey);
+    if (!email) {
+      const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken));
+      if (!r.ok) throw new AuthError('auth');
+      const t = await r.json();
+      if (String(t.email_verified) !== 'true' || !t.email) throw new AuthError('auth');
+      if (Number(t.exp) * 1000 < Date.now()) throw new AuthError('auth');
+      email = String(t.email).toLowerCase();
+      await env.HOT.put(kvKey, email, { expirationTtl: 300 });
+    }
   }
   const user = await env.DB.prepare(
     'SELECT email, name, role, status, modules, tools, super FROM users WHERE email = ?1'
@@ -2079,6 +2094,7 @@ async function itemStats(env) {
      letter retires at 90 days — the alert has either done its job by then or never will. */
   await env.DB.prepare("DELETE FROM alert_log WHERE resolved_at != '' AND created_at < datetime('now', '-30 day')").run();
   await env.DB.prepare("DELETE FROM alert_log WHERE created_at < datetime('now', '-90 day')").run();
+  await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
 }
 
 /* THE CPC RULE (Hasib, 19 Aug): an item whose raw profit after VAT is under £3.30 has no
@@ -2505,6 +2521,51 @@ const ROUTES = {
           traffic_date: String(traffic.date || ''),
           active_listings: Number(listings.n) || 0 };
       });
+    },
+  },
+
+  /* PORTAL SESSIONS (night list): minted only against a live Google sign-in, held 7 days,
+     shared across tabs via localStorage on the client. Identity rides back so the shell can
+     paint instantly on the next boot without asking anyone anything. */
+  sessionMint: {
+    auth: 'any', fn: async (p, ctx) => {
+      const buf = new Uint8Array(32);
+      crypto.getRandomValues(buf);
+      const token = [...buf].map((b) => b.toString(16).padStart(2, '0')).join('');
+      await ctx.env.DB.prepare(
+        "INSERT INTO sessions (token, email, created_at, expires_at, last_seen) VALUES (?1, ?2, datetime('now'), datetime('now', '+7 day'), datetime('now'))"
+      ).bind(token, ctx.email).run();
+      const u = ctx.user;
+      return { session: token, user: { email: u.email, name: u.name, role: u.role, status: u.status, modules: u.modules, tools: u.tools, super: u.super } };
+    },
+  },
+  /* The boot check: proves the stored session still stands and refreshes the role (an access
+     change lands on the very next page load, not in 7 days). */
+  sessionHello: {
+    auth: 'any', fn: async (p, ctx) => {
+      const u = ctx.user;
+      return { user: { email: u.email, name: u.name, role: u.role, status: u.status, modules: u.modules, tools: u.tools, super: u.super } };
+    },
+  },
+  sessionEnd: {
+    auth: 'any', fn: async (p, ctx) => {
+      const tok = String(p.session || '');
+      if (/^[0-9a-f]{64}$/.test(tok)) {
+        await ctx.env.DB.prepare('DELETE FROM sessions WHERE token = ?1 AND email = ?2').bind(tok, ctx.email).run();
+      }
+      return { ok: true };
+    },
+  },
+  /* For Apps Script: /exec asks the Engine who a session belongs to (sync-key gated), caches
+     the answer five minutes, and applies its own users-table gates as always. */
+  sessionCheck: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const tok = String(p.session || '');
+      if (!/^[0-9a-f]{64}$/.test(tok)) return { ok: false };
+      const row = await ctx.env.DB.prepare('SELECT email, expires_at FROM sessions WHERE token = ?1').bind(tok).first();
+      const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      if (!row || String(row.expires_at) <= nowStr) return { ok: false };
+      return { ok: true, email: String(row.email).toLowerCase() };
     },
   },
 
