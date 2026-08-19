@@ -762,6 +762,66 @@ async function dupSweep(env, acct) {
    encodes the fees the calculator EXPECTED (expected fees ≈ sold − OE×units), so when eBay's
    real fee beats that expectation by 15%+ AND 50p+, management hears about the exact order —
    that is the Brain-v17-drift alert the contract asks for. */
+/* ---------------- eBay Digital Signatures (19 Aug) ----------------------------------------
+   The Finances API refuses unsigned calls outright — error 215001, "Missing x-ebay-signature-key
+   header". Every call must carry an RFC-9421 HTTP message signature made with an ED25519 key
+   that eBay itself issues. The Engine MINTS ITS OWN key on first use and keeps it in D1 beside
+   the OAuth tokens it already guards — no human ever handles the private key, and a lost row
+   just means a fresh mint. Proven by hand against seller_funds_summary before being wired in. */
+async function ebaySigningKey(env) {
+  const row = await env.DB.prepare("SELECT v FROM engine_config WHERE k = 'ebay_sign_key'").first();
+  if (row && row.v) return JSON.parse(row.v);
+
+  const appId = await secret(env, 'EBAY_APP_ID');
+  const cert = await secret(env, 'EBAY_CERT_ID');
+  const tr = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'POST',
+    headers: { authorization: 'Basic ' + btoa(appId + ':' + cert), 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
+  });
+  if (!tr.ok) throw new Error('sign-key app token ' + tr.status);
+  const appTok = (await tr.json()).access_token;
+
+  const kr = await fetch('https://apiz.ebay.com/developer/key_management/v1/signing_key', {
+    method: 'POST', headers: { authorization: 'Bearer ' + appTok, 'content-type': 'application/json' },
+    body: JSON.stringify({ signingKeyCipher: 'ED25519' }),
+  });
+  if (!kr.ok && kr.status !== 201) throw new Error('sign-key create ' + kr.status + ': ' + (await kr.text()).slice(0, 140));
+  const k = await kr.json();
+  if (!k.privateKey || !k.jwe) throw new Error('sign-key create returned no private key');
+  const keep = { privateKey: k.privateKey, jwe: k.jwe, signingKeyId: k.signingKeyId || '' };
+  await env.DB.prepare("INSERT INTO engine_config (k, v) VALUES ('ebay_sign_key', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1")
+    .bind(JSON.stringify(keep)).run();
+  return keep;
+}
+
+async function ebaySignedFetch(env, url, tok, init) {
+  const k = await ebaySigningKey(env);
+  const u = new URL(url);
+  const method = ((init && init.method) || 'GET').toUpperCase();
+  const der = Uint8Array.from(atob(k.privateKey), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, false, ['sign']);
+  const created = Math.floor(Date.now() / 1000);
+  const params = '("x-ebay-signature-key" "@method" "@path" "@authority");created=' + created;
+  // The base string covers exactly the components eBay names, in eBay's order — path WITHOUT the
+  // query string (@path is the target path component alone).
+  const base = '"x-ebay-signature-key": ' + k.jwe +
+    '\n"@method": ' + method +
+    '\n"@path": ' + u.pathname +
+    '\n"@authority": ' + u.host +
+    '\n"@signature-params": ' + params;
+  const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(base)));
+  let raw = '';
+  for (const b of sig) raw += String.fromCharCode(b);
+  const headers = Object.assign({}, (init && init.headers) || {}, {
+    authorization: 'Bearer ' + tok,
+    'x-ebay-signature-key': k.jwe,
+    'Signature-Input': 'sig1=' + params,
+    'Signature': 'sig1=:' + btoa(raw) + ':',
+  });
+  return fetch(url, Object.assign({}, init || {}, { headers }));
+}
+
 async function financeSync(env) {
   await perAccount(env, 'financeSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
@@ -773,9 +833,10 @@ async function financeSync(env) {
     const since = new Date(sinceMs).toISOString();
     const txs = [];
     for (let page = 0; page < 3; page++) {
-      const r = await fetch('https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&offset=' + (page * 100) +
-        '&filter=' + encodeURIComponent('transactionDate:[' + since + '..]'), { headers: { authorization: 'Bearer ' + tok } });
-      if (r.status === 403) throw new Error(acct + ' finances 403 — needs the extended-scope re-consent (Account health screen)');
+      const r = await ebaySignedFetch(env,
+        'https://apiz.ebay.com/sell/finances/v1/transaction?limit=100&offset=' + (page * 100) +
+        '&filter=' + encodeURIComponent('transactionDate:[' + since + '..]'), tok);
+      if (r.status === 403) throw new Error(acct + ' finances 403 — this account\'s token still lacks sell.finances: re-consent it');
       if (!r.ok) throw new Error(acct + ' finances ' + r.status + ': ' + (await r.text()).slice(0, 120));
       const d = await r.json();
       txs.push(...(d.transactions || []));
