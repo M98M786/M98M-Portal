@@ -110,6 +110,24 @@
       h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ No item sits in more than one running campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
     }
 
+    /* Hasib item 9, the other half: ACTIVE listings sitting in NO campaign at all. */
+    var unc = (d.uncampaigned || []).filter(function (r) { return !acc || r.account === acc; });
+    if (unc.length) {
+      h += '<div class="cw-dupbox" style="border-color:var(--warn)"><h3 style="color:var(--warn)">🟡 ' + unc.length + ' active listing(s) in NO campaign — unadvertised reach</h3>' +
+        '<div class="scroll" style="max-height:280px"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Price</th><th>Sold 30d</th></tr></thead><tbody>';
+      unc.forEach(function (r) {
+        h += '<tr><td>' + esc(cwStr(r.account)) + '</td>' +
+          '<td><div style="font-weight:700;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+          '<a href="https://www.ebay.co.uk/itm/' + esc(cwStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(cwStr(r.title) || cwStr(r.item_id)) + '</a></div>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r.item_id)) + '</div></td>' +
+          '<td class="cw-num">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
+          '<td class="cw-num">' + (Number(r.sold_30d) || 0) + '</td></tr>';
+      });
+      h += '</tbody></table></div><p style="margin:8px 0 0;font-size:11px;color:var(--text-3);font-weight:600">The Advertising Manager gets one digest bell a day while this list is not empty.</p></div>';
+    } else {
+      h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ Every active listing sits in at least one campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
+    }
+
     h += '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Items</th><th>Synced</th></tr></thead><tbody>';
     if (!camps.length) {
       h += '<tr><td colspan="6" style="color:var(--text-2);font-weight:700">No campaigns synced yet for this filter.</td></tr>';

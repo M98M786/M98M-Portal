@@ -75,7 +75,7 @@ export default {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan, uncampaignedDigest],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
@@ -423,6 +423,26 @@ async function markEndedListings(env) {
    saw one, first_seen is the honest fallback and the row says which clock it used. Items only
    enter the queue while young (7 to 21 days) so day one doesn't drown Management in old stock;
    each item is queued once, ever — the decision row itself is the dedupe. */
+/* Item 9's bell: the advertising person hears ONCE a day how many active listings sit in no
+   campaign — a digest, not a flood; the list itself lives on the Campaign watch screen. */
+async function uncampaignedDigest(env) {
+  const today = ukDate('');
+  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'uncampaignedDigest' AND account = ''").first();
+  if (st && String(st.cursor) === today) return;
+  const rs = await env.DB.prepare(
+    "SELECT account, COUNT(*) AS n FROM items_api ia WHERE status = 'ACTIVE' " +
+    'AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id) GROUP BY account'
+  ).all();
+  const rows = rs.results || [];
+  const total = rows.reduce((s, r) => s + Number(r.n || 0), 0);
+  if (total) {
+    await notifyRole(env, 'Advertising Manager', 'Listings in no campaign',
+      total + ' active listing(s) sit in no campaign: ' + rows.map((r) => r.account + ' ' + r.n).join(', ') +
+      '. The full list is on the Campaign watch screen.', 'engine:uncamp:' + today);
+  }
+  await ctx_setSync(env, 'uncampaignedDigest', '', today);
+}
+
 async function zeroSaleScan(env) {
   const rs = await env.DB.prepare(
     "SELECT i.item_id, i.account, i.title, i.price, " +
@@ -2685,7 +2705,15 @@ const ROUTES = {
         "WHERE a.date >= date('now', '-14 day') GROUP BY a.account, a.item_id HAVING SUM(a.spend + a.cpc_spend) > 0 " +
         'ORDER BY (SUM(a.sales + a.cpc_sales) = 0) DESC, SUM(a.spend + a.cpc_spend) DESC LIMIT 60'
       ).all();
-      return { campaigns: camps.results || [], duplicates: dups.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
+      /* Hasib item 9, the other half: an ACTIVE listing sitting in NO campaign at all is unsold
+         reach — show it right next to the duplicates so the advertising person clears both. */
+      const unc = await ctx.env.DB.prepare(
+        'SELECT ia.account, ia.item_id, ia.title, ia.price, ia.sold_30d ' +
+        "FROM items_api ia WHERE ia.status = 'ACTIVE' " +
+        '  AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id) ' +
+        'ORDER BY ia.account, ia.sold_30d DESC LIMIT 300'
+      ).all();
+      return { campaigns: camps.results || [], duplicates: dups.results || [], uncampaigned: unc.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
       });
     },
   },
@@ -3180,7 +3208,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

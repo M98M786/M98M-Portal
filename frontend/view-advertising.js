@@ -862,6 +862,7 @@
           '<select class="ad-sel" id="adAlStatus"></select>' +
           '<button class="minibtn" id="adAlRefresh">Refresh</button>' +
         '</div>' +
+        '<div id="adAlEngine"></div>' +
         '<div id="adAlTotals"></div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">ALARM rows ' +
           '<span class="hint" id="adAlHint">read-only from each account&#39;s Wrong Advertising tab</span></div>' +
@@ -876,8 +877,33 @@
       adFillAlarmAccounts();
       adLoadAccounts(function () { adFillAlarmAccounts(); });
       adLoadAlarms();
+      adLoadEngineSignals();
     }
   };
+
+  /* Hasib item 14: this screen used to open on sheet rows that read as nonsense. It now leads
+     with the Engine's own live signals — money facts from eBay, not free-text tab rows. */
+  function adLoadEngineSignals() {
+    var box = $('adAlEngine');
+    if (!box) { return; }
+    api('campaignWatch', {}).then(function (d) {
+      d = d || {};
+      var dupN = {};
+      (d.duplicates || []).forEach(function (r) { dupN[r.account + '|' + r.listing_id] = 1; });
+      var dups = Object.keys(dupN).length;
+      var unc = (d.uncampaigned || []).length;
+      var burners = (d.cpq || []).filter(function (r) { return !Number(r.units) && Number(r.spend) > 0; }).length;
+      var t = function (n, label, view, bad) {
+        return '<a href="#' + view + '" style="text-decoration:none;color:inherit"><div class="ac-tile' + (n ? (bad ? ' bad' : '') : '') + '">' +
+          '<div class="k">' + label + '</div><div class="v"' + (n && bad ? ' style="color:var(--bad)"' : '') + '>' + n + '</div></div></a>';
+      };
+      box.innerHTML = '<div class="ac-tiles" style="margin-top:14px">' +
+        t(dups, 'Items in 2+ running campaigns', 'campaignWatch', true) +
+        t(unc, 'Active listings in no campaign', 'campaignWatch', false) +
+        t(burners, 'Burners — 14d spend, zero sold', 'adsCentre', true) +
+      '</div>';
+    }).catch(function () { box.innerHTML = ''; });
+  }
 
   function adFillStatus() {
     var sel = $('adAlStatus');
