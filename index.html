@@ -792,6 +792,35 @@ VIEWS.home = {
     return h + '</div>';
   }
 
+  /* Hasib item 13: the Seller Hub service-metrics panel — your INAD / INR rate against eBay's
+     peer benchmark, per account. Green when you beat the peers, red when you trail them. */
+  function ahServiceMetrics(rows) {
+    if (!rows.length) {
+      return '<div class="ah-note">eBay’s service metrics (item not as described / item not received, you vs peers) arrive with the nightly sync.</div>';
+    }
+    var names = { ITEM_NOT_AS_DESCRIBED: 'Item not as described', ITEM_NOT_RECEIVED: 'Item not received' };
+    var by = {};
+    rows.forEach(function (r) { (by[r.account] = by[r.account] || []).push(r); });
+    var h = '<h3 style="margin:14px 0 6px;font-size:13px">Service metrics vs peers <span style="color:var(--text-3);font-weight:600">(eBay’s own evaluation — lower is better)</span></h3><div class="ah-stds">';
+    Object.keys(by).sort().forEach(function (acc) {
+      h += '<div class="ah-std-card"><div class="ah-std-head"><b>' + esc(acc) + '</b>' +
+        '<span class="ah-std-when">' + esc(ahStr((by[acc][0] || {}).synced_at).slice(0, 10)) + '</span></div>' +
+        '<table class="ah-std-tbl"><tbody>';
+      by[acc].forEach(function (m) {
+        var have = m.you != null;
+        var worse = have && m.peer != null && Number(m.you) > Number(m.peer);
+        h += '<tr' + (worse ? ' class="ah-std-bad"' : '') + '>' +
+          '<td>' + esc(names[m.metric_type] || m.metric_type) + '</td>' +
+          '<td class="ah-num">' + (have ? (Number(m.you)).toFixed(2) + '%' : '—') + '</td>' +
+          '<td class="ah-std-thr">peers ' + (m.peer != null ? Number(m.peer).toFixed(2) + '%' : '—') +
+            (m.count != null ? ' · ' + m.count + ' transactions' : '') + '</td>' +
+          '<td>' + (have ? (worse ? '<span class="ah-lvl bad">ABOVE PEERS</span>' : '<span class="ah-lvl top">BEATING PEERS</span>') : '') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    });
+    return h + '</div>';
+  }
+
   function ahPaint(d) {
     var box = $('ahBody');
     if (!box) { return; }
@@ -808,6 +837,7 @@ VIEWS.home = {
        grades each shop at, and every metric behind it with eBay's own thresholds. Everything
        below it is the portal's operational picture; this section is eBay speaking. */
     var h = ahStandards((d && d.standards) || []);
+    h += ahServiceMetrics((d && d.metrics) || []);
 
     h += '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
       '<th>Account</th><th>Active listings</th><th>Orders 7d</th><th>Revenue 7d</th><th>Loss items</th><th>Campaigns</th></tr></thead><tbody>';
