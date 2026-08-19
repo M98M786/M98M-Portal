@@ -744,9 +744,15 @@ function actionAlertsCentre_(payload, ctx) {
       // §8.7 — Wrong Advertising alarms are for the advertising chain; the feed itself is shared
       // and unscoped, so the per-caller gate lives here.
       if (!advAllowed) return;
-      // hidden only for the person who acknowledged it; everyone else sees it with their name on
+      /* Hidden only for the person who acknowledged it. The trail is parsed, never substring-
+         matched: the trail stores the email VERBATIM while the caller's is normalized (googlemail
+         folds to gmail, dots drop), so indexOf would fail for exactly Sir Hasib's own address —
+         and a free-text note quoting someone's email would hide the alarm for the wrong person. */
       var ack = String(r.acknowledged_by || '');
-      if (ack && ack.toLowerCase().indexOf(meNorm) >= 0) return;
+      var mine = ack.split('|').some(function (part) {
+        return normalizeEmail(part.split(' @ ')[0]) === meNorm;
+      });
+      if (mine) return;
       r.seen_by = ack;
     }
     if (wantSeverity && alertsNorm_(r.severity) !== wantSeverity) return;

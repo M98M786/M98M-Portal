@@ -98,6 +98,7 @@
     '.al-msg{font-size:13.5px;font-weight:700;line-height:1.55;word-break:break-word}' +
     '.al-do{margin-top:11px;border:1px solid var(--gold-line-hi);border-radius:10px;padding:10px 12px;background:rgba(233,169,60,.06);font-size:12.5px;font-weight:700;line-height:1.55;word-break:break-word}' +
     '.al-do .k{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--gold-a);margin-bottom:4px}' +
+    '.al-seen{color:var(--gold-a);font-weight:700}' +
     '.al-from{margin-top:11px;font-size:11px;font-weight:700;color:var(--text-3);line-height:1.6;word-break:break-word}' +
     '.al-from .mono{color:var(--text-2)}' +
     '.al-acts{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}' +
@@ -511,6 +512,7 @@
              fact off the sheet and never used to decide whether this alert is open. */
           (resolvedAt ? esc(' · the report also carries resolved_at ' + resolvedAt) : '') +
           (pending && alStr(r.resolved_by) ? esc(' · portal record: ' + alStr(r.resolved_by)) : '') +
+          (alStr(r.seen_by) ? '<span class="al-seen"> · seen by ' + esc(alStr(r.seen_by).split(' @ ')[0]) + '</span>' : '') +
         '</div>' +
         (pending ?
           '<div class="al-note" style="margin-top:10px">Marked resolved in the portal — it stays here until the report agent’s next run rebuilds the sheet.</div>' : '') +

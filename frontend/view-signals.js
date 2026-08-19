@@ -93,7 +93,8 @@
     '.sig-fig.loss b{color:var(--sig-c)}',
     /* Money that is still money gets the metallic treatment; the minus figure never does. */
     '.sig-fig.gold b{background:linear-gradient(110deg,var(--gold-c),var(--gold-a) 40%,var(--gold-b));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}',
-    '.sig-vs{align-self:center;padding-bottom:5px;font-size:11.5px;font-weight:800;color:var(--text-3);letter-spacing:.08em}',
+    '.sig-vs{align-self:center;padding-bottom:5px;font-size:11.5px;font-weight:800;color:var(--text-3);letter-spacing:.08em}' +
+    '.sig-note{flex-basis:100%;font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:6px;line-height:1.5}',
     '.sig-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}',
     '.sig-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;border:1px solid var(--gold-line);font-size:11.5px;font-weight:700;color:var(--text-2);min-width:0}',
     '.sig-chip b{color:var(--sig-c);font-weight:800}',
@@ -337,17 +338,14 @@
       /* This card's row stores money, not a metric-vs-baseline pair: value is the item's net
          after the CPC allowance, baseline its raw profit. The generic wording below rendered it
          as "Yesterday −0.27 · Its normal line 1.73 · BELOW ITS NORMAL LINE" — the exact nonsense
-         Sir Hasib circled. It reads as an advertising verdict now. */
-      var live = sgField(rec, 'live_on_ebay'), wants = sgField(rec, 'manager_wants');
-      if (live !== null || wants !== null) {
-        if (live !== null) { out += sgFig('big loss', 'Live on eBay', sgStr(live) || 'unknown'); }
-        out += '<div class="sig-vs">AGAINST</div>';
-        if (wants !== null) { out += sgFig('big gold', 'Manager wants', sgStr(wants) || 'unknown'); }
-      }
+         Sir Hasib circled. The SIGNALS row carries only the two money figures, so the card is the
+         money verdict; the live-vs-wanted campaign detail lives on the Wrong ads screen. */
       var net = sgField(rec, 'value');
-      if (net !== null) { out += sgFig(Number(net) < 0 ? 'loss' : '', 'Net after CPC', sgGbp(net)); }
       var rawp = sgField(rec, 'baseline');
-      if (rawp !== null) { out += sgFig('', 'Raw profit', sgGbp(rawp)); }
+      if (net !== null) { out += sgFig(Number(net) < 0 ? 'big loss' : 'big', 'Net after CPC', sgGbp(net)); }
+      if (net !== null && rawp !== null) { out += '<div class="sig-vs">AGAINST</div>'; }
+      if (rawp !== null) { out += sgFig('gold', 'Raw profit', sgGbp(rawp)); }
+      out += '<div class="sig-note">The advertising on this item disagrees with the decision — the Wrong ads screen has the live-vs-wanted detail.</div>';
       return out;
     }
 
