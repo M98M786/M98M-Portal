@@ -275,6 +275,19 @@ function paint() {
     '<div class="card enter d2"><div class="hd">Profit against ad spend ' +
       '<span class="hint">gold is what the business kept · blue is what the ads took · below N/T 1.00 profit outran the ads</span></div>' +
       '<div class="bd">' + chart(d) + '</div></div>' +
+    '<div class="card enter d3" style="margin-top:16px"><div class="hd">Item-by-item P&L ' +
+      '<span class="hint">the Sales Analysis sheet\u2019s own columns \u00b7 real fees, real costs, both ad families</span></div>' +
+      '<div class="bd">' +
+        '<div class="pnl-chips">' +
+          '<button class="minibtn" data-pnl-r="1">Today</button>' +
+          '<button class="minibtn" data-pnl-r="2">Yesterday</button>' +
+          '<button class="minibtn on" data-pnl-r="7">7 days</button>' +
+          '<button class="minibtn" data-pnl-r="30">30 days</button>' +
+          '<select class="alx-sel" id="pnlAcc"><option value="">All accounts</option></select>' +
+          '<span id="pnlWhen" style="margin-left:auto;font-size:11px;color:var(--text-3);font-weight:700"></span>' +
+        '</div>' +
+        '<div id="pnlBody"><div class="spinner"></div></div>' +
+      '</div></div>' +
     '<div class="card enter d3" style="margin-top:16px"><div class="hd">The ledger ' +
       '<span class="hint">' + esc(d.period.current_label) + ' · straight from your Sales Analysis sheets</span></div>' +
       '<div class="bd">' + ledger(d) + '</div></div>' +
@@ -368,4 +381,92 @@ VIEWS.dashboard = {
     load(false);
   }
 };
+
+  /* ---- the per-item P&L (Hasib item 4/21): his sheet's chain, verified to the penny ----
+     True OE = OE − AliExpress − Priority ads incl VAT · Raw = True OE − VAT to HMRC.
+     Rows missing real fees or costs carry a flag instead of quietly pretending. */
+  var PNL = { days: 7, account: '' };
+
+  function pnlGBP(v) { var n = Number(v) || 0; return (n < 0 ? '−£' + Math.abs(n).toFixed(2) : '£' + n.toFixed(2)); }
+
+  function pnlLoad() {
+    var box = $('pnlBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    var ukDay = function (off) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(Date.now() - off * 86400000)); };
+    var from, to;
+    if (PNL.days === 2) { from = to = ukDay(1); }
+    else if (PNL.days === 1) { from = to = ukDay(0); }
+    else { from = ukDay(PNL.days - 1); to = ukDay(0); }
+    var payload = { from: from, to: to };
+    if (PNL.account) { payload.account = PNL.account; }
+    api('itemPnl', payload).then(function (d) {
+      d = d || {};
+      var when = $('pnlWhen');
+      if (when) { when.textContent = d.from + ' \u2192 ' + d.to; }
+      var rows = d.rows || [];
+      if (!rows.length) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No orders in this range.</div>'; return; }
+      var head = '<tr><th>Item</th><th class="pnl-g-sale">Sold</th><th>Qty</th><th class="pnl-g-sale">HMRC VAT</th>' +
+        '<th class="pnl-g-fee">eBay fees (real)</th><th class="pnl-g-fee">Fee VAT</th><th class="pnl-g-fee">Order earning</th>' +
+        '<th class="pnl-g-ali">AliExpress</th><th class="pnl-g-ali">Ali VAT</th>' +
+        '<th>Qty via Priority</th><th class="pnl-g-pri">Priority fees</th><th class="pnl-g-pri">Priority incl VAT</th>' +
+        '<th>Qty via General</th><th class="pnl-g-gen">General incl VAT</th>' +
+        '<th class="pnl-g-out">True earning</th><th>VAT to HMRC</th><th class="pnl-g-out">Raw profit</th></tr>';
+      var body = rows.map(function (r) {
+        var flags = [];
+        if (!r.fees_complete) { flags.push('fees partial'); }
+        if (!r.cost_complete) { flags.push('cost partial'); }
+        return '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+            esc(String(r.title || r.item_id).slice(0, 90)) + '</a>' +
+            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) +
+            (flags.length ? ' \u00b7 <span class="pnl-flag">' + flags.join(' \u00b7 ') + '</span>' : '') + '</div></td>' +
+          '<td class="pnl-g-sale">' + pnlGBP(r.revenue) + '</td><td>' + (r.qty || 0) + '</td><td class="pnl-g-sale">' + pnlGBP(r.vat_out) + '</td>' +
+          '<td class="pnl-g-fee">' + pnlGBP(r.fees) + '</td><td class="pnl-g-fee">' + pnlGBP(r.fees_vat) + '</td><td class="pnl-g-fee">' + pnlGBP(r.oe) + '</td>' +
+          '<td class="pnl-g-ali">' + pnlGBP(r.ali_cost) + '</td><td class="pnl-g-ali">' + pnlGBP(r.ali_vat) + '</td>' +
+          '<td>' + (r.pri_qty || 0) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_fees) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_incl) + '</td>' +
+          '<td>' + (r.gen_qty || 0) + '</td><td class="pnl-g-gen">' + pnlGBP(r.gen_incl) + '</td>' +
+          '<td class="pnl-g-out">' + pnlGBP(r.true_oe) + '</td><td>' + pnlGBP(r.vat_hmrc) + '</td>' +
+          '<td class="pnl-g-out' + (Number(r.raw_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.raw_profit) + '</td></tr>';
+      }).join('');
+      var t = d.total || {};
+      var totalRow = '<tr class="pnl-total"><td>GRAND TOTAL \u00b7 ' + rows.length + ' item(s)</td>' +
+        '<td>' + pnlGBP(t.revenue) + '</td><td>' + (t.qty || 0) + '</td><td>' + pnlGBP(t.vat_out) + '</td>' +
+        '<td>' + pnlGBP(t.fees) + '</td><td>' + pnlGBP(t.fees_vat) + '</td><td>' + pnlGBP(t.oe) + '</td>' +
+        '<td>' + pnlGBP(t.ali_cost) + '</td><td>' + pnlGBP(t.ali_vat) + '</td>' +
+        '<td>' + (t.pri_qty || 0) + '</td><td>' + pnlGBP(t.pri_fees) + '</td><td>' + pnlGBP(t.pri_incl) + '</td>' +
+        '<td>' + (t.gen_qty || 0) + '</td><td>' + pnlGBP(t.gen_incl) + '</td>' +
+        '<td>' + pnlGBP(t.true_oe) + '</td><td>' + pnlGBP(t.vat_hmrc) + '</td>' +
+        '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td></tr>';
+      box.innerHTML = '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">True earning = order earning \u2212 AliExpress \u2212 Priority ads incl VAT \u00b7 Raw profit = true earning \u2212 VAT to HMRC \u00b7 General ad fees already sit inside the eBay fees.</p>';
+    }).catch(function (e) {
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not compute the P&L.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
+    });
+  }
+
+  (function wirePnl() {
+    var orig = VIEWS.dashboard.init;
+    VIEWS.dashboard.init = function () {
+      if (orig) { orig.apply(this, arguments); }
+      document.querySelectorAll('[data-pnl-r]').forEach(function (b) {
+        b.onclick = function () {
+          document.querySelectorAll('[data-pnl-r]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          PNL.days = Number(this.getAttribute('data-pnl-r')) || 7;
+          pnlLoad();
+        };
+      });
+      cachedCall('accountList', {}, function (d) {
+        var sel = $('pnlAcc');
+        if (!sel) { return; }
+        sel.innerHTML = '<option value="">All accounts</option>' + (((d && d.accounts) || []).map(function (a) {
+          var n = String(a.account || '').trim();
+          return n ? '<option>' + esc(n) + '</option>' : '';
+        }).join(''));
+        sel.onchange = function () { PNL.account = String(this.value || ''); pnlLoad(); };
+      });
+      pnlLoad();
+    };
+  })();
+
 })();
