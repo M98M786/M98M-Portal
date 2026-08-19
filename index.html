@@ -591,6 +591,7 @@ VIEWS.home = {
     var u=STATE.user;
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
+     '<div id="hmBrief"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -607,6 +608,44 @@ VIEWS.home = {
        '<div class="bd" id="agendaBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
   },
   init:function(){
+    /* Management's briefing — the three numbers that decide whether the morning is calm, each a
+       click from its full screen. Staff roles keep the plain page; every feed fails into honest
+       words, never a spinner that stays. */
+    (function(){
+      var u=STATE.user||{};
+      var mgmt = u.role==='Management' || u.role==='Ops Head' || u.isSuper;
+      var box=$('hmBrief');
+      if(!mgmt || !box){ return; }
+      var tile=function(label,value,sub,view,tone){
+        return '<div class="card" data-hm-nav="'+view+'" style="cursor:pointer;flex:1;min-width:150px"><div class="bd" style="padding:14px 16px">'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">'+label+'</div>'+
+          '<div style="font-size:23px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums;'+(tone?'color:var(--'+tone+')':'')+'">'+value+'</div>'+
+          (sub?'<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:3px">'+sub+'</div>':'')+
+        '</div></div>';
+      };
+      var slots={money:'',late:'',cs:''};
+      var paint=function(){
+        box.innerHTML='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'+slots.money+slots.late+slots.cs+'</div>';
+        var tiles=box.querySelectorAll('[data-hm-nav]');
+        for(var i=0;i<tiles.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles[i]); }
+      };
+      var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
+      var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
+      api('dailyReport',{}).then(function(d){
+        var y=ukDay(1), t={sold:0,profit:0,ads:0};
+        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.profit+=Number(r.profit)||0; t.ads+=Number(r.ads)||0; } });
+        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.profit)+' profit · '+gbp(t.ads)+' ads', 'dailyReport', 'gold-a'); paint();
+      }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
+      api('dispatchLive',{}).then(function(d){
+        var n=Number(d&&d.late_count)||0;
+        slots.late=tile('Late right now', String(n), n?gbp(d.late_value)+' of orders past eBay\u2019s deadline':'nothing past its deadline', 'dispatch', n?'bad':'ok'); paint();
+      }).catch(function(){ slots.late=tile('Late right now','—','the dispatch feed did not answer','dispatch',''); paint(); });
+      api('csDesk',{}).then(function(d){
+        var ours=0; ((d&&d.open)||[]).forEach(function(c){ if(c.our_move){ ours++; } });
+        slots.cs=tile('CS needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
+      }).catch(function(){ slots.cs=tile('CS needs our reply','—','the CS feed did not answer','csDesk',''); paint(); });
+      paint();
+    })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }
       api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
