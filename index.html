@@ -1552,7 +1552,7 @@ VIEWS.home = {
       if (rf) { rf.onclick = acLoad; }
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
-      AC.timer = setInterval(function () { if ($('acBody')) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
+      AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
     }
   };
 })();
@@ -4950,10 +4950,15 @@ function createMeeting() {
         '</div></div>';
     },
     init: function () {
-      ['ocPrice', 'ocAli', 'ocCpc', 'ocAdRate', 'ocCat'].forEach(function (id) {
+      ['ocPrice', 'ocAli', 'ocCpc', 'ocAdRate'].forEach(function (id) {
         var el = $(id);
         if (el) { el.oninput = ocCalc; el.onchange = ocCalc; }
       });
+      /* A hand-picked category is a decision: once the seller touches the select, the title
+         matcher stops overriding it (it resumes only when the title box is cleared). */
+      var manualCat = false;
+      var catSel = $('ocCat');
+      if (catSel) { catSel.onchange = function () { manualCat = true; ocCalc(); }; }
       var dp = $('ocDiscPct'), da = $('ocDiscAmt');
       if (dp) { dp.oninput = function () { OC_DISC_MODE = 'pct'; ocCalc(); }; }
       if (da) { da.oninput = function () { OC_DISC_MODE = 'amt'; ocCalc(); }; }
@@ -4961,13 +4966,18 @@ function createMeeting() {
       if (tt) {
         tt.oninput = function () {
           var hint = $('ocAutoHint'), sel = $('ocCat');
+          if (!this.value) { manualCat = false; if (hint) { hint.textContent = ''; } return; }
+          if (manualCat) {
+            if (hint) { hint.textContent = 'Keeping your category — clear the title to re-enable auto-pick.'; }
+            return;
+          }
           var pick = ocAutoPick(this.value);
           if (pick >= 0 && sel) {
             sel.value = String(pick);
             if (hint) { hint.textContent = 'Auto-picked: ' + OC_FLAT[pick].n + ' — change it below if that’s wrong.'; }
             ocCalc();
           } else if (hint) {
-            hint.textContent = this.value ? 'No confident match — pick the category below.' : '';
+            hint.textContent = 'No confident match — pick the category below.';
           }
         };
       }
@@ -10479,7 +10489,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             esc(String(r.title || r.item_id).slice(0, 90)) + '</a>' +
             '<span class="ld-meta">£' + (Number(r.price) || 0).toFixed(2) + ' · ' + esc(String(r.account)) + ' · ' + esc(String(r.item_id)) +
             ' · listed ' + esc(String(r.born).slice(0, 10)) + ' (' + esc(String(r.clock)) + ') · 0 sold</span></div>';
-        if (pend && d.mgmt) {
+        var mayDecide = (d.canDecide !== undefined) ? d.canDecide : d.mgmt;
+        if (pend && mayDecide) {
           h += '<div class="ld-acts">' +
             '<button class="minibtn" data-ld-v="END">End it → Team Lead</button>' +
             '<button class="minibtn" data-ld-v="REVISE">Revise →</button>' +
@@ -12584,7 +12595,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         t('ordersBoard', 'Overdue dispatch', d.overdue, d.awaiting + ' open orders', Number(d.overdue) > 0) +
         t('adsCentre', 'Ad spend today', gbp(d.ad_spend_today), d.ad_sold_today + ' sold via ads') +
         t('adsCentre', 'Wasting £3+ today', d.waste_n, 'no order yet', Number(d.waste_n) > 0) +
-        t('traffic', 'Impressions today', (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views') +
+        t('traffic', 'Impressions · ' + (d.traffic_date ? esc(String(d.traffic_date).slice(5)) : 'latest'), (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views · eBay trails a day') +
         t('listingDecisions', 'Zero-sale decisions', d.zero_sale_pending, 'waiting on Management', Number(d.zero_sale_pending) > 0) +
         t('campaignWatch', 'Campaign gaps', (Number(d.uncampaigned) || 0) + ' / ' + (Number(d.duplicates) || 0), 'no campaign / duplicated', Number(d.duplicates) > 0) +
         t('alerts', 'Unhandled letters', d.letters_open, 'the Engine’s own bells', Number(d.letters_open) > 0) +
@@ -19812,8 +19823,8 @@ function saveSchedule() {
           '<span class="sub">impressions, views, CTR and conversion — per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
-            '<button class="minibtn on" data-tr-r="7">7 days</button>' +
-            '<button class="minibtn" data-tr-r="30">30 days</button>' +
+            '<button class="minibtn' + (TR.range === 7 ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
+            '<button class="minibtn' + (TR.range === 30 ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
             '<select class="alx-sel" id="trAcc"><option value="">All accounts</option></select>' +
             '<button class="minibtn" id="trRefresh" style="margin-left:auto">Refresh</button></div>' +
           '<div id="trBody"><div class="spinner"></div></div>' +
@@ -19835,6 +19846,8 @@ function saveSchedule() {
           var n = String(a.account || '').trim();
           return n ? '<option>' + esc(n) + '</option>' : '';
         }).join(''));
+        /* repaints (cached then fresh) must not clobber a selection the user already made */
+        if (TR.account) { sel.value = TR.account; }
         sel.onchange = function () { TR.account = String(this.value || ''); trLoad(); };
       });
       var rf = $('trRefresh');

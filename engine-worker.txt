@@ -394,10 +394,12 @@ async function listingSync(env) {
       throw new Error(acct + ' GetMyeBaySelling p' + page + ': ' + (xmlTag(xml, 'LongMessage') || ('HTTP ' + r.status)).slice(0, 160));
     }
     const items = xml.match(/<Item>[\s\S]*?<\/Item>/g) || [];
+    /* Batched: 200 single .run()s per page were 200 separate subrequests inside a shared slot. */
+    const upserts = [];
     for (const it of items) {
       const id = xmlTag(it, 'ItemID');
       if (!id) continue;
-      await env.DB.prepare(
+      upserts.push(env.DB.prepare(
         'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at, start_time, first_seen) ' +
         "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now'), ?7, datetime('now')) " +
         "ON CONFLICT(item_id) DO UPDATE SET account=?2, title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now'), " +
@@ -411,8 +413,9 @@ async function listingSync(env) {
         /* the 7-day-rule age clock: eBay's own StartTime when the XML carries it (first_seen
            stays as the fallback clock and is never overwritten once set) */
         String(xmlTag(it, 'StartTime') || '').replace('T', ' ').replace(/\.\d+Z$/, '').replace('Z', '')
-      ).run();
+      ));
     }
+    for (let i = 0; i < upserts.length; i += 50) await env.DB.batch(upserts.slice(i, i + 50));
     const totalPages = Number(xmlTag(xmlTag(xml, 'ActiveList'), 'TotalNumberOfPages')) || 1;
     const next = page >= totalPages ? 1 : page + 1;
     await env.DB.prepare(
@@ -501,14 +504,13 @@ async function zeroSaleScan(env) {
     "  AND NOT EXISTS (SELECT 1 FROM listing_decisions d WHERE d.item_id = i.item_id) " +
     'LIMIT 25'
   ).all();
-  let queued = 0;
-  for (const r of (rs.results || [])) {
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note) " +
-      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', '')"
-    ).bind(r.item_id, r.account, String(r.title || ''), Number(r.price) || 0, String(r.born), String(r.clock)).run();
-    queued++;
-  }
+  const rows = rs.results || [];
+  const ins = rows.map((r) => env.DB.prepare(
+    "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note) " +
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', '')"
+  ).bind(r.item_id, r.account, String(r.title || ''), Number(r.price) || 0, String(r.born), String(r.clock)));
+  for (let i = 0; i < ins.length; i += 50) await env.DB.batch(ins.slice(i, i + 50));
+  const queued = rows.length;
   if (queued) {
     await notifyRole(env, 'Management', 'Zero-sale listings need a decision',
       queued + ' new listing(s) passed 7 days with no sale — decide end or revise on the Listing decisions board.',
@@ -642,6 +644,12 @@ async function notifyRole(env, role, type, message, ref) {
 async function flushNotifyQueue(env) {
   const rs = await env.DB.prepare('SELECT id, to_addr, type, message, ref, tries FROM notify_queue ORDER BY id LIMIT 8').all();
   for (const row of (rs.results || [])) {
+    /* CLAIM before send: the five cron slots coincide at every quarter-hour and each ends in a
+       flush — two overlapping flushes both read the same rows and staff got the bell twice.
+       The tries counter doubles as a compare-and-swap; the loser skips the row. */
+    const claim = await env.DB.prepare('UPDATE notify_queue SET tries = tries + 1 WHERE id = ?1 AND tries = ?2')
+      .bind(row.id, Number(row.tries) || 0).run();
+    if (!claim.meta || !claim.meta.changes) continue;
     let ok = false;
     try {
       const r = await fetch(env.AS_URL, {
@@ -661,9 +669,8 @@ async function flushNotifyQueue(env) {
         "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('notifyQueue', '', '', '', ?1) " +
         'ON CONFLICT(job, account) DO UPDATE SET last_error = ?1'
       ).bind(('dropped after 30 tries: ' + row.type + ' → ' + row.to_addr).slice(0, 300)).run();
-    } else {
-      await env.DB.prepare('UPDATE notify_queue SET tries = tries + 1 WHERE id = ?1').bind(row.id).run();
     }
+    /* No else: the claim above already advanced tries — the row simply waits for the next flush. */
   }
 }
 
@@ -1491,6 +1498,15 @@ const ADS_FAMILIES = {
    land in ads_today (replaced wholesale — partial-day totals), never in ads_daily. */
 async function adsIntraday(env) {
   const day = ukDate('');
+  /* Rollover is a hard reset: rows from any other day are DELETED, not zeroed — so "today" on
+     every board is only ever today, and a family that stopped spending can't strand yesterday's
+     numbers behind the other family's fresh day stamp. */
+  await env.DB.prepare('DELETE FROM ads_today WHERE day != ?1').bind(day).run();
+  /* Zombie tasks (a 404-forever id, a report eBay quietly dropped) must not gate the kick loop:
+     any intraday task still PENDING after 2 hours is failed and forgotten. */
+  await env.DB.prepare(
+    "UPDATE ad_report_tasks SET status = 'FAILED', error = 'intraday timeout' WHERE status = 'PENDING' AND family LIKE '%_intra' AND created_at < datetime('now', '-2 hour')"
+  ).run();
   const accs = await env.DB.prepare('SELECT name FROM accounts WHERE api_enabled = 1').all();
   for (const a of (accs.results || [])) {
     const acct = a.name;
@@ -1499,12 +1515,24 @@ async function adsIntraday(env) {
 
     // 1) poll anything pending for this account
     const pend = await env.DB.prepare(
-      "SELECT task_id, family FROM ad_report_tasks WHERE account = ?1 AND status = 'PENDING' AND family LIKE '%_intra'"
+      "SELECT task_id, family, report_date FROM ad_report_tasks WHERE account = ?1 AND status = 'PENDING' AND family LIKE '%_intra'"
     ).bind(acct).all();
     let polled = 0;
     for (const t of (pend.results || [])) {
+      /* A task kicked before UK midnight completes AFTER it — ingesting that report under the
+         new day would stamp yesterday's full spend as today's and ring every waste bell again.
+         The report's own date decides; a stale one is dropped unread. */
+      if (String(t.report_date) !== day) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = 'stale day — never ingested' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
+        polled++;
+        continue;
+      }
       const tr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task/' + encodeURIComponent(t.task_id), {
         headers: { authorization: 'Bearer ' + tok } });
+      if (tr.status === 404 || tr.status === 400) {
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = 'task gone HTTP ' || ?3 WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id, String(tr.status)).run();
+        continue;
+      }
       if (!tr.ok) continue;
       const task = await tr.json();
       const st = String(task.reportTaskStatus || '');
@@ -1539,7 +1567,10 @@ async function adsIntraday(env) {
       });
       if (cr.status !== 202 && !cr.ok) continue;
       const loc = cr.headers.get('location') || '';
-      const taskId = loc.split('/').filter(Boolean).pop() || ('ti' + fam);
+      const taskId = loc.split('/').filter(Boolean).pop();
+      /* No location header → no trackable id. Never fabricate one: a made-up id polls 404
+         forever and (before the timeout above) wedged the kick gate for good. */
+      if (!taskId) continue;
       await env.DB.prepare(
         "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
         "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) ON CONFLICT(account, task_id) DO NOTHING"
@@ -1568,10 +1599,8 @@ async function ingestAdsToday(env, acct, day, tsv, isCpc) {
     const a = (agg[lid] = agg[lid] || { s: 0, c: 0, u: 0 });
     a.s += sum(cS); a.c += sum(cC); a.u += sum(cU);
   }
-  // zero this family's columns for the account first: an item that stopped spending must not
-  // keep yesterday's snapshot
-  if (isCpc) await env.DB.prepare('UPDATE ads_today SET cpc_spend = 0, cpc_clicks = 0, cpc_sales = 0 WHERE account = ?1 AND day != ?2 AND (cpc_spend != 0 OR cpc_clicks != 0 OR cpc_sales != 0)').bind(acct, day).run();
-  else await env.DB.prepare('UPDATE ads_today SET spend = 0, clicks = 0, sales = 0 WHERE account = ?1 AND day != ?2 AND (spend != 0 OR clicks != 0 OR sales != 0)').bind(acct, day).run();
+  /* Day rollover is handled by adsIntraday's DELETE of any other-day rows before polling —
+     within one day the report is cumulative, so an item present earlier is present later too. */
   /* CHANGE-ONLY writes (20 Aug): a full rewrite of ~570 rows per ingest was ~80k D1 rows a day
      on its own — most snapshots move a handful of items, so unchanged rows are skipped. The
      prefetch is one read; the day column doubles as the rollover marker. */
@@ -1612,6 +1641,12 @@ async function wasteAlarm(env) {
     'WHERE t.day = ?1 AND (t.spend + t.cpc_spend) >= 3 AND (t.sales + t.cpc_sales) = 0 LIMIT 20'
   ).bind(day).all();
   for (const r of (rs.results || [])) {
+    /* Once per item per day means the BELL too, not just the letter: the query re-matches a
+       wasting item on every 5-minute tick, so the letter file is checked BEFORE queueing —
+       without this, one bad item rang ~180 times a day. */
+    const rung = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1')
+      .bind('waste:' + r.item_id + ':' + day).first();
+    if (rung) continue;
     await queueNotify(env, 'advertising', 'Ad waste',
       '🔴 £' + Number(r.sp).toFixed(2) + ' spent TODAY on ' + r.item_id + ' · ' + r.account +
       (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
@@ -1673,6 +1708,12 @@ async function trafficSync(env) {
           "INSERT INTO traffic_listing (account, item_id, range_days, impressions, views, transactions, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
           'ON CONFLICT(account, item_id, range_days) DO UPDATE SET impressions=?4, views=?5, transactions=?6, updated_at=datetime(\'now\')'
         ).bind(acct, lid, range, v(idx('LISTING_IMPRESSION_TOTAL')), v(idx('LISTING_VIEWS_TOTAL')), v(idx('TRANSACTION'))));
+      }
+      /* Replace, don't accrete: the report is top-300 by impressions, and a listing that ended
+         or fell out would otherwise keep its stale window forever and crowd live listings off
+         the board. Deleted only AFTER a good fetch, so a bad hour never blanks the screen. */
+      if (stmts.length) {
+        await env.DB.prepare('DELETE FROM traffic_listing WHERE account = ?1 AND range_days = ?2').bind(acct, range).run();
       }
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
@@ -1884,6 +1925,18 @@ function ukDate(iso) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
+
+/* The ISO instant where the current UK trading day began — for comparing against raw UTC
+   created_at stamps in SQL. Same probe ordersBoard uses: try GMT, then BST. */
+function ukDayStartIso() {
+  const today = ukDate('');
+  let ms = Date.parse(today + 'T00:00:00Z');
+  for (const off of [0, -3600000]) {
+    const cand = Date.parse(today + 'T00:00:00Z') + off;
+    if (ukDate(new Date(cand).toISOString()) === today && ukDate(new Date(cand - 1000).toISOString()) !== today) { ms = cand; break; }
+  }
+  return new Date(ms).toISOString();
+}
 
 /* Nightly rollups (§3): sales_daily per account per UK day (last 8 days re-rolled, so late
    orders correct yesterday), avg_profit_7d per item, and the daily_health snapshot. Ads spend
@@ -2244,7 +2297,9 @@ const ROUTES = {
      the honest cadence — the data is as fresh as eBay built its last report, nothing pretended. */
   adsBoard: {
     auth: 'any', fn: async (p, ctx) => {
-      if (CAMPAIGN_ROLES.indexOf(ctx.user.role) < 0 && MGMT_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      /* Account-level ad-spend totals are a money read: the gate mirrors the screen's own
+         role list exactly (CAMPAIGN_ROLES also carries CS, which must not see totals). */
+      if (['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const day = ukDate('');
       const today = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS spend_t, (t.clicks + t.cpc_clicks) AS clicks_t, ' +
@@ -2253,8 +2308,8 @@ const ROUTES = {
       ).bind(day).all();
       const hist = await ctx.env.DB.prepare(
         "SELECT a.item_id, a.account, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend_14, SUM(a.clicks + a.cpc_clicks) AS clicks_14, " +
-        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= date('now', '-14 day') GROUP BY a.item_id, a.account"
-      ).all();
+        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= ?1 GROUP BY a.item_id, a.account"
+      ).bind(ukDate(new Date(Date.now() - 14 * 86400000).toISOString())).all();
       const hBy = {};
       for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
       const items = [];
@@ -2310,7 +2365,7 @@ const ROUTES = {
       const range = Number(p.range) === 30 ? 30 : 7;
       const days = await ctx.env.DB.prepare(
         "SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily " +
-        "WHERE date >= date('now', '-30 day')" + (account ? ' AND account = ?1' : '') + ' ORDER BY date'
+        "WHERE date >= '" + ukDate(new Date(Date.now() - 30 * 86400000).toISOString()) + "'" + (account ? ' AND account = ?1' : '') + ' ORDER BY date'
       ).bind(...(account ? [account] : [])).all();
       const listings = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, t.impressions, t.views, t.transactions, i.title, i.status AS listing_status ' +
@@ -2404,23 +2459,32 @@ const ROUTES = {
       return memo('mgmtPulse', 60000, async () => {
         const one = async (sql) => { const r = await ctx.env.DB.prepare(sql).first(); return r || {}; };
         const today = ukDate('');
-        const money = await one(
-          "SELECT COUNT(*) AS orders_n, ROUND(COALESCE(SUM(sold), 0), 2) AS revenue FROM orders WHERE date(created_at) = date('now') AND status != 'NOT_FOUND'");
+        /* "today" means the UK trading day everywhere on this strip: orders compare against the
+           UK-midnight instant (date('now') is UTC and disagrees for an hour each summer night),
+           and overdue compares ISO-to-ISO — ship_by holds 'T'-form stamps that SQL's space-form
+           datetime('now') text-compare can never call overdue on the same date. */
+        const money = (await ctx.env.DB.prepare(
+          "SELECT COUNT(*) AS orders_n, ROUND(COALESCE(SUM(sold), 0), 2) AS revenue FROM orders WHERE created_at >= ?1 AND status != 'NOT_FOUND'"
+        ).bind(ukDayStartIso()).first()) || {};
         const ads = await one(
           'SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS spend, COALESCE(SUM(sales + cpc_sales), 0) AS sold, ' +
           "SUM(CASE WHEN spend + cpc_spend >= 3 AND sales + cpc_sales = 0 THEN 1 ELSE 0 END) AS waste_n FROM ads_today WHERE day = '" + today + "'");
-        const disp = await one(
-          "SELECT SUM(CASE WHEN ship_by != '' AND ship_by < datetime('now') THEN 1 ELSE 0 END) AS overdue, COUNT(*) AS awaiting " +
-          "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND') AND created_at >= datetime('now', '-6 day')");
+        const disp = (await ctx.env.DB.prepare(
+          "SELECT SUM(CASE WHEN ship_by != '' AND ship_by < ?1 THEN 1 ELSE 0 END) AS overdue, COUNT(*) AS awaiting " +
+          "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND') AND created_at >= datetime('now', '-6 day')"
+        ).bind(new Date().toISOString()).first()) || {};
         const zs = await one("SELECT COUNT(*) AS n FROM listing_decisions WHERE status = 'PENDING'");
         const mail = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''");
         const unc = await one(
           "SELECT COUNT(*) AS n FROM items_api ia WHERE status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id)");
         const dup = await one(
           "SELECT COUNT(DISTINCT account || '|' || listing_id) AS n FROM dup_state WHERE alerted_day != ''");
+        /* eBay's traffic data trails by up to a day — a row for the current UK day essentially
+           never exists yet, and reading it painted "0 impressions today" every morning. The
+           strip shows the LATEST completed day and says which day it is. */
         const traffic = (await ctx.env.DB.prepare(
-          'SELECT COALESCE(SUM(impressions), 0) AS impressions, COALESCE(SUM(views), 0) AS views FROM traffic_daily WHERE date = ?1'
-        ).bind(today).first()) || {};
+          'SELECT date, SUM(impressions) AS impressions, SUM(views) AS views FROM traffic_daily GROUP BY date ORDER BY date DESC LIMIT 1'
+        ).first()) || {};
         const listings = await one("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'");
         return { day: today,
           orders_today: Number(money.orders_n) || 0, revenue_today: Number(money.revenue) || 0,
@@ -2429,6 +2493,7 @@ const ROUTES = {
           zero_sale_pending: Number(zs.n) || 0, letters_open: Number(mail.n) || 0,
           uncampaigned: Number(unc.n) || 0, duplicates: Number(dup.n) || 0,
           impressions_today: Number(traffic.impressions) || 0, views_today: Number(traffic.views) || 0,
+          traffic_date: String(traffic.date || ''),
           active_listings: Number(listings.n) || 0 };
       });
     },
@@ -2439,24 +2504,33 @@ const ROUTES = {
   alertMail: {
     auth: 'any', fn: async (p, ctx) => {
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      /* Some bells are addressed to a ROLE alias, not a person — wasteAlarm and the campaign
+         alarms write to 'advertising'. The mail view resolves the alias so the Advertising
+         Manager actually reads their own alarms; 'management' letters ride the mgmt=all path. */
+      const addrs = [ctx.user.email];
+      if (ctx.user.role === 'Advertising Manager') addrs.push('advertising');
       const rs = await ctx.env.DB.prepare(
         'SELECT id, to_addr, type, message, ref, created_at, resolved_by, resolved_at, note FROM alert_log ' +
-        (mgmt ? '' : 'WHERE to_addr = ?1 ') +
+        (mgmt ? '' : 'WHERE to_addr IN (?1, ?2) ') +
         "ORDER BY CASE WHEN resolved_at = '' THEN 0 ELSE 1 END, id DESC LIMIT 200"
-      ).bind(...(mgmt ? [] : [ctx.user.email])).all();
+      ).bind(...(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).all();
       const open = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''" + (mgmt ? '' : ' AND to_addr = ?1')
-      ).bind(...(mgmt ? [] : [ctx.user.email])).first();
+        "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''" + (mgmt ? '' : ' AND to_addr IN (?1, ?2)')
+      ).bind(...(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).first();
       return { rows: rs.results || [], open: Number(open && open.n) || 0, mgmt };
     },
   },
   alertMailResolve: {
     auth: 'any', fn: async (p, ctx) => {
       const id = Number(p.id) || 0;
-      const row = await ctx.env.DB.prepare('SELECT id, to_addr, resolved_at FROM alert_log WHERE id = ?1').bind(id).first();
-      if (!row) throw new Error('SAY: that alert is gone');
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
-      if (!mgmt && String(row.to_addr) !== ctx.user.email) throw new AuthError('auth');
+      const row = await ctx.env.DB.prepare('SELECT id, to_addr, resolved_at FROM alert_log WHERE id = ?1').bind(id).first();
+      /* One error for "not yours" AND "not there" below mgmt — a distinguishable not-found
+         message let any signed-in user count the org's alert stream by probing ids. */
+      const mine = row && (String(row.to_addr) === ctx.user.email ||
+        (String(row.to_addr) === 'advertising' && ctx.user.role === 'Advertising Manager'));
+      if (!mgmt && !mine) throw new AuthError('auth');
+      if (!row) throw new Error('SAY: that alert is gone');
       if (String(row.resolved_at)) throw new Error('SAY: already handled — refresh');
       await ctx.env.DB.prepare(
         "UPDATE alert_log SET resolved_by = ?2, resolved_at = datetime('now'), note = ?3 WHERE id = ?1"
@@ -2481,7 +2555,10 @@ const ROUTES = {
         ).all();
         listers = ls.results || [];
       }
-      return { rows: rs.results || [], mgmt, listers,
+      /* Seeing the queue and deciding it are different powers: the Team Lead reads everything
+         but only Management/Ops Head get live buttons — the screen keys off canDecide. */
+      const canDecide = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || !!ctx.user.super;
+      return { rows: rs.results || [], mgmt, canDecide, listers,
         note: 'A listing enters this queue once, when it passes 7 days with no sale (eBay’s StartTime where the sync has it, portal first-seen otherwise, and each row names its clock).' };
     },
   },
@@ -2497,9 +2574,12 @@ const ROUTES = {
       const row = await ctx.env.DB.prepare("SELECT item_id, account, title, status FROM listing_decisions WHERE item_id = ?1").bind(item).first();
       if (!row) throw new Error('SAY: that listing is not in the queue');
       if (row.status !== 'PENDING') throw new Error('SAY: already decided (' + row.status + ') — refresh the board');
-      await ctx.env.DB.prepare(
-        "UPDATE listing_decisions SET status = ?2, decided_by = ?3, decided_at = datetime('now'), assignee = ?4, note = ?5 WHERE item_id = ?1"
+      /* The UPDATE itself is the referee: two managers deciding at once both pass the SELECT
+         above, but only the write that still finds PENDING wins — the loser's bells never fire. */
+      const claim = await ctx.env.DB.prepare(
+        "UPDATE listing_decisions SET status = ?2, decided_by = ?3, decided_at = datetime('now'), assignee = ?4, note = ?5 WHERE item_id = ?1 AND status = 'PENDING'"
       ).bind(item, verdict, ctx.user.email, verdict === 'END' ? '' : assignee, note).run();
+      if (!claim.meta || !claim.meta.changes) throw new Error('SAY: someone else just decided this one — refresh the board');
       const label = String(row.title || item).slice(0, 70);
       if (verdict === 'END') {
         await notifyRole(ctx.env, 'Team Lead', 'End this listing',
@@ -2768,13 +2848,17 @@ const ROUTES = {
         String(f.current_sup || ''), String(f.sup1_link || ''), String(f.sup2_link || ''),
         String(f.sup3_link || ''), String(f.category || '')));
       for (let i = 0; i < batch.length; i += 50) await ctx.env.DB.batch(batch.slice(i, i + 50));
-      for (const r of risers.slice(0, 12)) {
+      try {
+      /* Capped and shielded: the costs are already committed above, so a notify hiccup must
+         never fail the push (a thrown error made Apps Script skip the remaining chunks). */
+      for (const r of risers.slice(0, 5)) {
         const msg = 'Cost up ' + Math.round((r.newC - r.oldC) * 100) + 'p on ' + (r.title || r.id).slice(0, 70) +
           ' (' + r.id + (r.account ? ', ' + r.account : '') + '): £' + r.oldC.toFixed(2) + ' → £' + r.newC.toFixed(2) +
           '. Revise the sale price or switch supplier.';
         await notifyRole(ctx.env, 'Pricing', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
         await notifyRole(ctx.env, 'Management', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
       }
+      } catch (e) { /* letters are best-effort — the cost write above already succeeded */ }
       return { synced: batch.length, risers: risers.length };
     },
   },
