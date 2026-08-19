@@ -629,6 +629,21 @@ VIEWS.home = {
 (function () {
 
   VIEW_CSS.push(
+    '.ah-stds{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-bottom:18px}' +
+    '.ah-std-card{border:1px solid var(--gold-line);border-radius:12px;padding:14px;background:var(--panel-2)}' +
+    '.ah-std-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}' +
+    '.ah-std-head b{font-size:14px}' +
+    '.ah-std-when{margin-left:auto;font-size:10.5px;color:var(--text-3);font-weight:700;text-transform:uppercase;letter-spacing:.06em}' +
+    '.ah-lvl{font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 9px;border-radius:99px}' +
+    '.ah-lvl.top{background:var(--gold-soft,rgba(246,208,107,.15));color:var(--gold-a)}' +
+    '.ah-lvl.mid{background:var(--panel);color:var(--text-2);border:1px solid var(--gold-line)}' +
+    '.ah-lvl.bad{background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}' +
+    '.ah-std-tbl{width:100%;border-collapse:collapse;font-size:12px}' +
+    '.ah-std-tbl td{padding:5px 8px;border-bottom:1px solid var(--gold-line)}' +
+    '.ah-std-tbl tr:last-child td{border-bottom:none}' +
+    '.ah-std-thr{color:var(--text-3);font-size:10.5px;text-align:right}' +
+    '.ah-std-bad td{color:var(--bad)}' +
+    '.ah-note{color:var(--text-3);font-weight:600;font-size:12.5px;margin-bottom:14px}' +
     '.ah-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}' +
     '.ah-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.ah-tbl td{padding:9px 12px;border-bottom:1px solid var(--gold-line)}' +
@@ -658,6 +673,57 @@ VIEWS.home = {
     });
   }
 
+  /* One metric value, in eBay's own shapes: booleans, plain numbers, and rate objects
+     ({value, numerator, denominator}) all occur in seller_standards_profile. */
+  function ahMetricValue(m) {
+    var v = m && m.value;
+    if (v === true) { return '✓'; }
+    if (v === false) { return '✗'; }
+    if (v !== null && typeof v === 'object') {
+      var pct = ahStr(v.value);
+      var frac = (v.numerator != null && v.denominator != null) ? ' (' + v.numerator + ' of ' + v.denominator + ')' : '';
+      return pct + '%' + frac;
+    }
+    return ahStr(v);
+  }
+
+  function ahLevelPill(level) {
+    var l = ahStr(level);
+    var cls = /TOP/.test(l) ? 'top' : /BELOW/.test(l) ? 'bad' : 'mid';
+    return '<span class="ah-lvl ' + cls + '">' + esc(l.replace(/_/g, ' ') || '—') + '</span>';
+  }
+
+  function ahStandards(rows) {
+    if (!rows.length) {
+      return '<div class="ah-note">eBay\u2019s seller-standards report arrives with the nightly sync — nothing stored yet.</div>';
+    }
+    var h = '<div class="ah-stds">';
+    rows.forEach(function (r) {
+      var p = (r.profiles || [])[0] || {};
+      var cyc = p.cycle || {};
+      h += '<div class="ah-std-card">' +
+        '<div class="ah-std-head"><b>' + esc(ahStr(r.account)) + '</b>' + ahLevelPill(p.standardsLevel) +
+          '<span class="ah-std-when">' + esc(ahStr(p.program).replace('PROGRAM_', '')) +
+          (cyc.evaluationMonth ? ' · evaluated ' + esc(ahStr(cyc.evaluationMonth)) : '') + '</span></div>';
+      var mets = p.metrics || [];
+      if (mets.length) {
+        h += '<table class="ah-std-tbl"><tbody>';
+        mets.forEach(function (m) {
+          var below = /BELOW/.test(ahStr(m.level));
+          h += '<tr' + (below ? ' class="ah-std-bad"' : '') + '>' +
+            '<td>' + esc(ahStr(m.name || m.metricKey)) + '</td>' +
+            '<td class="ah-num">' + esc(ahMetricValue(m)) + '</td>' +
+            '<td>' + ahLevelPill(m.level) + '</td>' +
+            '<td class="ah-std-thr">' + (m.thresholdLowerBound != null ? 'needs ' + esc(String(m.thresholdLowerBound)) : '') + '</td>' +
+          '</tr>';
+        });
+        h += '</tbody></table>';
+      }
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
+
   function ahPaint(d) {
     var box = $('ahBody');
     if (!box) { return; }
@@ -670,7 +736,12 @@ VIEWS.home = {
       if (String(t.day) < todayUk && !(t.account in prev)) { prev[t.account] = t; }
     });
 
-    var h = '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
+    /* eBay's own verdict first — this is THE account health report: the standards level eBay
+       grades each shop at, and every metric behind it with eBay's own thresholds. Everything
+       below it is the portal's operational picture; this section is eBay speaking. */
+    var h = ahStandards((d && d.standards) || []);
+
+    h += '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
       '<th>Account</th><th>Active listings</th><th>Orders 7d</th><th>Revenue 7d</th><th>Loss items</th><th>Campaigns</th></tr></thead><tbody>';
     now.forEach(function (r) {
       var p = prev[r.account] || null;

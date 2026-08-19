@@ -2492,7 +2492,16 @@ const ROUTES = {
         'SELECT day, account, listings, orders_7d, revenue_7d, loss_items, json FROM daily_health ORDER BY day DESC LIMIT 84'
       ).all();
       const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job, account').all();
-      return { now, trend: trend.results || [], sync: sync.results || [] };
+      /* eBay's own seller-standards verdict per account — the report this screen existed for.
+         standardsSync has been landing it in cs_standards since the re-consents; serving it is
+         what turns "account health is all useless" into eBay's actual TOP_RATED scoreboard. */
+      const stdRs = await ctx.env.DB.prepare('SELECT account, json, synced_at FROM cs_standards ORDER BY account').all();
+      const standards = (stdRs.results || []).map((r) => {
+        let profiles = [];
+        try { profiles = JSON.parse(r.json || '[]'); } catch (e) { profiles = []; }
+        return { account: r.account, synced_at: r.synced_at, profiles };
+      });
+      return { now, trend: trend.results || [], sync: sync.results || [], standards };
     },
   },
 
