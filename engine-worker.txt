@@ -75,7 +75,7 @@ export default {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan, uncampaignedDigest],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
@@ -423,6 +423,29 @@ async function markEndedListings(env) {
    saw one, first_seen is the honest fallback and the row says which clock it used. Items only
    enter the queue while young (7 to 21 days) so day one doesn't drown Management in old stock;
    each item is queued once, ever — the decision row itself is the dedupe. */
+/* Hasib item 20: an order being worked with NO supplier link anywhere — not on the order, not
+   in any of the item's three supplier columns — is a dispatch stall waiting to happen. The
+   Order Processors get the letter, one per item ever (alert_log is the memory), and the link
+   lands via the order screen's own add-link box. */
+async function noSupplierScan(env) {
+  const rs = await env.DB.prepare(
+    "SELECT o.item_id, MIN(o.order_id) AS order_id, o.account, COUNT(*) AS n, MAX(i.title) AS title " +
+    "FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id LEFT JOIN items_api i ON i.item_id = o.item_id " +
+    "WHERE o.status NOT IN ('FULFILLED', 'NOT_FOUND') AND o.created_at >= datetime('now', '-5 day') " +
+    "  AND COALESCE(o.ali_link, '') = '' AND o.item_id != '' " +
+    "  AND COALESCE(f.sup1_link, '') = '' AND COALESCE(f.sup2_link, '') = '' AND COALESCE(f.sup3_link, '') = '' AND COALESCE(f.current_sup, '') = '' " +
+    "  AND NOT EXISTS (SELECT 1 FROM alert_log a WHERE a.ref = 'engine:nosup:' || o.item_id) " +
+    'GROUP BY o.item_id, o.account LIMIT 10'
+  ).all();
+  for (const r of (rs.results || [])) {
+    await notifyRole(env, 'Order Processor', 'Supplier link missing',
+      'Order ' + r.order_id + ' (' + r.account + ') is being worked but ' + String(r.title || r.item_id).slice(0, 60) +
+      ' (' + r.item_id + ') has NO supplier link anywhere — not on the order, not in the sheet. Add it on the order screen or update the sheet.' +
+      (Number(r.n) > 1 ? ' ' + r.n + ' open orders are on this item.' : ''),
+      'engine:nosup:' + r.item_id);
+  }
+}
+
 /* Item 9's bell: the advertising person hears ONCE a day how many active listings sit in no
    campaign — a digest, not a flood; the list itself lives on the Campaign watch screen. */
 async function uncampaignedDigest(env) {
@@ -3309,7 +3332,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

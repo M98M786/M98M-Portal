@@ -1,0 +1,7 @@
+[
+ {
+  "file": "Tasks.gs",
+  "find": "function taskCanCreate_(role, email, type) {\n  if (isMgmt_(role, email)) return true;\n  if (role === 'Team Lead') return true;\n  if (role === 'Advertising Manager') return type === 'listing_revision';\n  return false;\n}",
+  "replace": "function taskCanCreate_(role, email, type) {\n  if (isMgmt_(role, email)) return true;\n  if (role === 'Team Lead') return true;\n  if (role === 'Advertising Manager') return type === 'listing_revision';\n  /* Hasib item 19: every approved staff member can hand a task or a lead to anyone. The open\n     types only \u2014 the privileged types above keep their gates. */\n  return type === 'general' || type === 'query' || type === 'supplier_add';\n}"
+ }
+]
