@@ -123,6 +123,7 @@
   function oSum(rows) {
     var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
     rows.forEach(function (r) { t.sold += oN(r.sold); t.oe += oN(r.oe); t.cost += oN(r.cost); t.ads += oN(r.ads); t.profit += oN(r.profit); });
+    t.net = t.profit - t.ads;               // the min-to-max truth: what is left AFTER advertising
     return t;
   }
 
@@ -145,7 +146,25 @@
        "Loading…" for ever — indistinguishable from a slow network, and the reason this screen
        looked dead rather than broken. A feed that fails now says so, in its own panel, with a
        way back. */
-    api('dailyReport', {}).then(function (d) { O.days = (d && d.rows) || []; oPaintDated(); })
+    api('dailyReport', {}).then(function (d) {
+      O.days = (d && d.rows) || [];
+      /* Night-list fix ("wrong stats"): the nightly book knows nothing of today — merge the
+         server's LIVE overlay in: real revenue/cost from orders, INTRADAY ad spend, and order
+         earning from fee-landed orders only. Larger value wins so a late rollup never shrinks. */
+      var live = (d && d.today_live) || [], today = (d && d.today) || ukToday();
+      var by = {};
+      O.days.forEach(function (r) { if (r.date === today) { by[r.account] = r; } });
+      live.forEach(function (l) {
+        var b = by[l.account];
+        if (!b) { b = { account: l.account, date: today, sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 }; by[l.account] = b; O.days.push(b); }
+        b.sold = Math.max(oN(b.sold), oN(l.sold));
+        b.cost = Math.max(oN(b.cost), oN(l.cost));
+        b.ads = Math.max(oN(b.ads), oN(l.ads));
+        if (!oN(b.oe)) { b.oe = oN(l.oe_known); }
+        b.profit = oN(b.oe) - oN(b.cost);
+      });
+      oPaintDated();
+    })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
       O.ov = d || {};
@@ -244,7 +263,8 @@
     var todayLive = O.ov && O.ov.kpis && O.ov.kpis.today;
     box.innerHTML =
       '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.sold) + '</div>' + delta(cur.sold, prev.sold) + '<div class="kpi-s">orders money in the range</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">sheet projection × units</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">order earning − goods cost</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Net after ads</div><div class="kpi-v' + (cur.net < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.net) + '</div>' + delta(cur.net, prev.net) + '<div class="kpi-s">profit minus ad spend — the keep-money</div></div>' +
       '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">after eBay, before AliExpress</div></div>' +
       '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(cur.ads) + '</div>' + delta(cur.ads, prev.ads) + '<div class="kpi-s">real spend where consented</div></div>' +
       '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.cost) + '</div>' + delta(cur.cost, prev.cost) + '<div class="kpi-s">per-unit sheet cost × units</div></div>' +

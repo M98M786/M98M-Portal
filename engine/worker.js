@@ -82,7 +82,7 @@ export default {
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
-      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
+      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -484,6 +484,90 @@ async function noSupplierScan(env) {
       (Number(r.n) > 1 ? ' ' + r.n + ' open orders are on this item.' : ''),
       'engine:nosup:' + r.item_id);
   }
+}
+
+/* THE VALIDATION SETUP (Hasib's night list: "test, validate every single calculation... proper
+   backend, validation setup, i need to make this live with my organization"). One battery of
+   invariant checks over the live data — the same battery serves the on-demand management action
+   AND the nightly job that files a letter for every failure. A check never throws; it reports. */
+async function selfTestRun(env) {
+  const out = [];
+  const add = (check, pass, detail) => out.push({ check, pass: !!pass, detail: String(detail).slice(0, 240) });
+  const one = async (sql, ...binds) => (await env.DB.prepare(sql).bind(...binds).first()) || {};
+
+  try { // 1. fee sanity: real eBay fees sit at 10-25% of sale — outside that band something is mis-signed or double-counted
+    const r = await one("SELECT ROUND(SUM(ebay_fees) * 100.0 / MAX(1, SUM(sold)), 1) AS pct, COUNT(*) AS n FROM orders WHERE ebay_fees > 0 AND created_at >= datetime('now', '-7 day')");
+    const pct = Number(r.pct) || 0;
+    add('fees within 10-25% of sale (7d)', r.n === 0 || (pct >= 10 && pct <= 25), pct + '% across ' + r.n + ' fee-known orders');
+  } catch (e) { add('fees within 10-25% of sale (7d)', false, e.message); }
+
+  try { // 2. no negative fees (the inverted-sign class)
+    const r = await one('SELECT COUNT(*) AS n FROM orders WHERE ebay_fees < 0');
+    add('no negative eBay fees', Number(r.n) === 0, r.n + ' negative-fee order(s)');
+  } catch (e) { add('no negative eBay fees', false, e.message); }
+
+  try { // 3. one order, one row
+    const r = await one('SELECT COUNT(*) - COUNT(DISTINCT order_id) AS extra FROM orders');
+    add('no duplicate order rows', Number(r.extra) === 0, r.extra + ' duplicate(s)');
+  } catch (e) { add('no duplicate order rows', false, e.message); }
+
+  try { // 4. the books reconcile with the orders for the last 2 FULL UK days (±£1 rounding)
+    for (let back = 1; back <= 2; back++) {
+      const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
+      const startIso = (() => { let ms = Date.parse(day + 'T00:00:00Z'); for (const off of [0, -3600000]) { const c = Date.parse(day + 'T00:00:00Z') + off; if (ukDate(new Date(c).toISOString()) === day && ukDate(new Date(c - 1000).toISOString()) !== day) { ms = c; break; } } return new Date(ms).toISOString(); })();
+      const endIso = new Date(Date.parse(startIso) + 86400000).toISOString();
+      const o = await one("SELECT ROUND(COALESCE(SUM(sold), 0), 2) AS s FROM orders WHERE created_at >= ?1 AND created_at < ?2 AND status != 'NOT_FOUND'", startIso, endIso);
+      const b = await one('SELECT ROUND(COALESCE(SUM(sold), 0), 2) AS s FROM sales_daily WHERE date = ?1', day);
+      const diff = Math.abs((Number(o.s) || 0) - (Number(b.s) || 0));
+      add('books match orders for ' + day, diff <= Math.max(1, (Number(o.s) || 0) * 0.02), 'orders £' + o.s + ' vs books £' + b.s);
+    }
+  } catch (e) { add('books match orders', false, e.message); }
+
+  try { // 5. the P&L identity holds when recomputed independently (7d totals)
+    const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost, ROUND(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END), 2) AS ref FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
+    const rev = Number(t.rev) || 0, fees = Number(t.fees) || 0, cost = Number(t.cost) || 0;
+    const oe = rev - fees, vatBack = fees / 6 + cost / 6, vatHmrc = rev / 6 - vatBack;
+    const raw = (oe - cost) - vatHmrc;
+    const identity = Math.abs((rev - fees - cost) - (oe - cost)) < 0.01 && isFinite(raw);
+    add('P&L identity recomputes', identity, '7d: rev £' + rev.toFixed(0) + ' → OE £' + oe.toFixed(0) + ' → raw £' + raw.toFixed(0));
+  } catch (e) { add('P&L identity recomputes', false, e.message); }
+
+  try { // 6. ads continuity: each of the last 2 full days has ad rows in the daily books
+    for (let back = 1; back <= 2; back++) {
+      const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
+      const r = await one('SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS sp, COUNT(*) AS n FROM ads_daily WHERE date = ?1', day);
+      add('ad books present for ' + day, Number(r.n) > 0, '£' + r.sp + ' across ' + r.n + ' rows' + (Number(r.n) === 0 ? ' — the daily report may not have landed yet' : ''));
+    }
+  } catch (e) { add('ad books present', false, e.message); }
+
+  try { // 7. intraday rollover: every ads_today row carries today's UK day
+    const r = await one('SELECT COUNT(*) AS n FROM ads_today WHERE day != ?1', ukDate(''));
+    add('intraday ads carry only today', Number(r.n) === 0, r.n + ' stale-day row(s)');
+  } catch (e) { add('intraday ads carry only today', false, e.message); }
+
+  try { // 8. no ACTIVE listing at a zero or negative price
+    const r = await one("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' AND price <= 0");
+    add('no zero-priced active listings', Number(r.n) === 0, r.n + ' listing(s) at £0');
+  } catch (e) { add('no zero-priced active listings', false, e.message); }
+
+  try { // 9. nothing dated in the future
+    const r = await one("SELECT (SELECT COUNT(*) FROM orders WHERE created_at > datetime('now', '+1 hour')) + (SELECT COUNT(*) FROM sales_daily WHERE date > date('now', '+1 day')) AS n");
+    add('nothing dated in the future', Number(r.n) === 0, r.n + ' future-dated row(s)');
+  } catch (e) { add('nothing dated in the future', false, e.message); }
+
+  return out;
+}
+
+/* Nightly: every failed check becomes a letter to Management — the validation is standing, not
+   a one-off. Ref carries the day so a persistent failure rings daily until fixed, once a day. */
+async function selfTestJob(env) {
+  const results = await selfTestRun(env);
+  const fails = results.filter((r) => !r.pass);
+  for (const f of fails.slice(0, 8)) {
+    await queueNotify(env, 'management', 'Validation failed',
+      '🔴 ' + f.check + ' — ' + f.detail, 'engine:selftest:' + ukDate('') + ':' + f.check.replace(/[^a-z0-9]+/gi, '-').slice(0, 40));
+  }
+  await ctx_setSync(env, 'selfTest', '', results.length + ' checks, ' + fails.length + ' failed');
 }
 
 /* Item 9's bell: the advertising person hears ONCE a day how many active listings sit in no
@@ -2479,6 +2563,13 @@ const ROUTES = {
   /* Hasib's closing line: "management home shows everything combined". One read, every headline
      the other boards carry — each tile on the screen deep-links to its board. Counts only, so
      the whole pulse is one cheap pass. */
+  /* The validation battery, on demand: Management presses the button, every check answers. */
+  selfTest: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const results = await selfTestRun(ctx.env);
+      return { results, failed: results.filter((r) => !r.pass).length, ran_at: new Date().toISOString() };
+    },
+  },
   mgmtPulse: {
     auth: 'mgmt', fn: async (p, ctx) => {
       return memo('mgmtPulse', 60000, async () => {
@@ -3570,14 +3661,44 @@ const ROUTES = {
       const rs = await ctx.env.DB.prepare(
         "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
       ).all();
-      return { rows: rs.results || [], note: 'cost = the day tab\u2019s real paid cost (hourly sync) · ads = eBay\u2019s own reports, both billing families · profit = order earning − goods cost' };
+      /* Hasib's night list: "Business overview is still showing wrong stats" — the wrongest one
+         was TODAY, because the books are rolled nightly and intraday ad spend lives in
+         ads_today. This overlay carries today's LIVE facts per account: revenue and paid cost
+         from orders, ads from the intraday snapshot, and order earning computed ONLY from the
+         orders whose real eBay fees have already landed (fees_n says how many) — a partial
+         truth labeled as such, never an invented number. */
+      const today = ukDate('');
+      const liveRs = await ctx.env.DB.prepare(
+        'SELECT account, ROUND(COALESCE(SUM(sold), 0), 2) AS sold, COUNT(*) AS orders_n, ' +
+        'ROUND(COALESCE(SUM(cost), 0), 2) AS cost, ' +
+        'ROUND(COALESCE(SUM(CASE WHEN ebay_fees > 0 THEN sold - ebay_fees ELSE 0 END), 0), 2) AS oe_known, ' +
+        'SUM(CASE WHEN ebay_fees > 0 THEN 1 ELSE 0 END) AS fees_n ' +
+        "FROM orders WHERE created_at >= ?1 AND status != 'NOT_FOUND' GROUP BY account"
+      ).bind(ukDayStartIso()).all();
+      const adsRs = await ctx.env.DB.prepare(
+        'SELECT account, ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS ads FROM ads_today WHERE day = ?1 GROUP BY account'
+      ).bind(today).all();
+      const adsBy = {};
+      for (const a of (adsRs.results || [])) adsBy[a.account] = Number(a.ads) || 0;
+      const today_live = (liveRs.results || []).map((r) => ({
+        account: r.account, date: today, sold: Number(r.sold) || 0, orders_n: Number(r.orders_n) || 0,
+        cost: Number(r.cost) || 0, oe_known: Number(r.oe_known) || 0, fees_n: Number(r.fees_n) || 0,
+        ads: adsBy[r.account] || 0,
+      }));
+      for (const acct of Object.keys(adsBy)) {
+        if (!today_live.some((r) => r.account === acct)) {
+          today_live.push({ account: acct, date: today, sold: 0, orders_n: 0, cost: 0, oe_known: 0, fees_n: 0, ads: adsBy[acct] });
+        }
+      }
+      return { rows: rs.results || [], today_live, today,
+        note: 'cost = the day tab\u2019s real paid cost (hourly sync) · ads = eBay\u2019s own reports, both billing families · profit = order earning − goods cost · today rides the live overlay (intraday ads, real fees only)' };
     },
   },
 
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

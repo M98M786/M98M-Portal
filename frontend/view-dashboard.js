@@ -283,6 +283,11 @@ function paint() {
           '<button class="minibtn" data-pnl-r="2">Yesterday</button>' +
           '<button class="minibtn on" data-pnl-r="7">7 days</button>' +
           '<button class="minibtn" data-pnl-r="30">30 days</button>' +
+          '<select class="alx-sel" id="pnlSort" title="Order of the rows">' +
+            '<option value="asc">Profit: min \u2192 max (losses first)</option>' +
+            '<option value="desc">Profit: max \u2192 min</option>' +
+            '<option value="rev">Revenue: biggest first</option>' +
+          '</select>' +
           '<select class="alx-sel" id="pnlAcc"><option value="">All accounts</option></select>' +
           '<span id="pnlWhen" style="margin-left:auto;font-size:11px;color:var(--text-3);font-weight:700"></span>' +
         '</div>' +
@@ -406,6 +411,14 @@ VIEWS.dashboard = {
       if (when) { when.textContent = d.from + ' \u2192 ' + d.to; }
       var rows = d.rows || [];
       if (!rows.length) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No orders in this range.</div>'; return; }
+      /* Hasib's night list, verbatim: "i need profits calculated from min to max" — losses lead
+         by default, so the money leaks are the first thing every morning. */
+      var sortKey = PNL.sort || 'asc';
+      rows.sort(function (a, b) {
+        if (sortKey === 'rev') { return (Number(b.revenue) || 0) - (Number(a.revenue) || 0); }
+        var d2 = (Number(a.actual_profit) || 0) - (Number(b.actual_profit) || 0);
+        return sortKey === 'desc' ? -d2 : d2;
+      });
       var head = '<tr><th>Item</th><th class="pnl-g-sale">Sold</th><th>Qty</th><th class="pnl-g-sale">HMRC VAT</th>' +
         '<th class="pnl-g-fee">eBay fees (real)</th><th class="pnl-g-fee">Fee VAT</th><th class="pnl-g-fee">Order earning</th>' +
         '<th class="pnl-g-ali">AliExpress</th><th class="pnl-g-ali">Ali VAT</th>' +
@@ -453,6 +466,8 @@ VIEWS.dashboard = {
     var orig = VIEWS.dashboard.init;
     VIEWS.dashboard.init = function () {
       if (orig) { orig.apply(this, arguments); }
+      var srt = $('pnlSort');
+      if (srt) { srt.onchange = function () { PNL.sort = String(this.value || 'asc'); pnlLoad(); }; }
       document.querySelectorAll('[data-pnl-r]').forEach(function (b) {
         b.onclick = function () {
           document.querySelectorAll('[data-pnl-r]').forEach(function (x) { x.classList.remove('on'); });

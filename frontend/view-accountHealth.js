@@ -278,9 +278,34 @@
     prefetch: function () { return ahFetch(); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">health</span></h1>' +
-          '<span class="sub">Live Engine numbers · arrows compare with last night\'s snapshot · sync problems surface here first</span></div>' +
+          '<span class="sub">Live Engine numbers · arrows compare with last night\'s snapshot · sync problems surface here first</span>' +
+          '<button class="minibtn" id="ahSelfTest" style="margin-left:auto">Run validation</button></div>' +
+        '<div id="ahSelfTestOut"></div>' +
         '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>';
     },
-    init: function () { ahLoad(); }
+    init: function () {
+      ahLoad();
+      /* The night list's validation setup, one press: every calculation invariant answers. The
+         same battery runs nightly on its own and files a letter for every failure. */
+      var st = $('ahSelfTest');
+      if (st) {
+        st.onclick = function () {
+          var out = $('ahSelfTestOut');
+          out.innerHTML = '<div class="card enter d1" style="margin-bottom:14px"><div class="bd"><div class="spinner"></div></div></div>';
+          api('selfTest', {}).then(function (d) {
+            var rows = (d && d.results) || [];
+            var h = '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Validation — ' +
+              ((d.failed || 0) === 0 ? '<span style="color:var(--ok)">all ' + rows.length + ' checks pass</span>' : '<span style="color:var(--bad)">' + d.failed + ' of ' + rows.length + ' checks FAILED</span>') +
+              '<span class="hint">runs nightly on its own — failures land as letters in the Alerts centre</span></div><div class="bd">';
+            rows.forEach(function (r) {
+              h += '<div class="tl-row"><span class="k">' + (r.pass ? '✅' : '🔴') + ' ' + esc(String(r.check)) + '</span><span style="color:var(--text-3);font-weight:600">' + esc(String(r.detail)) + '</span></div>';
+            });
+            out.innerHTML = h + '</div></div>';
+          }).catch(function (e) {
+            out.innerHTML = '<div class="card enter d1" style="margin-bottom:14px"><div class="bd" style="color:var(--bad);font-weight:700">Validation could not run: ' + esc(e.message) + '</div></div>';
+          });
+        };
+      }
+    }
   };
 })();
