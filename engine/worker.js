@@ -75,7 +75,7 @@ export default {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
@@ -376,15 +376,19 @@ async function listingSync(env) {
       const id = xmlTag(it, 'ItemID');
       if (!id) continue;
       await env.DB.prepare(
-        'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at) ' +
-        "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now')) " +
-        "ON CONFLICT(item_id) DO UPDATE SET account=?2, title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now')"
+        'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at, start_time, first_seen) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now'), ?7, datetime('now')) " +
+        "ON CONFLICT(item_id) DO UPDATE SET account=?2, title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now'), " +
+        "start_time = CASE WHEN ?7 != '' THEN ?7 ELSE start_time END"
       ).bind(
         id, acct,
         xmlTag(it, 'Title'),
         Number(xmlTag(it, 'CurrentPrice')) || 0,
         Number(xmlTag(it, 'QuantityAvailable') || xmlTag(it, 'Quantity')) || 0,
-        xmlTag(it, 'GalleryURL')
+        xmlTag(it, 'GalleryURL'),
+        /* the 7-day-rule age clock: eBay's own StartTime when the XML carries it (first_seen
+           stays as the fallback clock and is never overwritten once set) */
+        String(xmlTag(it, 'StartTime') || '').replace('T', ' ').replace(/\.\d+Z$/, '').replace('Z', '')
       ).run();
     }
     const totalPages = Number(xmlTag(xmlTag(xml, 'ActiveList'), 'TotalNumberOfPages')) || 1;
@@ -411,6 +415,40 @@ async function markEndedListings(env) {
   await env.DB.prepare(
     "UPDATE items_api SET status = 'ENDED' WHERE status = 'ACTIVE' AND api_synced_at < datetime('now', '-1 day')"
   ).run();
+}
+
+/* THE 7-DAY RULE (Hasib, item 12): a NEW listing that has sold nothing in its first week goes
+   to Management to decide — end it (job lands with the Team Lead) or revise it (job lands with
+   a chosen listing manager). The age clock prefers eBay's own StartTime; where the sync never
+   saw one, first_seen is the honest fallback and the row says which clock it used. Items only
+   enter the queue while young (7 to 21 days) so day one doesn't drown Management in old stock;
+   each item is queued once, ever — the decision row itself is the dedupe. */
+async function zeroSaleScan(env) {
+  const rs = await env.DB.prepare(
+    "SELECT i.item_id, i.account, i.title, i.price, " +
+    "  CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END AS born, " +
+    "  CASE WHEN i.start_time != '' THEN 'eBay start time' ELSE 'first seen by portal' END AS clock " +
+    "FROM items_api i " +
+    "WHERE i.status = 'ACTIVE' AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) != '' " +
+    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) <= datetime('now', '-7 day') " +
+    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-21 day') " +
+    "  AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.item_id = i.item_id) " +
+    "  AND NOT EXISTS (SELECT 1 FROM listing_decisions d WHERE d.item_id = i.item_id) " +
+    'LIMIT 25'
+  ).all();
+  let queued = 0;
+  for (const r of (rs.results || [])) {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note) " +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', '')"
+    ).bind(r.item_id, r.account, String(r.title || ''), Number(r.price) || 0, String(r.born), String(r.clock)).run();
+    queued++;
+  }
+  if (queued) {
+    await notifyRole(env, 'Management', 'Zero-sale listings need a decision',
+      queued + ' new listing(s) passed 7 days with no sale — decide end or revise on the Listing decisions board.',
+      'engine:zerosale:' + ukDate(''));
+  }
 }
 
 async function statusRefresh(env) {
@@ -2249,6 +2287,56 @@ const ROUTES = {
                                                           for incl-VAT figures, ×0.2 for ex-VAT)
        Raw Profit          = True OE − VAT to HMRC
      Returns ride as a per-item refund column when the cases data carries an amount. */
+  /* Hasib item 12, the read side: the queue of week-old zero-sale listings. Management and the
+     Team Lead see everything; a listing manager sees only revise jobs assigned to them. */
+  zeroSaleList: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const rs = await ctx.env.DB.prepare(
+        'SELECT item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note ' +
+        'FROM listing_decisions ' + (mgmt ? '' : 'WHERE assignee = ?1 ') +
+        'ORDER BY CASE status WHEN \'PENDING\' THEN 0 ELSE 1 END, flagged_at DESC LIMIT 200'
+      ).bind(...(mgmt ? [] : [ctx.user.email])).all();
+      let listers = [];
+      if (mgmt) {
+        const ls = await ctx.env.DB.prepare(
+          "SELECT email, name FROM users WHERE role IN ('Listing Manager', 'Item Lister') AND status = 'approved' ORDER BY name"
+        ).all();
+        listers = ls.results || [];
+      }
+      return { rows: rs.results || [], mgmt, listers,
+        note: 'A listing enters this queue once, when it passes 7 days with no sale (eBay’s StartTime where the sync has it, portal first-seen otherwise, and each row names its clock).' };
+    },
+  },
+  /* The decide lever: END lands with the Team Lead, REVISE with the chosen listing manager,
+     KEEP closes the row quietly. Only Management/Ops Head decide. */
+  zeroSaleDecide: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || ''), verdict = String(p.verdict || '').toUpperCase();
+      const assignee = String(p.assignee || ''), note = String(p.note || '').slice(0, 300);
+      if (['END', 'REVISE', 'KEEP'].indexOf(verdict) < 0) throw new Error('SAY: the decision is END, REVISE or KEEP');
+      if (verdict === 'REVISE' && !assignee) throw new Error('SAY: pick which listing manager gets the revise job');
+      const row = await ctx.env.DB.prepare("SELECT item_id, account, title, status FROM listing_decisions WHERE item_id = ?1").bind(item).first();
+      if (!row) throw new Error('SAY: that listing is not in the queue');
+      if (row.status !== 'PENDING') throw new Error('SAY: already decided (' + row.status + ') — refresh the board');
+      await ctx.env.DB.prepare(
+        "UPDATE listing_decisions SET status = ?2, decided_by = ?3, decided_at = datetime('now'), assignee = ?4, note = ?5 WHERE item_id = ?1"
+      ).bind(item, verdict, ctx.user.email, verdict === 'END' ? '' : assignee, note).run();
+      const label = String(row.title || item).slice(0, 70);
+      if (verdict === 'END') {
+        await notifyRole(ctx.env, 'Team Lead', 'End this listing',
+          'Management decided: END ' + label + ' (' + item + ', ' + row.account + ') — zero sales in its first week.' + (note ? ' Note: ' + note : ''),
+          'engine:zerosale:end:' + item);
+      } else if (verdict === 'REVISE') {
+        await queueNotify(ctx.env, assignee, 'Revise this listing',
+          'Management decided: REVISE ' + label + ' (' + item + ', ' + row.account + ') — zero sales in its first week. Improve title, photos, price or specifics.' + (note ? ' Note: ' + note : ''),
+          'engine:zerosale:revise:' + item);
+      }
+      await flushNotifyQueue(ctx.env);
+      return { ok: true, item_id: item, verdict };
+    },
+  },
   itemPnl: {
     auth: 'any', fn: async (p, ctx) => {
       if (ITEM_PROFIT_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
@@ -3092,7 +3180,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
