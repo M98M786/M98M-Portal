@@ -574,6 +574,15 @@ async function queueNotify(env, to, type, message, ref) {
   await env.DB.prepare(
     "INSERT INTO notify_queue (to_addr, type, message, ref, created_at, tries) VALUES (?1, ?2, ?3, ?4, datetime('now'), 0)"
   ).bind(String(to), String(type), String(message).slice(0, 900), String(ref)).run();
+  /* Hasib item 7: a bell that vanishes after sending is why the alerts centre read as useless.
+     Every bell is also a letter in alert_log — subject, body, who, when — so the centre can show
+     it like mail and let someone mark it handled. Same (recipient, ref) never files twice. */
+  try {
+    await env.DB.prepare(
+      "INSERT INTO alert_log (to_addr, type, message, ref, created_at) " +
+      "SELECT ?1, ?2, ?3, ?4, datetime('now') WHERE NOT EXISTS (SELECT 1 FROM alert_log WHERE to_addr = ?1 AND ref = ?4)"
+    ).bind(String(to), String(type), String(message).slice(0, 900), String(ref)).run();
+  } catch (e) { /* the letter is best-effort — the bell itself must never fail on it */ }
 }
 
 /* The bell law fans out by role too: CS events must reach the CS people, not just management —
@@ -2307,6 +2316,36 @@ const ROUTES = {
                                                           for incl-VAT figures, ×0.2 for ex-VAT)
        Raw Profit          = True OE − VAT to HMRC
      Returns ride as a per-item refund column when the cases data carries an amount. */
+  /* Hasib item 7, the read side: the Engine's bells as mail. Management reads every letter;
+     everyone else reads their own inbox. Unhandled first, newest first. */
+  alertMail: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const rs = await ctx.env.DB.prepare(
+        'SELECT id, to_addr, type, message, ref, created_at, resolved_by, resolved_at, note FROM alert_log ' +
+        (mgmt ? '' : 'WHERE to_addr = ?1 ') +
+        "ORDER BY CASE WHEN resolved_at = '' THEN 0 ELSE 1 END, id DESC LIMIT 200"
+      ).bind(...(mgmt ? [] : [ctx.user.email])).all();
+      const open = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''" + (mgmt ? '' : ' AND to_addr = ?1')
+      ).bind(...(mgmt ? [] : [ctx.user.email])).first();
+      return { rows: rs.results || [], open: Number(open && open.n) || 0, mgmt };
+    },
+  },
+  alertMailResolve: {
+    auth: 'any', fn: async (p, ctx) => {
+      const id = Number(p.id) || 0;
+      const row = await ctx.env.DB.prepare('SELECT id, to_addr, resolved_at FROM alert_log WHERE id = ?1').bind(id).first();
+      if (!row) throw new Error('SAY: that alert is gone');
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt && String(row.to_addr) !== ctx.user.email) throw new AuthError('auth');
+      if (String(row.resolved_at)) throw new Error('SAY: already handled — refresh');
+      await ctx.env.DB.prepare(
+        "UPDATE alert_log SET resolved_by = ?2, resolved_at = datetime('now'), note = ?3 WHERE id = ?1"
+      ).bind(id, ctx.user.email, String(p.note || '').slice(0, 300)).run();
+      return { ok: true, id };
+    },
+  },
   /* Hasib item 12, the read side: the queue of week-old zero-sale listings. Management and the
      Team Lead see everything; a listing manager sees only revise jobs assigned to them. */
   zeroSaleList: {
