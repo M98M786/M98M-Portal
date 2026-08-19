@@ -793,10 +793,12 @@ VIEWS.home = {
   }
 
   /* Hasib item 13: the Seller Hub service-metrics panel — your INAD / INR rate against eBay's
-     peer benchmark, per account. Green when you beat the peers, red when you trail them. */
+     peer benchmark, per account, per evaluation row (eBay grades INAD per listing category and
+     INR per shipping region — exactly the rows his screenshot shows). Red only when eBay's own
+     rating says HIGH or VERY HIGH; lower is better throughout. */
   function ahServiceMetrics(rows) {
     if (!rows.length) {
-      return '<div class="ah-note">eBay’s service metrics (item not as described / item not received, you vs peers) arrive with the nightly sync.</div>';
+      return '<div class="ah-note">eBay’s service metrics (item not as described / item not received, you vs peers) arrive with the nightly sync. Accounts without the analytics scope stay absent.</div>';
     }
     var names = { ITEM_NOT_AS_DESCRIBED: 'Item not as described', ITEM_NOT_RECEIVED: 'Item not received' };
     var by = {};
@@ -807,14 +809,22 @@ VIEWS.home = {
         '<span class="ah-std-when">' + esc(ahStr((by[acc][0] || {}).synced_at).slice(0, 10)) + '</span></div>' +
         '<table class="ah-std-tbl"><tbody>';
       by[acc].forEach(function (m) {
-        var have = m.you != null;
-        var worse = have && m.peer != null && Number(m.you) > Number(m.peer);
-        h += '<tr' + (worse ? ' class="ah-std-bad"' : '') + '>' +
-          '<td>' + esc(names[m.metric_type] || m.metric_type) + '</td>' +
-          '<td class="ah-num">' + (have ? (Number(m.you)).toFixed(2) + '%' : '—') + '</td>' +
-          '<td class="ah-std-thr">peers ' + (m.peer != null ? Number(m.peer).toFixed(2) + '%' : '—') +
-            (m.count != null ? ' · ' + m.count + ' transactions' : '') + '</td>' +
-          '<td>' + (have ? (worse ? '<span class="ah-lvl bad">ABOVE PEERS</span>' : '<span class="ah-lvl top">BEATING PEERS</span>') : '') + '</td></tr>';
+        var label = names[m.metric_type] || m.metric_type;
+        (m.dims || []).forEach(function (d) {
+          var have = d.you != null;
+          var bad = /^(HIGH|VERY_HIGH)$/.test(ahStr(d.rating));
+          var verdict = !have ? '' :
+            bad ? '<span class="ah-lvl bad">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>' :
+            /NOT_APPLICABLE/.test(ahStr(d.rating)) || !ahStr(d.rating) ? '<span class="ah-std-thr">too few to grade</span>' :
+            '<span class="ah-lvl top">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>';
+          h += '<tr' + (bad ? ' class="ah-std-bad"' : '') + '>' +
+            '<td>' + esc(label) + (d.dim ? ' · ' + esc(String(d.dim)) : '') + '</td>' +
+            '<td class="ah-num">' + (have ? Number(d.you).toFixed(2) + '%' : '—') + '</td>' +
+            '<td class="ah-std-thr">peers ' + (d.peer != null ? Number(d.peer).toFixed(2) + '%' : '—') +
+              (d.count != null ? ' · ' + d.count + ' case(s)' : '') +
+              (d.transactions != null ? ' · ' + d.transactions + ' transactions' : '') + '</td>' +
+            '<td>' + verdict + '</td></tr>';
+        });
       });
       h += '</tbody></table></div>';
     });
