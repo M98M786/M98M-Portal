@@ -71,8 +71,9 @@ function doPost(e) {
     const entry = ACTIONS[req.action];
     if (!entry) return out_({ ok: false, error: 'unknown action' }, 'REJECT unknown action', req);
 
-    const ctx = authorizeFor_(entry[1], req.idToken);
+    const ctx = authorizeFor_(entry[1], req.idToken, req.session);
     ctx.idToken = req.idToken;                              // batch re-authorises each inner call
+    ctx.session = req.session;
     if (req.idem && seenIdem_(req.idem)) return out_({ ok: true, idempotent: true }, null, req);
     const data = entry[0](req.payload || {}, ctx);
     if (req.idem) markIdem_(req.idem);
@@ -94,9 +95,13 @@ function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: t
 /** The ONE place an access level is enforced. Both a direct call and a batched one go through
  * here, so a batched action can never be checked more loosely than the same action called alone
  * — the risk that makes batching dangerous if each path grows its own copy of the rules. */
-function authorizeFor_(level, idToken) {
+function authorizeFor_(level, idToken, session) {
   if (level === 'public') return { ident: null, user: null };
-  const ident = verifyGoogleToken_(idToken);              // RL-1: throws on any token failure
+  /* Portal sessions (the night list's reload fix): a reload or a new tab arrives with the
+     Engine's own 7-day session instead of a fresh Google pass. The Engine is asked whose it is
+     (sync-key gated, answer cached five minutes); every gate below still reads the USERS row
+     fresh on every request, so deactivation still bites on the very next action. */
+  const ident = sessionIdent_(session) || verifyGoogleToken_(idToken);   // RL-1 either way
   rateLimit_(ident.email);
   const user = loadUser_(ident.email);                    // may be null (not registered yet)
   if (level === 'any' || level === 'super') {
@@ -124,7 +129,7 @@ function actionBatch_(payload, ctx) {
     const entry = ACTIONS[name];
     if (!entry || name === 'batch') return { ok: false, error: 'unknown action' };
     try {
-      const inner = authorizeFor_(entry[1], ctx.idToken);
+      const inner = authorizeFor_(entry[1], ctx.idToken, ctx.session);
       return { ok: true, data: entry[0](call.payload || {}, inner) };
     } catch (err) {
       logActivity_('router', 'ERROR:batch:' + name, name, '', '', String(err && err.stack || err));
@@ -134,6 +139,30 @@ function actionBatch_(payload, ctx) {
     }
   });
   return { results: results };
+}
+
+/** Portal-session identity: ask the Engine whose session this is. Returns an ident shaped like
+ * verifyGoogleToken_'s, or null — it NEVER throws, so the Google path stays the fallback. */
+function sessionIdent_(session) {
+  if (!session || !/^[0-9a-f]{64}$/.test(String(session))) return null;
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'sess_' + String(session).slice(0, 32);
+    const hit = cache.get(key);
+    if (hit) { const h = JSON.parse(hit); return (h && h.email) ? h : null; }
+    const engineUrl = getConfig('engine_url');
+    const syncKey = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');
+    if (!engineUrl || !syncKey) return null;
+    const resp = UrlFetchApp.fetch(engineUrl, { method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ action: 'sessionCheck', key: syncKey, payload: { session: String(session) } }),
+      muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) return null;
+    const j = JSON.parse(resp.getContentText());
+    if (!j || !j.ok || !j.data || !j.data.ok || !j.data.email) { cache.put(key, '{}', 60); return null; }
+    const ident = { email: String(j.data.email), name: String(j.data.email), given_name: '', picture: '' };
+    cache.put(key, JSON.stringify(ident), 300);
+    return ident;
+  } catch (e) { return null; }
 }
 
 /** RL-1 identity: verify Google ID token (signature+aud+exp via Google), return {email,name,...}. */
