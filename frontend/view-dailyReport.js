@@ -77,14 +77,14 @@
       }
       kpiHtml = '<div class="dr-kpis">' +
         tile('Revenue · 7 days', w1.sold, w0.sold, 'prior 7') +
-        tile('Profit est · 7 days', w1.profit, w0.profit, 'prior 7') +
+        tile('Profit · 7 days', w1.profit, w0.profit, 'prior 7') +
         tile('Revenue · month to date', m1.sold, m0.sold, 'last month') +
-        tile('Profit est · month to date', m1.profit, m0.profit, 'last month') +
+        tile('Profit · month to date', m1.profit, m0.profit, 'last month') +
         '</div>';
     }
 
     var h = kpiHtml + '<div class="scroll"><table class="dr-tbl"><thead><tr>' +
-      '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th><th style="text-align:right">Ads</th><th style="text-align:right">Profit est.</th></tr></thead><tbody>';
+      '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th><th style="text-align:right">Ads</th><th style="text-align:right">Profit</th></tr></thead><tbody>';
     order.slice(0, 31).forEach(function (dte) {
       var list = byDay[dte];
       var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
@@ -127,7 +127,7 @@
     prefetch: function () { return drFetch(); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Daily <span class="goldtext">report</span></h1>' +
-          '<span class="sub">UK business days · per-account and day totals · profit is an estimate until the fee feed lands</span></div>' +
+          '<span class="sub">UK business days · per-account and day totals · cost is the real paid cost, ads are eBay\u2019s own report, profit = earning \u2212 goods</span></div>' +
         '<div class="card enter d2"><div class="bd"><div id="drBody"><div class="spinner"></div></div></div></div>';
     },
     init: function () { drLoad(); }
