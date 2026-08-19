@@ -596,7 +596,7 @@
         t('ordersBoard', 'Overdue dispatch', d.overdue, d.awaiting + ' open orders', Number(d.overdue) > 0) +
         t('adsCentre', 'Ad spend today', gbp(d.ad_spend_today), d.ad_sold_today + ' sold via ads') +
         t('adsCentre', 'Wasting £3+ today', d.waste_n, 'no order yet', Number(d.waste_n) > 0) +
-        t('traffic', 'Impressions today', (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views') +
+        t('traffic', 'Impressions · ' + (d.traffic_date ? esc(String(d.traffic_date).slice(5)) : 'latest'), (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views · eBay trails a day') +
         t('listingDecisions', 'Zero-sale decisions', d.zero_sale_pending, 'waiting on Management', Number(d.zero_sale_pending) > 0) +
         t('campaignWatch', 'Campaign gaps', (Number(d.uncampaigned) || 0) + ' / ' + (Number(d.duplicates) || 0), 'no campaign / duplicated', Number(d.duplicates) > 0) +
         t('alerts', 'Unhandled letters', d.letters_open, 'the Engine’s own bells', Number(d.letters_open) > 0) +

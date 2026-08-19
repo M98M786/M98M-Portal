@@ -97,8 +97,8 @@
           '<span class="sub">impressions, views, CTR and conversion — per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
-            '<button class="minibtn on" data-tr-r="7">7 days</button>' +
-            '<button class="minibtn" data-tr-r="30">30 days</button>' +
+            '<button class="minibtn' + (TR.range === 7 ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
+            '<button class="minibtn' + (TR.range === 30 ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
             '<select class="alx-sel" id="trAcc"><option value="">All accounts</option></select>' +
             '<button class="minibtn" id="trRefresh" style="margin-left:auto">Refresh</button></div>' +
           '<div id="trBody"><div class="spinner"></div></div>' +
@@ -120,6 +120,8 @@
           var n = String(a.account || '').trim();
           return n ? '<option>' + esc(n) + '</option>' : '';
         }).join(''));
+        /* repaints (cached then fresh) must not clobber a selection the user already made */
+        if (TR.account) { sel.value = TR.account; }
         sel.onchange = function () { TR.account = String(this.value || ''); trLoad(); };
       });
       var rf = $('trRefresh');

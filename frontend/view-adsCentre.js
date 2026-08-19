@@ -88,7 +88,7 @@
       if (rf) { rf.onclick = acLoad; }
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
-      AC.timer = setInterval(function () { if ($('acBody')) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
+      AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
     }
   };
 })();

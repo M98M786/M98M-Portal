@@ -281,10 +281,15 @@
         '</div></div>';
     },
     init: function () {
-      ['ocPrice', 'ocAli', 'ocCpc', 'ocAdRate', 'ocCat'].forEach(function (id) {
+      ['ocPrice', 'ocAli', 'ocCpc', 'ocAdRate'].forEach(function (id) {
         var el = $(id);
         if (el) { el.oninput = ocCalc; el.onchange = ocCalc; }
       });
+      /* A hand-picked category is a decision: once the seller touches the select, the title
+         matcher stops overriding it (it resumes only when the title box is cleared). */
+      var manualCat = false;
+      var catSel = $('ocCat');
+      if (catSel) { catSel.onchange = function () { manualCat = true; ocCalc(); }; }
       var dp = $('ocDiscPct'), da = $('ocDiscAmt');
       if (dp) { dp.oninput = function () { OC_DISC_MODE = 'pct'; ocCalc(); }; }
       if (da) { da.oninput = function () { OC_DISC_MODE = 'amt'; ocCalc(); }; }
@@ -292,13 +297,18 @@
       if (tt) {
         tt.oninput = function () {
           var hint = $('ocAutoHint'), sel = $('ocCat');
+          if (!this.value) { manualCat = false; if (hint) { hint.textContent = ''; } return; }
+          if (manualCat) {
+            if (hint) { hint.textContent = 'Keeping your category — clear the title to re-enable auto-pick.'; }
+            return;
+          }
           var pick = ocAutoPick(this.value);
           if (pick >= 0 && sel) {
             sel.value = String(pick);
             if (hint) { hint.textContent = 'Auto-picked: ' + OC_FLAT[pick].n + ' — change it below if that’s wrong.'; }
             ocCalc();
           } else if (hint) {
-            hint.textContent = this.value ? 'No confident match — pick the category below.' : '';
+            hint.textContent = 'No confident match — pick the category below.';
           }
         };
       }

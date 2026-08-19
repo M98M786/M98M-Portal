@@ -39,7 +39,8 @@
             esc(String(r.title || r.item_id).slice(0, 90)) + '</a>' +
             '<span class="ld-meta">£' + (Number(r.price) || 0).toFixed(2) + ' · ' + esc(String(r.account)) + ' · ' + esc(String(r.item_id)) +
             ' · listed ' + esc(String(r.born).slice(0, 10)) + ' (' + esc(String(r.clock)) + ') · 0 sold</span></div>';
-        if (pend && d.mgmt) {
+        var mayDecide = (d.canDecide !== undefined) ? d.canDecide : d.mgmt;
+        if (pend && mayDecide) {
           h += '<div class="ld-acts">' +
             '<button class="minibtn" data-ld-v="END">End it → Team Lead</button>' +
             '<button class="minibtn" data-ld-v="REVISE">Revise →</button>' +
