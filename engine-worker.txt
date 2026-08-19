@@ -550,8 +550,10 @@ async function selfTestRun(env) {
     add('no zero-priced active listings', Number(r.n) === 0, r.n + ' listing(s) at £0');
   } catch (e) { add('no zero-priced active listings', false, e.message); }
 
-  try { // 9. nothing dated in the future
-    const r = await one("SELECT (SELECT COUNT(*) FROM orders WHERE created_at > datetime('now', '+1 hour')) + (SELECT COUNT(*) FROM sales_daily WHERE date > date('now', '+1 day')) AS n");
+  try { // 9. nothing dated in the future — the bound is an ISO instant because created_at is
+    // ISO 'T'-form and SQL's space-form datetime('now') TEXT-compares below EVERY same-day ISO
+    // stamp (this very check flagged 170 of today's orders as "future" on its first run)
+    const r = await one("SELECT (SELECT COUNT(*) FROM orders WHERE created_at > ?1) + (SELECT COUNT(*) FROM sales_daily WHERE date > date('now', '+1 day')) AS n", new Date(Date.now() + 3600000).toISOString());
     add('nothing dated in the future', Number(r.n) === 0, r.n + ' future-dated row(s)');
   } catch (e) { add('nothing dated in the future', false, e.message); }
 
