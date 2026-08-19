@@ -72,19 +72,38 @@ export default {
      50-subrequest cap, and a burst then kills whichever account happens to run last. The queue
      flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
   async scheduled(event, env, ctx) {
+    /* Slot budgeting (20 Aug, after the cap deaths): every job in a slot shares ONE invocation's
+       subrequest budget, so the heavy movers are spread out — listingSync dropped to hourly on
+       the half-past slot (its every-quarter-hour full upserts alone were ~72k of D1's 100k
+       rows-written/day), trafficSync moved off financeSync's slot, violationsSync off the
+       5-minute treadmill. */
     const jobs = {
-      '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
-      '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync],
-      /* The half-past slot exists so the D1-only scans never crowd the finance signatures out
-         of the hourly subrequest budget — Saif Bhai's financeSync hit the cap when they shared. */
-      '30 * * * *': [zeroSaleScan, uncampaignedDigest, noSupplierScan],
+      '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
+      '0 * * * *': [financeSync, csSync, autoMsgScan],
+      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
-      await Promise.all(fns.map(fn => runJob(env, fn)));
-      await flushNotifyQueue(env);
+      try {
+        /* The heartbeat is the black-box recorder: it proves in KV — a channel independent of
+           D1 — that the tick fired, BEFORE any job runs. Kept to the quarter-hour slots so it
+           stays far inside KV's 1k-writes/day budget. */
+        if (event.cron !== '*/5 * * * *') {
+          try { await env.HOT.put('cron:beat', JSON.stringify({ cron: event.cron, at: new Date().toISOString() })); } catch (e) {}
+        }
+        /* Sequential ON PURPOSE: under Promise.all a budget blow-up killed every job mid-flight
+           at once; run one after another, the early jobs land whole and only the tail starves. */
+        for (const fn of fns) { await runJob(env, fn); }
+        await flushNotifyQueue(env);
+      } catch (e) {
+        try {
+          await env.HOT.put('cron:err', JSON.stringify({
+            cron: event.cron, at: new Date().toISOString(),
+            err: String(e && e.message || e).slice(0, 400) }));
+        } catch (e2) {}
+      }
     })());
   },
 };
@@ -499,7 +518,7 @@ async function zeroSaleScan(env) {
 
 async function statusRefresh(env) {
   const rs = await env.DB.prepare(
-    "SELECT order_id, account FROM orders WHERE status NOT IN ('FULFILLED','NOT_FOUND') AND created_at < datetime('now', '-6 day') ORDER BY created_at ASC LIMIT 35"
+    "SELECT order_id, account FROM orders WHERE status NOT IN ('FULFILLED','NOT_FOUND') AND created_at < datetime('now', '-6 day') ORDER BY created_at ASC LIMIT 20"
   ).all();
   const rows = rs.results || [];
   if (!rows.length) return;
@@ -1551,11 +1570,24 @@ async function ingestAdsToday(env, acct, day, tsv, isCpc) {
   }
   // zero this family's columns for the account first: an item that stopped spending must not
   // keep yesterday's snapshot
-  if (isCpc) await env.DB.prepare('UPDATE ads_today SET cpc_spend = 0, cpc_clicks = 0, cpc_sales = 0 WHERE account = ?1 AND day != ?2').bind(acct, day).run();
-  else await env.DB.prepare('UPDATE ads_today SET spend = 0, clicks = 0, sales = 0 WHERE account = ?1 AND day != ?2').bind(acct, day).run();
+  if (isCpc) await env.DB.prepare('UPDATE ads_today SET cpc_spend = 0, cpc_clicks = 0, cpc_sales = 0 WHERE account = ?1 AND day != ?2 AND (cpc_spend != 0 OR cpc_clicks != 0 OR cpc_sales != 0)').bind(acct, day).run();
+  else await env.DB.prepare('UPDATE ads_today SET spend = 0, clicks = 0, sales = 0 WHERE account = ?1 AND day != ?2 AND (spend != 0 OR clicks != 0 OR sales != 0)').bind(acct, day).run();
+  /* CHANGE-ONLY writes (20 Aug): a full rewrite of ~570 rows per ingest was ~80k D1 rows a day
+     on its own — most snapshots move a handful of items, so unchanged rows are skipped. The
+     prefetch is one read; the day column doubles as the rollover marker. */
+  const cur = {};
+  const curRs = await env.DB.prepare(
+    'SELECT item_id, spend, clicks, sales, cpc_spend, cpc_clicks, cpc_sales, day FROM ads_today WHERE account = ?1'
+  ).bind(acct).all();
+  for (const r of (curRs.results || [])) cur[r.item_id] = r;
   const stmts = [];
   for (const lid of Object.keys(agg)) {
     const a = agg[lid];
+    const c = cur[lid];
+    const same = c && String(c.day) === day && (isCpc
+      ? round2(a.s) === Number(c.cpc_spend) && Math.round(a.c) === Number(c.cpc_clicks) && Math.round(a.u) === Number(c.cpc_sales)
+      : round2(a.s) === Number(c.spend) && Math.round(a.c) === Number(c.clicks) && Math.round(a.u) === Number(c.sales));
+    if (same) continue;
     stmts.push(isCpc
       ? env.DB.prepare(
           "INSERT INTO ads_today (account, item_id, cpc_spend, cpc_clicks, cpc_sales, day, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
@@ -1620,7 +1652,10 @@ async function trafficSync(env) {
       }
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
-    for (const range of [7, 30]) {
+    /* The per-listing drilldown re-lands ~760 rows per pass; eBay refreshes traffic on a slow
+       clock anyway, so four passes a day is honest and saves ~15k D1 rows/day for the quota. */
+    const listingPass = new Date().getUTCHours() % 6 === 0;
+    for (const range of listingPass ? [7, 30] : []) {
       const lUrl = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=LISTING' +
         '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(range) + '..' + d8(0) + ']') +
         '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION&sort=-LISTING_IMPRESSION_TOTAL';
@@ -1978,6 +2013,10 @@ async function itemStats(env) {
   for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
   await env.DB.prepare("DELETE FROM automsg_queue WHERE status != 'QUEUED' AND created_at < datetime('now', '-30 day')").run();
   await env.DB.prepare("DELETE FROM ad_report_tasks WHERE status IN ('INGESTED', 'FAILED') AND created_at < datetime('now', '-30 day')").run();
+  /* The letters keep their meaning for a month after handling, then leave; even an unhandled
+     letter retires at 90 days — the alert has either done its job by then or never will. */
+  await env.DB.prepare("DELETE FROM alert_log WHERE resolved_at != '' AND created_at < datetime('now', '-30 day')").run();
+  await env.DB.prepare("DELETE FROM alert_log WHERE created_at < datetime('now', '-90 day')").run();
 }
 
 /* THE CPC RULE (Hasib, 19 Aug): an item whose raw profit after VAT is under £3.30 has no
@@ -2369,7 +2408,7 @@ const ROUTES = {
           "SELECT COUNT(*) AS orders_n, ROUND(COALESCE(SUM(sold), 0), 2) AS revenue FROM orders WHERE date(created_at) = date('now') AND status != 'NOT_FOUND'");
         const ads = await one(
           'SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS spend, COALESCE(SUM(sales + cpc_sales), 0) AS sold, ' +
-          'SUM(CASE WHEN spend + cpc_spend >= 3 AND sales + cpc_sales = 0 THEN 1 ELSE 0 END) AS waste_n FROM ads_today');
+          "SUM(CASE WHEN spend + cpc_spend >= 3 AND sales + cpc_sales = 0 THEN 1 ELSE 0 END) AS waste_n FROM ads_today WHERE day = '" + today + "'");
         const disp = await one(
           "SELECT SUM(CASE WHEN ship_by != '' AND ship_by < datetime('now') THEN 1 ELSE 0 END) AS overdue, COUNT(*) AS awaiting " +
           "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND') AND created_at >= datetime('now', '-6 day')");
