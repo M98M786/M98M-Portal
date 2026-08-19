@@ -923,9 +923,15 @@ async function financeSync(env) {
     }
 
     const feesByOrder = {};
+    const refundsByOrder = {};
     for (const t of txs) {
       const oid = String(t.orderId || '');
       if (!oid) continue;
+      // the money handed back to the buyer — the sheet's own Returns column, per order
+      if (String(t.transactionType) === 'REFUND') {
+        const amt = Number((t.amount || {}).value || 0);
+        if (amt) refundsByOrder[oid] = round2((refundsByOrder[oid] || 0) + amt);
+      }
       const fee = Number((t.totalFeeAmount || {}).value || 0);
       if (!fee) continue;
       /* bookingEntry describes the ORDER MONEY, not the fee: a SALE books CREDIT (money to us,
@@ -945,7 +951,7 @@ async function financeSync(env) {
     for (let i = 0; i < ids.length; i += 90) {
       const chunk = ids.slice(i, i + 90);
       const rs = await env.DB.prepare(
-        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, o.created_at, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
+        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, o.refunded, o.created_at, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
         'WHERE o.order_id IN (' + chunk.map(() => '?').join(',') + ')'
       ).bind(...chunk).all();
       for (const row of (rs.results || [])) rows[row.order_id] = row;
@@ -958,8 +964,11 @@ async function financeSync(env) {
       if (!row) continue;                                              // not an order we track
       const createdMs = new Date(String(row.created_at)).getTime();
       if (isNaN(createdMs) || createdMs < sinceMs) continue;           // straddles the window — never clobber
-      if (Math.abs(Number(row.ebay_fees) - fee) < 0.005) continue;     // unchanged → no write
-      stmts.push(env.DB.prepare('UPDATE orders SET ebay_fees = ?2 WHERE order_id = ?1').bind(oid, fee));
+      const refund = refundsByOrder[oid] || 0;
+      const feeSame = Math.abs(Number(row.ebay_fees) - fee) < 0.005;
+      const refSame = Math.abs(Number(row.refunded || 0) - refund) < 0.005;
+      if (feeSame && refSame) continue;                                // unchanged → no write
+      stmts.push(env.DB.prepare('UPDATE orders SET ebay_fees = ?2, refunded = ?3 WHERE order_id = ?1').bind(oid, fee, refund));
       // drift is judged only on single-unit orders — multi-line orders mix items and the
       // per-unit OE of the first line would cry wolf
       const expected = round2((Number(row.sold) || 0) - (Number(row.oe) || 0));
@@ -1990,7 +1999,8 @@ const ROUTES = {
         'SELECT o.item_id, o.account, SUM(o.sold) AS revenue, SUM(o.qty) AS qty, COUNT(*) AS orders_n, ' +
         '       SUM(CASE WHEN o.ebay_fees > 0 THEN o.ebay_fees ELSE 0 END) AS fees, ' +
         '       SUM(CASE WHEN o.ebay_fees > 0 THEN 1 ELSE 0 END) AS fees_n, ' +
-        '       SUM(o.cost) AS cost, SUM(CASE WHEN o.cost > 0 THEN 1 ELSE 0 END) AS cost_n ' +
+        '       SUM(o.cost) AS cost, SUM(CASE WHEN o.cost > 0 THEN 1 ELSE 0 END) AS cost_n, ' +
+        '       SUM(CASE WHEN o.refunded > 0 THEN o.refunded ELSE 0 END) AS refunded ' +
         "FROM orders o WHERE o.status != 'NOT_FOUND' AND date(o.created_at) >= ?1 AND date(o.created_at) <= ?2" +
         (account ? ' AND o.account = ?3' : '') + ' GROUP BY o.item_id, o.account'
       ).bind(...[from, to].concat(account ? [account] : [])).all();
@@ -2021,6 +2031,8 @@ const ROUTES = {
         const vatBack = round2(fees / 6 + cost / 6 + pri * 0.2);
         const vatHmrc = round2(vatOut - vatBack);
         const raw = round2(trueOe - vatHmrc);
+        const returns = round2(o.refunded || 0);
+        const actual = round2(raw - returns);
         rows.push({
           item_id: o.item_id, account: o.account,
           title: (titleBy[o.item_id] || {}).title || '',
@@ -2031,7 +2043,7 @@ const ROUTES = {
           ali_cost: cost, ali_vat: round2(cost / 6), cost_n: o.cost_n || 0,
           pri_qty: a.pri_qty || 0, pri_fees: pri, pri_incl: priIncl,
           gen_qty: a.gen_qty || 0, gen_incl: genIncl, gen_ex: gen,
-          true_oe: trueOe, vat_hmrc: vatHmrc, raw_profit: raw,
+          true_oe: trueOe, vat_hmrc: vatHmrc, raw_profit: raw, returns, actual_profit: actual,
           // completeness flags — a row missing real fees or costs says so instead of lying
           fees_complete: (o.fees_n || 0) >= (o.orders_n || 0),
           cost_complete: (o.cost_n || 0) >= (o.orders_n || 0),
@@ -2039,7 +2051,7 @@ const ROUTES = {
       }
       rows.sort((x, y) => y.revenue - x.revenue);
       const tot = {};
-      for (const k of ['revenue','qty','orders_n','vat_out','fees','fees_vat','oe','ali_cost','ali_vat','pri_qty','pri_fees','pri_incl','gen_qty','gen_incl','gen_ex','true_oe','vat_hmrc','raw_profit']) {
+      for (const k of ['revenue','qty','orders_n','vat_out','fees','fees_vat','oe','ali_cost','ali_vat','pri_qty','pri_fees','pri_incl','gen_qty','gen_incl','gen_ex','true_oe','vat_hmrc','raw_profit','returns','actual_profit']) {
         tot[k] = round2(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0));
       }
       return { from, to, account, rows: rows.slice(0, 400), total: tot,

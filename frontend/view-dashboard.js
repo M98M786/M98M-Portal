@@ -411,7 +411,8 @@ VIEWS.dashboard = {
         '<th class="pnl-g-ali">AliExpress</th><th class="pnl-g-ali">Ali VAT</th>' +
         '<th>Qty via Priority</th><th class="pnl-g-pri">Priority fees</th><th class="pnl-g-pri">Priority incl VAT</th>' +
         '<th>Qty via General</th><th class="pnl-g-gen">General incl VAT</th>' +
-        '<th class="pnl-g-out">True earning</th><th>VAT to HMRC</th><th class="pnl-g-out">Raw profit</th></tr>';
+        '<th class="pnl-g-out">True earning</th><th>VAT to HMRC</th><th class="pnl-g-out">Raw profit</th>' +
+        '<th class="pnl-g-ali">Returns</th><th class="pnl-g-out">Actual profit</th></tr>';
       var body = rows.map(function (r) {
         var flags = [];
         if (!r.fees_complete) { flags.push('fees partial'); }
@@ -426,7 +427,9 @@ VIEWS.dashboard = {
           '<td>' + (r.pri_qty || 0) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_fees) + '</td><td class="pnl-g-pri">' + pnlGBP(r.pri_incl) + '</td>' +
           '<td>' + (r.gen_qty || 0) + '</td><td class="pnl-g-gen">' + pnlGBP(r.gen_incl) + '</td>' +
           '<td class="pnl-g-out">' + pnlGBP(r.true_oe) + '</td><td>' + pnlGBP(r.vat_hmrc) + '</td>' +
-          '<td class="pnl-g-out' + (Number(r.raw_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.raw_profit) + '</td></tr>';
+          '<td class="pnl-g-out' + (Number(r.raw_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.raw_profit) + '</td>' +
+          '<td class="pnl-g-ali">' + pnlGBP(r.returns) + '</td>' +
+          '<td class="pnl-g-out' + (Number(r.actual_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.actual_profit) + '</td></tr>';
       }).join('');
       var t = d.total || {};
       var totalRow = '<tr class="pnl-total"><td>GRAND TOTAL \u00b7 ' + rows.length + ' item(s)</td>' +
@@ -436,7 +439,9 @@ VIEWS.dashboard = {
         '<td>' + (t.pri_qty || 0) + '</td><td>' + pnlGBP(t.pri_fees) + '</td><td>' + pnlGBP(t.pri_incl) + '</td>' +
         '<td>' + (t.gen_qty || 0) + '</td><td>' + pnlGBP(t.gen_incl) + '</td>' +
         '<td>' + pnlGBP(t.true_oe) + '</td><td>' + pnlGBP(t.vat_hmrc) + '</td>' +
-        '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td></tr>';
+        '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td>' +
+        '<td>' + pnlGBP(t.returns) + '</td>' +
+        '<td class="' + (Number(t.actual_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.actual_profit) + '</td></tr>';
       box.innerHTML = '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
         '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">True earning = order earning \u2212 AliExpress \u2212 Priority ads incl VAT \u00b7 Raw profit = true earning \u2212 VAT to HMRC \u00b7 General ad fees already sit inside the eBay fees.</p>';
     }).catch(function (e) {
