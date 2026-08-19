@@ -75,7 +75,10 @@ export default {
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, violationsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [listingSync, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, trafficSync],
+      /* The half-past slot exists so the D1-only scans never crowd the finance signatures out
+         of the hourly subrequest budget — Saif Bhai's financeSync hit the cap when they shared. */
+      '30 * * * *': [zeroSaleScan, uncampaignedDigest, noSupplierScan],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats],
     };
     const fns = jobs[event.cron] || [];
