@@ -517,6 +517,7 @@
           '<button class="btn-p" id="o2Apply">Apply</button></div>' +
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
@@ -569,8 +570,40 @@
         };
       }
       var rf = $('o2Refresh');
-      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); }; }
+      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); oPulse(); }; }
       oFetchAll();
+      oPulse();
     }
   };
+
+  /* Hasib's closing line: "management home shows everything combined". One Engine read, every
+     headline across every board — each tile deep-links to the board that owns the number. */
+  function oPulse() {
+    var box = $('o2Pulse');
+    if (!box) { return; }
+    api('mgmtPulse', {}).then(function (d) {
+      d = d || {};
+      var gbp = function (v) { return '£' + (Number(v) || 0).toFixed(2); };
+      var t = function (view, label, val, sub, bad) {
+        return '<a href="#' + view + '" style="text-decoration:none;color:inherit">' +
+          '<div class="ac-tile' + (bad ? ' bad' : '') + '"><div class="k">' + label + '</div>' +
+          '<div class="v">' + val + '</div>' +
+          (sub ? '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:3px">' + sub + '</div>' : '') +
+          '</div></a>';
+      };
+      box.innerHTML = '<div class="ac-tiles">' +
+        t('ordersBoard', 'Orders today', d.orders_today, gbp(d.revenue_today) + ' revenue') +
+        t('ordersBoard', 'Overdue dispatch', d.overdue, d.awaiting + ' open orders', Number(d.overdue) > 0) +
+        t('adsCentre', 'Ad spend today', gbp(d.ad_spend_today), d.ad_sold_today + ' sold via ads') +
+        t('adsCentre', 'Wasting £3+ today', d.waste_n, 'no order yet', Number(d.waste_n) > 0) +
+        t('traffic', 'Impressions today', (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views') +
+        t('listingDecisions', 'Zero-sale decisions', d.zero_sale_pending, 'waiting on Management', Number(d.zero_sale_pending) > 0) +
+        t('campaignWatch', 'Campaign gaps', (Number(d.uncampaigned) || 0) + ' / ' + (Number(d.duplicates) || 0), 'no campaign / duplicated', Number(d.duplicates) > 0) +
+        t('alerts', 'Unhandled letters', d.letters_open, 'the Engine’s own bells', Number(d.letters_open) > 0) +
+        t('activeListings', 'Active listings', d.active_listings, 'all accounts') +
+      '</div>';
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">The pulse could not load: ' + esc(e.message) + '</div>';
+    });
+  }
 })();

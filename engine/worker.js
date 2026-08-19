@@ -2354,6 +2354,44 @@ const ROUTES = {
                                                           for incl-VAT figures, ×0.2 for ex-VAT)
        Raw Profit          = True OE − VAT to HMRC
      Returns ride as a per-item refund column when the cases data carries an amount. */
+  /* Hasib's closing line: "management home shows everything combined". One read, every headline
+     the other boards carry — each tile on the screen deep-links to its board. Counts only, so
+     the whole pulse is one cheap pass. */
+  mgmtPulse: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      return memo('mgmtPulse', 60000, async () => {
+        const one = async (sql) => { const r = await ctx.env.DB.prepare(sql).first(); return r || {}; };
+        const today = ukDate('');
+        const money = await one(
+          "SELECT COUNT(*) AS orders_n, ROUND(COALESCE(SUM(sold), 0), 2) AS revenue FROM orders WHERE date(created_at) = date('now') AND status != 'NOT_FOUND'");
+        const ads = await one(
+          'SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS spend, COALESCE(SUM(sales + cpc_sales), 0) AS sold, ' +
+          'SUM(CASE WHEN spend + cpc_spend >= 3 AND sales + cpc_sales = 0 THEN 1 ELSE 0 END) AS waste_n FROM ads_today');
+        const disp = await one(
+          "SELECT SUM(CASE WHEN ship_by != '' AND ship_by < datetime('now') THEN 1 ELSE 0 END) AS overdue, COUNT(*) AS awaiting " +
+          "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND') AND created_at >= datetime('now', '-6 day')");
+        const zs = await one("SELECT COUNT(*) AS n FROM listing_decisions WHERE status = 'PENDING'");
+        const mail = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''");
+        const unc = await one(
+          "SELECT COUNT(*) AS n FROM items_api ia WHERE status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id)");
+        const dup = await one(
+          "SELECT COUNT(DISTINCT account || '|' || listing_id) AS n FROM dup_state WHERE alerted_day != ''");
+        const traffic = (await ctx.env.DB.prepare(
+          'SELECT COALESCE(SUM(impressions), 0) AS impressions, COALESCE(SUM(views), 0) AS views FROM traffic_daily WHERE date = ?1'
+        ).bind(today).first()) || {};
+        const listings = await one("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'");
+        return { day: today,
+          orders_today: Number(money.orders_n) || 0, revenue_today: Number(money.revenue) || 0,
+          ad_spend_today: Number(ads.spend) || 0, ad_sold_today: Number(ads.sold) || 0, waste_n: Number(ads.waste_n) || 0,
+          overdue: Number(disp.overdue) || 0, awaiting: Number(disp.awaiting) || 0,
+          zero_sale_pending: Number(zs.n) || 0, letters_open: Number(mail.n) || 0,
+          uncampaigned: Number(unc.n) || 0, duplicates: Number(dup.n) || 0,
+          impressions_today: Number(traffic.impressions) || 0, views_today: Number(traffic.views) || 0,
+          active_listings: Number(listings.n) || 0 };
+      });
+    },
+  },
+
   /* Hasib item 7, the read side: the Engine's bells as mail. Management reads every letter;
      everyone else reads their own inbox. Unhandled first, newest first. */
   alertMail: {
