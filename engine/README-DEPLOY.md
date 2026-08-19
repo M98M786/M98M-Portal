@@ -66,3 +66,49 @@ D1 only** — the sheet automations keep their own apps and tokens untouched, al
 - Smart-targeting CPC campaigns have no ad groups (error 35129); DELETE-by-adId works.
 - `esc()` does not escape quotes — attribute contexts need their own escaper.
 - Business dates are UK (`ukDate()`); staff-facing display is PKT (T-1 law).
+
+
+## 19 Aug additions — the day the numbers became real
+
+**Deploying needs NO Cloudflare API token.** From any `dash.cloudflare.com` page (signed-in pane),
+`fetch('/api/v4/...', {credentials:'include'})` has full account rights. Deploy = PUT
+`/accounts/22159c26d5386e3ac543be2bbed95e6d/workers/scripts/m98m-engine` with FormData
+(`metadata` JSON blob + `worker.js` blob). Put `"keep_bindings":["secret_text"]` in the metadata
+and all secrets survive — the re-PUT-five-secrets ritual is dead. Ship the source to the page via
+`public/engine-worker.txt` on Pages (open CORS); ALWAYS assert a new symbol exists in the fetched
+text before deploying, or you redeploy the old build. Pages publishes in 1–3 min; the Worker
+propagates in ~30–60s (a new action answers "unknown action" until it lands).
+
+**Apps Script**: project id `1M-P4Bpfrd2Z-c5NgeiOER0KgJM7D09bAmlEPPg2eakqY1gAeceZGGr8v` (older
+notes carry a truncated id that 400s). Splices = find/replace pairs from `git diff` served as
+JSON on Pages, applied to `monaco.editor.getModels()[0]`, each `find` verified to occur EXACTLY
+once. Triggers run HEAD; `/exec` runs the deployed version — a saved fix is live for cron jobs
+before any deploy. `engineRunJob` (key-gated, /exec) runs
+pushEngineSync/pushEngineCosts/buildDashboardCache/alertsRefresh/dispatchOverdueSweep/
+runZeroSalesSweep on demand. The Deploy menu toggles shut on a second synthetic click — open it
+with a JS `.click()`, then MOUSE-click the item from a fresh screenshot; if the dialog will not
+open, reload the editor first.
+
+**eBay facts that cost a day each:**
+- **Finances needs Digital Signatures** (error 215001): RFC-9421 message signature, ED25519 key
+  minted from the Key Management API. The Engine mints and keeps its own key in D1
+  `engine_config` k='ebay_sign_key' (`ebaySigningKey`/`ebaySignedFetch`); corrupt row → re-mint.
+- **Fee sign**: `bookingEntry` describes the ORDER money, not the fee. Sign by transactionType —
+  SALE +, REFUND −, others carry no order fee. (bookingEntry-keyed signs wrote 618 negative fees.)
+- **Ads reports**: Standard and CPC metrics cannot share one report (35122) — one task per
+  funding family per day, each declaring `fundingModels`; CPC needs dims
+  listing_id+ad_group_id+campaign_id (35119); the CPC spend key is
+  `cpc_ad_fees_listingsite_currency`; payout-currency twins are the same money — never sum both.
+  Reports older than ~2 days return nothing — a permanent gap, not a bug.
+- **Day tabs carry TWO order-number columns** differing only in case: 'Order number' (col B,
+  eBay) vs 'Order Number' (col M, AliExpress). Resolve by POSITION (`ordersResolveFields_`).
+- **Every workbook spells its headers its own way** ('Suuplier 2', trailing spaces): resolve
+  through `bridgeNormalizeHeader_` with per-field alias lists, and log what a sheet lacks.
+- **Standards metrics** ship value objects two ways: RATE {numerator,denominator} = percent,
+  AMOUNT {currencyCodeEnum} = money. Thresholds can be {value} objects.
+- The sheet bridge keys duplicate/blank headers as `col:<letter>` — consumers reading records by
+  raw header must mirror that rule.
+
+**Repair tools**: `rollupsWide` re-rolls the 45-day window after any history repair (the nightly
+covers 8 days with the edge-day skipped — its brief absence shrank 15 Aug to a third). The ads
+kick self-heals a 7-day window of missed family-days.
