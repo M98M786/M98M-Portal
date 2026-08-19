@@ -11,6 +11,45 @@
     '.ar-tbl tbody tr:hover{background:var(--blue-soft)}'
   );
 
+  /* The workbook reads metrics-down-the-side; a row-per-entry table is the same data turned
+     ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
+     orientations are kept and one Flip button swaps them — the reader chooses the one that
+     matches the paper in their head. */
+  var AR = { data: null, flipped: true };
+
+  function arRender() {
+    var host = $('arBody');
+    var r = AR.data;
+    if (!host || !r) { return; }
+    var heads = r.headers || [];
+    var rows = r.rows || [];
+    var h;
+    if (AR.flipped) {
+      // metrics down the side (the workbook's own orientation), newest entries as columns
+      var take = rows.slice(0, 10);
+      h = '<div class="scroll"><table class="ar-tbl"><thead><tr><th></th>' +
+        take.map(function (row, i) { return '<th>' + esc(String(row[heads[0]] == null ? 'entry ' + (i + 1) : row[heads[0]])) + '</th>'; }).join('') +
+        '</tr></thead><tbody>';
+      heads.slice(1).forEach(function (x) {
+        h += '<tr><td style="font-weight:800;white-space:nowrap">' + esc(String(x)) + '</td>' +
+          take.map(function (row) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+      });
+      h += '</tbody></table></div>';
+      if (rows.length > 10) { h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Showing the newest 10 of ' + rows.length + ' — flip to the list to see them all.</p>'; }
+    } else {
+      h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+        heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      rows.forEach(function (row) {
+        h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    host.innerHTML = h +
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from "' + esc(String(r.tab || '')) + '" · resolving alarms stays on the Alerts centre.</p>';
+    var flipBtn = $('arFlip');
+    if (flipBtn) { flipBtn.style.display = ''; flipBtn.textContent = AR.flipped ? 'Show as a list' : 'Show like the workbook'; }
+  }
+
   function arLoad() {
     var acc = $('arAcc') ? $('arAcc').value : '';
     var host = $('arBody');
@@ -23,14 +62,8 @@
           '<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">"not connected yet" means this account\'s Daily Account Report workbook is missing from CONNECTIONS.</span></div>';
         return;
       }
-      var heads = r.headers || [];
-      var h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
-        heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
-      (r.rows || []).forEach(function (row) {
-        h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
-      });
-      host.innerHTML = h + '</tbody></table></div>' +
-        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from "' + esc(String(r.tab || '')) + '" · resolving alarms stays on the Alerts centre.</p>';
+      AR.data = r;
+      arRender();
     }).catch(function (e) {
       host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(e.message) + '</div>';
     });
@@ -47,7 +80,8 @@
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
             '<select class="alx-sel" id="arAcc"><option value="">Choose an account…</option></select>' +
-            '<button class="minibtn" id="arGo">Open the report</button></div>' +
+            '<button class="minibtn" id="arGo">Open the report</button>' +
+            '<button class="minibtn" id="arFlip" style="display:none">Show as a list</button></div>' +
           '<div id="arBody"><div style="color:var(--text-2);font-weight:700;padding:12px 0">Choose an account to open its report.</div></div>' +
         '</div></div>';
     },
@@ -62,6 +96,8 @@
       });
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
+      var fl = $('arFlip');
+      if (fl) { fl.onclick = function () { AR.flipped = !AR.flipped; arRender(); }; }
       var sel = $('arAcc');
       if (sel) { sel.onchange = arLoad; }
     }
