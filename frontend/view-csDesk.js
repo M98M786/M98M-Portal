@@ -67,19 +67,32 @@
     }
 
     var open = (d && d.open) || [];
+    /* Seller Hub's split, kept: OUR MOVE first (the real workload), then what is merely waiting
+       on the buyer or the post. One undifferentiated pile read as "wrong data" to anyone with
+       Seller Hub open beside it — 38 here against eBay's ~13, because 25 were returns in transit. */
     open.sort(function (a, b) {
+      if ((b.our_move || 0) !== (a.our_move || 0)) { return (b.our_move || 0) - (a.our_move || 0); }
       var da = cdDue(a.payload_json) || '9999', db = cdDue(b.payload_json) || '9999';
       return da < db ? -1 : da > db ? 1 : 0;
     });
-    h += '<h3 style="margin:0 0 6px;font-size:13px">Open on eBay right now — ' + open.length + ' · sorted by respond-by</h3>' +
+    var oursN = 0;
+    open.forEach(function (r) { if (r.our_move) { oursN++; } });
+    h += '<h3 style="margin:0 0 6px;font-size:13px">Needs OUR reply — ' + oursN +
+      ' <span style="color:var(--text-3);font-weight:600">· plus ' + (open.length - oursN) +
+      ' waiting on the buyer or the post</span></h3>' +
       '<div class="scroll"><table class="cd-tbl"><thead><tr><th>Kind</th><th>Account</th><th>Item / buyer</th><th>What eBay records</th><th>Status</th><th>Respond by</th><th></th></tr></thead><tbody>';
     if (!open.length) { h += '<tr><td colspan="7" style="color:var(--ok);font-weight:800">✓ Nothing open — every case, return and inquiry is closed.</td></tr>'; }
+    var cdLastMove = null;
     open.forEach(function (r) {
       var due = cdDue(r.payload_json);
       var kind = cdStr(r.kind);
       var writable = (kind === 'RETURN' || kind === 'INR') && !/REFUND_SENT/i.test(cdStr(r.status));
       var keyAttr = esc(cdStr(r.case_id)).replace(/"/g, '&quot;');
-      h += '<tr><td><span class="cd-kind ' + esc(kind) + '">' + esc(kind) + '</span></td>' +
+      if (cdLastMove === 1 && !r.our_move) {
+        h += '<tr><td colspan="7" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;padding:10px 12px 4px">Waiting on the buyer or the post — nothing to do yet</td></tr>';
+      }
+      cdLastMove = r.our_move ? 1 : 0;
+      h += '<tr' + (r.our_move ? '' : ' style="opacity:.55"') + '><td><span class="cd-kind ' + esc(kind) + '">' + esc(kind) + '</span></td>' +
         '<td>' + esc(cdStr(r.account)) + '</td>' +
         '<td><span class="mono">' + esc(cdStr(r.item_id)) + '</span><div style="font-size:11px;color:var(--text-3)">' + esc(cdStr(r.buyer)) + '</div></td>' +
         '<td style="max-width:340px">' + esc(cdStr(r.reason)) + '</td>' +

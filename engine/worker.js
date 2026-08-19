@@ -2057,9 +2057,19 @@ const ROUTES = {
         "SELECT case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, payload_json FROM cases " +
         "WHERE status NOT LIKE '%CLOSED%' ORDER BY opened_at DESC LIMIT 200"
       ).all();
+      /* Seller Hub's own split, mirrored: a return the buyer has not posted yet, or one still in
+         the mail, is not CS workload — it is WAITING ON OTHERS. Lumping those into "open" made
+         the desk read 38 where Seller Hub reads ~13, which is exactly what a CS agent calls
+         wrong data. The flag is computed HERE so every consumer agrees on whose move it is. */
+      const OURS = /WAITING_SELLER|^OPEN$|DECLINED|ESCALAT|PAYMENT_DISPUTE|LESS_THAN_A_FULL_REFUND|SELLER_/i;
+      const THEIRS = /WAITING_BUYER|READY_TO_SHIP|ITEM_SHIPPED|ITEM_DELIVERED|AWAITING_/i;
+      for (const c of (open.results || [])) {
+        c.our_move = OURS.test(String(c.status)) ? 1 : THEIRS.test(String(c.status)) ? 0 : 1;
+      }
       const counts = await ctx.env.DB.prepare(
         "SELECT kind, account, " +
         "SUM(CASE WHEN status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS open_n, " +
+        "SUM(CASE WHEN status NOT LIKE '%CLOSED%' AND (status LIKE '%WAITING_SELLER%' OR status = 'OPEN' OR status LIKE '%DECLINED%' OR status LIKE '%ESCALAT%') THEN 1 ELSE 0 END) AS ours_n, " +
         "SUM(CASE WHEN opened_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS d30, " +
         "SUM(CASE WHEN opened_at >= datetime('now', '-90 day') THEN 1 ELSE 0 END) AS d90 " +
         'FROM cases GROUP BY kind, account'
