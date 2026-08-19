@@ -55,11 +55,28 @@
     if (v === true) { return '✓'; }
     if (v === false) { return '✗'; }
     if (v !== null && typeof v === 'object') {
-      var pct = ahStr(v.value);
-      var frac = (v.numerator != null && v.denominator != null) ? ' (' + v.numerator + ' of ' + v.denominator + ')' : '';
-      return pct + '%' + frac;
+      /* eBay ships two object shapes here: RATE carries numerator/denominator and means percent;
+         AMOUNT carries currencyCodeEnum and means money. Treating every object as a rate printed
+         the fleet's annual sales amount as '41976.84%'. */
+      if (v.currencyCodeEnum || v.currency) {
+        return ahStr(v.value) + ' ' + ahStr(v.currencyCodeEnum || v.currency);
+      }
+      if (v.numerator != null && v.denominator != null) {
+        return ahStr(v.value) + '% (' + v.numerator + ' of ' + v.denominator + ')';
+      }
+      return ahStr(v.value);
     }
     return ahStr(v);
+  }
+
+  /* Thresholds arrive as plain numbers OR as {value:...} objects (AMOUNT/RATE metrics) — the
+     bare String() rendered the latter as 'needs [object Object]'. RATE requirements are usually
+     an UPPER bound, so that side is the fallback. */
+  function ahThreshold(m) {
+    var thr = m && m.thresholdLowerBound;
+    if (thr == null) { thr = m && m.thresholdUpperBound; }
+    if (thr !== null && typeof thr === 'object') { thr = thr.value; }
+    return thr != null && thr !== '' ? 'needs ' + ahStr(thr) : '';
   }
 
   function ahLevelPill(level) {
@@ -89,7 +106,7 @@
             '<td>' + esc(ahStr(m.name || m.metricKey)) + '</td>' +
             '<td class="ah-num">' + esc(ahMetricValue(m)) + '</td>' +
             '<td>' + ahLevelPill(m.level) + '</td>' +
-            '<td class="ah-std-thr">' + (m.thresholdLowerBound != null ? 'needs ' + esc(String(m.thresholdLowerBound)) : '') + '</td>' +
+            '<td class="ah-std-thr">' + esc(ahThreshold(m)) + '</td>' +
           '</tr>';
         });
         h += '</tbody></table>';
