@@ -2523,7 +2523,7 @@ const ROUTES = {
       const rs = await ctx.env.DB.prepare(
         "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
       ).all();
-      return { rows: rs.results || [], note: 'profit = per-item sheet projection × units (estimate); ads spend joins when the report feed lands' };
+      return { rows: rs.results || [], note: 'cost = the day tab\u2019s real paid cost (hourly sync) · ads = eBay\u2019s own reports, both billing families · profit = order earning − goods cost' };
     },
   },
 
