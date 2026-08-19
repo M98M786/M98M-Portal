@@ -1146,7 +1146,7 @@
       }
       var caveat = Number(d.no_deadline_count)
         ? '<div class="od-note" style="margin-top:8px">' + Number(d.no_deadline_count) +
-          ' open order(s) carry no ship-by from eBay yet — they are not counted above rather than guessed at.</div>' : '';
+          ' open order(s) carry no ship-by from eBay yet — they sit inside \u201cawaiting dispatch\u201d but cannot appear in LATE or DUE, because their deadline is unknown rather than guessed at.</div>' : '';
       box.innerHTML = '<div class="card"><div class="hd">Late right now ' +
           '<span class="hint">eBay\u2019s own ship-by deadline · not bounded to a month</span></div>' +
           '<div class="bd">' + tiles +

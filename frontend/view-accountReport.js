@@ -54,6 +54,12 @@
     var acc = $('arAcc') ? $('arAcc').value : '';
     var host = $('arBody');
     if (!host) { return; }
+    /* Switching accounts clears the held data FIRST: without this, the Flip button repainted the
+       previous account's whole table over the new account's error message — or over its spinner —
+       while the selector named someone else. */
+    AR.data = null;
+    var flipBtn = $('arFlip');
+    if (flipBtn) { flipBtn.style.display = 'none'; }
     if (!acc) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Choose an account to open its report.</div>'; return; }
     host.innerHTML = '<div class="spinner"></div>';
     api('accountReportRows', { account: acc }).then(function (r) {

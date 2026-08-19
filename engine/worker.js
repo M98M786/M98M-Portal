@@ -1493,11 +1493,16 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    mid-run, so the books simply stopped updating and every money screen went stale with no
    error anywhere. Each piece now runs in its own job with its own lease, and the day rebuild
    covers 3 days (yesterday can still be corrected) instead of 8. */
-async function rollups(env) {
-  /* Eight days again: the 3-day shrink was triage for the run that died at 16k orders, but the
-     kill was the per-row writes, and those batch in fifties now. The wider window means a late
-     cost or fee landing up to a week back still reaches the books on the next nightly pass. */
-  const sinceIso = new Date(Date.now() - 8 * 86400000).toISOString();
+async function rollups(env) { return rollupsWindow(env, 8); }
+/* The cost walk reaches 45 days back and financeSync corrects fees late — a number landing on an
+   old order needs a road into the books. The nightly stays at 8 days (cheap, covers the active
+   week); rollupsWide re-rolls the full 45 whenever history has been repaired underneath it. */
+async function rollupsWide(env) { return rollupsWindow(env, 45); }
+
+async function rollupsWindow(env, days) {
+  /* Eight days nightly: the 3-day shrink was triage for the run that died at 16k orders, but the
+     kill was the per-row writes, and those batch in fifties now. */
+  const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
   const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, cost, ebay_fees, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
   /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
@@ -2567,7 +2572,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
