@@ -680,11 +680,28 @@ VIEWS.home = {
     if (v === true) { return '✓'; }
     if (v === false) { return '✗'; }
     if (v !== null && typeof v === 'object') {
-      var pct = ahStr(v.value);
-      var frac = (v.numerator != null && v.denominator != null) ? ' (' + v.numerator + ' of ' + v.denominator + ')' : '';
-      return pct + '%' + frac;
+      /* eBay ships two object shapes here: RATE carries numerator/denominator and means percent;
+         AMOUNT carries currencyCodeEnum and means money. Treating every object as a rate printed
+         the fleet's annual sales amount as '41976.84%'. */
+      if (v.currencyCodeEnum || v.currency) {
+        return ahStr(v.value) + ' ' + ahStr(v.currencyCodeEnum || v.currency);
+      }
+      if (v.numerator != null && v.denominator != null) {
+        return ahStr(v.value) + '% (' + v.numerator + ' of ' + v.denominator + ')';
+      }
+      return ahStr(v.value);
     }
     return ahStr(v);
+  }
+
+  /* Thresholds arrive as plain numbers OR as {value:...} objects (AMOUNT/RATE metrics) — the
+     bare String() rendered the latter as 'needs [object Object]'. RATE requirements are usually
+     an UPPER bound, so that side is the fallback. */
+  function ahThreshold(m) {
+    var thr = m && m.thresholdLowerBound;
+    if (thr == null) { thr = m && m.thresholdUpperBound; }
+    if (thr !== null && typeof thr === 'object') { thr = thr.value; }
+    return thr != null && thr !== '' ? 'needs ' + ahStr(thr) : '';
   }
 
   function ahLevelPill(level) {
@@ -714,7 +731,7 @@ VIEWS.home = {
             '<td>' + esc(ahStr(m.name || m.metricKey)) + '</td>' +
             '<td class="ah-num">' + esc(ahMetricValue(m)) + '</td>' +
             '<td>' + ahLevelPill(m.level) + '</td>' +
-            '<td class="ah-std-thr">' + (m.thresholdLowerBound != null ? 'needs ' + esc(String(m.thresholdLowerBound)) : '') + '</td>' +
+            '<td class="ah-std-thr">' + esc(ahThreshold(m)) + '</td>' +
           '</tr>';
         });
         h += '</tbody></table>';
@@ -873,22 +890,45 @@ VIEWS.home = {
      matches the paper in their head. */
   var AR = { data: null, flipped: true };
 
+  /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
+     claimed; duplicates and blank headers land under 'col:<letter>' (SheetBridge's own rule,
+     mirrored here byte for byte). Raw-header lookup made duplicate-named columns repeat the
+     first column's value and blank-header columns render empty. */
+  function arColLetter(n) {
+    var out = '';
+    while (n > 0) { var r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
+    return out;
+  }
+  function arKeys(heads) {
+    var norm = function (h) { return String(h == null ? '' : h).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };
+    var seen = {}, keys = [];
+    heads.forEach(function (h, c) {
+      var key = norm(h) ? String(h) : 'col:' + arColLetter(c + 1);
+      if (seen[key]) { key = 'col:' + arColLetter(c + 1); }
+      seen[key] = true;
+      keys.push(key);
+    });
+    return keys;
+  }
+
   function arRender() {
     var host = $('arBody');
     var r = AR.data;
     if (!host || !r) { return; }
     var heads = r.headers || [];
+    var keys = arKeys(heads);
     var rows = r.rows || [];
+    var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
     if (AR.flipped) {
       // metrics down the side (the workbook's own orientation), newest entries as columns
       var take = rows.slice(0, 10);
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr><th></th>' +
-        take.map(function (row, i) { return '<th>' + esc(String(row[heads[0]] == null ? 'entry ' + (i + 1) : row[heads[0]])) + '</th>'; }).join('') +
+        take.map(function (row, i) { return '<th>' + esc(cell(row, 0) || 'entry ' + (i + 1)) + '</th>'; }).join('') +
         '</tr></thead><tbody>';
-      heads.slice(1).forEach(function (x) {
+      heads.slice(1).forEach(function (x, j) {
         h += '<tr><td style="font-weight:800;white-space:nowrap">' + esc(String(x)) + '</td>' +
-          take.map(function (row) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+          take.map(function (row) { return '<td>' + esc(cell(row, j + 1)) + '</td>'; }).join('') + '</tr>';
       });
       h += '</tbody></table></div>';
       if (rows.length > 10) { h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Showing the newest 10 of ' + rows.length + ' — flip to the list to see them all.</p>'; }
@@ -896,7 +936,7 @@ VIEWS.home = {
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
         heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
       rows.forEach(function (row) {
-        h += '<tr>' + heads.map(function (x) { return '<td>' + esc(String(row[x] == null ? '' : row[x])) + '</td>'; }).join('') + '</tr>';
+        h += '<tr>' + heads.map(function (x, i) { return '<td>' + esc(cell(row, i)) + '</td>'; }).join('') + '</tr>';
       });
       h += '</tbody></table></div>';
     }
