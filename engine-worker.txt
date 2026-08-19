@@ -1228,46 +1228,62 @@ async function adsReportKick(env) {
        redeploy. Spend was wrong for weeks precisely because nobody could see this list. */
     await ctx_setSync(env, 'adsMetrics', acct, families.map(f => f.family + '[' + f.keys.join(' ') + ']').join(' ') + ' offered[' + mets.join(' ') + ']');
 
-    const y = new Date(Date.now() - 86400000);
-    const day = ukDate(y.toISOString());
-    const from = day + 'T00:00:00.000Z';
-    const to = day + 'T23:59:59.000Z';
-    /* One family failing must not cost us the other — a CPC-only seller and a Standard-only
-       seller both have one family that legitimately returns nothing. */
-    const problems = [];
-    for (const fam of families) {
-      const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
-        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
-        /* fundingModels is the missing half of the request. eBay's answer to asking for CPC
-           metrics without it is "the metric key is not supported for the funding model" — it
-           defaults the report to cost-per-sale campaigns, for which a per-click charge does not
-           exist. 60 of the 68 running campaigns on this fleet are COST_PER_CLICK, so leaving
-           this out meant the spend screen was reporting the other 8 and calling it the total. */
-        body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
-          dateFrom: from, dateTo: to, fundingModels: [fam.model],
-          dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
-      });
-      if (cr.status !== 202 && !cr.ok) {
-        problems.push(fam.family + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 320));
-        continue;
+    /* SELF-HEALING WINDOW (19 Aug). Kicking only "yesterday" meant a day the cron missed — or,
+       as just happened, weeks where one whole billing family was being refused — stayed a hole
+       for ever. Each run now looks over the last 7 UK days and files a task for any
+       (family, day) that has never been ingested, so a gap closes itself within one run. */
+    const have = {};
+    const doneRs = await env.DB.prepare(
+      "SELECT report_date, family, status FROM ad_report_tasks WHERE account = ?1 AND report_date >= ?2"
+    ).bind(acct, ukDate(new Date(Date.now() - 8 * 86400000).toISOString())).all();
+    for (const r of (doneRs.results || [])) {
+      if (r.status === 'INGESTED' || r.status === 'PENDING' || r.status === 'SUCCESS') {
+        have[String(r.report_date) + '|' + String(r.family || 'std')] = true;
       }
-      const loc = cr.headers.get('location') || '';
-      const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now() + fam.family);
-      await env.DB.prepare(
-        "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
-        "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) " +
-        'ON CONFLICT(account, task_id) DO NOTHING'
-      ).bind(acct, taskId, day, fam.family).run();
     }
-    if (problems.length === families.length) throw new Error(acct + ' report create failed — ' + problems.join(' | '));
-    if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | '));
+
+    const problems = [];
+    for (let back = 1; back <= 7; back++) {
+      const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
+      const from = day + 'T00:00:00.000Z';
+      const to = day + 'T23:59:59.000Z';
+      /* One family failing must not cost us the other — a CPC-only seller and a Standard-only
+         seller both have one family that legitimately returns nothing. */
+      for (const fam of families) {
+        if (have[day + '|' + fam.family]) continue;
+        const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+          method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+          /* fundingModels is the half of the request that was missing for weeks. eBay's answer to
+             asking for CPC metrics without it is "the metric key is not supported for the funding
+             model" — it defaults the report to cost-per-sale campaigns, for which a per-click
+             charge does not exist. 60 of the 68 running campaigns on this fleet are
+             COST_PER_CLICK, so leaving it out meant the spend screen was reporting the other 8
+             and calling it the total: £11.05 against a real £406. */
+          body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+            dateFrom: from, dateTo: to, fundingModels: [fam.model],
+            dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
+        });
+        if (cr.status !== 202 && !cr.ok) {
+          problems.push(fam.family + ' ' + day + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200));
+          continue;
+        }
+        const loc = cr.headers.get('location') || '';
+        const taskId = loc.split('/').filter(Boolean).pop() || ('t' + Date.now() + fam.family + back);
+        await env.DB.prepare(
+          "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
+          "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) " +
+          'ON CONFLICT(account, task_id) DO NOTHING'
+        ).bind(acct, taskId, day, fam.family).run();
+      }
+    }
+    if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | ').slice(0, 1200));
   });
 }
 
 async function adsReportPoll(env) {
   await perAccount(env, 'adsReportPoll', async (acct) => {
     const pend = await env.DB.prepare(
-      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 6"
+      "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') ORDER BY created_at LIMIT 20"
     ).bind(acct).all();
     const tasks = pend.results || [];
     if (!tasks.length) return;
