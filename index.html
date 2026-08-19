@@ -4780,6 +4780,50 @@ function createMeeting() {
 
   var OC_DISC_MODE = 'pct';
 
+  /* Hasib item 17: paste the listing title, the calculator picks the category itself. Rules are
+     ordered most-specific first; every name on the right is an exact CATS entry. The pick is a
+     suggestion the seller can always override — the select stays live. */
+  var OC_AUTO = [
+    [/\b(wig|hair extension|toupee|hairpiece)\b/, "Health › Hair Extensions & Wigs"],
+    [/\b(vape|e-?cig|e-?liquid|smoking)\b/, "Health › Electronic Smoking"],
+    [/\b(extension lead|power strip|surge protect|extension socket|usb socket|wall socket|plug adaptor|plug adapter)\b/, "Home › Power Strips & Surge Protectors"],
+    [/\b(drill|grinder|sander|saw|screwdriver set|tool kit|heat gun|welder|air compressor|kettle|toaster|microwave|air fryer|blender|vacuum|hoover|dehumidifier|heater|iron\b)/, "Home › Appliances / DIY Tools & Workshop"],
+    [/\b(tap|faucet|shower head|basin|toilet|plumbing|radiator|towel rail|sofa|wardrobe|drawer|bookshelf|cabinet)\b/, "Home › Furniture / Bath / Plumbing"],
+    [/\b(tyre|tire|sat ?nav|gps)\b/, "Vehicle › Tyres / GPS Sat Nav / Power Tools"],
+    [/\b(car|van|motorbike|motorcycle|vehicle|number plate|wing mirror|bumper|headlight|12v|24v)\b/, "Vehicle Parts & Accessories (auto electrical)"],
+    [/\b(laptop|desktop pc|macbook|chromebook|tablet\b|ssd|hard drive|printer)\b/, "Computers › Laptops/Desktops/Tablets/Drives/Printers"],
+    [/\b(mouse|keyboard|usb|hdmi|ethernet|router|webcam|monitor stand|laptop stand|hub\b|network)\b/, "Computers, Tablets & Networking (mouse, keyboard, USB)"],
+    [/\b(iphone|samsung galaxy|smartphone|smart phone)\b/, "Mobile › Mobile & Smart Phones"],
+    [/\b(phone case|phone holder|phone mount|screen protector|charger|charging cable|power bank|sim\b)\b/, "Mobile Phones & Communication"],
+    [/\b(headphone|earphone|earbud|speaker|soundbar|tv\b|television|home cinema|hi-?fi)\b/, "Sound › TVs/Headphones/HiFi/Home Cinema"],
+    [/\b(camera|camcorder|lens|tripod)\b/, "Cameras & Photography"],
+    [/\b(watch\b|watches|bracelet|necklace|ring\b|earring|jewellery|jewelry)\b/, "Jewellery & Watches"],
+    [/\b(dog|cat\b|pet\b|puppy|kitten|bird cage|aquarium|hamster)\b/, "Pet Supplies"],
+    [/\b(garden|patio|plant pot|planter|lawn|hose|greenhouse|parasol|gazebo|bbq|barbecue)\b/, "Garden & Patio"],
+    [/\b(toy|lego|doll house|puzzle|board game|kids game)\b/, "Toys & Games"],
+    [/\b(games? console|playstation|\bps[45]\b|xbox|nintendo)\b/, "Video Games & Consoles"],
+    [/\b(baby|pram|pushchair|stroller|cot\b|nappy)\b/, "Baby"],
+    [/\b(dress|shirt|jacket|shoes|trainers|boots|jeans|hoodie|clothing)\b/, "Clothes, Shoes & Accessories"],
+    [/\b(handbag|shoulder bag|tote bag|clutch)\b/, "Clothes › Women's Bags & Handbags"],
+    [/\b(massager|trimmer|shaver|epilator|nail\b|makeup|skincare|toothbrush|hair dryer|straightener|curler)\b/, "Health & Beauty (personal care)"],
+    [/\b(tent\b|tents)\b/, "Toys › Tents"],
+    [/\b(bike|bicycle|dumbbell|yoga|fishing|golf|tennis|gym\b|fitness)\b/, "Sporting Goods"],
+    [/\b(office chair|desk\b|stationery|filing|warehouse|packaging)\b/, "Business, Office & Industrial"],
+    [/\b(lamp|light|lighting|led strip|bulb|chandelier|curtain|rug\b|cushion|mirror|shelf|shelving|storage box|clock)\b/, "Home, Furniture & DIY (lighting, etc.)"]
+  ];
+
+  function ocAutoPick(title) {
+    var t = ' ' + String(title || '').toLowerCase() + ' ';
+    for (var i = 0; i < OC_AUTO.length; i++) {
+      if (OC_AUTO[i][0].test(t)) {
+        for (var k = 0; k < OC_FLAT.length; k++) {
+          if (OC_FLAT[k].n === OC_AUTO[i][1]) { return k; }
+        }
+      }
+    }
+    return -1;
+  }
+
   function ocRow(label, val, cls, hint, sign) {
     return '<div class="r ' + (cls || '') + '"><span>' + esc(label) +
       (hint ? '<em>' + esc(hint) + '</em>' : '') + '</span><b>' + (sign || '') + ocGBP(val) + '</b></div>';
@@ -4897,6 +4941,9 @@ function createMeeting() {
             '<div class="field"><label>CPC ad cost £ (ex VAT)</label><input class="tk-in" id="ocCpc" type="number" step="0.01" min="0" placeholder="0"></div>' +
             '<div class="field"><label>Promoted General %</label><input class="tk-in" id="ocAdRate" type="number" step="0.1" min="0" placeholder="0"></div>' +
           '</div>' +
+          '<div class="field" style="margin-top:12px"><label>Item title — paste it and the category picks itself</label>' +
+            '<input class="tk-in" id="ocTitle" maxlength="120" placeholder="e.g. LED Strip Lights 5M RGB Colour Changing…">' +
+            '<div class="oc-hint" id="ocAutoHint"></div></div>' +
           '<div class="field" style="margin-top:12px"><label>eBay category</label>' +
             '<select class="tk-in" id="ocCat">' + opts + '</select></div>' +
           '<div id="ocOut"><div class="oc-hint">Enter a sale price to begin — every figure updates as you type.</div></div>' +
@@ -4910,6 +4957,20 @@ function createMeeting() {
       var dp = $('ocDiscPct'), da = $('ocDiscAmt');
       if (dp) { dp.oninput = function () { OC_DISC_MODE = 'pct'; ocCalc(); }; }
       if (da) { da.oninput = function () { OC_DISC_MODE = 'amt'; ocCalc(); }; }
+      var tt = $('ocTitle');
+      if (tt) {
+        tt.oninput = function () {
+          var hint = $('ocAutoHint'), sel = $('ocCat');
+          var pick = ocAutoPick(this.value);
+          if (pick >= 0 && sel) {
+            sel.value = String(pick);
+            if (hint) { hint.textContent = 'Auto-picked: ' + OC_FLAT[pick].n + ' — change it below if that’s wrong.'; }
+            ocCalc();
+          } else if (hint) {
+            hint.textContent = this.value ? 'No confident match — pick the category below.' : '';
+          }
+        };
+      }
     }
   };
 })();

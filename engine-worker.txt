@@ -2627,6 +2627,30 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       const items = (p.items || []).filter((f) => String(f.item_id || '').trim());
       if (!items.length) return { synced: 0 };
+      /* Hasib item 21: a cost price that climbed more than 30 pennies is a price-revision job,
+         and it should ring the moment the sheet says so — not be noticed at month end. The old
+         cost is read before the write; a riser only fires on a real change (the store then holds
+         the new cost, so the same rise never rings twice), never on first fill, and only for
+         items still ACTIVE. */
+      const oldCost = {};
+      const ids = items.map((f) => String(f.item_id).trim());
+      for (let i = 0; i < ids.length; i += 90) {
+        const chunk = ids.slice(i, i + 90);
+        const prev = await ctx.env.DB.prepare(
+          'SELECT f.item_id, f.ali_cost, i.status, i.title FROM items_facts f LEFT JOIN items_api i ON i.item_id = f.item_id ' +
+          'WHERE f.item_id IN (' + chunk.map(() => '?').join(',') + ')'
+        ).bind(...chunk).all();
+        for (const r of (prev.results || [])) oldCost[r.item_id] = r;
+      }
+      const risers = [];
+      for (const f of items) {
+        const id = String(f.item_id).trim(), prev = oldCost[id];
+        const oldC = prev ? Number(prev.ali_cost) || 0 : 0;
+        const newC = Number(f.ali_cost) || 0;
+        if (prev && oldC > 0 && newC - oldC > 0.30 && String(prev.status) === 'ACTIVE') {
+          risers.push({ id, oldC, newC, title: String(prev.title || ''), account: String(f.account || '') });
+        }
+      }
       const stmt = ctx.env.DB.prepare(
         'INSERT INTO items_facts (item_id, account, source, ali_cost, oe, profit, campaign_name, campaign_type, ' +
         'current_sup, sup1_link, sup2_link, sup3_link, category, enriched_at) ' +
@@ -2641,7 +2665,14 @@ const ROUTES = {
         String(f.current_sup || ''), String(f.sup1_link || ''), String(f.sup2_link || ''),
         String(f.sup3_link || ''), String(f.category || '')));
       for (let i = 0; i < batch.length; i += 50) await ctx.env.DB.batch(batch.slice(i, i + 50));
-      return { synced: batch.length };
+      for (const r of risers.slice(0, 12)) {
+        const msg = 'Cost up ' + Math.round((r.newC - r.oldC) * 100) + 'p on ' + (r.title || r.id).slice(0, 70) +
+          ' (' + r.id + (r.account ? ', ' + r.account : '') + '): £' + r.oldC.toFixed(2) + ' → £' + r.newC.toFixed(2) +
+          '. Revise the sale price or switch supplier.';
+        await notifyRole(ctx.env, 'Pricing', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
+        await notifyRole(ctx.env, 'Management', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
+      }
+      return { synced: batch.length, risers: risers.length };
     },
   },
 
