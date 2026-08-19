@@ -1738,6 +1738,9 @@ return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status,
 /* Who may hand a tracking number to eBay. The processors who type them, and the people who
    answer for the accounts. */
 const TRACKING_PUSH_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
+/* Who may read per-order data (buyer, value, deadline): the order-handling chain and CS —
+   mirrors ordersView_'s PII rule on the sheet side and the Orders/Dispatch screens' role lists. */
+const ORDER_DATA_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead', 'CS'];
 
 const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
@@ -1793,6 +1796,10 @@ const ROUTES = {
      number — and answers with the UK day, so the Orders screen can open that exact tab. */
   orderFind: {
     auth: 'any', fn: async (p, ctx) => {
+      /* The finder answers with buyer names and order values — the ordersView_ PII rule gives
+         those to the order-handling chain and CS, not to every signed-in role. Same list as the
+         screens that show the same data. */
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const q = String(p.q || '').trim();
       if (q.length < 3) throw new Error('SAY: type at least three characters');
       const like = '%' + q.toLowerCase() + '%';
@@ -1825,6 +1832,8 @@ const ROUTES = {
      that costs money, and it is deliberately NOT bounded to a month. */
   dispatchLive: {
     auth: 'any', fn: async (p, ctx) => {
+      // late orders carry buyer-adjacent detail and order values — the Dispatch screen's own roles
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || '');
       const where = ["o.status != 'FULFILLED'", "o.ship_by != ''"];
       const bind = [];
