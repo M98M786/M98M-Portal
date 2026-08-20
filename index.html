@@ -330,7 +330,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -389,7 +389,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-1918';
+var BUILD = '20260820-1932';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -5625,20 +5625,38 @@ function createMeeting() {
         '<p style="margin:0;font-size:11.5px;color:var(--text-3);font-weight:600">Nothing is broken: that shop\'s orders, listings and CS keep syncing. Enrol it in Promoted Listings on eBay and its campaigns appear here on the next 5-minute tick.</p></div>';
     });
     if (gOrder.length) {
-      h += '<div class="cw-dupbox"><h3>🔴 ' + gOrder.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
-        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that. ✕ removes the item from that one campaign' + '.</p>' +
-        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — ✕ to remove from that campaign</th></tr></thead><tbody>';
+      /* Review 3: every chip carries the campaign's REAL status — running (red-hot, double fees,
+         removable) vs paused/ended (grey, informational). The urgent count is only the listings
+         truly RUNNING in more than one place. */
+      var urgentN = 0;
+      gOrder.forEach(function (k) {
+        var runN = groups[k].filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
+        if (runN > 1) { urgentN++; }
+      });
+      h += '<div class="cw-dupbox"><h3>🔴 URGENT: ' + urgentN + ' item(s) ACTIVE in more than one RUNNING campaign — eBay can charge each of them in every running campaign they sit in</h3>' +
+        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">Every campaign the listing sits in is shown with its live status — <b style="color:var(--bad)">running</b> memberships cost money and carry ✕ to remove; <b>paused</b> ones are grey and harmless until resumed. A fresh move can echo here for ~90 minutes while the old campaign refreshes.</p>' +
+        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — live status per campaign · ✕ removes from that one</th></tr></thead><tbody>';
       gOrder.forEach(function (k) {
         var list = groups[k];
         var r0 = list[0];
+        var runN = list.filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
         var chips = list.map(function (r) {
-          return '<span class="cw-pill run" style="margin:2px 6px 2px 0;display:inline-block">' + esc(cwStr(r.name) || cwStr(r.campaign_id)) +
-            ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
+          var st = cwStr(r.status);
+          var running = /RUNNING/i.test(st);
+          var paused = /PAUSED/i.test(st);
+          var tone = running ? 'background:var(--bad-soft);border:1px solid rgba(240,96,90,.5);color:var(--bad)'
+            : paused ? 'background:rgba(120,132,152,.12);border:1px solid rgba(120,132,152,.35);color:var(--text-3)'
+            : 'background:rgba(120,132,152,.08);border:1px solid rgba(120,132,152,.25);color:var(--text-3);opacity:.7';
+          return '<span class="cw-pill" style="margin:2px 6px 2px 0;display:inline-block;' + tone + '">' +
+            esc(cwStr(r.name) || cwStr(r.campaign_id)) +
+            ' <b style="font-size:9px;letter-spacing:.05em">' + (running ? 'RUNNING' : paused ? 'paused' : esc(st.toLowerCase() || '?')) + '</b>' +
+            (running ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
+            '</span>';
         }).join('');
-        h += '<tr><td>' + esc(cwStr(r0.account)) + '</td>' +
+        h += '<tr' + (runN > 1 ? ' style="background:var(--bad-soft)"' : '') + '><td>' + esc(cwStr(r0.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + '</div></td>' +
-          '<td style="max-width:420px">' + chips + '</td></tr>';
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + (runN > 1 ? ' · <b style="color:var(--bad)">' + runN + ' RUNNING at once</b>' : '') + '</div></td>' +
+          '<td style="max-width:460px">' + chips + '</td></tr>';
       });
       h += '</tbody></table></div></div>';
     } else {
@@ -12258,12 +12276,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
      month, and counts each line of a multi-line order separately. This strip asks the orders
      table instead: one row per order, eBay's own ship-by, eBay's own fulfilment status. Where the
      two disagree, this one is the one to act on. */
+  /* review 3: every order number is a click-through to that order on eBay Seller Hub */
+  function odOrderLink(id) {
+    var oid = String(id || '');
+    return '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(oid) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(oid) + '</a>';
+  }
   function odLiveRow(r) {
     var late = Number(r.hours_late) || 0;
     var days = Math.floor(late / 24);
     var when = days >= 1 ? days + (days === 1 ? ' day' : ' days') + ' late' : Math.max(1, Math.round(late)) + 'h late';
     return '<tr>' +
-      '<td><b>' + esc(String(r.order_id)) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
+      '<td><b>' + odOrderLink(r.order_id) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
       '<td><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(String(r.title || r.item_id || '')) + '</div></td>' +
       '<td class="num">' + (Number(r.sold) ? '£' + Number(r.sold).toFixed(2) : '—') + '</td>' +
       '<td>' + esc(String(r.ship_by || '').slice(0, 10)) + '</td>' +
@@ -12303,6 +12326,20 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var caveat = Number(d.no_deadline_count)
         ? '<div class="od-note" style="margin-top:8px">' + Number(d.no_deadline_count) +
           ' open order(s) carry no ship-by from eBay yet — they sit inside \u201cawaiting dispatch\u201d but cannot appear in LATE or DUE, because their deadline is unknown rather than guessed at.</div>' : '';
+      var stuck = d.stuck_8d || [];
+      var stuckBlock = '';
+      if (stuck.length) {
+        stuckBlock = '<div class="od-stale" style="margin-top:12px"><b>\ud83d\udd34 ' + stuck.length + ' order(s) 8+ days old and STILL not dispatched \u2014 the emergency list</b>' +
+          '<div>eBay has never seen a dispatch for these and the buyer has been waiting over a week. Delivered-or-not checking for dispatched orders lives on Order rechecking (day 4 \u00b7 7 \u00b7 10).</div>' +
+          '<div class="scroll" style="margin-top:8px"><table class="od-tbl"><thead><tr><th>Order</th><th>Item</th><th>Value</th><th>Ordered</th><th>Status</th></tr></thead><tbody>' +
+          stuck.map(function (r) {
+            return '<tr><td><b>' + odOrderLink(r.order_id) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
+              '<td><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(String(r.title || r.item_id || '')) + '</div></td>' +
+              '<td class="num">' + (Number(r.sold) ? '\u00a3' + Number(r.sold).toFixed(2) : '\u2014') + '</td>' +
+              '<td>' + esc(String(r.created_at || '').slice(0, 10)) + '</td>' +
+              '<td><span class="od-late">' + esc(String(r.status || '')) + '</span></td></tr>';
+          }).join('') + '</tbody></table></div></div>';
+      }
       box.innerHTML = '<div class="card"><div class="hd">Late right now ' +
           '<span class="hint">eBay\u2019s own ship-by deadline · not bounded to a month</span></div>' +
           '<div class="bd">' + tiles +
@@ -12310,7 +12347,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty" style="margin-top:10px">Nothing is past its eBay deadline. That is the number that matters.</div>') +
-          staleBlock + caveat +
+          staleBlock + stuckBlock + caveat +
         '</div></div>';
     }).catch(function (e) {
       box.innerHTML = '<div class="card"><div class="bd"><div class="empty">The live dispatch feed did not answer — ' +
@@ -12553,7 +12590,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<th>Order</th><th>Account</th><th>Item</th>' + (hasBuyer ? '<th>Buyer</th>' : '') +
           '<th>Value</th><th>Ordered</th><th>Ship by</th><th>State</th></tr></thead><tbody>';
         (d.rows || []).forEach(function (r) {
-          h += '<tr><td class="mono">' + esc(obStr(r.order_id)) + '</td>' +
+          h += '<tr><td class="mono">' + '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(obStr(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(obStr(r.order_id)) + '</a>' + '</td>' +
             '<td>' + esc(obStr(r.account)) + '</td>' +
             '<td><a href="https://www.ebay.co.uk/itm/' + esc(obStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(obStr(r.title) || obStr(r.item_id)) + '</div></a></td>' +
             (hasBuyer ? '<td>' + esc(obStr(r.buyer)) + '</td>' : '') +
@@ -15697,10 +15734,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     badge: function () { return (STATE.counts && STATE.counts.recheck) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Order rechecking</h1>' +
-          '<span class="sub">Four stages, one row a day — Pakistan time</span>' +
+          '<span class="sub">Your three checkers — Noman day 4 · Zeeshan day 7 · Wahab day 10 — plus the workbook stages below</span>' +
           '<input class="rc-in rc-date" id="rcDate" type="date" style="width:auto;margin-left:auto" value="' + rcAttr(rcToday()) + '">' +
           '<button class="minibtn" id="rcRefresh">Refresh</button>' +
         '</div>' +
+        '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — three people ' +
+          '<span class="hint">delivered or not — the engine\u2019s own list per checker, refreshed live</span></div>' +
+          '<div class="bd" id="rcOwners"><div class="spinner"></div></div></div>' +
         '<div class="card enter d1"><div class="hd">Why today’s list holds these orders ' +
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
           '<div class="bd" id="rcWhy"><div class="spinner"></div></div>' +
@@ -15709,6 +15749,30 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
+      (function rcOwnersLoad() {
+        var box = $('rcOwners');
+        if (!box) { return; }
+        api('deliveryCheckpoints', {}).then(function (d) {
+          var h = '';
+          ((d && d.checkpoints) || []).forEach(function (c) {
+            var accs = (c.accounts || []).map(function (a) {
+              var flags = [];
+              if (a.undispatched) { flags.push('<b style="color:var(--bad)">' + a.undispatched + ' not dispatched</b>'); }
+              if (a.est_passed) { flags.push('<b style="color:var(--warn)">' + a.est_passed + ' past delivery estimate</b>'); }
+              return '<span class="minibtn" style="cursor:default">' + esc(String(a.account)) + ' ' + a.n + (flags.length ? ' \u00b7 ' + flags.join(' \u00b7 ') : '') + '</span>';
+            }).join(' ');
+            var focus = (c.focus || []).slice(0, 12).map(function (r) {
+              return '<div class="tl-row"><span class="k"><a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(String(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(String(r.order_id)) + '</a> \u00b7 ' + esc(String(r.account)) + '</span>' +
+                '<span style="color:var(--text-3);font-weight:600">' + (r.dispatched ? 'dispatched' : '<b style="color:var(--bad)">NOT DISPATCHED</b>') +
+                (r.est_passed ? ' \u00b7 <b style="color:var(--warn)">est ' + esc(String(r.est_delivery)) + ' passed — confirm delivered</b>' : (r.est_delivery ? ' \u00b7 est ' + esc(String(r.est_delivery)) : '')) + '</span></div>';
+            }).join('');
+            h += '<div style="margin-bottom:12px"><div style="font-weight:800;margin-bottom:4px">' + esc(String(c.owner)) + ' — day ' + c.days + ' <span style="color:var(--text-3);font-weight:600">\u00b7 orders from ' + esc(String(c.order_date)) + ' \u00b7 ' + c.total + ' order(s)</span></div>' +
+              '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + (accs || '<span class="empty">no orders that day</span>') + '</div>' + focus + '</div>';
+          });
+          box.innerHTML = h || '<div class="empty">No checkpoints to show.</div>';
+        }).catch(function (e) { box.innerHTML = '<div class="empty">Checkpoints did not answer \u2014 ' + esc(e.message) + '</div>'; });
+      })();
+
       $('rcRefresh').onclick = function () { rcLoad(); };
       $('rcDate').onchange = function () { rcLoad(); };
       enhanceDate($('rcDate'), { kind: 'day' });
@@ -16243,7 +16307,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (!host || !res) { return; }
     host.innerHTML = '<div class="card enter d1" style="margin-top:16px"><div class="hd">Logged ' +
         '<span class="hint">' + esc(rcStr(res.mistake_type)) + '</span></div><div class="bd">' +
-        '<div class="tl-row"><span class="k">Order</span><span class="mono">' + esc(rcStr(res.order_id)) + '</span></div>' +
+        '<div class="tl-row"><span class="k">Order</span><span class="mono">' + '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(rcStr(res.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(rcStr(res.order_id)) + '</a>' + '</span></div>' +
         '<div class="tl-row"><span class="k">Account</span><span>' + esc(rcStr(res.account_name)) + '</span></div>' +
         '<div class="tl-row"><span class="k">Processed by</span><span><b>' + esc(rcStr(res.processed_by)) + '</b></span></div>' +
         '<div class="tl-row"><span class="k">Order date</span><span class="num">' + esc(rcNice(rcStr(res.date))) + '</span></div>' +

@@ -196,10 +196,13 @@
     badge: function () { return (STATE.counts && STATE.counts.recheck) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Order rechecking</h1>' +
-          '<span class="sub">Four stages, one row a day — Pakistan time</span>' +
+          '<span class="sub">Your three checkers — Noman day 4 · Zeeshan day 7 · Wahab day 10 — plus the workbook stages below</span>' +
           '<input class="rc-in rc-date" id="rcDate" type="date" style="width:auto;margin-left:auto" value="' + rcAttr(rcToday()) + '">' +
           '<button class="minibtn" id="rcRefresh">Refresh</button>' +
         '</div>' +
+        '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — three people ' +
+          '<span class="hint">delivered or not — the engine\u2019s own list per checker, refreshed live</span></div>' +
+          '<div class="bd" id="rcOwners"><div class="spinner"></div></div></div>' +
         '<div class="card enter d1"><div class="hd">Why today’s list holds these orders ' +
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
           '<div class="bd" id="rcWhy"><div class="spinner"></div></div>' +
@@ -208,6 +211,30 @@
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
+      (function rcOwnersLoad() {
+        var box = $('rcOwners');
+        if (!box) { return; }
+        api('deliveryCheckpoints', {}).then(function (d) {
+          var h = '';
+          ((d && d.checkpoints) || []).forEach(function (c) {
+            var accs = (c.accounts || []).map(function (a) {
+              var flags = [];
+              if (a.undispatched) { flags.push('<b style="color:var(--bad)">' + a.undispatched + ' not dispatched</b>'); }
+              if (a.est_passed) { flags.push('<b style="color:var(--warn)">' + a.est_passed + ' past delivery estimate</b>'); }
+              return '<span class="minibtn" style="cursor:default">' + esc(String(a.account)) + ' ' + a.n + (flags.length ? ' \u00b7 ' + flags.join(' \u00b7 ') : '') + '</span>';
+            }).join(' ');
+            var focus = (c.focus || []).slice(0, 12).map(function (r) {
+              return '<div class="tl-row"><span class="k"><a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(String(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(String(r.order_id)) + '</a> \u00b7 ' + esc(String(r.account)) + '</span>' +
+                '<span style="color:var(--text-3);font-weight:600">' + (r.dispatched ? 'dispatched' : '<b style="color:var(--bad)">NOT DISPATCHED</b>') +
+                (r.est_passed ? ' \u00b7 <b style="color:var(--warn)">est ' + esc(String(r.est_delivery)) + ' passed — confirm delivered</b>' : (r.est_delivery ? ' \u00b7 est ' + esc(String(r.est_delivery)) : '')) + '</span></div>';
+            }).join('');
+            h += '<div style="margin-bottom:12px"><div style="font-weight:800;margin-bottom:4px">' + esc(String(c.owner)) + ' — day ' + c.days + ' <span style="color:var(--text-3);font-weight:600">\u00b7 orders from ' + esc(String(c.order_date)) + ' \u00b7 ' + c.total + ' order(s)</span></div>' +
+              '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + (accs || '<span class="empty">no orders that day</span>') + '</div>' + focus + '</div>';
+          });
+          box.innerHTML = h || '<div class="empty">No checkpoints to show.</div>';
+        }).catch(function (e) { box.innerHTML = '<div class="empty">Checkpoints did not answer \u2014 ' + esc(e.message) + '</div>'; });
+      })();
+
       $('rcRefresh').onclick = function () { rcLoad(); };
       $('rcDate').onchange = function () { rcLoad(); };
       enhanceDate($('rcDate'), { kind: 'day' });
@@ -742,7 +769,7 @@
     if (!host || !res) { return; }
     host.innerHTML = '<div class="card enter d1" style="margin-top:16px"><div class="hd">Logged ' +
         '<span class="hint">' + esc(rcStr(res.mistake_type)) + '</span></div><div class="bd">' +
-        '<div class="tl-row"><span class="k">Order</span><span class="mono">' + esc(rcStr(res.order_id)) + '</span></div>' +
+        '<div class="tl-row"><span class="k">Order</span><span class="mono">' + '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(rcStr(res.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(rcStr(res.order_id)) + '</a>' + '</span></div>' +
         '<div class="tl-row"><span class="k">Account</span><span>' + esc(rcStr(res.account_name)) + '</span></div>' +
         '<div class="tl-row"><span class="k">Processed by</span><span><b>' + esc(rcStr(res.processed_by)) + '</b></span></div>' +
         '<div class="tl-row"><span class="k">Order date</span><span class="num">' + esc(rcNice(rcStr(res.date))) + '</span></div>' +

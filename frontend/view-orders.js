@@ -1102,12 +1102,17 @@
      month, and counts each line of a multi-line order separately. This strip asks the orders
      table instead: one row per order, eBay's own ship-by, eBay's own fulfilment status. Where the
      two disagree, this one is the one to act on. */
+  /* review 3: every order number is a click-through to that order on eBay Seller Hub */
+  function odOrderLink(id) {
+    var oid = String(id || '');
+    return '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(oid) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(oid) + '</a>';
+  }
   function odLiveRow(r) {
     var late = Number(r.hours_late) || 0;
     var days = Math.floor(late / 24);
     var when = days >= 1 ? days + (days === 1 ? ' day' : ' days') + ' late' : Math.max(1, Math.round(late)) + 'h late';
     return '<tr>' +
-      '<td><b>' + esc(String(r.order_id)) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
+      '<td><b>' + odOrderLink(r.order_id) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
       '<td><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(String(r.title || r.item_id || '')) + '</div></td>' +
       '<td class="num">' + (Number(r.sold) ? '£' + Number(r.sold).toFixed(2) : '—') + '</td>' +
       '<td>' + esc(String(r.ship_by || '').slice(0, 10)) + '</td>' +
@@ -1147,6 +1152,20 @@
       var caveat = Number(d.no_deadline_count)
         ? '<div class="od-note" style="margin-top:8px">' + Number(d.no_deadline_count) +
           ' open order(s) carry no ship-by from eBay yet — they sit inside \u201cawaiting dispatch\u201d but cannot appear in LATE or DUE, because their deadline is unknown rather than guessed at.</div>' : '';
+      var stuck = d.stuck_8d || [];
+      var stuckBlock = '';
+      if (stuck.length) {
+        stuckBlock = '<div class="od-stale" style="margin-top:12px"><b>\ud83d\udd34 ' + stuck.length + ' order(s) 8+ days old and STILL not dispatched \u2014 the emergency list</b>' +
+          '<div>eBay has never seen a dispatch for these and the buyer has been waiting over a week. Delivered-or-not checking for dispatched orders lives on Order rechecking (day 4 \u00b7 7 \u00b7 10).</div>' +
+          '<div class="scroll" style="margin-top:8px"><table class="od-tbl"><thead><tr><th>Order</th><th>Item</th><th>Value</th><th>Ordered</th><th>Status</th></tr></thead><tbody>' +
+          stuck.map(function (r) {
+            return '<tr><td><b>' + odOrderLink(r.order_id) + '</b><div style="font-size:10.5px;color:var(--text-3)">' + esc(String(r.account || '')) + '</div></td>' +
+              '<td><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(String(r.title || r.item_id || '')) + '</div></td>' +
+              '<td class="num">' + (Number(r.sold) ? '\u00a3' + Number(r.sold).toFixed(2) : '\u2014') + '</td>' +
+              '<td>' + esc(String(r.created_at || '').slice(0, 10)) + '</td>' +
+              '<td><span class="od-late">' + esc(String(r.status || '')) + '</span></td></tr>';
+          }).join('') + '</tbody></table></div></div>';
+      }
       box.innerHTML = '<div class="card"><div class="hd">Late right now ' +
           '<span class="hint">eBay\u2019s own ship-by deadline · not bounded to a month</span></div>' +
           '<div class="bd">' + tiles +
@@ -1154,7 +1173,7 @@
             '<th>Order</th><th>Item</th><th>Value</th><th>Ship by</th><th>How late</th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>'
             : '<div class="empty" style="margin-top:10px">Nothing is past its eBay deadline. That is the number that matters.</div>') +
-          staleBlock + caveat +
+          staleBlock + stuckBlock + caveat +
         '</div></div>';
     }).catch(function (e) {
       box.innerHTML = '<div class="card"><div class="bd"><div class="empty">The live dispatch feed did not answer — ' +

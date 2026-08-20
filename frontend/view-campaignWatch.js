@@ -90,20 +90,38 @@
         '<p style="margin:0;font-size:11.5px;color:var(--text-3);font-weight:600">Nothing is broken: that shop\'s orders, listings and CS keep syncing. Enrol it in Promoted Listings on eBay and its campaigns appear here on the next 5-minute tick.</p></div>';
     });
     if (gOrder.length) {
-      h += '<div class="cw-dupbox"><h3>🔴 ' + gOrder.length + ' item(s) in more than one RUNNING campaign — eBay can charge each of them in every campaign they sit in</h3>' +
-        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">An item you just moved between campaigns can show here for up to ~90 minutes while the old campaign refreshes — bells only ring once a duplicate is confirmed past that. ✕ removes the item from that one campaign' + '.</p>' +
-        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — ✕ to remove from that campaign</th></tr></thead><tbody>';
+      /* Review 3: every chip carries the campaign's REAL status — running (red-hot, double fees,
+         removable) vs paused/ended (grey, informational). The urgent count is only the listings
+         truly RUNNING in more than one place. */
+      var urgentN = 0;
+      gOrder.forEach(function (k) {
+        var runN = groups[k].filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
+        if (runN > 1) { urgentN++; }
+      });
+      h += '<div class="cw-dupbox"><h3>🔴 URGENT: ' + urgentN + ' item(s) ACTIVE in more than one RUNNING campaign — eBay can charge each of them in every running campaign they sit in</h3>' +
+        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">Every campaign the listing sits in is shown with its live status — <b style="color:var(--bad)">running</b> memberships cost money and carry ✕ to remove; <b>paused</b> ones are grey and harmless until resumed. A fresh move can echo here for ~90 minutes while the old campaign refreshes.</p>' +
+        '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — live status per campaign · ✕ removes from that one</th></tr></thead><tbody>';
       gOrder.forEach(function (k) {
         var list = groups[k];
         var r0 = list[0];
+        var runN = list.filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
         var chips = list.map(function (r) {
-          return '<span class="cw-pill run" style="margin:2px 6px 2px 0;display:inline-block">' + esc(cwStr(r.name) || cwStr(r.campaign_id)) +
-            ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a></span>';
+          var st = cwStr(r.status);
+          var running = /RUNNING/i.test(st);
+          var paused = /PAUSED/i.test(st);
+          var tone = running ? 'background:var(--bad-soft);border:1px solid rgba(240,96,90,.5);color:var(--bad)'
+            : paused ? 'background:rgba(120,132,152,.12);border:1px solid rgba(120,132,152,.35);color:var(--text-3)'
+            : 'background:rgba(120,132,152,.08);border:1px solid rgba(120,132,152,.25);color:var(--text-3);opacity:.7';
+          return '<span class="cw-pill" style="margin:2px 6px 2px 0;display:inline-block;' + tone + '">' +
+            esc(cwStr(r.name) || cwStr(r.campaign_id)) +
+            ' <b style="font-size:9px;letter-spacing:.05em">' + (running ? 'RUNNING' : paused ? 'paused' : esc(st.toLowerCase() || '?')) + '</b>' +
+            (running ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
+            '</span>';
         }).join('');
-        h += '<tr><td>' + esc(cwStr(r0.account)) + '</td>' +
+        h += '<tr' + (runN > 1 ? ' style="background:var(--bad-soft)"' : '') + '><td>' + esc(cwStr(r0.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + '</div></td>' +
-          '<td style="max-width:420px">' + chips + '</td></tr>';
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + (runN > 1 ? ' · <b style="color:var(--bad)">' + runN + ' RUNNING at once</b>' : '') + '</div></td>' +
+          '<td style="max-width:460px">' + chips + '</td></tr>';
       });
       h += '</tbody></table></div></div>';
     } else {

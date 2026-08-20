@@ -74,7 +74,7 @@
           '<th>Order</th><th>Account</th><th>Item</th>' + (hasBuyer ? '<th>Buyer</th>' : '') +
           '<th>Value</th><th>Ordered</th><th>Ship by</th><th>State</th></tr></thead><tbody>';
         (d.rows || []).forEach(function (r) {
-          h += '<tr><td class="mono">' + esc(obStr(r.order_id)) + '</td>' +
+          h += '<tr><td class="mono">' + '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(obStr(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(obStr(r.order_id)) + '</a>' + '</td>' +
             '<td>' + esc(obStr(r.account)) + '</td>' +
             '<td><a href="https://www.ebay.co.uk/itm/' + esc(obStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(obStr(r.title) || obStr(r.item_id)) + '</div></a></td>' +
             (hasBuyer ? '<td>' + esc(obStr(r.buyer)) + '</td>' : '') +

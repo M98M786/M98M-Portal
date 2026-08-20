@@ -3068,7 +3068,7 @@ const ROUTES = {
       // late orders carry buyer-adjacent detail and order values — the Dispatch screen's own roles
       if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || '');
-      const where = ["o.status NOT IN ('FULFILLED','NOT_FOUND')", "o.ship_by != ''"];
+      const where = ["o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND')", "o.ship_by != ''"];
       const bind = [];
       if (account) { bind.push(account); where.push('o.account = ?' + bind.length); }
       const open = await ctx.env.DB.prepare(
@@ -3098,18 +3098,18 @@ const ROUTES = {
          allowed to under-report how many orders are actually late. */
       const cnt = await ctx.env.DB.prepare(
         "SELECT COUNT(*) AS late_n, COALESCE(SUM(sold), 0) AS late_value FROM orders o " +
-        "WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by < ?1" +
+        "WHERE o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by < ?1" +
         (account ? ' AND o.account = ?2' : '')
       ).bind(...[new Date(now).toISOString()].concat(account ? [account] : [])).first();
 
       const awaiting = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND')" + (account ? ' AND o.account = ?1' : '')
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND')" + (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
       /* due-soon counted in SQL like its siblings — the 400-row page must never under-report */
       const soonIso = new Date(soon).toISOString();
       const dueCnt = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by >= ?1 AND o.ship_by <= ?2" +
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND') AND o.ship_by != '' AND o.ship_by >= ?1 AND o.ship_by <= ?2" +
         (account ? ' AND o.account = ?3' : '')
       ).bind(...[new Date(now).toISOString(), soonIso].concat(account ? [account] : [])).first();
 
@@ -3129,7 +3129,7 @@ const ROUTES = {
       ).bind(...[new Date(dayStartMs).toISOString()].concat(account ? [account] : [])).first();
 
       const noDeadline = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.ship_by = ''" +
+        "SELECT COUNT(*) AS n FROM orders o WHERE o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND') AND o.ship_by = ''" +
         (account ? ' AND o.account = ?1' : '')
       ).bind(...(account ? [account] : [])).first();
 
@@ -3139,11 +3139,23 @@ const ROUTES = {
          dispatch. Every one is a real order eBay believes never shipped. */
       const staleRows = await ctx.env.DB.prepare(
         "SELECT o.account, COUNT(*) AS n, ROUND(SUM(o.sold), 2) AS value, MIN(date(o.created_at)) AS oldest " +
-        "FROM orders o WHERE o.status NOT IN ('FULFILLED','NOT_FOUND') AND o.created_at < date('now', '-30 day')" +
+        "FROM orders o WHERE o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND') AND o.created_at < date('now', '-30 day')" +
         (account ? ' AND o.account = ?1' : '') + ' GROUP BY o.account ORDER BY n DESC'
       ).bind(...(account ? [account] : [])).all();
       const stale = staleRows.results || [];
 
+      /* Review 3: "orders which have passed 8 days since order came and still not delivered" —
+         the engine cannot SEE carrier delivery, but an order still not even DISPATCHED 8 days
+         in is a fact it can prove, and that list is the emergency. Delivered-or-not checking
+         belongs to the recheck flow (day 4 Noman · day 7 Zeeshan · day 10 Wahab). */
+      const iso8 = new Date(Date.now() - 8 * 86400000).toISOString();
+      const stuck = await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.item_id, o.sold, o.status, o.created_at, o.est_delivery, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+        "WHERE o.status NOT IN ('FULFILLED', 'CANCELLED', 'NOT_FOUND') AND o.created_at <= ?1 " +
+        (account ? 'AND o.account = ?2 ' : '') +
+        'ORDER BY o.created_at ASC LIMIT 100'
+      ).bind(...(account ? [iso8, account] : [iso8])).all();
       return {
         as_of: new Date().toISOString(),
         late_count: (cnt && cnt.late_n) || 0,
@@ -3158,6 +3170,7 @@ const ROUTES = {
         stale_by_account: stale,
         late: late.slice(0, 120),
         due_soon: dueSoon.slice(0, 120),
+        stuck_8d: (stuck.results || []),
       };
     },
   },
@@ -3337,12 +3350,15 @@ const ROUTES = {
       ).all();
       /* One row per (item, campaign) so the screen can offer "remove from THIS one" — an
          aggregated names string cannot carry campaign ids safely (names are free text). */
+      /* Review 3: a duplicated listing shows its WHOLE campaign map — every membership carries
+         the campaign's live status, so a paused campaign reads as paused instead of masquerading
+         as active. The listing qualifies for this board only when RUNNING in more than one. */
       const dups = await ctx.env.DB.prepare(
-        'SELECT ca.account, ca.listing_id, ca.campaign_id, c.name, ia.title ' +
+        'SELECT ca.account, ca.listing_id, ca.campaign_id, c.name, c.status, ia.title ' +
         'FROM campaign_ads ca ' +
         'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
         'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id ' +
-        "WHERE c.status LIKE '%RUNNING%' AND EXISTS (" +
+        'WHERE EXISTS (' +
         '  SELECT 1 FROM campaign_ads x JOIN campaigns cx ON cx.account = x.account AND cx.campaign_id = x.campaign_id ' +
         "  WHERE x.account = ca.account AND x.listing_id = ca.listing_id AND cx.status LIKE '%RUNNING%' " +
         '  GROUP BY x.listing_id HAVING COUNT(DISTINCT x.campaign_id) > 1) ' +
@@ -3714,6 +3730,43 @@ const ROUTES = {
      status). At the CHINA check that is the "focus these" list nobody had before. Offsets
      arrive from the caller (the screen already knows the CONFIG-tuned values); defaults are
      the spec's 4/2/1/3. Order lists carry no profit, so any signed-in user may read them. */
+  /* Review 3: "i have three people for order rechecking — Noman after 4 days, Zeeshan after 7,
+     Wahab after 10 — either item is delivered or not." Each person's list = the orders created
+     exactly that many days ago, still standing (not cancelled), with what the engine can prove:
+     dispatched or not, and whether eBay's delivery estimate has already passed. */
+  deliveryCheckpoints: {
+    auth: 'any', fn: async (p, ctx) => {
+      const day = ukDate('');
+      const owners = [{ days: 4, owner: 'Noman' }, { days: 7, owner: 'Zeeshan' }, { days: 10, owner: 'Wahab' }];
+      const shift = (ymd, days) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - days); return d.toISOString().slice(0, 10); };
+      const out = [];
+      for (const o of owners) {
+        const ref = shift(day, o.days);
+        const rs = await ctx.env.DB.prepare(
+          'SELECT o.order_id, o.account, o.item_id, o.sold, o.status, o.est_delivery, i.title ' +
+          'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+          "WHERE o.status NOT IN ('CANCELLED','NOT_FOUND') AND substr(o.created_at, 1, 10) = ?1 " +
+          'ORDER BY o.account, o.order_id LIMIT 250'
+        ).bind(ref).all();
+        const rows = (rs.results || []).map(r => ({
+          order_id: r.order_id, account: r.account, item_id: r.item_id, sold: r.sold,
+          title: r.title || '', dispatched: r.status === 'FULFILLED',
+          est_delivery: String(r.est_delivery || '').slice(0, 10),
+          est_passed: !!(r.est_delivery && String(r.est_delivery) < new Date().toISOString()),
+        }));
+        const byAcct = {};
+        for (const r of rows) {
+          const a = (byAcct[r.account] = byAcct[r.account] || { account: r.account, n: 0, undispatched: 0, est_passed: 0 });
+          a.n++; if (!r.dispatched) a.undispatched++; if (r.est_passed) a.est_passed++;
+        }
+        out.push({ owner: o.owner, days: o.days, order_date: ref, total: rows.length,
+          accounts: Object.values(byAcct), focus: rows.filter(r => !r.dispatched || r.est_passed).slice(0, 60) });
+      }
+      return { day, checkpoints: out,
+        note: 'the focus list = not yet dispatched OR past eBay’s delivery estimate — exactly what the checker must confirm delivered' };
+    },
+  },
+
   recheckFeed: {
     auth: 'any', fn: async (p, ctx) => {
       // presence check, not truthiness — Management may legitimately tune a checkpoint to 0 days
