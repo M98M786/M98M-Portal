@@ -281,10 +281,49 @@
           '<span class="sub">Live Engine numbers · arrows compare with last night\'s snapshot · sync problems surface here first</span>' +
           '<button class="minibtn" id="ahSelfTest" style="margin-left:auto">Run validation</button></div>' +
         '<div id="ahSelfTestOut"></div>' +
-        '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>';
+        '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>' +
+        /* Engine ops — the runJobNow lever with a face. Every button fires the same job the
+           cron runs on its own; the '@lock' lease server-side stops a press racing a real tick. */
+        '<div class="card enter d3" style="margin-top:14px"><div class="hd">Engine ops' +
+          '<span class="hint">run any Engine job now — same jobs the clock runs, useful after a repair or when a number looks stale</span></div>' +
+          '<div class="bd"><div id="ahOpsBtns" style="display:flex;flex-wrap:wrap;gap:8px">' +
+          [['rollups', 'Re-roll books · 8 days'], ['rollupsWide', 'Re-roll books · 45 days'],
+           ['orderSync', 'Pull latest orders'], ['statusRefresh', 'Refresh order statuses'],
+           ['adsIntraday', 'Pull today’s ad spend'], ['adsReportKick', 'Request eBay ad reports'],
+           ['trafficSync', 'Pull traffic report'], ['csSync', 'Pull cases & returns'],
+           ['listingSync', 'Pull listings'], ['selfTestJob', 'Validation + letters'],
+           ['nightlyCatchup', 'Heal missed nightly jobs'], ['backup', 'Backup now']
+          ].map(function (j) {
+            return '<button class="minibtn" data-ah-job="' + j[0] + '">' + j[1] + '</button>';
+          }).join('') +
+          '</div><div id="ahOpsOut" style="margin-top:10px"></div></div></div>';
     },
     init: function () {
       ahLoad();
+      var ops = $('ahOpsBtns');
+      if (ops) {
+        ops.onclick = function (ev) {
+          var b = ev.target && ev.target.closest ? ev.target.closest('[data-ah-job]') : null;
+          if (!b || b.disabled) { return; }
+          var job = b.getAttribute('data-ah-job'), label = b.textContent;
+          var out = $('ahOpsOut');
+          b.disabled = true; b.textContent = 'Running…';
+          out.innerHTML = '<div class="tl-row"><span class="k">⏳ ' + esc(label) + '</span><span style="color:var(--text-3);font-weight:600">the Engine is running it now — long jobs can take a minute or two</span></div>';
+          api('runJobNow', { job: job }).then(function (d) {
+            var h = '';
+            ((d && d.state) || []).forEach(function (s) {
+              if (String(s.account) === '@lock') { return; }
+              h += '<div class="tl-row"><span class="k">' + (s.last_error ? '🔴' : '✅') + ' ' + esc(String(d.ran || job)) + (s.account ? ' · ' + esc(String(s.account)) : '') + '</span>' +
+                '<span style="color:var(--text-3);font-weight:600">' + (s.last_error ? esc(String(s.last_error)) : 'done ' + esc(String(s.last_ok || '')) + ' UTC') + '</span></div>';
+            });
+            out.innerHTML = h || '<div class="tl-row"><span class="k">✅ ' + esc(job) + '</span><span style="color:var(--text-3);font-weight:600">ran</span></div>';
+            b.disabled = false; b.textContent = label;
+          }).catch(function (e) {
+            out.innerHTML = '<div class="tl-row"><span class="k">🔴 ' + esc(job) + '</span><span style="color:var(--bad);font-weight:700">' + esc(e.message || 'failed') + '</span></div>';
+            b.disabled = false; b.textContent = label;
+          });
+        };
+      }
       /* The night list's validation setup, one press: every calculation invariant answers. The
          same battery runs nightly on its own and files a letter for every failure. */
       var st = $('ahSelfTest');
