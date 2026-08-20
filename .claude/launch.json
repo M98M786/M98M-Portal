@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vwtest",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "python3 -m http.server \"${PORT:-8123}\" --directory '/private/tmp/claude-502/-Users-ahtishamkhan-Documents-Claude-Code-/b520d66f-10f1-4340-8ebe-aa6a2884085f/scratchpad/vwtest'"],
+      "autoPort": true,
+      "port": 8123
+    }
+  ]
+}
