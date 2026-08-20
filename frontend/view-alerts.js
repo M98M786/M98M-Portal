@@ -351,7 +351,6 @@
       rows.forEach(function (r) { byId[String(r.id)] = r; });
       function letterCard(r) {
         var openR = !alStr(r.resolved_at);
-        var subj = alStr(r.message).replace(/^([\ud83d\ude80-\ud83d\udfff]|\ud83d[\ude00-\udfff]|[\u2700-\u27bf]|\ud83d\udd34|\ud83d\udfe0)\s*/g, '');
         return '<article class="al-card" data-al-open="' + alAttr(String(r.id)) + '" style="cursor:pointer;padding:8px 12px;margin:4px 0;' + (openR ? '' : 'opacity:.55') + '">' +
           '<div class="al-hd" style="margin:0"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
             '<span class="al-acct" style="font-size:12px">' + esc(alStr(r.type)) + '</span>' +
