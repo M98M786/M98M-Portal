@@ -1467,13 +1467,25 @@ async function marketingSync(env) {
     if (!lr.ok) throw new Error(acct + ' promotions ' + lr.status + ': ' + (await lr.text()).slice(0, 120));
     const data = await lr.json();
     const promos = data.promotions || [];
+    /* budget discipline (adsReportKick's lesson): the LIST row for every promotion always
+       lands, but the per-promotion DETAIL fetch is capped per run and skipped while fresh —
+       membership fills across runs instead of blowing the invocation's subrequest budget. */
+    let details = 0;
+    const freshRs = await env.DB.prepare(
+      "SELECT promo_id FROM promotions WHERE account = ?1 AND item_n > 0 AND synced_at >= datetime('now', '-20 hours')"
+    ).bind(acct).all();
+    const fresh = {};
+    for (const f of (freshRs.results || [])) fresh[String(f.promo_id)] = 1;
     for (const p0 of promos) {
       const pid = String(p0.promotionId || (p0.promotionHref || '').split('/').filter(Boolean).pop() || '');
       if (!pid) continue;
       /* member listings: markdown sales and item promotions carry them in different envelopes */
       let listingIds = [];
       let discount = '';
+      const wantDetail = !fresh[pid] && details < 6;
       try {
+        if (!wantDetail) throw { skip: true };
+        details++;
         const isMd = /MARKDOWN/i.test(String(p0.promotionType || ''));
         const dr = await fetch('https://api.ebay.com/sell/marketing/v1/' + (isMd ? 'item_price_markdown/' : 'item_promotion/') + encodeURIComponent(pid), {
           headers: { authorization: 'Bearer ' + tok } });
@@ -1495,7 +1507,10 @@ async function marketingSync(env) {
       await env.DB.prepare(
         'INSERT INTO promotions (account, promo_id, name, type, status, start_at, end_at, discount, item_n, listing_ids, synced_at) ' +
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) " +
-        'ON CONFLICT(account, promo_id) DO UPDATE SET name=?3, type=?4, status=?5, start_at=?6, end_at=?7, discount=?8, item_n=?9, listing_ids=?10, synced_at=datetime(\'now\')'
+        'ON CONFLICT(account, promo_id) DO UPDATE SET name=?3, type=?4, status=?5, start_at=?6, end_at=?7, ' +
+        "discount = CASE WHEN ?8 != '' THEN ?8 ELSE discount END, " +
+        'item_n = CASE WHEN ?9 > 0 THEN ?9 ELSE item_n END, ' +
+        "listing_ids = CASE WHEN ?10 != '' THEN ?10 ELSE listing_ids END, synced_at=datetime('now')"
       ).bind(acct, pid, String(p0.name || '').slice(0, 120), String(p0.promotionType || ''), String(p0.promotionStatus || ''),
         String(p0.startDate || ''), String(p0.endDate || ''), discount,
         listingIds.length, listingIds.join(',').slice(0, 40000)).run();
@@ -1560,24 +1575,34 @@ async function feedbackSync(env) {
     const fx = await fr.text();
     if (!fr.ok || fx.indexOf('<Ack>Failure</Ack>') >= 0) throw new Error(acct + ' GetFeedback failed: ' + fx.slice(0, 140));
     const entries = fx.match(/<FeedbackDetail>[\s\S]*?<\/FeedbackDetail>/g) || [];
+    /* one read of the known keys + batched inserts — a first run carries 100 entries per
+       account and per-row SELECT+INSERT pairs blew the invocation's subrequest budget */
+    const knownRs = await env.DB.prepare('SELECT fb_key FROM feedback WHERE account = ?1').bind(acct).all();
+    const known = {};
+    for (const k0 of (knownRs.results || [])) known[String(k0.fb_key)] = 1;
+    const stmts = [];
+    const newNegs = [];
     for (const e0 of entries) {
       const type = xmlTag(e0, 'CommentType');
       const user = xmlTag(e0, 'CommentingUser');
       const at = xmlTag(e0, 'CommentTime');
       const item = xmlTag(e0, 'ItemID');
       const key = acct + '|' + item + '|' + user + '|' + at;
-      const existed = await env.DB.prepare('SELECT 1 AS x FROM feedback WHERE fb_key = ?1').bind(key).first();
-      if (existed) continue;
-      await env.DB.prepare(
+      if (known[key]) continue;
+      known[key] = 1;
+      stmts.push(env.DB.prepare(
         "INSERT OR IGNORE INTO feedback (fb_key, account, type, item_id, order_line, buyer, text, at, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))"
-      ).bind(key, acct, type, item, xmlTag(e0, 'OrderLineItemID'), user, xmlTag(e0, 'CommentText').slice(0, 400), at).run();
+      ).bind(key, acct, type, item, xmlTag(e0, 'OrderLineItemID'), user, xmlTag(e0, 'CommentText').slice(0, 400), at));
       if (/Negative/i.test(type)) {
-        const msg = '🔴 NEGATIVE FEEDBACK on ' + acct + ' · item ' + item + ' · buyer ' + user +
-          ' — “' + xmlTag(e0, 'CommentText').slice(0, 140) + '” · order ' + xmlTag(e0, 'OrderLineItemID') +
-          ' — CS: respond and try to resolve for a revision.';
-        await queueNotify(env, 'management', 'Negative feedback', msg, 'engine:fbneg:' + key);
-        await notifyRole(env, 'CS', 'Negative feedback', msg, 'engine:fbneg:cs:' + key);
+        newNegs.push({ key, item, user, text: xmlTag(e0, 'CommentText').slice(0, 140), line: xmlTag(e0, 'OrderLineItemID') });
       }
+    }
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    for (const n of newNegs.slice(0, 10)) {
+      const msg = '🔴 NEGATIVE FEEDBACK on ' + acct + ' · item ' + n.item + ' · buyer ' + n.user +
+        ' — “' + n.text + '” · order ' + n.line + ' — CS: respond and try to resolve for a revision.';
+      await queueNotify(env, 'management', 'Negative feedback', msg, 'engine:fbneg:' + n.key);
+      await notifyRole(env, 'CS', 'Negative feedback', msg, 'engine:fbneg:cs:' + n.key);
     }
     /* the header numbers his Seller Hub card shows: score + positive % */
     const guReq = '<?xml version="1.0" encoding="utf-8"?>' +
