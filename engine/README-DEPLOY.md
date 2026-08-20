@@ -112,3 +112,35 @@ open, reload the editor first.
 **Repair tools**: `rollupsWide` re-rolls the 45-day window after any history repair (the nightly
 covers 8 days with the edge-day skipped — its brief absence shrank 15 Aug to a third). The ads
 kick self-heals a 7-day window of missed family-days.
+
+## 20 Aug additions — the overnight hardening (sessions, validation, departments)
+
+**Portal sessions** (the reload/new-tab logout fix): `sessions` D1 table; the Engine mints a
+64-hex 7-day token at sign-in (`sessionMint`), the client keeps it in localStorage
+(`m98m:psess` + cached identity `m98m:pident`) and boots straight into the app; `sessionHello`
+re-verifies in the background; `sessionEnd` on sign-out. Apps Script accepts the same token:
+`authorizeFor_(level, idToken, session)` → `sessionIdent_` asks the Engine (`sessionCheck`,
+sync-key gated, CacheService 5 min) and falls back to the Google pass. Roles are STILL read
+from the users table on every call, both servers — a session answers who, never may.
+
+**The validation battery**: `selfTestRun` (11 checks — fee band 10-25%, no negative fees, no
+duplicate orders, books-vs-orders to ±2% for the last two full UK days, independent P&L
+recompute, ad-book continuity, intraday rollover purity, zero-priced listings, future-dated
+rows). `selfTest` action (mgmt) behind the Run-validation button on Account health;
+`selfTestJob` nightly at 02:00 files a letter per failure. First live run: 11/11 after fixing
+its own check 9 — **never TEXT-compare ISO 'T'-form stamps against SQL's space-form
+datetime('now'); bind a real ISO instant.**
+
+**Deploying /exec from the pane — the ONLY reliable dialog recipe**: coordinate clicks from
+scaled screenshots silently mis-select (three deploys re-pinned the old version while showing a
+success banner). Drive it by DOM events: find the `[role=option]` LI whose textContent is
+'New version', dispatch pointerdown/mousedown/pointerup/mouseup/click with clientX/Y, same for
+the Deploy button, then read `document.body.innerText` and REQUIRE the banner to name a NEW
+version number.
+
+**Reading/writing Google Sheets from the pane** (no API, session cookies only): read any tab via
+`/htmlview/sheet?headers=true&gid=<gid>` + regex (gviz needs OAuth, export?format=csv dies on
+redirect CORS, DOMParser is blocked by TrustedHTML); find a gid by clicking the tab name in
+/htmlview and reading location.hash; write a cell in the editor via #t-name-box (set value +
+synthetic Enter) then a synthetic ClipboardEvent('paste') on .docs-texteventtarget-iframe's
+activeElement — computer-typing never reaches the grid.
