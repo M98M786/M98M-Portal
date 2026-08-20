@@ -390,7 +390,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-2317';
+var BUILD = '20260820-2321';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -9354,6 +9354,9 @@ VIEWS.dashboard = {
   })();
 
   VIEW_CSS.push(
+    '.hu-imgwrap{display:inline-block;border:1px solid var(--gold-line);border-radius:10px;overflow:hidden;background:var(--panel-2);line-height:0}' +
+    '.hu-imgwrap:hover{border-color:var(--gold-line-hi)}' +
+    '.hu-img{max-width:220px;max-height:150px;object-fit:contain;display:block}' +
     '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
     '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}' +
@@ -9459,7 +9462,23 @@ VIEWS.dashboard = {
     var s = huStr(v), u = safeUrl(s);
     if (!s) return '<span class="hu-none">—</span>';
     if (!u) return '<span class="hu-txt">' + esc(s) + '</span>';
+    /* R5 (Hasib): "if a product hunter adds an aliexpress image link or ebay link in image,
+     * make it visible there on the time of approval" — a link that IS an image renders as the
+     * image itself (lazy thumbnail, click opens the full file). AliExpress and eBay CDNs plus
+     * anything ending in an image extension count; page links stay links. */
+    if (huIsImageUrl(u)) {
+      return '<a class="hu-imgwrap" href="' + huAttr(u) + '" target="_blank" rel="noopener noreferrer" title="' + huAttr(u) + '">' +
+        '<img class="hu-img" loading="lazy" referrerpolicy="no-referrer" src="' + huAttr(u) + '" alt="evidence image"' +
+        ' onerror="var p=this.parentNode;p.className=\'hu-link\';p.style.lineHeight=\'1.4\';p.textContent=p.title">' +
+        '</a>';
+    }
     return '<a class="hu-link" href="' + huAttr(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + '</a>';
+  }
+
+  function huIsImageUrl(u) {
+    var s = String(u).toLowerCase().split('?')[0];
+    if (/\.(jpe?g|png|gif|webp|bmp|avif)$/.test(s)) return true;
+    return /(^https:\/\/([a-z0-9-]+\.)*(alicdn\.com|ebayimg\.com|ibb\.co|imgur\.com|postimg\.cc|prnt\.sc|gyazo\.com))/.test(String(u).toLowerCase());
   }
 
   // ---------- §8.0 the UK listing clock, shown in Pakistan time ----------
