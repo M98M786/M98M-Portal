@@ -1516,6 +1516,11 @@ async function marketingSync(env) {
         const isMd = /MARKDOWN/i.test(String(p0.promotionType || ''));
         const dr = await fetch('https://api.ebay.com/sell/marketing/v1/' + (isMd ? 'item_price_markdown/' : 'item_promotion/') + encodeURIComponent(pid), {
           headers: { authorization: 'Bearer ' + tok } });
+        if (!dr.ok) {
+          /* csMetricsSkip's lesson: a swallowed refusal hides the WHY for weeks — record it */
+          await ctx_setSync(env, 'promoDetailSkip', acct,
+            (String(p0.promotionType) + ' ' + pid).slice(0, 60) + ' -> ' + dr.status + ': ' + (await dr.text()).replace(/\s+/g, ' ').slice(0, 200));
+        }
         if (dr.ok) {
           const det = await dr.json();
           const sel = det.selectedInventoryDiscounts || [];
