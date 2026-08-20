@@ -293,7 +293,8 @@
            ['trafficSync', 'Pull traffic report'], ['csSync', 'Pull cases & returns'],
            ['listingSync', 'Pull listings'], ['selfTestJob', 'Validation + letters'],
            ['nightlyCatchup', 'Heal missed nightly jobs'], ['backup', 'Backup now'],
-           ['marketingSync', 'Pull sale events'], ['feedbackSync', 'Pull feedback']
+           ['marketingSync', 'Pull sale events'], ['feedbackSync', 'Pull feedback'],
+           ['securitySweep', 'Security sweep now']
           ].map(function (j) {
             return '<button class="minibtn" data-ah-job="' + j[0] + '">' + j[1] + '</button>';
           }).join('') +

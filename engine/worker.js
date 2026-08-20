@@ -61,10 +61,29 @@ export default {
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
       const t0 = Date.now();
-      const data = await route.fn(body.payload || {}, ctx2);
+      /* SPEED (Hasib, night order): the heavy read boards recomputed full scans on every
+         screen visit. These actions return IDENTICAL data to every permitted caller, so a
+         short in-isolate cache answers repeat visits in milliseconds and cuts D1 work ~10x.
+         Role-DEPENDENT actions (alertMail, csDesk, toolHtml…) are deliberately absent. */
+      const ROUTE_CACHE_MS = { itemPnl: 90000, dailyReport: 45000, itemRisk: 120000,
+        marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 60000, trafficBoard: 300000,
+        deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0 };
+      const rcTtl = ROUTE_CACHE_MS[action] || 0;
+      const data = rcTtl
+        ? await memo('rt:' + action + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2))
+        : await route.fn(body.payload || {}, ctx2);
       console.log('t', action, Date.now() - t0, 'ms');       // §9: server time per action, in the CF log
       return json({ ok: true, data }, 200, cors);
     } catch (e) {
+      /* daily security telemetry: every refused call ticks a counter the nightly
+         securitySweep reads — a spike means someone is probing the portal */
+      if (e instanceof AuthError) {
+        try {
+          const k = 'authfail:' + ukDate('');
+          const c = Number(await env.HOT.get(k)) || 0;
+          await env.HOT.put(k, String(c + 1), { expirationTtl: 172800 });
+        } catch (e2) {}
+      }
       const msg = e instanceof AuthError ? 'auth'
         : String(e && e.message || e).startsWith('SAY: ') ? String(e.message).slice(5)
         : 'request failed';
@@ -89,7 +108,7 @@ export default {
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync],
-      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob],
+      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -1685,6 +1704,63 @@ async function feedbackSync(env) {
       "ON CONFLICT(account) DO UPDATE SET score=?2, pos_pct=?3, pos_30d=?4, neu_30d=?5, neg_30d=?6, synced_at=datetime('now')"
     ).bind(acct, score, pct, Number(cnt && cnt.p) || 0, Number(cnt && cnt.n) || 0, Number(cnt && cnt.g) || 0).run();
   });
+}
+
+/* Review 5 (Hasib, night order): "make a plan to do the cybersecurity of this portal every
+   day." This sweep runs NIGHTLY and letters management on every finding. What it checks:
+   sessions (purge expired, malformed tokens, per-user floods), the SUPER-USER ALLOWLIST (a
+   new admin appearing is the loudest bell this portal can ring), role/status CHANGES since
+   yesterday's snapshot (insider-threat guard), secrets presence, the CORS origin allowlist,
+   and the day's failed-auth counter (probing detection). Human-side duties live in SECURITY.md. */
+async function securitySweep(env) {
+  const findings = [];
+  await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+  const bad = await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions WHERE length(token) != 64').first();
+  if (Number(bad && bad.n)) findings.push('🔴 ' + bad.n + ' malformed session token(s) in the sessions table');
+  const flood = await env.DB.prepare('SELECT email, COUNT(*) AS n FROM sessions GROUP BY email HAVING COUNT(*) > 15').all();
+  for (const r of (flood.results || [])) findings.push('🟠 session flood: ' + r.email + ' holds ' + r.n + ' live sessions (possible token leak)');
+
+  const SUPER_ALLOW = ['mrhasibullah91@googlemail.com', 'zaidkaleem987@gmail.com', 'm98m786@gmail.com'];
+  const sup = await env.DB.prepare('SELECT email FROM users WHERE super = 1').all();
+  for (const r of (sup.results || [])) {
+    if (SUPER_ALLOW.indexOf(String(r.email).toLowerCase()) < 0) findings.push('🔴 UNEXPECTED SUPER USER: ' + r.email + ' — remove or approve explicitly');
+  }
+
+  const now = (await env.DB.prepare('SELECT email, role, status, super FROM users').all()).results || [];
+  const snap = (await env.DB.prepare('SELECT email, role, status, super FROM users_snapshot').all()).results || [];
+  const snapBy = {};
+  for (const r of snap) snapBy[String(r.email)] = r;
+  for (const u of now) {
+    const o = snapBy[String(u.email)];
+    if (!o) { if (snap.length) findings.push('🟠 NEW USER since yesterday: ' + u.email + ' (' + u.role + ', ' + u.status + ')'); continue; }
+    if (String(o.role) !== String(u.role)) findings.push('🔴 ROLE CHANGED: ' + u.email + ' — ' + o.role + ' → ' + u.role);
+    if (Number(o.super) !== Number(u.super)) findings.push('🔴 SUPER FLAG CHANGED: ' + u.email + ' — ' + o.super + ' → ' + u.super);
+    if (String(o.status) !== String(u.status) && u.status === 'approved') findings.push('🟠 user newly approved: ' + u.email + ' (' + u.role + ')');
+  }
+  const stmts = now.map(u => env.DB.prepare(
+    "INSERT INTO users_snapshot (email, role, status, super, snapped_at) VALUES (?1, ?2, ?3, ?4, datetime('now')) " +
+    "ON CONFLICT(email) DO UPDATE SET role = ?2, status = ?3, super = ?4, snapped_at = datetime('now')"
+  ).bind(u.email, u.role, u.status, Number(u.super) || 0));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+
+  for (const k of ['SYNC_KEY', 'EBAY_APP_ID', 'EBAY_CERT_ID', 'EBAY_DEV_ID', 'EBAY_RU_NAME']) {
+    if (!env[k]) findings.push('🔴 missing secret binding: ' + k);
+  }
+  const EXPECT_ORIGINS = 'https://m98m786.github.io,https://portal.m98mltd.co.uk';
+  if (String(env.ALLOWED_ORIGIN || '') !== EXPECT_ORIGINS) {
+    findings.push('🔴 CORS allowlist drifted: "' + String(env.ALLOWED_ORIGIN || '') + '" (expected the two portal origins)');
+  }
+  const day = ukDate('');
+  const fails = Number(await env.HOT.get('authfail:' + day)) || 0;
+  if (fails > 50) findings.push('🟠 ' + fails + ' refused calls today — someone may be probing the portal');
+
+  for (const f of findings.slice(0, 8)) {
+    const ref = 'engine:sec:' + day + ':' + f.slice(0, 60).replace(/[^a-z0-9]/gi, '').slice(0, 40);
+    const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE to_addr = ?1 AND ref = ?2').bind('management', ref).first();
+    if (!seen) await queueNotify(env, 'management', 'Security', f + ' — nightly security sweep', ref);
+  }
+  await ctx_setSync(env, 'securitySweep', '',
+    (findings.length ? findings.length + ' finding(s): ' + findings.join(' | ').slice(0, 1100) : 'clean — sessions purged, admins verified, roles unchanged, secrets present, CORS exact, auth-fails ' + fails));
 }
 
 /* Seller standards move slowly — eBay evaluates monthly — so one nightly read per account is
@@ -4555,7 +4631,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
