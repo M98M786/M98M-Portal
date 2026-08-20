@@ -105,7 +105,7 @@ export default {
        5-minute treadmill. */
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync, processWatch],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
@@ -585,6 +585,54 @@ async function processWatch(env) {
         await notifyRole(env, 'Order Processor', 'Sourcing links missing', msg, ref);
         await notifyRole(env, 'Ops Head', 'Sourcing links missing', msg, ref);
       }
+    }
+  }
+}
+
+/* R5 (Hasib): "if one account does not give an order on ebay in the peak hours of 10am to 11pm
+   UK — send an alert to management that the account is SLEEPING, look into it. No order for
+   more than one hour in these timings = a message." Effective silence starts at the LATER of
+   the last order and 10:00 UK, so the overnight quiet never counts. Tiers 1h/2h/4h/8h re-ring
+   a still-sleeping account without 13 letters a day. When nearly every account is silent at
+   once the problem is the FEED, not five shops — one letter says so instead of five crying
+   wolf about the wrong thing. Only accounts that sold within 7 days play. */
+async function sleepWatch(env) {
+  const now = new Date();
+  const uk = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(now);
+  const ukHour = Number((uk.find((p) => p.type === 'hour') || {}).value || 0);
+  const ukMin = Number((uk.find((p) => p.type === 'minute') || {}).value || 0);
+  if (ukHour < 10 || ukHour >= 23) return;
+  const winStartMs = now.getTime() - ((ukHour - 10) * 60 + ukMin) * 60000;
+  const rs = await env.DB.prepare(
+    "SELECT account, MAX(created_at) AS last FROM orders WHERE status != 'NOT_FOUND' GROUP BY account " +
+    "HAVING MAX(created_at) >= datetime('now', '-7 day')"
+  ).all();
+  const day = ukDate(now.toISOString());
+  const sleeping = [];
+  for (const r of (rs.results || [])) {
+    const lastMs = new Date(String(r.last)).getTime();
+    const gapMin = Math.floor((now.getTime() - Math.max(lastMs, winStartMs)) / 60000);
+    if (gapMin > 60) sleeping.push({ account: String(r.account), gapMin, last: String(r.last) });
+  }
+  if (!sleeping.length) return;
+  const total = (rs.results || []).length;
+  if (total >= 3 && sleeping.length >= total - 1) {
+    const ref = 'engine:sleep:FEED:' + day + ':' + (Math.floor(Math.min(...sleeping.map(s => s.gapMin)) / 120) * 120);
+    const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
+    if (!seen) await notifyRole(env, 'Management', 'Every account quiet — feed suspect',
+      '⚠ ' + sleeping.length + ' of ' + total + ' accounts have no new order for over an hour in UK peak — when they all go quiet TOGETHER the likely cause is the order feed or eBay itself, not the shops. Check Account health → Validation first.', ref);
+    return;
+  }
+  for (const s of sleeping) {
+    const tier = s.gapMin >= 480 ? 480 : s.gapMin >= 240 ? 240 : s.gapMin >= 120 ? 120 : 60;
+    const ref = 'engine:sleep:' + s.account + ':' + day + ':' + tier;
+    const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
+    if (!seen) {
+      const h = Math.floor(s.gapMin / 60), m = s.gapMin % 60;
+      await notifyRole(env, 'Management', 'Account sleeping',
+        '🔴 ' + s.account + ' is SLEEPING — no new eBay order for ' + h + 'h' + (m ? m + 'm' : '') +
+        ' during UK peak (10:00–23:00). Last order ' + s.last.slice(0, 16).replace('T', ' ') +
+        ' UTC. Look into it: listings live? buy box lost? defect? price? If EVERY account is quiet it is the feed — Validation answers that.', ref);
     }
   }
 }
@@ -4878,7 +4926,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
