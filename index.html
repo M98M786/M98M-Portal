@@ -330,7 +330,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -389,7 +389,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-1932';
+var BUILD = '20260820-1943';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -1097,7 +1097,8 @@ VIEWS.home = {
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, mode: 'daily' };   // daily → workbook → list, one button cycles
+  var AR = { data: null, mode: 'daily', modeSet: false };
+  function arMgmt() { var r = (STATE.user && STATE.user.role) || ''; return r === 'Management' || r === 'Ops Head' || (STATE.user && STATE.user.super); }   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
      claimed; duplicates and blank headers land under 'col:<letter>' (SheetBridge's own rule,
@@ -1195,6 +1196,33 @@ VIEWS.home = {
     var rows = r.rows || [];
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
+    if (AR.mode === 'engine') {
+      /* review 3: "account report is still showing wrong stats and in very boring way" — the
+         ENGINE books for this account, named columns, the same law numbers as every money
+         screen. Mgmt/Ops only (collective profit, §6). */
+      h = '<div id="arEngine"><div class="spinner"></div></div>';
+      setTimeout(function () {
+        var slot = $('arEngine');
+        if (!slot) { return; }
+        api('dailyReport', {}).then(function (d) {
+          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account) === (($('arAcc') && $('arAcc').value) || ''); }).slice(0, 21);
+          if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
+          var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+            ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
+          rows2.forEach(function (r0) {
+            function g(v) { return '£' + (Number(v) || 0).toFixed(2); }
+            var roas = Number(r0.ads) > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / Number(r0.ads)).toFixed(1) + '×' : '—';
+            hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + '</td>' +
+              '<td>' + g(r0.sold) + '</td><td>' + g(r0.oe) + '</td><td>' + g(r0.cost) + '</td>' +
+              '<td>' + (Number(r0.ads) ? g(r0.ads) : '—') + '</td><td>' + (Number(r0.ads_rev) ? g(r0.ads_rev) : '—') + '</td>' +
+              '<td>' + roas + '</td><td>' + g(r0.profit) + '</td>' +
+              '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + g(r0.returns) + '</td>' +
+              '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + g(r0.actual) + '</td></tr>';
+          });
+          slot.innerHTML = hh + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Engine books · T = 0.8 × (OE − cost) · Actual = T − CPC ads − returns · newest 21 days</p>';
+        }).catch(function (e) { slot.innerHTML = '<div class="empty">Engine books did not answer — ' + esc(e.message) + '</div>'; });
+      }, 0);
+    }
     if (AR.mode === 'daily') {
       h = arDaily(r, heads, keys, rows, cell);
       if (h == null) { AR.mode = 'workbook'; }               // no date column — show the workbook view
@@ -1225,12 +1253,13 @@ VIEWS.home = {
     var flipBtn = $('arFlip');
     if (flipBtn) {
       flipBtn.style.display = '';
-      flipBtn.textContent = AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : 'Show the daily dashboard';
+      flipBtn.textContent = AR.mode === 'engine' ? 'Show the workbook daily view' : AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : (arMgmt() ? 'Show the ENGINE books' : 'Show the daily dashboard');
     }
   }
 
   function arLoad() {
     var acc = $('arAcc') ? $('arAcc').value : '';
+    if (!AR.modeSet && arMgmt()) { AR.mode = 'engine'; AR.modeSet = true; }
     var host = $('arBody');
     if (!host) { return; }
     /* Switching accounts clears the held data FIRST: without this, the Flip button repainted the
@@ -1282,7 +1311,7 @@ VIEWS.home = {
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
       var fl = $('arFlip');
-      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : 'daily'; arRender(); }; }
+      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'engine' ? 'daily' : AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : (arMgmt() ? 'engine' : 'daily'); arRender(); }; }
       var sel = $('arAcc');
       if (sel) { sel.onchange = arLoad; }
     }
@@ -4778,6 +4807,10 @@ function createMeeting() {
             '<span class="al-note" id="alkHint">All accounts reads the dashboard cache and opens no workbook · one account reads its ledger</span>' +
           '</div></div>' +
         '</div>' +
+        '<div class="card enter d2" style="margin-top:16px"><div class="hd">Engine truth for the chosen day ' +
+          '<span class="hint">books + traffic + live orders \u2014 the same tables every money screen reads \u00b7 any date</span></div>' +
+          '<div class="bd" id="alkEngineDay"><div class="empty">Pick one account and a date, then Show.</div></div>' +
+        '</div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">Operations counters ' +
           '<span class="hint">§13.3 · Pakistan time</span></div>' +
           '<div class="bd" id="alkOps"><div class="spinner"></div></div>' +
@@ -4802,9 +4835,47 @@ function createMeeting() {
 
   /** Both requests are fired in the same tick so the client batches them into ONE round trip —
    *  Google's ~2.5s backend load is paid per request, not per action. */
+  function alkEngineDay() {
+    var box = $('alkEngineDay');
+    if (!box) { return; }
+    if (!ALK.account) { box.innerHTML = '<div class="empty">Pick one account and a date, then Show \u2014 the engine card reads per account.</div>'; return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    api('accountDay', { account: ALK.account, date: ALK.date }).then(function (d) {
+      var b = (d && d.book) || null, t = (d && d.traffic) || null, o = (d && d.orders) || {};
+      function tile(k, v, tone) {
+        return '<div class="dr-kpi" style="min-width:130px"><div class="l">' + esc(k) + '</div><div class="v"' + (tone ? ' style="color:var(--' + tone + ')"' : '') + '>' + v + '</div></div>';
+      }
+      function gbp(v) { return '\u00a3' + (Number(v) || 0).toFixed(2); }
+      var h = '<div class="dr-kpis">';
+      h += tile('Orders', (o.n || 0) + (o.cancelled ? ' \u00b7 ' + o.cancelled + ' cancelled' : ''));
+      h += tile('Revenue (live orders)', gbp(o.revenue));
+      if (b) {
+        h += tile('Order earning', gbp(b.oe));
+        h += tile('Cost', gbp(b.cost));
+        h += tile('Ads', gbp(b.ads));
+        h += tile('ROAS', Number(b.ads) > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / Number(b.ads)).toFixed(1) + '\u00d7') : '\u2014');
+        h += tile('T \u00b7 0.8 law', gbp(b.profit));
+        h += tile('Returns', gbp(b.returns), Number(b.returns) > 0 ? 'bad' : '');
+        h += tile('ACTUAL', gbp(b.actual), Number(b.actual) < 0 ? 'bad' : 'ok');
+      } else {
+        h += tile('Books', 'not rolled yet', '');
+      }
+      if (t) {
+        h += tile('Impressions', String(t.impressions || 0));
+        h += tile('Views', String(t.views || 0));
+        h += tile('Sold (traffic)', String(t.transactions || 0));
+      }
+      h += '</div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin:6px 0 0">' + esc(String((d && d.note) || '')) + '</p>';
+      box.innerHTML = h;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">Engine day did not answer \u2014 ' + esc(e.message) + '</div>';
+    });
+  }
+
   function alkLoad(refresh) {
     var body = $('alkBody'), ops = $('alkOps');
     var force = refresh && alMayRefresh();
+    alkEngineDay();
 
     var kpiPayload = {};
     if (ALK.account) { kpiPayload.account = ALK.account; }
@@ -7962,6 +8033,39 @@ function createMeeting() {
     var box = $('cdBody');
     if (!box) { return; }
     var h = '';
+
+    /* Review 3: the desk leads with its own dashboard — lifecycle, INAD, refund money, reasons */
+    var dash = (d && d.dashboard) || null;
+    if (dash) {
+      var L = dash.life || {}, R = dash.refunds || {};
+      function n0(v) { return Number(v) || 0; }
+      function gbp(v) { return '£' + n0(v).toFixed(2); }
+      function dTile(k, v, tone) {
+        return '<div class="dr-kpi" style="min-width:120px"><div class="l">' + esc(k) + '</div><div class="v"' + (tone ? ' style="color:var(--' + tone + ')"' : '') + '>' + v + '</div></div>';
+      }
+      h += '<div class="dr-kpis" style="margin-bottom:6px">' +
+        dTile('Live cases', n0(L.live_n), n0(L.live_n) ? 'warn' : 'ok') +
+        dTile('Opened · 30d', n0(L.opened_30)) +
+        dTile('Closed · 30d', n0(L.closed_30), 'ok') +
+        dTile('Returns open', n0(L.returns_open)) +
+        dTile('INAD open', n0(L.inad_open), n0(L.inad_open) ? 'bad' : 'ok') +
+        dTile('Not received open', n0(L.inr_open)) +
+        dTile('Refunds · today', gbp(R.today), n0(R.today) ? 'bad' : '') +
+        dTile('Refunds · this month', gbp(R.this_month) + (n0(R.this_month_n) ? ' <span style="font-size:11px;color:var(--text-3)">· ' + n0(R.this_month_n) + '</span>' : ''), n0(R.this_month) ? 'bad' : '') +
+        dTile('Refunds · last month', gbp(R.last_month)) +
+        '</div>';
+      var reasons = dash.reasons || [];
+      if (reasons.length) {
+        var totR = reasons.reduce(function (t, r) { return t + (Number(r.n) || 0); }, 0);
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:2px 0 4px">Why buyers return · last 60 days</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
+          reasons.map(function (r) {
+            var pc = totR ? Math.round(Number(r.n) / totR * 100) : 0;
+            return '<span class="minibtn" style="cursor:default">' + esc(String(r.why)) + ' <b>' + r.n + '</b> · ' + pc + '%</span>';
+          }).join('') + '</div>' +
+          '<p style="font-size:10.5px;color:var(--text-3);font-weight:600;margin:0 0 12px">' + esc(String(dash.refund_note || '')) + '</p>';
+      }
+    }
 
     var viols = (d && d.violations) || [];
     if (viols.length) {
@@ -20493,7 +20597,7 @@ function saveSchedule() {
 (function () {
 
   var TR_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager'];
-  var TR = { account: '', range: 7 };
+  var TR = { account: '', range: 7, mode: '', from: '', to: '' };
 
   VIEW_CSS.push(
     '.tr-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px}' +
@@ -20520,6 +20624,8 @@ function saveSchedule() {
     box.innerHTML = '<div class="spinner"></div>';
     var payload = { range: TR.range };
     if (TR.account) { payload.account = TR.account; }
+    if (TR.mode === 'today') { payload.from = ukToday(); payload.to = ukToday(); }
+    else if (TR.mode === 'custom' && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
     api('trafficBoard', payload).then(function (d) {
       d = d || {};
       // fold per-account day rows into one series when "all accounts"
@@ -20532,14 +20638,16 @@ function saveSchedule() {
         o.transactions += Number(r.transactions) || 0;
       });
       var series = Object.values(byDay).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-      var win = series.slice(-TR.range);
+      var bounded = TR.mode === 'today' || TR.mode === 'custom';
+      var win = bounded ? series : series.slice(-TR.range);
+      var winLbl = TR.mode === 'today' ? 'today' : TR.mode === 'custom' ? (TR.from + ' \u2192 ' + TR.to) : TR.range + 'd';
       var tot = { impressions: 0, views: 0, transactions: 0 };
       win.forEach(function (r) { tot.impressions += r.impressions; tot.views += r.views; tot.transactions += r.transactions; });
       var ctr = tot.impressions ? (tot.views / tot.impressions * 100) : 0;
       var cvr = tot.views ? (tot.transactions / tot.views * 100) : 0;
 
       var h = '<div class="tr-tiles">' +
-        '<div class="tr-tile"><div class="k">Impressions · ' + TR.range + 'd</div><div class="v">' + trN(tot.impressions) + '</div></div>' +
+        '<div class="tr-tile"><div class="k">Impressions · ' + esc(winLbl) + '</div><div class="v">' + trN(tot.impressions) + '</div></div>' +
         '<div class="tr-tile"><div class="k">Listing views</div><div class="v">' + trN(tot.views) + '</div></div>' +
         '<div class="tr-tile"><div class="k">Transactions</div><div class="v">' + trN(tot.transactions) + '</div></div>' +
         '<div class="tr-tile"><div class="k">CTR</div><div class="v">' + ctr.toFixed(2) + '%</div></div>' +
@@ -20553,6 +20661,49 @@ function saveSchedule() {
             '<span>' + esc(r.date.slice(5)) + ' · ' + trN(r.impressions) + ' imp · ' + trN(r.views) + ' views · ' + r.transactions + ' sold</span></div>';
         }).join('') + '</div>';
 
+      /* review 3: account-to-account, day by day */
+      if (!TR.account) {
+        var byAcct = {};
+        (d.days || []).forEach(function (r) {
+          if (bounded || win.some(function (w) { return w.date === r.date; })) {
+            (byAcct[r.account] = byAcct[r.account] || []).push(r);
+          }
+        });
+        var accts = Object.keys(byAcct);
+        if (accts.length > 1) {
+          h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 4px">Account to account \u00b7 the window\u2019s totals per day</div>' +
+            '<div class="scroll" style="max-height:240px"><table class="tr-tbl" style="min-width:640px"><thead><tr>' +
+            '<th>Account</th><th>Days</th><th>Impressions</th><th>Views</th><th>Sold</th><th>CTR</th><th>Conversion</th><th>Best day</th></tr></thead><tbody>';
+          accts.forEach(function (a) {
+            var t2 = { imp: 0, vw: 0, tx: 0 }; var best = null;
+            byAcct[a].forEach(function (r) {
+              t2.imp += Number(r.impressions) || 0; t2.vw += Number(r.views) || 0; t2.tx += Number(r.transactions) || 0;
+              if (!best || Number(r.transactions) > Number(best.transactions)) { best = r; }
+            });
+            h += '<tr><td style="font-weight:800">' + esc(a) + '</td><td>' + byAcct[a].length + '</td>' +
+              '<td>' + trN(t2.imp) + '</td><td>' + trN(t2.vw) + '</td><td>' + t2.tx + '</td>' +
+              '<td>' + (t2.imp ? (t2.vw / t2.imp * 100).toFixed(2) : '0.00') + '%</td>' +
+              '<td>' + (t2.vw ? (t2.tx / t2.vw * 100).toFixed(2) : '0.00') + '%</td>' +
+              '<td>' + (best ? esc(String(best.date).slice(5)) + ' \u00b7 ' + best.transactions + ' sold' : '\u2014') + '</td></tr>';
+          });
+          h += '</tbody></table></div>';
+        }
+      }
+      /* review 3: the money leak by name — real reach, nothing landing */
+      var lows = d.low_conversion || [];
+      if (lows.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--bad);font-weight:800;margin:14px 0 4px">\ud83d\udd3b Low conversion \u00b7 ' + lows.length + ' listing(s) with real views converting under 1% (' + d.range + 'd)</div>' +
+          '<div class="scroll" style="max-height:260px"><table class="tr-tbl"><thead><tr>' +
+          '<th>Listing</th><th>Views</th><th>Sold</th><th>Conversion</th></tr></thead><tbody>';
+        lows.forEach(function (r) {
+          h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+            esc(String(r.title || r.item_id).slice(0, 70)) + '</a>' +
+            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) + '</div></td>' +
+            '<td>' + trN(r.views) + '</td><td>' + (r.transactions || 0) + '</td>' +
+            '<td style="color:var(--bad);font-weight:800">' + (Number(r.cvr_l) || 0).toFixed(2) + '%</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       var rows = d.listings || [];
       if (rows.length) {
         h += '<div class="scroll" style="margin-top:14px"><table class="tr-tbl"><thead><tr>' +
@@ -20586,22 +20737,38 @@ function saveSchedule() {
           '<span class="sub">impressions, views, CTR and conversion — per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
-            '<button class="minibtn' + (TR.range === 7 ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
-            '<button class="minibtn' + (TR.range === 30 ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
+            '<button class="minibtn' + (TR.mode === 'today' ? ' on' : '') + '" id="trToday">Today</button>' +
+            '<button class="minibtn' + (TR.range === 7 && !TR.mode ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
+            '<button class="minibtn' + (TR.range === 30 && !TR.mode ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
+            '<input type="date" id="trFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="trTo" class="minibtn" style="padding:5px 6px">' +
+            '<button class="minibtn" id="trApply">Apply</button>' +
             '<select class="alx-sel" id="trAcc"><option value="">All accounts</option></select>' +
             '<button class="minibtn" id="trRefresh" style="margin-left:auto">Refresh</button></div>' +
           '<div id="trBody"><div class="spinner"></div></div>' +
         '</div></div>';
     },
     init: function () {
+      function trChips(el) {
+        document.querySelectorAll('[data-tr-r], #trToday').forEach(function (x) { x.classList.remove('on'); });
+        if (el) { el.classList.add('on'); }
+      }
       document.querySelectorAll('[data-tr-r]').forEach(function (b) {
         b.onclick = function () {
-          document.querySelectorAll('[data-tr-r]').forEach(function (x) { x.classList.remove('on'); });
-          this.classList.add('on');
+          trChips(this); TR.mode = ''; TR.from = ''; TR.to = '';
           TR.range = Number(this.getAttribute('data-tr-r')) || 7;
           trLoad();
         };
       });
+      var td = $('trToday');
+      if (td) { td.onclick = function () { trChips(this); TR.mode = 'today'; trLoad(); }; }
+      var ap = $('trApply');
+      if (ap) {
+        ap.onclick = function () {
+          var f = $('trFrom'), t = $('trTo');
+          if (f && t && f.value && t.value) { trChips(null); TR.mode = 'custom'; TR.from = f.value; TR.to = t.value; trLoad(); }
+          else { toast('Pick both dates first.'); }
+        };
+      }
       cachedCall('accountList', {}, function (d) {
         var sel = $('trAcc');
         if (!sel) { return; }

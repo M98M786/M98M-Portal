@@ -53,6 +53,39 @@
     if (!box) { return; }
     var h = '';
 
+    /* Review 3: the desk leads with its own dashboard — lifecycle, INAD, refund money, reasons */
+    var dash = (d && d.dashboard) || null;
+    if (dash) {
+      var L = dash.life || {}, R = dash.refunds || {};
+      function n0(v) { return Number(v) || 0; }
+      function gbp(v) { return '£' + n0(v).toFixed(2); }
+      function dTile(k, v, tone) {
+        return '<div class="dr-kpi" style="min-width:120px"><div class="l">' + esc(k) + '</div><div class="v"' + (tone ? ' style="color:var(--' + tone + ')"' : '') + '>' + v + '</div></div>';
+      }
+      h += '<div class="dr-kpis" style="margin-bottom:6px">' +
+        dTile('Live cases', n0(L.live_n), n0(L.live_n) ? 'warn' : 'ok') +
+        dTile('Opened · 30d', n0(L.opened_30)) +
+        dTile('Closed · 30d', n0(L.closed_30), 'ok') +
+        dTile('Returns open', n0(L.returns_open)) +
+        dTile('INAD open', n0(L.inad_open), n0(L.inad_open) ? 'bad' : 'ok') +
+        dTile('Not received open', n0(L.inr_open)) +
+        dTile('Refunds · today', gbp(R.today), n0(R.today) ? 'bad' : '') +
+        dTile('Refunds · this month', gbp(R.this_month) + (n0(R.this_month_n) ? ' <span style="font-size:11px;color:var(--text-3)">· ' + n0(R.this_month_n) + '</span>' : ''), n0(R.this_month) ? 'bad' : '') +
+        dTile('Refunds · last month', gbp(R.last_month)) +
+        '</div>';
+      var reasons = dash.reasons || [];
+      if (reasons.length) {
+        var totR = reasons.reduce(function (t, r) { return t + (Number(r.n) || 0); }, 0);
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:2px 0 4px">Why buyers return · last 60 days</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
+          reasons.map(function (r) {
+            var pc = totR ? Math.round(Number(r.n) / totR * 100) : 0;
+            return '<span class="minibtn" style="cursor:default">' + esc(String(r.why)) + ' <b>' + r.n + '</b> · ' + pc + '%</span>';
+          }).join('') + '</div>' +
+          '<p style="font-size:10.5px;color:var(--text-3);font-weight:600;margin:0 0 12px">' + esc(String(dash.refund_note || '')) + '</p>';
+      }
+    }
+
     var viols = (d && d.violations) || [];
     if (viols.length) {
       h += '<div class="cd-violbox"><b style="color:var(--bad)">🔴 ' + viols.length + ' listing violation(s) — eBay\'s own words:</b>';

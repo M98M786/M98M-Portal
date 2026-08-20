@@ -714,6 +714,10 @@
             '<span class="al-note" id="alkHint">All accounts reads the dashboard cache and opens no workbook · one account reads its ledger</span>' +
           '</div></div>' +
         '</div>' +
+        '<div class="card enter d2" style="margin-top:16px"><div class="hd">Engine truth for the chosen day ' +
+          '<span class="hint">books + traffic + live orders \u2014 the same tables every money screen reads \u00b7 any date</span></div>' +
+          '<div class="bd" id="alkEngineDay"><div class="empty">Pick one account and a date, then Show.</div></div>' +
+        '</div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">Operations counters ' +
           '<span class="hint">§13.3 · Pakistan time</span></div>' +
           '<div class="bd" id="alkOps"><div class="spinner"></div></div>' +
@@ -738,9 +742,47 @@
 
   /** Both requests are fired in the same tick so the client batches them into ONE round trip —
    *  Google's ~2.5s backend load is paid per request, not per action. */
+  function alkEngineDay() {
+    var box = $('alkEngineDay');
+    if (!box) { return; }
+    if (!ALK.account) { box.innerHTML = '<div class="empty">Pick one account and a date, then Show \u2014 the engine card reads per account.</div>'; return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    api('accountDay', { account: ALK.account, date: ALK.date }).then(function (d) {
+      var b = (d && d.book) || null, t = (d && d.traffic) || null, o = (d && d.orders) || {};
+      function tile(k, v, tone) {
+        return '<div class="dr-kpi" style="min-width:130px"><div class="l">' + esc(k) + '</div><div class="v"' + (tone ? ' style="color:var(--' + tone + ')"' : '') + '>' + v + '</div></div>';
+      }
+      function gbp(v) { return '\u00a3' + (Number(v) || 0).toFixed(2); }
+      var h = '<div class="dr-kpis">';
+      h += tile('Orders', (o.n || 0) + (o.cancelled ? ' \u00b7 ' + o.cancelled + ' cancelled' : ''));
+      h += tile('Revenue (live orders)', gbp(o.revenue));
+      if (b) {
+        h += tile('Order earning', gbp(b.oe));
+        h += tile('Cost', gbp(b.cost));
+        h += tile('Ads', gbp(b.ads));
+        h += tile('ROAS', Number(b.ads) > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / Number(b.ads)).toFixed(1) + '\u00d7') : '\u2014');
+        h += tile('T \u00b7 0.8 law', gbp(b.profit));
+        h += tile('Returns', gbp(b.returns), Number(b.returns) > 0 ? 'bad' : '');
+        h += tile('ACTUAL', gbp(b.actual), Number(b.actual) < 0 ? 'bad' : 'ok');
+      } else {
+        h += tile('Books', 'not rolled yet', '');
+      }
+      if (t) {
+        h += tile('Impressions', String(t.impressions || 0));
+        h += tile('Views', String(t.views || 0));
+        h += tile('Sold (traffic)', String(t.transactions || 0));
+      }
+      h += '</div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin:6px 0 0">' + esc(String((d && d.note) || '')) + '</p>';
+      box.innerHTML = h;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">Engine day did not answer \u2014 ' + esc(e.message) + '</div>';
+    });
+  }
+
   function alkLoad(refresh) {
     var body = $('alkBody'), ops = $('alkOps');
     var force = refresh && alMayRefresh();
+    alkEngineDay();
 
     var kpiPayload = {};
     if (ALK.account) { kpiPayload.account = ALK.account; }

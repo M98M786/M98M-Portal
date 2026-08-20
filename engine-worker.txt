@@ -2625,17 +2625,32 @@ const ROUTES = {
       if (allowed.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || '');
       const range = Number(p.range) === 30 ? 30 : 7;
+      /* Review 3: custom windows — from/to bound the day rows; the per-listing table stays on
+         eBay's own 7/30-day pre-aggregation (their API's shape, honestly labeled). */
+      const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const dFrom = okDate(p.from) ? String(p.from) : ukDate(new Date(Date.now() - 30 * 86400000).toISOString());
+      const dTo = okDate(p.to) ? String(p.to) : ukDate('');
       const days = await ctx.env.DB.prepare(
-        "SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily " +
-        "WHERE date >= '" + ukDate(new Date(Date.now() - 30 * 86400000).toISOString()) + "'" + (account ? ' AND account = ?1' : '') + ' ORDER BY date'
-      ).bind(...(account ? [account] : [])).all();
+        'SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily ' +
+        'WHERE date >= ?1 AND date <= ?2' + (account ? ' AND account = ?3' : '') + ' ORDER BY date'
+      ).bind(...[dFrom, dTo].concat(account ? [account] : [])).all();
       const listings = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, t.impressions, t.views, t.transactions, i.title, i.status AS listing_status ' +
         'FROM traffic_listing t LEFT JOIN items_api i ON i.item_id = t.item_id ' +
         'WHERE t.range_days = ?1' + (account ? ' AND t.account = ?2' : '') +
         ' ORDER BY t.impressions DESC LIMIT 200'
       ).bind(...[range].concat(account ? [account] : [])).all();
+      /* Low-conversion callout: real reach, nothing landing — views well above the account's
+         own average CVR expectation with zero-to-thin sales. The money leak the dashboard
+         must name, per Hasib. */
+      const lows = (listings.results || [])
+        .filter(l => String(l.listing_status || 'ACTIVE') === 'ACTIVE' && Number(l.views) >= 50)
+        .map(l => ({ ...l, cvr_l: Number(l.views) ? (Number(l.transactions) || 0) / Number(l.views) * 100 : 0 }))
+        .filter(l => l.cvr_l < 1)
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 25);
       return { days: days.results || [], listings: listings.results || [], range,
+        from: dFrom, to: dTo, low_conversion: lows,
         note: 'eBay refreshes traffic data on its own clock (up to a day behind); the portal re-reads it hourly' };
     },
   },
@@ -3428,8 +3443,40 @@ const ROUTES = {
       const viol = await ctx.env.DB.prepare(
         'SELECT id, account, item_id, type, text, at, ack_by FROM violations ORDER BY at DESC LIMIT 50'
       ).all();
+      /* Review 3: "customer service live desk needs some respect" — the dashboard header:
+         lifecycle counts, INAD split, refund MONEY (from Finances via orders.refunded, grouped
+         by the ORDER's month and said so), and the reasons behind the returns. */
+      const life = await ctx.env.DB.prepare(
+        "SELECT SUM(CASE WHEN status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS live_n, " +
+        "SUM(CASE WHEN opened_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS opened_30, " +
+        "SUM(CASE WHEN status LIKE '%CLOSED%' AND opened_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS closed_30, " +
+        "SUM(CASE WHEN kind = 'RETURN' AND status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS returns_open, " +
+        "SUM(CASE WHEN kind = 'INR' AND status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS inr_open, " +
+        "SUM(CASE WHEN kind = 'RETURN' AND (reason LIKE '%NOT_AS_DESCRIBED%' OR reason LIKE '%not as described%' OR reason LIKE '%DEFECTIVE%' OR reason LIKE '%WRONG%') AND status NOT LIKE '%CLOSED%' THEN 1 ELSE 0 END) AS inad_open " +
+        'FROM cases'
+      ).first();
+      const refunds = await ctx.env.DB.prepare(
+        "SELECT ROUND(COALESCE(SUM(CASE WHEN substr(created_at, 1, 10) = ?1 AND refunded > 0 THEN refunded END), 0), 2) AS today, " +
+        "ROUND(COALESCE(SUM(CASE WHEN substr(created_at, 1, 7) = ?2 AND refunded > 0 THEN refunded END), 0), 2) AS this_month, " +
+        "ROUND(COALESCE(SUM(CASE WHEN substr(created_at, 1, 7) = ?3 AND refunded > 0 THEN refunded END), 0), 2) AS last_month, " +
+        "SUM(CASE WHEN substr(created_at, 1, 7) = ?2 AND refunded > 0 THEN 1 ELSE 0 END) AS this_month_n " +
+        'FROM orders'
+      ).bind(ukDate(''), ukDate('').slice(0, 7),
+        (() => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })()
+      ).first();
+      const reasons = await ctx.env.DB.prepare(
+        "SELECT CASE WHEN reason LIKE '%NOT_AS_DESCRIBED%' OR reason LIKE '%not as described%' THEN 'Item not as described' " +
+        "WHEN reason LIKE '%DEFECTIVE%' OR reason LIKE '%faulty%' THEN 'Defective / faulty' " +
+        "WHEN reason LIKE '%WRONG%' THEN 'Wrong item sent' " +
+        "WHEN reason LIKE '%NO_LONGER%' OR reason LIKE '%changed%mind%' OR reason LIKE '%BUYER%' THEN 'Buyer changed mind' " +
+        "WHEN reason LIKE '%not received%' OR reason LIKE '%NOT_RECEIVED%' THEN 'Not received' " +
+        "ELSE 'Other' END AS why, COUNT(*) AS n " +
+        "FROM cases WHERE kind = 'RETURN' AND opened_at >= datetime('now', '-60 day') GROUP BY why ORDER BY n DESC"
+      ).all();
       return { open: open.results || [], counts: counts.results || [], messages: msgs.results || [],
-        standards: std.results || [], violations: viol.results || [] };
+        standards: std.results || [], violations: viol.results || [],
+        dashboard: { life: life || {}, refunds: refunds || {}, reasons: reasons.results || [],
+          refund_note: 'refund £ grouped by the ORDER’s date (Finances writes the amount onto the order)' } };
     },
   },
 
@@ -3764,6 +3811,32 @@ const ROUTES = {
       }
       return { day, checkpoints: out,
         note: 'the focus list = not yet dispatched OR past eBay’s delivery estimate — exactly what the checker must confirm delivered' };
+    },
+  },
+
+  /* Review 3: "custom date account KPIs are showing wrong and not connected" — the day view
+     now has ENGINE truth for any (account, date): the books row, traffic, and the live order
+     count, straight from the same tables every money screen reads. */
+  accountDay: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? String(p.date) : ukDate('');
+      if (!account) throw new Error('SAY: which account?');
+      const book = await ctx.env.DB.prepare(
+        'SELECT sold, oe, cost, ads, ads_rev, profit, pri, returns, actual FROM sales_daily WHERE account = ?1 AND date = ?2'
+      ).bind(account, date).first();
+      const traffic = await ctx.env.DB.prepare(
+        'SELECT impressions, views, transactions FROM traffic_daily WHERE account = ?1 AND date = ?2'
+      ).bind(account, date).first();
+      const dayStart = date + 'T00:00:00Z';
+      const dayEnd = date + 'T23:59:59Z';
+      const ord = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n, ROUND(COALESCE(SUM(sold), 0), 2) AS rev, SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled " +
+        'FROM orders WHERE account = ?1 AND created_at >= ?2 AND created_at <= ?3 AND status != ?4'
+      ).bind(account, dayStart, dayEnd, 'NOT_FOUND').first();
+      return { account, date, book: book || null, traffic: traffic || null,
+        orders: { n: Number(ord && ord.n) || 0, revenue: Number(ord && ord.rev) || 0, cancelled: Number(ord && ord.cancelled) || 0 },
+        note: 'books row lands at the nightly rollup; a date with no row yet shows live orders only' };
     },
   },
 

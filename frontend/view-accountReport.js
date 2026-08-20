@@ -15,7 +15,8 @@
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, mode: 'daily' };   // daily → workbook → list, one button cycles
+  var AR = { data: null, mode: 'daily', modeSet: false };
+  function arMgmt() { var r = (STATE.user && STATE.user.role) || ''; return r === 'Management' || r === 'Ops Head' || (STATE.user && STATE.user.super); }   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
      claimed; duplicates and blank headers land under 'col:<letter>' (SheetBridge's own rule,
@@ -113,6 +114,33 @@
     var rows = r.rows || [];
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
+    if (AR.mode === 'engine') {
+      /* review 3: "account report is still showing wrong stats and in very boring way" — the
+         ENGINE books for this account, named columns, the same law numbers as every money
+         screen. Mgmt/Ops only (collective profit, §6). */
+      h = '<div id="arEngine"><div class="spinner"></div></div>';
+      setTimeout(function () {
+        var slot = $('arEngine');
+        if (!slot) { return; }
+        api('dailyReport', {}).then(function (d) {
+          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account) === (($('arAcc') && $('arAcc').value) || ''); }).slice(0, 21);
+          if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
+          var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+            ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
+          rows2.forEach(function (r0) {
+            function g(v) { return '£' + (Number(v) || 0).toFixed(2); }
+            var roas = Number(r0.ads) > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / Number(r0.ads)).toFixed(1) + '×' : '—';
+            hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + '</td>' +
+              '<td>' + g(r0.sold) + '</td><td>' + g(r0.oe) + '</td><td>' + g(r0.cost) + '</td>' +
+              '<td>' + (Number(r0.ads) ? g(r0.ads) : '—') + '</td><td>' + (Number(r0.ads_rev) ? g(r0.ads_rev) : '—') + '</td>' +
+              '<td>' + roas + '</td><td>' + g(r0.profit) + '</td>' +
+              '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + g(r0.returns) + '</td>' +
+              '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + g(r0.actual) + '</td></tr>';
+          });
+          slot.innerHTML = hh + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Engine books · T = 0.8 × (OE − cost) · Actual = T − CPC ads − returns · newest 21 days</p>';
+        }).catch(function (e) { slot.innerHTML = '<div class="empty">Engine books did not answer — ' + esc(e.message) + '</div>'; });
+      }, 0);
+    }
     if (AR.mode === 'daily') {
       h = arDaily(r, heads, keys, rows, cell);
       if (h == null) { AR.mode = 'workbook'; }               // no date column — show the workbook view
@@ -143,12 +171,13 @@
     var flipBtn = $('arFlip');
     if (flipBtn) {
       flipBtn.style.display = '';
-      flipBtn.textContent = AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : 'Show the daily dashboard';
+      flipBtn.textContent = AR.mode === 'engine' ? 'Show the workbook daily view' : AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : (arMgmt() ? 'Show the ENGINE books' : 'Show the daily dashboard');
     }
   }
 
   function arLoad() {
     var acc = $('arAcc') ? $('arAcc').value : '';
+    if (!AR.modeSet && arMgmt()) { AR.mode = 'engine'; AR.modeSet = true; }
     var host = $('arBody');
     if (!host) { return; }
     /* Switching accounts clears the held data FIRST: without this, the Flip button repainted the
@@ -200,7 +229,7 @@
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
       var fl = $('arFlip');
-      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : 'daily'; arRender(); }; }
+      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'engine' ? 'daily' : AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : (arMgmt() ? 'engine' : 'daily'); arRender(); }; }
       var sel = $('arAcc');
       if (sel) { sel.onchange = arLoad; }
     }
