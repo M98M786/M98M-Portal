@@ -335,7 +335,16 @@
           '<span>Waste alarms, CPC-rule bells, violations and digests all file here the moment they ring.</span></div>';
         return;
       }
-      box.innerHTML = '<div style="max-height:420px;overflow-y:auto">' + rows.map(function (r) {
+      /* Grouped by type: one loud day of the CPC rule filed 84 same-type letters and buried
+         everything else. A type with more than 3 open letters folds to one line with its count
+         and a mark-all button; small types stay expanded. */
+      var groups = {}, order = [];
+      rows.forEach(function (r) {
+        var t = alStr(r.type) || '(untyped)';
+        if (!groups[t]) { groups[t] = { open: [], done: [] }; order.push(t); }
+        groups[t][alStr(r.resolved_at) ? 'done' : 'open'].push(r);
+      });
+      function letterCard(r) {
         var openR = !alStr(r.resolved_at);
         return '<article class="al-card' + (openR ? ' al-money' : '') + '" style="' + (openR ? '' : 'opacity:.6') + '">' +
           '<div class="al-hd"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
@@ -348,12 +357,54 @@
                 (alStr(r.note) ? esc(' · ' + alStr(r.note)) : '')) + '</div>' +
             (openR ? '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Mark handled</button></div>' : '') +
           '</div></article>';
-      }).join('') + '</div>';
+      }
+      var h2 = '<div style="max-height:460px;overflow-y:auto">';
+      order.forEach(function (t) {
+        var g = groups[t];
+        var big = g.open.length > 3;
+        h2 += '<div class="al-hd" style="margin:10px 0 6px;gap:8px">' +
+          '<span class="al-acct">' + esc(t) + '</span>' +
+          '<span class="pill ' + (g.open.length ? 'al-p-sev' : 'al-p-cat') + '">' + g.open.length + ' open</span>' +
+          (g.done.length ? '<span class="al-when">' + g.done.length + ' handled</span>' : '') +
+          (big ? '<button class="minibtn" data-al-expand="' + alAttr(t) + '">Show all</button>' +
+                 '<button class="minibtn" data-al-bulk="' + alAttr(t) + '">Mark all ' + g.open.length + ' handled</button>' : '') +
+          '</div>';
+        var show = big ? g.open.slice(0, 2) : g.open.concat(g.done.slice(0, 3));
+        h2 += '<div data-al-group="' + alAttr(t) + '">' + show.map(letterCard).join('') + '</div>';
+      });
+      box.innerHTML = h2 + '</div>';
       box.querySelectorAll('[data-al-mail]').forEach(function (b) {
         b.onclick = function () {
           this.disabled = true;
           api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
             .then(function () { toast('Handled.'); alLoadMail(); })
+            .catch(function (e) { toast(e.message); alLoadMail(); });
+        };
+      });
+      box.querySelectorAll('[data-al-expand]').forEach(function (b) {
+        b.onclick = function () {
+          var t = this.getAttribute('data-al-expand');
+          var cont = box.querySelector('[data-al-group="' + t.replace(/"/g, '\\"') + '"]');
+          if (!cont) { return; }
+          var g = groups[t];
+          cont.innerHTML = g.open.concat(g.done).map(letterCard).join('');
+          this.remove();
+          cont.parentElement.querySelectorAll('[data-al-mail]').forEach(function (mb) {
+            mb.onclick = function () {
+              this.disabled = true;
+              api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
+                .then(function () { toast('Handled.'); alLoadMail(); })
+                .catch(function (e) { toast(e.message); alLoadMail(); });
+            };
+          });
+        };
+      });
+      box.querySelectorAll('[data-al-bulk]').forEach(function (b) {
+        b.onclick = function () {
+          var t = this.getAttribute('data-al-bulk');
+          this.disabled = true; this.textContent = 'Handling…';
+          api('alertMailResolveAll', { type: t })
+            .then(function (res) { toast((res && res.handled || 0) + ' letters handled.'); alLoadMail(); })
             .catch(function (e) { toast(e.message); alLoadMail(); });
         };
       });

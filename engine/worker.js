@@ -571,6 +571,25 @@ async function selfTestRun(env) {
     add('no zero-priced active listings', Number(r.n) === 0, r.n + ' listing(s) at £0');
   } catch (e) { add('no zero-priced active listings', false, e.message); }
 
+  try { // 9b. the intraday pipeline agrees with eBay's official daily report (once it lands):
+    // the rollover records each dying day's final intraday total; when ads_daily has that day,
+    // the two must sit within max(£15, 20%) — different attribution timing, same money.
+    const fin = await one("SELECT cursor FROM sync_state WHERE job = 'adsIntradayFinal' AND account = ''");
+    const m = String((fin && fin.cursor) || '').match(/^(\d{4}-\d{2}-\d{2}):([0-9.]+)$/);
+    if (m) {
+      const dayF = m[1], intr = Number(m[2]) || 0;
+      const dd = await one('SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS sp, COUNT(*) AS n FROM ads_daily WHERE date = ?1', dayF);
+      if (Number(dd.n) > 0) {
+        const daily = Number(dd.sp) || 0;
+        const tol = Math.max(15, daily * 0.2);
+        add('intraday agrees with the daily report (' + dayF + ')', Math.abs(daily - intr) <= tol,
+          'intraday closed at £' + intr.toFixed(2) + ' vs official £' + daily.toFixed(2));
+      } else {
+        add('intraday agrees with the daily report (' + dayF + ')', true, 'official report not landed yet — the ad-books check guards that side');
+      }
+    }
+  } catch (e) { add('intraday agrees with the daily report', false, e.message); }
+
   try { // 9. nothing dated in the future — the bound is an ISO instant because created_at is
     // ISO 'T'-form and SQL's space-form datetime('now') TEXT-compares below EVERY same-day ISO
     // stamp (this very check flagged 170 of today's orders as "future" on its first run)
@@ -1628,7 +1647,15 @@ async function adsIntraday(env) {
   const day = ukDate('');
   /* Rollover is a hard reset: rows from any other day are DELETED, not zeroed — so "today" on
      every board is only ever today, and a family that stopped spending can't strand yesterday's
-     numbers behind the other family's fresh day stamp. */
+     numbers behind the other family's fresh day stamp. The dying day's final total is recorded
+     FIRST, so the validation can later reconcile the intraday pipeline against eBay's official
+     daily report — without this the number vanished before anything could check it. */
+  const dying = await env.DB.prepare(
+    'SELECT day, ROUND(SUM(spend + cpc_spend), 2) AS sp FROM ads_today WHERE day != ?1 GROUP BY day ORDER BY day DESC LIMIT 1'
+  ).bind(day).first();
+  if (dying && dying.day) {
+    await ctx_setSync(env, 'adsIntradayFinal', '', String(dying.day) + ':' + (Number(dying.sp) || 0));
+  }
   await env.DB.prepare('DELETE FROM ads_today WHERE day != ?1').bind(day).run();
   /* Zombie tasks (a 404-forever id, a report eBay quietly dropped) must not gate the kick loop:
      any intraday task still PENDING after 2 hours is failed and forgotten. */
@@ -2702,6 +2729,22 @@ const ROUTES = {
         "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''" + (mgmt ? '' : ' AND to_addr IN (?1, ?2)')
       ).bind(...(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).first();
       return { rows: rs.results || [], open: Number(open && open.n) || 0, mgmt };
+    },
+  },
+  /* One press clears a whole type — the CPC rule alone filed 84 letters in a day, and handling
+     them one by one made the mail useless. Same visibility rules as reading. */
+  alertMailResolveAll: {
+    auth: 'any', fn: async (p, ctx) => {
+      const type = String(p.type || '').slice(0, 60);
+      if (!type) throw new Error('SAY: which type?');
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const addrs = [ctx.email];
+      if (ctx.user.role === 'Advertising Manager') addrs.push('advertising');
+      const r = await ctx.env.DB.prepare(
+        "UPDATE alert_log SET resolved_by = ?1, resolved_at = datetime('now'), note = 'bulk' " +
+        "WHERE resolved_at = '' AND type = ?2" + (mgmt ? '' : ' AND to_addr IN (?3, ?4)')
+      ).bind(...[ctx.email, type].concat(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).run();
+      return { ok: true, handled: (r.meta && r.meta.changes) || 0 };
     },
   },
   alertMailResolve: {
