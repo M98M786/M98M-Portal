@@ -3836,9 +3836,11 @@ const ROUTES = {
     },
   },
 
-  /* Ops lever for the build session and the Management ops panel: run any cron job now. */
+  /* Ops lever for the build session and the Management ops panel: run any cron job now.
+     mgmt-gated (nothing ever called it with the sync key): these are the same jobs the cron
+     fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
-    auth: 'sync', fn: async (p, ctx) => {
+    auth: 'mgmt', fn: async (p, ctx) => {
       const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
