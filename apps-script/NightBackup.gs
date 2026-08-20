@@ -249,7 +249,9 @@ function aliSweep() {
       for (var s = 0; s < sheets.length; s++) {
         if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
         opened++;
-        var values = sheets[s].getDataRange().getValues();
+        /* DISPLAY values, not raw: a 16-digit Ali order number in a numeric cell loses its last
+         * digit to float precision through getValues — the display string is what was typed. */
+        var values = sheets[s].getDataRange().getDisplayValues();
         if (values.length < 2) continue;
         var cols = nbHeaderCols_(values[0]);
         if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) continue;
