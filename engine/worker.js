@@ -1416,16 +1416,24 @@ async function standardsSync(env) {
        "item not received" rates against eBay's peer benchmark. Same nightly cadence: eBay
        re-evaluates these monthly, so nightly is already generous. A scope-gap account simply
        stays absent, like the standards above. */
+    const csSkips = [];
     for (const mt of ['ITEM_NOT_AS_DESCRIBED', 'ITEM_NOT_RECEIVED']) {
       const mr = await fetch('https://api.ebay.com/sell/analytics/v1/customer_service_metric/' + mt + '/CURRENT?evaluation_marketplace_id=EBAY_GB', {
         headers: { authorization: 'Bearer ' + tok } });
-      if (!mr.ok) continue;
+      if (!mr.ok) {
+        /* Amna and Saif sat metrics-less for weeks and the silent `continue` hid WHY — a 403
+           means a consent would fix it, a 404 means eBay has no evaluation for the account and
+           no consent will ever change that. Record the refusal where it can be read. */
+        csSkips.push(mt + ' ' + mr.status + ': ' + (await mr.text()).replace(/\s+/g, ' ').slice(0, 140));
+        continue;
+      }
       const md = await mr.json();
       await env.DB.prepare(
         "INSERT INTO cs_metrics (account, metric_type, json, synced_at) VALUES (?1, ?2, ?3, datetime('now')) " +
         "ON CONFLICT(account, metric_type) DO UPDATE SET json = ?3, synced_at = datetime('now')"
       ).bind(acct, mt, JSON.stringify(md).slice(0, 8000)).run();
     }
+    if (csSkips.length) await ctx_setSync(env, 'csMetricsSkip', acct, csSkips.join(' | '));
   });
 }
 
