@@ -33,7 +33,11 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 
 export default {
   async fetch(req, env, ctx) {
-    const origin = env.ALLOWED_ORIGIN || '*';
+    /* ALLOWED_ORIGIN is a comma-separated LIST since the custom domain (portal.m98mltd.co.uk)
+       joined the github.io address — the caller's own origin is echoed back only when listed. */
+    const allowedList = String(env.ALLOWED_ORIGIN || '*').split(',').map(x => x.trim()).filter(Boolean);
+    const reqOrigin = req.headers.get('origin') || '';
+    const origin = allowedList.indexOf(reqOrigin) >= 0 ? reqOrigin : (allowedList[0] || '*');
     const cors = {
       'access-control-allow-origin': origin,
       'access-control-allow-methods': 'POST, OPTIONS',
