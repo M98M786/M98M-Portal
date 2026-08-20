@@ -469,6 +469,8 @@
     api('submitHunt', payload).then(function (res) {
       btn.disabled = false;
       huResetForm();
+      /* the shell's draft keeper would refill the emptied form on the next render otherwise */
+      if (typeof draftClear === 'function') { draftClear('hunting'); }
       huCalcIdle('Submitted. The projection follows your next hunt.');
       toast('Hunt submitted · ' + huStr(res.hunt_id) +
         ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));

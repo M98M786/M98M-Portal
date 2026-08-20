@@ -390,15 +390,118 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-2330';
+var BUILD = '20260820-2338';
+/* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
+   reload). Two defences, both here in the shell so every screen gets them:
+   1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
+      reloads because the key ignores BUILD) and poured back into empty fields after any
+      reload or re-render. A submit clears its view's drafts via draftClear(view).
+   2. Updates WAIT — a reload is postponed while anyone typed in the last 10 minutes. The old
+      behaviour (reload as soon as the tab was hidden) fired exactly when a hunter hopped to
+      AliExpress to copy a link; that path is gone. */
+var LAST_TYPED_AT = 0;
+var DRAFT = (function(){
+  var timer = null, pending = {}, MAX_AGE = 24*3600000;
+  function key(view){ return 'm98m:draft:' + view; }
+  function fieldKey(el){
+    if(el.id) return 'id:' + el.id;
+    if(el.name) return 'nm:' + el.name;
+    if(el.getAttribute('data-draft')) return 'dd:' + el.getAttribute('data-draft');
+    var p = [], n = el;
+    while(n && n.id !== 'mainView' && p.length < 12){
+      var i = 0, s = n;
+      while(s.previousElementSibling){ s = s.previousElementSibling; i++; }
+      p.unshift(n.tagName + ':' + i); n = n.parentElement;
+    }
+    return 'dp:' + p.join('/');
+  }
+  function load(view){
+    try{ var raw = localStorage.getItem(key(view)); return raw ? JSON.parse(raw) : {}; }catch(e){ return {}; }
+  }
+  function capture(ev){
+    var el = ev.target;
+    if(!el || !el.tagName) return;
+    var t = el.tagName;
+    if(t !== 'INPUT' && t !== 'TEXTAREA' && t !== 'SELECT') return;
+    if(el.type === 'password' || el.type === 'file' || el.type === 'hidden') return;
+    if(el.hasAttribute('data-nodraft')) return;
+    var mv = $('mainView');
+    if(!mv || !mv.contains(el)) return;
+    LAST_TYPED_AT = Date.now();
+    var view = (location.hash || '').replace('#', '');   /* the router keeps the view key in the hash */
+    if(!view) return;
+    var k = fieldKey(el);
+    var val = (el.type === 'checkbox' || el.type === 'radio') ? { c: !!el.checked } : { v: String(el.value) };
+    /* accumulate, never cancel: a shared debounce that dropped earlier fields' writes is how a
+       two-field form would lose field one — every pending field flushes together */
+    (pending[view] = pending[view] || {})[k] = { d: val, t: Date.now() };
+    if(timer) clearTimeout(timer);
+    timer = setTimeout(flush, 250);
+  }
+  function flush(){
+    timer = null;
+    Object.keys(pending).forEach(function(view){
+      try{
+        var map = load(view);
+        Object.keys(pending[view]).forEach(function(k){ map[k] = pending[view][k]; });
+        localStorage.setItem(key(view), JSON.stringify(map));
+      }catch(e){}
+    });
+    pending = {};
+  }
+  function restore(view){
+    var map = load(view), n = 0, now = Date.now(), keep = {}, changed = false;
+    Object.keys(map).forEach(function(k){
+      var rec = map[k];
+      if(!rec || (now - (rec.t || 0)) > MAX_AGE){ changed = true; return; }
+      keep[k] = rec;
+      var el = null;
+      if(k.indexOf('id:') === 0) el = document.getElementById(k.slice(3));
+      else if(k.indexOf('nm:') === 0) el = document.getElementsByName(k.slice(3))[0] || null;
+      else if(k.indexOf('dd:') === 0) el = document.querySelector('[data-draft="' + k.slice(3).replace(/"/g, '') + '"]');
+      else if(k.indexOf('dp:') === 0){
+        var mv = $('mainView'), node = mv;
+        var parts = k.slice(3).split('/');
+        for(var i = 0; i < parts.length && node; i++){
+          var bits = parts[i].split(':');
+          node = node ? node.children[Number(bits[1])] : null;
+          if(node && node.tagName !== bits[0]) { node = null; }
+        }
+        el = node;
+      }
+      if(!el) return;
+      var d = rec.d || {};
+      if(d.c !== undefined){ if(el.checked !== d.c){ el.checked = d.c; n++; } return; }
+      if(typeof d.v === 'string' && d.v !== '' && String(el.value || '') === ''){
+        el.value = d.v; n++;
+      }
+    });
+    if(changed){ try{ localStorage.setItem(key(view), JSON.stringify(keep)); }catch(e){} }
+    if(n > 0){ try{ toast('Restored ' + n + ' unsaved field' + (n === 1 ? '' : 's') + ' you had typed.'); }catch(e){} }
+    return n;
+  }
+  function clear(view){ delete pending[view]; try{ localStorage.removeItem(key(view)); }catch(e){} }
+  document.addEventListener('input', capture, true);
+  document.addEventListener('change', capture, true);
+  /* the last 250ms of typing must survive an immediate reload or tab-switch */
+  window.addEventListener('beforeunload', flush);
+  document.addEventListener('visibilitychange', function(){ if(document.hidden) flush(); });
+  return { restore: restore, clear: clear, flush: flush };
+})();
+function draftClear(view){ DRAFT.clear(view); }
 function versionWatch(){
-  function safeReload(){
+  var deferToastShown = false;
+  function busyTyping(){
+    if(Date.now() - LAST_TYPED_AT < 10*60*1000) return true;
     var a = document.activeElement;
-    var typing = a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox' && a.value));
-    if(typing){ /* never eat a half-written note — go when the tab is next hidden */
-      document.addEventListener('visibilitychange', function once(){
-        document.removeEventListener('visibilitychange', once); location.reload();
-      });
+    return !!(a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox' && a.value)));
+  }
+  function safeReload(){
+    if(busyTyping()){
+      /* Drafts make even a lost reload safe, but the polite thing is to not interrupt at all:
+         keep checking every 2 minutes and go only after a 10-minute quiet spell. */
+      if(!deferToastShown){ deferToastShown = true; try{ toast('Portal update ready — it will apply when you pause.'); }catch(e){} }
+      setTimeout(safeReload, 2*60*1000);
       return;
     }
     location.reload();
@@ -9708,6 +9811,8 @@ VIEWS.dashboard = {
     api('submitHunt', payload).then(function (res) {
       btn.disabled = false;
       huResetForm();
+      /* the shell's draft keeper would refill the emptied form on the next render otherwise */
+      if (typeof draftClear === 'function') { draftClear('hunting'); }
       huCalcIdle('Submitted. The projection follows your next hunt.');
       toast('Hunt submitted · ' + huStr(res.hunt_id) +
         ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
@@ -21920,6 +22025,10 @@ function renderView(key){
   try{ m.innerHTML=v.render(); }
   catch(e){ m.innerHTML='<div class="card enter d1"><div class="bd">This section could not be drawn. Nothing was changed.</div></div>'; return; }
   if(typeof v.init==='function'){ try{ v.init(); }catch(e){} }
+  /* The draft keeper pours back anything typed and not yet submitted — after an update reload,
+     after switching views and coming back, after anything. Empty fields only; a submit calls
+     draftClear(view) so a finished form never refills itself. */
+  try{ setTimeout(function(){ DRAFT.restore(key); }, 350); }catch(e){}
 }
 /** Nav badges: view modules set STATE.counts[key] and call refreshBadges(). */
 function refreshBadges(){
