@@ -564,8 +564,10 @@
           '<span class="sub">Management · all accounts · every number has a live feed behind it</span>' +
           '<button class="minibtn" id="o2Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="dates enter d1"><div class="seg" id="o2Seg">' +
-          '<button data-o2-mode="today">Today</button><button data-o2-mode="yday">Yesterday</button>' +
-          '<button data-o2-mode="d7" class="on">7 days</button><button data-o2-mode="d30">30 days</button></div>' +
+          /* chips render FROM O.mode — the state survives navigation, so static markup lies */
+          [['today', 'Today'], ['yday', 'Yesterday'], ['d7', '7 days'], ['d30', '30 days']].map(function (p) {
+            return '<button data-o2-mode="' + p[0] + '"' + (O.mode === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
+          }).join('') + '</div>' +
           '<div class="custom"><label>FROM</label><input type="date" id="o2From"><label>TO</label><input type="date" id="o2To">' +
           '<button class="btn-p" id="o2Apply">Apply</button></div>' +
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
@@ -621,6 +623,11 @@
             oPaintDated();
           } else { toast('Pick both dates first.'); }
         };
+      }
+      if (O.mode === 'custom') { /* returning to a custom range: show its dates in the pickers */
+        var f0 = $('o2From'), t0 = $('o2To');
+        if (f0 && O.from) f0.value = O.from;
+        if (t0 && O.to) t0.value = O.to;
       }
       var rf = $('o2Refresh');
       if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); oPulse(); }; }

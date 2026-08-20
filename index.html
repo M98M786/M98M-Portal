@@ -383,10 +383,62 @@ function api(action, payload){
    person's numbers can never surface under another's login, and profit stripping still happens
    server-side per role before anything is ever stored here. */
 var CACHE_TTL_MS = 24*60*60*1000;
+
+/* Build identity. The team kept reviewing week-old bundles: GitHub Pages + browser caches hold
+   index.html for hours, so a fix could be live yet invisible on every staff machine. build.py
+   stamps this constant and writes the same stamp to version.txt; the poller below notices when
+   the deployed stamp moves ahead of the running page and reloads once (sessions live in
+   localStorage now, so a reload lands straight back on the same screen, signed in). */
+var BUILD = '__BUILD_STAMP__';
+function versionWatch(){
+  function safeReload(){
+    var a = document.activeElement;
+    var typing = a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox' && a.value));
+    if(typing){ /* never eat a half-written note — go when the tab is next hidden */
+      document.addEventListener('visibilitychange', function once(){
+        document.removeEventListener('visibilitychange', once); location.reload();
+      });
+      return;
+    }
+    location.reload();
+  }
+  function check(){
+    fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ return r.ok ? r.text() : ''; })
+      .then(function(v){
+        v = (v || '').trim();
+        if(!v || v.length > 40 || v === BUILD) return;
+        var seen = null;
+        try{ seen = sessionStorage.getItem('m98m:reloadedFor'); }catch(e){}
+        if(seen === v) return; /* already reloaded for this stamp and still old = CDN lag, not a loop */
+        try{ sessionStorage.setItem('m98m:reloadedFor', v); }catch(e){}
+        safeReload();
+      }).catch(function(){});
+  }
+  setInterval(check, 4*60*1000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(); });
+  setTimeout(check, 15*1000);
+}
+versionWatch();
+
 function cacheKey(action, payload){
   var who = (STATE.user && STATE.user.email) || decodeJwt(STATE.idToken||'').email || '?';
-  return 'm98m:' + who + ':' + action + ':' + JSON.stringify(payload||{});
+  /* BUILD in the key: an upgraded page must never repaint answer shapes cached by an old one */
+  return 'm98m:c:' + BUILD + ':' + who + ':' + action + ':' + JSON.stringify(payload||{});
 }
+/* boot-time sweep: drop answer caches from other builds (old-format keys carry the email '@') */
+(function cacheSweepOldBuilds(){
+  try{
+    var kill = [];
+    for(var i = 0; i < localStorage.length; i++){
+      var k = localStorage.key(i);
+      if(!k) continue;
+      if(k.indexOf('m98m:c:') === 0 && k.indexOf('m98m:c:' + BUILD + ':') !== 0) kill.push(k);
+      else if(k.indexOf('m98m:') === 0 && k.indexOf('@') !== -1) kill.push(k);
+    }
+    kill.forEach(function(k){ localStorage.removeItem(k); });
+  }catch(e){}
+})();
 function cacheRead(action, payload){
   try{
     var raw = localStorage.getItem(cacheKey(action,payload));
@@ -698,7 +750,7 @@ function enterApp(user){
   $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
   $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
   $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
-    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build 15 Aug · V2</div>';
+    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>';
   if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
   /* Management lands on the live Business overview, not the generic home — the screen that
      answers "how is the business right now" should be the first thing the owner sees. */

@@ -2163,11 +2163,15 @@ async function rollupsWindow(env, days) {
     if (realCost > 0) row.real++;
 
     if (cost > 0) {
-      // Order Earning is already net of eBay's cut, so profit is simply earning minus goods.
-      // Without an OE we fall back to eBay's own fee figure for the order.
-      row.profit += oe > 0 ? oe - cost : (Number(o.sold) || 0) - (Number(o.ebay_fees) || 0) - cost;
+      /* THE LAW (brain of central account sheet): the daily books carry T = 0.8 × (Earning − Cost).
+         Order Earning is already net of eBay's cut; the 0.8 nets VAT — 20% owed on the selling
+         price less the 20% reclaimed on the cost. Ads live in their own column, deducted at the
+         period level exactly as the sheet does. Without an OE we approximate earning as
+         sold − eBay's own fee figure for the order. */
+      const earn = oe > 0 ? oe : (Number(o.sold) || 0) - (Number(o.ebay_fees) || 0);
+      row.profit += 0.8 * (earn - cost);
     } else if (Number(f.profit)) {
-      row.profit += Number(f.profit) * q;             // sheet stated a profit outright
+      row.profit += Number(f.profit) * q;             // sheet stated a (post-VAT) profit outright
     }
     const t = new Date(o.created_at).getTime();
     if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + q;
@@ -3790,9 +3794,9 @@ const ROUTES = {
     },
   },
 
-  /* Daily report (own dashboard, §9-C): sales_daily in UK business dates. Profit is the sheet's
-     per-item projection × units — an estimate until the fee/ads feeds land — and the auth gate
-     is the §6 law: only Management/Ops ever see collective profit. */
+  /* Daily report (own dashboard, §9-C): sales_daily in UK business dates. Profit is the books'
+     own identity — T = 0.8 × (order earning − cost), VAT netted, ads in their own column — and
+     the auth gate is the §6 law: only Management/Ops ever see collective profit. */
   dailyReport: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const rs = await ctx.env.DB.prepare(
@@ -3828,7 +3832,7 @@ const ROUTES = {
         }
       }
       return { rows: rs.results || [], today_live, today,
-        note: 'cost = the day tab\u2019s real paid cost (hourly sync) · ads = eBay\u2019s own reports, both billing families · profit = order earning − goods cost · today rides the live overlay (intraday ads, real fees only)' };
+        note: 'cost = the day tab\u2019s real paid cost (hourly sync) · ads = eBay\u2019s own reports, both billing families · profit = 0.8 × (order earning − cost), the sheet’s VAT law, ads deducted separately · today rides the live overlay (intraday ads, real fees only)' };
     },
   },
 

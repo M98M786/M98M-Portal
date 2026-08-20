@@ -125,9 +125,18 @@ def build_frontend():
             blocks.append('/* ---------- %s ---------- */\n%s' % (name, fh.read().strip()))
     page = shell.replace(MARKER, '\n\n'.join(blocks) if blocks else MARKER)
 
+    # Stamp the bundle and publish the same stamp to version.txt: the shell's versionWatch()
+    # compares the two and self-reloads stale tabs, so a deploy actually reaches every screen.
+    import time
+    stamp = time.strftime('%Y%m%d-%H%M', time.gmtime())
+    page = page.replace('__BUILD_STAMP__', stamp)
+
     os.makedirs(os.path.join(ROOT, 'public', 'assets'), exist_ok=True)
     with open(os.path.join(ROOT, 'public', 'index.html'), 'w') as fh:
         fh.write(page)
+    with open(os.path.join(ROOT, 'public', 'version.txt'), 'w') as fh:
+        fh.write(stamp + '\n')
+    print('build stamp: %s (public/version.txt written)' % stamp)
     views = sorted(set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)))
     print('frontend -> public/index.html  %d bytes, modules: %d, views: %s'
           % (len(page), len(files), ', '.join(views)))

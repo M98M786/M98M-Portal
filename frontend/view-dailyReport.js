@@ -1,7 +1,7 @@
 /* view-dailyReport.js — V2 Phase C (§9-C "daily report, own dashboard"): sales_daily from the
- * Engine, UK business dates (timezone law T-1). Profit is the sheet's own per-item projection ×
- * units — an estimate until the fee and ads feeds land, and the screen says so. Management/Ops
- * only, enforced server-side (collective profit, §6/A9). */
+ * Engine, UK business dates (timezone law T-1). Profit is the books' identity from the central
+ * sheet — T = 0.8 × (order earning − cost), VAT netted, ads in their own column and deducted at
+ * period level. Management/Ops only, enforced server-side (collective profit, §6/A9). */
 (function () {
 
   VIEW_CSS.push(
@@ -138,7 +138,7 @@
     prefetch: function () { return drFetch(); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Daily <span class="goldtext">report</span></h1>' +
-          '<span class="sub">UK business days · per-account and day totals · cost is the real paid cost, ads are eBay\u2019s own report, profit = earning \u2212 goods</span></div>' +
+          '<span class="sub">UK business days · per-account and day totals · cost is the real paid cost, ads are eBay\u2019s own report, profit = 0.8 \u00d7 (earning \u2212 cost) \u2014 the sheet\u2019s VAT law, ads deducted separately</span></div>' +
         '<div class="card enter d2"><div class="bd"><div id="drBody"><div class="spinner"></div></div></div></div>';
     },
     init: function () { drLoad(); }
