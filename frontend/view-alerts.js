@@ -344,21 +344,59 @@
         if (!groups[t]) { groups[t] = { open: [], done: [] }; order.push(t); }
         groups[t][alStr(r.resolved_at) ? 'done' : 'open'].push(r);
       });
+      /* Review 4b: the inbox pattern — compact subject rows, click one and it OPENS like an
+         email: sender, recipient, time, the full letter with item/order ids auto-linked, and
+         the Mark-handled action inside the reading pane. */
+      var byId = {};
+      rows.forEach(function (r) { byId[String(r.id)] = r; });
       function letterCard(r) {
         var openR = !alStr(r.resolved_at);
-        return '<article class="al-card' + (openR ? ' al-money' : '') + '" style="' + (openR ? '' : 'opacity:.6') + '">' +
+        var subj = alStr(r.message).replace(/^([\ud83d\ude80-\ud83d\udfff]|\ud83d[\ude00-\udfff]|[\u2700-\u27bf]|\ud83d\udd34|\ud83d\udfe0)\s*/g, '');
+        return '<article class="al-card" data-al-open="' + alAttr(String(r.id)) + '" style="cursor:pointer;padding:8px 12px;margin:4px 0;' + (openR ? '' : 'opacity:.55') + '">' +
+          '<div class="al-hd" style="margin:0"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
+            '<span class="al-acct" style="font-size:12px">' + esc(alStr(r.type)) + '</span>' +
+            '<span style="font-weight:' + (openR ? '800' : '600') + ';font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + esc(alStr(r.message).slice(0, 110)) + '</span>' +
+            '<span class="al-when">' + esc(alStr(r.created_at).slice(5, 16)) + '</span></div>' +
+          '</article>';
+      }
+      function alLink(text) {
+        /* item ids and order ids become links inside the opened letter */
+        var e0 = esc(text);
+        e0 = e0.replace(/\b(\d{12})\b/g, '<a href="https://www.ebay.co.uk/itm/$1" target="_blank" rel="noopener noreferrer" style="color:var(--gold-a)">$1</a>');
+        e0 = e0.replace(/\b(\d{2}-\d{5}-\d{5})\b/g, '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=$1" target="_blank" rel="noopener noreferrer" style="color:var(--gold-a)">$1</a>');
+        return e0;
+      }
+      function alOpenLetter(id) {
+        var r = byId[String(id)];
+        var pane = $('alReader');
+        if (!r || !pane) { return; }
+        var openR = !alStr(r.resolved_at);
+        pane.innerHTML = '<article class="al-card al-money" style="margin-bottom:12px">' +
           '<div class="al-hd"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
-            '<span class="al-acct">' + esc(alStr(r.type)) + '</span>' +
-            (d.mgmt ? '<span class="pill al-p-cat">to ' + esc(alStr(r.to_addr).split('@')[0]) + '</span>' : '') +
-            '<span class="al-when">' + esc(alStr(r.created_at).slice(0, 16)) + ' UTC</span></div>' +
-          '<div class="al-bd"><div class="al-msg">' + esc(alStr(r.message)) + '</div>' +
-            '<div class="al-from">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
+            '<span class="al-acct" style="font-size:14px">' + esc(alStr(r.type)) + '</span>' +
+            '<span class="al-when">' + esc(alStr(r.created_at).slice(0, 16)) + ' UTC</span>' +
+            '<button class="minibtn" id="alReaderClose" style="margin-left:auto">Close</button></div>' +
+          '<div class="al-bd">' +
+            '<div class="al-from" style="margin-bottom:8px">From <b>M98M Engine</b> — the automated watch · to <b>' + esc(alStr(r.to_addr).split('@')[0]) + '</b></div>' +
+            '<div class="al-msg" style="font-size:13.5px;line-height:1.65;white-space:pre-wrap">' + alLink(alStr(r.message)) + '</div>' +
+            '<div class="al-from" style="margin-top:10px">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
               (openR ? '' : esc(' · handled by ' + alStr(r.resolved_by).split('@')[0] + ' · ' + alStr(r.resolved_at).slice(0, 16)) +
-                (alStr(r.note) ? esc(' · ' + alStr(r.note)) : '')) + '</div>' +
+                (alStr(r.note) ? '<div style="margin-top:4px">' + esc('note: ' + alStr(r.note)) + '</div>' : '')) + '</div>' +
             (openR ? '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Mark handled</button></div>' : '') +
           '</div></article>';
+        try { pane.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e2) {}
+        var cb = $('alReaderClose');
+        if (cb) { cb.onclick = function () { pane.innerHTML = ''; }; }
+        pane.querySelectorAll('[data-al-mail]').forEach(function (mb) {
+          mb.onclick = function () {
+            this.disabled = true;
+            api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
+              .then(function () { toast('Handled.'); pane.innerHTML = ''; alLoadMail(); })
+              .catch(function (e2) { toast(e2.message); alLoadMail(); });
+          };
+        });
       }
-      var h2 = '<div style="max-height:460px;overflow-y:auto">';
+      var h2 = '<div id="alReader"></div><div style="max-height:460px;overflow-y:auto">';
       order.forEach(function (t) {
         var g = groups[t];
         var big = g.open.length > 3;
@@ -373,6 +411,9 @@
         h2 += '<div data-al-group="' + alAttr(t) + '">' + show.map(letterCard).join('') + '</div>';
       });
       box.innerHTML = h2 + '</div>';
+      box.querySelectorAll('[data-al-open]').forEach(function (row) {
+        row.onclick = function () { alOpenLetter(this.getAttribute('data-al-open')); };
+      });
       box.querySelectorAll('[data-al-mail]').forEach(function (b) {
         b.onclick = function () {
           this.disabled = true;
@@ -388,6 +429,9 @@
           if (!cont) { return; }
           var g = groups[t];
           cont.innerHTML = g.open.concat(g.done).map(letterCard).join('');
+          cont.querySelectorAll('[data-al-open]').forEach(function (row) {
+            row.onclick = function () { alOpenLetter(this.getAttribute('data-al-open')); };
+          });
           this.remove();
           cont.parentElement.querySelectorAll('[data-al-mail]').forEach(function (mb) {
             mb.onclick = function () {

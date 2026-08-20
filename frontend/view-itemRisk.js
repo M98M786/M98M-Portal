@@ -5,7 +5,7 @@
  * (>5 returns, >5 INR, >10 late-tracking orders) pinned red at the top. */
 (function () {
 
-  var IR = { tab: 'returns', data: null };
+  var IR = { tab: 'returns', data: null, acct: '' };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -22,7 +22,7 @@
     var box = $('irBody');
     if (!box) { return; }
     if (!IR.data) { box.innerHTML = '<div class="spinner"></div>'; }
-    api('itemRisk', {}).then(function (d) {
+    api('itemRisk', IR.acct ? { account: IR.acct } : {}).then(function (d) {
       IR.data = d || {};
       irPaint();
     }).catch(function (e) {
@@ -106,6 +106,7 @@
         [['returns', 'Returns'], ['inr', 'Not received'], ['late', 'Late tracking']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
+        '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<button class="minibtn" id="irRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="irBody"><div class="spinner"></div></div></div>';
     },
@@ -118,6 +119,13 @@
           irPaint();
         };
       });
+      var sa = $('irAcct');
+      if (sa) {
+        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
+          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
+        });
+        sa.value = IR.acct; sa.onchange = function () { IR.acct = this.value; IR.data = null; irLoad(); };
+      }
       var rf = $('irRefresh');
       if (rf) { rf.onclick = irLoad; }
       irLoad();

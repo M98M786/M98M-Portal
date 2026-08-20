@@ -441,7 +441,8 @@ async function listingSync(env) {
         xmlTag(it, 'GalleryURL'),
         /* the 7-day-rule age clock: eBay's own StartTime when the XML carries it (first_seen
            stays as the fallback clock and is never overwritten once set) */
-        String(xmlTag(it, 'StartTime') || '').replace('T', ' ').replace(/\.\d+Z$/, '').replace('Z', '')
+        String(xmlTag(it, 'StartTime') || '').replace('T', ' ').replace(/\.\d+Z$/, '').replace('Z', ''),
+        Number(xmlTag(it, 'QuantitySold')) || 0
       ));
     }
     for (let i = 0; i < upserts.length; i += 50) await env.DB.batch(upserts.slice(i, i + 50));
@@ -3610,7 +3611,7 @@ const ROUTES = {
           (canCamp ? ' OR lower(f.campaign_name) LIKE ?' + n + ' OR lower(f.campaign_type) LIKE ?' + n : '') + ')');
       }
       const rs = await ctx.env.DB.prepare(
-        'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, ' +
+        'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, a.sold_qty, a.sold_30d, ' +
         '       f.ali_cost, f.sup1, f.sup2, f.sup3, f.sup1_link, f.sup2_link, f.sup3_link, ' +
         '       f.current_sup, f.category, f.oe, f.profit, f.roi, f.margin, ' +
         '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ' +
@@ -3814,15 +3815,20 @@ const ROUTES = {
         "SELECT account, type, substr(at, 1, 10) AS d, COUNT(*) AS n FROM feedback " +
         "WHERE at >= datetime('now', '-31 day') GROUP BY account, type, d"
       ).all()).results || [];
+      const fAcct = String(p.account || '');
       const negatives = (await ctx.env.DB.prepare(
         "SELECT f.account, f.item_id, f.order_line, f.buyer, f.text, f.at, i.title FROM feedback f " +
-        "LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.type = 'Negative' ORDER BY f.at DESC LIMIT 60"
-      ).all()).results || [];
+        "LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.type = 'Negative'" + (fAcct ? ' AND f.account = ?1' : '') + " ORDER BY f.at DESC LIMIT 60"
+      ).bind(...(fAcct ? [fAcct] : [])).all()).results || [];
+      const allComments = (await ctx.env.DB.prepare(
+        "SELECT f.account, f.type, f.item_id, f.buyer, f.text, f.at, i.title FROM feedback f " +
+        "LEFT JOIN items_api i ON i.item_id = f.item_id" + (fAcct ? ' WHERE f.account = ?1' : '') + " ORDER BY f.at DESC LIMIT 250"
+      ).bind(...(fAcct ? [fAcct] : [])).all()).results || [];
       const neutrals = (await ctx.env.DB.prepare(
         "SELECT f.account, f.item_id, f.buyer, f.text, f.at, i.title FROM feedback f " +
         "LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.type = 'Neutral' ORDER BY f.at DESC LIMIT 20"
       ).all()).results || [];
-      return { summaries: sums, daily, today, yesterday: yday, negatives, neutrals,
+      return { summaries: sums, daily, today, yesterday: yday, negatives, neutrals, all_comments: allComments, account: fAcct,
         note: 'score and positive % are eBay’s own (GetUser); the 30-day splits come from the stored comments · a NEW negative letters management + CS the moment the sync sees it' };
     },
   },
@@ -3877,18 +3883,19 @@ const ROUTES = {
         })).sort((a, b) => b.all - a.all).slice(0, 120);
       };
       /* refund £ rides in via the order the case sits on — Finances writes the amount there */
+      const acctF = String(p.account || '');
       const kindRows = async (kind) => (await ctx.env.DB.prepare(
         'SELECT c.item_id, c.account, c.reason, c.opened_at, i.title, o.refunded FROM cases c ' +
         'LEFT JOIN items_api i ON i.item_id = c.item_id ' +
         'LEFT JOIN orders o ON o.order_id = c.order_id ' +
-        'WHERE c.kind = ?1 ORDER BY c.opened_at DESC LIMIT 4000'
-      ).bind(kind).all()).results || [];
+        'WHERE c.kind = ?1' + (acctF ? ' AND c.account = ?2' : '') + ' ORDER BY c.opened_at DESC LIMIT 4000'
+      ).bind(...(acctF ? [kind, acctF] : [kind])).all()).results || [];
       const retRows = await kindRows('RETURN');
       const inrRows = await kindRows('INR');
       const lateRows = (await ctx.env.DB.prepare(
         'SELECT lm.item_id, lm.account, lm.marked_at, i.title, 0 AS refunded FROM late_marks lm ' +
-        'LEFT JOIN items_api i ON i.item_id = lm.item_id ORDER BY lm.marked_at DESC LIMIT 4000'
-      ).all()).results || [];
+        'LEFT JOIN items_api i ON i.item_id = lm.item_id' + (acctF ? ' WHERE lm.account = ?1' : '') + ' ORDER BY lm.marked_at DESC LIMIT 4000'
+      ).bind(...(acctF ? [acctF] : [])).all()).results || [];
       const returns = fold(retRows, r => String(r.opened_at || '').slice(0, 10), true);
       const inr = fold(inrRows, r => String(r.opened_at || '').slice(0, 10), true);
       const late = fold(lateRows, r => String(r.marked_at || '').slice(0, 10), false);

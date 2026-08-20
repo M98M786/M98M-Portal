@@ -94,7 +94,7 @@
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>Sold 30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
@@ -112,6 +112,8 @@
         '<td>' + esc(axStr(r.account)) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
+        '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
+        '<td class="alx-num">' + (Number(r.sold_30d) || 0) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +

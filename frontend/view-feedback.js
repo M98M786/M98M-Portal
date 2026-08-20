@@ -3,6 +3,8 @@
  * full detail of every negative — with letters already sent to management + CS on arrival. */
 (function () {
 
+  var FB = { acct: '' };
+
   VIEW_CSS.push(
     '.fb-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:14px}' +
     '.fb-card{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:12px 14px}' +
@@ -17,7 +19,7 @@
     var box = $('fbBody');
     if (!box) { return; }
     box.innerHTML = '<div class="spinner"></div>';
-    api('feedbackBoard', {}).then(function (d) {
+    api('feedbackBoard', FB.acct ? { account: FB.acct } : {}).then(function (d) {
       var sums = (d && d.summaries) || [];
       var daily = (d && d.daily) || [];
       var today = (d && d.today) || '';
@@ -67,6 +69,22 @@
             ' · “' + esc(String(n.text || '').slice(0, 120)) + '” · <span style="color:var(--text-3)">' + esc(String(n.title || n.item_id).slice(0, 50)) + '</span></div>';
         });
       }
+      var all = (d && d.all_comments) || [];
+      if (all.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:14px 0 4px">Every feedback' + (FB.acct ? ' \u00b7 ' + esc(FB.acct) : ' \u00b7 all accounts') + ' \u00b7 newest ' + all.length + '</div>' +
+          '<div class="scroll" style="max-height:420px"><table class="fb-tbl ir-tbl" style="min-width:820px"><thead><tr>' +
+          '<th style="text-align:left">Date</th><th style="text-align:left">Account</th><th style="text-align:left">Type</th><th style="text-align:left">Buyer</th><th style="text-align:left">Comment</th><th style="text-align:left">Item</th></tr></thead><tbody>';
+        all.forEach(function (c) {
+          var tone = c.type === 'Negative' ? 'var(--bad)' : c.type === 'Neutral' ? 'var(--warn)' : 'var(--ok)';
+          h += '<tr><td style="text-align:left;white-space:nowrap">' + esc(String(c.at).slice(0, 10)) + '</td>' +
+            '<td style="text-align:left">' + esc(String(c.account)) + '</td>' +
+            '<td style="text-align:left;font-weight:800;color:' + tone + '">' + esc(String(c.type)) + '</td>' +
+            '<td style="text-align:left">' + esc(String(c.buyer)) + '</td>' +
+            '<td style="text-align:left;max-width:340px;white-space:normal">\u201c' + esc(String(c.text || '').slice(0, 160)) + '\u201d</td>' +
+            '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(String(c.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(c.title || c.item_id).slice(0, 45)) + '</a></td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String((d && d.note) || '')) + '</p>';
       box.innerHTML = h;
     }).catch(function (e) {
@@ -83,10 +101,19 @@
     render: function () {
       return '<div class="hgroup enter d1"><h1><span class="goldtext">Feedback</span> — all accounts</h1>' +
         '<span class="sub">eBay score + positive % per account · today, yesterday, 30 days · every negative in full, lettered to management + CS on arrival</span>' +
-        '<button class="minibtn" id="fbRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<span style="margin-left:auto;display:flex;gap:6px">' +
+        '<select id="fbAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
+        '<button class="minibtn" id="fbRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="fbBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
+      var sa = $('fbAcct');
+      if (sa) {
+        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
+          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
+        });
+        sa.value = FB.acct; sa.onchange = function () { FB.acct = this.value; fbLoad(); };
+      }
       var rf = $('fbRefresh');
       if (rf) { rf.onclick = fbLoad; }
       fbLoad();

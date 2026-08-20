@@ -389,7 +389,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-2055';
+var BUILD = '20260820-2059';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -420,6 +420,46 @@ function versionWatch(){
   setTimeout(check, 15*1000);
 }
 versionWatch();
+
+/* Review 4b (Hasib): "in every data of my portal i need sorting from up to down". One delegated
+   handler: click any column header in the portal's standard tables and the body sorts by that
+   column — numbers, money, percent and dates all compare as values, second click flips the
+   direction. Tables with grouped rows (the Daily report's day+account nesting) opt out. */
+document.addEventListener('click', function (ev) {
+  var th = ev.target && ev.target.closest ? ev.target.closest('th') : null;
+  if (!th || th.closest('a,button,input,select')) { return; }
+  var table = th.closest('table');
+  if (!table || !/\b(ir|mk|tr|ac|cw|cd|od|ah|ar|alx|fb)-tbl\b/.test(table.className)) { return; }
+  var tbody = table.tBodies[0];
+  if (!tbody || tbody.querySelector('.dr-day, .dr-acct')) { return; } /* grouped tables keep their order */
+  var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
+  if (idx < 0) { return; }
+  var dir = th.getAttribute('data-sort-dir') === 'asc' ? 'desc' : 'asc';
+  Array.prototype.forEach.call(th.parentNode.children, function (x) {
+    x.removeAttribute('data-sort-dir');
+    x.textContent = x.textContent.replace(/ [\u25b2\u25bc]$/, '');
+  });
+  th.setAttribute('data-sort-dir', dir);
+  th.textContent = th.textContent.replace(/ [\u25b2\u25bc]$/, '') + (dir === 'asc' ? ' \u25b2' : ' \u25bc');
+  function val(tr) {
+    var td = tr.children[idx];
+    if (!td) { return ''; }
+    var t = (td.textContent || '').trim();
+    if (t === '\u2014' || t === '') { return { n: -Infinity, t: '' }; }
+    var num = parseFloat(t.replace(/[\u00a3,%\u00d7,\s]/g, '').replace(/,/g, ''));
+    if (isFinite(num) && /^[\u00a3\u2212\-]?[\d.,]+[%\u00d7]?/.test(t)) { return { n: num, t: t.toLowerCase() }; }
+    return { n: null, t: t.toLowerCase() };
+  }
+  var rows = Array.prototype.slice.call(tbody.rows);
+  rows.sort(function (a, b) {
+    var va = val(a), vb = val(b);
+    var cmp;
+    if (va.n !== null && vb.n !== null) { cmp = va.n - vb.n; }
+    else { cmp = va.t < vb.t ? -1 : va.t > vb.t ? 1 : 0; }
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  rows.forEach(function (r) { tbody.appendChild(r); });
+});
 
 function cacheKey(action, payload){
   var who = (STATE.user && STATE.user.email) || decodeJwt(STATE.idToken||'').email || '?';
@@ -1416,7 +1456,7 @@ VIEWS.home = {
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>Sold 30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
@@ -1434,6 +1474,8 @@ VIEWS.home = {
         '<td>' + esc(axStr(r.account)) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
+        '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
+        '<td class="alx-num">' + (Number(r.sold_30d) || 0) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
@@ -4438,21 +4480,59 @@ function createMeeting() {
         if (!groups[t]) { groups[t] = { open: [], done: [] }; order.push(t); }
         groups[t][alStr(r.resolved_at) ? 'done' : 'open'].push(r);
       });
+      /* Review 4b: the inbox pattern — compact subject rows, click one and it OPENS like an
+         email: sender, recipient, time, the full letter with item/order ids auto-linked, and
+         the Mark-handled action inside the reading pane. */
+      var byId = {};
+      rows.forEach(function (r) { byId[String(r.id)] = r; });
       function letterCard(r) {
         var openR = !alStr(r.resolved_at);
-        return '<article class="al-card' + (openR ? ' al-money' : '') + '" style="' + (openR ? '' : 'opacity:.6') + '">' +
+        var subj = alStr(r.message).replace(/^([\ud83d\ude80-\ud83d\udfff]|\ud83d[\ude00-\udfff]|[\u2700-\u27bf]|\ud83d\udd34|\ud83d\udfe0)\s*/g, '');
+        return '<article class="al-card" data-al-open="' + alAttr(String(r.id)) + '" style="cursor:pointer;padding:8px 12px;margin:4px 0;' + (openR ? '' : 'opacity:.55') + '">' +
+          '<div class="al-hd" style="margin:0"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
+            '<span class="al-acct" style="font-size:12px">' + esc(alStr(r.type)) + '</span>' +
+            '<span style="font-weight:' + (openR ? '800' : '600') + ';font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + esc(alStr(r.message).slice(0, 110)) + '</span>' +
+            '<span class="al-when">' + esc(alStr(r.created_at).slice(5, 16)) + '</span></div>' +
+          '</article>';
+      }
+      function alLink(text) {
+        /* item ids and order ids become links inside the opened letter */
+        var e0 = esc(text);
+        e0 = e0.replace(/\b(\d{12})\b/g, '<a href="https://www.ebay.co.uk/itm/$1" target="_blank" rel="noopener noreferrer" style="color:var(--gold-a)">$1</a>');
+        e0 = e0.replace(/\b(\d{2}-\d{5}-\d{5})\b/g, '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=$1" target="_blank" rel="noopener noreferrer" style="color:var(--gold-a)">$1</a>');
+        return e0;
+      }
+      function alOpenLetter(id) {
+        var r = byId[String(id)];
+        var pane = $('alReader');
+        if (!r || !pane) { return; }
+        var openR = !alStr(r.resolved_at);
+        pane.innerHTML = '<article class="al-card al-money" style="margin-bottom:12px">' +
           '<div class="al-hd"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
-            '<span class="al-acct">' + esc(alStr(r.type)) + '</span>' +
-            (d.mgmt ? '<span class="pill al-p-cat">to ' + esc(alStr(r.to_addr).split('@')[0]) + '</span>' : '') +
-            '<span class="al-when">' + esc(alStr(r.created_at).slice(0, 16)) + ' UTC</span></div>' +
-          '<div class="al-bd"><div class="al-msg">' + esc(alStr(r.message)) + '</div>' +
-            '<div class="al-from">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
+            '<span class="al-acct" style="font-size:14px">' + esc(alStr(r.type)) + '</span>' +
+            '<span class="al-when">' + esc(alStr(r.created_at).slice(0, 16)) + ' UTC</span>' +
+            '<button class="minibtn" id="alReaderClose" style="margin-left:auto">Close</button></div>' +
+          '<div class="al-bd">' +
+            '<div class="al-from" style="margin-bottom:8px">From <b>M98M Engine</b> — the automated watch · to <b>' + esc(alStr(r.to_addr).split('@')[0]) + '</b></div>' +
+            '<div class="al-msg" style="font-size:13.5px;line-height:1.65;white-space:pre-wrap">' + alLink(alStr(r.message)) + '</div>' +
+            '<div class="al-from" style="margin-top:10px">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
               (openR ? '' : esc(' · handled by ' + alStr(r.resolved_by).split('@')[0] + ' · ' + alStr(r.resolved_at).slice(0, 16)) +
-                (alStr(r.note) ? esc(' · ' + alStr(r.note)) : '')) + '</div>' +
+                (alStr(r.note) ? '<div style="margin-top:4px">' + esc('note: ' + alStr(r.note)) + '</div>' : '')) + '</div>' +
             (openR ? '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Mark handled</button></div>' : '') +
           '</div></article>';
+        try { pane.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e2) {}
+        var cb = $('alReaderClose');
+        if (cb) { cb.onclick = function () { pane.innerHTML = ''; }; }
+        pane.querySelectorAll('[data-al-mail]').forEach(function (mb) {
+          mb.onclick = function () {
+            this.disabled = true;
+            api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
+              .then(function () { toast('Handled.'); pane.innerHTML = ''; alLoadMail(); })
+              .catch(function (e2) { toast(e2.message); alLoadMail(); });
+          };
+        });
       }
-      var h2 = '<div style="max-height:460px;overflow-y:auto">';
+      var h2 = '<div id="alReader"></div><div style="max-height:460px;overflow-y:auto">';
       order.forEach(function (t) {
         var g = groups[t];
         var big = g.open.length > 3;
@@ -4467,6 +4547,9 @@ function createMeeting() {
         h2 += '<div data-al-group="' + alAttr(t) + '">' + show.map(letterCard).join('') + '</div>';
       });
       box.innerHTML = h2 + '</div>';
+      box.querySelectorAll('[data-al-open]').forEach(function (row) {
+        row.onclick = function () { alOpenLetter(this.getAttribute('data-al-open')); };
+      });
       box.querySelectorAll('[data-al-mail]').forEach(function (b) {
         b.onclick = function () {
           this.disabled = true;
@@ -4482,6 +4565,9 @@ function createMeeting() {
           if (!cont) { return; }
           var g = groups[t];
           cont.innerHTML = g.open.concat(g.done).map(letterCard).join('');
+          cont.querySelectorAll('[data-al-open]').forEach(function (row) {
+            row.onclick = function () { alOpenLetter(this.getAttribute('data-al-open')); };
+          });
           this.remove();
           cont.parentElement.querySelectorAll('[data-al-mail]').forEach(function (mb) {
             mb.onclick = function () {
@@ -9031,6 +9117,8 @@ VIEWS.dashboard = {
  * full detail of every negative — with letters already sent to management + CS on arrival. */
 (function () {
 
+  var FB = { acct: '' };
+
   VIEW_CSS.push(
     '.fb-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:14px}' +
     '.fb-card{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:12px 14px}' +
@@ -9045,7 +9133,7 @@ VIEWS.dashboard = {
     var box = $('fbBody');
     if (!box) { return; }
     box.innerHTML = '<div class="spinner"></div>';
-    api('feedbackBoard', {}).then(function (d) {
+    api('feedbackBoard', FB.acct ? { account: FB.acct } : {}).then(function (d) {
       var sums = (d && d.summaries) || [];
       var daily = (d && d.daily) || [];
       var today = (d && d.today) || '';
@@ -9095,6 +9183,22 @@ VIEWS.dashboard = {
             ' · “' + esc(String(n.text || '').slice(0, 120)) + '” · <span style="color:var(--text-3)">' + esc(String(n.title || n.item_id).slice(0, 50)) + '</span></div>';
         });
       }
+      var all = (d && d.all_comments) || [];
+      if (all.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:14px 0 4px">Every feedback' + (FB.acct ? ' \u00b7 ' + esc(FB.acct) : ' \u00b7 all accounts') + ' \u00b7 newest ' + all.length + '</div>' +
+          '<div class="scroll" style="max-height:420px"><table class="fb-tbl ir-tbl" style="min-width:820px"><thead><tr>' +
+          '<th style="text-align:left">Date</th><th style="text-align:left">Account</th><th style="text-align:left">Type</th><th style="text-align:left">Buyer</th><th style="text-align:left">Comment</th><th style="text-align:left">Item</th></tr></thead><tbody>';
+        all.forEach(function (c) {
+          var tone = c.type === 'Negative' ? 'var(--bad)' : c.type === 'Neutral' ? 'var(--warn)' : 'var(--ok)';
+          h += '<tr><td style="text-align:left;white-space:nowrap">' + esc(String(c.at).slice(0, 10)) + '</td>' +
+            '<td style="text-align:left">' + esc(String(c.account)) + '</td>' +
+            '<td style="text-align:left;font-weight:800;color:' + tone + '">' + esc(String(c.type)) + '</td>' +
+            '<td style="text-align:left">' + esc(String(c.buyer)) + '</td>' +
+            '<td style="text-align:left;max-width:340px;white-space:normal">\u201c' + esc(String(c.text || '').slice(0, 160)) + '\u201d</td>' +
+            '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(String(c.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(c.title || c.item_id).slice(0, 45)) + '</a></td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String((d && d.note) || '')) + '</p>';
       box.innerHTML = h;
     }).catch(function (e) {
@@ -9111,10 +9215,19 @@ VIEWS.dashboard = {
     render: function () {
       return '<div class="hgroup enter d1"><h1><span class="goldtext">Feedback</span> — all accounts</h1>' +
         '<span class="sub">eBay score + positive % per account · today, yesterday, 30 days · every negative in full, lettered to management + CS on arrival</span>' +
-        '<button class="minibtn" id="fbRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<span style="margin-left:auto;display:flex;gap:6px">' +
+        '<select id="fbAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
+        '<button class="minibtn" id="fbRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="fbBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
+      var sa = $('fbAcct');
+      if (sa) {
+        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
+          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
+        });
+        sa.value = FB.acct; sa.onchange = function () { FB.acct = this.value; fbLoad(); };
+      }
       var rf = $('fbRefresh');
       if (rf) { rf.onclick = fbLoad; }
       fbLoad();
@@ -10447,7 +10560,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
  * (>5 returns, >5 INR, >10 late-tracking orders) pinned red at the top. */
 (function () {
 
-  var IR = { tab: 'returns', data: null };
+  var IR = { tab: 'returns', data: null, acct: '' };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -10464,7 +10577,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var box = $('irBody');
     if (!box) { return; }
     if (!IR.data) { box.innerHTML = '<div class="spinner"></div>'; }
-    api('itemRisk', {}).then(function (d) {
+    api('itemRisk', IR.acct ? { account: IR.acct } : {}).then(function (d) {
       IR.data = d || {};
       irPaint();
     }).catch(function (e) {
@@ -10548,6 +10661,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         [['returns', 'Returns'], ['inr', 'Not received'], ['late', 'Late tracking']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
+        '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<button class="minibtn" id="irRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="irBody"><div class="spinner"></div></div></div>';
     },
@@ -10560,6 +10674,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           irPaint();
         };
       });
+      var sa = $('irAcct');
+      if (sa) {
+        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
+          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
+        });
+        sa.value = IR.acct; sa.onchange = function () { IR.acct = this.value; IR.data = null; irLoad(); };
+      }
       var rf = $('irRefresh');
       if (rf) { rf.onclick = irLoad; }
       irLoad();

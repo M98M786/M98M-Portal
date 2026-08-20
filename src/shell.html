@@ -421,6 +421,46 @@ function versionWatch(){
 }
 versionWatch();
 
+/* Review 4b (Hasib): "in every data of my portal i need sorting from up to down". One delegated
+   handler: click any column header in the portal's standard tables and the body sorts by that
+   column — numbers, money, percent and dates all compare as values, second click flips the
+   direction. Tables with grouped rows (the Daily report's day+account nesting) opt out. */
+document.addEventListener('click', function (ev) {
+  var th = ev.target && ev.target.closest ? ev.target.closest('th') : null;
+  if (!th || th.closest('a,button,input,select')) { return; }
+  var table = th.closest('table');
+  if (!table || !/\b(ir|mk|tr|ac|cw|cd|od|ah|ar|alx|fb)-tbl\b/.test(table.className)) { return; }
+  var tbody = table.tBodies[0];
+  if (!tbody || tbody.querySelector('.dr-day, .dr-acct')) { return; } /* grouped tables keep their order */
+  var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
+  if (idx < 0) { return; }
+  var dir = th.getAttribute('data-sort-dir') === 'asc' ? 'desc' : 'asc';
+  Array.prototype.forEach.call(th.parentNode.children, function (x) {
+    x.removeAttribute('data-sort-dir');
+    x.textContent = x.textContent.replace(/ [\u25b2\u25bc]$/, '');
+  });
+  th.setAttribute('data-sort-dir', dir);
+  th.textContent = th.textContent.replace(/ [\u25b2\u25bc]$/, '') + (dir === 'asc' ? ' \u25b2' : ' \u25bc');
+  function val(tr) {
+    var td = tr.children[idx];
+    if (!td) { return ''; }
+    var t = (td.textContent || '').trim();
+    if (t === '\u2014' || t === '') { return { n: -Infinity, t: '' }; }
+    var num = parseFloat(t.replace(/[\u00a3,%\u00d7,\s]/g, '').replace(/,/g, ''));
+    if (isFinite(num) && /^[\u00a3\u2212\-]?[\d.,]+[%\u00d7]?/.test(t)) { return { n: num, t: t.toLowerCase() }; }
+    return { n: null, t: t.toLowerCase() };
+  }
+  var rows = Array.prototype.slice.call(tbody.rows);
+  rows.sort(function (a, b) {
+    var va = val(a), vb = val(b);
+    var cmp;
+    if (va.n !== null && vb.n !== null) { cmp = va.n - vb.n; }
+    else { cmp = va.t < vb.t ? -1 : va.t > vb.t ? 1 : 0; }
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  rows.forEach(function (r) { tbody.appendChild(r); });
+});
+
 function cacheKey(action, payload){
   var who = (STATE.user && STATE.user.email) || decodeJwt(STATE.idToken||'').email || '?';
   /* BUILD in the key: an upgraded page must never repaint answer shapes cached by an old one */
