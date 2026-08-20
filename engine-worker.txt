@@ -544,14 +544,12 @@ async function selfTestRun(env) {
     }
   } catch (e) { add('books match orders', false, e.message); }
 
-  try { // 5. the P&L identity holds when recomputed independently (7d totals)
-    const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost, ROUND(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END), 2) AS ref FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
+  try { // 5. the P&L law recomputes (7d totals): Raw = 0.8 × (OE − Ali) — the central-sheet brain
+    const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
     const rev = Number(t.rev) || 0, fees = Number(t.fees) || 0, cost = Number(t.cost) || 0;
-    const oe = rev - fees, vatBack = fees / 6 + cost / 6, vatHmrc = rev / 6 - vatBack;
-    const raw = (oe - cost) - vatHmrc;
-    const identity = Math.abs((rev - fees - cost) - (oe - cost)) < 0.01 && isFinite(raw);
-    add('P&L identity recomputes', identity, '7d: rev £' + rev.toFixed(0) + ' → OE £' + oe.toFixed(0) + ' → raw £' + raw.toFixed(0));
-  } catch (e) { add('P&L identity recomputes', false, e.message); }
+    const oe = rev - fees, raw = 0.8 * (oe - cost);
+    add('P&L law recomputes (0.8 × (OE − Ali))', isFinite(raw) && oe >= 0, '7d: rev £' + rev.toFixed(0) + ' → OE £' + oe.toFixed(0) + ' → raw £' + raw.toFixed(0));
+  } catch (e) { add('P&L law recomputes (0.8 × (OE − Ali))', false, e.message); }
 
   try { // 6. ads continuity: each of the last 2 full days has ad rows in the daily books
     for (let back = 1; back <= 2; back++) {
@@ -2933,7 +2931,12 @@ const ROUTES = {
         const vatOut = round2(revenue * 0.2);
         const vatBack = round2(fees / 6 + cost / 6 + pri * 0.2);
         const vatHmrc = round2(vatOut - vatBack);
-        const raw = round2(trueOe - vatHmrc);
+        /* THE ORGANISATION'S OWN LAW (the central-sheet brain, v1.3, Hasib's instruction):
+           Profit = 0.8 × (Order Earning − AliExpress) — "deduct 20% selling-price VAT, reclaim
+           20% cost-price VAT" — then minus net-of-VAT ad cost, then minus returns. The real
+           eBay fees already carry the GENERAL ad fees inside, so only the priority (CPC)
+           family is subtracted separately here; the VAT ladder above stays as detail columns. */
+        const raw = round2(0.8 * (oe - cost) - pri);
         const returns = round2(o.refunded || 0);
         const actual = round2(raw - returns);
         rows.push({
@@ -2958,7 +2961,7 @@ const ROUTES = {
         tot[k] = round2(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0));
       }
       return { from, to, account, rows: rows.slice(0, 400), total: tot,
-        note: 'True OE = OE − AliExpress − Priority ads incl VAT · Raw Profit = True OE − VAT to HMRC · General ad fees already sit inside the eBay fees' };
+        note: 'The sheet law: Raw = 0.8 × (Order Earning − AliExpress) − priority ads net of VAT · Actual = Raw − returns · general ad fees already sit inside the real eBay fees · VAT columns shown as detail' };
     },
   },
 
