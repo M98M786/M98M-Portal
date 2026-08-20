@@ -281,6 +281,24 @@ function aliSweep() {
 /** The hourly ride (called from runMissedCheckpointSweep): the Ali sweep every hour, plus the
  *  one-time first backup — until the backup files exist, night one must not wait for the nightly
  *  trigger to come around. After the first run the property exists and this is sweep-only. */
+/** One-shot: until the backup files exist, run the whole first cycle (sweep + backup) from
+ *  whichever trigger reaches here first — the 5-minute loss sweep carries it so night one
+ *  starts within minutes, not at the hourly trigger's leisure. Pure no-op ever after. */
+function nightWatchBootstrapOnce_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('BACKUP_SS_MONEY')) return;
+  if (props.getProperty('NW_BOOT_LOCK')) return;                    // a 6-min run must not double-start
+  props.setProperty('NW_BOOT_LOCK', new Date().toISOString());
+  try {
+    try { aliSweep(); }
+    catch (e) { logActivity_('trigger', 'ERROR:aliSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+    try { nightBackupPull(); }
+    catch (e) { logActivity_('trigger', 'ERROR:firstBackup', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  } finally {
+    props.deleteProperty('NW_BOOT_LOCK');
+  }
+}
+
 function nightWatchHourlyRide() {
   try { aliSweep(); }
   catch (e) { logActivity_('trigger', 'ERROR:aliSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }

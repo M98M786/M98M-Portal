@@ -983,6 +983,13 @@ const LOSS_PING_START = 14;                       // 2 PM PKT (Q6 default until 
 const LOSS_PING_END = 23;                         // 11 PM PKT
 
 function runLossEscalationSweep() {
+  /* R5: one-time night-watch bootstrap rides the fastest trigger in the project (this one,
+   * every 5 minutes) so the FIRST backup + Ali sweep never wait for the hourly clock. A pure
+   * property-check no-op forever after; sits above the ping-hours gate on purpose. */
+  if (typeof nightWatchBootstrapOnce_ === 'function') {
+    try { nightWatchBootstrapOnce_(); }
+    catch (e) { logActivity_('trigger', 'ERROR:nwBootstrap', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
