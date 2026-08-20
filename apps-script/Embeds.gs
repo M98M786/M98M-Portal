@@ -62,9 +62,6 @@ const EMBED_TOOLS = [
   { kind: 'tool_cpc_keyword', title: 'M98M CPC Keyword Decision Engine',
     roles: ['Item Lister', 'Listing Manager', 'Advertising Manager'],
     file_hint: 'M98M-CPC-Keyword-Agent-v3_2.html' },
-  { kind: 'tool_order_ops', title: 'M98M Order Operations',
-    roles: ['Order Processor', 'Team Lead'],
-    file_hint: 'M98M-Order-Ops.html' },
 ];
 
 // ---------- role gate ----------

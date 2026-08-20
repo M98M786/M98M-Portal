@@ -293,6 +293,18 @@
     var margin = oN(cur.revenue) ? (oN(cur.actual_profit) / oN(cur.revenue) * 100) : 0;
     var marginPrev = oN(prev.revenue) ? (oN(prev.actual_profit) / oN(prev.revenue) * 100) : 0;
     var todayLive = O.ov && O.ov.kpis && O.ov.kpis.today;
+    /* ROAS (review 3): eBay-attributed ad revenue over ad spend, from the books' ads_rev —
+       blended (all revenue ÷ ads) shown beside it so a thin attribution day still reads. */
+    var rr = { rev: 0, ads2: 0 };
+    var pr = { rev: 0, ads2: 0 };
+    var pFrom = dShift(r.from, -span), pTo = dShift(r.from, -1);
+    (O.days || []).forEach(function (d0) {
+      if (d0.date >= r.from && d0.date <= r.to) { rr.rev += oN(d0.ads_rev); rr.ads2 += oN(d0.ads); }
+      if (d0.date >= pFrom && d0.date <= pTo) { pr.rev += oN(d0.ads_rev); pr.ads2 += oN(d0.ads); }
+    });
+    var roasCur = rr.ads2 > 0.005 ? rr.rev / rr.ads2 : 0;
+    var roasPrev = pr.ads2 > 0.005 ? pr.rev / pr.ads2 : 0;
+    var blended = rr.ads2 > 0.005 ? oN(cur.revenue) / rr.ads2 : 0;
     box.innerHTML =
       '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Sold</div><div class="kpi-v gold">' + oGBP0(cur.revenue) + '</div>' + delta(cur.revenue, prev.revenue) + '<div class="kpi-s">' + oN(cur.orders_n) + ' order(s) in the range</div></div>' +
       '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Actual profit</div><div class="kpi-v' + (oN(cur.actual_profit) < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.actual_profit) + '</div>' + delta(cur.actual_profit, prev.actual_profit) + '<div class="kpi-s">0.8 × (OE − Ali) − ads net − returns — the sheet law</div></div>' +
@@ -300,6 +312,7 @@
       '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">All ads incl VAT</div><div class="kpi-v">' + oGBP0(adsIncl) + '</div>' + delta(adsIncl, adsInclPrev) + '<div class="kpi-s">waste inside · both families · today intraday included</div></div>' +
       '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">Returns</div><div class="kpi-v' + (oN(cur.returns) > 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.returns) + '</div>' + delta(cur.returns, prev.returns) + '<div class="kpi-s">real refunds from eBay finances</div></div>' +
       '<div class="kpi" style="--tone:var(--gold-a)"><div class="kpi-l">Margin</div><div class="kpi-v">' + margin.toFixed(2) + '%</div>' + delta(margin, marginPrev) + '<div class="kpi-s">actual profit ÷ sold</div></div>' +
+      '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">ROAS</div><div class="kpi-v' + (roasCur && roasCur < 5 ? '" style="color:var(--warn)' : '') + '">' + (roasCur ? roasCur.toFixed(1) + '×' : '—') + '</div>' + delta(roasCur, roasPrev) + '<div class="kpi-s">eBay-attributed ad £ ÷ ad spend · blended ' + (blended ? blended.toFixed(1) + '×' : '—') + ' · SOP target ≥ 5</div></div>' +
       '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">' + feesNote + '</div></div>' +
       (todayLive ? '<div class="kpi" style="--tone:var(--gold-a)"><div class="kpi-l">Today · live</div><div class="kpi-v gold">' + oGBP0(todayLive.revenue) + '</div><div class="kpi-d mut">' + oN(todayLive.orders) + ' order(s) so far</div><div class="kpi-s">straight from the order feed</div></div>' : '');
   }
@@ -339,10 +352,25 @@
       return h + '</div>';
     }
     var t = O.ov.today_by_account || [], y = O.ov.yesterday_by_account || [], ad = O.ov.ads_yesterday || [];
+    /* Review 3: yesterday's strips speak the BOOKS' brain columns — Actual (T − CPC − returns)
+       and ad spend with each account's own ROAS beside it. */
+    var yd = dShift(ukToday(), -1);
+    var booksY = (O.days || []).filter(function (r0) { return r0.date === yd; });
+    if (booksY.length) {
+      y = booksY.map(function (r0) { return { account: r0.account, profit: oN(r0.actual) }; })
+        .sort(function (a, b) { return b.profit - a.profit; });
+      ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
+        .filter(function (a) { return a.spend > 0; })
+        .sort(function (a, b) { return b.spend - a.spend; });
+    }
     box.innerHTML =
       '<div class="o-card"><span class="card-t">Today\'s sales — all accounts · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s profit est — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s ad spend — per account</span>' + rows(ad, function (a) { return a.spend; }, true, oGBP) + '</div>';
+      '<div class="o-card"><span class="card-t">Yesterday\'s ACTUAL profit — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + '</div>' +
+      '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
+        var a0 = null;
+        ad.forEach(function (x) { if (Math.abs(oN(x.spend) - v) < 0.005 && !a0) { a0 = x; } });
+        return oGBP(v) + (a0 && a0.roas ? ' <span style="color:' + (a0.roas < 5 ? 'var(--warn)' : 'var(--ok)') + '">· ' + a0.roas.toFixed(1) + '×</span>' : '');
+      }) + '</div>';
   }
 
   // ---------- live listings ----------

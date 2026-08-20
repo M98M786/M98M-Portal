@@ -4,7 +4,7 @@
 (function () {
 
   var AC_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
-  var AC = { timer: null, days: 14 };
+  var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
 
   VIEW_CSS.push(
     '.ac-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px}' +
@@ -26,11 +26,15 @@
   );
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
+  function acROAS(rev, sp) { return Number(sp) > 0.005 ? (Number(rev) / Number(sp)).toFixed(1) + '\u00d7' : '\u2014'; }
 
   function acLoad() {
     var box = $('acBody');
     if (!box) { return; }
-    api('adsBoard', { days: AC.days }).then(function (d) {
+    var payload = { days: AC.days };
+    if (AC.acct) { payload.account = AC.acct; }
+    if (AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
+    api('adsBoard', payload).then(function (d) {
       d = d || {};
       var c = d.combined || {};
       var h = '<div class="ac-tiles">' +
@@ -45,12 +49,43 @@
       if (ser.length) {
         h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · last ' + (d.days || 14) + '</div>' +
           '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="ac-tbl" style="min-width:520px"><thead><tr>' +
-          '<th>Date</th><th>Spend</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
+          '<th>Date</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
         ser.forEach(function (r) {
           h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
-            '<td>' + acGBP(r.spend) + '</td><td>' + (r.clicks || 0) + '</td>' +
-            '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '—') + '</td>' +
+            '<td>' + acGBP(r.spend) + '</td>' +
+            '<td>' + (Number(r.rev) ? acGBP(r.rev) : '\u2014') + '</td>' +
+            '<td>' + acROAS(r.rev, r.spend) + '</td>' +
+            '<td>' + (r.clicks || 0) + '</td>' +
+            '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '\u2014') + '</td>' +
             '<td>' + (r.sold || 0) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+      /* account-to-account, day by day (review 3): every account's spend, revenue and ROAS
+         per day inside the chosen window */
+      var sba = d.series_by_account || [];
+      if (sba.length && !AC.acct) {
+        var byA = {};
+        sba.forEach(function (r) { (byA[r.account] = byA[r.account] || []).push(r); });
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Account to account \u00b7 spend / revenue / ROAS per day</div>' +
+          '<div class="scroll" style="max-height:260px;margin-bottom:14px"><table class="ac-tbl" style="min-width:560px"><thead><tr>' +
+          '<th style="text-align:left">Account</th><th>Days</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Worst day</th><th>Best day</th></tr></thead><tbody>';
+        Object.keys(byA).forEach(function (a) {
+          var list = byA[a];
+          var sp = 0, rv = 0, worst = null, best = null;
+          list.forEach(function (r) {
+            sp += Number(r.spend) || 0; rv += Number(r.rev) || 0;
+            var ro = Number(r.spend) > 0.005 ? Number(r.rev) / Number(r.spend) : null;
+            if (ro !== null) {
+              if (!worst || ro < worst.ro) { worst = { d: r.date, ro: ro }; }
+              if (!best || ro > best.ro) { best = { d: r.date, ro: ro }; }
+            }
+          });
+          h += '<tr><td style="text-align:left;font-weight:800">' + esc(a) + '</td><td>' + list.length + '</td>' +
+            '<td>' + acGBP(sp) + '</td><td>' + acGBP(rv) + '</td>' +
+            '<td style="font-weight:800;color:' + (sp > 0.005 && rv / sp < 5 ? 'var(--warn)' : 'var(--ok)') + '">' + acROAS(rv, sp) + '</td>' +
+            '<td>' + (worst ? esc(String(worst.d).slice(5)) + ' \u00b7 ' + worst.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td>' +
+            '<td>' + (best ? esc(String(best.d).slice(5)) + ' \u00b7 ' + best.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td></tr>';
         });
         h += '</tbody></table></div>';
       }
@@ -99,12 +134,31 @@
             '<button class="minibtn on" data-ac-d="14">14d</button>' +
             '<button class="minibtn" data-ac-d="30">30d</button>' +
             '<button class="minibtn" data-ac-d="60">60d</button>' +
+            '<select id="acAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
+            '<input type="date" id="acFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="acTo" class="minibtn" style="padding:5px 6px">' +
+            '<button class="minibtn" id="acApply">Apply</button>' +
             '<button class="minibtn" id="acRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="acBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
       var rf = $('acRefresh');
-      if (rf) { rf.onclick = acLoad; }
+      if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
+      var sel = $('acAcct');
+      if (sel) {
+        (STATE.config && STATE.config.accounts || ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai']).forEach(function (a) {
+          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
+        });
+        sel.value = AC.acct || '';
+        sel.onchange = function () { AC.acct = sel.value; acLoad(); };
+      }
+      var ap = $('acApply');
+      if (ap) {
+        ap.onclick = function () {
+          var f = $('acFrom'), t = $('acTo');
+          if (f && t && f.value && t.value) { AC.from = f.value; AC.to = t.value; acLoad(); }
+          else { toast('Pick both dates first.'); }
+        };
+      }
       document.querySelectorAll('[data-ac-d]').forEach(function (b) {
         b.onclick = function () {
           document.querySelectorAll('[data-ac-d]').forEach(function (x) { x.classList.remove('on'); });

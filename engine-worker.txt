@@ -2544,21 +2544,32 @@ const ROUTES = {
          board takes a window (7/14/30/60 days) and also returns the per-day series, so the
          command centre carries the history, not just today. */
       const histDays = Math.min(60, Math.max(7, Number(p.days) || 14));
-      const since = ukDate(new Date(Date.now() - histDays * 86400000).toISOString());
+      /* Review 3: the centre takes a CUSTOM window and an account filter — from/to override the
+         day-count chips, and every series row carries eBay-attributed revenue for ROAS. */
+      const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const from = okDate(p.from) ? String(p.from) : ukDate(new Date(Date.now() - histDays * 86400000).toISOString());
+      const to = okDate(p.to) ? String(p.to) : day;
+      const acctF = String(p.account || '');
+      const AF = acctF ? ' AND account = ?3' : '';
+      const bindR = acctF ? [from, to, acctF] : [from, to];
       const today = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS spend_t, (t.clicks + t.cpc_clicks) AS clicks_t, ' +
         '(t.sales + t.cpc_sales) AS sold_t, t.updated_at, i.title, i.price, i.status AS listing_status ' +
-        'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.day = ?1'
-      ).bind(day).all();
+        'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.day = ?1' + (acctF ? ' AND t.account = ?2' : '')
+      ).bind(...(acctF ? [day, acctF] : [day])).all();
       const series = await ctx.env.DB.prepare(
         'SELECT date, ROUND(SUM(spend + cpc_spend), 2) AS spend, SUM(clicks + cpc_clicks) AS clicks, ' +
-        'SUM(sales + cpc_sales) AS sold ' +
-        'FROM ads_daily WHERE date >= ?1 GROUP BY date ORDER BY date DESC'
-      ).bind(since).all().catch(() => ({ results: [] }));
+        'SUM(sales + cpc_sales) AS sold, ROUND(SUM(sale_amount + cpc_sale_amount), 2) AS rev ' +
+        'FROM ads_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY date ORDER BY date DESC'
+      ).bind(...bindR).all().catch(() => ({ results: [] }));
+      const seriesByAcct = await ctx.env.DB.prepare(
+        'SELECT account, date, ROUND(SUM(spend + cpc_spend), 2) AS spend, ROUND(SUM(sale_amount + cpc_sale_amount), 2) AS rev ' +
+        'FROM ads_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY account, date ORDER BY date DESC, account'
+      ).bind(...bindR).all().catch(() => ({ results: [] }));
       const hist = await ctx.env.DB.prepare(
         "SELECT a.item_id, a.account, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend_14, SUM(a.clicks + a.cpc_clicks) AS clicks_14, " +
-        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= ?1 GROUP BY a.item_id, a.account"
-      ).bind(since).all();
+        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= ?1 AND a.date <= ?2" + (acctF ? ' AND a.account = ?3' : '') + " GROUP BY a.item_id, a.account"
+      ).bind(...bindR).all();
       const hBy = {};
       for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
       const items = [];
@@ -2597,8 +2608,9 @@ const ROUTES = {
         waste_n: items.filter(i => i.waste).length,
         spend_14d: round2(items.reduce((s, i) => s + i.spend_14d, 0)),
       };
-      return { day, updated_at: updated, combined, days: histDays,
+      return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF,
         series: (series.results || []),
+        series_by_account: (seriesByAcct.results || []),
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
         items: items.slice(0, 300),
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live)' };

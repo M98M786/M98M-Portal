@@ -71,12 +71,16 @@
     /* Weekly/monthly KPIs (§9-C) from the same rows — UK dates, so "this week" is the last 7
      * UK days vs the 7 before, and "month" is month-to-date vs the whole previous month. */
     function sumRange(from, to) {
-      var t = { sold: 0, profit: 0 };
+      var t = { sold: 0, profit: 0, actual: 0, ads: 0, adsRev: 0 };
       rows.forEach(function (r) {
-        if (r.date >= from && r.date <= to) { t.sold += Number(r.sold) || 0; t.profit += Number(r.profit) || 0; }
+        if (r.date >= from && r.date <= to) {
+          t.sold += Number(r.sold) || 0; t.profit += Number(r.profit) || 0;
+          t.actual += Number(r.actual) || 0; t.ads += Number(r.ads) || 0; t.adsRev += Number(r.ads_rev) || 0;
+        }
       });
       return t;
     }
+    function drROAS(rev, ads) { return ads > 0.005 ? (rev / ads).toFixed(1) + '×' : '—'; }
     function dShift(iso, days) {
       var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days);
       return d.toISOString().slice(0, 10);
@@ -105,32 +109,43 @@
       }
       kpiHtml = '<div class="dr-kpis">' +
         tile('Revenue · 7 days', w1.sold, w0.sold, 'prior 7') +
-        tile('Profit · 7 days', w1.profit, w0.profit, 'prior 7') +
+        tile('Actual profit · 7 days', w1.actual, w0.actual, 'prior 7') +
+        '<div class="dr-kpi"><div class="l">ROAS · 7 days</div><div class="v">' + drROAS(w1.adsRev, w1.ads) + '</div>' +
+          '<div class="d" style="color:var(--text-3)">eBay-attributed £' + Math.round(w1.adsRev) + ' on £' + Math.round(w1.ads) + ' ads · blended ' + drROAS(w1.sold, w1.ads) + '</div></div>' +
         tile('Revenue · month to date', m1.sold, m0.sold, 'same ' + daysIn + 'd last month') +
-        tile('Profit · month to date', m1.profit, m0.profit, 'same ' + daysIn + 'd last month') +
+        tile('Actual · month to date', m1.actual, m0.actual, 'same ' + daysIn + 'd last month') +
         '</div>';
     }
 
     var h = kpiHtml + '<div class="scroll"><table class="dr-tbl"><thead><tr>' +
-      '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th><th style="text-align:right">Ads</th><th style="text-align:right">Profit</th></tr></thead><tbody>';
+      '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th>' +
+      '<th style="text-align:right">Ads</th><th style="text-align:right">Ad revenue</th><th style="text-align:right">ROAS</th>' +
+      '<th style="text-align:right" title="T = 0.8 × (OE − cost) — the sheet law, before ads">T</th>' +
+      '<th style="text-align:right" title="Actual = T − CPC ads − returns — the sales-analysis brain, per day">Actual</th></tr></thead><tbody>';
     order.slice(0, 31).forEach(function (dte) {
       var list = byDay[dte];
       var isLive = dte === liveDay && list.some(function (r) { return r._live; });
-      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
-      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0; t.ads += Number(r.ads) || 0; t.profit += Number(r.profit) || 0; });
+      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, adsRev: 0 };
+      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0; t.ads += Number(r.ads) || 0; t.profit += Number(r.profit) || 0; t.actual += Number(r.actual) || 0; t.adsRev += Number(r.ads_rev) || 0; });
+      var wait = '<span title="closes at the nightly rollup, once every fee has landed" style="color:var(--text-3)">tonight</span>';
       h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + '</td>' +
         '<td class="dr-num">' + drGBP(t.sold) + '</td><td class="dr-num">' + drGBP(t.oe) + '</td>' +
         '<td class="dr-num">' + drGBP(t.cost) + '</td>' +
         '<td class="dr-num">' + (t.ads ? drGBP(t.ads) : '—') + '</td>' +
-        '<td class="dr-num ' + (t.profit < 0 ? 'dr-neg' : 'dr-pos') + '">' +
-          (isLive ? '<span title="profit books close at the nightly rollup, once every fee has landed" style="color:var(--text-3)">tonight</span>' : drGBP(t.profit)) + '</td></tr>';
+        '<td class="dr-num">' + (t.adsRev ? drGBP(t.adsRev) : '—') + '</td>' +
+        '<td class="dr-num">' + drROAS(t.adsRev, t.ads) + '</td>' +
+        '<td class="dr-num">' + (isLive ? wait : drGBP(t.profit)) + '</td>' +
+        '<td class="dr-num ' + (t.actual < 0 ? 'dr-neg' : 'dr-pos') + '">' + (isLive ? wait : drGBP(t.actual)) + '</td></tr>';
       list.forEach(function (r) {
         h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + '</td>' +
           '<td class="dr-num">' + drGBP(r.sold) + '</td><td class="dr-num">' + drGBP(r.oe) + '</td>' +
           '<td class="dr-num">' + drGBP(r.cost) + '</td>' +
           '<td class="dr-num">' + (Number(r.ads) ? drGBP(r.ads) : '—') + '</td>' +
-          '<td class="dr-num ' + (Number(r.profit) < 0 ? 'dr-neg' : '') + '">' +
-            (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.profit)) + '</td></tr>';
+          '<td class="dr-num">' + (Number(r.ads_rev) ? drGBP(r.ads_rev) : '—') + '</td>' +
+          '<td class="dr-num">' + drROAS(Number(r.ads_rev) || 0, Number(r.ads) || 0) + '</td>' +
+          '<td class="dr-num">' + (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.profit)) + '</td>' +
+          '<td class="dr-num ' + (Number(r.actual) < 0 ? 'dr-neg' : '') + '">' +
+            (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.actual)) + '</td></tr>';
       });
     });
     h += '</tbody></table></div>';
@@ -158,7 +173,7 @@
     prefetch: function () { return drFetch(); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Daily <span class="goldtext">report</span></h1>' +
-          '<span class="sub">UK business days · per-account and day totals · cost is the real paid cost, ads are eBay\u2019s own report, profit = 0.8 \u00d7 (earning \u2212 cost) \u2014 the sheet\u2019s VAT law, ads deducted separately</span></div>' +
+          '<span class="sub">UK business days \u00b7 per-account and day totals \u00b7 T = 0.8 \u00d7 (earning \u2212 cost), Actual = T \u2212 CPC ads \u2212 returns \u2014 the sales-analysis brain per day \u00b7 ROAS = eBay-attributed ad revenue \u00f7 ad spend</span></div>' +
         '<div class="card enter d2"><div class="bd"><div id="drBody"><div class="spinner"></div></div></div></div>';
     },
     init: function () { drLoad(); }

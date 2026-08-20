@@ -149,7 +149,8 @@
     var box = $('tkList');
     if (!box) { return; }
     var tc = cachedCall('toolManifest', {}, function (d) {
-      TK_TOOLS = (d && d.tools) || [];
+      /* review 3: Order Operations was "just an idea" — gone by Hasib's order */
+      TK_TOOLS = ((d && d.tools) || []).filter(function (t) { return String(t.tool) !== 'tool_order_ops'; });
       TK_ARM = '';
       box.innerHTML = TK_TOOLS.length ? '<div class="tk-grid">' + TK_TOOLS.map(tkCard).join('') + '</div>' + tkFootNote()
         : '<div class="tk-empty">No tool is part of your version.' +
