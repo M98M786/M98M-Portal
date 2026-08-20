@@ -2111,27 +2111,29 @@ async function ingestAdsReport(env, acct, day, text, family) {
     total += a.spend;
     /* The two billing families are written to their own columns. Sending both to `spend` would
        mean whichever report ingested second silently erased the other. */
+    /* a.sales is the MONEY eBay attributes to the ads (sale_amount) — Hasib's ROAS needs it.
+       It was parsed and then dropped for weeks; each family keeps its own revenue column. */
     stmts.push(isCpc
       ? env.DB.prepare(
-          'INSERT INTO ads_daily (account, item_id, date, cpc_spend, cpc_clicks, cpc_sales) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
-          'ON CONFLICT(account, item_id, date) DO UPDATE SET cpc_spend = ?4, cpc_clicks = ?5, cpc_sales = ?6'
-        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units))
+          'INSERT INTO ads_daily (account, item_id, date, cpc_spend, cpc_clicks, cpc_sales, cpc_sale_amount) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET cpc_spend = ?4, cpc_clicks = ?5, cpc_sales = ?6, cpc_sale_amount = ?7'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), round2(a.sales))
       : env.DB.prepare(
-          'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
-          'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7'
-        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0));
+          'INSERT INTO ads_daily (account, item_id, date, spend, clicks, sales, cpq, sale_amount) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ' +
+          'ON CONFLICT(account, item_id, date) DO UPDATE SET spend = ?4, clicks = ?5, sales = ?6, cpq = ?7, sale_amount = ?8'
+        ).bind(acct, lid, day, round2(a.spend), Math.round(a.clicks), Math.round(a.units), a.units > 0 ? round2(a.spend / a.units) : 0, round2(a.sales)));
   }
   /* The day's ad spend is BOTH families added together, read back from the table rather than from
      this report alone — otherwise ingesting the Standard report would overwrite the day's total
      with only its own half, and the CPC spend would vanish until the next poll. */
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
   const dayTotal = await env.DB.prepare(
-    'SELECT ROUND(SUM(spend + cpc_spend), 2) AS ads FROM ads_daily WHERE account = ?1 AND date = ?2'
+    'SELECT ROUND(SUM(spend + cpc_spend), 2) AS ads, ROUND(SUM(sale_amount + cpc_sale_amount), 2) AS rev FROM ads_daily WHERE account = ?1 AND date = ?2'
   ).bind(acct, day).first();
   await env.DB.prepare(
-    'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, 0, 0, 0, ?3, 0) ' +
-    'ON CONFLICT(account, date) DO UPDATE SET ads = ?3'
-  ).bind(acct, day, round2((dayTotal && dayTotal.ads) || 0)).run();
+    'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit, ads_rev) VALUES (?1, ?2, 0, 0, 0, ?3, 0, ?4) ' +
+    'ON CONFLICT(account, date) DO UPDATE SET ads = ?3, ads_rev = ?4'
+  ).bind(acct, day, round2((dayTotal && dayTotal.ads) || 0), round2((dayTotal && dayTotal.rev) || 0)).run();
   return Object.keys(agg).length;
 }
 
@@ -2176,7 +2178,7 @@ async function rollupsWindow(env, days) {
   /* Eight days nightly: the 3-day shrink was triage for the run that died at 16k orders, but the
      kill was the per-row writes, and those batch in fifties now. */
   const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
-  const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, cost, ebay_fees, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
+  const ors = await env.DB.prepare('SELECT account, item_id, sold, qty, cost, ebay_fees, refunded, created_at FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const orders = ors.results || [];
   /* The oldest UK day in the window is only PARTIALLY covered (the window edge is an instant,
      a UK day is not) — writing it would overwrite a correct full-day row with a truncated one,
@@ -2203,8 +2205,9 @@ async function rollupsWindow(env, days) {
     const q = Math.max(1, Number(o.qty) || 0);       // per-unit facts × units actually sold
     const f = facts[o.item_id] || {};
     const k = o.account + '|' + dte;
-    const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0, real: 0, n: 0 });
+    const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0, returns: 0, real: 0, n: 0 });
     row.sold += Number(o.sold) || 0;                  // order total is already all units
+    row.returns += Number(o.refunded) > 0 ? Number(o.refunded) : 0;  // Finances refund £, by order day — the brain's basis
     const oe = (Number(f.oe) || 0) * q;
     row.oe += oe;
     row.n++;
@@ -2235,14 +2238,26 @@ async function rollupsWindow(env, days) {
     if (o.item_id && !isNaN(t) && t >= cut7) units7[o.item_id] = (units7[o.item_id] || 0) + q;
   }
 
+  /* The brain's own per-day columns (Hasib review 3: "daily report not based on the sales
+     analysis brain") — pri is the CPC family ex VAT (general already lives inside real-fee OE),
+     actual = T − pri − returns, ads_rev is eBay's attributed sale money for real ROAS. */
+  const extraByKey = {};
+  const cpcRs = await env.DB.prepare(
+    'SELECT account, date, ROUND(SUM(cpc_spend), 2) AS pri, ROUND(SUM(sale_amount + cpc_sale_amount), 2) AS rev FROM ads_daily WHERE date > ?1 GROUP BY account, date'
+  ).bind(edgeDay).all();
+  for (const r of (cpcRs.results || [])) extraByKey[r.account + '|' + r.date] = { pri: Number(r.pri) || 0, rev: Number(r.rev) || 0 };
+
   const stmts = [];
   for (const k of Object.keys(day)) {
     const cut = k.indexOf('|');
     const v = day[k];
+    const ex = extraByKey[k] || { pri: 0, rev: 0 };
+    const actual = round2(v.profit - ex.pri - v.returns);
     stmts.push(env.DB.prepare(
-      'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) ' +
-      'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6'
-    ).bind(k.slice(0, cut), k.slice(cut + 1), round2(v.sold), round2(v.oe), round2(v.cost), round2(v.profit)));
+      'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10) ' +
+      'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6, pri = ?7, returns = ?8, actual = ?9, ads_rev = ?10'
+    ).bind(k.slice(0, cut), k.slice(cut + 1), round2(v.sold), round2(v.oe), round2(v.cost), round2(v.profit),
+      round2(ex.pri), round2(v.returns), actual, round2(ex.rev)));
   }
   /* avg_profit_7d: zero ONLY the items that stopped selling, by explicit list — a blanket
      zero-then-set spans batches, and a failure between them would serve zeros all day. Every
@@ -3858,7 +3873,7 @@ const ROUTES = {
   dailyReport: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const rs = await ctx.env.DB.prepare(
-        "SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
+        "SELECT account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
       ).all();
       /* Hasib's night list: "Business overview is still showing wrong stats" — the wrongest one
          was TODAY, because the books are rolled nightly and intraday ad spend lives in
