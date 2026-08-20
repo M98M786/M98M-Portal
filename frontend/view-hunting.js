@@ -68,7 +68,7 @@
       { col: 'Product Link 1 Main supplier', req: true, hint: 'Also added in the supplier sheet.' },
       { col: 'Product Link 2' },
       { col: 'Product Link 3' },
-      { col: 'Ebay Link' }
+      { col: 'Ebay Link', label: 'Prime Ebay Link' }
     ] },
     { title: 'Product', hint: 'what gets listed', fields: [
       { col: 'Title', req: true, wide: true },
@@ -78,7 +78,7 @@
     ] },
     { title: 'Pricing', hint: 'the two figures the calculator below follows', fields: [
       { col: 'Source Price', req: true, hint: 'A range is fine — "3.02 - 3.30". The higher end is used.' },
-      { col: 'E-Bey Caluclator + £4', req: true, hint: 'The intended eBay sell price. (Column name is the sheet\'s own spelling.)' }
+      { col: 'E-Bey Caluclator + £4', label: 'Selling Price', req: true, hint: 'The intended eBay sell price — ranges like 8.99 - 11.99 are welcome for variation items.' }
     ] },
     { title: 'Analysis', hint: 'the numbers Management reads before deciding', fields: [
       { col: 'Sell Through' },
@@ -335,7 +335,7 @@
       body = '<input class="hu-in" id="' + huAttr(f.id) + '" type="text" autocomplete="off">';
     }
     return '<div class="field' + (f.wide ? ' hu-wide' : '') + '">' +
-      '<label>' + esc(f.col) + (f.req ? ' <span class="hu-req">required</span>' : '') + '</label>' + body +
+      '<label>' + esc(f.label || f.col) + (f.req ? ' <span class="hu-req">required</span>' : '') + '</label>' + body +
       (f.hint ? '<div class="hu-hint">' + esc(f.hint) + '</div>' : '') + '</div>';
   }
 
@@ -496,7 +496,7 @@
         (approved ? '<div class="hu-lr"><span class="k">CPC Selling Chance</span>' + huCell(adv) + '</div>' : '') +
         (status ? '<div class="hu-lr"><span class="k">Listing Status</span>' + huCell(status) + '</div>' : '') +
         '<div class="hu-lr"><span class="k">Source Price</span>' + huCellMoney(rec['Source Price']) + '</div>' +
-        '<div class="hu-lr"><span class="k">E-Bey Caluclator + £4</span>' + huCellMoney(rec['E-Bey Caluclator + £4']) + '</div>' +
+        '<div class="hu-lr"><span class="k">Selling Price</span>' + huCellMoney(rec['E-Bey Caluclator + £4']) + '</div>' +
         '<div class="hu-lr"><span class="k">Our Profit</span>' + huCellMoney(rec['Our Profit']) + '</div>' +
         '<div class="hu-lr"><span class="k">ROI</span>' + huCellRoi(rec['ROI']) + '</div>' +
       '</div>' +

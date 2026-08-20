@@ -68,14 +68,21 @@ const HUNT_DECISION_COLS = [HC_APPROVAL, HC_COMMENTS, HC_ACCOUNT, HC_LISTING_STA
 /** The 33 headers as the live workbook spells them, index-aligned with HUNTING_COLS. The Portal
  * DB uses the cleaned names; the business sheet gets its own trailing spaces, embedded newlines
  * and typos back, because SheetBridge addresses columns by header and never creates one. */
+/* Hunting sheet v3 (20 Aug): 'Ebay Link ' became 'Prime Ebay Link ', the price column dropped
+ * its famous misspelling for 'Selling Price ', and five columns arrived (Comments given by,
+ * High Price Link, both competitor prices, Campaign category). The Portal DB keeps its old
+ * column names — this list is index-aligned with HUNTING_COLS, so only the SHEET spellings and
+ * the appended pairs change. */
 const HUNT_SHEET_HEADERS = ['Selected By ', 'Approval Status', 'Comments', 'Date Added ',
   'Account Selected', 'Listing Status', 'Seasonal', 'Main Keyword Terapeak link ',
   'Image Link of avg sold price ', 'Image Link of Zik analytics', 'Terapeak overview', 'Temu Link',
   'Product Link 1 Main supplier\n\n\nAdded in supplier sheet', 'Product Link 2\n\n', 'Product Link 3',
-  'Ebay Link ', 'Title', 'Image Link ', 'IMAGE ', 'DESCRIPTION', 'Category', 'Source Price',
-  'E-Bey Caluclator + £4', 'CPC Selling Chance', 'Sell Through', 'Competitors', 'TOP THREE SALES ',
+  'Prime Ebay Link ', 'Title', 'Image Link ', 'IMAGE ', 'DESCRIPTION', 'Category', 'Source Price',
+  'Selling Price ', 'CPC Selling Chance', 'Sell Through', 'Competitors', 'TOP THREE SALES ',
   "Total Competitors on main keyword's search bar", 'Price Range ANALYSIS', 'Sold Unit  ANALYSIS   ',
-  'Our Profit', 'ROI', 'Comment'];
+  'Our Profit', 'ROI', 'Comment',
+  'Comments given by ', 'High Price Link', 'Prime Competitor Selling Price',
+  'Competitor High  Selling Price', 'Campaign category'];
 const HUNT_SHEET_TABS = ['Main Sheet'];
 // 'IMAGE ' is the workbook's only formula column — writing it would delete =IMAGE(R{n}).
 const HUNT_MIRROR_WHITELIST = HUNT_SHEET_HEADERS.filter(function (h) { return h !== 'IMAGE '; });

@@ -92,6 +92,20 @@
   );
 
   function ocN(id) { var v = parseFloat(($(id) || {}).value); return isFinite(v) && v > 0 ? v : 0; }
+  /* Hasib's min-to-max rule: a variation item carries "4.09 - 5.99" in one cell — every
+     calculation runs BOTH ends (cheap variation with cheap price, dear with dear). */
+  function ocRange(id) {
+    var raw = String((($(id) || {}).value) || '');
+    var m = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*[-–—]\s*([0-9]+(?:\.[0-9]+)?)/);
+    if (m) {
+      var a2 = parseFloat(m[1]), b2 = parseFloat(m[2]);
+      if (isFinite(a2) && isFinite(b2) && a2 > 0 && b2 > 0) {
+        return { lo: Math.min(a2, b2), hi: Math.max(a2, b2), range: a2 !== b2 };
+      }
+    }
+    var v = ocN(id);
+    return { lo: v, hi: v, range: false };
+  }
   function ocR2(v) { return Math.round(v * 100) / 100; }
   function ocGBP(v) { return '£' + ocR2(v).toFixed(2); }
 
@@ -163,7 +177,9 @@
   function ocCalc() {
     var out = $('ocOut');
     if (!out) { return; }
-    var price = ocN('ocPrice'), ali = ocN('ocAli'), cpc = ocN('ocCpc'), adRate = ocN('ocAdRate');
+    var priceR = ocRange('ocPrice'), aliR = ocRange('ocAli');
+    var price = priceR.lo, ali = aliR.lo, cpc = ocN('ocCpc'), adRate = ocN('ocAdRate');
+    var isRange = priceR.range || aliR.range;
     var cat = OC_FLAT[parseInt(($('ocCat') || {}).value, 10) || 0];
 
     // sale discount — % and £ mirror each other, everything downstream runs on the final price
@@ -203,8 +219,25 @@
       ? 'FVF ' + cat.t[0][1] + '% flat'
       : cat.t.map(function (x) { return x[1] + '%' + (x[0] === INF ? ' above' : ' to £' + x[0]); }).join(', ');
 
+    /* the high-end variation, same maths exactly */
+    var hiCalc = null;
+    if (isRange) {
+      var S2 = priceR.hi * (price > 0 ? (finalPrice / price) : 1);   // same discount ratio applies
+      var fvf2 = ocTierFee(S2, cat.t);
+      var per2 = (S2 <= 10) ? (cat.red ? 0.10 : 0.30) : 0.40;
+      var fees2 = fvf2 + per2 + S2 * 0.0035 + S2 * adRate / 100;
+      var ded2 = fees2 * 1.2;
+      var earn2 = S2 - ded2;
+      hiCalc = { S: ocR2(S2), earn: ocR2(earn2), net: ocR2(earn2 - aliR.hi - cpc * 1.2) };
+    }
     var h = '<div class="oc-out">' +
-      '<div class="oc-tile gold"><div class="k">eBay order earning</div><div class="v">' + ocGBP(earn) + '</div>' +
+      (isRange && hiCalc
+        ? '<div class="oc-tile gold"><div class="k">Order earning · min → max</div><div class="v">' + ocGBP(Math.min(earn, hiCalc.earn)) + ' → ' + ocGBP(Math.max(earn, hiCalc.earn)) + '</div>' +
+            '<div class="s">variations £' + priceR.lo.toFixed(2) + ' to £' + priceR.hi.toFixed(2) + ' sale</div></div>' +
+          '<div class="oc-tile ' + (Math.min(net, hiCalc.net) >= 0 ? 'good' : 'bad') + '"><div class="k">Profit · min → max</div><div class="v">' + ocGBP(Math.min(net, hiCalc.net)) + ' → ' + ocGBP(Math.max(net, hiCalc.net)) + '</div>' +
+            '<div class="s">worst variation to best — costs £' + aliR.lo.toFixed(2) + ' to £' + aliR.hi.toFixed(2) + '</div></div>'
+        : '') +
+      '<div class="oc-tile gold"><div class="k">eBay order earning' + (isRange ? ' · low variation' : '') + '</div><div class="v">' + ocGBP(earn) + '</div>' +
         '<div class="s">eBay deducted ' + ocGBP(deduct) + ' — ' + (deduct / S * 100).toFixed(1) + '% of the sale</div></div>' +
       ((ali > 0 || cpc > 0)
         ? '<div class="oc-tile ' + (net >= 0 ? 'good' : 'bad') + '"><div class="k">Net profit</div><div class="v">' + ocGBP(net) + '</div>' +
@@ -265,10 +298,10 @@
           '<span class="sub">Sir Hasib’s v18 calculator, exactly — banded FVF per category, VAT on every fee, the sheet’s own HMRC column</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="oc-grid">' +
-            '<div class="field"><label>Sale price £</label><input class="tk-in" id="ocPrice" type="number" step="0.01" min="0" placeholder="19.99"></div>' +
+            '<div class="field"><label>Sale price £ <span style="color:var(--text-3)">(or 8.99 - 11.99)</span></label><input class="tk-in" id="ocPrice" type="text" inputmode="decimal" placeholder="19.99 or 8.99 - 11.99"></div>' +
             '<div class="field"><label>Sale discount %</label><input class="tk-in" id="ocDiscPct" type="number" step="0.01" min="0" max="100" placeholder="0"></div>' +
             '<div class="field"><label>Sale discount £</label><input class="tk-in" id="ocDiscAmt" type="number" step="0.01" min="0" placeholder="0"></div>' +
-            '<div class="field"><label>AliExpress cost £</label><input class="tk-in" id="ocAli" type="number" step="0.01" min="0" placeholder="3.20"></div>' +
+            '<div class="field"><label>AliExpress cost £ <span style="color:var(--text-3)">(or 4.09 - 5.99)</span></label><input class="tk-in" id="ocAli" type="text" inputmode="decimal" placeholder="3.20 or 4.09 - 5.99"></div>' +
             '<div class="field"><label>CPC ad cost £ (ex VAT)</label><input class="tk-in" id="ocCpc" type="number" step="0.01" min="0" placeholder="0"></div>' +
             '<div class="field"><label>Promoted General %</label><input class="tk-in" id="ocAdRate" type="number" step="0.1" min="0" placeholder="0"></div>' +
           '</div>' +
