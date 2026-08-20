@@ -546,7 +546,13 @@ async function processWatch(env) {
     'ORDER BY o.created_at ASC LIMIT 60'
   ).bind(oneBiz).all();
   const rows = rs.results || [];
-  if (rows.length) {
+  /* Arming guard: until the hourly sheet sweep has landed Ali data at least once, "no Ali order
+     on the order" is a statement about the sweep, not the processors — every open order would
+     ring. The letter stays silent until the feed exists; the board itself always shows. */
+  const armed = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM orders WHERE (COALESCE(ali_order,'') != '' OR COALESCE(ali_link,'') != '') AND created_at >= datetime('now','-7 day')"
+  ).first();
+  if (rows.length && armed && Number(armed.n) > 0) {
     const tier = Math.floor(rows.length / 10) * 10;
     const ref = 'engine:proc:' + day + ':' + tier;
     const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
