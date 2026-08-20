@@ -68,6 +68,22 @@ Resolve letters only after acting on them; "resolve all of this type" exists for
 - **Sessions** last 7 days and survive reloads and new tabs. Signing out ends the session server-side.
 - The engine's D1 is backed up nightly to Drive; the Portal DB sheet is the staff-facing mirror.
 
+## 6b. Backups (R5 — "at any day portal dies, we need backup data")
+
+Three independent layers, none sharing a failure mode:
+
+1. **Google backup sheets, nightly** — four spreadsheets in the owner's Drive (*M98M Backup — Money & Marketing / Orders & Tracking / Listings & Sourcing / People, Feedback & System*). The Apps Script night trigger PULLS every Engine table page by page (`backupDump`, key-authed) and rewrites the tabs, then stamps the Engine (`backupStamp` → KV `backup:last` + a `sheetBackup` sync_state row). A failed night letters Management by itself, and the validation battery's check 4e rings if no stamp lands within 26 h. The dump whitelist is **credential-free**: sessions never leave, engine_config never leaves, the accounts table gives up names only.
+2. **Drive copy of the Portal DB, nightly** — the long-standing `nightlyBackup` file copy (30-day retention), untouched.
+3. **Local copies on the office Mac** — the Night Watch session exports the four backup sheets as .xlsx into `Documents/Claude Code/M98M-Backups/<date>/` each night it runs, pruning after 21 days.
+
+Apps Script has **no triggers of its own** for any of this (house rule: no ScriptApp scope). The hourly work rides `runMissedCheckpointSweep`, the nightly work rides `nightlyBackup` — same pattern as every other sweep.
+
+## 6c. Order processing & sourcing (R5)
+
+- **Ali order numbers**: processors record them in the day tab (or the portal's order card — both write both stores). The hourly `aliSweep` reads the last 7 days of day tabs per account and pours `Order Number` + `New Ali Link` into the Engine's orders, so **All orders → Needs processing** is live truth: NOT_STARTED + no Ali order + no tracking. One tap on the 📋 button copies the Ali number for tracking pulls.
+- **processWatch (hourly)**: any order past **1 UK business day** unprocessed → letters Order Processors + Ops Head (tier ladder re-rings as the pile grows). It stays silent until the sweep has landed data at least once, so it can never cry wolf about a feed that hasn't run.
+- **Sourcing links** (screen): supplier 1/2/3 per ACTIVE listing — the Main Sheet's columns merged with portal-saved overrides (portal wins; a sheet push can never erase a portal entry). The **Missing tab is the Order Processors' task queue**, sorted by 30-day sales; the 09:00 UK digest letters the count + top sellers daily until it is empty. Links saved in the portal are **not** written back to the Main Sheet yet — that write-back is a pending decision.
+
 ## 7. If something looks wrong
 
 1. Open **Account health** — sync problems surface there first; run **Validation** for a full answer in one press.

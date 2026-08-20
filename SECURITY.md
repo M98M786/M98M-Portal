@@ -36,6 +36,17 @@ Weekly — Zaid:
 - **Secrets never leave Cloudflare** — eBay keys and the sync key exist only as Worker secrets; deploys preserve them by contract (`keep_bindings`).
 - **Every deploy self-announces** (build stamp + auto-reload), so a tampered or stale bundle can't linger unnoticed, and every deploy is compile-checked before being declared done.
 
+## The Night Watch (R5 — nightly, run by Claude on the office Mac)
+
+Every night at 03:30 UK (07:30 PKT), a scheduled Claude session inspects the whole portal and reviews the code — beyond what the in-engine battery can see:
+
+1. **Backup verification** — the Sheets backup stamped and healthy; local .xlsx copies exported and pruned.
+2. **Full-portal inspection** — live build serves and *compiles*, engine and domain answer, every sync job fresh, every account's order feed alive, unhandled letters counted, session table scanned for anomalies.
+3. **Line-by-line code review** — every line changed in the last day is read; on quiet nights a rotating deep-read covers the entire engine + frontend once a week. Anything suspicious or improvable letters Management the same night ("inform me earlier" — recommendations arrive before they become problems).
+4. **A morning brief letter every night** — silence is never the signal; the letter says "all clear" or names findings.
+
+The Mac must be awake with the Claude app open for the watch to run; a missed night runs on next launch, and the in-engine battery + securitySweep (which need no Mac) still cover every night regardless.
+
 ## If something looks wrong
 
 1. Red Security letter → read it; the letter names the exact account/setting.
