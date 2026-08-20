@@ -1499,17 +1499,20 @@ async function marketingSync(env) {
        membership fills across runs instead of blowing the invocation's subrequest budget. */
     let details = 0;
     const freshRs = await env.DB.prepare(
-      "SELECT promo_id FROM promotions WHERE account = ?1 AND item_n > 0 AND synced_at >= datetime('now', '-20 hours')"
+      "SELECT promo_id FROM promotions WHERE account = ?1 AND synced_at >= datetime('now', '-20 hours') " +
+      "AND (item_n > 0 OR status NOT LIKE '%RUNNING%')"
     ).bind(acct).all();
     const fresh = {};
     for (const f of (freshRs.results || [])) fresh[String(f.promo_id)] = 1;
-    for (const p0 of promos) {
+    const ordered = promos.slice().sort((a, b) =>
+      ((/RUNNING/i.test(String(b.promotionStatus)) ? 1 : 0) - (/RUNNING/i.test(String(a.promotionStatus)) ? 1 : 0)));
+    for (const p0 of ordered) {
       const pid = String(p0.promotionId || (p0.promotionHref || '').split('/').filter(Boolean).pop() || '');
       if (!pid) continue;
       /* member listings: markdown sales and item promotions carry them in different envelopes */
       let listingIds = [];
       let discount = '';
-      const wantDetail = !fresh[pid] && details < 6;
+      const wantDetail = !fresh[pid] && details < 8;
       try {
         if (!wantDetail) throw { skip: true };
         details++;
@@ -1523,6 +1526,8 @@ async function marketingSync(env) {
         }
         if (dr.ok) {
           const det = await dr.json();
+          const topIds = ((det.inventoryCriterion || {}).listingIds) || [];
+          listingIds = listingIds.concat(topIds.map(String));
           const sel = det.selectedInventoryDiscounts || [];
           for (const s of sel) {
             const ids = ((s.inventoryCriterion || {}).listingIds) || [];
