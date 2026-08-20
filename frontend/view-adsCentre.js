@@ -4,7 +4,7 @@
 (function () {
 
   var AC_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
-  var AC = { timer: null };
+  var AC = { timer: null, days: 14 };
 
   VIEW_CSS.push(
     '.ac-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px}' +
@@ -30,7 +30,7 @@
   function acLoad() {
     var box = $('acBody');
     if (!box) { return; }
-    api('adsBoard', {}).then(function (d) {
+    api('adsBoard', { days: AC.days }).then(function (d) {
       d = d || {};
       var c = d.combined || {};
       var h = '<div class="ac-tiles">' +
@@ -38,8 +38,22 @@
         '<div class="ac-tile"><div class="k">Clicks today</div><div class="v">' + (c.clicks_today || 0) + '</div></div>' +
         '<div class="ac-tile"><div class="k">Sold via ads today</div><div class="v">' + (c.sold_today || 0) + '</div></div>' +
         '<div class="ac-tile' + (c.waste_n ? ' bad' : '') + '"><div class="k">Wasting £3+ · no order</div><div class="v">' + (c.waste_n || 0) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Spend · 14 days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
+        '<div class="ac-tile"><div class="k">Spend · ' + (d.days || 14) + ' days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
+      /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
+      var ser = d.series || [];
+      if (ser.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · last ' + (d.days || 14) + '</div>' +
+          '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="ac-tbl" style="min-width:520px"><thead><tr>' +
+          '<th>Date</th><th>Spend</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
+        ser.forEach(function (r) {
+          h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
+            '<td>' + acGBP(r.spend) + '</td><td>' + (r.clicks || 0) + '</td>' +
+            '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '—') + '</td>' +
+            '<td>' + (r.sold || 0) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       h += '<div class="ac-accs">' + (d.accounts || []).map(function (a) {
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
           a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
@@ -50,7 +64,7 @@
       } else {
         h += '<div class="scroll"><table class="ac-tbl"><thead><tr>' +
           '<th>Item</th><th>Spend today</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th>' +
-          '<th>Spend 14d</th><th>Clicks 14d</th><th>Sold 14d</th></tr></thead><tbody>';
+          '<th>Spend ' + (d.days || 14) + 'd</th><th>Clicks ' + (d.days || 14) + 'd</th><th>Sold ' + (d.days || 14) + 'd</th></tr></thead><tbody>';
         rows.forEach(function (r) {
           h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '><td>' +
             '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
@@ -79,13 +93,26 @@
     prefetch: function () { return api('adsBoard', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
-          '<span class="sub">every advertised item, live CPC, and the waste alarm — combined, per account, per item</span>' +
-          '<button class="minibtn" id="acRefresh" style="margin-left:auto">Refresh</button></div>' +
+          '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day — combined, per account, per item</span>' +
+          '<span style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn" data-ac-d="7">7d</button>' +
+            '<button class="minibtn on" data-ac-d="14">14d</button>' +
+            '<button class="minibtn" data-ac-d="30">30d</button>' +
+            '<button class="minibtn" data-ac-d="60">60d</button>' +
+            '<button class="minibtn" id="acRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="acBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
       var rf = $('acRefresh');
       if (rf) { rf.onclick = acLoad; }
+      document.querySelectorAll('[data-ac-d]').forEach(function (b) {
+        b.onclick = function () {
+          document.querySelectorAll('[data-ac-d]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          AC.days = Number(this.getAttribute('data-ac-d')) || 14;
+          acLoad();
+        };
+      });
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
       AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);

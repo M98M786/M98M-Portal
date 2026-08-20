@@ -152,6 +152,7 @@
          server's LIVE overlay in: real revenue/cost from orders, INTRADAY ad spend, and order
          earning from fee-landed orders only. Larger value wins so a late rollup never shrinks. */
       var live = (d && d.today_live) || [], today = (d && d.today) || ukToday();
+      O.todayLive = live;
       var by = {};
       O.days.forEach(function (r) { if (r.date === today) { by[r.account] = r; } });
       live.forEach(function (l) {
@@ -243,31 +244,55 @@
   function oPaintKpis(r) {
     var box = $('o2Kpis');
     if (!box) { return; }
-    if (O.days === null) { box.innerHTML = '<div class="empty">Loading the books…</div>'; return; }
-    var cur = oSum(oRows(r.from, r.to));
-    /* The nightly book cannot know about today — orders that landed since 2am are only in the
-     * live feed. Whenever the range reaches today, today's revenue comes from the feed. */
-    var liveT = O.ov && O.ov.kpis && O.ov.kpis.today;
-    if (liveT && r.to >= ukToday()) {
-      var bookToday = oSum(oRows(ukToday(), ukToday()));
-      var live = oN(liveT.revenue);
-      if (live > bookToday.sold) { cur.sold += (live - bookToday.sold); }
+    /* THE BRAIN RULE (Hasib, night review 2): these tiles compute with the organisation's own
+       calculator — the same penny-verified P&L the Sales analysis sheet runs (OE = revenue −
+       real eBay fees; True OE − VAT-to-HMRC = Raw profit; minus returns = Actual). The books
+       still draw the charts; the MONEY tiles come from the P&L engine. */
+    var key = r.from + '|' + r.to;
+    if (O.pnlKey !== key) {
+      O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
+      box.innerHTML = '<div class="empty">Computing with the P&L brain…</div>';
+      var span0 = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
+      api('itemPnl', { from: r.from, to: r.to }).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlCur = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function (e) { if (O.pnlKey === key) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
+      api('itemPnl', { from: dShift(r.from, -span0), to: dShift(r.from, -1) }).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlPrev = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function () {});
+      return;
     }
+    var cur = O.pnlCur;
+    if (!cur) { return; }
+    var prev = O.pnlPrev || {};
     var span = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
-    var prev = oSum(oRows(dShift(r.from, -span), dShift(r.from, -1)));
     function delta(c, p) {
+      p = oN(p);
       if (!p) { return '<div class="kpi-d mut">prior: —</div>'; }
-      var d = Math.round((c - p) / p * 100);
+      var d = Math.round((oN(c) - p) / Math.abs(p) * 100);
       return '<div class="kpi-d ' + (d >= 0 ? 'up' : 'dn') + '">' + (d >= 0 ? '▲' : '▼') + Math.abs(d) + '% vs prior ' + span + 'd</div>';
     }
+    /* ads = both families ex VAT from the books, PLUS today's intraday when the range reaches
+       today (the daily report for today only lands overnight) */
+    var ads = oN(cur.pri_fees) + oN(cur.gen_ex);
+    var adsPrev = oN(prev.pri_fees) + oN(prev.gen_ex);
+    if (r.to >= ukToday()) {
+      (O.todayLive || []).forEach(function (l) { ads += oN(l.ads); });
+    }
+    var feesNote = oN(cur.fees_n) < oN(cur.orders_n)
+      ? oN(cur.fees_n) + ' of ' + oN(cur.orders_n) + ' orders have real fees so far'
+      : 'real eBay fees on every order';
     var todayLive = O.ov && O.ov.kpis && O.ov.kpis.today;
     box.innerHTML =
-      '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.sold) + '</div>' + delta(cur.sold, prev.sold) + '<div class="kpi-s">orders money in the range</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">order earning − goods cost</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Net after ads</div><div class="kpi-v' + (cur.net < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.net) + '</div>' + delta(cur.net, prev.net) + '<div class="kpi-s">profit minus ad spend — the keep-money</div></div>' +
-      '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">after eBay, before AliExpress</div></div>' +
-      '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(cur.ads) + '</div>' + delta(cur.ads, prev.ads) + '<div class="kpi-s">real spend where consented</div></div>' +
-      '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.cost) + '</div>' + delta(cur.cost, prev.cost) + '<div class="kpi-s">per-unit sheet cost × units</div></div>' +
+      '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.revenue) + '</div>' + delta(cur.revenue, prev.revenue) + '<div class="kpi-s">' + oN(cur.orders_n) + ' order(s) in the range</div></div>' +
+      '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">' + feesNote + '</div></div>' +
+      '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.ali_cost) + '</div>' + delta(cur.ali_cost, prev.ali_cost) + '<div class="kpi-s">the day tabs\u2019 real paid cost</div></div>' +
+      '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(ads) + '</div>' + delta(ads, adsPrev) + '<div class="kpi-s">both families · intraday included today</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Raw profit</div><div class="kpi-v' + (oN(cur.raw_profit) < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.raw_profit) + '</div>' + delta(cur.raw_profit, prev.raw_profit) + '<div class="kpi-s">the sheet\u2019s formula — after VAT to HMRC</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Actual profit</div><div class="kpi-v' + (oN(cur.actual_profit) < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.actual_profit) + '</div>' + delta(cur.actual_profit, prev.actual_profit) + '<div class="kpi-s">raw minus returns \u00b7 £' + oN(cur.returns).toFixed(0) + ' returned</div></div>' +
       (todayLive ? '<div class="kpi" style="--tone:var(--gold-a)"><div class="kpi-l">Today · live</div><div class="kpi-v gold">' + oGBP0(todayLive.revenue) + '</div><div class="kpi-d mut">' + oN(todayLive.orders) + ' order(s) so far</div><div class="kpi-s">straight from the order feed</div></div>' : '');
   }
 

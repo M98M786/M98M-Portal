@@ -15,6 +15,7 @@
     ['due2d', 'Due in 2 days'],
     ['due3d', 'Due in 3 days'],
     ['dispatched', 'Dispatched'],
+    ['cancelled', 'Cancelled'],
     ['archived', 'Archived · no eBay record'],
   ];
 
@@ -40,6 +41,7 @@
     var sb = obStr(r.ship_by);
     if (!sb) { return '<span style="color:var(--text-3)">no deadline yet</span>'; }
     var ms = Date.parse(sb) - Date.now();
+    if (r.status === 'CANCELLED') { return '<span class="ob-bad" style="color:var(--text-3)">cancelled</span>'; }
     if (r.status === 'FULFILLED') { return '<span class="ob-ok">dispatched</span>'; }
     if (ms < 0) {
       var d = Math.floor(-ms / 86400000);

@@ -748,6 +748,14 @@
     var opsPayload = { date: ALK.date || alTodayPkt() };
     if (force) { opsPayload.refresh = true; }
 
+    /* Engine truth rides alongside the sheet cache: every account gets real 30-day numbers
+       (orders, revenue, ads incl intraday, eBay traffic, refunds) even when the cache's
+       round-robin has not reached it — the night review's "not computed yet" cards. */
+    api('accountKpisEngine', {}).then(function (d) {
+      ALK.engine = {};
+      ((d && d.rows) || []).forEach(function (r) { ALK.engine[alStr(r.account)] = r; });
+      if (!ALK.account && ALK.kpi) { alkRenderFleet(ALK.kpi); }
+    }).catch(function () {});
     var kc = cachedCall('accountKpis', kpiPayload, function (d) {
       ALK.kpi = d || null;
       alkFillAccounts(d);
@@ -812,12 +820,32 @@
     });
   }
 
+  function alkEngineMini(name) {
+    var e = ALK.engine && ALK.engine[name];
+    if (!e) { return ''; }
+    var f2 = function (v) { return v == null ? '—' : (Math.round(Number(v) * 100) / 100).toFixed(2); };
+    var pct = function (v) { return v == null ? '—' : f2(v) + '%'; };
+    var cells = [
+      ['Orders/day', f2(e.orders_day)], ['Revenue/day', '£' + f2(e.revenue_day)], ['AOV', '£' + f2(e.aov)],
+      ['CTR', pct(e.ctr)], ['CVR', pct(e.cvr)], ['Ad £/order', '£' + f2(e.ad_per_order)],
+      ['TACoS', pct(e.tacos)], ['Ad spend 30d', '£' + f2(e.ad_spend_30d)], ['Impressions/day', e.impressions_day == null ? '—' : String(e.impressions_day)],
+      ['Refund rate', pct(e.refund_rate)], ['Active listings', e.listings_active == null ? '—' : String(e.listings_active)], ['Orders 30d', e.orders_30d == null ? '—' : String(e.orders_30d)]
+    ];
+    return '<div class="al-note" style="margin:2px 0 6px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:9.5px">Engine · live eBay truth · 30d</div>' +
+      '<div class="al-mini">' + cells.map(function (c) {
+        return '<div class="al-m-k">' + esc(c[0]) + '</div><div class="al-m-v num">' + esc(c[1]) + '</div>';
+      }).join('') + '</div>';
+  }
+
   function alkFleetCard(a) {
     var name = alStr(a && a.account);
+    var engineBlock = alkEngineMini(name);
     if (!a || !a.ok) {
       return '<div class="card"><div class="hd">' + esc(name) + '</div><div class="bd">' +
-        '<div class="al-empty">' + esc(alStr(a && a.reason) || 'not connected yet') +
-        '<span>The 15-minute refresh writes each account’s cards into the dashboard cache.</span></div></div></div>';
+        (engineBlock || ('<div class="al-empty">' + esc(alStr(a && a.reason) || 'not connected yet') +
+        '<span>The 15-minute refresh writes each account’s cards into the dashboard cache.</span></div>')) +
+        (engineBlock ? '<div class="al-note" style="margin-top:8px">sheet ledger not cached yet — these figures are the Engine\u2019s own</div>' : '') +
+        '</div></div>';
     }
     var open = Number(a.active_alerts);
     var cards = (a.cards || []).map(function (c) {
@@ -827,8 +855,8 @@
     return '<div class="card"><div class="hd">' + esc(name) +
         (isFinite(open) && open > 0 ? '<span class="pill al-p-money">' + esc(alInt(open)) + ' active</span>' : '') +
         '<span class="hint">' + esc(a.window_days ? alInt(a.window_days) + '-day window' : 'window not recorded') + '</span>' +
-      '</div><div class="bd">' +
-        (cards ? '<div class="al-mini">' + cards + '</div>' :
+      '</div><div class="bd">' + engineBlock +
+        (cards ? '<div class="al-note" style="margin:10px 0 6px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:9.5px">Sheet ledger cards</div><div class="al-mini">' + cards + '</div>' :
           '<div class="al-empty">No cached figure for this account yet.<span>The next refresh will fill it.</span></div>') +
         '<div class="al-note" style="margin-top:12px">' + esc('cached ' + (alPortalStamp(a.computed_at) || 'not yet')) +
           ' · sparklines need the account’s own ledger</div>' +

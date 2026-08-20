@@ -15,7 +15,7 @@
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, flipped: true };
+  var AR = { data: null, mode: 'daily' };   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
      claimed; duplicates and blank headers land under 'col:<letter>' (SheetBridge's own rule,
@@ -38,6 +38,72 @@
     return keys;
   }
 
+  /* Night review 2, verbatim: "account report required data of each day with proper
+     calculation, and this is probably the worst representation ever." The default is now a
+     DAY-KEYED dashboard: the date column is detected from the data, every numeric metric is
+     formatted, and a 7-day-vs-prior-7 summary leads. The workbook orientation and the raw
+     list survive behind the same button. */
+  function arDaily(r, heads, keys, rows, cell) {
+    // 1) find the date column: the key whose values look like dates most often
+    var best = 0, bestHits = -1;
+    keys.forEach(function (k, i) {
+      var hits = 0;
+      rows.forEach(function (row) {
+        if (/^\d{4}-\d{2}-\d{2}/.test(String(row[k] == null ? '' : row[k]).trim())) { hits++; }
+      });
+      if (hits > bestHits) { bestHits = hits; best = i; }
+    });
+    if (bestHits < 2) { return null; }                       // no date column → fall back
+    var dateKey = keys[best];
+    // 2) day rows only, newest first
+    var days = rows.filter(function (row) { return /^\d{4}-\d{2}-\d{2}/.test(String(row[dateKey] || '').trim()); });
+    days.sort(function (x, y) { return String(y[dateKey]) < String(x[dateKey]) ? -1 : 1; });
+    if (!days.length) { return null; }
+    // 3) numeric metric columns (most non-empty values parse as numbers)
+    var metrics = [];
+    keys.forEach(function (k, i) {
+      if (i === best) { return; }
+      var num = 0, filled = 0;
+      days.forEach(function (row) {
+        var v = String(row[k] == null ? '' : row[k]).trim();
+        if (v !== '') { filled++; if (isFinite(parseFloat(v.replace(/[£,%]/g, '')))) { num++; } }
+      });
+      if (filled >= 3 && num / filled >= 0.7) { metrics.push({ k: k, label: String(heads[i] || k), filled: filled }); }
+    });
+    metrics = metrics.slice(0, 14);
+    if (!metrics.length) { return null; }
+    var numOf = function (row, k) { var v = parseFloat(String(row[k] == null ? '' : row[k]).replace(/[£,%]/g, '')); return isFinite(v) ? v : null; };
+    var fmt = function (v) {
+      if (v == null) { return '—'; }
+      if (Math.abs(v) > 0 && Math.abs(v) < 1) { return (Math.round(v * 1000) / 10) + '%'; }   // 0-1 ratios read as percent
+      return String(Math.round(v * 100) / 100);
+    };
+    // 4) 7-day averages vs the prior 7
+    var avg = function (list, k) {
+      var vals = list.map(function (row) { return numOf(row, k); }).filter(function (v) { return v != null; });
+      if (!vals.length) { return null; }
+      return vals.reduce(function (a2, b2) { return a2 + b2; }, 0) / vals.length;
+    };
+    var w1 = days.slice(0, 7), w0 = days.slice(7, 14);
+    var strip = '<div class="al-mini" style="margin-bottom:14px">' + metrics.slice(0, 8).map(function (m) {
+      var c = avg(w1, m.k), p = avg(w0, m.k);
+      var d = (c != null && p) ? Math.round((c - p) / Math.abs(p) * 100) : null;
+      return '<div class="al-m-k">' + esc(m.label.slice(0, 26)) + ' · 7d avg</div>' +
+        '<div class="al-m-v num">' + esc(fmt(c)) +
+        (d == null ? '' : ' <span style="font-size:10px;color:var(--' + (d >= 0 ? 'ok' : 'bad') + ')">' + (d >= 0 ? '▲' : '▼') + Math.abs(d) + '%</span>') + '</div>';
+    }).join('') + '</div>';
+    // 5) the day table, newest 14
+    var h2 = strip + '<div class="scroll"><table class="ar-tbl"><thead><tr><th>Day</th>' +
+      metrics.map(function (m) { return '<th>' + esc(m.label.slice(0, 24)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+    days.slice(0, 14).forEach(function (row) {
+      h2 += '<tr><td style="font-weight:800;white-space:nowrap">' + esc(String(row[dateKey]).slice(0, 10)) + '</td>' +
+        metrics.map(function (m) { return '<td style="text-align:right;font-variant-numeric:tabular-nums">' + esc(fmt(numOf(row, m.k))) + '</td>'; }).join('') + '</tr>';
+    });
+    h2 += '</tbody></table></div>';
+    if (days.length > 14) { h2 += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Newest 14 of ' + days.length + ' days — the other views show everything.</p>'; }
+    return h2;
+  }
+
   function arRender() {
     var host = $('arBody');
     var r = AR.data;
@@ -47,7 +113,11 @@
     var rows = r.rows || [];
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
-    if (AR.flipped) {
+    if (AR.mode === 'daily') {
+      h = arDaily(r, heads, keys, rows, cell);
+      if (h == null) { AR.mode = 'workbook'; }               // no date column — show the workbook view
+    }
+    if (AR.mode === 'workbook') {
       // metrics down the side (the workbook's own orientation), newest entries as columns
       var take = rows.slice(0, 10);
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr><th></th>' +
@@ -59,7 +129,8 @@
       });
       h += '</tbody></table></div>';
       if (rows.length > 10) { h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Showing the newest 10 of ' + rows.length + ' — flip to the list to see them all.</p>'; }
-    } else {
+    }
+    if (AR.mode === 'list') {
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
         heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
       rows.forEach(function (row) {
@@ -70,7 +141,10 @@
     host.innerHTML = h +
       '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from "' + esc(String(r.tab || '')) + '" · resolving alarms stays on the Alerts centre.</p>';
     var flipBtn = $('arFlip');
-    if (flipBtn) { flipBtn.style.display = ''; flipBtn.textContent = AR.flipped ? 'Show as a list' : 'Show like the workbook'; }
+    if (flipBtn) {
+      flipBtn.style.display = '';
+      flipBtn.textContent = AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : 'Show the daily dashboard';
+    }
   }
 
   function arLoad() {
@@ -126,7 +200,7 @@
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
       var fl = $('arFlip');
-      if (fl) { fl.onclick = function () { AR.flipped = !AR.flipped; arRender(); }; }
+      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : 'daily'; arRender(); }; }
       var sel = $('arAcc');
       if (sel) { sel.onchange = arLoad; }
     }

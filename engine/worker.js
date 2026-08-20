@@ -471,7 +471,7 @@ async function noSupplierScan(env) {
   const rs = await env.DB.prepare(
     "SELECT o.item_id, MIN(o.order_id) AS order_id, o.account, COUNT(*) AS n, MAX(i.title) AS title " +
     "FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id LEFT JOIN items_api i ON i.item_id = o.item_id " +
-    "WHERE o.status NOT IN ('FULFILLED', 'NOT_FOUND') AND o.created_at >= datetime('now', '-5 day') " +
+    "WHERE o.status NOT IN ('FULFILLED', 'NOT_FOUND', 'CANCELLED') AND o.created_at >= datetime('now', '-5 day') " +
     "  AND COALESCE(o.ali_link, '') = '' AND o.item_id != '' " +
     "  AND COALESCE(f.sup1_link, '') = '' AND COALESCE(f.sup2_link, '') = '' AND COALESCE(f.sup3_link, '') = '' AND COALESCE(f.current_sup, '') = '' " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a WHERE a.ref = 'engine:nosup:' || o.item_id) " +
@@ -661,7 +661,7 @@ async function zeroSaleScan(env) {
 
 async function statusRefresh(env) {
   const rs = await env.DB.prepare(
-    "SELECT order_id, account FROM orders WHERE status NOT IN ('FULFILLED','NOT_FOUND') AND created_at < datetime('now', '-6 day') ORDER BY created_at ASC LIMIT 20"
+    "SELECT order_id, account FROM orders WHERE status NOT IN ('FULFILLED','NOT_FOUND','CANCELLED') AND created_at < datetime('now', '-6 day') ORDER BY created_at ASC LIMIT 20"
   ).all();
   const rows = rs.results || [];
   if (!rows.length) return;
@@ -685,8 +685,9 @@ async function statusRefresh(env) {
         const d = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
         if (d && (!shipBy || d < shipBy)) shipBy = d;
       }
+      const rfCancelled = String(((o.cancelStatus || {}).cancelState) || '') === 'CANCELED';
       await env.DB.prepare('UPDATE orders SET status = ?2, ship_by = ?3 WHERE order_id = ?1')
-        .bind(oid, String(o.orderFulfillmentStatus || ''), shipBy).run();
+        .bind(oid, rfCancelled ? 'CANCELLED' : String(o.orderFulfillmentStatus || ''), shipBy).run();
       refreshed++;
     }
   }
@@ -733,7 +734,11 @@ async function orderSync(env) {
           const d = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
           if (d && (!shipBy || d < shipBy)) shipBy = d;
         }
-        const status = String(o.orderFulfillmentStatus || '');
+        /* Night review: cancelled orders sat in Awaiting/Overdue for ever — fulfillment
+           status never says cancelled; cancelStatus does. A cancelled order leaves every open
+           bucket and joins its own pile. */
+        const cancelled = String(((o.cancelStatus || {}).cancelState) || '') === 'CANCELED';
+        const status = cancelled ? 'CANCELLED' : String(o.orderFulfillmentStatus || '');
         const id = String(o.orderId);
         if (knownO[id] === status + '|' + qty + '|' + est + '|' + shipBy) continue;   // unchanged → no write
         await env.DB.prepare(
@@ -2460,15 +2465,25 @@ const ROUTES = {
          role list exactly (CAMPAIGN_ROLES also carries CS, which must not see totals). */
       if (['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const day = ukDate('');
+      /* Night review 2: "advertising requires all previous numbers the way i told you" — the
+         board takes a window (7/14/30/60 days) and also returns the per-day series, so the
+         command centre carries the history, not just today. */
+      const histDays = Math.min(60, Math.max(7, Number(p.days) || 14));
+      const since = ukDate(new Date(Date.now() - histDays * 86400000).toISOString());
       const today = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS spend_t, (t.clicks + t.cpc_clicks) AS clicks_t, ' +
         '(t.sales + t.cpc_sales) AS sold_t, t.updated_at, i.title, i.price, i.status AS listing_status ' +
         'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.day = ?1'
       ).bind(day).all();
+      const series = await ctx.env.DB.prepare(
+        'SELECT date, ROUND(SUM(spend + cpc_spend), 2) AS spend, SUM(clicks + cpc_clicks) AS clicks, ' +
+        'SUM(sales + cpc_sales) AS sold ' +
+        'FROM ads_daily WHERE date >= ?1 GROUP BY date ORDER BY date DESC'
+      ).bind(since).all().catch(() => ({ results: [] }));
       const hist = await ctx.env.DB.prepare(
         "SELECT a.item_id, a.account, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend_14, SUM(a.clicks + a.cpc_clicks) AS clicks_14, " +
         "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= ?1 GROUP BY a.item_id, a.account"
-      ).bind(ukDate(new Date(Date.now() - 14 * 86400000).toISOString())).all();
+      ).bind(since).all();
       const hBy = {};
       for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
       const items = [];
@@ -2507,7 +2522,8 @@ const ROUTES = {
         waste_n: items.filter(i => i.waste).length,
         spend_14d: round2(items.reduce((s, i) => s + i.spend_14d, 0)),
       };
-      return { day, updated_at: updated, combined,
+      return { day, updated_at: updated, combined, days: histDays,
+        series: (series.results || []),
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
         items: items.slice(0, 300),
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live)' };
@@ -2552,9 +2568,10 @@ const ROUTES = {
       const nowIso = new Date().toISOString();
       const horizonIso = new Date(Date.now() - 14 * 86400000).toISOString();  // 'recent' = ship-by within 14 days
 
-      const OPEN = "o.status NOT IN ('FULFILLED','NOT_FOUND')";
+      const OPEN = "o.status NOT IN ('FULFILLED','NOT_FOUND','CANCELLED')";
       const B = {
         all:       "o.created_at >= datetime('now','-90 day')",
+        cancelled: "o.status = 'CANCELLED' AND o.created_at >= datetime('now','-30 day')",
         awaiting:  OPEN + " AND (o.ship_by = '' OR o.ship_by >= ?H)",
         overdue:   OPEN + " AND o.ship_by != '' AND o.ship_by < ?N AND o.ship_by >= ?H",
         due24:     OPEN + " AND o.ship_by != '' AND o.ship_by >= ?N AND o.ship_by < datetime(?N, '+1 day')",
@@ -2613,6 +2630,57 @@ const ROUTES = {
   /* Hasib's closing line: "management home shows everything combined". One read, every headline
      the other boards carry — each tile on the screen deep-links to its board. Counts only, so
      the whole pulse is one cheap pass. */
+  /* Account KPIs from the ENGINE for every account (night review: two accounts said "not
+     computed yet" for ever because the sheet cache's round-robin never reached them, and a
+     third was sparse). 30-day window; traffic from eBay's own report; ads from both families
+     plus today's intraday. Same money gate as the KPI screen. */
+  accountKpisEngine: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      return memo('accountKpisEngine', 60000, async () => {
+        const since30 = ukDate(new Date(Date.now() - 30 * 86400000).toISOString());
+        const o = await ctx.env.DB.prepare(
+          "SELECT account, COUNT(*) AS n, ROUND(COALESCE(SUM(sold), 0), 2) AS rev, COALESCE(SUM(qty), 0) AS units, " +
+          "ROUND(COALESCE(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END), 0), 2) AS refunded " +
+          "FROM orders WHERE created_at >= datetime('now', '-30 day') AND status NOT IN ('NOT_FOUND', 'CANCELLED') GROUP BY account"
+        ).all();
+        const a = await ctx.env.DB.prepare(
+          'SELECT account, ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS spend FROM ads_daily WHERE date >= ?1 GROUP BY account'
+        ).bind(since30).all();
+        const at = await ctx.env.DB.prepare(
+          'SELECT account, ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS spend FROM ads_today WHERE day = ?1 GROUP BY account'
+        ).bind(ukDate('')).all();
+        const t = await ctx.env.DB.prepare(
+          'SELECT account, COALESCE(SUM(impressions), 0) AS imp, COALESCE(SUM(views), 0) AS views, COALESCE(SUM(transactions), 0) AS tx FROM traffic_daily WHERE date >= ?1 GROUP BY account'
+        ).bind(since30).all();
+        const l = await ctx.env.DB.prepare(
+          "SELECT account, COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' GROUP BY account"
+        ).all();
+        const by = {};
+        const get = (acct) => (by[acct] = by[acct] || { account: acct });
+        for (const r of (o.results || [])) Object.assign(get(r.account), { orders_30d: r.n, revenue_30d: Number(r.rev), units_30d: r.units, refunded_30d: Number(r.refunded) });
+        for (const r of (a.results || [])) get(r.account).ad_spend_30d = Number(r.spend);
+        for (const r of (at.results || [])) get(r.account).ad_spend_30d = round2((get(r.account).ad_spend_30d || 0) + Number(r.spend));
+        for (const r of (t.results || [])) Object.assign(get(r.account), { impressions_30d: r.imp, views_30d: r.views, traffic_tx_30d: r.tx });
+        for (const r of (l.results || [])) get(r.account).listings_active = r.n;
+        const rows = Object.values(by).map((r) => {
+          const n = Number(r.orders_30d) || 0, rev = Number(r.revenue_30d) || 0, sp = Number(r.ad_spend_30d) || 0;
+          const imp = Number(r.impressions_30d) || 0, vw = Number(r.views_30d) || 0;
+          return { ...r,
+            orders_day: round2(n / 30), revenue_day: round2(rev / 30),
+            aov: n ? round2(rev / n) : 0,
+            ctr: imp ? round2(vw / imp * 1000) / 10 : null,
+            cvr: vw ? round2(Number(r.traffic_tx_30d || 0) / vw * 1000) / 10 : null,
+            ad_per_order: n ? round2(sp / n) : 0,
+            tacos: rev ? round2(sp / rev * 1000) / 10 : 0,
+            refund_rate: rev ? round2(Number(r.refunded_30d || 0) / rev * 1000) / 10 : 0,
+            impressions_day: Math.round(imp / 30) };
+        }).sort((x, y) => (y.revenue_30d || 0) - (x.revenue_30d || 0));
+        return { rows, window_days: 30,
+          note: 'Engine truth for every account: orders + revenue from eBay orders (cancelled excluded), ads from both billing families incl today intraday, traffic from eBay\u2019s Traffic Report, refund rate from real refunds.' };
+      });
+    },
+  },
+
   /* The validation battery, on demand: Management presses the button, every check answers. */
   selfTest: {
     auth: 'mgmt', fn: async (p, ctx) => {
@@ -2637,7 +2705,7 @@ const ROUTES = {
           "SUM(CASE WHEN spend + cpc_spend >= 3 AND sales + cpc_sales = 0 THEN 1 ELSE 0 END) AS waste_n FROM ads_today WHERE day = '" + today + "'");
         const disp = (await ctx.env.DB.prepare(
           "SELECT SUM(CASE WHEN ship_by != '' AND ship_by < ?1 THEN 1 ELSE 0 END) AS overdue, COUNT(*) AS awaiting " +
-          "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND') AND created_at >= datetime('now', '-6 day')"
+          "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND', 'CANCELLED') AND created_at >= datetime('now', '-6 day')"
         ).bind(new Date().toISOString()).first()) || {};
         const zs = await one("SELECT COUNT(*) AS n FROM listing_decisions WHERE status = 'PENDING'");
         const mail = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''");
@@ -2886,7 +2954,7 @@ const ROUTES = {
       }
       rows.sort((x, y) => y.revenue - x.revenue);
       const tot = {};
-      for (const k of ['revenue','qty','orders_n','vat_out','fees','fees_vat','oe','ali_cost','ali_vat','pri_qty','pri_fees','pri_incl','gen_qty','gen_incl','gen_ex','true_oe','vat_hmrc','raw_profit','returns','actual_profit']) {
+      for (const k of ['revenue','qty','orders_n','fees_n','cost_n','vat_out','fees','fees_vat','oe','ali_cost','ali_vat','pri_qty','pri_fees','pri_incl','gen_qty','gen_incl','gen_ex','true_oe','vat_hmrc','raw_profit','returns','actual_profit']) {
         tot[k] = round2(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0));
       }
       return { from, to, account, rows: rows.slice(0, 400), total: tot,

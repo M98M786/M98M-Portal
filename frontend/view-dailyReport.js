@@ -34,6 +34,14 @@
     var box = $('drBody');
     if (!box) { return; }
     var rows = (d && d.rows) || [];
+    /* Night review 2 ("daily report is all wrong, with no sense"): a dormant account painted a
+       £0.00 row under every single day — noise dressed as data. An account with literally
+       nothing across the whole window leaves the table; the day it earns a penny it is back. */
+    var alive = {};
+    rows.forEach(function (r) {
+      if ((Number(r.sold) || 0) || (Number(r.cost) || 0) || (Number(r.ads) || 0)) { alive[r.account] = 1; }
+    });
+    rows = rows.filter(function (r) { return alive[r.account]; });
     if (!rows.length) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">No rolled-up days yet.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">The nightly rollup fills this after the first 2 AM run — or the moment an order lands on a new day.</span></div>';
       return;
@@ -67,7 +75,10 @@
       var pmEnd = dShift(mStart, -1);
       var pmStart = pmEnd.slice(0, 8) + '01';
       var m1 = sumRange(mStart, newest);
-      var m0 = sumRange(pmStart, pmEnd);
+      /* like-for-like: 14 days of this month against the FIRST 14 days of last month — the
+         whole prior month made every MTD read as a collapse */
+      var daysIn = Math.round((new Date(newest + 'T12:00:00Z') - new Date(mStart + 'T12:00:00Z')) / 86400000) + 1;
+      var m0 = sumRange(pmStart, dShift(pmStart, daysIn - 1));
       function tile(label, cur, prev, prevLabel) {
         var d = prev > 0 ? Math.round((cur - prev) / prev * 100) : null;
         return '<div class="dr-kpi"><div class="l">' + esc(label) + '</div><div class="v">' + drGBP(cur) + '</div>' +
@@ -78,8 +89,8 @@
       kpiHtml = '<div class="dr-kpis">' +
         tile('Revenue · 7 days', w1.sold, w0.sold, 'prior 7') +
         tile('Profit · 7 days', w1.profit, w0.profit, 'prior 7') +
-        tile('Revenue · month to date', m1.sold, m0.sold, 'last month') +
-        tile('Profit · month to date', m1.profit, m0.profit, 'last month') +
+        tile('Revenue · month to date', m1.sold, m0.sold, 'same ' + daysIn + 'd last month') +
+        tile('Profit · month to date', m1.profit, m0.profit, 'same ' + daysIn + 'd last month') +
         '</div>';
     }
 
