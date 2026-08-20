@@ -557,6 +557,29 @@ async function selfTestRun(env) {
     }
   } catch (e) { add('books carry the 0.8 law', false, e.message); }
 
+  try { // 4c. no sync job stuck failing: success writes last_error='', so a row still carrying
+    // an error with no success for 6h is a feed problem, not a blip. Letters it within a day.
+    const rs = await env.DB.prepare(
+      "SELECT job, account, last_error FROM sync_state WHERE account != '@lock' AND last_error != '' " +
+      "AND (last_ok = '' OR last_ok < datetime('now', '-6 hours')) LIMIT 5"
+    ).all();
+    const bad = (rs.results || []).map(r => r.job + (r.account ? '·' + r.account : '') + ': ' + String(r.last_error).slice(0, 60));
+    add('no sync job stuck failing', bad.length === 0, bad.length ? bad.join(' | ') : 'every job clean or freshly recovered');
+  } catch (e) { add('no sync job stuck failing', false, e.message); }
+
+  try { // 4d. every selling account's order feed is ALIVE: an account that sold within the week
+    // but has NOTHING for 18h has a dead token or a real sales collapse — both letter-worthy.
+    // Dormant-from-the-start accounts never trigger. ISO instants bound from JS (check 9's lesson:
+    // 'T'-form stamps never text-compare cleanly against SQL space-form datetimes).
+    const iso = (h) => new Date(Date.now() - h * 3600000).toISOString();
+    const rs = await env.DB.prepare(
+      "SELECT account, MAX(created_at) AS last FROM orders WHERE status != 'NOT_FOUND' GROUP BY account " +
+      'HAVING MAX(created_at) >= ?1 AND MAX(created_at) < ?2'
+    ).bind(iso(168), iso(18)).all();
+    const quiet = (rs.results || []).map(r => r.account + ' (last ' + String(r.last).slice(0, 16) + ')');
+    add('every account feed is alive', quiet.length === 0, quiet.length ? 'QUIET: ' + quiet.join(', ') : 'all selling accounts have fresh orders');
+  } catch (e) { add('every account feed is alive', false, e.message); }
+
   try { // 5. the P&L law recomputes (7d totals): Raw = 0.8 × (OE − Ali) — the central-sheet brain
     const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
     const rev = Number(t.rev) || 0, fees = Number(t.fees) || 0, cost = Number(t.cost) || 0;
