@@ -113,7 +113,10 @@ def build_backend():
 
 
 def build_frontend():
-    with open(os.path.join(ROOT, 'index.html')) as fh:
+    # Source shell lives in src/ — the ROOT index.html is the BUILT page, because GitHub
+    # Pages serves this repo's root as the live portal (main branch, path "/"). A push of the
+    # source shell to root once served an empty frame to the whole team; never again.
+    with open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
         shell = fh.read()
     if MARKER not in shell:
         sys.exit('ERROR: splice marker missing from index.html')
@@ -131,12 +134,16 @@ def build_frontend():
     stamp = time.strftime('%Y%m%d-%H%M', time.gmtime())
     page = page.replace('__BUILD_STAMP__', stamp)
 
-    os.makedirs(os.path.join(ROOT, 'public', 'assets'), exist_ok=True)
-    with open(os.path.join(ROOT, 'public', 'index.html'), 'w') as fh:
+    with open(os.path.join(ROOT, 'index.html'), 'w') as fh:
         fh.write(page)
-    with open(os.path.join(ROOT, 'public', 'version.txt'), 'w') as fh:
+    with open(os.path.join(ROOT, 'version.txt'), 'w') as fh:
         fh.write(stamp + '\n')
-    print('build stamp: %s (public/version.txt written)' % stamp)
+    # engine source staged at root too: the dash-pane deploy fetches it from the live site
+    with open(os.path.join(ROOT, 'engine', 'worker.js')) as fh:
+        eng = fh.read()
+    with open(os.path.join(ROOT, 'engine-worker.txt'), 'w') as fh:
+        fh.write(eng)
+    print('build stamp: %s (root index.html, version.txt, engine-worker.txt written)' % stamp)
     views = sorted(set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)))
     print('frontend -> public/index.html  %d bytes, modules: %d, views: %s'
           % (len(page), len(files), ', '.join(views)))

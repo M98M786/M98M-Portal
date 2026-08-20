@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="royal">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com https://*.workers.dev; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
+<title>M98M Portal</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ============ M98M ROYAL — DESIGN TOKENS (from design preview v2) ============ */
+:root{
+  --bg0:#10141F; --bg1:#1C2436; --panel:#171D2C; --panel-2:#1A2130;
+  --gold-line:rgba(233,180,60,.16); --gold-line-hi:rgba(233,180,60,.45);
+  --text:#F2F4F8; --text-2:#A7B0C0; --text-3:#6B7688;
+  --gold-a:#F6D06B; --gold-b:#E9A93C; --gold-c:#B66F1F; --gold-ink:#241A06;
+  --blue:#3D9BF0; --blue-2:#63B4FF; --blue-deep:#1F6FC0; --blue-soft:rgba(61,155,240,.12);
+  --ok:#3FCF8E; --ok-soft:rgba(63,207,142,.14);
+  --warn:#FF9F43; --warn-soft:rgba(255,159,67,.14);
+  --bad:#F0605A; --bad-soft:rgba(240,96,90,.14);
+  --radius:12px;
+  --font:"Amazon Ember","Open Sans","Segoe UI",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --glow-gold:0 6px 26px rgba(233,169,60,.14);
+  --glow-blue:0 0 18px rgba(61,155,240,.35);
+}
+[data-theme="ivory"]{
+  --bg0:#F5F1E6; --bg1:#FDFBF4; --panel:#FFFFFF; --panel-2:#FFFDF6;
+  --gold-line:rgba(176,138,46,.28); --gold-line-hi:rgba(176,138,46,.6);
+  --text:#1A2130; --text-2:#4C5568; --text-3:#8A91A0;
+  --gold-a:#D9A62E; --gold-b:#B9821F; --gold-c:#8C6314; --gold-ink:#FFF;
+  --blue:#1F6FC0; --blue-2:#3D9BF0; --blue-soft:rgba(31,111,192,.10);
+  --ok:#188A5C; --ok-soft:rgba(24,138,92,.12);
+  --warn:#B06A10; --warn-soft:rgba(176,106,16,.12);
+  --bad:#C0362E; --bad-soft:rgba(192,54,46,.10);
+  --glow-gold:0 6px 22px rgba(185,130,31,.18); --glow-blue:0 0 14px rgba(31,111,192,.25);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--font); font-size:14.5px; line-height:1.55; color:var(--text);
+  background:radial-gradient(1100px 520px at 50% -8%, var(--bg1) 0%, var(--bg0) 58%) fixed var(--bg0);
+  -webkit-font-smoothing:antialiased; transition:background .3s,color .3s}
+.num{font-variant-numeric:tabular-nums lining-nums}
+.mono{font-family:var(--mono); font-size:12.5px}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+input,select{font:inherit}
+::selection{background:rgba(61,155,240,.3)}
+.hidden{display:none!important}
+.goldtext{background:linear-gradient(110deg,var(--gold-c) 0%,var(--gold-a) 28%,var(--gold-b) 46%,#F8E39B 52%,var(--gold-b) 58%,var(--gold-c) 100%);
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:sheen 3s ease-in-out .4s 1 both}
+@keyframes sheen{from{background-position:120% 0}to{background-position:0% 0}}
+.btn-gold{display:inline-flex; align-items:center; justify-content:center; gap:8px; font-weight:800; font-size:13.5px; padding:11px 20px; border-radius:10px;
+  color:var(--gold-ink); background:linear-gradient(135deg,var(--gold-a),var(--gold-b) 55%,var(--gold-c));
+  box-shadow:0 3px 14px rgba(233,169,60,.35), inset 0 1px 0 rgba(255,255,255,.55); transition:transform .12s, filter .15s}
+.btn-gold:hover{filter:brightness(1.07)} .btn-gold:active{transform:scale(.98)}
+.btn-ghost{padding:10px 18px;border:1px solid var(--gold-line-hi);border-radius:10px;font-weight:700;color:var(--text-2);transition:all .15s}
+.btn-ghost:hover{color:var(--blue-2);border-color:var(--blue)}
+
+/* ============ CENTERED SCREENS (login / register / pending) ============ */
+.screen{min-height:100vh; display:grid; place-items:center; padding:24px}
+.card-auth{width:min(460px,94vw); background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--gold-line);
+  border-radius:16px; padding:34px 30px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.4); position:relative; overflow:hidden}
+.card-auth::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:linear-gradient(90deg,var(--gold-c),var(--gold-a),var(--blue))}
+.logo-auth{width:120px;height:120px;border-radius:22px;margin:0 auto 18px;display:block;box-shadow:0 10px 30px rgba(0,0,0,.35),0 0 26px rgba(233,169,60,.12)}
+.card-auth h1{font-size:22px;font-weight:800;letter-spacing:.01em}
+.card-auth .tag{color:var(--text-2);font-size:13px;font-weight:600;margin-top:8px;line-height:1.5}
+.gbtn-wrap{margin:24px auto 6px; display:flex; justify-content:center; min-height:44px}
+.auth-note{font-size:12px;color:var(--text-3);font-weight:600;margin-top:14px;line-height:1.5}
+.auth-status{margin-top:16px;font-size:13px;font-weight:700;min-height:20px}
+.auth-status.err{color:var(--bad)} .auth-status.ok{color:var(--ok)} .auth-status.info{color:var(--blue-2)}
+.field{text-align:left;margin-top:16px}
+.field label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:6px}
+.field select,.field input{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font-weight:600}
+.field select:focus,.field input:focus{outline:none;border-color:var(--blue);box-shadow:var(--glow-blue)}
+.spinner{width:22px;height:22px;border:2.5px solid var(--gold-line);border-top-color:var(--gold-a);border-radius:50%;animation:spin .8s linear infinite;margin:8px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ============ APP SHELL (from design preview) ============ */
+.shell{display:grid; grid-template-columns:236px 1fr; grid-template-rows:60px 66px 1fr; height:100vh;
+  grid-template-areas:"side top" "side line" "side main"}
+.side{grid-area:side; background:linear-gradient(180deg,#141926,#10141F); border-right:1px solid var(--gold-line); display:flex; flex-direction:column; padding:16px 12px; gap:4px}
+[data-theme="ivory"] .side{background:linear-gradient(180deg,#1A2130,#141926)}
+.brand{display:flex; align-items:center; gap:11px; padding:2px 6px 18px}
+.brand img{width:40px;height:40px;border-radius:10px;flex:none}
+.brand-text b{display:block; color:#F4F7F9; font-size:15px; letter-spacing:.03em}
+.brand-text span{font-size:11px; color:var(--text-3); letter-spacing:.14em; text-transform:uppercase}
+.nav{display:flex; flex-direction:column; gap:3px}
+.nav a{display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; color:#9AA6B6; text-decoration:none; font-weight:600; font-size:13.5px; position:relative; transition:all .18s ease; cursor:pointer}
+.nav-dept{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b7687;padding:14px 12px 5px;border-top:1px solid rgba(233,169,60,.08);margin-top:6px}
+.nav-dept:first-child{border-top:none;margin-top:0;padding-top:4px}
+.nav a svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.nav a:hover{background:rgba(61,155,240,.08); color:#DCE5EE}
+.nav a.on{background:linear-gradient(90deg,rgba(233,169,60,.14),rgba(233,169,60,.02)); color:#F6D989}
+.nav a.on::before{content:""; position:absolute; left:-12px; top:9px; bottom:9px; width:3px; border-radius:3px; background:linear-gradient(180deg,var(--gold-a),var(--gold-c)); box-shadow:0 0 10px rgba(233,169,60,.6)}
+.nav .badge{margin-left:auto; background:linear-gradient(135deg,var(--blue-2),var(--blue-deep)); color:#fff; font-size:11px; font-weight:800; padding:1px 8px; border-radius:99px}
+.side .foot{margin-top:auto; padding:12px 8px 4px; border-top:1px solid var(--gold-line); font-size:11.5px; color:var(--text-3)}
+.side .foot b{color:#C9D3DC}
+.top{grid-area:top; display:flex; align-items:center; gap:12px; padding:0 20px; background:rgba(16,20,31,.55); backdrop-filter:blur(10px); border-bottom:1px solid var(--gold-line)}
+[data-theme="ivory"] .top{background:rgba(253,251,244,.7)}
+.acct{display:flex; align-items:center; gap:8px; border:1px solid var(--gold-line); background:var(--panel); padding:7px 13px; border-radius:10px; font-weight:700; font-size:13px}
+.top .spacer{flex:1}
+.iconbtn{position:relative; width:36px;height:36px; display:grid; place-items:center; border-radius:10px; color:#C9D3DC; transition:all .15s}
+.iconbtn:hover{background:var(--blue-soft); color:var(--blue-2)}
+.iconbtn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.avatar{width:34px;height:34px;border-radius:50%; background:linear-gradient(135deg,var(--blue-2),var(--blue-deep)); color:#fff; display:grid; place-items:center; font-weight:800; font-size:12.5px; box-shadow:var(--glow-blue); cursor:pointer}
+.shiftline{grid-area:line; display:flex; align-items:center; gap:18px; padding:0 26px; background:rgba(23,29,44,.5); border-bottom:1px solid var(--gold-line)}
+[data-theme="ivory"] .shiftline{background:rgba(255,255,255,.55)}
+.sl-meta{font-size:12px; color:var(--text-3); font-weight:700; white-space:nowrap}
+.sl-meta b{color:var(--text)}
+.sl-track{position:relative; flex:1; height:36px; display:flex; align-items:center; min-width:180px}
+.sl-bar{position:absolute; left:0; right:0; height:5px; border-radius:99px; background:rgba(120,132,152,.22)}
+.sl-fill{position:absolute; left:0; height:5px; border-radius:99px; background:linear-gradient(90deg,var(--blue-deep),var(--blue-2)); box-shadow:var(--glow-blue); transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.streak{display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:800; white-space:nowrap; color:var(--gold-a); background:linear-gradient(135deg,rgba(233,169,60,.18),rgba(233,169,60,.05)); border:1px solid var(--gold-line-hi); padding:6px 13px; border-radius:99px}
+.main{grid-area:main; overflow:auto; padding:26px 28px 44px; position:relative}
+.enter{opacity:0; transform:translateY(10px); animation:enter .55s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes enter{to{opacity:1;transform:none}}
+.d1{animation-delay:.05s}.d2{animation-delay:.12s}.d3{animation-delay:.19s}
+.hgroup{display:flex; align-items:center; gap:14px; margin-bottom:20px; flex-wrap:wrap}
+.hgroup h1{font-size:24px; font-weight:800; letter-spacing:-.01em}
+.hgroup .sub{color:var(--text-3); font-size:13px; font-weight:600}
+.grid{display:grid; gap:16px} .g-2{grid-template-columns:1.4fr 1fr}
+.card{background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--gold-line); border-radius:var(--radius); transition:border-color .2s, box-shadow .2s, transform .2s}
+.card:hover{border-color:var(--gold-line-hi); box-shadow:var(--glow-gold)}
+.card .hd{display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--gold-line); font-weight:800; font-size:13.5px}
+.card .hd .hint{margin-left:auto; font-size:11.5px; color:var(--text-3); font-weight:600}
+.card .bd{padding:15px 18px}
+.tl-row{display:flex;align-items:center;gap:10px;padding:9px 0;font-size:13px}
+.tl-row+.tl-row{border-top:1px solid var(--gold-line)}
+.tl-row .k{color:var(--text-3);font-weight:700;min-width:110px}
+.pill{display:inline-block; padding:3px 11px; border-radius:99px; font-size:11.5px; font-weight:800}
+.pill.role{background:linear-gradient(135deg,rgba(233,169,60,.18),rgba(233,169,60,.05));color:var(--gold-a);border:1px solid var(--gold-line-hi)}
+.ideas{background:linear-gradient(135deg,rgba(233,169,60,.16),rgba(233,169,60,.03)); border:1px solid var(--gold-line-hi); box-shadow:var(--glow-gold)}
+.ideas textarea{width:100%;margin-top:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;resize:vertical;min-height:66px}
+.toast{position:fixed; bottom:22px; left:50%; transform:translate(-50%,90px); z-index:50; background:linear-gradient(180deg,#1E2637,#161C2A); border:1px solid var(--gold-line-hi); color:var(--text); font-weight:700; font-size:13px; padding:12px 19px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.5); transition:transform .38s cubic-bezier(.2,.8,.2,1)}
+
+/* quick date presets (V2 req 32) */
+.dp-wrap{position:relative; display:inline-flex; align-items:center; gap:6px; margin-left:6px}
+.dp-btn{padding:7px 10px; border:1px solid var(--gold-line-hi); border-radius:8px; font-weight:800; font-size:12px; color:var(--gold-a); transition:all .15s}
+.dp-btn:hover{border-color:var(--gold-a); box-shadow:var(--glow-gold)}
+.dp-tz{font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.07em; color:var(--text-3); border:1px solid var(--gold-line); border-radius:99px; padding:2px 8px}
+.dp-pop{position:absolute; top:calc(100% + 6px); right:0; z-index:60; display:none; flex-wrap:wrap; gap:5px; width:220px; padding:10px;
+  background:var(--panel-2); border:1px solid var(--gold-line-hi); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.5)}
+.dp-pop.on{display:flex}
+.dp-pop button{padding:5px 11px; border:1px solid var(--gold-line); border-radius:99px; font-size:11.5px; font-weight:700; color:var(--text-2); transition:all .14s}
+.dp-pop button:hover{color:var(--gold-a); border-color:var(--gold-line-hi); background:rgba(233,169,60,.08)}
+.toast.show{transform:translate(-50%,0)}
+/* Grid items default to min-width:auto, so a wide child pushes the whole shell past the
+   viewport. Zero them and let the scroll live inside the panel that owns the wide content. */
+.top,.shiftline,.main,.side{min-width:0}
+.acct{max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:880px){
+  .shell{grid-template-columns:66px minmax(0,1fr)}
+  .nav-label,.brand-text,.side .foot{display:none}
+  .nav a{justify-content:center;padding:11px 0} .nav .badge{position:absolute;top:4px;right:8px}
+  .g-2{grid-template-columns:1fr} .sl-meta{display:none} .shiftline{padding:0 14px;gap:10px}
+  .main{padding:18px 14px 40px} .hgroup h1{font-size:20px} .streak-label{display:none}
+  .top{padding:0 12px; gap:8px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="loginScreen" class="screen">
+  <div class="card-auth enter">
+    <img class="logo-auth" src="assets/logo.png" alt="M98M">
+    <h1>The <span class="goldtext">M98M Portal</span></h1>
+    <div class="tag">Synchronized working · Task giving · Database · Business overview</div>
+    <div class="gbtn-wrap" id="gbtn"></div>
+    <div class="auth-status info" id="loginStatus"></div>
+    <div class="auth-note">Sign in with your <b>M98M company Google account</b>. New here? Signing in starts your registration — Management approves before access.</div>
+  </div>
+</div>
+
+<!-- ============ REGISTER ============ -->
+<div id="registerScreen" class="screen hidden">
+  <div class="card-auth enter">
+    <img class="logo-auth" src="assets/logo.png" alt="M98M">
+    <h1>Welcome, <span class="goldtext" id="regName">there</span></h1>
+    <div class="tag">Confirm your role and shift. Management sets the final timetable when they approve you.</div>
+    <div class="field"><label>My role</label>
+      <select id="regRole"></select></div>
+    <div class="field"><label>My shift (request)</label>
+      <select id="regShift">
+        <option value="Shift 1">Shift 1 · 2:15 PM – 11:15 PM</option>
+        <option value="Shift 2">Shift 2 · 9:00 PM – 6:00 AM</option>
+        <option value="Custom">Custom (management will set)</option>
+      </select></div>
+    <button class="btn-gold" id="regSubmit" style="width:100%;margin-top:20px">Request access</button>
+    <div class="auth-status" id="regStatus"></div>
+    <div class="auth-note" id="regEmail"></div>
+  </div>
+</div>
+
+<!-- ============ PENDING ============ -->
+<div id="pendingScreen" class="screen hidden">
+  <div class="card-auth enter">
+    <img class="logo-auth" src="assets/logo.png" alt="M98M">
+    <h1>You're in the <span class="goldtext">approval queue</span></h1>
+    <div class="tag" id="pendingMsg">Management has been notified. You'll get access the moment they approve you — check back shortly.</div>
+    <div class="tl-row" style="justify-content:center;margin-top:16px"><span class="pill role" id="pendingRole"></span></div>
+    <button class="btn-ghost" id="pendingRefresh" style="margin-top:20px">Check again</button>
+    <button class="btn-ghost" id="pendingSignout" style="margin-top:10px">Sign out</button>
+    <div class="auth-note" id="pendingEmail"></div>
+  </div>
+</div>
+
+<!-- ============ APP SHELL ============ -->
+<div id="appShell" class="shell hidden">
+  <aside class="side">
+    <div class="brand"><img src="assets/logo.png" alt="M98M"><div class="brand-text"><b>M98M LTD</b><span>E-commerce</span></div></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="foot" id="shiftFoot"></div>
+  </aside>
+  <header class="top">
+    <div class="acct" id="acctChip">—</div>
+    <div class="spacer"></div>
+    <span id="meetingChip"></span>
+    <button class="iconbtn" title="Notifications" id="bellBtn"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="dot hidden" id="bellDot">0</span></button>
+    <button class="iconbtn" title="Royal / Ivory" id="themeBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.5 4.5l2 2M17.5 17.5l2 2M19.5 4.5l-2 2M6.5 17.5l-2 2"/></svg></button>
+    <div class="avatar" id="avatar" title="Sign out">MU</div>
+  </header>
+  <div class="shiftline">
+    <div class="sl-meta" id="slMeta"><b>Shift</b></div>
+    <div class="sl-track"><div class="sl-bar"></div><div class="sl-fill" id="slFill" style="width:0%"></div></div>
+    <div class="streak"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2c1 4-3 5-3 9a5 5 0 0 0 10 0c0-2-1-3.5-2-5-1.5 2-2.5 2-2.5 0 0-1.5-1-3-2.5-4z"/></svg><span class="streak-label" id="streakLabel">Welcome</span></div>
+  </div>
+  <main class="main" id="mainView"></main>
+</div>
+
+<div class="toast" id="toast"><span id="toastMsg">Saved</span></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+/* ============ M98M Portal — client. Knows ONLY the backend URL (RL-9). ============ */
+var BACKEND = "https://script.google.com/macros/s/AKfycbx1_6VpJUMVEJeifbwq79DIhNwhZgzHmPxRuC2oj6my3b1Kl2mpowSGjNMAM8D3bLP1wg/exec";
+var STATE = { idToken:null, session:null, user:null, config:null, counts:{} };
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
+function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
+function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
+
+/* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ----
+   Google spends roughly 2.5 seconds loading the backend before any of our code runs, and that
+   toll is per REQUEST, not per action. A screen that asks for five things used to pay it five
+   times. So calls made in the same moment are gathered and sent as one, transparently: every
+   caller still gets its own promise and its own error. Nothing in the views had to change. */
+var API_BATCH_WINDOW_MS = 20;
+var API_BATCH_MAX = 10;
+var apiQueue = [];
+var apiTimer = null;
+
+/* A spinner that never explains itself is the difference between "slow" and "broken". Google's
+   backend answers in about 3 seconds on a good run and has been measured at 13 on a bad one, so
+   when anything has been outstanding past SLOW_AFTER_MS we say so plainly instead of letting the
+   screen look dead. */
+var SLOW_AFTER_MS = 6000;
+var apiInflight = 0, apiSlowTimer = null;
+function slowBanner(on){
+  var el = $('slowNote');
+  if(!el){
+    if(!on) return;
+    el = document.createElement('div');
+    el.id = 'slowNote';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;'+
+      'background:rgba(20,24,34,.96);border:1px solid rgba(212,175,55,.45);color:#e8e4dc;'+
+      'padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;box-shadow:0 8px 26px rgba(0,0,0,.5)';
+    document.body.appendChild(el);
+  }
+  el.textContent = 'Still loading — the Google server is being slow right now.';
+  el.style.display = on ? 'block' : 'none';
+}
+function apiStarted(){
+  apiInflight++;
+  if(!apiSlowTimer){ apiSlowTimer = setTimeout(function(){ slowBanner(true); }, SLOW_AFTER_MS); }
+}
+function apiFinished(){
+  apiInflight = Math.max(0, apiInflight - 1);
+  if(apiInflight === 0){ clearTimeout(apiSlowTimer); apiSlowTimer = null; slowBanner(false); }
+}
+
+function apiSend(action, payload){
+  var body = JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} });
+  apiStarted();
+  return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ apiFinished(); return j; }, function(e){ apiFinished(); throw e; });
+}
+
+function apiFlush(){
+  var batch = apiQueue; apiQueue = []; apiTimer = null;
+  if(!batch.length) return;
+  if(batch.length === 1){
+    var one = batch[0];
+    apiSend(one.action, one.payload)
+      .then(function(j){ if(!j.ok){ one.reject(new Error(j.error||'request failed')); } else { one.resolve(j.data); } })
+      .catch(function(e){ one.reject(e); });
+    return;
+  }
+  apiSend('batch', { calls: batch.map(function(c){ return { action:c.action, payload:c.payload }; }) })
+    .then(function(j){
+      var results = j && j.ok && j.data && j.data.results;
+      // If batching itself is unavailable for any reason, fall back to one request per call so
+      // the portal degrades to its old speed instead of breaking. Individual call failures are
+      // NOT retried here — those are real answers and belong to their own caller.
+      if(!results || results.length !== batch.length){ apiRetrySingly(batch); return; }
+      batch.forEach(function(c, i){
+        var r = results[i];
+        if(!r){ c.reject(new Error('request failed')); }
+        else if(!r.ok){ c.reject(new Error(r.error||'request failed')); }
+        else { c.resolve(r.data); }
+      });
+    })
+    .catch(function(){ apiRetrySingly(batch); });
+}
+
+function apiRetrySingly(batch){
+  batch.forEach(function(c){
+    apiSend(c.action, c.payload)
+      .then(function(j){ if(!j.ok){ c.reject(new Error(j.error||'request failed')); } else { c.resolve(j.data); } })
+      .catch(function(e){ c.reject(e); });
+  });
+}
+
+/* ---- Engine-first transport (V2 Phase B) --------------------------------------------------
+   When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
+   reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
+   Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink'];
+/* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
+   failure while the Engine finishes the change — the read path's resilience trick becomes a
+   lie on a mutation. The Engine is the ONLY server that knows these actions. */
+var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking'];
+function engineApi(action, payload){
+  var url = STATE.config && STATE.config.engine_url;
+  var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
+  var ac = new AbortController();
+  var t = setTimeout(function(){ ac.abort(); }, isWrite ? 15000 : 2500);
+  return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
+    .then(function(r){ return r.json(); })
+    .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; })
+    .catch(function(e){
+      clearTimeout(t);
+      if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
+      if(isWrite){
+        throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
+      }
+      return apiSend(action, payload).then(function(j){
+        if(!j.ok){ throw new Error(j.error||'request failed'); }
+        return j.data;
+      });
+    });
+}
+
+function api(action, payload){
+  if((STATE.idToken || STATE.session) && STATE.config && STATE.config.engine_url && ENGINE_ACTIONS.indexOf(action)>=0){
+    return engineApi(action, payload);
+  }
+  // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
+  if((!STATE.idToken && !STATE.session) || action === 'batch'){
+    return apiSend(action, payload).then(function(j){
+      if(!j.ok){ throw new Error(j.error||'request failed'); }
+      return j.data;
+    });
+  }
+  return new Promise(function(resolve, reject){
+    apiQueue.push({ action:action, payload:payload||{}, resolve:resolve, reject:reject });
+    if(apiQueue.length >= API_BATCH_MAX){ clearTimeout(apiTimer); apiFlush(); return; }
+    if(!apiTimer){ apiTimer = setTimeout(apiFlush, API_BATCH_WINDOW_MS); }
+  });
+}
+
+/* ---- last-answer cache: paint now, refresh underneath -----------------------------------
+   The 2.5s toll above is Google's, not ours, and we cannot remove it. What we can remove is the
+   STARING at a spinner: a screen you have opened before repaints instantly from the last answer
+   it received, then quietly replaces it when the fresh one lands. Read-only screens only —
+   never anything that decides, approves or writes. The key carries the signed-in email, so one
+   person's numbers can never surface under another's login, and profit stripping still happens
+   server-side per role before anything is ever stored here. */
+var CACHE_TTL_MS = 24*60*60*1000;
+
+/* Build identity. The team kept reviewing week-old bundles: GitHub Pages + browser caches hold
+   index.html for hours, so a fix could be live yet invisible on every staff machine. build.py
+   stamps this constant and writes the same stamp to version.txt; the poller below notices when
+   the deployed stamp moves ahead of the running page and reloads once (sessions live in
+   localStorage now, so a reload lands straight back on the same screen, signed in). */
+var BUILD = '__BUILD_STAMP__';
+function versionWatch(){
+  function safeReload(){
+    var a = document.activeElement;
+    var typing = a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox' && a.value));
+    if(typing){ /* never eat a half-written note — go when the tab is next hidden */
+      document.addEventListener('visibilitychange', function once(){
+        document.removeEventListener('visibilitychange', once); location.reload();
+      });
+      return;
+    }
+    location.reload();
+  }
+  function check(){
+    fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ return r.ok ? r.text() : ''; })
+      .then(function(v){
+        v = (v || '').trim();
+        if(!v || v.length > 40 || v === BUILD) return;
+        var seen = null;
+        try{ seen = sessionStorage.getItem('m98m:reloadedFor'); }catch(e){}
+        if(seen === v) return; /* already reloaded for this stamp and still old = CDN lag, not a loop */
+        try{ sessionStorage.setItem('m98m:reloadedFor', v); }catch(e){}
+        safeReload();
+      }).catch(function(){});
+  }
+  setInterval(check, 4*60*1000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(); });
+  setTimeout(check, 15*1000);
+}
+versionWatch();
+
+function cacheKey(action, payload){
+  var who = (STATE.user && STATE.user.email) || decodeJwt(STATE.idToken||'').email || '?';
+  /* BUILD in the key: an upgraded page must never repaint answer shapes cached by an old one */
+  return 'm98m:c:' + BUILD + ':' + who + ':' + action + ':' + JSON.stringify(payload||{});
+}
+/* boot-time sweep: drop answer caches from other builds (old-format keys carry the email '@') */
+(function cacheSweepOldBuilds(){
+  try{
+    var kill = [];
+    for(var i = 0; i < localStorage.length; i++){
+      var k = localStorage.key(i);
+      if(!k) continue;
+      if(k.indexOf('m98m:c:') === 0 && k.indexOf('m98m:c:' + BUILD + ':') !== 0) kill.push(k);
+      else if(k.indexOf('m98m:') === 0 && k.indexOf('@') !== -1) kill.push(k);
+    }
+    kill.forEach(function(k){ localStorage.removeItem(k); });
+  }catch(e){}
+})();
+function cacheRead(action, payload){
+  try{
+    var raw = localStorage.getItem(cacheKey(action,payload));
+    if(!raw) return null;
+    var o = JSON.parse(raw);
+    if(!o || (Date.now() - o.t) > CACHE_TTL_MS) return null;
+    return o.d;
+  }catch(e){ return null; }
+}
+function cacheWrite(action, payload, data){
+  try{ localStorage.setItem(cacheKey(action,payload), JSON.stringify({ t:Date.now(), d:data })); }
+  catch(e){ /* quota or private mode — caching is an optimisation, never a requirement */ }
+}
+function cacheClearAll(){
+  try{
+    var kill = [];
+    for(var i=0;i<localStorage.length;i++){ var k = localStorage.key(i); if(k && k.indexOf('m98m:')===0) kill.push(k); }
+    kill.forEach(function(k){ localStorage.removeItem(k); });
+  }catch(e){}
+}
+
+/* The one-line version for view loaders: paint(d, isStale) runs at once from the last answer
+   when there is one, then again with the fresh one. Returns { painted, done } — `painted` says
+   whether something is already on screen (the caller skips its spinner), `done` is the fetch
+   promise, which only rejects when there was nothing cached to fall back on. */
+function cachedCall(action, payload, paint){
+  var had = cacheRead(action, payload);
+  var painted = false;
+  if(had != null){ try{ paint(had, true); painted = true; }catch(e){ painted = false; } }
+  var p = api(action, payload).then(function(d){
+    cacheWrite(action, payload, d);
+    paint(d, false);
+    return d;
+  });
+  if(painted){ p = p.catch(function(){ toast('Showing the last answer — could not refresh just now.'); return had; }); }
+  return { painted: painted, done: p };
+}
+
+/* onData(data, isStale) may be called twice: once from cache, once with the truth. */
+function apiCached(action, payload, onData){
+  var had = cacheRead(action, payload);
+  if(had != null){ try{ onData(had, true); }catch(e){} }
+  return api(action, payload).then(function(fresh){
+    cacheWrite(action, payload, fresh);
+    onData(fresh, false);
+    return fresh;
+  }).catch(function(e){
+    // A cached screen stays usable when the network does not: show the error only if we have
+    // nothing at all to show.
+    if(had == null) throw e;
+    toast('Showing the last figures — could not reach the server just now.');
+    return had;
+  });
+}
+
+/* ---- quick date presets (V2 req 32) -------------------------------------------------------
+   One control for every date filter in the portal: the native input stays (arbitrary dates keep
+   working), and a ▾ beside it opens presets computed in Pakistan time — pick one and the view's
+   own change handler fires as if the date was typed. tz labels the calendar the screen lives on
+   (T-1: performance = Pakistan, business = UK). */
+function pktDate(daysAgo){
+  return new Date(Date.now() - (daysAgo||0)*86400000).toLocaleDateString('en-CA', { timeZone:'Asia/Karachi' });
+}
+function pktMonth(monthsAgo){
+  var d = new Date(); d = new Date(d.getFullYear(), d.getMonth() - (monthsAgo||0), 15);
+  return d.toLocaleDateString('en-CA', { timeZone:'Asia/Karachi' }).slice(0,7);
+}
+function dpSet(el, v){ if(!el) return; el.value = v; el.dispatchEvent(new Event('change')); }
+function enhanceDate(el, opts){
+  if(!el || el._dp) return; el._dp = true;
+  opts = opts || {};
+  var kind = opts.kind || 'day';
+  var sets = kind === 'month'
+    ? [['This month', function(){ dpSet(el, pktMonth(0)); }], ['Last month', function(){ dpSet(el, pktMonth(1)); }]]
+    : [['Today', function(){ dpSet(el, pktDate(0)); }], ['Yesterday', function(){ dpSet(el, pktDate(1)); }],
+       ['−7 days', function(){ dpSet(el, pktDate(7)); }], ['−30 days', function(){ dpSet(el, pktDate(30)); }]];
+  dpAttach(el, sets, opts.tz);
+}
+function enhanceDateRange(fromEl, toEl, opts){
+  if(!fromEl || !toEl || fromEl._dp) return; fromEl._dp = true;
+  var both = function(a, b){ return function(){ dpSet(fromEl, a()); dpSet(toEl, b()); }; };
+  var sets = [
+    ['Today', both(function(){return pktDate(0);}, function(){return pktDate(0);})],
+    ['Last 7 days', both(function(){return pktDate(6);}, function(){return pktDate(0);})],
+    ['Last 30 days', both(function(){return pktDate(29);}, function(){return pktDate(0);})],
+    ['This month', both(function(){return pktMonth(0)+'-01';}, function(){return pktDate(0);})],
+  ];
+  dpAttach(toEl, sets, (opts||{}).tz);
+}
+function dpAttach(el, sets, tz){
+  var wrap = document.createElement('span');
+  wrap.className = 'dp-wrap';
+  el.parentNode.insertBefore(wrap, el.nextSibling);
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'dp-btn'; btn.textContent = '▾'; btn.title = 'Quick ranges';
+  wrap.appendChild(btn);
+  if(tz){
+    var lab = document.createElement('span');
+    lab.className = 'dp-tz'; lab.textContent = tz;
+    wrap.appendChild(lab);
+  }
+  var pop = document.createElement('span');
+  pop.className = 'dp-pop';
+  sets.forEach(function(s){
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = s[0];
+    b.onclick = function(e){ e.stopPropagation(); s[1](); pop.classList.remove('on'); };
+    pop.appendChild(b);
+  });
+  wrap.appendChild(pop);
+  btn.onclick = function(e){ e.stopPropagation(); pop.classList.toggle('on'); };
+  document.addEventListener('click', function(){ pop.classList.remove('on'); });
+}
+
+/* ---- Google Identity Services ---- */
+function initGsi(){
+  if(!window.google || !google.accounts || !STATE.config || !STATE.config.oauth_client_id){ return; }
+  google.accounts.id.initialize({ client_id: STATE.config.oauth_client_id, callback: onCredential, auto_select:true, use_fedcm_for_prompt:true });
+  google.accounts.id.renderButton($('gbtn'), { theme:'filled_black', size:'large', shape:'pill', text:'signin_with', width:280 });
+}
+function trySilentSignIn(){
+  try {
+    $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Signing you back in…';
+    google.accounts.id.prompt(function(n){
+      if (n && (n.isNotDisplayed && n.isNotDisplayed() || n.isSkippedMoment && n.isSkippedMoment())) {
+        $('loginStatus').textContent='';
+      }
+    });
+  } catch(e) { $('loginStatus').textContent=''; }
+}
+
+function onCredential(resp){
+  var wasIn = !!(STATE.user && STATE.user.status === 'approved');
+  STATE.idToken = resp.credential;
+  sessSave(resp.credential);
+  try { localStorage.setItem('m98m:knows', '1'); } catch(e) {}
+  if(wasIn){ hideReauth(); toast('Session refreshed — carry on.'); return; }
+  $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Checking your access…';
+  api('whoami').then(routeUser).catch(function(e){
+    $('loginStatus').className='auth-status err';
+    $('loginStatus').textContent = (e.message==='auth') ? 'Sign-in could not be verified. Please try again.' : e.message;
+  });
+}
+
+/* ---- session freshness (the Zaid lesson: a soured token scatters auth errors across every
+   screen while caches keep painting — one banner BEFORE expiry beats twenty mysteries) ---- */
+function tokenMsLeft(){
+  var j = decodeJwt(STATE.idToken || '');
+  return j && j.exp ? j.exp * 1000 - Date.now() : 0;
+}
+function showReauth(){
+  if($('reauthBar')){ return; }
+  var d = document.createElement('div');
+  d.id = 'reauthBar';
+  d.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:9999;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--gold-line-hi);border-radius:14px;padding:14px 16px;box-shadow:0 18px 50px rgba(0,0,0,.5);max-width:320px';
+  d.innerHTML = '<div style="font-weight:800;font-size:13px">Your session is about to expire</div>' +
+    '<div style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:4px 0 10px">One click keeps everything loading — your screen stays exactly where it is.</div>' +
+    '<div id="reauthBtn"></div>';
+  document.body.appendChild(d);
+  try{ google.accounts.id.renderButton($('reauthBtn'), { theme:'filled_black', size:'medium', shape:'pill', text:'signin_with', width:240 }); }
+  catch(e){ $('reauthBtn').innerHTML = '<button class="btn-gold" onclick="location.reload()">Reload to sign in</button>'; }
+}
+function hideReauth(){ var b = $('reauthBar'); if(b){ b.remove(); } }
+setInterval(function(){
+  if(!STATE.user || STATE.user.status !== 'approved' || !STATE.idToken || STATE.session){ return; }
+  var left = tokenMsLeft();
+  if(left > 0 && left < 5 * 60000){ showReauth(); }
+  if(left <= 0){ showReauth(); }
+}, 60000);
+function decodeJwt(t){ try{ return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return {}; } }
+
+function routeUser(user){
+  STATE.user = user;
+  if(!user || user.status==='none' || user.needsRegister){ beginRegister(); return; }
+  if(user.status==='pending'){ showPending(user); return; }
+  if(user.status==='approved'){ enterApp(user); mintPortalSession(); return; }
+  if(user.status==='disabled'){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='This account has been deactivated. Contact Management.'; return; }
+  beginRegister();
+}
+
+/* ---- Registration ---- */
+function beginRegister(){
+  var jwt = decodeJwt(STATE.idToken);
+  $('regName').textContent = (jwt.given_name || jwt.name || 'there');
+  $('regEmail').textContent = jwt.email || '';
+  var sel=$('regRole'); sel.innerHTML='';
+  (STATE.config.roles||['Item Lister']).forEach(function(r){ var o=document.createElement('option'); o.value=r; o.textContent=r; sel.appendChild(o); });
+  var pre = (STATE.user && STATE.user.prefillRole) || STATE.config.prefillRole;
+  if(pre){ sel.value=pre; }
+  show('registerScreen');
+}
+$('regSubmit').onclick=function(){
+  $('regStatus').className='auth-status info'; $('regStatus').innerHTML='<div class="spinner"></div>Sending your request…';
+  api('register', { role:$('regRole').value, shift:$('regShift').value }).then(function(res){
+    STATE.user=res; showPending(res);
+  }).catch(function(e){ $('regStatus').className='auth-status err'; $('regStatus').textContent=e.message; });
+};
+
+/* ---- Pending ---- */
+function showPending(user){
+  $('pendingRole').textContent=(user.role||'role')+' · '+(user.shift||'shift TBD');
+  $('pendingEmail').textContent=user.email||'';
+  show('pendingScreen');
+}
+$('pendingRefresh').onclick=function(){ api('whoami').then(routeUser).catch(function(){}); };
+$('pendingSignout').onclick=signOut;
+
+/* ---- App: view registry. Each view module registers VIEWS[key] = {label,icon,roles,order,render,init} ---- */
+var VIEWS = {};
+var VIEW_CSS = [];
+
+VIEWS.home = {
+  label:'Home', order:0, roles:'*',
+  icon:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  render:function(){
+    var u=STATE.user;
+    return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
+     '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
+     '<div id="hmBrief"></div>'+
+     '<div class="grid g-2">'+
+       '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
+         '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
+         '<div class="tl-row"><span class="k">Accounts</span><b>'+esc(u.accounts||'—')+'</b></div>'+
+         '<div class="tl-row"><span class="k">Role</span><b>'+esc(u.role)+'</b></div>'+
+       '</div></div>'+
+       '<div class="card ideas enter d3"><div class="hd">Any new idea generation ✨</div><div class="bd">'+
+         '<div style="font-size:12.5px;color:var(--text-2);font-weight:600">Your idea goes straight to Management. Implemented ideas get a shoutout.</div>'+
+         '<textarea id="ideaBox" placeholder="Type your idea…"></textarea>'+
+         '<button class="btn-gold" style="margin-top:10px" id="ideaBtn">Submit idea</button>'+
+       '</div></div>'+
+     '</div>'+
+     '<div class="card enter d3" style="margin-top:16px"><div class="hd">Today’s agenda <span class="hint">from Management</span></div>'+
+       '<div class="bd" id="agendaBox" style="color:var(--text-3);font-weight:600">Loading…</div></div>';
+  },
+  init:function(){
+    /* Management's briefing — the three numbers that decide whether the morning is calm, each a
+       click from its full screen. Staff roles keep the plain page; every feed fails into honest
+       words, never a spinner that stays. */
+    (function(){
+      var u=STATE.user||{};
+      var mgmt = u.role==='Management' || u.role==='Ops Head' || u.isSuper;
+      var box=$('hmBrief');
+      if(!mgmt || !box){ return; }
+      var tile=function(label,value,sub,view,tone){
+        return '<div class="card" data-hm-nav="'+view+'" style="cursor:pointer;flex:1;min-width:150px"><div class="bd" style="padding:14px 16px">'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">'+label+'</div>'+
+          '<div style="font-size:23px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums;'+(tone?'color:var(--'+tone+')':'')+'">'+value+'</div>'+
+          (sub?'<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:3px">'+sub+'</div>':'')+
+        '</div></div>';
+      };
+      var slots={money:'',late:'',cs:''};
+      var paint=function(){
+        box.innerHTML='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'+slots.money+slots.late+slots.cs+'</div>';
+        var tiles=box.querySelectorAll('[data-hm-nav]');
+        for(var i=0;i<tiles.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles[i]); }
+      };
+      var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
+      var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
+      api('dailyReport',{}).then(function(d){
+        var y=ukDay(1), t={sold:0,profit:0,ads:0};
+        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.profit+=Number(r.profit)||0; t.ads+=Number(r.ads)||0; } });
+        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.profit)+' profit · '+gbp(t.ads)+' ads', 'dailyReport', 'gold-a'); paint();
+      }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
+      api('dispatchLive',{}).then(function(d){
+        var n=Number(d&&d.late_count)||0;
+        slots.late=tile('Late right now', String(n), n?gbp(d.late_value)+' of orders past eBay\u2019s deadline':'nothing past its deadline', 'dispatch', n?'bad':'ok'); paint();
+      }).catch(function(){ slots.late=tile('Late right now','—','the dispatch feed did not answer','dispatch',''); paint(); });
+      api('csDesk',{}).then(function(d){
+        var ours=0; ((d&&d.open)||[]).forEach(function(c){ if(c.our_move){ ours++; } });
+        slots.cs=tile('CS needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
+      }).catch(function(){ slots.cs=tile('CS needs our reply','—','the CS feed did not answer','csDesk',''); paint(); });
+      paint();
+    })();
+    $('ideaBtn').onclick=function(){
+      var v=$('ideaBox').value.trim(); if(!v){ return; }
+      api('submitIdea',{idea:v}).then(function(){ $('ideaBox').value=''; toast('Idea sent to Management — thank you!'); })
+        .catch(function(e){ toast('Could not send: '+e.message); });
+    };
+    var hc = cachedCall('todayAgenda', {}, function(a){
+      var b=$('agendaBox'); if(!b){ return; }
+      var items=(a&&a.items)||[];
+      if(!items.length){ b.textContent='No agenda posted for today yet.'; return; }
+      b.innerHTML=items.map(function(x){ return '<div class="tl-row">'+esc(typeof x==='string'?x:(x.text||''))+'</div>'; }).join('');
+    });
+    hc.done.catch(function(){ if(!hc.painted && $('agendaBox')){ $('agendaBox').textContent='No agenda posted for today yet.'; } });
+  }
+};
+
+/* === PHASE 3 VIEW MODULES SPLICED HERE === */
+
+/* A person's screens = their role's defaults PLUS the modules Management granted them on the
+   Access desk; a '-key' module takes a default away. The server rechecks every action, so this
+   gate is presentation — but the desk's changes take effect on the next sign-in with no deploy. */
+function canSee(v){
+  var mods=(STATE.user&&STATE.user.modules)||[];
+  if(mods.indexOf('-'+v.key)>=0) return false;
+  if(!v.roles||v.roles==='*') return true;
+  return v.roles.indexOf(STATE.user.role)>=0 || mods.indexOf(v.key)>=0;
+}
+function viewList(){
+  return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
+    .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });
+}
+function ordOf(v){ return typeof v.order==='number' ? v.order : 99; }   /* order 0 is Home, not "missing" */
+function enterApp(user){
+  var initials=(user.name||'M U').split(' ').map(function(w){return w[0]||'';}).join('').slice(0,2).toUpperCase();
+  $('avatar').textContent=initials;
+  $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
+  $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
+  $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
+  $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
+    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>';
+  if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
+  /* Management lands on the live Business overview, not the generic home — the screen that
+     answers "how is the business right now" should be the first thing the owner sees. */
+  var landing=(VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home';
+  var nav=$('nav'); nav.innerHTML='';
+  /* Night list: "make a main dashboard of every department... i don't want tools to be treated
+     as separate tools". The nav is grouped BY DEPARTMENT, each group led by that department's
+     main dashboard; a role only sees the groups it can open, so nothing is hidden — the
+     duplicates are simply no longer scattered as one flat pile. */
+  var NAV_DEPTS = [
+    { name:'Management',  keys:['overview','kpis','dailyReport','accountReport','accountHealth','alerts','reports','reportsGrid','perf','signals','approvals','staffAdmin','rota','team','meetings','agenda'] },
+    { name:'Advertising', keys:['adsCentre','campaignWatch','traffic','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Orders',      keys:['ordersBoard','orders','dispatch','recheck','returns','wrongOrders'] },
+    { name:'Listings',    keys:['activeListings','listingDecisions','listing','hunting','huntQueue','pipeline','calculator'] },
+    { name:'CS',          keys:['csDesk','cs','inbox'] },
+    { name:'My desk',     keys:['home','dashboard','tasks','rules','tools'] }
+  ];
+  var placed = {};
+  function navLink(v){
+    var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
+    a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
+    a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
+    a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
+    return a;
+  }
+  var visible = viewList();
+  var byKey = {}; visible.forEach(function(v){ byKey[v.key] = v; });
+  NAV_DEPTS.forEach(function(dept){
+    var members = dept.keys.filter(function(k){ return byKey[k]; });
+    if(!members.length) return;
+    var h = document.createElement('div');
+    h.className = 'nav-dept';
+    h.textContent = dept.name;
+    nav.appendChild(h);
+    members.forEach(function(k){ placed[k]=1; nav.appendChild(navLink(byKey[k])); });
+  });
+  var rest = visible.filter(function(v){ return !placed[v.key]; });
+  if(rest.length){
+    var h2 = document.createElement('div'); h2.className='nav-dept'; h2.textContent='More';
+    nav.appendChild(h2);
+    rest.forEach(function(v){ nav.appendChild(navLink(v)); });
+  }
+  /* A #view hash wins over the default landing: a reload lands where you were, and a link
+     opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
+  var fromHash = (location.hash || '').replace(/^#/, '');
+  if (fromHash && VIEWS[fromHash] && canSee(VIEWS[fromHash])) { landing = fromHash; }
+  show('appShell'); location.hash = landing; renderView(landing);
+  var navTo = function(key){
+    var links = document.querySelectorAll('.nav a');
+    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
+    renderView(key);
+  };
+  window.addEventListener('hashchange', function(){
+    var k = (location.hash || '').replace(/^#/, '');
+    if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
+  });
+  if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
+  warmUp();
+}
+
+/* The backend charges its ~3 seconds per REQUEST, not per question asked — a request that
+   answers eight things costs about the same as one that answers one. So at sign-in we ask for
+   the heavy screens up front, in a single batched request, and put the answers in the cache.
+   By the time anyone clicks Business overview or Pipeline, the figures are already here and the
+   screen opens at once instead of starting a three-second wait.
+
+   Only screens this person is allowed to see are asked for — viewList() is the same gate the
+   navigation uses — so the warm-up can never fetch something the role could not open, and each
+   answer still passes the server's own role check on the way out. Failures are ignored on
+   purpose: a warm-up is a courtesy, and every screen still loads normally on its own. */
+function warmUp(){
+  if(!STATE.idToken) return;
+  try{
+    viewList().forEach(function(v){
+      var view = VIEWS[v.key];
+      if(!view || typeof view.prefetch !== 'function') return;
+      try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+    });
+  }catch(e){}
+}
+function renderView(key){
+  var v=VIEWS[key]; var m=$('mainView');
+  if(!v || !canSee(v)){
+    m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
+    return;
+  }
+  try{ m.innerHTML=v.render(); }
+  catch(e){ m.innerHTML='<div class="card enter d1"><div class="bd">This section could not be drawn. Nothing was changed.</div></div>'; return; }
+  if(typeof v.init==='function'){ try{ v.init(); }catch(e){} }
+}
+/** Nav badges: view modules set STATE.counts[key] and call refreshBadges(). */
+function refreshBadges(){
+  var els=document.querySelectorAll('.nav .badge[data-badge]');
+  for(var i=0;i<els.length;i++){
+    var n=STATE.counts[els[i].getAttribute('data-badge')]||0;
+    els[i].textContent=n; els[i].classList.toggle('hidden', !n);
+  }
+  var bd=$('bellDot'); if(bd){ var u=STATE.counts.notifications||0; bd.textContent=u; bd.classList.toggle('hidden', !u); }
+}
+
+function greeting(){ var h=new Date().getHours(); return h<12?'Good morning':h<17?'Good afternoon':'Good evening'; }
+function dateStr(){ return new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'}); }
+/** Everything the team sees is PKT (the team's "PST"), whatever timezone the device is in. */
+function fmtPkt(iso, withDate){
+  if(!iso) return '';
+  var d=new Date(iso); if(isNaN(d.getTime())) return String(iso);
+  var opts=withDate?{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}:{hour:'2-digit',minute:'2-digit'};
+  opts.timeZone='Asia/Karachi'; opts.hour12=true;
+  return d.toLocaleString('en-GB',opts);
+}
+function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
+$('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
+$('avatar').onclick=signOut;
+function signOut(){ try{ if(STATE.session){ api('sessionEnd', { session: STATE.session }).catch(function(){}); } }catch(e){} try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); psessClear(); STATE.idToken=null; STATE.session=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+
+/* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
+/* ---- the session survives a reload (RL-11 still holds: the token is Google's own, it is
+   checked by BOTH servers on every call, and it is kept in sessionStorage — this tab only,
+   gone when the tab closes, never written to disk-backed localStorage). Reloading a page is
+   not signing out, and staff should never be thrown back to the login screen mid-shift. ---- */
+var SESS_KEY = 'm98m:sess';
+/* ---- the PORTAL session (night list: "one refresh and it goes to login") ----
+   Minted by the Engine at sign-in, held 7 days, stored in localStorage so EVERY tab and every
+   reload boots straight into the app. Google's token becomes a sign-in ceremony, not a leash:
+   the Engine checks the session against its own table on every call, and the role still comes
+   from the users table server-side — storing identity here only paints the shell faster. */
+var PSESS_KEY = 'm98m:psess', PIDENT_KEY = 'm98m:pident';
+function psessSave(tok, user){ try{ localStorage.setItem(PSESS_KEY, tok); localStorage.setItem(PIDENT_KEY, JSON.stringify(user||{})); }catch(e){} }
+function psessClear(){ try{ localStorage.removeItem(PSESS_KEY); localStorage.removeItem(PIDENT_KEY); }catch(e){} }
+function psessLoad(){
+  try{
+    var t = localStorage.getItem(PSESS_KEY);
+    if(!t || !/^[0-9a-f]{64}$/.test(t)){ return null; }
+    var u = JSON.parse(localStorage.getItem(PIDENT_KEY) || 'null');
+    return (u && u.email) ? { token:t, user:u } : null;
+  }catch(e){ return null; }
+}
+function mintPortalSession(){
+  if(STATE.session || !(STATE.config && STATE.config.engine_url)){ return; }
+  api('sessionMint').then(function(d){
+    if(d && d.session){ STATE.session = d.session; psessSave(d.session, d.user || STATE.user); }
+  }).catch(function(){});
+}
+function sessSave(tok){ try{ sessionStorage.setItem(SESS_KEY, tok); }catch(e){} }
+function sessClear(){ try{ sessionStorage.removeItem(SESS_KEY); }catch(e){} }
+function sessLoad(){
+  try{
+    var t = sessionStorage.getItem(SESS_KEY);
+    if(!t){ return null; }
+    var j = decodeJwt(t);
+    if(!j || !j.exp || j.exp*1000 - Date.now() < 60000){ sessClear(); return null; }  // expired or about to
+    return t;
+  }catch(e){ return null; }
+}
+function boot(){
+  api('getPublicConfig').then(function(cfg){
+    STATE.config=cfg;
+    if(!cfg.oauth_client_id){ $('loginStatus').className='auth-status info'; $('loginStatus').textContent='Sign-in is being switched on by setup — almost there.'; return; }
+    initGsi();
+    /* Portal session first: instant app on every reload and every new tab. The Engine re-checks
+       it in the background; only a real refusal sends anyone back to the sign-in screen. */
+    var ps = psessLoad();
+    if(ps){
+      STATE.session = ps.token;
+      STATE.user = ps.user;
+      enterApp(ps.user);
+      api('sessionHello').then(function(d){
+        if(d && d.user){ STATE.user = d.user; psessSave(ps.token, d.user); }
+      }).catch(function(e){
+        if(e && e.message === 'auth'){
+          psessClear(); STATE.session = null; STATE.user = null;
+          show('loginScreen'); trySilentSignIn();
+        }
+      });
+      /* quietly fetch a Google credential too — the sheet backend still likes one while its
+         session support rolls out; nothing here touches the visible screen */
+      try{ google.accounts.id.prompt(); }catch(e){}
+      return;
+    }
+    var kept = sessLoad();
+    if(kept){
+      STATE.idToken = kept;
+      $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Welcome back…';
+      api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; trySilentSignIn(); });
+    } else if (localStorage.getItem('m98m:knows')) {
+      /* The reload-logout complaint: sessionStorage dies with the tab and Google's token dies in
+         an hour, but the GOOGLE SESSION in this browser is still alive. One silent prompt
+         re-mints the credential without the user touching anything; only if Google itself says
+         no do they see the sign-in button. */
+      trySilentSignIn();
+    }
+  }).catch(function(e){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.'; });
+}
+window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };
+</script>
+</body>
+</html>

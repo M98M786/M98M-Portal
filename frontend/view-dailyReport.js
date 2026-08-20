@@ -34,6 +34,20 @@
     var box = $('drBody');
     if (!box) { return; }
     var rows = (d && d.rows) || [];
+    /* Today rides the live overlay. The books only materialise at the nightly rollup, so the
+       raw rows for today are ads-only zeros — noise dressed as data. Swap them for the Engine's
+       live pulse: real orders, real paid cost, intraday ads. Profit stays "—" until the fees
+       land — OE is only known for fee-landed orders, and netting a partial OE against a full
+       day's cost would print a fake loss. */
+    var liveDay = (d && d.today) || '';
+    var liveRows = (d && d.today_live) || [];
+    if (liveDay && liveRows.length) {
+      rows = rows.filter(function (r) { return r.date !== liveDay; });
+      liveRows.forEach(function (l) {
+        rows.push({ account: l.account, date: liveDay, sold: l.sold, oe: l.oe_known,
+          cost: l.cost, ads: l.ads, profit: null, _live: true });
+      });
+    }
     /* Night review 2 ("daily report is all wrong, with no sense"): a dormant account painted a
        £0.00 row under every single day — noise dressed as data. An account with literally
        nothing across the whole window leaves the table; the day it earns a penny it is back. */
@@ -52,6 +66,7 @@
       if (!byDay[r.date]) { byDay[r.date] = []; order.push(r.date); }
       byDay[r.date].push(r);
     });
+    order.sort().reverse(); /* live rows append out of order — ISO dates sort lexically */
 
     /* Weekly/monthly KPIs (§9-C) from the same rows — UK dates, so "this week" is the last 7
      * UK days vs the 7 before, and "month" is month-to-date vs the whole previous month. */
@@ -68,7 +83,9 @@
     }
     var kpiHtml = '';
     if (order.length) {
-      var newest = order[0];
+      /* KPI tiles compare CLOSED books only — anchoring "7 days" on a half-finished today
+         would grade a full prior week against six days and a stub */
+      var newest = (order[0] === liveDay && order.length > 1) ? order[1] : order[0];
       var w1 = sumRange(dShift(newest, -6), newest);
       var w0 = sumRange(dShift(newest, -13), dShift(newest, -7));
       var mStart = newest.slice(0, 8) + '01';
@@ -98,19 +115,22 @@
       '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th><th style="text-align:right">Ads</th><th style="text-align:right">Profit</th></tr></thead><tbody>';
     order.slice(0, 31).forEach(function (dte) {
       var list = byDay[dte];
+      var isLive = dte === liveDay && list.some(function (r) { return r._live; });
       var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
       list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0; t.ads += Number(r.ads) || 0; t.profit += Number(r.profit) || 0; });
-      h += '<tr class="dr-day"><td>' + esc(dte) + '</td>' +
+      h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + '</td>' +
         '<td class="dr-num">' + drGBP(t.sold) + '</td><td class="dr-num">' + drGBP(t.oe) + '</td>' +
         '<td class="dr-num">' + drGBP(t.cost) + '</td>' +
         '<td class="dr-num">' + (t.ads ? drGBP(t.ads) : '—') + '</td>' +
-        '<td class="dr-num ' + (t.profit < 0 ? 'dr-neg' : 'dr-pos') + '">' + drGBP(t.profit) + '</td></tr>';
+        '<td class="dr-num ' + (t.profit < 0 ? 'dr-neg' : 'dr-pos') + '">' +
+          (isLive ? '<span title="profit books close at the nightly rollup, once every fee has landed" style="color:var(--text-3)">tonight</span>' : drGBP(t.profit)) + '</td></tr>';
       list.forEach(function (r) {
         h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + '</td>' +
           '<td class="dr-num">' + drGBP(r.sold) + '</td><td class="dr-num">' + drGBP(r.oe) + '</td>' +
           '<td class="dr-num">' + drGBP(r.cost) + '</td>' +
           '<td class="dr-num">' + (Number(r.ads) ? drGBP(r.ads) : '—') + '</td>' +
-          '<td class="dr-num ' + (Number(r.profit) < 0 ? 'dr-neg' : '') + '">' + drGBP(r.profit) + '</td></tr>';
+          '<td class="dr-num ' + (Number(r.profit) < 0 ? 'dr-neg' : '') + '">' +
+            (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.profit)) + '</td></tr>';
       });
     });
     h += '</tbody></table></div>';
