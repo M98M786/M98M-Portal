@@ -736,6 +736,21 @@ async function statusRefresh(env) {
     "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('statusRefresh', '', ?1, datetime('now'), '') " +
     "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now'), last_error = ''"
   ).bind(refreshed + ' refreshed, ' + rows.length + ' scanned').run();
+
+  /* Review 3, late-tracking ledger: an order that crosses 2 BUSINESS days with no dispatch is
+     marked PERMANENTLY (INSERT OR IGNORE — the mark survives even after the order finally
+     ships), so the Item risk board can count how often each listing does this. History cannot
+     be reconstructed backwards (only current status is stored), so counting starts 21 Aug. */
+  const twoBiz = (() => {
+    let d = new Date(); let left = 2;
+    while (left > 0) { d = new Date(d.getTime() - 86400000); const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) left--; }
+    return d.toISOString();
+  })();
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO late_marks (order_id, account, item_id, created_at, marked_at) ' +
+    "SELECT order_id, account, item_id, created_at, datetime('now') FROM orders " +
+    "WHERE status IN ('NOT_STARTED', 'IN_PROGRESS') AND created_at <= ?1"
+  ).bind(twoBiz).run();
 }
 
 async function orderSync(env) {
@@ -1395,6 +1410,42 @@ async function csSync(env) {
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
   });
+
+  /* Review 3: management decision bells. An item past 5 returns (or 5 INRs) ACROSS ALL
+     ACCOUNTS — duplicated listings folded by title — or past 10 late-tracking marks, files
+     ONE letter per 5-wide tier (5, 10, 15…): alert_log's (recipient, ref) dedupe is checked
+     FIRST so the mail queue never repeats a tier. */
+  try {
+    const agg = async (sql) => (await env.DB.prepare(sql).all()).results || [];
+    const notifyOnce = async (msg, ref) => {
+      const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE to_addr = ?1 AND ref = ?2')
+        .bind('management', ref).first();
+      if (!seen) await queueNotify(env, 'management', 'Item decision needed', msg, ref);
+    };
+    const caseAgg = await agg(
+      "SELECT COALESCE(NULLIF(TRIM(i.title), ''), c.item_id) AS k, c.kind, COUNT(*) AS n, " +
+      "COUNT(DISTINCT c.item_id) AS ids, COUNT(DISTINCT c.account) AS accts " +
+      "FROM cases c LEFT JOIN items_api i ON i.item_id = c.item_id " +
+      "WHERE c.kind IN ('RETURN', 'INR') GROUP BY k, c.kind HAVING COUNT(*) > 5");
+    for (const r of caseAgg) {
+      const tier = Math.floor(Number(r.n) / 5) * 5;
+      const word = r.kind === 'RETURN' ? 'returns' : 'item-not-received cases';
+      await notifyOnce('🔴 DECISION NEEDED · "' + String(r.k).slice(0, 90) + '" has ' + r.n + ' ' + word +
+        ' across ' + r.accts + ' account(s)' + (Number(r.ids) > 1 ? ' (duplicated — ' + r.ids + ' listings)' : '') +
+        ' — review price, supplier or listing on the Item risk board.',
+        'engine:itemrisk:' + r.kind + ':' + String(r.k).slice(0, 60) + ':' + tier);
+    }
+    const lateAgg = await agg(
+      "SELECT COALESCE(NULLIF(TRIM(i.title), ''), lm.item_id) AS k, COUNT(DISTINCT lm.order_id) AS n, " +
+      "COUNT(DISTINCT lm.account) AS accts FROM late_marks lm LEFT JOIN items_api i ON i.item_id = lm.item_id " +
+      "GROUP BY k HAVING COUNT(DISTINCT lm.order_id) > 10");
+    for (const r of lateAgg) {
+      const tier = Math.floor(Number(r.n) / 5) * 5;
+      await notifyOnce('🔴 DECISION NEEDED · "' + String(r.k).slice(0, 90) + '" failed to get tracking within 2 business days on ' +
+        r.n + ' order(s) across ' + r.accts + ' account(s) — supplier or process problem, see the Item risk board.',
+        'engine:itemrisk:LATE:' + String(r.k).slice(0, 60) + ':' + tier);
+    }
+  } catch (e) { console.log('itemrisk alerts', String(e && e.message || e).slice(0, 200)); }
 }
 
 /* Seller standards move slowly — eBay evaluates monthly — so one nightly read per account is
@@ -3412,6 +3463,85 @@ const ROUTES = {
      30/90-day open-closed counts, unanswered received messages, eBay's own seller-standards
      verdict per account, and any listing violations. No profit fields anywhere here — CS and
      Management/Ops read it. */
+  /* Review 3: the Item risk boards — returns, item-not-received, and late-tracking, ITEM BY
+     ITEM. Duplicated listings across accounts are folded into one product by TITLE (the same
+     product carries a different listing id per account — the title is the honest join, and the
+     board says which accounts/ids fold in). Windows: today · yesterday · 7d · 30d · all time. */
+  itemRisk: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const today = ukDate('');
+      const shiftD = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+      const d1 = shiftD(1), d7 = shiftD(6), d30 = shiftD(29);
+      /* eBay's OWN reason wording, the way his Returns Summary workbook prints it —
+         "Doesn't match description or photos (9); Item defective (7)" */
+      const why = (reason) => {
+        const r = String(reason || '');
+        if (/NOT_AS_DESCRIBED|not as described|match description/i.test(r)) return "Doesn't match description or photos";
+        if (/ARRIVED_DAMAGED|damaged/i.test(r)) return 'Arrived damaged';
+        if (/DEFECTIVE|faulty/i.test(r)) return 'Item defective';
+        if (/DOESNT_FIT|doesn.?t fit|WRONG_SIZE/i.test(r)) return "Doesn't fit";
+        if (/ORDERED_BY_MISTAKE|by mistake/i.test(r)) return 'Ordered by mistake';
+        if (/WRONG_ITEM|wrong item|ORDERED_WRONG/i.test(r)) return 'Ordered the wrong item';
+        if (/NO_LONGER|no longer|changed.*mind/i.test(r)) return 'No longer needed';
+        if (/not received|NOT_RECEIVED|item not received/i.test(r)) return 'Item not received';
+        const clean = r.replace(/_/g, ' ').toLowerCase().trim();
+        return clean ? clean.charAt(0).toUpperCase() + clean.slice(1, 40) : 'Other';
+      };
+      const fold = (rows, dateOf, withReasons) => {
+        const by = {};
+        let total = 0;
+        for (const r of rows) {
+          const key = String(r.title || '').trim() || String(r.item_id || '?');
+          const g = (by[key] = by[key] || { key, title: String(r.title || '').trim(), items: {}, accounts: {},
+            all: 0, w30: 0, w7: 0, y1: 0, t0: 0, reasons: {}, refund: 0 });
+          g.all++; total++;
+          const d = dateOf(r);
+          if (d >= d30) g.w30++;
+          if (d >= d7) g.w7++;
+          if (d === d1) g.y1++;
+          if (d === today) g.t0++;
+          if (r.item_id) g.items[r.item_id] = 1;
+          if (r.account) g.accounts[r.account] = (g.accounts[r.account] || 0) + 1;
+          if (withReasons) { const w = why(r.reason); g.reasons[w] = (g.reasons[w] || 0) + 1; }
+          if (r.refunded > 0) g.refund += Number(r.refunded);
+        }
+        return Object.values(by).map(g => ({ key: g.key, title: g.title,
+          item_ids: Object.keys(g.items), accounts: g.accounts,
+          all: g.all, d30: g.w30, d7: g.w7, yesterday: g.y1, today: g.t0,
+          refund: round2(g.refund),
+          pct: total ? Math.round(g.all / total * 1000) / 10 : 0,
+          reasons: Object.entries(g.reasons).sort((a, b) => b[1] - a[1])
+            .map(([k, n]) => k + ' (' + n + ')').join('; '),
+          duplicated: Object.keys(g.items).length > 1,
+        })).sort((a, b) => b.all - a.all).slice(0, 120);
+      };
+      /* refund £ rides in via the order the case sits on — Finances writes the amount there */
+      const kindRows = async (kind) => (await ctx.env.DB.prepare(
+        'SELECT c.item_id, c.account, c.reason, c.opened_at, i.title, o.refunded FROM cases c ' +
+        'LEFT JOIN items_api i ON i.item_id = c.item_id ' +
+        'LEFT JOIN orders o ON o.order_id = c.order_id ' +
+        'WHERE c.kind = ?1 ORDER BY c.opened_at DESC LIMIT 4000'
+      ).bind(kind).all()).results || [];
+      const retRows = await kindRows('RETURN');
+      const inrRows = await kindRows('INR');
+      const lateRows = (await ctx.env.DB.prepare(
+        'SELECT lm.item_id, lm.account, lm.marked_at, i.title, 0 AS refunded FROM late_marks lm ' +
+        'LEFT JOIN items_api i ON i.item_id = lm.item_id ORDER BY lm.marked_at DESC LIMIT 4000'
+      ).all()).results || [];
+      const returns = fold(retRows, r => String(r.opened_at || '').slice(0, 10), true);
+      const inr = fold(inrRows, r => String(r.opened_at || '').slice(0, 10), true);
+      const late = fold(lateRows, r => String(r.marked_at || '').slice(0, 10), false);
+      return { today, returns, inr, late,
+        alerts: {
+          returns5: returns.filter(x => x.all > 5),
+          inr5: inr.filter(x => x.all > 5),
+          late10: late.filter(x => x.all > 10),
+        },
+        note: 'products folded across accounts by TITLE (a duplicated listing carries a different id per shop) · late-tracking marks accumulate from 21 Aug — an order that crosses 2 business days untracked is marked forever, even after it finally ships' };
+    },
+  },
+
   csDesk: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
