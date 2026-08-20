@@ -19,16 +19,33 @@
  *  sweep runs the backup once itself, so night one has an off-site copy without waiting a day.
  */
 
+/* One backup spreadsheet PER DEPARTMENT (Hasib: "backup spreadsheet of each and every single
+ * department… to keep backup of every single line written in it"). `tables` pull from the
+ * Engine (backupDump); `portalTabs` copy line-for-line from the Portal DB spreadsheet the
+ * office actually types into. BACKUP_SS_MONEY doubles as the first-run bootstrap marker. */
 var NB_FILES = {
-  BACKUP_SS_MONEY: { title: 'M98M Backup — Money & Marketing',
-    tables: ['sales_daily', 'ads_daily', 'ads_today', 'daily_health', 'campaigns', 'campaign_ads', 'promotions', 'promo_members'] },
-  BACKUP_SS_ORDERS: { title: 'M98M Backup — Orders & Tracking',
-    tables: ['orders', 'trackings', 'late_marks', 'cases'] },
-  BACKUP_SS_LISTINGS: { title: 'M98M Backup — Listings & Sourcing',
+  BACKUP_SS_MONEY: { title: 'M98M Backup — Money & Daily Books',
+    tables: ['sales_daily', 'daily_health', 'account_summary'] },
+  BACKUP_SS_ORDERS: { title: 'M98M Backup — Orders Department',
+    tables: ['orders', 'trackings', 'late_marks'] },
+  BACKUP_SS_ADVERT: { title: 'M98M Backup — Advertising Department',
+    tables: ['campaigns', 'campaign_ads', 'ads_daily', 'ads_today', 'promotions', 'promo_members'] },
+  BACKUP_SS_CSDEPT: { title: 'M98M Backup — Customer Service Department',
+    tables: ['cases', 'cs_metrics', 'cs_standards', 'violations', 'feedback', 'feedback_summary'] },
+  BACKUP_SS_LISTINGS: { title: 'M98M Backup — Listings & Sourcing Department',
     tables: ['items_api', 'items_facts', 'sourcing', 'listing_decisions', 'traffic_daily'] },
-  BACKUP_SS_SYSTEM: { title: 'M98M Backup — People, Feedback & System',
-    tables: ['users', 'users_snapshot', 'accounts', 'feedback', 'feedback_summary', 'cs_metrics', 'cs_standards', 'violations', 'alert_log', 'audit', 'sync_state'] },
+  BACKUP_SS_OFFICE: { title: 'M98M Backup — Office, Tasks & Departments',
+    tables: [],
+    portalTabs: ['USERS', 'TASKS', 'SCHEDULES', 'ATTENDANCE', 'MEETINGS', 'DAILY_AGENDA', 'MESSAGES',
+      'NOTICES', 'SOPS', 'RULES', 'SIGNALS', 'STAFF_REVIEWS', 'STAFF_EVAL', 'HUNTING_DB',
+      'POTENTIAL_CPC', 'IDEAS', 'REPORTS_2H', 'CAMPAIGN_LOG', 'CONNECTIONS', 'CONFIG'] },
+  BACKUP_SS_SYSTEM: { title: 'M98M Backup — People & System',
+    tables: ['users', 'users_snapshot', 'accounts', 'alert_log', 'audit', 'sync_state'] },
 };
+
+/* A Portal DB tab is copied whole — header and every written line — capped at the LAST 4000
+ * rows for the two unbounded logs so one giant log can never eat the night's budget. */
+var NB_TAB_ROW_CAP = { REPORTS_2H: 4000, ACTIVITY_LOG: 4000 };
 
 /** Create-once: each backup file lives in the owner's Drive, its id pinned in Script Properties. */
 function nbFile_(propKey) {
@@ -83,24 +100,76 @@ function nbPullTable_(ss, table) {
   return all.length;
 }
 
-/** The nightly trigger (7 AM PKT = 3 AM UK). Every table into its file; failures collect and
- *  stamp back to the Engine, which letters Management the same morning if anything failed. */
+/** One Portal DB tab, line for line, into the department backup file. */
+function nbCopyPortalTab_(ss, db, name, t0) {
+  var src = db.getSheetByName(name);
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  sh.clearContents();
+  if (!src || src.getLastRow() === 0) { sh.getRange(1, 1).setValue('(no such tab or empty on ' + new Date().toISOString() + ')'); return 0; }
+  var vals = src.getDataRange().getValues();
+  var cap = NB_TAB_ROW_CAP[name];
+  if (cap && vals.length > cap + 1) vals = [vals[0]].concat(vals.slice(vals.length - cap));  // header + newest lines
+  vals = vals.map(function (row) {
+    return row.map(function (c) {
+      if (c === null || c === undefined) return '';
+      if (typeof c === 'number' || c instanceof Date) return c;
+      var s = String(c);
+      return s.length > 45000 ? s.slice(0, 45000) : s;
+    });
+  });
+  for (var r = 0; r < vals.length; r += 2000) {
+    var chunk = vals.slice(r, r + 2000);
+    sh.getRange(r + 1, 1, chunk.length, chunk[0].length).setValues(chunk);
+  }
+  nbLog_(ss, [new Date().toISOString(), 'portal:' + name, vals.length - 1, Math.round((Date.now() - t0) / 100) / 10, '']);
+  return vals.length - 1;
+}
+
+/** Hasib: "create minimum 3 backups of all this portal". Copy 1 = the live backup files
+ *  (rewritten nightly). Copy 2 = a dated file-copy of each into the Drive backup folder
+ *  (30-day history, pruned by the same prune the DB copy uses). Copy 3 = the Night Watch's
+ *  local .xlsx exports on the office Mac. Plus the untouched nightly Portal DB copy. */
+function nbGenerationCopies_(fails) {
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+  var folder;
+  try { folder = backupFolder_(); } catch (e) { fails.push('gen:folder ' + String(e).slice(0, 50)); return 0; }
+  var made = 0;
+  Object.keys(NB_FILES).forEach(function (k) {
+    var id = PropertiesService.getScriptProperties().getProperty(k);
+    if (!id) return;
+    try { DriveApp.getFileById(id).makeCopy(NB_FILES[k].title + ' — ' + stamp, folder); made++; }
+    catch (e) { fails.push('gen:' + k + ' ' + String(e).slice(0, 40)); }
+  });
+  return made;
+}
+
+/** The nightly pull (rides nightlyBackup; first run rides the hourly sweep via the bootstrap).
+ *  Engine tables + Portal DB department tabs into their files, then the dated generation
+ *  copies; failures collect and stamp back to the Engine, which letters Management if anything
+ *  failed. */
 function nightBackupPull() {
   var t0 = Date.now(), fails = [], tables = 0, rowsTotal = 0;
+  var db = null;
+  try { db = getPortalDb_(false); } catch (e) { fails.push('portalDb: ' + String(e).slice(0, 60)); }
   Object.keys(NB_FILES).forEach(function (propKey) {
     var ss;
     try { ss = nbFile_(propKey); } catch (e) { fails.push(propKey + ': ' + String(e).slice(0, 60)); return; }
     NB_FILES[propKey].tables.forEach(function (table) {
-      if (Date.now() - t0 > 240000) {                     // the house 240s budget: never die mid-write
-        fails.push('TIME:' + table); return;
-      }
+      if (Date.now() - t0 > 270000) { fails.push('TIME:' + table); return; }   // never die mid-write
       try { rowsTotal += nbPullTable_(ss, table); tables++; }
       catch (e) { fails.push(table + ': ' + String(e).slice(0, 60)); }
     });
+    (NB_FILES[propKey].portalTabs || []).forEach(function (tab) {
+      if (!db) return;
+      if (Date.now() - t0 > 270000) { fails.push('TIME:portal:' + tab); return; }
+      try { rowsTotal += nbCopyPortalTab_(ss, db, tab, t0); tables++; }
+      catch (e) { fails.push('portal:' + tab + ': ' + String(e).slice(0, 50)); }
+    });
   });
-  var stamp = { ok: fails.length === 0, tables: tables, rows: rowsTotal, fails: fails, secs: Math.round((Date.now() - t0) / 1000) };
+  var copies = nbGenerationCopies_(fails);
+  var stamp = { ok: fails.length === 0, tables: tables, rows: rowsTotal, fails: fails, copies: copies, secs: Math.round((Date.now() - t0) / 1000) };
   try { enginePost_('backupStamp', stamp); } catch (e) { stamp.stampError = String(e).slice(0, 120); }
-  PropertiesService.getScriptProperties().setProperty('BACKUP_LAST', JSON.stringify({ at: new Date().toISOString(), tables: tables, rows: rowsTotal, fails: fails }));
+  PropertiesService.getScriptProperties().setProperty('BACKUP_LAST', JSON.stringify({ at: new Date().toISOString(), tables: tables, rows: rowsTotal, copies: copies, fails: fails }));
   return stamp;
 }
 

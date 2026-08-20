@@ -4490,6 +4490,18 @@ const ROUTES = {
         sync_state: 'SELECT job, account, cursor, last_ok, last_error FROM sync_state',
         alert_log: "SELECT * FROM alert_log WHERE created_at >= datetime('now','-90 day')",
         audit: "SELECT * FROM audit WHERE at >= datetime('now','-90 day')",
+        /* Not a table — a REPRESENTABLE per-account summary computed from the engine's own
+           truth (Hasib: the report books eBay-side agents stopped filling; this one always
+           fills). 30 days, the profit law's own chain. */
+        account_summary:
+          "SELECT account, COUNT(*) AS orders_30d, COALESCE(SUM(qty), 0) AS units_30d, " +
+          'ROUND(COALESCE(SUM(sold), 0), 2) AS revenue_30d, ' +
+          'ROUND(COALESCE(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 0), 2) AS ebay_fees_30d, ' +
+          'ROUND(COALESCE(SUM(cost), 0), 2) AS aliexpress_cost_30d, ' +
+          'ROUND(0.8 * (COALESCE(SUM(sold), 0) - COALESCE(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 0) - COALESCE(SUM(cost), 0)), 2) AS raw_profit_law_30d, ' +
+          'ROUND(COALESCE(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END), 0), 2) AS refunded_30d, ' +
+          "MAX(created_at) AS last_order_at " +
+          "FROM orders WHERE created_at >= datetime('now','-30 day') AND status != 'NOT_FOUND' GROUP BY account ORDER BY revenue_30d DESC",
       };
       const t = String(p.table || '');
       if (!T[t]) return { tables: Object.keys(T) };
