@@ -84,6 +84,10 @@ Apps Script has **no triggers of its own** for any of this (house rule: no Scrip
 - **processWatch (hourly)**: any order past **1 UK business day** unprocessed → letters Order Processors + Ops Head (tier ladder re-rings as the pile grows). It stays silent until the sweep has landed data at least once, so it can never cry wolf about a feed that hasn't run.
 - **Sourcing links** (screen): supplier 1/2/3 per ACTIVE listing — the Main Sheet's columns merged with portal-saved overrides (portal wins; a sheet push can never erase a portal entry). The **Missing tab is the Order Processors' task queue**, sorted by 30-day sales; the 09:00 UK digest letters the count + top sellers daily until it is empty. Links saved in the portal are **not** written back to the Main Sheet yet — that write-back is a pending decision.
 
+## 6d. Typing is safe (R5 emergency fix)
+
+Everything anyone types into any portal field is **auto-saved as they type** and poured back into the form after any reload, update, or accidental navigation — a toast says "Restored N unsaved fields". A finished submit clears its own drafts. Portal updates **never reload a tab while someone typed in the last 10 minutes**; the update waits for a pause and says so. Half-typed work cannot be eaten again.
+
 ## 7. If something looks wrong
 
 1. Open **Account health** — sync problems surface there first; run **Validation** for a full answer in one press.
