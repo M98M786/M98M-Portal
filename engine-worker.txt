@@ -514,6 +514,7 @@ async function noSupplierScan(env) {
     "WHERE o.status NOT IN ('FULFILLED', 'NOT_FOUND', 'CANCELLED') AND o.created_at >= datetime('now', '-5 day') " +
     "  AND COALESCE(o.ali_link, '') = '' AND o.item_id != '' " +
     "  AND COALESCE(f.sup1_link, '') = '' AND COALESCE(f.sup2_link, '') = '' AND COALESCE(f.sup3_link, '') = '' AND COALESCE(f.current_sup, '') = '' " +
+    "  AND NOT EXISTS (SELECT 1 FROM sourcing s WHERE s.item_id = o.item_id AND (COALESCE(s.s1,'') != '' OR COALESCE(s.s2,'') != '' OR COALESCE(s.s3,'') != '')) " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a WHERE a.ref = 'engine:nosup:' || o.item_id) " +
     'GROUP BY o.item_id, o.account LIMIT 10'
   ).all();
