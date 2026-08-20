@@ -107,7 +107,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
-      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync],
+      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync, processWatch],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
     const fns = jobs[event.cron] || [];
@@ -526,6 +526,62 @@ async function noSupplierScan(env) {
   }
 }
 
+/* R5 (Hasib): "if not processed after 1 business day show alert". Processed = an AliExpress
+   order number or link on the order (the hourly sheet sweep + the portal's own add box are the
+   two feeds). Letters ride the tier ladder so a growing pile re-rings the same day; the same
+   hourly pass sends the 09:00 UK sourcing digest — ACTIVE items with no supplier link anywhere,
+   by 30-day sales, which is the Order Processors' standing task queue. */
+async function processWatch(env) {
+  const oneBiz = (() => {
+    let d = new Date(); let left = 1;
+    while (left > 0) { d = new Date(d.getTime() - 86400000); const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) left--; }
+    return d.toISOString();
+  })();
+  const day = ukDate(new Date().toISOString());
+  const rs = await env.DB.prepare(
+    'SELECT o.order_id, o.account, o.created_at, i.title FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+    "WHERE o.status = 'NOT_STARTED' AND COALESCE(o.ali_order,'') = '' AND COALESCE(o.ali_link,'') = '' " +
+    "AND o.created_at <= ?1 AND o.created_at >= datetime('now','-10 day') " +
+    "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') " +
+    'ORDER BY o.created_at ASC LIMIT 60'
+  ).bind(oneBiz).all();
+  const rows = rs.results || [];
+  if (rows.length) {
+    const tier = Math.floor(rows.length / 10) * 10;
+    const ref = 'engine:proc:' + day + ':' + tier;
+    const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
+    if (!seen) {
+      const lines = rows.slice(0, 15).map((r) => '· ' + r.order_id + ' (' + r.account + ') — ' +
+        String(r.title || '').slice(0, 55) + ' — since ' + String(r.created_at).slice(0, 16).replace('T', ' ')).join('\n');
+      const msg = '🔴 ' + rows.length + ' order(s) have passed 1 BUSINESS DAY with no AliExpress order placed:\n' + lines +
+        (rows.length > 15 ? '\n…and ' + (rows.length - 15) + ' more.' : '') +
+        '\nOpen Orders → Needs processing and work them oldest-first.';
+      await notifyRole(env, 'Order Processor', 'Orders not processed', msg, ref);
+      await notifyRole(env, 'Ops Head', 'Orders not processed', msg, ref);
+    }
+  }
+  const ukHour = Number(new Date().toLocaleString('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Europe/London' }));
+  if (ukHour === 9) {
+    const missSql =
+      'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN sourcing s ON s.item_id = i.item_id ' +
+      "WHERE i.status = 'ACTIVE' AND COALESCE(f.sup1_link,'') = '' AND COALESCE(f.sup2_link,'') = '' AND COALESCE(f.sup3_link,'') = '' " +
+      "AND COALESCE(s.s1,'') = '' AND COALESCE(s.s2,'') = '' AND COALESCE(s.s3,'') = ''";
+    const m = await env.DB.prepare('SELECT COUNT(*) AS n ' + missSql).first();
+    const n = (m && m.n) || 0;
+    if (n > 0) {
+      const ref = 'engine:sourcing:' + day;
+      const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
+      if (!seen) {
+        const top = await env.DB.prepare('SELECT i.item_id, i.title, i.account, i.sold_30d ' + missSql + ' ORDER BY i.sold_30d DESC LIMIT 12').all();
+        const lines = (top.results || []).map((r) => '· ' + String(r.title || r.item_id).slice(0, 55) + ' (' + r.account + ') — ' + r.sold_30d + ' sold/30d').join('\n');
+        const msg = n + ' ACTIVE listing(s) have not a single supplier link — not in the sheet, not in the portal. Today\'s task: open Sourcing links → Missing and fill the top sellers first:\n' + lines;
+        await notifyRole(env, 'Order Processor', 'Sourcing links missing', msg, ref);
+        await notifyRole(env, 'Ops Head', 'Sourcing links missing', msg, ref);
+      }
+    }
+  }
+}
+
 /* THE NIGHTLY IS ALLOWED TO MISS — ONCE. Cloudflare skipped the 02:00 tick on 20 Aug and six
    jobs silently didn't run: the books stayed unfinalized, no daily ad reports were kicked, the
    validation never rang. This sentinel rides the half-past slot: any nightly job whose last
@@ -619,6 +675,19 @@ async function selfTestRun(env) {
     const quiet = (rs.results || []).map(r => r.account + ' (last ' + String(r.last).slice(0, 16) + ')');
     add('every account feed is alive', quiet.length === 0, quiet.length ? 'QUIET: ' + quiet.join(', ') : 'all selling accounts have fresh orders');
   } catch (e) { add('every account feed is alive', false, e.message); }
+
+  try { // 4e. the off-site Sheets backup stamped within 26h — Hasib's "portal dies" insurance.
+    // Arms only after the first successful night, so day one never cries wolf.
+    const raw = await env.HOT.get('backup:last');
+    const st = raw ? JSON.parse(raw) : null;
+    if (!st) add('nightly Sheets backup fresh', true, 'not armed yet — first backup has not stamped');
+    else {
+      const ageH = (Date.now() - new Date(st.at).getTime()) / 3600000;
+      add('nightly Sheets backup fresh', !!st.ok && ageH < 26,
+        (st.ok ? '' : 'LAST RUN FAILED (' + (st.fails || []).join(', ').slice(0, 80) + ') · ') +
+        st.tables + ' tables, ' + st.rows + ' rows, ' + ageH.toFixed(1) + 'h ago');
+    }
+  } catch (e) { add('nightly Sheets backup fresh', false, e.message); }
 
   try { // 5. the P&L law recomputes (7d totals): Raw = 0.8 × (OE − Ali) — the central-sheet brain
     const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
@@ -3051,6 +3120,11 @@ const ROUTES = {
         due3d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+2 day') AND o.ship_by < datetime(?N, '+3 day')",
         dispatched:"o.status = 'FULFILLED' AND o.created_at >= datetime('now','-30 day')",
         archived:  OPEN + " AND o.ship_by != '' AND o.ship_by < ?H",
+        /* R5 (Hasib): "show orders not processed or still need to be processed". Processed = an
+           AliExpress order number or link is on the order — the hourly sheet sweep fills those
+           in, portal-entered ones are already here. Tracking pushed via the portal also counts. */
+        needs_processing: "o.status = 'NOT_STARTED' AND COALESCE(o.ali_order,'') = '' AND COALESCE(o.ali_link,'') = '' " +
+          "AND o.created_at >= datetime('now','-10 day') AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '')",
       };
 
       const bindFor = (sql) => {
@@ -3073,7 +3147,7 @@ const ROUTES = {
 
       const sel = B[bucket] ? bucket : 'awaiting';
       const listQ = bindFor(
-        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, i.title ' +
+        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, o.ali_order, o.ali_link, i.title ' +
         'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE ' + B[sel] + acctSql +
         " ORDER BY CASE WHEN o.ship_by != '' THEN o.ship_by ELSE o.created_at END " +
         (sel === 'dispatched' || sel === 'all' ? 'DESC' : 'ASC') + ' LIMIT 150');
@@ -4315,17 +4389,27 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const account = String(p.account || ''), orderId = String(p.order_id || '').trim(), link = String(p.ali_link || '').trim();
-      if (!account || !orderId || !link) throw new Error('SAY: account, order_id and the link are all needed');
-      if (!/^https:\/\/([a-z0-9-]+\.)*aliexpress\.[a-z.]+\//i.test(link)) throw new Error('SAY: that does not look like an AliExpress link');
-      await ctx.env.DB.prepare('UPDATE orders SET ali_link = ?2 WHERE order_id = ?1').bind(orderId, link.slice(0, 400)).run();
+      /* R5: the AliExpress ORDER NUMBER rides along — it is what tracking gets pulled with, so
+         the portal stores it and the day tab's own 'Order Number' column receives it too. */
+      const aliOrder = String(p.ali_order || '').replace(/\D/g, '').slice(0, 25);
+      if (!account || !orderId || (!link && !aliOrder)) throw new Error('SAY: account, order_id and the link or the Ali order number are needed');
+      if (link && !/^https:\/\/([a-z0-9-]+\.)*aliexpress\.[a-z.]+\//i.test(link)) throw new Error('SAY: that does not look like an AliExpress link');
+      if (aliOrder && aliOrder.length < 8) throw new Error('SAY: an AliExpress order number is at least 8 digits');
+      await ctx.env.DB.prepare(
+        "UPDATE orders SET ali_link = CASE WHEN ?2 != '' THEN ?2 ELSE ali_link END, " +
+        "ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE ali_order END WHERE order_id = ?1"
+      ).bind(orderId, link.slice(0, 400), aliOrder).run();
       let sheet = { ok: false, reason: 'bridge did not answer' };
       try {
+        const values = {};
+        if (link) values['New Ali Link'] = link.slice(0, 400);
+        if (aliOrder) values['Order Number'] = aliOrder;
         const r = await fetch(ctx.env.AS_URL, {
           method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'engineSheetWrite', payload: {
             key: await secret(ctx.env, 'SYNC_KEY'), whitelist: 'orders_day', account,
             match_header: 'Order number', match_value: orderId,
-            values: { 'New Ali Link': link.slice(0, 400) } } }),
+            values } }),
           signal: AbortSignal.timeout(20000),
         });
         const body = await r.json().catch(() => ({}));
@@ -4333,10 +4417,154 @@ const ROUTES = {
       } catch (e) { sheet = { ok: false, reason: String(e && e.message || e).slice(0, 120) }; }
       await ctx.env.DB.prepare(
         "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ALI_LINK_ADDED', ?2, '', ?3, datetime('now'))"
-      ).bind(ctx.email, account + ':' + orderId, link.slice(0, 200)).run();
+      ).bind(ctx.email, account + ':' + orderId, (link + (aliOrder ? ' #' + aliOrder : '')).slice(0, 200)).run();
       return { saved: true, sheet,
         note: sheet.ok ? (sheet.shadow ? 'recorded in the Engine; the sheet write is in SHADOW (logged, not written) until the shadow flip' : 'written to the Engine AND the day tab')
           : 'saved in the Engine; the sheet side answered: ' + String(sheet.reason || '') };
+    },
+  },
+
+  /* R5 sink for the hourly Apps Script day-tab sweep: order_id → AliExpress order number + link.
+     A field only ever fills or corrects — an empty incoming value never erases what is stored,
+     so a half-filled sheet row cannot blank a portal-entered number. */
+  syncAliOrders: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 500);
+      const stmts = [];
+      for (const r of rows) {
+        const id = String(r.order_id || '').trim();
+        if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
+        const ord = String(r.ali_order || '').replace(/\D/g, '').slice(0, 25);
+        const link = String(r.ali_link || '').trim().slice(0, 400);
+        if (!ord && (!link || !/^https:\/\//i.test(link))) continue;
+        stmts.push(ctx.env.DB.prepare(
+          "UPDATE orders SET ali_order = CASE WHEN ?2 != '' THEN ?2 ELSE ali_order END, " +
+          "ali_link = CASE WHEN ?3 != '' AND ?3 LIKE 'https://%' THEN ?3 ELSE ali_link END WHERE order_id = ?1"
+        ).bind(id, ord.length >= 8 ? ord : '', link));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
+      return { received: rows.length, written: stmts.length };
+    },
+  },
+
+  /* R5 backups (Hasib: "at any day portal dies, we need backup data"). PULL model: the Apps
+     Script night trigger calls this per table per page and writes the Google backup sheets —
+     each pull is its own invocation, so the subrequest budget is never at risk. The whitelist
+     is explicit and CREDENTIAL-FREE: sessions never leave, engine_config never leaves, and the
+     accounts table gives up only its names — never app ids, certs or oauth refs. */
+  backupDump: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const T = {
+        users: 'SELECT email, name, role, status, modules, tools, super FROM users',
+        accounts: 'SELECT name, api_enabled FROM accounts',
+        items_api: 'SELECT * FROM items_api',
+        items_facts: 'SELECT * FROM items_facts',
+        sourcing: 'SELECT * FROM sourcing',
+        orders: 'SELECT * FROM orders',
+        trackings: 'SELECT * FROM trackings',
+        sales_daily: 'SELECT * FROM sales_daily',
+        ads_daily: 'SELECT * FROM ads_daily',
+        ads_today: 'SELECT * FROM ads_today',
+        campaigns: 'SELECT * FROM campaigns',
+        campaign_ads: 'SELECT * FROM campaign_ads',
+        promotions: 'SELECT * FROM promotions',
+        promo_members: 'SELECT * FROM promo_members',
+        feedback: 'SELECT * FROM feedback',
+        feedback_summary: 'SELECT * FROM feedback_summary',
+        cases: 'SELECT * FROM cases',
+        cs_metrics: 'SELECT * FROM cs_metrics',
+        cs_standards: 'SELECT * FROM cs_standards',
+        traffic_daily: 'SELECT * FROM traffic_daily',
+        late_marks: 'SELECT * FROM late_marks',
+        listing_decisions: 'SELECT * FROM listing_decisions',
+        violations: 'SELECT * FROM violations',
+        users_snapshot: 'SELECT * FROM users_snapshot',
+        daily_health: 'SELECT * FROM daily_health',
+        sync_state: 'SELECT job, account, cursor, last_ok, last_error FROM sync_state',
+        alert_log: "SELECT * FROM alert_log WHERE created_at >= datetime('now','-90 day')",
+        audit: "SELECT * FROM audit WHERE at >= datetime('now','-90 day')",
+      };
+      const t = String(p.table || '');
+      if (!T[t]) return { tables: Object.keys(T) };
+      const limit = Math.min(Number(p.limit) || 2500, 4000), offset = Math.max(Number(p.offset) || 0, 0);
+      const rs = await ctx.env.DB.prepare(T[t] + ' LIMIT ' + limit + ' OFFSET ' + offset).all();
+      const rows = rs.results || [];
+      const header = rows.length ? Object.keys(rows[0]) : [];
+      return { table: t, offset, header, rows: rows.map((r) => header.map((h) => r[h])), n: rows.length, done: rows.length < limit };
+    },
+  },
+
+  /* The night trigger reports back here when the Sheets copy is done — KV carries the stamp the
+     battery's freshness check reads, and a failed night letters Management the same morning. */
+  backupStamp: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const ok = !!p.ok, tables = Number(p.tables) || 0, rowsN = Number(p.rows) || 0;
+      const fails = (Array.isArray(p.fails) ? p.fails : []).map((s) => String(s).slice(0, 80)).slice(0, 10);
+      await ctx.env.HOT.put('backup:last', JSON.stringify({ at: new Date().toISOString(), ok, tables, rows: rowsN, fails }), { expirationTtl: 7 * 86400 });
+      await ctx.env.DB.prepare(
+        "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('sheetBackup', '', ?1, datetime('now'), ?2) " +
+        "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now'), last_error = ?2"
+      ).bind(tables + ' tables, ' + rowsN + ' rows', ok ? '' : fails.join('; ').slice(0, 300)).run();
+      if (!ok) {
+        const ref = 'engine:backup:' + ukDate(new Date().toISOString());
+        const seen = await ctx.env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(ref).first();
+        if (!seen) await notifyRole(ctx.env, 'Management', 'Backup FAILED',
+          "🔴 Tonight's Google Sheets backup did not complete — failed on: " + fails.join(', ').slice(0, 400) +
+          '. The portal itself is fine; the OFF-SITE COPY is what is stale. Run nightBackupPull again from the Apps Script editor, or tell Claude tonight.', ref);
+      }
+      return { stamped: true };
+    },
+  },
+
+  /* R5, Hasib: "make a separate dashboard page in sourcing links of the products" — three
+     supplier slots per listing. The Main Sheet's supplier columns arrive via syncFacts; portal
+     edits live in the `sourcing` overrides table so a sheet push can never erase what a
+     processor typed here. Effective link = portal override, else the sheet's. */
+  sourcingBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (ITEM_COST_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const rs = await ctx.env.DB.prepare(
+        "SELECT i.item_id, i.account, i.title, i.price, i.sold_30d, " +
+        "COALESCE(f.sup1_link,'') AS f1, COALESCE(f.sup2_link,'') AS f2, COALESCE(f.sup3_link,'') AS f3, " +
+        "COALESCE(f.current_sup,'') AS cur, COALESCE(f.ali_cost,0) AS cost, " +
+        "COALESCE(s.s1,'') AS s1, COALESCE(s.s2,'') AS s2, COALESCE(s.s3,'') AS s3, " +
+        "COALESCE(s.updated_by,'') AS upd_by, COALESCE(s.updated_at,'') AS upd_at, COALESCE(op.n,0) AS open_orders " +
+        'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN sourcing s ON s.item_id = i.item_id ' +
+        "LEFT JOIN (SELECT item_id, COUNT(*) AS n FROM orders WHERE status = 'NOT_STARTED' GROUP BY item_id) op ON op.item_id = i.item_id " +
+        "WHERE i.status = 'ACTIVE' ORDER BY i.sold_30d DESC, i.title"
+      ).all();
+      const rows = (rs.results || []).map((r) => {
+        const e1 = r.s1 || r.f1, e2 = r.s2 || r.f2, e3 = r.s3 || r.f3;
+        return { ...r, e1, e2, e3, links_n: [e1, e2, e3].filter(Boolean).length };
+      });
+      const missing = rows.filter((r) => r.links_n === 0);
+      return { rows, total: rows.length,
+        with_links: rows.length - missing.length,
+        missing_n: missing.length,
+        missing_hot: missing.filter((r) => r.open_orders > 0 || Number(r.sold_30d) > 0).length,
+        note: 'links: portal-saved first, else the Main Sheet’s supplier columns · "missing" = not a single link in either place · the missing tab, sorted by 30-day sales, IS the Order Processors’ task queue' };
+    },
+  },
+
+  sourcingSave: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const itemId = String(p.item_id || '').trim(), slot = Number(p.slot);
+      const url = String(p.url || '').trim().slice(0, 400);
+      if (!/^\d{9,14}$/.test(itemId)) throw new Error('SAY: that item id does not look right');
+      if ([1, 2, 3].indexOf(slot) < 0) throw new Error('SAY: slot must be 1, 2 or 3');
+      if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('SAY: a supplier link must be a full https:// URL');
+      const it = await ctx.env.DB.prepare('SELECT account FROM items_api WHERE item_id = ?1').bind(itemId).first();
+      if (!it) throw new Error('SAY: that item is not in the listings table');
+      const col = 's' + slot;
+      await ctx.env.DB.prepare(
+        'INSERT INTO sourcing (item_id, account, ' + col + ', updated_by, updated_at) VALUES (?1, ?2, ?3, ?4, datetime(\'now\')) ' +
+        'ON CONFLICT(item_id) DO UPDATE SET ' + col + ' = ?3, account = ?2, updated_by = ?4, updated_at = datetime(\'now\')'
+      ).bind(itemId, String(it.account), url, ctx.email).run();
+      await ctx.env.DB.prepare(
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'SOURCING_SAVED', ?2, '', ?3, datetime('now'))"
+      ).bind(ctx.email, itemId + ':s' + slot, url.slice(0, 200)).run();
+      return { saved: true, item_id: itemId, slot, cleared: !url };
     },
   },
 
@@ -4631,7 +4859,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

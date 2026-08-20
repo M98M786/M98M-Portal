@@ -462,6 +462,26 @@
       /* req 16 capture — delegated, wired once (odLoad repaints must not stack listeners) */
       if (!box.dataset.aliWired) { box.dataset.aliWired = '1';
       box.addEventListener('click', function (ev) {
+        /* R5: the one-tap Ali order number copy — same fallback ladder the address copy uses. */
+        var c = ev.target && ev.target.closest ? ev.target.closest('[data-ali-copy]') : null;
+        if (c) {
+          var num = c.getAttribute('data-ali-copy') || '';
+          var was = c.textContent;
+          var ok = function () { c.textContent = '✓ Copied'; setTimeout(function () { c.textContent = was; }, 1400); };
+          var fallback = function () {
+            var ta = document.createElement('textarea');
+            ta.value = num; ta.setAttribute('readonly', 'readonly');
+            ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); ok(); } catch (e2) { window.prompt('Copy the number:', num); }
+            document.body.removeChild(ta);
+          };
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(num).then(ok, fallback); }
+            else { fallback(); }
+          } catch (e3) { fallback(); }
+          return;
+        }
         var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-alilink-save]') : null;
         if (!b) { return; }
         var ono = b.getAttribute('data-od-alilink-save');
@@ -669,6 +689,14 @@
     if (odHas(w, OD_H.aliOrderNo)) {
       purchase += odField(OD_H.aliOrderNo, 'AliExpress — 16 digits', odInput(row, 'ali', odFieldValue(o, 'ali', OD_H.aliOrderNo),
         odDirty(o, 'ali', OD_H.aliOrderNo), 'text', 'numeric', ' mono', dis));
+    }
+    /* R5 (Hasib): "copying aliexpress order number for pulling out tracking should be very
+     * easy" — one tap, no selecting 16 digits by hand. Shows for every role that sees the row. */
+    var aliNow = odStr(o[OD_H.aliOrderNo]).replace(/[^0-9]/g, '');
+    if (aliNow.length >= 8) {
+      purchase += '<div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button class="minibtn" data-ali-copy="' + odAttr(aliNow) + '" title="Copy the AliExpress order number — paste it into AliExpress or the tracking site">📋 Copy Ali order number</button>' +
+        '<span class="od-note mono">' + esc(aliNow) + '</span></div>';
     }
     if (odHas(w, OD_H.email)) {
       purchase += odField(OD_H.email, 'purchasing account used', odInput(row, 'email', odFieldValue(o, 'email', OD_H.email),

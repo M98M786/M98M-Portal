@@ -331,7 +331,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -390,7 +390,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-2217';
+var BUILD = '20260820-2301';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -12300,6 +12300,26 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       /* req 16 capture — delegated, wired once (odLoad repaints must not stack listeners) */
       if (!box.dataset.aliWired) { box.dataset.aliWired = '1';
       box.addEventListener('click', function (ev) {
+        /* R5: the one-tap Ali order number copy — same fallback ladder the address copy uses. */
+        var c = ev.target && ev.target.closest ? ev.target.closest('[data-ali-copy]') : null;
+        if (c) {
+          var num = c.getAttribute('data-ali-copy') || '';
+          var was = c.textContent;
+          var ok = function () { c.textContent = '✓ Copied'; setTimeout(function () { c.textContent = was; }, 1400); };
+          var fallback = function () {
+            var ta = document.createElement('textarea');
+            ta.value = num; ta.setAttribute('readonly', 'readonly');
+            ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); ok(); } catch (e2) { window.prompt('Copy the number:', num); }
+            document.body.removeChild(ta);
+          };
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(num).then(ok, fallback); }
+            else { fallback(); }
+          } catch (e3) { fallback(); }
+          return;
+        }
         var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-alilink-save]') : null;
         if (!b) { return; }
         var ono = b.getAttribute('data-od-alilink-save');
@@ -12507,6 +12527,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (odHas(w, OD_H.aliOrderNo)) {
       purchase += odField(OD_H.aliOrderNo, 'AliExpress — 16 digits', odInput(row, 'ali', odFieldValue(o, 'ali', OD_H.aliOrderNo),
         odDirty(o, 'ali', OD_H.aliOrderNo), 'text', 'numeric', ' mono', dis));
+    }
+    /* R5 (Hasib): "copying aliexpress order number for pulling out tracking should be very
+     * easy" — one tap, no selecting 16 digits by hand. Shows for every role that sees the row. */
+    var aliNow = odStr(o[OD_H.aliOrderNo]).replace(/[^0-9]/g, '');
+    if (aliNow.length >= 8) {
+      purchase += '<div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button class="minibtn" data-ali-copy="' + odAttr(aliNow) + '" title="Copy the AliExpress order number — paste it into AliExpress or the tracking site">📋 Copy Ali order number</button>' +
+        '<span class="od-note mono">' + esc(aliNow) + '</span></div>';
     }
     if (odHas(w, OD_H.email)) {
       purchase += odField(OD_H.email, 'purchasing account used', odInput(row, 'email', odFieldValue(o, 'email', OD_H.email),
@@ -13181,7 +13209,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 /* view-ordersBoard.js — Hasib's item 2 (19 Aug review): eBay's own order-status dropdown as a
  * screen. Every bucket counted across ALL dates from the statusRefresh-converged Engine truth —
  * not day tabs. 'Archived' holds the old orders eBay has no dispatch record for: dispatched and
- * delivered in the real world, but never tracked on eBay — history, never LATE NOW. */
+ * delivered in the real world, but never tracked on eBay — history, never LATE NOW.
+ * R5 (21 Aug): the 'Needs processing' bucket — orders with no AliExpress order placed yet (the
+ * hourly sheet sweep + the portal's own add box feed the truth) — and the one-tap copy button
+ * for the AliExpress order number, which is what tracking gets pulled with. */
 (function () {
 
   var OB_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead', 'CS'];
@@ -13189,6 +13220,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   var OB_LABELS = [
     ['all', 'All orders'],
+    ['needs_processing', 'Needs processing'],
     ['awaiting', 'Awaiting dispatch'],
     ['overdue', 'Overdue'],
     ['due24', 'Send in next 24h'],
@@ -13205,17 +13237,53 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.ob-chip.on{background:var(--gold-soft,rgba(246,208,107,.15));border-color:var(--gold-line-hi);color:var(--gold-a)}' +
     '.ob-chip b{font-variant-numeric:tabular-nums;margin-left:5px}' +
     '.ob-chip.bad{border-color:var(--bad)}.ob-chip.bad b{color:var(--bad)}' +
-    '.ob-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:840px}' +
+    '.ob-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:900px}' +
     '.ob-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:9px 11px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.ob-tbl td{padding:8px 11px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
     '.ob-tbl tbody tr:hover{background:var(--blue-soft)}' +
     '.ob-late{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}' +
     '.ob-due{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--warn-soft,rgba(246,208,107,.12));color:var(--warn,#d9a021)}' +
-    '.ob-ok{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--ok-soft,rgba(60,200,120,.12));color:var(--ok)}'
+    '.ob-ok{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--ok-soft,rgba(60,200,120,.12));color:var(--ok)}' +
+    '.ob-copy{border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text);border-radius:8px;padding:4px 9px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}' +
+    '.ob-copy:hover{border-color:var(--gold-line-hi)}.ob-copy.done{color:var(--ok);border-color:var(--ok)}'
   );
 
   function obStr(v) { return String(v == null ? '' : v).trim(); }
   function obGBP(v) { var n = Number(v); return isFinite(n) && n ? '£' + n.toFixed(2) : '—'; }
+
+  /* The number tracking gets pulled with: the sheet's own 'Order Number' when the sweep brought
+   * it, else the longest digit run inside the Ali link (aliexpress order URLs carry ?orderId=). */
+  function obAliNum(r) {
+    var n = obStr(r.ali_order).replace(/\D/g, '');
+    if (n.length >= 8) { return n; }
+    var m = obStr(r.ali_link).match(/(\d{10,20})/);
+    return m ? m[1] : '';
+  }
+
+  function obCopy(btn, text) {
+    var done = function () {
+      var old = btn.textContent;
+      btn.textContent = '✓ copied'; btn.classList.add('done');
+      setTimeout(function () { btn.textContent = old; btn.classList.remove('done'); }, 1400);
+    };
+    var manual = function () { window.prompt('Copy the AliExpress order number:', text); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, manual);
+    } else { manual(); }
+  }
+
+  /* UK business days since the order was created — the 1-business-day rule made visible. */
+  function obBizDays(createdIso) {
+    var t = Date.parse(createdIso);
+    if (!isFinite(t)) { return 0; }
+    var n = 0, d = new Date(t);
+    while (d.getTime() < Date.now() - 86400000) {
+      d = new Date(d.getTime() + 86400000);
+      var wd = d.getUTCDay();
+      if (wd !== 0 && wd !== 6) { n++; }
+    }
+    return n;
+  }
 
   function obWhen(r) {
     var sb = obStr(r.ship_by);
@@ -13241,25 +13309,49 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       d = d || {};
       var chips = OB_LABELS.map(function (pair) {
         var n = (d.counts || {})[pair[0]];
-        return '<button class="ob-chip' + (d.bucket === pair[0] ? ' on' : '') + (pair[0] === 'overdue' && n ? ' bad' : '') +
+        var red = (pair[0] === 'overdue' || pair[0] === 'needs_processing') && n;
+        return '<button class="ob-chip' + (d.bucket === pair[0] ? ' on' : '') + (red ? ' bad' : '') +
           '" data-ob="' + pair[0] + '">' + esc(pair[1]) + '<b>' + (n == null ? '—' : n) + '</b></button>';
       }).join('');
       var hasBuyer = (d.rows || []).some(function (r) { return r.buyer !== undefined; });
+      var isNP = d.bucket === 'needs_processing';
       var h = '<div class="ob-chips">' + chips + '</div>';
-      if (d.note) { h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">' + esc(d.note) + '</p>'; }
+      if (isNP) {
+        h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">No AliExpress order has been placed on these yet — oldest first. Past 1 BUSINESS day they ring the Order Processors and Ops. The moment the Ali order number lands in the day tab (or here via Add Ali), the order leaves this list within the hour.</p>';
+      } else if (d.note) {
+        h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">' + esc(d.note) + '</p>';
+      }
       if (!(d.rows || []).length) {
         h += '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Nothing in this bucket' + (OB.account ? ' for ' + esc(OB.account) : '') + '.</div>';
       } else {
         h += '<div class="scroll"><table class="ob-tbl"><thead><tr>' +
           '<th>Order</th><th>Account</th><th>Item</th>' + (hasBuyer ? '<th>Buyer</th>' : '') +
-          '<th>Value</th><th>Ordered</th><th>Ship by</th><th>State</th></tr></thead><tbody>';
+          '<th>Value</th><th>Ordered</th><th>Ali order</th><th>Ship by</th><th>State</th></tr></thead><tbody>';
         (d.rows || []).forEach(function (r) {
+          var ali = obAliNum(r);
+          var aliCell;
+          if (ali) {
+            aliCell = '<button class="ob-copy" data-ali="' + esc(ali) + '" title="Copy the AliExpress order number — paste it into AliExpress or the tracking site">📋 ' + esc(ali.length > 12 ? ali.slice(0, 5) + '…' + ali.slice(-4) : ali) + '</button>' +
+              (obStr(r.ali_link) ? ' <a href="' + esc(obStr(r.ali_link)) + '" target="_blank" rel="noopener noreferrer" style="color:var(--text-3);font-size:11px">open</a>' : '');
+          } else if (obStr(r.ali_link)) {
+            aliCell = '<a href="' + esc(obStr(r.ali_link)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;font-size:11.5px">Ali link</a>';
+          } else if (r.status === 'NOT_STARTED') {
+            aliCell = '<span class="ob-late" title="No AliExpress order recorded — sheet or portal">not processed</span>';
+          } else {
+            aliCell = '<span style="color:var(--text-3)">—</span>';
+          }
+          var ordered = esc(obStr(r.created_at).slice(0, 10));
+          if (isNP) {
+            var bd = obBizDays(r.created_at);
+            ordered += ' <span class="' + (bd >= 1 ? 'ob-late' : 'ob-ok') + '">' + bd + ' biz day' + (bd === 1 ? '' : 's') + '</span>';
+          }
           h += '<tr><td class="mono">' + '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(obStr(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(obStr(r.order_id)) + '</a>' + '</td>' +
             '<td>' + esc(obStr(r.account)) + '</td>' +
-            '<td><a href="https://www.ebay.co.uk/itm/' + esc(obStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(obStr(r.title) || obStr(r.item_id)) + '</div></a></td>' +
+            '<td><a href="https://www.ebay.co.uk/itm/' + esc(obStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(obStr(r.title) || obStr(r.item_id)) + '</div></a></td>' +
             (hasBuyer ? '<td>' + esc(obStr(r.buyer)) + '</td>' : '') +
             '<td class="mono">' + obGBP(r.sold) + '</td>' +
-            '<td>' + esc(obStr(r.created_at).slice(0, 10)) + '</td>' +
+            '<td>' + ordered + '</td>' +
+            '<td>' + aliCell + '</td>' +
             '<td>' + esc(obStr(r.ship_by).slice(0, 10) || '—') + '</td>' +
             '<td>' + obWhen(r) + '</td></tr>';
         });
@@ -13268,6 +13360,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       box.innerHTML = h;
       box.querySelectorAll('[data-ob]').forEach(function (b) {
         b.onclick = function () { OB.bucket = this.getAttribute('data-ob'); obLoad(); };
+      });
+      box.querySelectorAll('[data-ali]').forEach(function (b) {
+        b.onclick = function () { obCopy(this, this.getAttribute('data-ali')); };
       });
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
@@ -13282,7 +13377,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     prefetch: function () { return api('ordersBoard', { bucket: 'awaiting' }); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>All <span class="goldtext">orders</span></h1>' +
-          '<span class="sub">every date, straight from eBay’s own statuses · refreshed every 15 minutes</span></div>' +
+          '<span class="sub">every date, straight from eBay’s own statuses · refreshed every 15 minutes · Ali order numbers ride in from the day tabs hourly</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">' +
             '<select class="alx-sel" id="obAcc"><option value="">All accounts</option></select>' +
@@ -19045,6 +19140,203 @@ function saveSchedule() {
     };
   }
 }());
+
+/* ---------- view-sourcing.js ---------- */
+/* view-sourcing.js — R5 (21 Aug), Hasib: "make a separate dashboard page in sourcing links of
+ * the products … supplier 1, supplier 2, supplier 3 … order processors will receive pending
+ * tasks if there is not even a single link working for any item."
+ * Three supplier slots per ACTIVE listing. Links from the Main Sheet's supplier columns arrive
+ * via the Engine; links typed here live in the portal's own overrides table (a sheet push can
+ * never erase them) and win the merge. The Missing tab, sorted by 30-day sales, IS the Order
+ * Processors' task queue — the 09:00 UK letter points them at it every day it is not empty. */
+(function () {
+
+  var SRC_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
+  var SRC_EDIT_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
+  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null };
+
+  VIEW_CSS.push(
+    '.src-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px}' +
+    '.src-card{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:12px 14px}' +
+    '.src-card .l{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}' +
+    '.src-card .v{font-size:22px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}' +
+    '.src-slot{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}' +
+    '.src-slot a{color:var(--gold-a);font-weight:700;font-size:11.5px}' +
+    '.src-add{border:1px dashed var(--gold-line);background:none;color:var(--text-3);border-radius:8px;padding:3px 8px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}' +
+    '.src-add:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
+    '.src-edit{border:none;background:none;color:var(--text-3);cursor:pointer;font-size:11px;padding:2px}' +
+    '.src-input{width:230px;background:var(--panel);border:1px solid var(--gold-line-hi);border-radius:8px;color:var(--text);font:inherit;font-size:11.5px;padding:5px 8px}' +
+    '.src-miss{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}'
+  );
+
+  function srcStr(v) { return String(v == null ? '' : v).trim(); }
+  function srcCanEdit() { return STATE.user && (SRC_EDIT_ROLES.indexOf(STATE.user.role) >= 0 || STATE.user.super); }
+
+  function srcHost(u) {
+    var m = srcStr(u).match(/^https:\/\/([^/]+)/i);
+    return m ? m[1].replace(/^www\./, '').split('.').slice(0, -1).join('.') || m[1] : 'link';
+  }
+
+  function srcSlotCell(r, slot) {
+    var eff = srcStr(r['e' + slot]);
+    var fromPortal = !!srcStr(r['s' + slot]);
+    var h = '<span class="src-slot" data-item="' + esc(srcStr(r.item_id)) + '" data-slot="' + slot + '">';
+    if (eff) {
+      h += '<a href="' + esc(eff) + '" target="_blank" rel="noopener noreferrer" title="' + esc(eff) + (fromPortal ? ' (saved in the portal)' : ' (from the Main Sheet)') + '">' + esc(srcHost(eff)) + '</a>';
+      if (srcCanEdit()) { h += '<button class="src-edit" data-act="edit" title="Replace this link">✎</button>'; }
+    } else if (srcCanEdit()) {
+      h += '<button class="src-add" data-act="edit">+ add</button>';
+    } else {
+      h += '<span style="color:var(--text-3)">—</span>';
+    }
+    return h + '</span>';
+  }
+
+  function srcRender() {
+    var box = $('srcBody');
+    if (!box) { return; }
+    var rows = SRC.rows;
+    if (SRC.tab === 'missing') { rows = rows.filter(function (r) { return !r.links_n; }); }
+    if (SRC.acct) { rows = rows.filter(function (r) { return srcStr(r.account) === SRC.acct; }); }
+    if (SRC.q) {
+      var q = SRC.q.toLowerCase();
+      rows = rows.filter(function (r) { return srcStr(r.title).toLowerCase().indexOf(q) >= 0 || srcStr(r.item_id).indexOf(q) >= 0; });
+    }
+    var s = SRC.sums || {};
+    var h = '<div class="src-cards">' +
+      '<div class="src-card"><div class="l">Active listings</div><div class="v">' + (s.total || 0) + '</div></div>' +
+      '<div class="src-card"><div class="l">With supplier links</div><div class="v" style="color:var(--ok)">' + (s.with_links || 0) + '</div></div>' +
+      '<div class="src-card"><div class="l">Missing — the task queue</div><div class="v" style="color:' + (s.missing_n ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_n || 0) + '</div></div>' +
+      '<div class="src-card"><div class="l">Missing AND selling / has open orders</div><div class="v" style="color:' + (s.missing_hot ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_hot || 0) + '</div></div></div>';
+    if (SRC.tab === 'missing') {
+      h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">Not a single working link on these — top sellers first. Add supplier 1 at least; the 9 AM letter keeps ringing the Order Processors until this list is empty.</p>';
+    }
+    if (!rows.length) {
+      h += '<div class="empty">' + (SRC.tab === 'missing' ? 'Nothing missing — every listing has at least one supplier link. Keep it that way.' : 'No rows match.') + '</div>';
+    } else {
+      h += '<div class="scroll" style="max-height:560px"><table class="ir-tbl src-tbl" style="min-width:980px"><thead><tr>' +
+        '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th>Price</th><th>Sold 30d</th><th>Open orders</th>' +
+        '<th style="text-align:left">Supplier 1</th><th style="text-align:left">Supplier 2</th><th style="text-align:left">Supplier 3</th><th style="text-align:left">Updated</th></tr></thead><tbody>';
+      rows.slice(0, 400).forEach(function (r) {
+        h += '<tr' + (!r.links_n ? ' style="background:var(--bad-soft,rgba(255,80,80,.05))"' : '') + '>' +
+          '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(srcStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srcStr(r.title) || srcStr(r.item_id)) + '</div></a></td>' +
+          '<td style="text-align:left">' + esc(srcStr(r.account)) + '</td>' +
+          '<td class="num">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (Number(r.sold_30d) || 0) + '</td>' +
+          '<td class="num">' + (Number(r.open_orders) ? '<b style="color:var(--warn,#d9a021)">' + r.open_orders + '</b>' : '0') + '</td>' +
+          '<td style="text-align:left">' + srcSlotCell(r, 1) + '</td>' +
+          '<td style="text-align:left">' + srcSlotCell(r, 2) + '</td>' +
+          '<td style="text-align:left">' + srcSlotCell(r, 3) + '</td>' +
+          '<td style="text-align:left;font-size:11px;color:var(--text-3)">' + (srcStr(r.upd_by) ? esc(srcStr(r.upd_by).split('@')[0]) + ' · ' + esc(srcStr(r.upd_at).slice(0, 10)) : '—') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      if (rows.length > 400) { h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Showing the first 400 of ' + rows.length + ' — narrow with search or the account filter.</p>'; }
+    }
+    box.innerHTML = h;
+
+    box.querySelectorAll('[data-act="edit"]').forEach(function (b) {
+      b.onclick = function () {
+        var holder = this.closest('.src-slot');
+        var itemId = holder.getAttribute('data-item'), slot = holder.getAttribute('data-slot');
+        var row = SRC.rows.filter(function (r) { return srcStr(r.item_id) === itemId; })[0] || {};
+        var current = srcStr(row['e' + slot]);
+        holder.innerHTML = '<input class="src-input" type="url" placeholder="https://…" value="' + esc(current) + '">' +
+          '<button class="minibtn" data-save="1">Save</button>' +
+          (current ? '<button class="minibtn" data-clear="1" title="Remove this link">✕</button>' : '') +
+          '<button class="minibtn" data-cancel="1">↩</button>';
+        var inp = holder.querySelector('input');
+        inp.focus();
+        var save = function (url) {
+          holder.innerHTML = '<span style="color:var(--text-3);font-size:11px">saving…</span>';
+          api('sourcingSave', { item_id: itemId, slot: Number(slot), url: url }).then(function () {
+            row['s' + slot] = url; row['e' + slot] = url || srcStr(row['f' + slot]);
+            row.links_n = ['e1', 'e2', 'e3'].filter(function (k) { return srcStr(row[k]); }).length;
+            srcRecount(); srcRender();
+          }).catch(function (e) {
+            alert(e.message);
+            srcRender();
+          });
+        };
+        holder.querySelector('[data-save="1"]').onclick = function () { save(inp.value.trim()); };
+        var cl = holder.querySelector('[data-clear="1"]');
+        if (cl) { cl.onclick = function () { if (confirm('Remove this supplier link from the portal?')) { save(''); } }; }
+        holder.querySelector('[data-cancel="1"]').onclick = srcRender;
+        inp.onkeydown = function (ev) { if (ev.key === 'Enter') { save(inp.value.trim()); } if (ev.key === 'Escape') { srcRender(); } };
+      };
+    });
+  }
+
+  function srcRecount() {
+    var miss = SRC.rows.filter(function (r) { return !r.links_n; });
+    SRC.sums = { total: SRC.rows.length, with_links: SRC.rows.length - miss.length, missing_n: miss.length,
+      missing_hot: miss.filter(function (r) { return Number(r.open_orders) > 0 || Number(r.sold_30d) > 0; }).length };
+    var mt = $('srcTabMiss');
+    if (mt) { mt.innerHTML = 'Missing — task queue <b>' + miss.length + '</b>'; }
+  }
+
+  function srcLoad() {
+    var box = $('srcBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    api('sourcingBoard', {}).then(function (d) {
+      SRC.rows = (d && d.rows) || [];
+      SRC.sums = { total: d.total, with_links: d.with_links, missing_n: d.missing_n, missing_hot: d.missing_hot };
+      if (!d.missing_n && SRC.tab === 'missing') { SRC.tab = 'all'; }
+      var mt = $('srcTabMiss');
+      if (mt) { mt.innerHTML = 'Missing — task queue <b>' + (d.missing_n || 0) + '</b>'; }
+      srcRender();
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">The sourcing board did not answer — ' + esc(e.message) + '</div>';
+    });
+  }
+
+  VIEWS.sourcing = {
+    label: 'Sourcing links',
+    order: 3.7,
+    roles: SRC_VIEW_ROLES,
+    icon: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    prefetch: function () { return api('sourcingBoard', {}); },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1><span class="goldtext">Sourcing</span> links</h1>' +
+        '<span class="sub">supplier 1 · 2 · 3 for every ACTIVE listing — the sheet’s links plus everything saved here · the Missing tab is the Order Processors’ task queue</span></div>' +
+        '<div class="card enter d2"><div class="bd">' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">' +
+        '<button class="ob-chip" id="srcTabMiss" data-tab="missing">Missing — task queue <b>…</b></button>' +
+        '<button class="ob-chip" id="srcTabAll" data-tab="all">All listings</button>' +
+        '<select class="alx-sel" id="srcAcct"><option value="">All accounts</option></select>' +
+        '<input class="src-input" id="srcQ" placeholder="Search title or item id…" style="flex:1;min-width:180px">' +
+        '<button class="minibtn" id="srcRefresh">Refresh</button></div>' +
+        '<div id="srcBody"><div class="spinner"></div></div>' +
+        '</div></div>';
+    },
+    init: function () {
+      var setTab = function (t) {
+        SRC.tab = t;
+        var m = $('srcTabMiss'), a = $('srcTabAll');
+        if (m) { m.classList.toggle('on', t === 'missing'); }
+        if (a) { a.classList.toggle('on', t === 'all'); }
+        srcRender();
+      };
+      var m = $('srcTabMiss'), a = $('srcTabAll');
+      if (m) { m.onclick = function () { setTab('missing'); }; m.classList.add('on'); }
+      if (a) { a.onclick = function () { setTab('all'); }; }
+      cachedCall('accountList', {}, function (d) {
+        var sel = $('srcAcct');
+        if (!sel) { return; }
+        sel.innerHTML = '<option value="">All accounts</option>' + (((d && d.accounts) || []).map(function (x) {
+          var n = String(x.account || '').trim();
+          return n ? '<option>' + esc(n) + '</option>' : '';
+        }).join(''));
+        sel.onchange = function () { SRC.acct = String(this.value || ''); srcRender(); };
+      });
+      var q = $('srcQ');
+      if (q) { q.oninput = function () { SRC.q = this.value.trim(); srcRender(); }; }
+      var rf = $('srcRefresh');
+      if (rf) { rf.onclick = srcLoad; }
+      srcLoad();
+    }
+  };
+})();
 
 /* ---------- view-staff.js ---------- */
 /* Phase 6 — §4.1b staff lifecycle and §3/§6 accounts admin. The full version of VIEWS.staffAdmin:
