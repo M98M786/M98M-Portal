@@ -1452,6 +1452,33 @@ async function csSync(env) {
         r.n + ' order(s) across ' + r.accts + ' account(s) — supplier or process problem, see the Item risk board.',
         'engine:itemrisk:LATE:' + String(r.k).slice(0, 60) + ':' + tier);
     }
+
+    /* Review 4b, Hasib's dynamic-campaign price rules:
+       A. any item priced OVER £15 sitting in a RUNNING dynamic campaign → tell management
+       B. any item priced over £10 paying MORE THAN 15% in a dynamic GENERAL campaign → tell management
+       ("dynamic" = the campaign's own name, his naming convention; general = cost-per-sale) */
+    const rowsA = await agg(
+      "SELECT ca.listing_id AS item_id, ca.account, c.name AS cname, i.title, i.price " +
+      "FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id " +
+      "JOIN items_api i ON i.item_id = ca.listing_id " +
+      "WHERE c.status LIKE '%RUNNING%' AND lower(c.name) LIKE '%dynamic%' AND i.price > 15 AND i.status = 'ACTIVE' LIMIT 40");
+    for (const r of rowsA) {
+      await notifyOnce('🟠 ADVERTISING RULE · "' + String(r.title || r.item_id).slice(0, 70) + '" (£' + Number(r.price).toFixed(2) +
+        ') sits in dynamic campaign "' + String(r.cname).slice(0, 40) + '" on ' + r.account + ' — items over £15 do not belong in dynamic.',
+        'engine:dynprice:' + r.account + ':' + r.item_id);
+    }
+    const rowsB = await agg(
+      "SELECT ca.listing_id AS item_id, ca.account, ca.bid_pct, c.name AS cname, i.title, i.price " +
+      "FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id " +
+      "JOIN items_api i ON i.item_id = ca.listing_id " +
+      "WHERE c.status LIKE '%RUNNING%' AND lower(c.name) LIKE '%dynamic%' AND c.funding_model LIKE '%SALE%' " +
+      "AND i.price > 10 AND ca.bid_pct > 15 AND i.status = 'ACTIVE' LIMIT 40");
+    for (const r of rowsB) {
+      await notifyOnce('🟠 ADVERTISING RULE · "' + String(r.title || r.item_id).slice(0, 70) + '" (£' + Number(r.price).toFixed(2) +
+        ') pays ' + Number(r.bid_pct).toFixed(1) + '% in dynamic GENERAL campaign "' + String(r.cname).slice(0, 40) + '" on ' + r.account +
+        ' — over £10 items must stay at 15% or below.',
+        'engine:dynrate:' + r.account + ':' + r.item_id + ':' + Math.round(Number(r.bid_pct)));
+    }
   } catch (e) { console.log('itemrisk alerts', String(e && e.message || e).slice(0, 200)); }
 }
 
@@ -1504,6 +1531,15 @@ async function marketingSync(env) {
           }
         }
       } catch (e) { /* membership detail is best effort — the event row still lands */ }
+      /* the listing-to-listing HISTORY: when each item was ADDED to this event (first seen)
+         and when it was last still there — history accumulates from 21 Aug */
+      if (listingIds.length) {
+        const mstmts = listingIds.slice(0, 500).map(id => env.DB.prepare(
+          "INSERT INTO promo_members (account, promo_id, item_id, added_at, last_seen) VALUES (?1, ?2, ?3, datetime('now'), datetime('now')) " +
+          "ON CONFLICT(account, promo_id, item_id) DO UPDATE SET last_seen = datetime('now')"
+        ).bind(acct, pid, String(id)));
+        for (let i = 0; i < mstmts.length; i += 50) await env.DB.batch(mstmts.slice(i, i + 50));
+      }
       await env.DB.prepare(
         'INSERT INTO promotions (account, promo_id, name, type, status, start_at, end_at, discount, item_n, listing_ids, synced_at) ' +
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) " +
@@ -3644,7 +3680,23 @@ const ROUTES = {
         '  AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id) ' +
         'ORDER BY ia.account, ia.sold_30d DESC LIMIT 300'
       ).all();
-      return { campaigns: camps.results || [], duplicates: dups.results || [], uncampaigned: unc.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [] };
+      /* Review 4b: the dynamic-campaign price rules, visible on the board (letters fire hourly) */
+      const dynOver15 = await ctx.env.DB.prepare(
+        "SELECT ca.listing_id AS item_id, ca.account, c.name AS cname, i.title, i.price " +
+        "FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id " +
+        "JOIN items_api i ON i.item_id = ca.listing_id " +
+        "WHERE c.status LIKE '%RUNNING%' AND lower(c.name) LIKE '%dynamic%' AND i.price > 15 AND i.status = 'ACTIVE' " +
+        'ORDER BY i.price DESC LIMIT 60'
+      ).all().catch(() => ({ results: [] }));
+      const dynHighRate = await ctx.env.DB.prepare(
+        "SELECT ca.listing_id AS item_id, ca.account, ca.bid_pct, c.name AS cname, i.title, i.price " +
+        "FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id " +
+        "JOIN items_api i ON i.item_id = ca.listing_id " +
+        "WHERE c.status LIKE '%RUNNING%' AND lower(c.name) LIKE '%dynamic%' AND c.funding_model LIKE '%SALE%' " +
+        "AND i.price > 10 AND ca.bid_pct > 15 AND i.status = 'ACTIVE' ORDER BY ca.bid_pct DESC LIMIT 60"
+      ).all().catch(() => ({ results: [] }));
+      return { campaigns: camps.results || [], duplicates: dups.results || [], uncampaigned: unc.results || [], events: events.results || [], sync: state.results || [], cpq: cpq.results || [],
+        dyn_over15: dynOver15.results || [], dyn_high_rate: dynHighRate.results || [] };
       });
     },
   },
@@ -3675,13 +3727,68 @@ const ROUTES = {
       const uncovered = items.filter(i => !covered[String(i.item_id)]);
       const eligible = uncovered.filter(i => !i.last_revised || Date.parse(String(i.last_revised).replace(' ', 'T') + 'Z') <= nowMs - 14 * 86400000);
       const blocked = uncovered.filter(i => i.last_revised && Date.parse(String(i.last_revised).replace(' ', 'T') + 'Z') > nowMs - 14 * 86400000);
+
+      /* Review 4b: "if any item is in sale and due to the sale its profit drops under £1 —
+         show it." The sheet's stated per-item profit, minus what the discount really costs at
+         the law's marginal rate: a £1 price cut loses ≈ £0.67 of Actual (fees scale with price,
+         then the 0.8 VAT law applies) — so disc_profit = profit − price × pct% × 0.67. */
+      const runningMd = (await ctx.env.DB.prepare(
+        "SELECT account, promo_id, name, discount, listing_ids FROM promotions WHERE status LIKE '%RUNNING%' AND instr(discount, '% off') > 0 AND listing_ids != ''"
+      ).all()).results || [];
+      const factRs = (await ctx.env.DB.prepare('SELECT item_id, profit FROM items_facts WHERE profit != 0').all()).results || [];
+      const profBy = {};
+      for (const f of factRs) profBy[String(f.item_id)] = Number(f.profit) || 0;
+      const priceBy = {};
+      const titleBy = {};
+      for (const i of items) { priceBy[String(i.item_id)] = Number(i.price) || 0; titleBy[String(i.item_id)] = String(i.title || ''); }
+      const lowProfit = [];
+      for (const ev of runningMd) {
+        const pct = Number((String(ev.discount).match(/([\d.]+)\s*%/) || [])[1]) || 0;
+        if (!pct) continue;
+        for (const id of String(ev.listing_ids).split(',')) {
+          if (!id || !(id in profBy) || !priceBy[id]) continue;
+          const cut = priceBy[id] * pct / 100;
+          const disc = round2(profBy[id] - cut * 0.67);
+          if (disc < 1) {
+            lowProfit.push({ item_id: id, account: ev.account, title: titleBy[id] || '',
+              price: priceBy[id], pct, event: String(ev.name || ev.promo_id).slice(0, 50),
+              profit_listed: round2(profBy[id]), profit_in_sale: disc });
+          }
+        }
+      }
+      lowProfit.sort((a, b) => a.profit_in_sale - b.profit_in_sale);
+
+      /* optional filters — account to account, live-only, per type */
+      let view = promos;
+      const fAcct = String(p.account || ''), fStatus = String(p.status || ''), fType = String(p.type || '');
+      if (fAcct) view = view.filter(x => x.account === fAcct);
+      if (fStatus) view = view.filter(x => new RegExp(fStatus, 'i').test(String(x.status)));
+      if (fType) view = view.filter(x => new RegExp(fType, 'i').test(String(x.type)));
       return {
-        promotions: promos,
+        promotions: view.slice(0, 400),
+        total_promotions: promos.length,
         coverage: { active_items: items.length, covered: items.length - uncovered.length,
           uncovered: uncovered.length, eligible_now: eligible.length, blocked_14d: blocked.length },
         eligible: eligible.slice(0, 80),
         blocked: blocked.slice(0, 40),
-        note: 'covered = the listing sits in at least one RUNNING event · the 14-day clock runs from the last revision the engine OBSERVED (price/title change) — tracking began 21 Aug, so an unchanged listing counts as eligible' };
+        low_profit_in_sale: lowProfit.slice(0, 80),
+        note: 'covered = the listing sits in at least one RUNNING event · the 14-day clock runs from the last revision the engine OBSERVED (price/title change) — tracking began 21 Aug, so an unchanged listing counts as eligible · profit-in-sale uses the law’s marginal rate (a £1 cut costs ≈ £0.67 of Actual)' };
+    },
+  },
+
+  /* Review 4b: the listing-to-listing history of one sale event — who is in it and when each
+     was ADDED (history accumulates from 21 Aug). */
+  promoMembers: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || ''), pid = String(p.promo_id || '');
+      if (!account || !pid) throw new Error('SAY: which event?');
+      const rows = (await ctx.env.DB.prepare(
+        'SELECT pm.item_id, pm.added_at, pm.last_seen, i.title, i.price, i.status AS listing_status FROM promo_members pm ' +
+        'LEFT JOIN items_api i ON i.item_id = pm.item_id WHERE pm.account = ?1 AND pm.promo_id = ?2 ORDER BY pm.added_at DESC LIMIT 400'
+      ).bind(account, pid).all()).results || [];
+      return { account, promo_id: pid, members: rows,
+        note: '"added" = when the engine first SAW the listing inside this event — the ledger began 21 Aug' };
     },
   },
 

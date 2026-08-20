@@ -89,6 +89,19 @@
         '<h3 style="color:var(--warn)">' + esc(cwStr(s.account)) + ' — ' + esc(cwStr(s.last_error)) + '</h3>' +
         '<p style="margin:0;font-size:11.5px;color:var(--text-3);font-weight:600">Nothing is broken: that shop\'s orders, listings and CS keep syncing. Enrol it in Promoted Listings on eBay and its campaigns appear here on the next 5-minute tick.</p></div>';
     });
+    /* review 4b: the dynamic-campaign price rules, red and named */
+    var dA = (d.dyn_over15 || []).filter(function (r) { return !acc || cwStr(r.account) === acc; });
+    var dB = (d.dyn_high_rate || []).filter(function (r) { return !acc || cwStr(r.account) === acc; });
+    if (dA.length || dB.length) {
+      h += '<div class="cw-dupbox"><h3>\ud83d\udfe0 ' + (dA.length + dB.length) + ' dynamic-campaign price rule violation(s) \u2014 management has been lettered</h3>';
+      dA.slice(0, 8).forEach(function (r) {
+        h += '<div style="margin-top:4px">\u00a3' + Number(r.price).toFixed(2) + ' item in DYNAMIC \u2014 <b>' + esc(cwStr(r.title) || cwStr(r.item_id)).slice(0, 60) + '</b> \u00b7 ' + esc(cwStr(r.account)) + ' \u00b7 \u201c' + esc(cwStr(r.cname)).slice(0, 35) + '\u201d \u00b7 over-\u00a315 items do not belong in dynamic</div>';
+      });
+      dB.slice(0, 8).forEach(function (r) {
+        h += '<div style="margin-top:4px">' + Number(r.bid_pct).toFixed(1) + '% rate on \u00a3' + Number(r.price).toFixed(2) + ' item \u2014 <b>' + esc(cwStr(r.title) || cwStr(r.item_id)).slice(0, 60) + '</b> \u00b7 ' + esc(cwStr(r.account)) + ' \u00b7 \u201c' + esc(cwStr(r.cname)).slice(0, 35) + '\u201d \u00b7 over-\u00a310 items stay at 15% or below in dynamic general</div>';
+      });
+      h += '</div>';
+    }
     if (gOrder.length) {
       /* Review 3: every chip carries the campaign's REAL status — running (red-hot, double fees,
          removable) vs paused/ended (grey, informational). The urgent count is only the listings
