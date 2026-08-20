@@ -1,0 +1,7 @@
+[
+ {
+  "file": "Setup.gs",
+  "find": "function runMissedCheckpointSweep() {",
+  "replace": "/* Hunting v3 (20 Aug): the DB tab self-heals its columns \u2014 any HUNTING_COLS name missing from\n * the HUNTING_DB header row is appended at the end, so a workbook redesign never needs manual\n * sheet surgery. Idempotent; rides the hourly sweep below. */\nfunction huntEnsureDbCols_() {\n  try {\n    const sh = getPortalDb_(false).getSheetByName('HUNTING_DB');\n    if (!sh) return;\n    const width = sh.getLastColumn();\n    const head = sh.getRange(1, 1, 1, width).getValues()[0].map(function (h) { return String(h).trim(); });\n    const want = ['hunt_id', 'hunter_email', 'ts'].concat(HUNTING_COLS);\n    const missing = want.filter(function (c) { return head.indexOf(c) < 0; });\n    if (!missing.length) return;\n    sh.getRange(1, width + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');\n    logActivity_('system', 'HUNTING_DB_COLS', '', '', '', 'appended: ' + missing.join(', '));\n  } catch (e) { logActivity_('system', 'ERROR:huntEnsureCols', '', '', '', String(e && e.message || e)); }\n}\n\nfunction runMissedCheckpointSweep() {\n  huntEnsureDbCols_();"
+ }
+]
