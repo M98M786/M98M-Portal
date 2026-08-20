@@ -5,7 +5,7 @@
 (function () {
 'use strict';
 
-var DB_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+var DB_VIEW_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS']; /* review 4: no sales analysis for Team Lead */
 
 /* The workbook's own labels. Never invent one — a renamed figure is a wrong figure. */
 var T_SOLD   = 'Sold';

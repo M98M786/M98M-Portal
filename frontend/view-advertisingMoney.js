@@ -99,7 +99,7 @@
     });
   }
 
-  var AM_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
+  var AM_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4 */
 
   VIEWS.advertising = {
     label: 'Advertising',

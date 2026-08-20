@@ -22,7 +22,10 @@
 
 /* ---------------- visibility law (§6 of the contract; server-enforced) ------ */
 const PROFIT_ROLES = ['Management', 'Ops Head'];                 // collective profit: NOBODY else (A9)
-const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+/* Review 4 (Hasib): "don't share details of sales analysis to team lead, only loss alerts and
+   nothing else, i don't want to show them the real earnings" — Team Lead is OUT of every
+   profit-bearing read; loss letters still reach them by role. */
+const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
 const MGMT_ROLES = ['Management', 'Ops Head'];
 
@@ -81,7 +84,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
-      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup],
+      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob],
     };
     const fns = jobs[event.cron] || [];
@@ -424,7 +427,11 @@ async function listingSync(env) {
       upserts.push(env.DB.prepare(
         'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at, start_time, first_seen) ' +
         "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now'), ?7, datetime('now')) " +
-        "ON CONFLICT(item_id) DO UPDATE SET account=?2, title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now'), " +
+        "ON CONFLICT(item_id) DO UPDATE SET account=?2, " +
+        /* review 4 (marketing 14-day rule): a PRICE or TITLE change stamps last_revised — the
+           markdown-sale eligibility clock. Tracking starts 21 Aug; earlier revisions are unknowable. */
+        "last_revised = CASE WHEN price != ?4 OR title != ?3 THEN datetime('now') ELSE last_revised END, " +
+        "title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now'), " +
         "start_time = CASE WHEN ?7 != '' THEN ?7 ELSE start_time END"
       ).bind(
         id, acct,
@@ -1448,6 +1455,155 @@ async function csSync(env) {
   } catch (e) { console.log('itemrisk alerts', String(e && e.message || e).slice(0, 200)); }
 }
 
+/* Review 4: MARKETING — every sale event on every account, from eBay's own Promotions API.
+   Stores each promotion with dates, status, discount and member listings; letters management
+   2 days before a running event ends ("arrange a new one"), and a daily digest of items that
+   became ELIGIBLE to join a sale (14 days since their last observed revision) but sit in none. */
+async function marketingSync(env) {
+  await perAccount(env, 'marketingSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const lr = await fetch('https://api.ebay.com/sell/marketing/v1/promotion?marketplace_id=EBAY_GB&limit=100', {
+      headers: { authorization: 'Bearer ' + tok } });
+    if (!lr.ok) throw new Error(acct + ' promotions ' + lr.status + ': ' + (await lr.text()).slice(0, 120));
+    const data = await lr.json();
+    const promos = data.promotions || [];
+    for (const p0 of promos) {
+      const pid = String(p0.promotionId || (p0.promotionHref || '').split('/').filter(Boolean).pop() || '');
+      if (!pid) continue;
+      /* member listings: markdown sales and item promotions carry them in different envelopes */
+      let listingIds = [];
+      let discount = '';
+      try {
+        const isMd = /MARKDOWN/i.test(String(p0.promotionType || ''));
+        const dr = await fetch('https://api.ebay.com/sell/marketing/v1/' + (isMd ? 'item_price_markdown/' : 'item_promotion/') + encodeURIComponent(pid), {
+          headers: { authorization: 'Bearer ' + tok } });
+        if (dr.ok) {
+          const det = await dr.json();
+          const sel = det.selectedInventoryDiscounts || [];
+          for (const s of sel) {
+            const ids = ((s.inventoryCriterion || {}).listingIds) || [];
+            listingIds = listingIds.concat(ids.map(String));
+            const b = s.discountBenefit || {};
+            if (!discount) discount = b.percentageOffItem ? b.percentageOffItem + '% off' : b.amountOffItem ? '£' + (b.amountOffItem.value || '?') + ' off' : '';
+          }
+          if (!discount && det.discountRules && det.discountRules[0]) {
+            const b = det.discountRules[0].discountBenefit || {};
+            discount = b.percentageOffOrder ? b.percentageOffOrder + '% off order' : b.amountOffOrder ? '£' + (b.amountOffOrder.value || '?') + ' off order' : '';
+          }
+        }
+      } catch (e) { /* membership detail is best effort — the event row still lands */ }
+      await env.DB.prepare(
+        'INSERT INTO promotions (account, promo_id, name, type, status, start_at, end_at, discount, item_n, listing_ids, synced_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) " +
+        'ON CONFLICT(account, promo_id) DO UPDATE SET name=?3, type=?4, status=?5, start_at=?6, end_at=?7, discount=?8, item_n=?9, listing_ids=?10, synced_at=datetime(\'now\')'
+      ).bind(acct, pid, String(p0.name || '').slice(0, 120), String(p0.promotionType || ''), String(p0.promotionStatus || ''),
+        String(p0.startDate || ''), String(p0.endDate || ''), discount,
+        listingIds.length, listingIds.join(',').slice(0, 40000)).run();
+
+      /* the 2-day ending bell — once per (promotion, end date) */
+      if (/RUNNING/i.test(String(p0.promotionStatus || '')) && p0.endDate) {
+        const endMs = Date.parse(p0.endDate);
+        if (isFinite(endMs) && endMs - Date.now() > 0 && endMs - Date.now() <= 2 * 86400000) {
+          const ref = 'engine:promoend:' + acct + ':' + pid + ':' + String(p0.endDate).slice(0, 10);
+          const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE to_addr = ?1 AND ref = ?2').bind('management', ref).first();
+          if (!seen) {
+            await queueNotify(env, 'management', 'Sale event ending',
+              '🟠 "' + String(p0.name || pid).slice(0, 70) + '" on ' + acct + ' ENDS ' + String(p0.endDate).slice(0, 10) +
+              ' (within 2 days) — ARRANGE A NEW SALE EVENT so every listing stays covered.', ref);
+          }
+        }
+      }
+    }
+  });
+
+  /* eligibility digest: ACTIVE listings in NO running event whose last observed revision is
+     14+ days old (or that have never changed since tracking began and are old stock) */
+  try {
+    const running = await env.DB.prepare("SELECT account, listing_ids FROM promotions WHERE status LIKE '%RUNNING%'").all();
+    const covered = {};
+    for (const r of (running.results || [])) {
+      for (const id of String(r.listing_ids || '').split(',')) { if (id) covered[id] = 1; }
+    }
+    const items = await env.DB.prepare(
+      "SELECT item_id, account, title FROM items_api WHERE status = 'ACTIVE' AND " +
+      "(last_revised = '' OR last_revised <= datetime('now', '-14 day'))"
+    ).all();
+    const eligible = (items.results || []).filter(i => !covered[String(i.item_id)]);
+    if (eligible.length) {
+      const day = ukDate('');
+      const ref = 'engine:saleeligible:' + day;
+      const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE to_addr = ?1 AND ref = ?2').bind('management', ref).first();
+      if (!seen) {
+        const sample = eligible.slice(0, 8).map(i => String(i.title || i.item_id).slice(0, 40) + ' (' + i.account + ')').join(' · ');
+        await queueNotify(env, 'management', 'Sale coverage',
+          '🟠 ' + eligible.length + ' active listing(s) sit in NO running sale event and are past the 14-day revision rule — add them: ' + sample +
+          (eligible.length > 8 ? ' +' + (eligible.length - 8) + ' more (Marketing board)' : ''), ref);
+      }
+    }
+  } catch (e) { console.log('sale eligibility', String(e && e.message || e).slice(0, 160)); }
+}
+
+/* Review 4: FEEDBACK — per-account score and every comment, from Trading GetFeedback + GetUser.
+   A NEW NEGATIVE files letters to management AND the CS role the moment the sync sees it. */
+async function feedbackSync(env) {
+  await perAccount(env, 'feedbackSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const fbReq = '<?xml version="1.0" encoding="utf-8"?>' +
+      '<GetFeedbackRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel>' +
+      '<Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetFeedbackRequest>';
+    const fr = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetFeedback',
+        'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+      body: fbReq,
+    });
+    const fx = await fr.text();
+    if (!fr.ok || fx.indexOf('<Ack>Failure</Ack>') >= 0) throw new Error(acct + ' GetFeedback failed: ' + fx.slice(0, 140));
+    const entries = fx.match(/<FeedbackDetail>[\s\S]*?<\/FeedbackDetail>/g) || [];
+    for (const e0 of entries) {
+      const type = xmlTag(e0, 'CommentType');
+      const user = xmlTag(e0, 'CommentingUser');
+      const at = xmlTag(e0, 'CommentTime');
+      const item = xmlTag(e0, 'ItemID');
+      const key = acct + '|' + item + '|' + user + '|' + at;
+      const existed = await env.DB.prepare('SELECT 1 AS x FROM feedback WHERE fb_key = ?1').bind(key).first();
+      if (existed) continue;
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO feedback (fb_key, account, type, item_id, order_line, buyer, text, at, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))"
+      ).bind(key, acct, type, item, xmlTag(e0, 'OrderLineItemID'), user, xmlTag(e0, 'CommentText').slice(0, 400), at).run();
+      if (/Negative/i.test(type)) {
+        const msg = '🔴 NEGATIVE FEEDBACK on ' + acct + ' · item ' + item + ' · buyer ' + user +
+          ' — “' + xmlTag(e0, 'CommentText').slice(0, 140) + '” · order ' + xmlTag(e0, 'OrderLineItemID') +
+          ' — CS: respond and try to resolve for a revision.';
+        await queueNotify(env, 'management', 'Negative feedback', msg, 'engine:fbneg:' + key);
+        await notifyRole(env, 'CS', 'Negative feedback', msg, 'engine:fbneg:cs:' + key);
+      }
+    }
+    /* the header numbers his Seller Hub card shows: score + positive % */
+    const guReq = '<?xml version="1.0" encoding="utf-8"?>' +
+      '<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel></GetUserRequest>';
+    const gr = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetUser',
+        'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+      body: guReq,
+    });
+    const gx = await gr.text();
+    const score = Number(xmlTag(gx, 'FeedbackScore')) || 0;
+    const pct = Number(xmlTag(gx, 'PositiveFeedbackPercent')) || 0;
+    const cnt = await env.DB.prepare(
+      "SELECT SUM(CASE WHEN type = 'Positive' AND at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS p, " +
+      "SUM(CASE WHEN type = 'Neutral' AND at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS n, " +
+      "SUM(CASE WHEN type = 'Negative' AND at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS g " +
+      'FROM feedback WHERE account = ?1'
+    ).bind(acct).first();
+    await env.DB.prepare(
+      "INSERT INTO feedback_summary (account, score, pos_pct, pos_30d, neu_30d, neg_30d, json, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', datetime('now')) " +
+      "ON CONFLICT(account) DO UPDATE SET score=?2, pos_pct=?3, pos_30d=?4, neu_30d=?5, neg_30d=?6, synced_at=datetime('now')"
+    ).bind(acct, score, pct, Number(cnt && cnt.p) || 0, Number(cnt && cnt.n) || 0, Number(cnt && cnt.g) || 0).run();
+  });
+}
+
 /* Seller standards move slowly — eBay evaluates monthly — so one nightly read per account is
    the honest cadence, and it keeps the hourly slot far from the subrequest cap. */
 async function standardsSync(env) {
@@ -1915,6 +2071,10 @@ async function wasteAlarm(env) {
     await queueNotify(env, 'management', 'Ad waste',
       '🔴 £' + Number(r.sp).toFixed(2) + ' today, zero orders — ' + r.item_id + ' · ' + r.account + ' (advertising has been told).',
       'waste-m:' + r.item_id + ':' + day);
+    /* Review 4: Team Lead gets LOSS alerts — and nothing else of the money picture */
+    await notifyRole(env, 'Team Lead', 'Ad waste',
+      '🔴 Losing money: £' + Number(r.sp).toFixed(2) + ' spent today on ' + r.item_id + ' · ' + r.account + ' with zero orders — chase it.',
+      'waste-tl:' + r.item_id + ':' + day);
   }
 }
 
@@ -2589,7 +2749,7 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       /* Account-level ad-spend totals are a money read: the gate mirrors the screen's own
          role list exactly (CAMPAIGN_ROLES also carries CS, which must not see totals). */
-      if (['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      if (['Advertising Manager', 'Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth'); // Team Lead out — ad revenue is earnings (review 4)
       const day = ukDate('');
       /* Night review 2: "advertising requires all previous numbers the way i told you" — the
          board takes a window (7/14/30/60 days) and also returns the per-day series, so the
@@ -3467,6 +3627,59 @@ const ROUTES = {
      ITEM. Duplicated listings across accounts are folded into one product by TITLE (the same
      product carries a different listing id per account — the title is the honest join, and the
      board says which accounts/ids fold in). Windows: today · yesterday · 7d · 30d · all time. */
+  /* Review 4: the Marketing board — every sale event on every account, coverage, and the
+     14-day-eligible list. */
+  marketingBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const promos = (await ctx.env.DB.prepare(
+        'SELECT account, promo_id, name, type, status, start_at, end_at, discount, item_n, synced_at FROM promotions ORDER BY account, status, end_at'
+      ).all()).results || [];
+      const running = (await ctx.env.DB.prepare("SELECT listing_ids FROM promotions WHERE status LIKE '%RUNNING%'").all()).results || [];
+      const covered = {};
+      for (const r of running) for (const id of String(r.listing_ids || '').split(',')) { if (id) covered[id] = 1; }
+      const items = (await ctx.env.DB.prepare(
+        "SELECT item_id, account, title, price, last_revised FROM items_api WHERE status = 'ACTIVE'"
+      ).all()).results || [];
+      const nowMs = Date.now();
+      const uncovered = items.filter(i => !covered[String(i.item_id)]);
+      const eligible = uncovered.filter(i => !i.last_revised || Date.parse(String(i.last_revised).replace(' ', 'T') + 'Z') <= nowMs - 14 * 86400000);
+      const blocked = uncovered.filter(i => i.last_revised && Date.parse(String(i.last_revised).replace(' ', 'T') + 'Z') > nowMs - 14 * 86400000);
+      return {
+        promotions: promos,
+        coverage: { active_items: items.length, covered: items.length - uncovered.length,
+          uncovered: uncovered.length, eligible_now: eligible.length, blocked_14d: blocked.length },
+        eligible: eligible.slice(0, 80),
+        blocked: blocked.slice(0, 40),
+        note: 'covered = the listing sits in at least one RUNNING event · the 14-day clock runs from the last revision the engine OBSERVED (price/title change) — tracking began 21 Aug, so an unchanged listing counts as eligible' };
+    },
+  },
+
+  /* Review 4: the Feedback board — his Seller Hub card, all accounts, plus every comment. */
+  feedbackBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const sums = (await ctx.env.DB.prepare('SELECT * FROM feedback_summary ORDER BY account').all()).results || [];
+      const today = ukDate('');
+      const shiftD = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+      const yday = shiftD(1);
+      const daily = (await ctx.env.DB.prepare(
+        "SELECT account, type, substr(at, 1, 10) AS d, COUNT(*) AS n FROM feedback " +
+        "WHERE at >= datetime('now', '-31 day') GROUP BY account, type, d"
+      ).all()).results || [];
+      const negatives = (await ctx.env.DB.prepare(
+        "SELECT f.account, f.item_id, f.order_line, f.buyer, f.text, f.at, i.title FROM feedback f " +
+        "LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.type = 'Negative' ORDER BY f.at DESC LIMIT 60"
+      ).all()).results || [];
+      const neutrals = (await ctx.env.DB.prepare(
+        "SELECT f.account, f.item_id, f.buyer, f.text, f.at, i.title FROM feedback f " +
+        "LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.type = 'Neutral' ORDER BY f.at DESC LIMIT 20"
+      ).all()).results || [];
+      return { summaries: sums, daily, today, yesterday: yday, negatives, neutrals,
+        note: 'score and positive % are eBay’s own (GetUser); the 30-day splits come from the stored comments · a NEW negative letters management + CS the moment the sync sees it' };
+    },
+  },
+
   itemRisk: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'CS', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
@@ -4182,7 +4395,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

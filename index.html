@@ -330,7 +330,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -389,7 +389,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260820-2010';
+var BUILD = '20260820-2034';
 function versionWatch(){
   function safeReload(){
     var a = document.activeElement;
@@ -1022,7 +1022,8 @@ VIEWS.home = {
            ['adsIntraday', 'Pull today’s ad spend'], ['adsReportKick', 'Request eBay ad reports'],
            ['trafficSync', 'Pull traffic report'], ['csSync', 'Pull cases & returns'],
            ['listingSync', 'Pull listings'], ['selfTestJob', 'Validation + letters'],
-           ['nightlyCatchup', 'Heal missed nightly jobs'], ['backup', 'Backup now']
+           ['nightlyCatchup', 'Heal missed nightly jobs'], ['backup', 'Backup now'],
+           ['marketingSync', 'Pull sale events'], ['feedbackSync', 'Pull feedback']
           ].map(function (j) {
             return '<button class="minibtn" data-ah-job="' + j[0] + '">' + j[1] + '</button>';
           }).join('') +
@@ -1698,7 +1699,7 @@ VIEWS.home = {
  * The waste rows (£3+ today, zero orders) lead the table, red, exactly per his rule. */
 (function () {
 
-  var AC_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
+  var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
   var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
 
   VIEW_CSS.push(
@@ -3075,7 +3076,7 @@ VIEWS.home = {
     });
   }
 
-  var AM_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
+  var AM_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4 */
 
   VIEWS.advertising = {
     label: 'Advertising',
@@ -8525,7 +8526,7 @@ function createMeeting() {
 (function () {
 'use strict';
 
-var DB_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+var DB_VIEW_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS']; /* review 4: no sales analysis for Team Lead */
 
 /* The workbook's own labels. Never invent one — a renamed figure is a wrong figure. */
 var T_SOLD   = 'Sold';
@@ -9009,6 +9010,103 @@ VIEWS.dashboard = {
     };
   })();
 
+})();
+
+/* ---------- view-feedback.js ---------- */
+/* view-feedback.js — review 4: the Feedback dashboard. Every account's Seller Hub card
+ * (score + positive %), positive/neutral/negative for today · yesterday · 30 days, and the
+ * full detail of every negative — with letters already sent to management + CS on arrival. */
+(function () {
+
+  VIEW_CSS.push(
+    '.fb-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:14px}' +
+    '.fb-card{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:12px 14px}' +
+    '.fb-card .a{font-weight:800;font-size:13px}' +
+    '.fb-card .s{font-size:22px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}' +
+    '.fb-card .p{font-size:11.5px;font-weight:700;margin-top:2px}' +
+    '.fb-row{display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;margin-top:6px}' +
+    '.fb-neg{border:1px solid var(--bad);border-radius:12px;background:var(--bad-soft);padding:10px 14px;margin-bottom:10px;font-size:12.5px}'
+  );
+
+  function fbLoad() {
+    var box = $('fbBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    api('feedbackBoard', {}).then(function (d) {
+      var sums = (d && d.summaries) || [];
+      var daily = (d && d.daily) || [];
+      var today = (d && d.today) || '';
+      var yday = (d && d.yesterday) || '';
+      function cnt(acct, type, day) {
+        var n = 0;
+        daily.forEach(function (r) { if (r.account === acct && r.type === type && (!day || r.d === day)) { n += Number(r.n) || 0; } });
+        return n;
+      }
+      var h = '<div class="fb-cards">';
+      var fleet = { p: 0, n: 0, g: 0, pt: 0, gt: 0 };
+      sums.forEach(function (s) {
+        var negT = cnt(s.account, 'Negative', today), negY = cnt(s.account, 'Negative', yday);
+        var posT = cnt(s.account, 'Positive', today), posY = cnt(s.account, 'Positive', yday);
+        fleet.p += Number(s.pos_30d) || 0; fleet.n += Number(s.neu_30d) || 0; fleet.g += Number(s.neg_30d) || 0;
+        fleet.pt += posT; fleet.gt += negT;
+        h += '<div class="fb-card"><div class="a">' + esc(String(s.account)) + '</div>' +
+          '<div class="s">(' + (Number(s.score) || 0).toLocaleString() + ') <span style="color:var(--' + (Number(s.pos_pct) >= 99 ? 'ok' : 'warn') + ')">' + (Number(s.pos_pct) || 0).toFixed(1) + '%</span></div>' +
+          '<div class="p" style="color:var(--text-3)">eBay score · positive %</div>' +
+          '<div class="fb-row"><span style="color:var(--ok)">+ ' + (s.pos_30d || 0) + ' positive</span><span>' + (s.neu_30d || 0) + ' neutral</span><span style="color:var(--bad)">− ' + (s.neg_30d || 0) + ' negative</span></div>' +
+          '<div class="fb-row" style="color:var(--text-3)"><span>today + ' + posT + (negT ? ' / <b style="color:var(--bad)">− ' + negT + '</b>' : '') + '</span>' +
+          '<span>yesterday + ' + posY + (negY ? ' / <b style="color:var(--bad)">− ' + negY + '</b>' : '') + '</span></div></div>';
+      });
+      h += '</div>';
+      h += '<div class="dr-kpis" style="margin-bottom:12px">' +
+        '<div class="dr-kpi"><div class="l">Fleet · 30 days</div><div class="v"><span style="color:var(--ok)">+' + fleet.p + '</span> · ' + fleet.n + ' · <span style="color:var(--bad)">−' + fleet.g + '</span></div></div>' +
+        '<div class="dr-kpi"><div class="l">Today so far</div><div class="v"><span style="color:var(--ok)">+' + fleet.pt + '</span>' + (fleet.gt ? ' · <span style="color:var(--bad)">−' + fleet.gt + '</span>' : '') + '</div></div>' +
+        '</div>';
+      var negs = (d && d.negatives) || [];
+      if (negs.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--bad);font-weight:800;margin:4px 0 6px">🔴 Negative feedback — every one, newest first (management + CS were lettered on arrival)</div>';
+        negs.forEach(function (n) {
+          h += '<div class="fb-neg"><b>' + esc(String(n.account)) + '</b> · ' + esc(String(n.at).slice(0, 10)) + ' · buyer <b>' + esc(String(n.buyer)) + '</b>' +
+            '<div style="margin-top:3px">“' + esc(String(n.text || '(no comment)')) + '”</div>' +
+            '<div style="margin-top:3px;font-size:11px;color:var(--text-3)">' +
+            '<a href="https://www.ebay.co.uk/itm/' + esc(String(n.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(n.title || n.item_id).slice(0, 70)) + '</a>' +
+            (n.order_line ? ' · order line <span class="mono">' + esc(String(n.order_line)) + '</span>' : '') + '</div></div>';
+        });
+      } else {
+        h += '<div class="empty">No negative feedback on record. Keep it that way.</div>';
+      }
+      var neus = (d && d.neutrals) || [];
+      if (neus.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 4px">Neutral — newest ' + neus.length + '</div>';
+        neus.forEach(function (n) {
+          h += '<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--gold-line)"><b>' + esc(String(n.account)) + '</b> · ' + esc(String(n.at).slice(0, 10)) +
+            ' · “' + esc(String(n.text || '').slice(0, 120)) + '” · <span style="color:var(--text-3)">' + esc(String(n.title || n.item_id).slice(0, 50)) + '</span></div>';
+        });
+      }
+      h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String((d && d.note) || '')) + '</p>';
+      box.innerHTML = h;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">The feedback board did not answer — ' + esc(e.message) + '</div>';
+    });
+  }
+
+  VIEWS.feedback = {
+    label: 'Feedback',
+    order: 8.6,
+    roles: ['Management', 'Ops Head', 'CS', 'Team Lead'],
+    icon: '<path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.3a2 2 0 0 0 2-1.7l1.4-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>',
+    prefetch: function () { return api('feedbackBoard', {}); },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1><span class="goldtext">Feedback</span> — all accounts</h1>' +
+        '<span class="sub">eBay score + positive % per account · today, yesterday, 30 days · every negative in full, lettered to management + CS on arrival</span>' +
+        '<button class="minibtn" id="fbRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div class="card enter d2"><div class="bd" id="fbBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      var rf = $('fbRefresh');
+      if (rf) { rf.onclick = fbLoad; }
+      fbLoad();
+    }
+  };
 })();
 
 /* ---------- view-hunting.js ---------- */
@@ -11436,6 +11534,111 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var rf = $('ldRefresh');
       if (rf) { rf.onclick = ldLoad; }
       ldLoad();
+    }
+  };
+})();
+
+/* ---------- view-marketing.js ---------- */
+/* view-marketing.js — review 4: the Marketing dashboard. Every sale event on every account
+ * (name, dates, status, discount, member count), coverage of the "sale on every single item"
+ * rule, the 14-day-eligible list, and the ending-soon warnings. Management/Ops/Advertising. */
+(function () {
+
+  VIEW_CSS.push(
+    '.mk-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}' +
+    '.mk-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:8px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.mk-tbl td{padding:8px 12px;border-bottom:1px solid var(--gold-line)}' +
+    '.mk-end{background:var(--warn-soft)}' +
+    '.mk-st{font-size:10px;font-weight:800;letter-spacing:.05em;padding:2px 8px;border-radius:99px}' +
+    '.mk-st.run{background:var(--ok-soft);color:var(--ok)}' +
+    '.mk-st.sched{background:var(--blue-soft);color:var(--blue-2)}' +
+    '.mk-st.end{background:rgba(120,132,152,.16);color:var(--text-3)}'
+  );
+
+  function mkLoad() {
+    var box = $('mkBody');
+    if (!box) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    api('marketingBoard', {}).then(function (d) {
+      var cov = (d && d.coverage) || {};
+      var promos = (d && d.promotions) || [];
+      var running = promos.filter(function (p) { return /RUNNING/i.test(String(p.status)); });
+      var soon = running.filter(function (p) {
+        var t = Date.parse(p.end_at); return isFinite(t) && t - Date.now() > 0 && t - Date.now() <= 2 * 86400000;
+      });
+      var covPct = cov.active_items ? Math.round((cov.covered / cov.active_items) * 100) : 0;
+      var h = '<div class="dr-kpis">' +
+        '<div class="dr-kpi"><div class="l">Running sale events</div><div class="v">' + running.length + '</div></div>' +
+        '<div class="dr-kpi"><div class="l">Coverage · sale on every item</div><div class="v" style="color:var(--' + (covPct >= 95 ? 'ok' : 'warn') + ')">' + covPct + '%</div>' +
+          '<div class="d" style="color:var(--text-3)">' + cov.covered + ' of ' + cov.active_items + ' active listings in a running event</div></div>' +
+        '<div class="dr-kpi"><div class="l">Eligible NOW · add them</div><div class="v" style="color:var(--' + (cov.eligible_now ? 'warn' : 'ok') + ')">' + (cov.eligible_now || 0) + '</div>' +
+          '<div class="d" style="color:var(--text-3)">uncovered + past the 14-day revision rule</div></div>' +
+        '<div class="dr-kpi"><div class="l">Blocked by 14-day rule</div><div class="v">' + (cov.blocked_14d || 0) + '</div>' +
+          '<div class="d" style="color:var(--text-3)">revised too recently — clock running</div></div>' +
+        '<div class="dr-kpi"><div class="l">Ending within 2 days</div><div class="v" style="color:var(--' + (soon.length ? 'bad' : 'ok') + ')">' + soon.length + '</div>' +
+          '<div class="d" style="color:var(--text-3)">management is lettered 2 days out</div></div>' +
+        '</div>';
+      if (soon.length) {
+        h += '<div class="ir-alert"><b style="color:var(--warn)">🟠 Ending soon — arrange the replacement events:</b>';
+        soon.forEach(function (p) {
+          h += '<div style="margin-top:4px"><b>' + esc(String(p.name || p.promo_id)) + '</b> · ' + esc(String(p.account)) +
+            ' · ends ' + esc(String(p.end_at).slice(0, 10)) + ' · ' + (p.item_n || 0) + ' item(s)</div>';
+        });
+        h += '</div>';
+      }
+      h += '<div class="scroll"><table class="mk-tbl"><thead><tr>' +
+        '<th>Account</th><th>Sale event</th><th>Type</th><th>Status</th><th>Discount</th><th>Items</th><th>Started</th><th>Ends</th></tr></thead><tbody>';
+      if (!promos.length) {
+        h += '<tr><td colspan="8"><div class="empty">No promotions synced yet — the sync runs hourly at half past (or press "Pull now" on Account health → Engine ops → marketingSync).</div></td></tr>';
+      }
+      promos.forEach(function (p) {
+        var run = /RUNNING/i.test(String(p.status));
+        var endSoon = run && (function () { var t = Date.parse(p.end_at); return isFinite(t) && t - Date.now() <= 2 * 86400000; })();
+        h += '<tr' + (endSoon ? ' class="mk-end"' : '') + '><td style="font-weight:800">' + esc(String(p.account)) + '</td>' +
+          '<td>' + esc(String(p.name || p.promo_id).slice(0, 55)) + '</td>' +
+          '<td style="font-size:10.5px;color:var(--text-3)">' + esc(String(p.type).replace(/_/g, ' ').toLowerCase()) + '</td>' +
+          '<td><span class="mk-st ' + (run ? 'run' : /SCHEDULED/i.test(String(p.status)) ? 'sched' : 'end') + '">' + esc(String(p.status)) + '</span></td>' +
+          '<td>' + esc(String(p.discount || '—')) + '</td>' +
+          '<td style="font-weight:800">' + (p.item_n || 0) + '</td>' +
+          '<td>' + esc(String(p.start_at).slice(0, 10)) + '</td>' +
+          '<td' + (endSoon ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + esc(String(p.end_at).slice(0, 10) || '—') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      var el = (d && d.eligible) || [];
+      if (el.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);font-weight:800;margin:14px 0 4px">🟠 Eligible now — in no running event, past the 14-day rule (' + ((d.coverage || {}).eligible_now || el.length) + ')</div>' +
+          '<div class="scroll" style="max-height:280px"><table class="mk-tbl"><thead><tr><th>Listing</th><th>Account</th><th>Price</th><th>Last revision seen</th></tr></thead><tbody>';
+        el.forEach(function (i) {
+          h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(i.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+            esc(String(i.title || i.item_id).slice(0, 70)) + '</a><div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(i.item_id)) + '</div></td>' +
+            '<td>' + esc(String(i.account)) + '</td><td>£' + (Number(i.price) || 0).toFixed(2) + '</td>' +
+            '<td style="color:var(--text-3)">' + esc(String(i.last_revised || 'none observed')) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+      h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String((d && d.note) || '')) + '</p>';
+      box.innerHTML = h;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">The marketing board did not answer — ' + esc(e.message) + '</div>';
+    });
+  }
+
+  VIEWS.marketing = {
+    label: 'Marketing',
+    order: 7.4,
+    roles: ['Management', 'Ops Head', 'Advertising Manager'],
+    icon: '<path d="M20 12a8 8 0 1 0-16 0"/><path d="M12 12l4-4"/><path d="M8 21h8"/>',
+    prefetch: function () { return api('marketingBoard', {}); },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1><span class="goldtext">Marketing</span> — sale events</h1>' +
+        '<span class="sub">every sale event on every account · the sale-on-every-item rule · the 14-day revision clock · 2-day ending bells</span>' +
+        '<button class="minibtn" id="mkRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div class="card enter d2"><div class="bd" id="mkBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      var rf = $('mkRefresh');
+      if (rf) { rf.onclick = mkLoad; }
+      mkLoad();
     }
   };
 })();

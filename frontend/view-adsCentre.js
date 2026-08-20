@@ -3,7 +3,7 @@
  * The waste rows (£3+ today, zero orders) lead the table, red, exactly per his rule. */
 (function () {
 
-  var AC_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
+  var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
   var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
 
   VIEW_CSS.push(
