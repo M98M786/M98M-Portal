@@ -442,7 +442,9 @@ async function listingSync(env) {
         /* the 7-day-rule age clock: eBay's own StartTime when the XML carries it (first_seen
            stays as the fallback clock and is never overwritten once set) */
         String(xmlTag(it, 'StartTime') || '').replace('T', ' ').replace(/\.\d+Z$/, '').replace('Z', ''),
-        Number(xmlTag(it, 'QuantitySold')) || 0
+        /* eBay's active list gives original Quantity and QuantityAvailable, never a sold count —
+           lifetime sold is the difference (0 when either is missing) */
+        Math.max(0, (Number(xmlTag(it, 'Quantity')) || 0) - (Number(xmlTag(it, 'QuantityAvailable')) || 0))
       ));
     }
     for (let i = 0; i < upserts.length; i += 50) await env.DB.batch(upserts.slice(i, i + 50));
