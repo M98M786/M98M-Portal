@@ -357,7 +357,14 @@ async function apiAccounts(env) {
 /* One account's bad credentials must never starve the accounts after it — each account gets its
  * own try/catch and its own sync_state row, so the job-level row stays for the job itself. */
 async function perAccount(env, job, fn) {
-  for (const acct of await apiAccounts(env)) {
+  /* ROTATE the starting account each hour. The list used to run in one fixed order, so when an
+     invocation neared the Workers subrequest cap it was always the SAME tail account that died —
+     Saif's report kicks failed for 29 straight hours while the other four passed, and his ad
+     books sat at £0. Rotation shares the tail; the per-run backlog cap bounds the budget. */
+  const all = await apiAccounts(env);
+  const off = all.length ? new Date().getUTCHours() % all.length : 0;
+  const order = all.slice(off).concat(all.slice(0, off));
+  for (const acct of order) {
     try {
       await fn(acct);
       await env.DB.prepare(
@@ -1958,7 +1965,12 @@ async function adsReportKick(env) {
     }
 
     const problems = [];
-    for (let back = 1; back <= 7; back++) {
+    /* BACKLOG CAP (20 Aug): at most 4 report-task creates per account per run. An account with a
+       week-deep hole used to fire up to 14 creates in one go, and the invocation's Workers
+       subrequest budget died on whichever account ran last — Saif, for 29 hours straight. The
+       'have' map resumes exactly where a capped run stopped, so a hole still heals in 2-3 runs. */
+    let kicked = 0;
+    for (let back = 1; back <= 7 && kicked < 4; back++) {
       const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
       const from = day + 'T00:00:00.000Z';
       const to = day + 'T23:59:59.000Z';
@@ -1966,6 +1978,8 @@ async function adsReportKick(env) {
          seller both have one family that legitimately returns nothing. */
       for (const fam of families) {
         if (have[day + '|' + fam.family]) continue;
+        if (kicked >= 4) break;
+        kicked++;
         const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
           method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
           /* fundingModels is the half of the request that was missing for weeks. eBay's answer to
