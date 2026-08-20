@@ -173,6 +173,7 @@ input,select{font:inherit}
     <div class="gbtn-wrap" id="gbtn"></div>
     <div class="auth-status info" id="loginStatus"></div>
     <div class="auth-note">Sign in with your <b>M98M company Google account</b>. New here? Signing in starts your registration — Management approves before access.</div>
+    <div style="font-size:10px;color:var(--text-3);margin-top:14px;line-height:1.6;opacity:.8">Designed, logiced &amp; made by <b>Zaid Kaleem</b> · Sales analysis logic by <b>Sir Hasib Ullah</b> &amp; <b>Ubaid Kaleem</b></div>
   </div>
 </div>
 
@@ -790,7 +791,8 @@ function enterApp(user){
   $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
   $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
   $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
-    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>';
+    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>'+
+    '<div style="font-size:9.5px;color:var(--text-3);margin-top:6px;line-height:1.5;opacity:.85">Designed, logiced &amp; made by <b>Zaid Kaleem</b><br>Sales analysis logic by <b>Sir Hasib Ullah</b> &amp; <b>Ubaid Kaleem</b></div>';
   if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
   /* Management lands on the live Business overview, not the generic home — the screen that
      answers "how is the business right now" should be the first thing the owner sees. */
@@ -934,6 +936,15 @@ function mintPortalSession(){
     if(d && d.session){ STATE.session = d.session; psessSave(d.session, d.user || STATE.user); }
   }).catch(function(){});
 }
+/* Review 4c ("portal logs out on a reload"): a device signed in BEFORE sessions shipped holds
+   no stored session, and Chrome's third-party-cookie rules can kill the silent Google fallback —
+   so every reload looked like a logout. Any signed-in minute without a stored session now retries
+   the mint until it lands; one success and that device never sees the sign-in screen again. */
+setInterval(function(){
+  try{
+    if(STATE.user && (STATE.idToken || STATE.session) && !psessLoad()){ STATE.session = null; mintPortalSession(); }
+  }catch(e){}
+}, 45000);
 function sessSave(tok){ try{ sessionStorage.setItem(SESS_KEY, tok); }catch(e){} }
 function sessClear(){ try{ sessionStorage.removeItem(SESS_KEY); }catch(e){} }
 function sessLoad(){
@@ -976,6 +987,8 @@ function boot(){
       $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Welcome back…';
       api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; trySilentSignIn(); });
     } else if (localStorage.getItem('m98m:knows')) {
+      $('loginStatus').className='auth-status info';
+      $('loginStatus').textContent='One click brings you back — this sign-in sticks from now on (reloads and new tabs stay signed in).';
       /* The reload-logout complaint: sessionStorage dies with the tab and Google's token dies in
          an hour, but the GOOGLE SESSION in this browser is still alive. One silent prompt
          re-mints the credential without the user touching anything; only if Google itself says
