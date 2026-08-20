@@ -113,7 +113,25 @@ function bootstrapApproveUser(email, role, accounts) {
  * the smallest set of scopes that does the job (least privilege).
  *
  * Each handler is defensive — a module that is not deployed is simply skipped. */
+/* Hunting v3 (20 Aug): the DB tab self-heals its columns — any HUNTING_COLS name missing from
+ * the HUNTING_DB header row is appended at the end, so a workbook redesign never needs manual
+ * sheet surgery. Idempotent; rides the hourly sweep below. */
+function huntEnsureDbCols_() {
+  try {
+    const sh = getPortalDb_(false).getSheetByName('HUNTING_DB');
+    if (!sh) return;
+    const width = sh.getLastColumn();
+    const head = sh.getRange(1, 1, 1, width).getValues()[0].map(function (h) { return String(h).trim(); });
+    const want = ['hunt_id', 'hunter_email', 'ts'].concat(HUNTING_COLS);
+    const missing = want.filter(function (c) { return head.indexOf(c) < 0; });
+    if (!missing.length) return;
+    sh.getRange(1, width + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    logActivity_('system', 'HUNTING_DB_COLS', '', '', '', 'appended: ' + missing.join(', '));
+  } catch (e) { logActivity_('system', 'ERROR:huntEnsureCols', '', '', '', String(e && e.message || e)); }
+}
+
 function runMissedCheckpointSweep() {
+  huntEnsureDbCols_();
   if (typeof flagMissedCheckpoints === 'function') {
     try { flagMissedCheckpoints(); }
     catch (e) { logActivity_('trigger', 'ERROR:missedCheckpoints', '', '', '', String(e && e.stack || e)); }
