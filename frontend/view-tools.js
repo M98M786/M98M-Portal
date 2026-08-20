@@ -407,4 +407,39 @@
     tkExitFull();
   });
 
+
+  /* review 3: "all these tools integrated with the dashboards ... the way order earning
+     calculator is live." Any view calls toolDock(hostEl, kind, title) — the tool mounts inline
+     in that dashboard, in the SAME opaque-origin sandbox as the Tools screen (allow-scripts
+     allow-forms only; no same-origin, no popups, no top-navigation — RL-3's reasoning applies
+     unchanged). One dock per host; a second call replaces the first. */
+  window.toolDock = function (host, kind, title) {
+    if (!host) { return; }
+    host.innerHTML = '<div class="tk-load" style="padding:14px"><div class="spinner"></div>' +
+      '<div class="tk-sub">Opening ' + esc(String(title || kind)) + '\u2026</div></div>';
+    api('toolHtml', { tool: kind }).then(function (res) {
+      if (!res || res.ok !== true) {
+        host.innerHTML = '<div class="empty">' + esc(String((res && (res.reason || res.note)) || 'The tool is not ready.')) + '</div>';
+        return;
+      }
+      host.innerHTML = '';
+      var bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--gold-line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--panel-2);font-weight:800;font-size:12px';
+      bar.textContent = String(title || kind);
+      var x = document.createElement('button');
+      x.className = 'minibtn'; x.textContent = 'Close';
+      x.onclick = function () { host.innerHTML = ''; };
+      bar.appendChild(x);
+      var fr = document.createElement('iframe');
+      fr.setAttribute('sandbox', 'allow-scripts allow-forms');
+      fr.style.cssText = 'width:100%;height:640px;border:1px solid var(--gold-line);border-radius:0 0 12px 12px;background:#fff';
+      fr.srcdoc = String(res.html || '');
+      host.appendChild(bar);
+      host.appendChild(fr);
+      try { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    }).catch(function (e) {
+      host.innerHTML = '<div class="empty">Could not open the tool \u2014 ' + esc(e.message) + '</div>';
+    });
+  };
+
 })();

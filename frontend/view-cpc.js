@@ -216,6 +216,20 @@
         '<div id="cpWork" style="margin-top:16px"></div>';
     },
     init: function () {
+      /* review 3: the tool lives IN this dashboard, like the calculator */
+      (function () {
+        var hg = document.querySelector('.hgroup');
+        if (hg && !document.getElementById('cpcToolDockBtn')) {
+          var b = document.createElement('button');
+          b.className = 'minibtn'; b.id = 'cpcToolDockBtn'; b.textContent = 'Open CPC Keyword Decision Engine';
+          b.style.marginLeft = 'auto';
+          var host = document.createElement('div'); host.id = 'cpcToolDock';
+          hg.appendChild(b);
+          hg.parentNode.insertBefore(host, hg.nextSibling);
+          b.onclick = function () { window.toolDock(host, 'tool_cpc_keyword', 'CPC Keyword Decision Engine'); };
+        }
+      })();
+
       $('cpRefresh').onclick = cpLoadTasks;
       $('cpOpenGo').onclick = function () {
         var id = cpStr($('cpOpenId').value);

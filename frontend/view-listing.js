@@ -298,6 +298,20 @@
         (lsCanCreate() ? lsComposer() : lsComposerNote());
     },
     init: function () {
+      /* review 3: the tool lives IN this dashboard, like the calculator */
+      (function () {
+        var hg = document.querySelector('.hgroup');
+        if (hg && !document.getElementById('liToolDockBtn')) {
+          var b = document.createElement('button');
+          b.className = 'minibtn'; b.id = 'liToolDockBtn'; b.textContent = 'Open M98M Listing Tool';
+          b.style.marginLeft = 'auto';
+          var host = document.createElement('div'); host.id = 'liToolDock';
+          hg.appendChild(b);
+          hg.parentNode.insertBefore(host, hg.nextSibling);
+          b.onclick = function () { window.toolDock(host, 'tool_listing', 'M98M Listing Tool'); };
+        }
+      })();
+
       $('lsRefresh').onclick = lsLoad;
       $('lsDone').onclick = function () {
         LS_SHOW_DONE = !LS_SHOW_DONE;
