@@ -143,6 +143,51 @@ function nbGenerationCopies_(fails) {
   return made;
 }
 
+/** Hasib: "create every sheet i gave you at the back end for which ebay is not putting data,
+ *  but create sheets that are representable." The account_report books whose eBay-side agents
+ *  went quiet get a clean ENGINE REPORT tab, rewritten nightly from the Engine's own truth:
+ *  the 30-day summary block plus that account's daily book lines. The agents' own tabs are
+ *  never touched — this adds a tab that is always alive. */
+function nbRefreshReportBooks_(fails) {
+  var conns = readTab_('CONNECTIONS').filter(function (c) {
+    return String(c.sheet_kind) === 'account_report' && String(c.status || '').toLowerCase() !== 'off';
+  });
+  if (!conns.length) return 0;
+  var sum, daily;
+  try {
+    sum = enginePost_('backupDump', { table: 'account_summary', limit: 100 });
+    daily = enginePost_('backupDump', { table: 'sales_daily', limit: 4000 });
+  } catch (e) { fails.push('reportBooks: ' + String(e).slice(0, 60)); return 0; }
+  var accCol = daily.header.indexOf('account'), dateCol = daily.header.indexOf('date');
+  var done = 0;
+  conns.forEach(function (c) {
+    var acct = String(c.account_name || '').trim();
+    try {
+      var ss = SpreadsheetApp.openById(String(c.spreadsheet_id));
+      var sh = ss.getSheetByName('ENGINE REPORT') || ss.insertSheet('ENGINE REPORT', 0);
+      sh.clearContents();
+      var out = [['M98M ENGINE REPORT — ' + acct], ['always alive: rewritten nightly from the portal engine (eBay API truth), ' + new Date().toISOString()], ['']];
+      out.push(['30-DAY SUMMARY']);
+      var mine = (sum.rows || []).filter(function (r) { return String(r[sum.header.indexOf('account')]).trim() === acct; });
+      if (mine.length) {
+        for (var i = 0; i < sum.header.length; i++) out.push([sum.header[i], mine[0][i]]);
+      } else { out.push(['no orders in the last 30 days', '']); }
+      out.push(['']);
+      out.push(['DAILY BOOKS (newest first)']);
+      out.push(daily.header);
+      var rowsAcct = (daily.rows || []).filter(function (r) { return String(r[accCol]).trim() === acct; })
+        .sort(function (a, b) { return String(b[dateCol]).localeCompare(String(a[dateCol])); }).slice(0, 60);
+      rowsAcct.forEach(function (r) { out.push(r); });
+      var width = Math.max.apply(null, out.map(function (r) { return r.length; }));
+      var rect = out.map(function (r) { while (r.length < width) r.push(''); return r.map(function (x) { return x === null || x === undefined ? '' : x; }); });
+      sh.getRange(1, 1, rect.length, width).setValues(rect);
+      sh.getRange(1, 1).setFontWeight('bold');
+      done++;
+    } catch (e) { fails.push('report:' + acct + ' ' + String(e).slice(0, 50)); }
+  });
+  return done;
+}
+
 /** The nightly pull (rides nightlyBackup; first run rides the hourly sweep via the bootstrap).
  *  Engine tables + Portal DB department tabs into their files, then the dated generation
  *  copies; failures collect and stamp back to the Engine, which letters Management if anything
@@ -167,7 +212,8 @@ function nightBackupPull() {
     });
   });
   var copies = nbGenerationCopies_(fails);
-  var stamp = { ok: fails.length === 0, tables: tables, rows: rowsTotal, fails: fails, copies: copies, secs: Math.round((Date.now() - t0) / 1000) };
+  var books = nbRefreshReportBooks_(fails);
+  var stamp = { ok: fails.length === 0, tables: tables, rows: rowsTotal, fails: fails, copies: copies, report_books: books, secs: Math.round((Date.now() - t0) / 1000) };
   try { enginePost_('backupStamp', stamp); } catch (e) { stamp.stampError = String(e).slice(0, 120); }
   PropertiesService.getScriptProperties().setProperty('BACKUP_LAST', JSON.stringify({ at: new Date().toISOString(), tables: tables, rows: rowsTotal, copies: copies, fails: fails }));
   return stamp;
