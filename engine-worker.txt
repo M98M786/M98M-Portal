@@ -81,7 +81,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
-      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan],
+      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob],
     };
     const fns = jobs[event.cron] || [];
@@ -483,6 +483,27 @@ async function noSupplierScan(env) {
       ' (' + r.item_id + ') has NO supplier link anywhere — not on the order, not in the sheet. Add it on the order screen or update the sheet.' +
       (Number(r.n) > 1 ? ' ' + r.n + ' open orders are on this item.' : ''),
       'engine:nosup:' + r.item_id);
+  }
+}
+
+/* THE NIGHTLY IS ALLOWED TO MISS — ONCE. Cloudflare skipped the 02:00 tick on 20 Aug and six
+   jobs silently didn't run: the books stayed unfinalized, no daily ad reports were kicked, the
+   validation never rang. This sentinel rides the half-past slot: any nightly job whose last
+   clean run is older than 26 hours gets re-run, at most two per tick (oldest first), so a
+   missed night self-repairs within three hours and never blows one invocation's budget. */
+async function nightlyCatchup(env) {
+  const NIGHTLY = { rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob };
+  const names = Object.keys(NIGHTLY);
+  const rs = await env.DB.prepare(
+    "SELECT job, last_ok FROM sync_state WHERE account = '' AND job IN ('" + names.join("','") + "')"
+  ).all();
+  const last = {};
+  for (const r of (rs.results || [])) last[r.job] = String(r.last_ok || '');
+  const cutoff = new Date(Date.now() - 26 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  const stale = names.filter((j) => !last[j] || last[j] < cutoff)
+    .sort((a, b) => (last[a] || '') < (last[b] || '') ? -1 : 1);
+  for (const j of stale.slice(0, 2)) {
+    await runJob(env, NIGHTLY[j]);
   }
 }
 
@@ -3700,7 +3721,7 @@ const ROUTES = {
   /* Ops lever for the build session and the Management ops panel: run any cron job now. */
   runJobNow: {
     auth: 'sync', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
