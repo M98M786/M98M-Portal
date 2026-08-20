@@ -544,6 +544,19 @@ async function selfTestRun(env) {
     }
   } catch (e) { add('books match orders', false, e.message); }
 
+  try { // 4b. the books CARRY the VAT law: sales_daily.profit ≈ 0.8 × (oe − cost) per closed day.
+    // Guards the 20 Aug rollups change — a regression to pre-law oe−cost books would overstate
+    // every profit surface by 25% and nothing else would notice. Small drift is legitimate:
+    // orders with no real OE contribute via per-order fallbacks, not the aggregate identity.
+    for (let back = 1; back <= 2; back++) {
+      const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
+      const b = await one('SELECT ROUND(SUM(profit), 2) AS p, ROUND(0.8 * (SUM(oe) - SUM(cost)), 2) AS law FROM sales_daily WHERE date = ?1', day);
+      const p = Number(b.p) || 0, law = Number(b.law) || 0;
+      const tol = Math.max(2, Math.abs(law) * 0.03);
+      add('books carry the 0.8 law for ' + day, Math.abs(p - law) <= tol, '£' + p.toFixed(2) + ' vs 0.8×(OE−cost) £' + law.toFixed(2));
+    }
+  } catch (e) { add('books carry the 0.8 law', false, e.message); }
+
   try { // 5. the P&L law recomputes (7d totals): Raw = 0.8 × (OE − Ali) — the central-sheet brain
     const t = await one("SELECT ROUND(SUM(sold), 2) AS rev, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END), 2) AS fees, ROUND(SUM(cost), 2) AS cost FROM orders WHERE status != 'NOT_FOUND' AND created_at >= datetime('now', '-7 day')");
     const rev = Number(t.rev) || 0, fees = Number(t.fees) || 0, cost = Number(t.cost) || 0;
