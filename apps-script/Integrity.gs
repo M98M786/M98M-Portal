@@ -25,6 +25,13 @@ function nightlyBackup() {
     const pruned = backupPrune_(folder);
     logActivity_('backup', 'NIGHTLY_BACKUP', copy.getId(), '', copy.getName(),
       'started ' + started + ' · pruned ' + pruned);
+    /* R5: the Engine-tables → Google Sheets backup rides the same nightly trigger (no ScriptApp,
+     * see NightBackup.gs). Defensive like every ride: its failure letters Management through the
+     * Engine stamp, never breaks the Drive copy above. */
+    if (typeof nightBackupPull === 'function') {
+      try { nightBackupPull(); }
+      catch (e) { logActivity_('backup', 'ERROR:nightBackupPull', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+    }
     return 'Backed up as "' + copy.getName() + '". Pruned ' + pruned + ' copy(ies) older than ' + BACKUP_KEEP_DAYS + ' days.';
   } catch (err) {
     // A failed backup must shout, not fail silently — silence is how people discover at the worst

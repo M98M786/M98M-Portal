@@ -3,12 +3,20 @@
  *  "at any day portal dies , we need backup data" — so every night this file PULLS the Engine's
  *  tables (backupDump, key-authed, credential-free whitelist) and writes them into four Google
  *  backup spreadsheets in the owner's Drive. Pull, not push: each page is its own Engine
- *  invocation, so the Worker's subrequest budget is never in the picture, and triggers run HEAD
- *  code — no /exec redeploy is ever needed to change what gets backed up.
+ *  invocation, so the Worker's subrequest budget is never in the picture, and these functions
+ *  run on HEAD — no /exec redeploy is ever needed to change what gets backed up.
  *
  *  The hourly aliSweep reads the day tabs' processor columns (the AliExpress 'Order Number' and
  *  'New Ali Link') and pours them into the Engine, which is what lets the portal answer
  *  "which orders are still not processed" from its own tables.
+ *
+ *  NO TRIGGERS OF THEIR OWN — this project deliberately never calls ScriptApp (the scriptapp
+ *  scope forces a re-consent that blocks every function). Both jobs RIDE the two triggers that
+ *  already exist, the same way alertsRefresh and dispatchOverdueSweep do:
+ *    · aliSweep        rides runMissedCheckpointSweep (hourly, Setup.gs)
+ *    · nightBackupPull rides nightlyBackup            (nightly, Integrity.gs)
+ *  First-run bootstrap: until the backup files exist (no BACKUP_SS_MONEY property), the hourly
+ *  sweep runs the backup once itself, so night one has an off-site copy without waiting a day.
  */
 
 var NB_FILES = {
@@ -83,7 +91,7 @@ function nightBackupPull() {
     var ss;
     try { ss = nbFile_(propKey); } catch (e) { fails.push(propKey + ': ' + String(e).slice(0, 60)); return; }
     NB_FILES[propKey].tables.forEach(function (table) {
-      if (Date.now() - t0 > 300000) {                     // 5-minute guard: never die mid-write
+      if (Date.now() - t0 > 240000) {                     // the house 240s budget: never die mid-write
         fails.push('TIME:' + table); return;
       }
       try { rowsTotal += nbPullTable_(ss, table); tables++; }
@@ -120,7 +128,7 @@ function aliSweep() {
     var ss;
     try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
     var sheets = ss.getSheets();
-    for (var back = 0; back <= 3; back++) {
+    for (var back = 0; back <= 6; back++) {
       var ymd = Utilities.formatDate(new Date(Date.now() - back * 86400000), 'Asia/Karachi', 'yyyy-MM-dd');
       var candidates = ordersDayTabCandidates_(ymd);
       for (var s = 0; s < sheets.length; s++) {
@@ -155,13 +163,14 @@ function aliSweep() {
 
 /* ------------------------------------------------------------------------------------------ */
 
-/** Run once from the editor. Replaces any previous copies of these two triggers. */
-function setupNightWatchTriggers() {
-  var mine = { nightBackupPull: 1, aliSweep: 1 };
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (mine[t.getHandlerFunction()]) ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('nightBackupPull').timeBased().atHour(7).everyDays(1).create();  // 7 AM PKT = 3 AM UK
-  ScriptApp.newTrigger('aliSweep').timeBased().everyHours(1).create();
-  return 'triggers set: nightBackupPull daily @ 7 AM PKT, aliSweep hourly';
+/** The hourly ride (called from runMissedCheckpointSweep): the Ali sweep every hour, plus the
+ *  one-time first backup — until the backup files exist, night one must not wait for the nightly
+ *  trigger to come around. After the first run the property exists and this is sweep-only. */
+function nightWatchHourlyRide() {
+  try { aliSweep(); }
+  catch (e) { logActivity_('trigger', 'ERROR:aliSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  if (!PropertiesService.getScriptProperties().getProperty('BACKUP_SS_MONEY')) {
+    try { nightBackupPull(); }
+    catch (e) { logActivity_('trigger', 'ERROR:firstBackup', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
 }

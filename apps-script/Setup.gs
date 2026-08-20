@@ -151,6 +151,12 @@ function runMissedCheckpointSweep() {
     try { dispatchOverdueSweep(); }
     catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e)); }
   }
+  /* R5: the Ali order-number sweep rides here too (day tabs → Engine, hourly), carrying the
+   * one-time first-backup bootstrap. Same defensive shape as the sweeps above. */
+  if (typeof nightWatchHourlyRide === 'function') {
+    try { nightWatchHourlyRide(); }
+    catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
+  }
 }
 
 function runSubmissionEscalationSweep() {
