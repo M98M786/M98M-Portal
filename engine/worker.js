@@ -1544,7 +1544,12 @@ async function marketingSync(env) {
       "(last_revised = '' OR last_revised <= datetime('now', '-14 day'))"
     ).all();
     const eligible = (items.results || []).filter(i => !covered[String(i.item_id)]);
-    if (eligible.length) {
+    /* never letter management off half-filled membership: while many RUNNING events still
+       await their detail fetch (item_n = 0), "uncovered" is an artifact of the fill, not a fact */
+    const unfilled = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM promotions WHERE status LIKE '%RUNNING%' AND item_n = 0"
+    ).first();
+    if (eligible.length && Number(unfilled && unfilled.n) === 0) {
       const day = ukDate('');
       const ref = 'engine:saleeligible:' + day;
       const seen = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE to_addr = ?1 AND ref = ?2').bind('management', ref).first();
