@@ -330,7 +330,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll','orderAddAliLink'];
+var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -1006,7 +1006,7 @@ VIEWS.home = {
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, flipped: true };
+  var AR = { data: null, mode: 'daily' };   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
      claimed; duplicates and blank headers land under 'col:<letter>' (SheetBridge's own rule,
@@ -1029,6 +1029,72 @@ VIEWS.home = {
     return keys;
   }
 
+  /* Night review 2, verbatim: "account report required data of each day with proper
+     calculation, and this is probably the worst representation ever." The default is now a
+     DAY-KEYED dashboard: the date column is detected from the data, every numeric metric is
+     formatted, and a 7-day-vs-prior-7 summary leads. The workbook orientation and the raw
+     list survive behind the same button. */
+  function arDaily(r, heads, keys, rows, cell) {
+    // 1) find the date column: the key whose values look like dates most often
+    var best = 0, bestHits = -1;
+    keys.forEach(function (k, i) {
+      var hits = 0;
+      rows.forEach(function (row) {
+        if (/^\d{4}-\d{2}-\d{2}/.test(String(row[k] == null ? '' : row[k]).trim())) { hits++; }
+      });
+      if (hits > bestHits) { bestHits = hits; best = i; }
+    });
+    if (bestHits < 2) { return null; }                       // no date column → fall back
+    var dateKey = keys[best];
+    // 2) day rows only, newest first
+    var days = rows.filter(function (row) { return /^\d{4}-\d{2}-\d{2}/.test(String(row[dateKey] || '').trim()); });
+    days.sort(function (x, y) { return String(y[dateKey]) < String(x[dateKey]) ? -1 : 1; });
+    if (!days.length) { return null; }
+    // 3) numeric metric columns (most non-empty values parse as numbers)
+    var metrics = [];
+    keys.forEach(function (k, i) {
+      if (i === best) { return; }
+      var num = 0, filled = 0;
+      days.forEach(function (row) {
+        var v = String(row[k] == null ? '' : row[k]).trim();
+        if (v !== '') { filled++; if (isFinite(parseFloat(v.replace(/[£,%]/g, '')))) { num++; } }
+      });
+      if (filled >= 3 && num / filled >= 0.7) { metrics.push({ k: k, label: String(heads[i] || k), filled: filled }); }
+    });
+    metrics = metrics.slice(0, 14);
+    if (!metrics.length) { return null; }
+    var numOf = function (row, k) { var v = parseFloat(String(row[k] == null ? '' : row[k]).replace(/[£,%]/g, '')); return isFinite(v) ? v : null; };
+    var fmt = function (v) {
+      if (v == null) { return '—'; }
+      if (Math.abs(v) > 0 && Math.abs(v) < 1) { return (Math.round(v * 1000) / 10) + '%'; }   // 0-1 ratios read as percent
+      return String(Math.round(v * 100) / 100);
+    };
+    // 4) 7-day averages vs the prior 7
+    var avg = function (list, k) {
+      var vals = list.map(function (row) { return numOf(row, k); }).filter(function (v) { return v != null; });
+      if (!vals.length) { return null; }
+      return vals.reduce(function (a2, b2) { return a2 + b2; }, 0) / vals.length;
+    };
+    var w1 = days.slice(0, 7), w0 = days.slice(7, 14);
+    var strip = '<div class="al-mini" style="margin-bottom:14px">' + metrics.slice(0, 8).map(function (m) {
+      var c = avg(w1, m.k), p = avg(w0, m.k);
+      var d = (c != null && p) ? Math.round((c - p) / Math.abs(p) * 100) : null;
+      return '<div class="al-m-k">' + esc(m.label.slice(0, 26)) + ' · 7d avg</div>' +
+        '<div class="al-m-v num">' + esc(fmt(c)) +
+        (d == null ? '' : ' <span style="font-size:10px;color:var(--' + (d >= 0 ? 'ok' : 'bad') + ')">' + (d >= 0 ? '▲' : '▼') + Math.abs(d) + '%</span>') + '</div>';
+    }).join('') + '</div>';
+    // 5) the day table, newest 14
+    var h2 = strip + '<div class="scroll"><table class="ar-tbl"><thead><tr><th>Day</th>' +
+      metrics.map(function (m) { return '<th>' + esc(m.label.slice(0, 24)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+    days.slice(0, 14).forEach(function (row) {
+      h2 += '<tr><td style="font-weight:800;white-space:nowrap">' + esc(String(row[dateKey]).slice(0, 10)) + '</td>' +
+        metrics.map(function (m) { return '<td style="text-align:right;font-variant-numeric:tabular-nums">' + esc(fmt(numOf(row, m.k))) + '</td>'; }).join('') + '</tr>';
+    });
+    h2 += '</tbody></table></div>';
+    if (days.length > 14) { h2 += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Newest 14 of ' + days.length + ' days — the other views show everything.</p>'; }
+    return h2;
+  }
+
   function arRender() {
     var host = $('arBody');
     var r = AR.data;
@@ -1038,7 +1104,11 @@ VIEWS.home = {
     var rows = r.rows || [];
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
-    if (AR.flipped) {
+    if (AR.mode === 'daily') {
+      h = arDaily(r, heads, keys, rows, cell);
+      if (h == null) { AR.mode = 'workbook'; }               // no date column — show the workbook view
+    }
+    if (AR.mode === 'workbook') {
       // metrics down the side (the workbook's own orientation), newest entries as columns
       var take = rows.slice(0, 10);
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr><th></th>' +
@@ -1050,7 +1120,8 @@ VIEWS.home = {
       });
       h += '</tbody></table></div>';
       if (rows.length > 10) { h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Showing the newest 10 of ' + rows.length + ' — flip to the list to see them all.</p>'; }
-    } else {
+    }
+    if (AR.mode === 'list') {
       h = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
         heads.map(function (x) { return '<th>' + esc(String(x)) + '</th>'; }).join('') + '</tr></thead><tbody>';
       rows.forEach(function (row) {
@@ -1061,7 +1132,10 @@ VIEWS.home = {
     host.innerHTML = h +
       '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Newest first · read straight from "' + esc(String(r.tab || '')) + '" · resolving alarms stays on the Alerts centre.</p>';
     var flipBtn = $('arFlip');
-    if (flipBtn) { flipBtn.style.display = ''; flipBtn.textContent = AR.flipped ? 'Show as a list' : 'Show like the workbook'; }
+    if (flipBtn) {
+      flipBtn.style.display = '';
+      flipBtn.textContent = AR.mode === 'daily' ? 'Show like the workbook' : AR.mode === 'workbook' ? 'Show as a list' : 'Show the daily dashboard';
+    }
   }
 
   function arLoad() {
@@ -1117,7 +1191,7 @@ VIEWS.home = {
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
       var fl = $('arFlip');
-      if (fl) { fl.onclick = function () { AR.flipped = !AR.flipped; arRender(); }; }
+      if (fl) { fl.onclick = function () { AR.mode = AR.mode === 'daily' ? 'workbook' : AR.mode === 'workbook' ? 'list' : 'daily'; arRender(); }; }
       var sel = $('arAcc');
       if (sel) { sel.onchange = arLoad; }
     }
@@ -1505,7 +1579,7 @@ VIEWS.home = {
 (function () {
 
   var AC_ROLES = ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'];
-  var AC = { timer: null };
+  var AC = { timer: null, days: 14 };
 
   VIEW_CSS.push(
     '.ac-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px}' +
@@ -1531,7 +1605,7 @@ VIEWS.home = {
   function acLoad() {
     var box = $('acBody');
     if (!box) { return; }
-    api('adsBoard', {}).then(function (d) {
+    api('adsBoard', { days: AC.days }).then(function (d) {
       d = d || {};
       var c = d.combined || {};
       var h = '<div class="ac-tiles">' +
@@ -1539,8 +1613,22 @@ VIEWS.home = {
         '<div class="ac-tile"><div class="k">Clicks today</div><div class="v">' + (c.clicks_today || 0) + '</div></div>' +
         '<div class="ac-tile"><div class="k">Sold via ads today</div><div class="v">' + (c.sold_today || 0) + '</div></div>' +
         '<div class="ac-tile' + (c.waste_n ? ' bad' : '') + '"><div class="k">Wasting £3+ · no order</div><div class="v">' + (c.waste_n || 0) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Spend · 14 days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
+        '<div class="ac-tile"><div class="k">Spend · ' + (d.days || 14) + ' days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
+      /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
+      var ser = d.series || [];
+      if (ser.length) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · last ' + (d.days || 14) + '</div>' +
+          '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="ac-tbl" style="min-width:520px"><thead><tr>' +
+          '<th>Date</th><th>Spend</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
+        ser.forEach(function (r) {
+          h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
+            '<td>' + acGBP(r.spend) + '</td><td>' + (r.clicks || 0) + '</td>' +
+            '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '—') + '</td>' +
+            '<td>' + (r.sold || 0) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       h += '<div class="ac-accs">' + (d.accounts || []).map(function (a) {
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
           a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
@@ -1551,7 +1639,7 @@ VIEWS.home = {
       } else {
         h += '<div class="scroll"><table class="ac-tbl"><thead><tr>' +
           '<th>Item</th><th>Spend today</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th>' +
-          '<th>Spend 14d</th><th>Clicks 14d</th><th>Sold 14d</th></tr></thead><tbody>';
+          '<th>Spend ' + (d.days || 14) + 'd</th><th>Clicks ' + (d.days || 14) + 'd</th><th>Sold ' + (d.days || 14) + 'd</th></tr></thead><tbody>';
         rows.forEach(function (r) {
           h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '><td>' +
             '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
@@ -1580,13 +1668,26 @@ VIEWS.home = {
     prefetch: function () { return api('adsBoard', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
-          '<span class="sub">every advertised item, live CPC, and the waste alarm — combined, per account, per item</span>' +
-          '<button class="minibtn" id="acRefresh" style="margin-left:auto">Refresh</button></div>' +
+          '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day — combined, per account, per item</span>' +
+          '<span style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn" data-ac-d="7">7d</button>' +
+            '<button class="minibtn on" data-ac-d="14">14d</button>' +
+            '<button class="minibtn" data-ac-d="30">30d</button>' +
+            '<button class="minibtn" data-ac-d="60">60d</button>' +
+            '<button class="minibtn" id="acRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="acBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
       var rf = $('acRefresh');
       if (rf) { rf.onclick = acLoad; }
+      document.querySelectorAll('[data-ac-d]').forEach(function (b) {
+        b.onclick = function () {
+          document.querySelectorAll('[data-ac-d]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          AC.days = Number(this.getAttribute('data-ac-d')) || 14;
+          acLoad();
+        };
+      });
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
       AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
@@ -4414,6 +4515,14 @@ function createMeeting() {
     var opsPayload = { date: ALK.date || alTodayPkt() };
     if (force) { opsPayload.refresh = true; }
 
+    /* Engine truth rides alongside the sheet cache: every account gets real 30-day numbers
+       (orders, revenue, ads incl intraday, eBay traffic, refunds) even when the cache's
+       round-robin has not reached it — the night review's "not computed yet" cards. */
+    api('accountKpisEngine', {}).then(function (d) {
+      ALK.engine = {};
+      ((d && d.rows) || []).forEach(function (r) { ALK.engine[alStr(r.account)] = r; });
+      if (!ALK.account && ALK.kpi) { alkRenderFleet(ALK.kpi); }
+    }).catch(function () {});
     var kc = cachedCall('accountKpis', kpiPayload, function (d) {
       ALK.kpi = d || null;
       alkFillAccounts(d);
@@ -4478,12 +4587,32 @@ function createMeeting() {
     });
   }
 
+  function alkEngineMini(name) {
+    var e = ALK.engine && ALK.engine[name];
+    if (!e) { return ''; }
+    var f2 = function (v) { return v == null ? '—' : (Math.round(Number(v) * 100) / 100).toFixed(2); };
+    var pct = function (v) { return v == null ? '—' : f2(v) + '%'; };
+    var cells = [
+      ['Orders/day', f2(e.orders_day)], ['Revenue/day', '£' + f2(e.revenue_day)], ['AOV', '£' + f2(e.aov)],
+      ['CTR', pct(e.ctr)], ['CVR', pct(e.cvr)], ['Ad £/order', '£' + f2(e.ad_per_order)],
+      ['TACoS', pct(e.tacos)], ['Ad spend 30d', '£' + f2(e.ad_spend_30d)], ['Impressions/day', e.impressions_day == null ? '—' : String(e.impressions_day)],
+      ['Refund rate', pct(e.refund_rate)], ['Active listings', e.listings_active == null ? '—' : String(e.listings_active)], ['Orders 30d', e.orders_30d == null ? '—' : String(e.orders_30d)]
+    ];
+    return '<div class="al-note" style="margin:2px 0 6px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:9.5px">Engine · live eBay truth · 30d</div>' +
+      '<div class="al-mini">' + cells.map(function (c) {
+        return '<div class="al-m-k">' + esc(c[0]) + '</div><div class="al-m-v num">' + esc(c[1]) + '</div>';
+      }).join('') + '</div>';
+  }
+
   function alkFleetCard(a) {
     var name = alStr(a && a.account);
+    var engineBlock = alkEngineMini(name);
     if (!a || !a.ok) {
       return '<div class="card"><div class="hd">' + esc(name) + '</div><div class="bd">' +
-        '<div class="al-empty">' + esc(alStr(a && a.reason) || 'not connected yet') +
-        '<span>The 15-minute refresh writes each account’s cards into the dashboard cache.</span></div></div></div>';
+        (engineBlock || ('<div class="al-empty">' + esc(alStr(a && a.reason) || 'not connected yet') +
+        '<span>The 15-minute refresh writes each account’s cards into the dashboard cache.</span></div>')) +
+        (engineBlock ? '<div class="al-note" style="margin-top:8px">sheet ledger not cached yet — these figures are the Engine\u2019s own</div>' : '') +
+        '</div></div>';
     }
     var open = Number(a.active_alerts);
     var cards = (a.cards || []).map(function (c) {
@@ -4493,8 +4622,8 @@ function createMeeting() {
     return '<div class="card"><div class="hd">' + esc(name) +
         (isFinite(open) && open > 0 ? '<span class="pill al-p-money">' + esc(alInt(open)) + ' active</span>' : '') +
         '<span class="hint">' + esc(a.window_days ? alInt(a.window_days) + '-day window' : 'window not recorded') + '</span>' +
-      '</div><div class="bd">' +
-        (cards ? '<div class="al-mini">' + cards + '</div>' :
+      '</div><div class="bd">' + engineBlock +
+        (cards ? '<div class="al-note" style="margin:10px 0 6px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:9.5px">Sheet ledger cards</div><div class="al-mini">' + cards + '</div>' :
           '<div class="al-empty">No cached figure for this account yet.<span>The next refresh will fill it.</span></div>') +
         '<div class="al-note" style="margin-top:12px">' + esc('cached ' + (alPortalStamp(a.computed_at) || 'not yet')) +
           ' · sparklines need the account’s own ledger</div>' +
@@ -7767,6 +7896,14 @@ function createMeeting() {
     var box = $('drBody');
     if (!box) { return; }
     var rows = (d && d.rows) || [];
+    /* Night review 2 ("daily report is all wrong, with no sense"): a dormant account painted a
+       £0.00 row under every single day — noise dressed as data. An account with literally
+       nothing across the whole window leaves the table; the day it earns a penny it is back. */
+    var alive = {};
+    rows.forEach(function (r) {
+      if ((Number(r.sold) || 0) || (Number(r.cost) || 0) || (Number(r.ads) || 0)) { alive[r.account] = 1; }
+    });
+    rows = rows.filter(function (r) { return alive[r.account]; });
     if (!rows.length) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">No rolled-up days yet.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">The nightly rollup fills this after the first 2 AM run — or the moment an order lands on a new day.</span></div>';
       return;
@@ -7800,7 +7937,10 @@ function createMeeting() {
       var pmEnd = dShift(mStart, -1);
       var pmStart = pmEnd.slice(0, 8) + '01';
       var m1 = sumRange(mStart, newest);
-      var m0 = sumRange(pmStart, pmEnd);
+      /* like-for-like: 14 days of this month against the FIRST 14 days of last month — the
+         whole prior month made every MTD read as a collapse */
+      var daysIn = Math.round((new Date(newest + 'T12:00:00Z') - new Date(mStart + 'T12:00:00Z')) / 86400000) + 1;
+      var m0 = sumRange(pmStart, dShift(pmStart, daysIn - 1));
       function tile(label, cur, prev, prevLabel) {
         var d = prev > 0 ? Math.round((cur - prev) / prev * 100) : null;
         return '<div class="dr-kpi"><div class="l">' + esc(label) + '</div><div class="v">' + drGBP(cur) + '</div>' +
@@ -7811,8 +7951,8 @@ function createMeeting() {
       kpiHtml = '<div class="dr-kpis">' +
         tile('Revenue · 7 days', w1.sold, w0.sold, 'prior 7') +
         tile('Profit · 7 days', w1.profit, w0.profit, 'prior 7') +
-        tile('Revenue · month to date', m1.sold, m0.sold, 'last month') +
-        tile('Profit · month to date', m1.profit, m0.profit, 'last month') +
+        tile('Revenue · month to date', m1.sold, m0.sold, 'same ' + daysIn + 'd last month') +
+        tile('Profit · month to date', m1.profit, m0.profit, 'same ' + daysIn + 'd last month') +
         '</div>';
     }
 
@@ -11989,6 +12129,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     ['due2d', 'Due in 2 days'],
     ['due3d', 'Due in 3 days'],
     ['dispatched', 'Dispatched'],
+    ['cancelled', 'Cancelled'],
     ['archived', 'Archived · no eBay record'],
   ];
 
@@ -12014,6 +12155,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var sb = obStr(r.ship_by);
     if (!sb) { return '<span style="color:var(--text-3)">no deadline yet</span>'; }
     var ms = Date.parse(sb) - Date.now();
+    if (r.status === 'CANCELLED') { return '<span class="ob-bad" style="color:var(--text-3)">cancelled</span>'; }
     if (r.status === 'FULFILLED') { return '<span class="ob-ok">dispatched</span>'; }
     if (ms < 0) {
       var d = Math.floor(-ms / 86400000);
@@ -12254,6 +12396,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
          server's LIVE overlay in: real revenue/cost from orders, INTRADAY ad spend, and order
          earning from fee-landed orders only. Larger value wins so a late rollup never shrinks. */
       var live = (d && d.today_live) || [], today = (d && d.today) || ukToday();
+      O.todayLive = live;
       var by = {};
       O.days.forEach(function (r) { if (r.date === today) { by[r.account] = r; } });
       live.forEach(function (l) {
@@ -12345,31 +12488,55 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function oPaintKpis(r) {
     var box = $('o2Kpis');
     if (!box) { return; }
-    if (O.days === null) { box.innerHTML = '<div class="empty">Loading the books…</div>'; return; }
-    var cur = oSum(oRows(r.from, r.to));
-    /* The nightly book cannot know about today — orders that landed since 2am are only in the
-     * live feed. Whenever the range reaches today, today's revenue comes from the feed. */
-    var liveT = O.ov && O.ov.kpis && O.ov.kpis.today;
-    if (liveT && r.to >= ukToday()) {
-      var bookToday = oSum(oRows(ukToday(), ukToday()));
-      var live = oN(liveT.revenue);
-      if (live > bookToday.sold) { cur.sold += (live - bookToday.sold); }
+    /* THE BRAIN RULE (Hasib, night review 2): these tiles compute with the organisation's own
+       calculator — the same penny-verified P&L the Sales analysis sheet runs (OE = revenue −
+       real eBay fees; True OE − VAT-to-HMRC = Raw profit; minus returns = Actual). The books
+       still draw the charts; the MONEY tiles come from the P&L engine. */
+    var key = r.from + '|' + r.to;
+    if (O.pnlKey !== key) {
+      O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
+      box.innerHTML = '<div class="empty">Computing with the P&L brain…</div>';
+      var span0 = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
+      api('itemPnl', { from: r.from, to: r.to }).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlCur = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function (e) { if (O.pnlKey === key) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
+      api('itemPnl', { from: dShift(r.from, -span0), to: dShift(r.from, -1) }).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlPrev = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function () {});
+      return;
     }
+    var cur = O.pnlCur;
+    if (!cur) { return; }
+    var prev = O.pnlPrev || {};
     var span = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
-    var prev = oSum(oRows(dShift(r.from, -span), dShift(r.from, -1)));
     function delta(c, p) {
+      p = oN(p);
       if (!p) { return '<div class="kpi-d mut">prior: —</div>'; }
-      var d = Math.round((c - p) / p * 100);
+      var d = Math.round((oN(c) - p) / Math.abs(p) * 100);
       return '<div class="kpi-d ' + (d >= 0 ? 'up' : 'dn') + '">' + (d >= 0 ? '▲' : '▼') + Math.abs(d) + '% vs prior ' + span + 'd</div>';
     }
+    /* ads = both families ex VAT from the books, PLUS today's intraday when the range reaches
+       today (the daily report for today only lands overnight) */
+    var ads = oN(cur.pri_fees) + oN(cur.gen_ex);
+    var adsPrev = oN(prev.pri_fees) + oN(prev.gen_ex);
+    if (r.to >= ukToday()) {
+      (O.todayLive || []).forEach(function (l) { ads += oN(l.ads); });
+    }
+    var feesNote = oN(cur.fees_n) < oN(cur.orders_n)
+      ? oN(cur.fees_n) + ' of ' + oN(cur.orders_n) + ' orders have real fees so far'
+      : 'real eBay fees on every order';
     var todayLive = O.ov && O.ov.kpis && O.ov.kpis.today;
     box.innerHTML =
-      '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.sold) + '</div>' + delta(cur.sold, prev.sold) + '<div class="kpi-s">orders money in the range</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Profit est.</div><div class="kpi-v">' + oGBP0(cur.profit) + '</div>' + delta(cur.profit, prev.profit) + '<div class="kpi-s">order earning − goods cost</div></div>' +
-      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Net after ads</div><div class="kpi-v' + (cur.net < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.net) + '</div>' + delta(cur.net, prev.net) + '<div class="kpi-s">profit minus ad spend — the keep-money</div></div>' +
-      '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">after eBay, before AliExpress</div></div>' +
-      '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(cur.ads) + '</div>' + delta(cur.ads, prev.ads) + '<div class="kpi-s">real spend where consented</div></div>' +
-      '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.cost) + '</div>' + delta(cur.cost, prev.cost) + '<div class="kpi-s">per-unit sheet cost × units</div></div>' +
+      '<div class="kpi" style="--tone:var(--gold-b)"><div class="kpi-l">Revenue</div><div class="kpi-v gold">' + oGBP0(cur.revenue) + '</div>' + delta(cur.revenue, prev.revenue) + '<div class="kpi-s">' + oN(cur.orders_n) + ' order(s) in the range</div></div>' +
+      '<div class="kpi" style="--tone:var(--blue)"><div class="kpi-l">Order earning</div><div class="kpi-v">' + oGBP0(cur.oe) + '</div>' + delta(cur.oe, prev.oe) + '<div class="kpi-s">' + feesNote + '</div></div>' +
+      '<div class="kpi" style="--tone:var(--bad)"><div class="kpi-l">AliExpress cost</div><div class="kpi-v">' + oGBP0(cur.ali_cost) + '</div>' + delta(cur.ali_cost, prev.ali_cost) + '<div class="kpi-s">the day tabs\u2019 real paid cost</div></div>' +
+      '<div class="kpi" style="--tone:var(--warn)"><div class="kpi-l">Ad spend</div><div class="kpi-v">' + oGBP0(ads) + '</div>' + delta(ads, adsPrev) + '<div class="kpi-s">both families · intraday included today</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Raw profit</div><div class="kpi-v' + (oN(cur.raw_profit) < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.raw_profit) + '</div>' + delta(cur.raw_profit, prev.raw_profit) + '<div class="kpi-s">the sheet\u2019s formula — after VAT to HMRC</div></div>' +
+      '<div class="kpi" style="--tone:var(--ok)"><div class="kpi-l">Actual profit</div><div class="kpi-v' + (oN(cur.actual_profit) < 0 ? '" style="color:var(--bad)' : '') + '">' + oGBP0(cur.actual_profit) + '</div>' + delta(cur.actual_profit, prev.actual_profit) + '<div class="kpi-s">raw minus returns \u00b7 £' + oN(cur.returns).toFixed(0) + ' returned</div></div>' +
       (todayLive ? '<div class="kpi" style="--tone:var(--gold-a)"><div class="kpi-l">Today · live</div><div class="kpi-v gold">' + oGBP0(todayLive.revenue) + '</div><div class="kpi-d mut">' + oN(todayLive.orders) + ' order(s) so far</div><div class="kpi-s">straight from the order feed</div></div>' : '');
   }
 
