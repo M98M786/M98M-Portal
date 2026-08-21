@@ -657,7 +657,15 @@ async function nightlyCatchup(env) {
   ).all();
   const last = {};
   for (const r of (rs.results || [])) last[r.job] = String(r.last_ok || '');
-  const cutoff = new Date(Date.now() - 26 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  /* Anchor on the most recent 02:00 UTC (grace 45 min), not a rolling 26h: after the 20 Aug
+     miss was healed by afternoon catch-ups, the VERY NEXT night's miss (21 Aug — two in a row)
+     left every nightly "fresh" on the 26h clock until mid-afternoon. Anchored, a missed night
+     re-runs from the 03:30 tick and the whole set is healed by breakfast. */
+  const nowMs = Date.now();
+  let anchor = new Date();
+  anchor = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate(), 2, 0, 0);
+  if (nowMs < anchor + 45 * 60000) anchor -= 86400000;
+  const cutoff = new Date(anchor).toISOString().slice(0, 19).replace('T', ' ');
   const stale = names.filter((j) => !last[j] || last[j] < cutoff)
     .sort((a, b) => (last[a] || '') < (last[b] || '') ? -1 : 1);
   for (const j of stale.slice(0, 2)) {
