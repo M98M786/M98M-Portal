@@ -219,6 +219,13 @@
     return s ? '<span class="hu-txt">' + esc(s) + '</span>' : '<span class="hu-none">—</span>';
   }
   /** RL-3: a cell becomes an anchor only when safeUrl() accepts it; anything else is inert text. */
+  /** Today 23:59 in Pakistan time, in datetime-local format — the default listing deadline. */
+  function huTodayEndPkt() {
+    var pk = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' }));
+    var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    return pk.getFullYear() + '-' + p2(pk.getMonth() + 1) + '-' + p2(pk.getDate()) + 'T23:59';
+  }
+
   function huLinkOrText(v) {
     var s = huStr(v), u = safeUrl(s);
     if (!s) return '<span class="hu-none">—</span>';
@@ -374,9 +381,9 @@
     for (i = 0; i < HU_FLAT.length; i++) {
       el = huEl(HU_FLAT[i].id);
       if (!el) { continue; }
-      if (price[HU_FLAT[i].col] || HU_FLAT[i].col === 'Category') {
+      if (price[HU_FLAT[i].col] || HU_FLAT[i].col === 'Category' || HU_FLAT[i].col === 'CPC Selling Chance') {
         el.oninput = huCalcSoon;
-        el.onchange = huCalcSoon;
+        el.onchange = huCalcSoon;    /* CPC choice re-runs the projection — the £2 allowance rides it */
       }
     }
     el = huEl('huShip');
@@ -417,6 +424,19 @@
       category: huValue('Category')
     }).then(function (r) {
       if (seq !== huCalcSeq) { return; }
+      /* R6 (Hasib): "if he selects item for CPC, add those 2 pounds in calculation too" — a CPC
+         advertising choice costs ~£2 in clicks per sale, so the projection carries it. Applied
+         here, labeled, whenever the chosen type names CPC. */
+      var advSel = huValue('CPC Selling Chance');
+      if (/CPC/i.test(huStr(advSel))) {
+        r = JSON.parse(JSON.stringify(r));
+        r.profit = (Number(r.profit) || 0) - 2;
+        r.cost = (Number(r.cost) || 0) + 2;
+        if (r.roiPct !== null && r.roiPct !== undefined && Number(r.cost) > 0) {
+          r.roiPct = (Number(r.profit) / Number(r.cost)) * 100;
+        }
+        r.notes = (r.notes || []).concat(['CPC allowance −£2.00 included (advertising type: ' + huStr(advSel) + ')']);
+      }
       box.innerHTML = huCalcHtml(r);
     }).catch(function (e) {
       if (seq !== huCalcSeq) { return; }
@@ -541,7 +561,12 @@
           '<span class="sub">Oldest waits longest · nothing is listed until you decide</span>' +
           '<button class="minibtn" id="huQRefresh" style="margin-left:auto">Refresh</button>' +
         '</div>' +
-        '<div class="card enter d2"><div class="hd">Waiting for a decision ' +
+        /* R6 (Hasib): "dashboard that shows number of products pending for approval, how many got
+           rejected in past 7 days, from every individual, and how much are still pending" */
+        '<div class="card enter d2"><div class="hd">Hunting pulse — per hunter' +
+          '<span class="hint">pending now · decided in the last 7 days</span></div>' +
+          '<div class="bd" id="huQStats"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Waiting for a decision ' +
           '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
           '<div class="bd" id="huQBody"><div class="spinner"></div></div>' +
         '</div>' +
@@ -549,11 +574,60 @@
         '<datalist id="huListerList"></datalist>';
     },
     init: function () {
-      huEl('huQRefresh').onclick = huLoadQueue;
+      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); };
       huLoadPickers();
       huLoadQueue();
+      huLoadQueueStats();
     }
   };
+
+  /** The per-hunter pulse: one 'all' fetch, aggregated here — pending now, and the last 7 days'
+      approved / rejected per person, newest business first. */
+  function huLoadQueueStats() {
+    var box = huEl('huQStats');
+    if (!box) { return; }
+    api('huntQueue', { status: 'all' }).then(function (d) {
+      var hunts = (d && d.hunts) || [];
+      var week = Date.now() - 7 * 86400000;
+      var per = {}, totals = { pending: 0, approved7: 0, rejected7: 0 };
+      hunts.forEach(function (rec) {
+        var who = huStr(rec.hunter_name) || huStr(rec.hunter_email) || '(unknown)';
+        var p = per[who] = per[who] || { pending: 0, approved7: 0, rejected7: 0, oldest: '' };
+        var st = huStr(rec.approval_status);
+        var ts = Date.parse(huStr(rec.ts) || huStr(rec['Date Added']) || '') || 0;
+        if (st === '') {
+          p.pending++; totals.pending++;
+          if (!p.oldest || (ts && ts < Date.parse(p.oldest))) { p.oldest = huStr(rec.ts); }
+        } else if (ts >= week) {
+          if (st === HU_APPROVED) { p.approved7++; totals.approved7++; }
+          else { p.rejected7++; totals.rejected7++; }
+        }
+      });
+      var names = Object.keys(per).sort(function (a, b) { return per[b].pending - per[a].pending; });
+      var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
+        '<div class="hu-tile big"><span class="k">Pending review now</span><b class="num goldtext">' + totals.pending + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Approved · 7 days</span><b class="num" style="color:var(--ok)">' + totals.approved7 + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Rejected · 7 days</span><b class="num" style="color:var(--bad)">' + totals.rejected7 + '</b></div>' +
+        '</div>';
+      if (!names.length) {
+        h += '<div class="hu-hint" style="margin-top:0">No hunts on record yet.</div>';
+      } else {
+        h += '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
+          '<th style="text-align:left">Hunter</th><th>Pending now</th><th>Approved · 7d</th><th>Rejected · 7d</th><th style="text-align:left">Waiting longest since</th></tr></thead><tbody>' +
+          names.map(function (n) {
+            var p = per[n];
+            return '<tr><td style="text-align:left">' + esc(n) + '</td>' +
+              '<td class="num">' + (p.pending ? '<b style="color:var(--gold-a)">' + p.pending + '</b>' : '0') + '</td>' +
+              '<td class="num" style="color:var(--ok)">' + p.approved7 + '</td>' +
+              '<td class="num"' + (p.rejected7 ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.rejected7 + '</td>' +
+              '<td style="text-align:left;font-size:11.5px;color:var(--text-3)">' + (p.oldest ? esc(fmtPkt(p.oldest, true) || p.oldest) : '—') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+      box.innerHTML = h;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="hu-hint" style="margin-top:0">The pulse could not load: ' + esc(e.message) + '</div>';
+    });
+  }
 
   /** One fetch used by the screen, the sign-in warm-up and the badge alike, so the queue is
       already in hand when the screen opens. Painting a cached queue is safe on a DECISION screen
@@ -658,8 +732,9 @@
             }).join('') + '</select>' +
           '<div class="hu-hint">The advertising type this item runs on.</div></div>' +
         '<div class="field"><label>Deadline (PKT)</label>' +
-          '<input class="hu-in" type="datetime-local" data-due="' + huAttr(id) + '">' +
-          '<div class="hu-hint">' + huClockLine() + '</div></div>' +
+          /* R6 (Hasib): "auto selected date … current day 11:59pm deadline" — prefilled, still editable */
+          '<input class="hu-in" type="datetime-local" data-due="' + huAttr(id) + '" value="' + huTodayEndPkt() + '">' +
+          '<div class="hu-hint">' + huClockLine() + ' · prefilled: today 11:59 PM</div></div>' +
         '<div class="field hu-wide"><label>Comment <span class="hu-req">required to reject</span></label>' +
           '<textarea class="hu-ta" data-cmt="' + huAttr(id) + '" placeholder="Why this item is not approved, or anything the lister should know"></textarea></div>' +
       '</div>' +

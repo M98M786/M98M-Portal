@@ -49,8 +49,37 @@
         '<div class="dr-kpi"><div class="l">Today so far</div><div class="v"><span style="color:var(--ok)">+' + fleet.pt + '</span>' + (fleet.gt ? ' · <span style="color:var(--bad)">−' + fleet.gt + '</span>' : '') + '</div></div>' +
         '</div>';
       var negs = (d && d.negatives) || [];
+      /* R6 (Hasib): "feedback page required separate dashboard of negative feedbacks" — the
+         negatives get their own board first: per-account counts across today / 7 / 30 days /
+         all time, computed from the full record, before the detail cards. */
+      var negPer = {}, dayMs = 86400000, nowMs = Date.now();
+      negs.forEach(function (n) {
+        var a = String(n.account || '');
+        var p = negPer[a] = negPer[a] || { today: 0, d7: 0, d30: 0, all: 0 };
+        var t = Date.parse(String(n.at) || '') || 0;
+        p.all++;
+        if (nowMs - t < dayMs) { p.today++; }
+        if (nowMs - t < 7 * dayMs) { p.d7++; }
+        if (nowMs - t < 30 * dayMs) { p.d30++; }
+      });
+      var negAccts = Object.keys(negPer).sort(function (a, b) { return negPer[b].d30 - negPer[a].d30; });
+      h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--bad);font-weight:800;margin:14px 0 6px">Negative dashboard — account to account</div>';
+      if (!negAccts.length) {
+        h += '<div class="empty">Zero negative feedback on record — nothing to dashboard. Keep it that way.</div>';
+      } else {
+        h += '<div class="scroll"><table class="ir-tbl fb-tbl" style="min-width:520px"><thead><tr>' +
+          '<th style="text-align:left">Account</th><th>Today</th><th>7 days</th><th>30 days</th><th>All time</th></tr></thead><tbody>' +
+          negAccts.map(function (a) {
+            var p = negPer[a];
+            return '<tr><td style="text-align:left">' + esc(a) + '</td>' +
+              '<td class="num"' + (p.today ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.today + '</td>' +
+              '<td class="num"' + (p.d7 ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.d7 + '</td>' +
+              '<td class="num">' + p.d30 + '</td><td class="num">' + p.all + '</td></tr>';
+          }).join('') +
+          '</tbody></table></div>';
+      }
       if (negs.length) {
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--bad);font-weight:800;margin:4px 0 6px">🔴 Negative feedback — every one, newest first (management + CS were lettered on arrival)</div>';
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--bad);font-weight:800;margin:14px 0 6px">🔴 Negative feedback — every one, newest first (management + CS were lettered on arrival)</div>';
         negs.forEach(function (n) {
           h += '<div class="fb-neg"><b>' + esc(String(n.account)) + '</b> · ' + esc(String(n.at).slice(0, 10)) + ' · buyer <b>' + esc(String(n.buyer)) + '</b>' +
             '<div style="margin-top:3px">“' + esc(String(n.text || '(no comment)')) + '”</div>' +

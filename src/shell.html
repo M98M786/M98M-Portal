@@ -1076,7 +1076,19 @@ function boot(){
       STATE.user = ps.user;
       enterApp(ps.user);
       api('sessionHello').then(function(d){
-        if(d && d.user){ STATE.user = d.user; psessSave(ps.token, d.user); }
+        if(d && d.user){
+          /* R6 (Husnain's grant was invisible until sign-out): the boot paints from the CACHED
+             identity; when the server's fresh answer differs — new modules, changed role — the
+             sidebar is already drawn from stale truth. One clean reload repaints everything
+             from the updated identity; the draft keeper makes it safe mid-anything. */
+          var accessBefore = JSON.stringify({ r: ps.user.role, m: ps.user.modules, t: ps.user.tools, s: ps.user.status });
+          var accessAfter = JSON.stringify({ r: d.user.role, m: d.user.modules, t: d.user.tools, s: d.user.status });
+          STATE.user = d.user; psessSave(ps.token, d.user);
+          if(accessBefore !== accessAfter){
+            try{ toast('Your access was updated — refreshing your screens…'); }catch(e2){}
+            setTimeout(function(){ location.reload(); }, 900);
+          }
+        }
       }).catch(function(e){
         if(e && e.message === 'auth'){
           psessClear(); STATE.session = null; STATE.user = null;

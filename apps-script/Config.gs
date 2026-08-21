@@ -53,6 +53,13 @@ const MODULE_KEYS = {
   alerts:'Alerts centre', signals:'My signals', staffAdmin:'Staff & approvals', approvals:'Approvals desk',
   tools:'Tools', home:'Home', calculator:'Order earning calculator', activeListings:'Active listings (Engine)',
   'team-lead':'Team-lead duties (routing)',
+  /* R6 (Hasib: "as management i need to control each and every single page") — every portal
+     screen the registry was missing. The engine's per-user gates honor the same keys. */
+  overview:'Business overview (live)', dailyReport:'Daily report', accountReport:'Account report',
+  accountHealth:'Account health', ordersBoard:'All orders (Engine)', listingDecisions:'Listing decisions',
+  adsCentre:'Ads command centre', campaignWatch:'Campaign watch', traffic:'Traffic',
+  csDesk:'CS live desk', itemRisk:'Item risk', marketing:'Marketing (sale events)',
+  feedback:'Feedback', sourcing:'Sourcing links', vatBreakdown:'VAT breakdown',
 };
 
 function parseAccessCsv_(s) {
