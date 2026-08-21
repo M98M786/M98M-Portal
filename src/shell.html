@@ -359,8 +359,22 @@ function engineApi(action, payload){
 }
 
 function api(action, payload){
-  if((STATE.idToken || STATE.session) && STATE.config && STATE.config.engine_url && ENGINE_ACTIONS.indexOf(action)>=0){
-    return engineApi(action, payload);
+  if((STATE.idToken || STATE.session) && ENGINE_ACTIONS.indexOf(action)>=0){
+    if(STATE.config && STATE.config.engine_url){ return engineApi(action, payload); }
+    /* R6c (Hasib's "unknown action" on the CS desk): an ENGINE action must NEVER fall through
+       to the sheet backend — on a cold tab the config (which carries engine_url) can lag the
+       first screen by a second, and the mis-routed call died with a nonsense error. Wait for
+       the config instead, then go to the engine; if it truly never comes, say so readably. */
+    return new Promise(function(resolve, reject){
+      var tries = 0;
+      var t = setInterval(function(){
+        if(STATE.config && STATE.config.engine_url){
+          clearInterval(t); resolve(engineApi(action, payload));
+        } else if(++tries > 60){
+          clearInterval(t); reject(new Error('the portal is still connecting — give it a second and press Refresh'));
+        }
+      }, 250);
+    });
   }
   // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
   if((!STATE.idToken && !STATE.session) || action === 'batch'){
@@ -1064,8 +1078,15 @@ function sessLoad(){
   }catch(e){ return null; }
 }
 function boot(){
+  /* R6c: the config is public and stable — a cached copy arms engine routing the instant a
+     cold tab opens, so the first screen can never race it. The fresh fetch still replaces it. */
+  try{
+    var cachedCfg = JSON.parse(localStorage.getItem('m98m:cfg') || 'null');
+    if(cachedCfg && cachedCfg.engine_url && !STATE.config){ STATE.config = cachedCfg; }
+  }catch(e){}
   api('getPublicConfig').then(function(cfg){
     STATE.config=cfg;
+    try{ localStorage.setItem('m98m:cfg', JSON.stringify(cfg)); }catch(e){}
     if(!cfg.oauth_client_id){ $('loginStatus').className='auth-status info'; $('loginStatus').textContent='Sign-in is being switched on by setup — almost there.'; return; }
     initGsi();
     /* Portal session first: instant app on every reload and every new tab. The Engine re-checks
