@@ -238,7 +238,8 @@
             '<div class="s">worst variation to best — costs £' + aliR.lo.toFixed(2) + ' to £' + aliR.hi.toFixed(2) + '</div></div>'
         : '') +
       '<div class="oc-tile gold"><div class="k">eBay order earning' + (isRange ? ' · low variation' : '') + '</div><div class="v">' + ocGBP(earn) + '</div>' +
-        '<div class="s">eBay deducted ' + ocGBP(deduct) + ' — ' + (deduct / S * 100).toFixed(1) + '% of the sale</div></div>' +
+        ((STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super))
+          ? '<div class="s">eBay deducted ' + ocGBP(deduct) + ' — ' + (deduct / S * 100).toFixed(1) + '% of the sale</div>' : '') + '</div>' +
       ((ali > 0 || cpc > 0)
         ? '<div class="oc-tile ' + (net >= 0 ? 'good' : 'bad') + '"><div class="k">Net profit</div><div class="v">' + ocGBP(net) + '</div>' +
           '<div class="s">after AliExpress' + (cpc > 0 ? ' and ad cost incl VAT' : '') + '</div></div>'
@@ -274,9 +275,15 @@
     if (cpc > 0) { vrows += ocRow('VAT reclaimable on priority ads', vatCPC, '', ocGBP(cpc) + ' × 20%', '−'); }
     vrows += ocRow('VAT owed to HMRC on this order', vatS, 'total ' + (vatS < 0 ? 'neg' : ''));
 
-    h += '<div class="oc-fees">' + rows + '</div>';
-    h += '<div class="oc-fees"><h3>VAT to HMRC (column S)</h3>' + vrows + '</div>';
-    if (cat._g) { h += '<div class="oc-hint">' + esc(cat.n) + ' — ' + rateTxt + (cat.red ? ' · reduced 10p per-order (≤ £10)' : '') + '</div>'; }
+    /* R6b (Hasib): "no breakdown of all the costs, just profit and order earning — only
+       management will get that version". The tiles above already carry Order Earning + Profit;
+       the fee anatomy and the VAT section render for Management/Ops Head/super ONLY. */
+    var ocMgmt = STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super);
+    if (ocMgmt) {
+      h += '<div class="oc-fees">' + rows + '</div>';
+      h += '<div class="oc-fees"><h3>VAT to HMRC (column S)</h3>' + vrows + '</div>';
+      if (cat._g) { h += '<div class="oc-hint">' + esc(cat.n) + ' — ' + rateTxt + (cat.red ? ' · reduced 10p per-order (≤ £10)' : '') + '</div>'; }
+    }
     out.innerHTML = h;
   }
 

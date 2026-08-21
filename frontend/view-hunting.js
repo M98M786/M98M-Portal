@@ -447,6 +447,16 @@
   function huCalcHtml(r) {
     var roi = (r.roiPct === null || r.roiPct === undefined) ? null : Number(r.roiPct);
     var notes = (r.notes || []).map(function (n) { return esc(huStr(n)); }).join(' ');
+    /* R6b (Hasib): "give the product hunting version … no breakdown of all the costs, just
+       profit and order earning — only management will get that version". Same maths, smaller
+       window: hunters see the two numbers that matter and none of the fee anatomy. */
+    var huMgmt = STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super);
+    if (!huMgmt) {
+      return '<div class="hu-tiles">' +
+        '<div class="hu-tile big"><span class="k">Order Earning</span><b class="num goldtext">' + esc(huMoney(r.orderEarning)) + '</b></div>' +
+        '<div class="hu-tile big"><span class="k">Projected profit</span><b class="num goldtext">' + esc(huMoney(r.profit)) + '</b></div>' +
+      '</div>';
+    }
     return '<div class="hu-tiles">' +
         '<div class="hu-tile"><span class="k">Order Earning</span><b class="num">' + esc(huMoney(r.orderEarning)) + '</b></div>' +
         '<div class="hu-tile"><span class="k">Cost to us</span><b class="num">' + esc(huMoney(r.cost)) + '</b></div>' +
