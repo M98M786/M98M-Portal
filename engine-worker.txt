@@ -1499,7 +1499,13 @@ async function csSync(env) {
         item: m => String(m.itemId || ''), reason: m => 'claim £' + String(((m.claimAmount || {}).value) || '?'),
         due: m => String((m.respondByDate || {}).value || ''), openish: s => !/CLOSED|CS_CLOSED/i.test(s) },
       { kind: 'RETURN', url: 'https://api.ebay.com/post-order/v2/return/search?limit=100&sort=-creationdate',
-        list: d => d.members || [], id: m => String(m.returnId || ''), status: m => String(m.state || m.status || ''),
+        list: d => d.members || [],
+        id: m => String(m.returnId || ''),
+        /* a return carries BOTH a lifecycle `state` (ITEM_READY_TO_SHIP…) and an overall
+           `status` — when either says CLOSED, closed wins, or a finished return wears its last
+           lifecycle step forever and the desk counts it as open (Hasib: "cases closed and
+           still showing") */
+        status: m => { const st = String(m.state || ''); const s2 = String(m.status || ''); return (/CLOSED/i.test(s2) && !/CLOSED/i.test(st)) ? s2 : (st || s2); },
         opened: m => String((((m.creationInfo || {}).creationDate || {}).value) || ''), buyer: m => String(m.buyerLoginName || ''),
         item: m => String((((m.creationInfo || {}).item || {}).itemId) || ''),
         reason: m => String((m.creationInfo || {}).reason || '') + (((m.creationInfo || {}).comments || {}).content ? ' — "' + String(m.creationInfo.comments.content).slice(0, 120) + '"' : ''),
@@ -1514,6 +1520,7 @@ async function csSync(env) {
     // status per known id, so unchanged rows cost ZERO writes — D1's daily write budget is
     // finite and rewriting 400 unchanged rows an hour was most of it.
     const known = {};
+    const seenKeys = {};                       // every id the searches served this run
     const kr = await env.DB.prepare('SELECT case_id, status FROM cases WHERE account = ?1').bind(acct).all();
     for (const r of (kr.results || [])) known[r.case_id] = String(r.status || '');
 
@@ -1529,6 +1536,7 @@ async function csSync(env) {
           const id = f.id(m);
           if (!id) continue;
           const key = f.kind + ':' + id;
+          seenKeys[key] = true;                 // seen = the search still serves it (fresh either way)
           const status = f.status(m);
           const isNew = !(key in known);
           if (!isNew && known[key] === status) continue;               // nothing changed → no write
@@ -1549,6 +1557,40 @@ async function csSync(env) {
           }
         }
       }
+    }
+
+    /* R5 (Hasib: "cases closed and still showing, not showing correct status"): the searches
+       window on the newest ~200 per feed — a case whose last modification drifts out of that
+       window FOSSILIZES at its last-seen status and the desk keeps counting it open. Any row
+       still open-ish in D1 that this sweep did NOT see gets re-fetched one by one (oldest
+       first, 6 per account per run — heals a backlog within the hour) and corrected; a 404
+       means eBay no longer serves it, which is a closed case by definition. */
+    const staleRs = await env.DB.prepare(
+      "SELECT case_id, kind FROM cases WHERE account = ?1 AND status NOT LIKE '%CLOSED%' ORDER BY opened_at ASC LIMIT 40"
+    ).bind(acct).all();
+    const unseen = (staleRs.results || []).filter((r) => !seenKeys[r.case_id]).slice(0, 6);
+    for (const row of unseen) {
+      const bare = String(row.case_id).split(':')[1] || '';
+      const kindUrl = row.kind === 'CASE' ? 'https://api.ebay.com/post-order/v2/casemanagement/' + bare
+        : row.kind === 'RETURN' ? 'https://api.ebay.com/post-order/v2/return/' + bare
+        : 'https://api.ebay.com/post-order/v2/inquiry/' + bare;
+      try {
+        const rr = await fetch(kindUrl, { headers: { authorization: 'IAF ' + tok } });
+        if (rr.status === 404) {
+          await env.DB.prepare("UPDATE cases SET status = 'CLOSED' WHERE case_id = ?1").bind(row.case_id).run();
+          continue;
+        }
+        if (!rr.ok) continue;                                      // transient — next run retries
+        const j = await rr.json();
+        const detail = j.caseDetails || j.detail || j;
+        const st0 = String(detail.state || '');
+        const st1 = String(detail.status || detail.caseStatusEnum || detail.inquiryStatusEnum || '');
+        const fresh = (/CLOSED/i.test(st1) && !/CLOSED/i.test(st0)) ? st1 : (st0 || st1);
+        if (fresh) {
+          await env.DB.prepare('UPDATE cases SET status = ?2, payload_json = ?3 WHERE case_id = ?1')
+            .bind(row.case_id, fresh, JSON.stringify(detail).slice(0, 4000)).run();
+        }
+      } catch (e) { /* one bad fetch must not kill the sweep — the next run retries */ }
     }
 
     // buyer messages RECEIVED (headers only — subject + sender is what the desk lists)
