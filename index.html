@@ -390,7 +390,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260821-0215';
+var BUILD = '20260821-1430';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1157,7 +1157,10 @@ VIEWS.home = {
         '<div id="ahSelfTestOut"></div>' +
         '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>' +
         /* Engine ops — the runJobNow lever with a face. Every button fires the same job the
-           cron runs on its own; the '@lock' lease server-side stops a press racing a real tick. */
+           cron runs on its own; the '@lock' lease server-side stops a press racing a real tick.
+           Management-only: a module-granted viewer (R5: Husnain) reads health but gets no levers
+           — the server refuses runJobNow below management anyway; not drawing them is honest. */
+        (!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)) ? '' :
         '<div class="card enter d3" style="margin-top:14px"><div class="hd">Engine ops' +
           '<span class="hint">run any Engine job now — same jobs the clock runs, useful after a repair or when a number looks stale</span></div>' +
           '<div class="bd"><div id="ahOpsBtns" style="display:flex;flex-wrap:wrap;gap:8px">' +
@@ -1172,7 +1175,7 @@ VIEWS.home = {
           ].map(function (j) {
             return '<button class="minibtn" data-ah-job="' + j[0] + '">' + j[1] + '</button>';
           }).join('') +
-          '</div><div id="ahOpsOut" style="margin-top:10px"></div></div></div>';
+          '</div><div id="ahOpsOut" style="margin-top:10px"></div></div></div>');
     },
     init: function () {
       ahLoad();

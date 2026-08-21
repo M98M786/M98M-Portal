@@ -4137,7 +4137,12 @@ const ROUTES = {
 
   csDesk: {
     auth: 'any', fn: async (p, ctx) => {
-      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      /* R5 (Hasib: "update cs live desk … to husnain's system"): a per-user module grant opens
+         this desk for a named person without widening the whole role — the modules column is
+         the same one the screens honor. Refund figures here are LOSSES, never earnings, so the
+         Team-Lead profit strip stays intact. */
+      const csMods = String(ctx.user.modules || '').split(',');
+      if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super && csMods.indexOf('csDesk') < 0) throw new AuthError('auth');
       const open = await ctx.env.DB.prepare(
         "SELECT case_id, account, kind, order_id, item_id, buyer, reason, status, opened_at, payload_json FROM cases " +
         "WHERE status NOT LIKE '%CLOSED%' ORDER BY opened_at DESC LIMIT 200"
@@ -4848,11 +4853,19 @@ const ROUTES = {
   /* Account health (own menu, §9-C): live numbers plus the nightly trend. Management-only —
      revenue and loss counts are account totals. */
   accountHealth: {
-    auth: 'mgmt', fn: async (p, ctx) => {
+    /* R5: was mgmt-only. A per-user 'accountHealth' module grant (Hasib: Husnain's system) now
+       opens the READ — ops levers (runJobNow) stay their own mgmt-gated action. The module path
+       never sees revenue: the trend's money column is stripped for anyone below management,
+       keeping the Team-Lead earnings rule intact. */
+    auth: 'any', fn: async (p, ctx) => {
+      const ahMods = String(ctx.user.modules || '').split(',');
+      const ahMgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!ahMgmt && ahMods.indexOf('accountHealth') < 0) throw new AuthError('auth');
       const now = await computeHealth(ctx.env);
       const trend = await ctx.env.DB.prepare(
         'SELECT day, account, listings, orders_7d, revenue_7d, loss_items, json FROM daily_health ORDER BY day DESC LIMIT 84'
       ).all();
+      if (!ahMgmt) { for (const r of (trend.results || [])) { delete r.revenue_7d; } }
       const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job, account').all();
       /* eBay's own seller-standards verdict per account — the report this screen existed for.
          standardsSync has been landing it in cs_standards since the re-consents; serving it is

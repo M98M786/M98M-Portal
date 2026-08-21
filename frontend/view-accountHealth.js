@@ -283,7 +283,10 @@
         '<div id="ahSelfTestOut"></div>' +
         '<div class="card enter d2"><div class="bd"><div id="ahBody"><div class="spinner"></div></div></div></div>' +
         /* Engine ops — the runJobNow lever with a face. Every button fires the same job the
-           cron runs on its own; the '@lock' lease server-side stops a press racing a real tick. */
+           cron runs on its own; the '@lock' lease server-side stops a press racing a real tick.
+           Management-only: a module-granted viewer (R5: Husnain) reads health but gets no levers
+           — the server refuses runJobNow below management anyway; not drawing them is honest. */
+        (!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)) ? '' :
         '<div class="card enter d3" style="margin-top:14px"><div class="hd">Engine ops' +
           '<span class="hint">run any Engine job now — same jobs the clock runs, useful after a repair or when a number looks stale</span></div>' +
           '<div class="bd"><div id="ahOpsBtns" style="display:flex;flex-wrap:wrap;gap:8px">' +
@@ -298,7 +301,7 @@
           ].map(function (j) {
             return '<button class="minibtn" data-ah-job="' + j[0] + '">' + j[1] + '</button>';
           }).join('') +
-          '</div><div id="ahOpsOut" style="margin-top:10px"></div></div></div>';
+          '</div><div id="ahOpsOut" style="margin-top:10px"></div></div></div>');
     },
     init: function () {
       ahLoad();
