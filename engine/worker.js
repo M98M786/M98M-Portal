@@ -107,7 +107,10 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
-      '30 * * * *': [listingSync, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, marketingSync, feedbackSync, processWatch],
+      /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
+         invocation's subrequest budget, and anything queued after them silently never runs —
+         processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
+      '30 * * * *': [processWatch, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
       '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
     const fns = jobs[event.cron] || [];
@@ -567,6 +570,10 @@ async function processWatch(env) {
       await notifyRole(env, 'Ops Head', 'Orders not processed', msg, ref);
     }
   }
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('processWatch', '', ?1, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now'), last_error = ''"
+  ).bind(rows.length + ' unprocessed >1 biz day').run();
   const ukHour = Number(new Date().toLocaleString('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Europe/London' }));
   if (ukHour === 9) {
     const missSql =
