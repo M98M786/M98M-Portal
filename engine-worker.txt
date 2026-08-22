@@ -111,7 +111,10 @@ export default {
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
       '30 * * * *': [processWatch, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
-      '0 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
+      /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
+         Aug; registration present, tick never delivered, all other slots fine). Moved to a
+         fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
+      '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
