@@ -24,6 +24,28 @@
   ];
 
   VIEW_CSS.push(
+    /* R7-8 graphical today strip */
+    '.ob-graph{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:var(--panel-2);margin-bottom:14px}' +
+    '.ob-gtiles{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}' +
+    '.ob-gtile{border:1px solid var(--gold-line);border-radius:10px;padding:10px 16px;background:var(--panel);min-width:130px}' +
+    '.ob-gtile .k{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.ob-gtile b{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}' +
+    '.ob-gtile.gold b{color:var(--gold-a)}' +
+    '.ob-fnl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}' +
+    '.ob-fn{border:1px solid var(--gold-line);background:var(--panel);border-radius:10px;padding:8px 11px;cursor:pointer;font:inherit;text-align:left;display:flex;flex-direction:column;gap:5px}' +
+    '.ob-fn.on{border-color:var(--gold-line-hi);box-shadow:var(--glow-gold)}' +
+    '.ob-fn-k{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800}' +
+    '.ob-fn-bar{height:8px;border-radius:5px;background:rgba(120,132,152,.15);overflow:hidden}' +
+    '.ob-fn-bar span{display:block;height:100%;border-radius:5px}' +
+    '.ob-fn b{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}' +
+    '.ob-gsub{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 7px}' +
+    '.ob-gacc{display:flex;flex-direction:column;gap:6px}' +
+    '.ob-ga{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700}' +
+    '.ob-ga-k{min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.ob-ga-bar{flex:1;height:9px;border-radius:5px;background:rgba(120,132,152,.15);overflow:hidden}' +
+    '.ob-ga-bar span{display:block;height:100%;background:var(--gold-a);border-radius:5px}' +
+    '.ob-ga b{min-width:26px;text-align:right;font-variant-numeric:tabular-nums}' +
+    '.ob-ga-rev{min-width:74px;text-align:right;color:var(--text-3);font-variant-numeric:tabular-nums}' +
     '.ob-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}' +
     '.ob-chip{border:1px solid var(--gold-line);background:var(--panel);color:var(--text);border-radius:99px;padding:7px 14px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}' +
     '.ob-chip.on{background:var(--gold-soft,rgba(246,208,107,.15));border-color:var(--gold-line-hi);color:var(--gold-a)}' +
@@ -91,6 +113,39 @@
     return '<span class="' + (h <= 24 ? 'ob-due' : 'ob-ok') + '">' + (h < 48 ? h + 'h left' : Math.round(h / 24) + 'd left') + '</span>';
   }
 
+  /* R7-8 (Hasib): "graphical orders dashboard in today's orders" — today's live pulse as tiles,
+     a clickable processing funnel (each bar jumps to its bucket) and today's orders per account. */
+  function obGraphical(d) {
+    var t = d.today || {}, c = d.counts || {};
+    var stages = [
+      ['needs_processing', 'To process', Number(c.needs_processing) || 0, 'var(--bad)'],
+      ['awaiting', 'Awaiting dispatch', Number(c.awaiting) || 0, 'var(--gold-a)'],
+      ['overdue', 'Overdue', Number(c.overdue) || 0, 'var(--bad)'],
+      ['due24', 'Due 24h', Number(c.due24) || 0, 'var(--warn)'],
+      ['dispatched', 'Dispatched · 30d', Number(c.dispatched) || 0, 'var(--ok)']
+    ];
+    var maxS = stages.reduce(function (m, s) { return Math.max(m, s[2]); }, 1);
+    var funnel = stages.map(function (s) {
+      var pct = Math.max(2, Math.round((s[2] / maxS) * 100));
+      return '<button class="ob-fn' + (d.bucket === s[0] ? ' on' : '') + '" data-ob="' + s[0] + '">' +
+        '<span class="ob-fn-k">' + esc(s[1]) + '</span>' +
+        '<span class="ob-fn-bar"><span style="width:' + pct + '%;background:' + s[3] + '"></span></span>' +
+        '<b>' + s[2] + '</b></button>';
+    }).join('');
+    var byA = (t.by_account || []).slice().sort(function (a, b) { return (b.orders || 0) - (a.orders || 0); });
+    var maxA = byA.reduce(function (m, x) { return Math.max(m, Number(x.orders) || 0); }, 1);
+    var accts = byA.length ? '<div class="ob-gsub">Today by account</div><div class="ob-gacc">' + byA.map(function (a) {
+      var pct = Math.max(2, Math.round(((Number(a.orders) || 0) / maxA) * 100));
+      return '<div class="ob-ga"><span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
+        '<span class="ob-ga-bar"><span style="width:' + pct + '%"></span></span>' +
+        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></div>';
+    }).join('') + '</div>' : '';
+    return '<div class="ob-graph"><div class="ob-gtiles">' +
+      '<div class="ob-gtile gold"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></div>' +
+      '<div class="ob-gtile"><span class="k">Revenue today</span><b>' + obGBP(t.revenue) + '</b></div>' +
+      '</div><div class="ob-fnl">' + funnel + '</div>' + accts + '</div>';
+  }
+
   function obLoad() {
     var box = $('obBody');
     if (!box) { return; }
@@ -107,7 +162,7 @@
       }).join('');
       var hasBuyer = (d.rows || []).some(function (r) { return r.buyer !== undefined; });
       var isNP = d.bucket === 'needs_processing';
-      var h = '<div class="ob-chips">' + chips + '</div>';
+      var h = obGraphical(d) + '<div class="ob-chips">' + chips + '</div>';
       if (isNP) {
         h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">No AliExpress order has been placed on these yet — oldest first. Past 1 BUSINESS day they ring the Order Processors and Ops. The moment the Ali order number lands in the day tab (or here via Add Ali), the order leaves this list within the hour.</p>';
       } else if (d.note) {

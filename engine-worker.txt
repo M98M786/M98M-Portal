@@ -3447,6 +3447,16 @@ const ROUTES = {
         counts[k] = (row && row.n) || 0;
       }
 
+      /* R7-8 (Hasib): "graphical orders dashboard in today's orders". Today's live pulse — order
+         count and revenue for the current day — plus a per-account split so the board can draw
+         bars, all honouring the account filter. */
+      const todayQ = bindFor("SELECT COUNT(*) AS n, ROUND(COALESCE(SUM(o.sold), 0), 2) AS rev FROM orders o WHERE date(o.created_at) = date('now')" + acctSql);
+      const todayRow = await ctx.env.DB.prepare(todayQ.s).bind(...todayQ.bind).first();
+      const byAcctQ = bindFor("SELECT o.account, COUNT(*) AS n, ROUND(COALESCE(SUM(o.sold), 0), 2) AS rev FROM orders o WHERE date(o.created_at) = date('now')" + acctSql + ' GROUP BY o.account ORDER BY n DESC');
+      const byAcct = await ctx.env.DB.prepare(byAcctQ.s).bind(...byAcctQ.bind).all().catch(() => ({ results: [] }));
+      const today = { orders: Number(todayRow && todayRow.n) || 0, revenue: Number(todayRow && todayRow.rev) || 0,
+        by_account: (byAcct.results || []).map((r) => ({ account: r.account, orders: Number(r.n) || 0, revenue: Number(r.rev) || 0 })) };
+
       const sel = B[bucket] ? bucket : 'awaiting';
       const listQ = bindFor(
         'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, o.ali_order, o.ali_link, i.title ' +
@@ -3458,7 +3468,7 @@ const ROUTES = {
         if (!seesPII) { const c = { ...r }; delete c.buyer; return c; }
         return r;
       });
-      return { bucket: sel, counts, rows, as_of: nowIso,
+      return { bucket: sel, counts, rows, as_of: nowIso, today,
         note: sel === 'archived' ? 'Orders eBay holds no dispatch record for — dispatched and delivered in the real world, but tracking never reached eBay. They are history, not workload.' : '' };
     },
   },
