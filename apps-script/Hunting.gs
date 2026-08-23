@@ -19,6 +19,9 @@ const HUNT_APPROVED = 'APPROVED';                 // §8.1 canonical — the onl
 const HUNT_NOT_APPROVED = 'NOT APPROVED';
 const HUNT_PENDING = '';                          // undecided: the live sheet leaves the cell blank
 const HUNT_DECISIONS = [HUNT_APPROVED, HUNT_NOT_APPROVED];
+/* R7 (Hasib): a third road between approve and reject — the manager sends the hunt BACK with
+ * what is missing; the hunter edits it (reviseHunt) and it re-enters the queue as pending. */
+const HUNT_REVISION = 'REVISION REQUIRED';
 
 /** Every value the live column B can hold, folded to the two canonical outcomes. 'Already
  * Tested'/'Already on Account' are dispositions, not approvals — they fold to NOT APPROVED for
@@ -32,6 +35,9 @@ const HUNT_STATUS_READ_MAP = {
   'NOT APPROVED': HUNT_NOT_APPROVED,
   'NOT APRROVED': HUNT_NOT_APPROVED,
   'NOT SELECTED': HUNT_NOT_APPROVED,
+  'REVISION REQUIRED': 'REVISION REQUIRED',
+  'REVISION': 'REVISION REQUIRED',
+  'REVISE': 'REVISION REQUIRED',
   'ALREADY TESTED': HUNT_NOT_APPROVED,
   'ALREADY ON ACCOUNT': HUNT_NOT_APPROVED,
 };
@@ -262,8 +268,34 @@ function actionDecideHunt_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not a hunt approver', ctx.ident.email);
 
   const decision = huntCanonStatus_(payload.decision);      // tolerant on input, canonical on write
-  if (HUNT_DECISIONS.indexOf(decision) < 0) throw new Error('decision must be APPROVED or NOT APPROVED');
   const comment = String(payload.comment || '').trim().slice(0, HUNT_MAX_COMMENT);
+
+  /* R7: the revision road — the hunt leaves the queue carrying exactly what is missing, and
+     reviseHunt brings it back as pending once the hunter fills the gap. */
+  if (decision === HUNT_REVISION) {
+    if (!comment) throw new Error('say what more is required — the comment carries it to the hunter');
+    let rrec = null;
+    const rlock = LockService.getScriptLock();
+    try {
+      rlock.waitLock(10000);
+      const rsh = huntSheet_();
+      const rfound = huntFind_(rsh, payload.hunt_id);
+      rrec = huntRecord_(rfound.rec);
+      if (rrec.approval_status !== HUNT_PENDING) throw new Error('hunt already decided');
+      const rpatch = {};
+      rpatch[HC_APPROVAL] = HUNT_REVISION;
+      rpatch[HC_COMMENTS] = comment;
+      huntWrite_(rsh, rfound, rpatch);
+    } finally { rlock.releaseLock(); }
+    logActivity_(ctx.ident.email, 'HUNT_REVISION_REQUESTED', rrec.hunt_id, HUNT_PENDING, HUNT_REVISION, comment.slice(0, 200));
+    notify_(rrec.hunter_email, 'Revision required',
+      '🟡 Your hunt "' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 120) + '" needs more before a decision: ' +
+      comment + ' — open Product hunting, press Revise on it, fill the gap and it goes straight back to the queue.',
+      'hunt:' + rrec.hunt_id + ':rev');
+    return { revision: true, hunt_id: rrec.hunt_id };
+  }
+
+  if (HUNT_DECISIONS.indexOf(decision) < 0) throw new Error('decision must be APPROVED, NOT APPROVED or REVISION');
   const approving = decision === HUNT_APPROVED;
   if (!approving && !comment) throw new Error('a comment is mandatory when a hunt is not approved');
 
@@ -665,9 +697,59 @@ function huntCopyToCentral_(account, limited, actor) {
   }
 }
 
+/* R7: a hunter fixes their own hunt while it is pending or sent back for revision — the same
+ * field intake as submission, but only the fields actually sent are touched, the projection is
+ * recomputed when prices moved, and the row returns to the pending queue. */
+function actionReviseHunt_(payload, ctx) {
+  if (HUNT_SUBMIT_ROLES.indexOf(ctx.user.role) < 0 && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+    throw new Error('this role does not submit hunts');
+  }
+  const cols = huntColumnsFromPayload_(payload);
+  const sent = {};
+  Object.keys(cols).forEach(function (c) {
+    if (String(cols[c] === null || cols[c] === undefined ? '' : cols[c]).trim() !== '') sent[c] = cols[c];
+  });
+  delete sent[HC_APPROVAL]; delete sent[HC_ACCOUNT]; delete sent[HC_SELECTED_BY];
+  delete sent[HC_DATE_ADDED]; delete sent[HC_LISTING_STATUS]; delete sent[HC_IMAGE];
+  if (!Object.keys(sent).length) throw new Error('nothing to revise — send at least one changed field');
+  if (sent[HC_CPC]) sent[HC_CPC] = huntAdvertisingType_(sent[HC_CPC], false);
+
+  let rec = null;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const sh = huntSheet_();
+    const found = huntFind_(sh, payload.hunt_id);
+    rec = huntRecord_(found.rec);
+    if (normalizeEmail(rec.hunter_email) !== normalizeEmail(ctx.ident.email) && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+      throw new Error('only the hunter who submitted it may revise it');
+    }
+    if (rec.approval_status !== HUNT_PENDING && rec.approval_status !== HUNT_REVISION) {
+      throw new Error('this hunt is already decided — submit a new one instead');
+    }
+    const merged = {};
+    Object.keys(rec).forEach(function (k) { merged[k] = rec[k]; });
+    Object.keys(sent).forEach(function (k) { merged[k] = sent[k]; });
+    if (sent[HC_CALC_PRICE] || sent[HC_SOURCE_PRICE]) {
+      const calc = huntCalculate_(merged, payload.shipping);
+      sent[HC_PROFIT] = calc.profit === null ? '' : calc.profit;
+      sent[HC_ROI] = calc.roi === null ? '' : calc.roi;
+    }
+    sent[HC_APPROVAL] = HUNT_PENDING;                  // back into the queue
+    sent[HC_COMMENTS] = String(rec[HC_COMMENTS] || '').slice(0, 1500) +
+      (rec[HC_COMMENTS] ? ' · ' : '') + '(revised ' + huntPktDate_() + ')';
+    huntWrite_(sh, found, sent);
+  } finally { lock.releaseLock(); }
+
+  logActivity_(ctx.ident.email, 'REVISE_HUNT', rec.hunt_id, String(rec.approval_status || 'PENDING'), 'PENDING',
+    Object.keys(sent).join(',').slice(0, 200));
+  return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
+}
+
 const ACTIONS_HUNTING = {
   submitHunt: [actionSubmitHunt_, 'any'],
   myHunts:    [actionMyHunts_, 'any'],
   huntQueue:  [actionHuntQueue_, 'any'],   // reviewers gated inside
   decideHunt: [actionDecideHunt_, 'any'],  // Management / Ops Head gated inside
+  reviseHunt: [actionReviseHunt_, 'any'],  // hunter-own or management, gated inside
 };
