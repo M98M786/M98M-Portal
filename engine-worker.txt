@@ -110,7 +110,7 @@ export default {
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
-      '30 * * * *': [processWatch, zeroSaleScan, uncampaignedDigest, noSupplierScan, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
+      '30 * * * *': [processWatch, zeroSaleScan, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -554,6 +554,50 @@ async function noSupplierScan(env) {
       (Number(r.n) > 1 ? ' ' + r.n + ' open orders are on this item.' : ''),
       'engine:nosup:' + r.item_id);
   }
+}
+
+/* R7-3 (Hasib): "update trackings of all previous orders … you can take it from api too."
+   eBay's own shipping fulfillments are the record of every tracking ever uploaded — from the
+   portal, from the sheet flow, from anywhere. This walks FULFILLED orders that have no
+   trackings row yet, newest first, 18 per run (each is one API call), until the history is
+   drained; the '30' slot keeps it topped up forever after. */
+async function trackingBackfill(env) {
+  const rs = await env.DB.prepare(
+    "SELECT o.order_id, o.account FROM orders o WHERE o.status = 'FULFILLED' " +
+    "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') " +
+    "AND o.created_at >= datetime('now', '-90 day') ORDER BY o.created_at DESC LIMIT 18"
+  ).all();
+  const rows = rs.results || [];
+  let got = 0;
+  const toks = {};
+  for (const r of rows) {
+    try {
+      if (!toks[r.account]) toks[r.account] = await ebayAccessToken(env, r.account);
+      const fr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(r.order_id) + '/shipping_fulfillment',
+        { headers: { authorization: 'Bearer ' + toks[r.account] } });
+      if (!fr.ok) continue;
+      const fj = await fr.json();
+      const f = (fj.fulfillments || [])[0];
+      const num = f ? String(f.shipmentTrackingNumber || '') : '';
+      if (!num) {
+        await env.DB.prepare(
+          "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, '', '', datetime('now'), 'EBAY:none') " +
+          'ON CONFLICT(order_id) DO NOTHING').bind(r.order_id).run();
+        continue;
+      }
+      await env.DB.prepare(
+        "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, ?4, 'EBAY') " +
+        "ON CONFLICT(order_id) DO UPDATE SET tracking = CASE WHEN tracking = '' THEN ?2 ELSE tracking END, " +
+        "courier_ebay = CASE WHEN courier_ebay = '' THEN ?3 ELSE courier_ebay END"
+      ).bind(r.order_id, num.slice(0, 60), String(f.shippingCarrierCode || '').slice(0, 30),
+        String(f.shippedDate || new Date().toISOString())).run();
+      got++;
+    } catch (e) { /* one bad order must not stop the walk — next run retries */ }
+  }
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('trackingBackfill', '', ?1, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now'), last_error = ''"
+  ).bind(got + ' of ' + rows.length + ' fetched this run').run();
 }
 
 /* R5 (Hasib): "if not processed after 1 business day show alert". Processed = an AliExpress
@@ -3022,7 +3066,24 @@ await ctx.env.DB.prepare(
   "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
 ).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
 if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
-return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status,
+/* R7-3 (Hasib: "I uploaded the tracking … but it didn't update in the sheet"): a successful
+   eBay push now ALSO writes the day tab's own Tracking cell + flips its Delivery Status to
+   the sheet's 'Tracking' token — the same bridge the Ali-link capture rides. Best-effort:
+   the eBay push already succeeded; a sheet miss is reported, never fatal. */
+let sheetSaid = { ok: false, reason: 'bridge did not answer' };
+try {
+  const sr = await fetch(ctx.env.AS_URL, {
+    method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'engineSheetWrite', payload: {
+      key: await secret(ctx.env, 'SYNC_KEY'), whitelist: 'orders_day', account,
+      match_header: 'Order number', match_value: orderId,
+      values: { 'Tracking number': tracking.slice(0, 60), 'Delivery Status': 'Tracking' } } }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const sb = await sr.json().catch(() => ({}));
+  sheetSaid = sb.ok ? sb.data : { ok: false, reason: String(sb.error || sr.status) };
+} catch (e) { sheetSaid = { ok: false, reason: String(e && e.message || e).slice(0, 120) }; }
+return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status, sheet: sheetSaid,
   carriers: accepted.slice(0, 200) };
 }
 
@@ -3255,14 +3316,19 @@ const ROUTES = {
       const horizonIso = new Date(Date.now() - 14 * 86400000).toISOString();  // 'recent' = ship-by within 14 days
 
       const OPEN = "o.status NOT IN ('FULFILLED','NOT_FOUND','CANCELLED')";
+      /* R7-3 (Hasib: "over-dues tab shows the wrong numbers"): an order whose tracking is
+         already recorded — pushed from the portal or found on eBay by the backfill — is
+         dispatched in the real world even while eBay's own status field lags. It must never
+         sit in OVERDUE or DUE; it is workload nobody owes anymore. */
+      const UNTRACKED = " AND NOT EXISTS (SELECT 1 FROM trackings t2 WHERE t2.order_id = o.order_id AND t2.tracking != '')";
       const B = {
         all:       "o.created_at >= datetime('now','-90 day')",
         cancelled: "o.status = 'CANCELLED' AND o.created_at >= datetime('now','-30 day')",
         awaiting:  OPEN + " AND (o.ship_by = '' OR o.ship_by >= ?H)",
-        overdue:   OPEN + " AND o.ship_by != '' AND o.ship_by < ?N AND o.ship_by >= ?H",
-        due24:     OPEN + " AND o.ship_by != '' AND o.ship_by >= ?N AND o.ship_by < datetime(?N, '+1 day')",
-        due2d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+1 day') AND o.ship_by < datetime(?N, '+2 day')",
-        due3d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+2 day') AND o.ship_by < datetime(?N, '+3 day')",
+        overdue:   OPEN + " AND o.ship_by != '' AND o.ship_by < ?N AND o.ship_by >= ?H" + UNTRACKED,
+        due24:     OPEN + " AND o.ship_by != '' AND o.ship_by >= ?N AND o.ship_by < datetime(?N, '+1 day')" + UNTRACKED,
+        due2d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+1 day') AND o.ship_by < datetime(?N, '+2 day')" + UNTRACKED,
+        due3d:     OPEN + " AND o.ship_by != '' AND o.ship_by >= datetime(?N, '+2 day') AND o.ship_by < datetime(?N, '+3 day')" + UNTRACKED,
         dispatched:"o.status = 'FULFILLED' AND o.created_at >= datetime('now','-30 day')",
         archived:  OPEN + " AND o.ship_by != '' AND o.ship_by < ?H",
         /* R5 (Hasib): "show orders not processed or still need to be processed". Processed = an
@@ -5055,7 +5121,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
