@@ -4708,6 +4708,32 @@ const ROUTES = {
     },
   },
 
+  /* R7 (22 Aug): bulk sourcing loader for Hasib's supplier workbooks — key-gated like every
+     sync feed. Fills or corrects; an empty incoming slot never erases a stored link. */
+  sourcingImport: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 1000);
+      const stmts = [];
+      for (const r of rows) {
+        const id = String(r.item_id || '').trim();
+        if (!/^\d{9,14}$/.test(id)) continue;
+        const clean = (v) => { const s = String(v || '').trim().slice(0, 400); return /^https:\/\//i.test(s) ? s : ''; };
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO sourcing (item_id, account, s1, s2, s3, updated_by, updated_at) ' +
+          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+          'ON CONFLICT(item_id) DO UPDATE SET ' +
+          "s1 = CASE WHEN excluded.s1 != '' THEN excluded.s1 ELSE s1 END, " +
+          "s2 = CASE WHEN excluded.s2 != '' THEN excluded.s2 ELSE s2 END, " +
+          "s3 = CASE WHEN excluded.s3 != '' THEN excluded.s3 ELSE s3 END, " +
+          "updated_by = ?6, updated_at = datetime('now')"
+        ).bind(id, String(r.account || '').slice(0, 40), clean(r.s1), clean(r.s2), clean(r.s3),
+          String(p.source || 'import').slice(0, 40)));
+      }
+      for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
+      return { received: rows.length, written: stmts.length };
+    },
+  },
+
   sourcingSave: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
