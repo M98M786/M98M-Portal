@@ -110,7 +110,7 @@ export default {
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -987,6 +987,37 @@ async function cpcRevisionWatch(env) {
     const ref = 'engine:cpc72:' + r.item_id;
     await notifyRole(env, 'Listing Manager', 'CPC revision due (72h)', msg, ref);
     await notifyRole(env, 'Advertising Manager', 'CPC revision due (72h)', msg, ref);
+  }
+}
+
+/* R7-7 (Hasib): "every alert must be acknowledged within 2 hours with written feedback, strict
+   for pricing and advertising". A money alert — price, CPC, campaign, ad waste — is STRICT: its
+   SLA is 2 hours, it cannot be bulk-cleared, and its acknowledgement demands a real note. */
+function alertStrict(type) {
+  return /price|pricing|cpc|campaign|advertis|waste|roas|ad ?spend|ad ?fee/i.test(String(type || ''));
+}
+
+/* Open alerts past their SLA escalate to Management once each. Strict money alerts breach at 2
+   hours; everything else gets a 6-hour grace so the mail does not become noise. The escalation is
+   itself a letter (ref engine:acksla:<id>) so it never re-escalates and never files twice. */
+async function alertAckWatch(env) {
+  const rows = (await env.DB.prepare(
+    "SELECT id, to_addr, type, message, created_at FROM alert_log " +
+    "WHERE resolved_at = '' AND type != 'Alert not acknowledged in time' " +
+    "  AND to_addr NOT IN ('management') " +
+    "  AND created_at <= datetime('now', '-2 hours') " +
+    "  AND NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = 'engine:acksla:' || alert_log.id) " +
+    'ORDER BY created_at ASC LIMIT 25'
+  ).all()).results || [];
+  for (const r of rows) {
+    const strict = alertStrict(r.type);
+    const ageMs = Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z');
+    const ageH = isFinite(ageMs) ? Math.floor(ageMs / 3600000) : 2;
+    if (!strict && ageH < 6) continue;                     // gentle 6-hour grace for non-money alerts
+    const msg = (strict ? '⛔ STRICT SLA breach (2h) · ' : '⚠ Alert unacknowledged · ') +
+      String(r.type) + ' → ' + String(r.to_addr) + ' has sat ' + ageH + 'h with no written feedback. ' +
+      'Original: ' + String(r.message || '').slice(0, 180) + ' — chase the acknowledgement now.';
+    await notifyRole(env, 'Management', 'Alert not acknowledged in time', msg, 'engine:acksla:' + r.id);
   }
 }
 
@@ -3603,6 +3634,9 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       const type = String(p.type || '').slice(0, 60);
       if (!type) throw new Error('SAY: which type?');
+      /* R7-7: money alerts can never be swept away in bulk — each must carry its own written
+         feedback, acknowledged one by one. */
+      if (alertStrict(type)) throw new Error('SAY: pricing/advertising alerts must be acknowledged one at a time, each with written feedback — bulk clear is not allowed for them');
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const addrs = [ctx.email];
       if (ctx.user.role === 'Advertising Manager') addrs.push('advertising');
@@ -3617,7 +3651,7 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       const id = Number(p.id) || 0;
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
-      const row = await ctx.env.DB.prepare('SELECT id, to_addr, resolved_at FROM alert_log WHERE id = ?1').bind(id).first();
+      const row = await ctx.env.DB.prepare('SELECT id, to_addr, type, resolved_at FROM alert_log WHERE id = ?1').bind(id).first();
       /* One error for "not yours" AND "not there" below mgmt — a distinguishable not-found
          message let any signed-in user count the org's alert stream by probing ids. */
       const mine = row && (String(row.to_addr) === ctx.user.email ||
@@ -3625,9 +3659,14 @@ const ROUTES = {
       if (!mgmt && !mine) throw new AuthError('auth');
       if (!row) throw new Error('SAY: that alert is gone');
       if (String(row.resolved_at)) throw new Error('SAY: already handled — refresh');
+      /* R7-7: written feedback is mandatory to acknowledge — a bare click no longer clears a
+         letter. Money alerts (price/CPC/campaign/ad waste) demand a real sentence. */
+      const note = String(p.note || '').trim().slice(0, 400);
+      if (note.length < 3) throw new Error('SAY: write what you did about it — every alert needs a note to be acknowledged');
+      if (alertStrict(row.type) && note.length < 8) throw new Error('SAY: this is a pricing/advertising alert — say what you changed and why (a few words is not enough)');
       await ctx.env.DB.prepare(
         "UPDATE alert_log SET resolved_by = ?2, resolved_at = datetime('now'), note = ?3 WHERE id = ?1"
-      ).bind(id, ctx.user.email, String(p.note || '').slice(0, 300)).run();
+      ).bind(id, ctx.user.email, note).run();
       return { ok: true, id };
     },
   },
@@ -5162,7 +5201,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

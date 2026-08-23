@@ -404,7 +404,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260823-0401';
+var BUILD = '20260823-0410';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -4324,6 +4324,13 @@ function createMeeting() {
     '.al-toggle.on{border-color:rgba(240,96,90,.62);color:var(--bad);background:var(--bad-soft)}' +
     '.al-note{font-size:11.5px;color:var(--text-3);font-weight:700;line-height:1.55}' +
     '.al-note b{color:var(--text-2)}' +
+    /* R7-7 acknowledgement + SLA */
+    '.al-ack{margin-top:12px;padding:11px 12px;border-radius:10px;border:1px solid var(--gold-line);background:rgba(120,132,152,.06)}' +
+    '.al-ack-strict{border-color:rgba(240,96,90,.5);background:var(--bad-soft)}' +
+    '.al-acklab{display:block;font-size:11.5px;font-weight:800;color:var(--text-2);margin-bottom:6px}' +
+    '.al-ack-strict .al-acklab{color:var(--bad)}' +
+    '.pill.al-breach{background:var(--bad-soft);color:var(--bad);border:1px solid rgba(240,96,90,.5);font-size:10px}' +
+    '.pill.al-late{background:var(--warn-soft);color:var(--warn);font-size:10px}' +
     '.al-chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}' +
     '.al-chip{font-size:11.5px;font-weight:700;color:var(--text);border:1px solid var(--gold-line);border-radius:8px;padding:5px 11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
     '.al-chip .k{color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:800;margin-right:6px}' +
@@ -4608,11 +4615,26 @@ function createMeeting() {
          the Mark-handled action inside the reading pane. */
       var byId = {};
       rows.forEach(function (r) { byId[String(r.id)] = r; });
+      /* R7-7: money alerts (price/CPC/campaign/ad waste) are STRICT — 2-hour SLA, feedback
+         mandatory, never bulk-cleared. Mirror of the engine's alertStrict(). */
+      function alStrict(type) { return /price|pricing|cpc|campaign|advertis|waste|roas|ad ?spend|ad ?fee/i.test(String(type || '')); }
+      function alAgeH(created) {
+        var ms = Date.parse(String(created || '').replace(' ', 'T') + 'Z');
+        return isFinite(ms) ? (Date.now() - ms) / 3600000 : 0;
+      }
+      function alOverdue(r) {
+        if (alStr(r.resolved_at)) { return ''; }
+        var h = alAgeH(r.created_at), strict = alStrict(r.type);
+        if (strict && h >= 2) { return 'breach'; }
+        if (!strict && h >= 6) { return 'late'; }
+        return '';
+      }
       function letterCard(r) {
-        var openR = !alStr(r.resolved_at);
+        var openR = !alStr(r.resolved_at), od = alOverdue(r);
         return '<article class="al-card" data-al-open="' + alAttr(String(r.id)) + '" style="cursor:pointer;padding:8px 12px;margin:4px 0;' + (openR ? '' : 'opacity:.55') + '">' +
-          '<div class="al-hd" style="margin:0"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
+          '<div class="al-hd" style="margin:0"><span class="al-dot ' + (openR ? (od === 'breach' ? 'sev-high' : 'sev-high') : 'ok') + '"></span>' +
             '<span class="al-acct" style="font-size:12px">' + esc(alStr(r.type)) + '</span>' +
+            (od === 'breach' ? '<span class="pill al-breach">⛔ SLA 2h</span>' : (od === 'late' ? '<span class="pill al-late">⏰ overdue</span>' : '')) +
             '<span style="font-weight:' + (openR ? '800' : '600') + ';font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + esc(alStr(r.message).slice(0, 110)) + '</span>' +
             '<span class="al-when">' + esc(alStr(r.created_at).slice(5, 16)) + '</span></div>' +
           '</article>';
@@ -4628,7 +4650,7 @@ function createMeeting() {
         var r = byId[String(id)];
         var pane = $('alReader');
         if (!r || !pane) { return; }
-        var openR = !alStr(r.resolved_at);
+        var openR = !alStr(r.resolved_at), strict = alStrict(r.type), od = alOverdue(r);
         pane.innerHTML = '<article class="al-card al-money" style="margin-bottom:12px">' +
           '<div class="al-hd"><span class="al-dot ' + (openR ? 'sev-high' : 'ok') + '"></span>' +
             '<span class="al-acct" style="font-size:14px">' + esc(alStr(r.type)) + '</span>' +
@@ -4640,16 +4662,33 @@ function createMeeting() {
             '<div class="al-from" style="margin-top:10px">ref <span class="mono">' + esc(alStr(r.ref)) + '</span>' +
               (openR ? '' : esc(' · handled by ' + alStr(r.resolved_by).split('@')[0] + ' · ' + alStr(r.resolved_at).slice(0, 16)) +
                 (alStr(r.note) ? '<div style="margin-top:4px">' + esc('note: ' + alStr(r.note)) + '</div>' : '')) + '</div>' +
-            (openR ? '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Mark handled</button></div>' : '') +
+            /* R7-7: acknowledgement now demands written feedback, strictly for money alerts. */
+            (openR ? '<div class="al-ack' + (strict ? ' al-ack-strict' : '') + '">' +
+              '<label class="al-acklab">' + (strict
+                ? '⛔ Pricing/advertising alert — written feedback required: what did you change and why?'
+                : 'What did you do about it? A short note is required to acknowledge.') + '</label>' +
+              '<textarea class="al-in al-wide" id="alAckNote" rows="2" maxlength="400" placeholder="' +
+                (strict ? 'e.g. cut CPC to 8% on 3 items, held price — ROAS was under target' : 'the action you took') + '"></textarea>' +
+              '<div class="al-acts"><button class="btn-gold" data-al-mail="' + alAttr(String(r.id)) + '">Acknowledge with feedback</button>' +
+                '<span class="al-note" style="margin-top:0">' + (od === 'breach' ? '⛔ Past its 2-hour SLA — Management has been alerted.' : (od === 'late' ? '⏰ Overdue.' : '')) + '</span></div>' +
+              '</div>' : '') +
           '</div></article>';
         try { pane.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e2) {}
         var cb = $('alReaderClose');
         if (cb) { cb.onclick = function () { pane.innerHTML = ''; }; }
         pane.querySelectorAll('[data-al-mail]').forEach(function (mb) {
           mb.onclick = function () {
+            var noteEl = $('alAckNote'), note = noteEl ? String(noteEl.value || '').trim() : '';
+            var min = strict ? 8 : 3;
+            if (note.length < min) {
+              toast(strict ? 'This pricing/advertising alert needs real feedback — say what you changed and why.'
+                : 'Write a short note on what you did — it is required to acknowledge.');
+              if (noteEl) { noteEl.focus(); }
+              return;
+            }
             this.disabled = true;
-            api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')) })
-              .then(function () { toast('Handled.'); pane.innerHTML = ''; alLoadMail(); })
+            api('alertMailResolve', { id: Number(this.getAttribute('data-al-mail')), note: note })
+              .then(function () { toast('Acknowledged with feedback.'); pane.innerHTML = ''; alLoadMail(); })
               .catch(function (e2) { toast(e2.message); alLoadMail(); });
           };
         });
@@ -4663,7 +4702,9 @@ function createMeeting() {
           '<span class="pill ' + (g.open.length ? 'al-p-sev' : 'al-p-cat') + '">' + g.open.length + ' open</span>' +
           (g.done.length ? '<span class="al-when">' + g.done.length + ' handled</span>' : '') +
           (big ? '<button class="minibtn" data-al-expand="' + alAttr(t) + '">Show all</button>' +
-                 '<button class="minibtn" data-al-bulk="' + alAttr(t) + '">Mark all ' + g.open.length + ' handled</button>' : '') +
+                 /* R7-7: money alerts can't be bulk-cleared — each needs its own feedback. */
+                 (alStrict(t) ? '<span class="al-note" style="margin-top:0">each needs feedback</span>'
+                              : '<button class="minibtn" data-al-bulk="' + alAttr(t) + '">Mark all ' + g.open.length + ' handled</button>') : '') +
           '</div>';
         var show = big ? g.open.slice(0, 2) : g.open.concat(g.done.slice(0, 3));
         h2 += '<div data-al-group="' + alAttr(t) + '">' + show.map(letterCard).join('') + '</div>';
