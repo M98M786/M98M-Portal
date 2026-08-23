@@ -22,7 +22,17 @@
     '.ac-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.ac-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
-    '.ac-waste td:first-child{border-left:3px solid var(--bad)}'
+    '.ac-waste td:first-child{border-left:3px solid var(--bad)}' +
+    /* R7-8 organic vs promoted split */
+    '.ac-split{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:var(--panel-2);margin-bottom:16px}' +
+    '.ac-split-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin-bottom:9px}' +
+    '.ac-bar{height:16px;border-radius:8px;overflow:hidden;background:var(--ok,#2fb170);display:flex}' +
+    '.ac-bar-p{display:block;height:100%;background:var(--gold-a);border-right:2px solid var(--panel-2)}' +
+    '.ac-bar-lg{display:flex;flex-wrap:wrap;gap:14px;margin-top:9px;font-size:12.5px;font-weight:700;align-items:center}' +
+    '.ac-bar-lg b{font-weight:800}' +
+    '.ac-lg-p b{color:var(--gold-a)}.ac-lg-o b{color:var(--ok,#2fb170)}' +
+    '.ac-bar-tot{margin-left:auto;color:var(--text-3);font-weight:800}' +
+    '.ac-split-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:9px;line-height:1.5}'
   );
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
@@ -44,6 +54,30 @@
         '<div class="ac-tile' + (c.waste_n ? ' bad' : '') + '"><div class="k">Wasting £3+ · no order</div><div class="v">' + (c.waste_n || 0) + '</div></div>' +
         '<div class="ac-tile"><div class="k">Spend · ' + (d.days || 14) + ' days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
+      /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
+         ad revenue; organic = the rest. Combined bar + per-account split over the window. */
+      var sp = d.split_total || {}, spl = d.split || [];
+      if (Number(sp.total_rev)) {
+        var promoPct = Number(sp.promoted_pct) || 0, orgPct = Number(sp.organic_pct);
+        if (!isFinite(orgPct)) { orgPct = 100 - promoPct; }
+        var rangeLabel = (d.from && d.to) ? (String(d.from) + ' → ' + String(d.to)) : ('last ' + (d.days || 14) + ' days');
+        h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(rangeLabel) + '</div>' +
+          '<div class="ac-bar"><span class="ac-bar-p" style="width:' + Math.max(0, Math.min(100, promoPct)) + '%"></span></div>' +
+          '<div class="ac-bar-lg"><span class="ac-lg-p"><b>Promoted</b> ' + acGBP(sp.promoted_rev) + ' · ' + promoPct.toFixed(1) + '%</span>' +
+          '<span class="ac-lg-o"><b>Organic</b> ' + acGBP(sp.organic_rev) + ' · ' + orgPct.toFixed(1) + '%</span>' +
+          '<span class="ac-bar-tot">Total ' + acGBP(sp.total_rev) + '</span></div>';
+        if (spl.length > 1 && !AC.acct) {
+          h += '<div class="scroll" style="max-height:220px;margin-top:8px"><table class="ac-tbl" style="min-width:480px"><thead><tr>' +
+            '<th style="text-align:left">Account</th><th>Total</th><th>Promoted</th><th>Organic</th><th>Promoted %</th></tr></thead><tbody>';
+          spl.forEach(function (r) {
+            h += '<tr><td style="text-align:left;font-weight:800">' + esc(String(r.account)) + '</td>' +
+              '<td>' + acGBP(r.total_rev) + '</td><td>' + acGBP(r.promoted_rev) + '</td><td>' + acGBP(r.organic_rev) + '</td>' +
+              '<td style="font-weight:800;color:' + (Number(r.promoted_pct) > 60 ? 'var(--warn)' : 'var(--text)') + '">' + (Number(r.promoted_pct) || 0).toFixed(1) + '%</td></tr>';
+          });
+          h += '</tbody></table></div>';
+        }
+        h += '<div class="ac-split-note">Promoted is what eBay credits to the ads; organic is the rest of the sale revenue. From the finance feed, over the window above.</div></div>';
+      }
       /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
       var ser = d.series || [];
       if (ser.length) {

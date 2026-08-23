@@ -3325,12 +3325,31 @@ const ROUTES = {
         waste_n: items.filter(i => i.waste).length,
         spend_14d: round2(items.reduce((s, i) => s + i.spend_14d, 0)),
       };
+      /* R7-8 (Hasib): "organic vs promoted sales stats". The split is PRECISE — sales_daily.sold
+         is total revenue and ads_rev is eBay's own attributed (promoted) revenue, so organic is
+         the remainder. Per account and combined, over the same window as the rest of the board. */
+      const splitRows = await ctx.env.DB.prepare(
+        'SELECT account, ROUND(SUM(sold), 2) AS total_rev, ROUND(SUM(ads_rev), 2) AS promoted_rev ' +
+        'FROM sales_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY account'
+      ).bind(...bindR).all().catch(() => ({ results: [] }));
+      const split = (splitRows.results || []).map((r) => {
+        const total = Number(r.total_rev) || 0, promoted = Math.min(total, Number(r.promoted_rev) || 0);
+        return { account: r.account, total_rev: round2(total), promoted_rev: round2(promoted),
+          organic_rev: round2(total - promoted), promoted_pct: total ? round2(promoted / total * 100) : 0 };
+      }).sort((a, b) => b.total_rev - a.total_rev);
+      const splitTotal = split.reduce((s, r) => ({
+        total_rev: round2(s.total_rev + r.total_rev), promoted_rev: round2(s.promoted_rev + r.promoted_rev),
+        organic_rev: round2(s.organic_rev + r.organic_rev),
+      }), { total_rev: 0, promoted_rev: 0, organic_rev: 0 });
+      splitTotal.promoted_pct = splitTotal.total_rev ? round2(splitTotal.promoted_rev / splitTotal.total_rev * 100) : 0;
+      splitTotal.organic_pct = splitTotal.total_rev ? round2(splitTotal.organic_rev / splitTotal.total_rev * 100) : 0;
       return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF,
         series: (series.results || []),
         series_by_account: (seriesByAcct.results || []),
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
         items: items.slice(0, 300),
-        note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live)' };
+        split: split, split_total: splitTotal,
+        note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live). Organic vs promoted uses eBay-attributed sale revenue — promoted is what eBay credits to the ads, organic is the rest.' };
     },
   },
 
