@@ -404,7 +404,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260823-0319';
+var BUILD = '20260823-0332';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9418,6 +9418,18 @@ VIEWS.dashboard = {
      the live sheet's own misspelling 'E-Bey Caluclator + £4' included. */
   var HU_APPROVED = 'APPROVED';
   var HU_NOT_APPROVED = 'NOT APPROVED';
+  var HU_REVISION = 'REVISION REQUIRED';
+
+  /* R7-5 (Hasib): "add some auto selected reasons of disapproving the product" and "give the
+     option… what more required" — chips that compose the comment; free text welcome around them. */
+  var HU_REJECT_REASONS = ['Profit too thin after fees', 'Too many competitors',
+    'Sell-through too low', 'Branded item — VeRO risk', 'Outside the £8–30 price window',
+    'Supplier delivery too slow', 'Already listed / duplicate', 'Evidence links broken or missing',
+    'Seasonal window already passed'];
+  var HU_REVISE_NEEDS = ['Better images required', 'Need 3 working supplier links',
+    'Re-check the source price', 'Selling price — margin too thin', 'Terapeak evidence missing',
+    'Competitor analysis incomplete', 'Title needs rework', 'Description too weak',
+    'Category breadcrumb missing', 'Confirm UK stock & delivery time'];
 
   /* Spec §4.3 names Product Hunter and Team Lead. REALITY WINS: the live 'Selected By' dropdown is
      Wahab · Noman · Fasieh · Irfan — two Order Processors and the Ops Head hunt too — and
@@ -9564,6 +9576,8 @@ VIEWS.dashboard = {
     '.hu-box.hu-say .k{color:var(--blue-2)}' +
     '.hu-box.hu-bad{background:var(--bad-soft);border-color:rgba(240,96,90,.45)}' +
     '.hu-box.hu-bad .k{color:var(--bad)}' +
+    '.hu-box.hu-warn{background:var(--warn-soft);border-color:rgba(255,159,67,.4)}' +
+    '.hu-box.hu-warn .k{color:var(--warn)}' +
     '.hu-txt{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.55}' +
     '.hu-link{color:var(--blue-2);font-weight:700;word-break:break-all}' +
     '.hu-lg{display:grid;gap:10px 16px;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:6px}' +
@@ -9573,6 +9587,16 @@ VIEWS.dashboard = {
     '.pill.hu-ok{background:linear-gradient(135deg,rgba(233,169,60,.20),rgba(233,169,60,.05));color:var(--gold-a);border:1px solid var(--gold-line-hi)}' +
     '.pill.hu-no{background:var(--bad-soft);color:var(--bad)}' +
     '.pill.hu-wait{background:var(--warn-soft);color:var(--warn)}' +
+    '.pill.hu-rev{background:var(--warn-soft);color:var(--warn);border:1px solid rgba(255,159,67,.45)}' +
+    '.hu-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}' +
+    '.hu-chipk{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);font-weight:700;margin-top:10px}' +
+    '.hu-chip{border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text-2);border-radius:999px;' +
+      'padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer;user-select:none;transition:border-color .15s,color .15s}' +
+    '.hu-chip:hover{border-color:var(--gold-line-hi)}' +
+    '.hu-chip.on{border-color:var(--gold-a);color:var(--gold-a);background:rgba(212,175,55,.08)}' +
+    '.hu-revbtn{border-color:rgba(255,159,67,.55)!important;color:var(--warn)!important}' +
+    '.hu-revband{background:var(--warn-soft);border:1px solid rgba(255,159,67,.4);border-radius:12px;' +
+      'padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
     '.pill.hu-view{background:rgba(120,132,152,.16);color:var(--text-2)}' +
     '.hu-dec{margin-top:14px;padding-top:14px;border-top:1px solid var(--gold-line)}' +
     '.hu-empty{color:var(--text-2);font-weight:700;padding:10px 0}' +
@@ -9685,6 +9709,7 @@ VIEWS.dashboard = {
     var s = huStr(rec.approval_status);
     if (s === HU_APPROVED) return '<span class="pill hu-ok">Approved</span>';
     if (s === HU_NOT_APPROVED) return '<span class="pill hu-no">Not approved</span>';
+    if (s === HU_REVISION) return '<span class="pill hu-rev">Revision required</span>';
     return '<span class="pill hu-wait">Awaiting review</span>';
   }
   /** The live column B holds seven spellings; the server folds them but keeps the raw text, so a
@@ -9716,7 +9741,7 @@ VIEWS.dashboard = {
         '</div>' +
         '<div class="card enter d1"><div class="hd">New hunt ' +
           '<span class="hint">Five fields are required · everything else strengthens the case</span></div>' +
-          '<div class="bd">' + HU_SECTIONS.map(huSection).join('') +
+          '<div class="bd"><div id="huRevBand" style="display:none"></div>' + HU_SECTIONS.map(huSection).join('') +
             '<div class="hu-btns"><button class="btn-gold" id="huSend">Submit hunt</button>' +
               '<button class="minibtn" id="huClear">Clear form</button>' +
               '<span class="hu-hint" style="margin-top:0">Nothing is listed until Management approves it.</span></div>' +
@@ -9738,6 +9763,7 @@ VIEWS.dashboard = {
           '<span class="hint">Newest first</span>' +
           '<select class="hu-sel" id="huFilter" style="width:auto;padding:7px 11px;font-size:12px">' +
             '<option value="all">All</option><option value="pending">Awaiting review</option>' +
+            '<option value="REVISION REQUIRED">Revision required</option>' +
             '<option value="APPROVED">Approved</option><option value="NOT APPROVED">Not approved</option>' +
           '</select></div>' +
           '<div class="bd" id="huMineBody"><div class="spinner"></div></div>' +
@@ -9798,7 +9824,7 @@ VIEWS.dashboard = {
     el = huEl('huShip');
     if (el) { el.oninput = huCalcSoon; }
     huCalcIdle('Type a source price and an intended sell price — the projection appears here.');
-    huEl('huClear').onclick = function () { huResetForm(); huCalcIdle('Cleared. The projection follows your next price.'); };
+    huEl('huClear').onclick = function () { huSetRevise(null); huResetForm(); huCalcIdle('Cleared. The projection follows your next price.'); };
     huEl('huSend').onclick = huSubmit;
     huEl('huFilter').onchange = huLoadMine;
   }
@@ -9906,32 +9932,100 @@ VIEWS.dashboard = {
 
     /* R7-1: optimistic submit — the form clears the instant the click lands (Hasib: "same with
        product hunter when he adds the data there"). The draft keeper holds every keystroke
-       until the server CONFIRMS; a refusal refills the whole form exactly as typed. */
+       until the server CONFIRMS; a refusal refills the whole form exactly as typed — and, on a
+       revision, puts the form back into revise mode for the same hunt. */
+    var revId = HU_REVISING, revTitle = HU_REV_TITLE;
+    if (revId) { payload.hunt_id = revId; huSetRevise(null); }
     huResetForm();
-    huCalcIdle('Submitted. The projection follows your next hunt.');
-    toast('Hunt submitted — saving…');
-    api('submitHunt', payload).then(function (res) {
+    huCalcIdle(revId ? 'Revision sent. The projection follows your next hunt.' : 'Submitted. The projection follows your next hunt.');
+    toast(revId ? 'Revision sent — saving…' : 'Hunt submitted — saving…');
+    api(revId ? 'reviseHunt' : 'submitHunt', payload).then(function (res) {
       if (typeof draftClear === 'function') { draftClear('hunting'); }
-      toast('Hunt saved · ' + huStr(res.hunt_id) +
-        ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
+      toast(revId ? 'Revised · ' + huStr(res.hunt_id) + ' is back in the review queue'
+        : 'Hunt saved · ' + huStr(res.hunt_id) +
+          ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
       huLoadMine();
     }).catch(function (e) {
+      /* Their typing first (the keeper only fills EMPTY fields), then the record tops up
+         whatever they had not touched — edits win, nothing is blank. */
       if (typeof draftRestore === 'function') { draftRestore('hunting'); }
+      if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
       toast('NOT saved — ' + e.message + ' · your typing is restored.');
     });
   }
 
+  // ---------- the Revise flow (R7-5: fix a hunt while it is pending or sent back) ----------
+  var HU_REVISING = '', HU_REV_TITLE = '';
+
+  function huSetRevise(id, title) {
+    HU_REVISING = id || '';
+    HU_REV_TITLE = HU_REVISING ? huStr(title) : '';
+    var band = huEl('huRevBand'), send = huEl('huSend');
+    if (band) {
+      band.className = HU_REVISING ? 'hu-revband' : '';
+      band.style.display = HU_REVISING ? '' : 'none';
+      band.innerHTML = HU_REVISING
+        ? '<span>Revising <b class="mono">' + esc(HU_REVISING) + '</b>' +
+            (HU_REV_TITLE ? ' — ' + esc(HU_REV_TITLE.slice(0, 60)) : '') + '</span>' +
+          '<span style="font-weight:500;color:var(--text-2)">Fix what was asked, then press Save revision — it goes straight back into the review queue.</span>' +
+          '<button class="minibtn" id="huRevCancel" style="margin-left:auto">Cancel revision</button>'
+        : '';
+      var c = huEl('huRevCancel');
+      if (c) {
+        c.onclick = function () {
+          huSetRevise(null); huResetForm();
+          huCalcIdle('Revision cancelled — the form is a fresh hunt again.');
+        };
+      }
+    }
+    if (send) { send.textContent = HU_REVISING ? 'Save revision' : 'Submit hunt'; }
+  }
+
+  function huFillFromRec(rec, onlyEmpty) {
+    if (!rec) { return; }
+    var i, f, el;
+    for (i = 0; i < HU_FLAT.length; i++) {
+      f = HU_FLAT[i]; el = huEl(f.id);
+      if (!el) { continue; }
+      if (onlyEmpty && huStr(el.value) !== '') { continue; }
+      el.value = huStr(rec[f.col]);
+    }
+  }
+
+  function huStartRevise(id) {
+    var rec = HU_MINE[id];
+    if (!rec) { toast('That hunt is not on this list any more — refresh and try again.'); return; }
+    huFillFromRec(rec, false);
+    var el = huEl('huShip'); if (el) { el.value = ''; }
+    huSetRevise(id, huStr(rec['Title']));
+    huCalcSoon();
+    var band = huEl('huRevBand');
+    if (band && band.scrollIntoView) { band.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
+
   // ---------- my hunts ----------
+  var HU_MINE = {};          // hunt_id → record, for the Revise flow
+
   function huLoadMine() {
     var box = huEl('huMineBody'), filter = huEl('huFilter');
     if (!box) { return; }
-    var hc = cachedCall('myHunts', { status: filter ? filter.value : 'all' }, function (d) {
+    /* The server's status filter predates the revision road, so 'REVISION REQUIRED' is filtered
+       here from the 'all' answer instead of being sent — same rows, no new failure mode. */
+    var want = filter ? filter.value : 'all';
+    var ask = (want === HU_REVISION) ? 'all' : want;
+    var hc = cachedCall('myHunts', { status: ask }, function (d) {
       var hunts = (d && d.hunts) || [];
+      if (want === HU_REVISION) {
+        hunts = hunts.filter(function (r) { return huStr(r.approval_status) === HU_REVISION; });
+      }
       if (!hunts.length) {
         box.innerHTML = '<div class="hu-empty">Nothing here yet.<span>Every hunt you submit stays on this list with its decision and any comment.</span></div>';
         return;
       }
+      HU_MINE = {};
+      hunts.forEach(function (r) { HU_MINE[huStr(r.hunt_id)] = r; });
       box.innerHTML = hunts.map(huMineItem).join('');
+      huWireMine(box);
     });
     if (!hc.painted) { box.innerHTML = '<div class="spinner"></div>'; }
     hc.done.catch(function (e) {
@@ -9941,9 +10035,18 @@ VIEWS.dashboard = {
     });
   }
 
+  function huWireMine(box) {
+    var btns = box.querySelectorAll('button[data-hurev]'), i;
+    for (i = 0; i < btns.length; i++) {
+      (function (b) { b.onclick = function () { huStartRevise(b.getAttribute('data-hurev')); }; })(btns[i]);
+    }
+  }
+
   function huMineItem(rec) {
-    var approved = huStr(rec.approval_status) === HU_APPROVED;
-    var decided = huStr(rec.approval_status) !== '';
+    var st = huStr(rec.approval_status);
+    var approved = st === HU_APPROVED;
+    var decided = st !== '';
+    var revisable = st === '' || st === HU_REVISION;   // mirror of the server's own gate
     var comment = huStr(rec['Comments']);          // column C — where the live sheet keeps review notes
     var account = huStr(rec['Account Selected']);
     var adv = huStr(rec['CPC Selling Chance']);
@@ -9964,10 +10067,16 @@ VIEWS.dashboard = {
         '<div class="hu-lr"><span class="k">Our Profit</span>' + huCellMoney(rec['Our Profit']) + '</div>' +
         '<div class="hu-lr"><span class="k">ROI</span>' + huCellRoi(rec['ROI']) + '</div>' +
       '</div>' +
-      (comment ? '<div class="hu-box ' + (approved ? 'hu-say' : 'hu-bad') + '"><div class="k">Management comment</div>' +
+      (comment ? '<div class="hu-box ' + (approved ? 'hu-say' : (st === HU_REVISION ? 'hu-warn' : 'hu-bad')) + '">' +
+        '<div class="k">' + (st === HU_REVISION ? 'What more is required' : 'Management comment') + '</div>' +
         '<div class="hu-txt">' + esc(comment) + '</div></div>' : '') +
       (!decided ? huFlags(rec.criteria_flags) : '') +
       (mine ? '<div class="hu-box"><div class="k">Your comment</div><div class="hu-txt">' + esc(mine) + '</div></div>' : '') +
+      /* R7-5 (Hasib): "the hunter can revise the information if he think there is something
+         wrong, before the approval" — pending and sent-back rows carry the button. */
+      (revisable ? '<div class="hu-btns" style="margin-top:10px"><button class="minibtn' +
+        (st === HU_REVISION ? ' hu-revbtn' : '') + '" data-hurev="' + huAttr(huStr(rec.hunt_id)) + '">' +
+        (st === HU_REVISION ? 'Revise & resubmit' : 'Revise this hunt') + '</button></div>' : '') +
     '</div>';
   }
 
@@ -9993,11 +10102,20 @@ VIEWS.dashboard = {
           '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
           '<div class="bd" id="huQBody"><div class="spinner"></div></div>' +
         '</div>' +
+        /* R7-5 (Hasib): "make the proper approval records" — every decided hunt, its decision,
+           its comment and its account, searchable, newest first. */
+        '<div class="card enter d3" style="margin-top:14px"><div class="hd">Decision records ' +
+          '<span class="hint">every decision with its reason · newest first</span>' +
+          '<input class="hu-in" id="huQRecFind" placeholder="Search title · hunter · reason · account" ' +
+            'style="width:min(340px,50%);margin-left:auto;padding:7px 11px;font-size:12.5px"></div>' +
+          '<div class="bd" id="huQRecords"><div class="spinner"></div></div>' +
+        '</div>' +
         '<datalist id="huAccList"></datalist>' +
         '<datalist id="huListerList"></datalist>';
     },
     init: function () {
       huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); };
+      huEl('huQRecFind').oninput = function () { huPaintRecords(this.value); };
       huLoadPickers();
       huLoadQueue();
       huLoadQueueStats();
@@ -10012,20 +10130,26 @@ VIEWS.dashboard = {
     api('huntQueue', { status: 'all' }).then(function (d) {
       var hunts = (d && d.hunts) || [];
       var week = Date.now() - 7 * 86400000;
-      var per = {}, totals = { pending: 0, approved7: 0, rejected7: 0 };
+      var per = {}, totals = { pending: 0, approved7: 0, rejected7: 0, revision: 0 };
       hunts.forEach(function (rec) {
         var who = huStr(rec.hunter_name) || huStr(rec.hunter_email) || '(unknown)';
-        var p = per[who] = per[who] || { pending: 0, approved7: 0, rejected7: 0, oldest: '' };
+        var p = per[who] = per[who] || { pending: 0, approved7: 0, rejected7: 0, revision: 0, oldest: '' };
         var st = huStr(rec.approval_status);
         var ts = Date.parse(huStr(rec.ts) || huStr(rec['Date Added']) || '') || 0;
         if (st === '') {
           p.pending++; totals.pending++;
           if (!p.oldest || (ts && ts < Date.parse(p.oldest))) { p.oldest = huStr(rec.ts); }
+        } else if (st === HU_REVISION) {
+          /* an in-flight state, not a rejection — counted whole, not 7-day-windowed */
+          p.revision++; totals.revision++;
         } else if (ts >= week) {
           if (st === HU_APPROVED) { p.approved7++; totals.approved7++; }
           else { p.rejected7++; totals.rejected7++; }
         }
       });
+      HU_RECORDS = hunts.filter(function (r) { return huStr(r.approval_status) !== ''; });
+      HU_RECORDS.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });
+      huPaintRecords(huEl('huQRecFind') ? huEl('huQRecFind').value : '');
       /* R7 (Hasib): "numbering of today how many products submitted today, yesterday, weekly,
          monthly" — counted from every hunt's own submission stamp, decided or not. */
       var subs = { today: 0, yesterday: 0, week: 0, month: 0 };
@@ -10043,6 +10167,7 @@ VIEWS.dashboard = {
       var names = Object.keys(per).sort(function (a, b) { return per[b].pending - per[a].pending; });
       var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
         '<div class="hu-tile big"><span class="k">Pending review now</span><b class="num goldtext">' + totals.pending + '</b></div>' +
+        '<div class="hu-tile"><span class="k">In revision now</span><b class="num" style="color:var(--warn)">' + totals.revision + '</b></div>' +
         '<div class="hu-tile"><span class="k">Approved · 7 days</span><b class="num" style="color:var(--ok)">' + totals.approved7 + '</b></div>' +
         '<div class="hu-tile"><span class="k">Rejected · 7 days</span><b class="num" style="color:var(--bad)">' + totals.rejected7 + '</b></div>' +
         '<div class="hu-tile"><span class="k">Submitted today</span><b class="num">' + subs.today + '</b></div>' +
@@ -10053,12 +10178,13 @@ VIEWS.dashboard = {
       if (!names.length) {
         h += '<div class="hu-hint" style="margin-top:0">No hunts on record yet.</div>';
       } else {
-        h += '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
-          '<th style="text-align:left">Hunter</th><th>Pending now</th><th>Approved · 7d</th><th>Rejected · 7d</th><th style="text-align:left">Waiting longest since</th></tr></thead><tbody>' +
+        h += '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
+          '<th style="text-align:left">Hunter</th><th>Pending now</th><th>In revision</th><th>Approved · 7d</th><th>Rejected · 7d</th><th style="text-align:left">Waiting longest since</th></tr></thead><tbody>' +
           names.map(function (n) {
             var p = per[n];
             return '<tr><td style="text-align:left">' + esc(n) + '</td>' +
               '<td class="num">' + (p.pending ? '<b style="color:var(--gold-a)">' + p.pending + '</b>' : '0') + '</td>' +
+              '<td class="num"' + (p.revision ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.revision + '</td>' +
               '<td class="num" style="color:var(--ok)">' + p.approved7 + '</td>' +
               '<td class="num"' + (p.rejected7 ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.rejected7 + '</td>' +
               '<td style="text-align:left;font-size:11.5px;color:var(--text-3)">' + (p.oldest ? esc(fmtPkt(p.oldest, true) || p.oldest) : '—') + '</td></tr>';
@@ -10067,7 +10193,48 @@ VIEWS.dashboard = {
       box.innerHTML = h;
     }).catch(function (e) {
       box.innerHTML = '<div class="hu-hint" style="margin-top:0">The pulse could not load: ' + esc(e.message) + '</div>';
+      var rb = huEl('huQRecords');
+      if (rb) { rb.innerHTML = '<div class="hu-hint" style="margin-top:0">Records ride the same fetch — press Refresh to retry.</div>'; }
     });
+  }
+
+  /* R7-5: the decision records — every decided row from the same 'all' fetch the pulse uses. */
+  var HU_RECORDS = [];
+
+  function huPaintRecords(query) {
+    var box = huEl('huQRecords');
+    if (!box) { return; }
+    var q = huStr(query).toLowerCase();
+    var rows = HU_RECORDS.filter(function (r) {
+      if (!q) { return true; }
+      return (huStr(r['Title']) + ' ' + huStr(r.hunter_name) + ' ' + huStr(r.hunter_email) + ' ' +
+        huStr(r['Comments']) + ' ' + huStr(r['Account Selected']) + ' ' + huStr(r.hunt_id))
+        .toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      box.innerHTML = '<div class="hu-hint" style="margin-top:0">' +
+        (q ? 'No decision matches that search.' : 'No hunt has been decided yet.') + '</div>';
+      return;
+    }
+    var cap = 250, shown = rows.slice(0, cap);
+    box.innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+      '<th style="text-align:left">Decision</th><th style="text-align:left">Product</th>' +
+      '<th style="text-align:left">Hunter</th><th style="text-align:left">Account</th>' +
+      '<th style="text-align:left">Reason / comment</th><th style="text-align:left">Submitted</th></tr></thead><tbody>' +
+      shown.map(function (r) {
+        var c = huStr(r['Comments']);
+        return '<tr><td style="text-align:left;white-space:nowrap">' + huPill(r) + '</td>' +
+          '<td style="text-align:left;max-width:230px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
+            huAttr(huStr(r['Title'])) + '">' + esc(huStr(r['Title']) || huStr(r.hunt_id)) + '</div>' +
+            '<span class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(huStr(r.hunt_id)) + '</span></td>' +
+          '<td style="text-align:left">' + esc(huStr(r.hunter_name) || huStr(r.hunter_email)) + '</td>' +
+          '<td style="text-align:left">' + esc(huStr(r['Account Selected']) || '—') + '</td>' +
+          '<td style="text-align:left;max-width:280px;font-size:12px" title="' + huAttr(c) + '">' +
+            esc(c ? (c.length > 140 ? c.slice(0, 140) + '…' : c) : '—') + '</td>' +
+          '<td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' +
+            esc(fmtPkt(r.ts, true) || huStr(r['Date Added']) || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      (rows.length > cap ? '<div class="hu-hint">Showing the newest ' + cap + ' of ' + rows.length + ' — search to narrow.</div>' : '');
   }
 
   /** One fetch used by the screen, the sign-in warm-up and the badge alike, so the queue is
@@ -10176,10 +10343,21 @@ VIEWS.dashboard = {
           /* R6 (Hasib): "auto selected date … current day 11:59pm deadline" — prefilled, still editable */
           '<input class="hu-in" type="datetime-local" data-due="' + huAttr(id) + '" value="' + huTodayEndPkt() + '">' +
           '<div class="hu-hint">' + huClockLine() + ' · prefilled: today 11:59 PM</div></div>' +
-        '<div class="field hu-wide"><label>Comment <span class="hu-req">required to reject</span></label>' +
-          '<textarea class="hu-ta" data-cmt="' + huAttr(id) + '" placeholder="Why this item is not approved, or anything the lister should know"></textarea></div>' +
+        '<div class="field hu-wide"><label>Comment <span class="hu-req">required to reject or send back</span></label>' +
+          /* R7-5: the chips below write straight into this box — tap to add, tap again to remove;
+             anything typed by hand stays untouched. */
+          '<div class="hu-chipk">Not approving? Tap the reasons</div>' +
+          '<div class="hu-chips">' + HU_REJECT_REASONS.map(function (r) {
+            return '<span class="hu-chip" data-rsn="' + huAttr(r) + '" data-for="' + huAttr(id) + '">' + esc(r) + '</span>';
+          }).join('') + '</div>' +
+          '<div class="hu-chipk">Sending back for revision? Tap what more is required</div>' +
+          '<div class="hu-chips">' + HU_REVISE_NEEDS.map(function (r) {
+            return '<span class="hu-chip" data-rsn="' + huAttr(r) + '" data-for="' + huAttr(id) + '">' + esc(r) + '</span>';
+          }).join('') + '</div>' +
+          '<textarea class="hu-ta" data-cmt="' + huAttr(id) + '" style="margin-top:8px" placeholder="Why this item is not approved, what more is required, or anything the lister should know"></textarea></div>' +
       '</div>' +
       '<div class="hu-btns"><button class="btn-gold" data-hd="approve" data-id="' + huAttr(id) + '">Approve</button>' +
+        '<button class="minibtn hu-revbtn" data-hd="revise" data-id="' + huAttr(id) + '">Send for revision</button>' +
         '<button class="minibtn" data-hd="reject" data-id="' + huAttr(id) + '">Not approved</button></div>' +
     '</div>';
   }
@@ -10191,12 +10369,41 @@ VIEWS.dashboard = {
         b.onclick = function () { huDecide(box, b.getAttribute('data-hd'), b.getAttribute('data-id'), b); };
       })(btns[i]);
     }
+    var chips = box.querySelectorAll('.hu-chip[data-rsn]');
+    for (i = 0; i < chips.length; i++) {
+      (function (c) { c.onclick = function () { huChipToggle(box, c); }; })(chips[i]);
+    }
+  }
+
+  /** A chip toggles its phrase in the card's comment box — '; '-joined, hand-typed text kept. */
+  function huChipToggle(box, chip) {
+    var cmt = huPick(box, 'data-cmt', chip.getAttribute('data-for'));
+    if (!cmt) { return; }
+    var phrase = chip.getAttribute('data-rsn') || '';
+    var parts = huStr(cmt.value) ? cmt.value.split(/;\s*/).map(huStr).filter(Boolean) : [];
+    var at = parts.indexOf(phrase);
+    if (at >= 0) { parts.splice(at, 1); chip.classList.remove('on'); }
+    else { parts.push(phrase); chip.classList.add('on'); }
+    cmt.value = parts.join('; ');
   }
 
   function huDecide(box, act, id, btn) {
     var cmt = huPick(box, 'data-cmt', id);
     var comment = cmt ? huStr(cmt.value) : '';
     var payload = { hunt_id: id, comment: comment }, el;
+
+    /* R7-5: the revision road — the hunt leaves this queue and lands back with the hunter,
+       carrying exactly what is missing. Same optimistic shape as the other two decisions. */
+    if (act === 'revise') {
+      if (!comment) { toast('Say what more is required — tap the chips or type it.'); if (cmt) { cmt.focus(); } return; }
+      payload.decision = HU_REVISION;
+      huCardGone(box, id, 'Sent back for revision ✓');
+      api('decideHunt', payload).then(function () {
+        huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
+        huLoadQueueStats();
+      }).catch(function (e) { huCardBack(box, id); toast('Not sent back — ' + e.message); });
+      return;
+    }
 
     if (act === 'reject') {
       if (!comment) { toast('A comment is mandatory when a hunt is not approved.'); if (cmt) { cmt.focus(); } return; }
