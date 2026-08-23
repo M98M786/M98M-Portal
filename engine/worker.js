@@ -454,14 +454,18 @@ async function listingSync(env) {
       const id = xmlTag(it, 'ItemID');
       if (!id) continue;
       upserts.push(env.DB.prepare(
-        'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at, start_time, first_seen) ' +
-        "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now'), ?7, datetime('now')) " +
+        /* INCIDENT 22 Aug: this statement carried SEVEN placeholders while bind() passed EIGHT
+           values (sold_qty had its bind but no ?8) — every listingSync run since 20 Aug 21:01
+           threw 'Wrong number of parameter bindings', the table froze, and markEndedListings
+           diffed against the dead fetch and flipped all 798 items ENDED. ?8 restored. */
+        'INSERT INTO items_api (item_id, account, title, price, qty, status, image, api_synced_at, start_time, first_seen, sold_qty) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, 'ACTIVE', ?6, datetime('now'), ?7, datetime('now'), ?8) " +
         "ON CONFLICT(item_id) DO UPDATE SET account=?2, " +
         /* review 4 (marketing 14-day rule): a PRICE or TITLE change stamps last_revised — the
            markdown-sale eligibility clock. Tracking starts 21 Aug; earlier revisions are unknowable. */
         "last_revised = CASE WHEN price != ?4 OR title != ?3 THEN datetime('now') ELSE last_revised END, " +
         "title=?3, price=?4, qty=?5, status='ACTIVE', image=?6, api_synced_at=datetime('now'), " +
-        "start_time = CASE WHEN ?7 != '' THEN ?7 ELSE start_time END"
+        "start_time = CASE WHEN ?7 != '' THEN ?7 ELSE start_time END, sold_qty=?8"
       ).bind(
         id, acct,
         xmlTag(it, 'Title'),
@@ -498,6 +502,25 @@ async function listingSync(env) {
    the 15-minute cadence, so an ACTIVE row untouched for a day is an ended item. Marked, not deleted:
    its history still joins orders and ads. */
 async function markEndedListings(env) {
+  /* INCIDENT GUARD (22 Aug): with listingSync itself broken, NOTHING gets re-touched and this
+     diff would (did) end the entire fleet. Ending is only meaningful when the sync is alive —
+     require a listing write within the last 2 hours, and never end more than 30% of the ACTIVE
+     set in one pass; a bigger cut is a feed problem wearing an ended-items costume. */
+  const alive = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM items_api WHERE api_synced_at >= datetime('now', '-2 hour')"
+  ).first();
+  if (!alive || Number(alive.n) === 0) return;
+  const counts = await env.DB.prepare(
+    "SELECT SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) AS act, " +
+    "SUM(CASE WHEN status = 'ACTIVE' AND api_synced_at < datetime('now', '-1 day') THEN 1 ELSE 0 END) AS stale FROM items_api"
+  ).first();
+  const act = Number(counts && counts.act) || 0, stale = Number(counts && counts.stale) || 0;
+  if (act > 20 && stale > act * 0.3) {
+    await queueNotify(env, 'management', 'Listings check',
+      '⚠ ' + stale + ' of ' + act + ' ACTIVE listings stopped refreshing — too many to be real endings, so nothing was marked. The listing feed needs eyes: Account health → run Pull listings.',
+      'engine:endguard:' + ukDate(new Date().toISOString()));
+    return;
+  }
   await env.DB.prepare(
     "UPDATE items_api SET status = 'ENDED' WHERE status = 'ACTIVE' AND api_synced_at < datetime('now', '-1 day')"
   ).run();
@@ -748,6 +771,13 @@ async function selfTestRun(env) {
     const quiet = (rs.results || []).map(r => r.account + ' (last ' + String(r.last).slice(0, 16) + ')');
     add('every account feed is alive', quiet.length === 0, quiet.length ? 'QUIET: ' + quiet.join(', ') : 'all selling accounts have fresh orders');
   } catch (e) { add('every account feed is alive', false, e.message); }
+
+  try { // 4f. the ACTIVE fleet did not collapse: 798→0 happened silently on 22 Aug when a
+    // bindings bug froze listingSync and the ended-marker ate the table. Fewer than 100 ACTIVE
+    // items on a 5-shop fleet is an emergency, not a market condition.
+    const a = await one('SELECT COUNT(*) AS n FROM items_api WHERE status = ?1', 'ACTIVE');
+    add('ACTIVE listings fleet alive', Number(a.n) > 100, Number(a.n) + ' ACTIVE listings on record');
+  } catch (e) { add('ACTIVE listings fleet alive', false, e.message); }
 
   try { // 4e. the off-site Sheets backup stamped within 26h — Hasib's "portal dies" insurance.
     // Arms only after the first successful night, so day one never cries wolf.
