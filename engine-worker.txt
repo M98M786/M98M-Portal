@@ -110,7 +110,7 @@ export default {
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
-      '30 * * * *': [processWatch, zeroSaleScan, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -936,16 +936,57 @@ async function zeroSaleScan(env) {
     'LIMIT 25'
   ).all();
   const rows = rs.results || [];
+  /* R7-6 (Hasib): "any account item with no orders in 7 days → product revision task with
+     explained reason". The reason is computed per item and stored on the board row so the
+     Listing Manager sees WHY, not just WHICH. */
+  const reasonFor = (r) => {
+    const bornMs = Date.parse(String(r.born).replace(' ', 'T'));   // ISO or space-separated both parse
+    const days = isFinite(bornMs) ? Math.max(7, Math.floor((Date.now() - bornMs) / 86400000)) : 7;
+    return days + ' days live (' + r.clock + ' ' + String(r.born).slice(0, 10) + '), £' +
+      (Number(r.price) || 0).toFixed(2) + ', 0 orders — revise the title, main image, price or campaign, or end it.';
+  };
   const ins = rows.map((r) => env.DB.prepare(
     "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note) " +
-    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', '')"
-  ).bind(r.item_id, r.account, String(r.title || ''), Number(r.price) || 0, String(r.born), String(r.clock)));
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', ?7)"
+  ).bind(r.item_id, r.account, String(r.title || ''), Number(r.price) || 0, String(r.born), String(r.clock), reasonFor(r)));
   for (let i = 0; i < ins.length; i += 50) await env.DB.batch(ins.slice(i, i + 50));
   const queued = rows.length;
   if (queued) {
     await notifyRole(env, 'Management', 'Zero-sale listings need a decision',
       queued + ' new listing(s) passed 7 days with no sale — decide end or revise on the Listing decisions board.',
       'engine:zerosale:' + ukDate(''));
+    /* the person who can actually revise it hears about each item with its reason, once ever */
+    for (const r of rows.slice(0, 12)) {
+      await notifyRole(env, 'Listing Manager', 'Product revision needed (7-day no sale)',
+        '🟠 ' + r.account + ' · ' + r.item_id + (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
+        ' — ' + reasonFor(r), 'engine:zerosale:item:' + r.item_id);
+    }
+  }
+}
+
+/* R7-6 (Hasib): "72h CPC revision alert to the listing manager". The Day-0 dummy becomes the
+   real competitor-based listing at +72h, when its CPC must be set/revised. An item that has
+   passed 72 hours and still sits in NO campaign missed that step — alert the Listing Manager and
+   the Advertising Manager, once per item (alert_log's ref dedupe is the guard). */
+async function cpcRevisionWatch(env) {
+  const rs = await env.DB.prepare(
+    "SELECT i.item_id, i.account, i.title, " +
+    "  CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END AS born " +
+    "FROM items_api i " +
+    "WHERE i.status = 'ACTIVE' AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) != '' " +
+    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) <= datetime('now', '-72 hours') " +
+    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-10 day') " +
+    "  AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = i.item_id) " +
+    "  AND NOT EXISTS (SELECT 1 FROM alert_log WHERE ref = 'engine:cpc72:' || i.item_id) " +
+    'ORDER BY born ASC LIMIT 12'
+  ).all();
+  for (const r of (rs.results || [])) {
+    const msg = '⏱ 72-hour CPC revision due · ' + r.account + ' · ' + r.item_id +
+      (r.title ? ' · ' + String(r.title).slice(0, 55) : '') + ' — live since ' + String(r.born).slice(0, 10) +
+      ' and still in no campaign. Set or revise the CPC now: at 72 hours the dummy is the real listing.';
+    const ref = 'engine:cpc72:' + r.item_id;
+    await notifyRole(env, 'Listing Manager', 'CPC revision due (72h)', msg, ref);
+    await notifyRole(env, 'Advertising Manager', 'CPC revision due (72h)', msg, ref);
   }
 }
 
@@ -5121,7 +5162,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
