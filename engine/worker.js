@@ -4616,10 +4616,10 @@ const ROUTES = {
       const d7 = shift(today, 6);
 
       const sd = await ctx.env.DB.prepare(
-        'SELECT account, date, sold, oe, cost, ads, profit FROM sales_daily WHERE date >= ?1'
+        'SELECT account, date, sold, oe, cost, ads, profit, ads_rev FROM sales_daily WHERE date >= ?1'
       ).bind(shift(today, 8)).all();
       const days = sd.results || [];
-      const sum = rows => rows.reduce((t, r) => ({ sold: t.sold + (Number(r.sold) || 0), profit: t.profit + (Number(r.profit) || 0), ads: t.ads + (Number(r.ads) || 0) }), { sold: 0, profit: 0, ads: 0 });
+      const sum = rows => rows.reduce((t, r) => ({ sold: t.sold + (Number(r.sold) || 0), profit: t.profit + (Number(r.profit) || 0), ads: t.ads + (Number(r.ads) || 0), promoted: t.promoted + Math.min(Number(r.sold) || 0, Number(r.ads_rev) || 0) }), { sold: 0, profit: 0, ads: 0, promoted: 0 });
       const kToday = sum(days.filter(r => r.date === today));
       const kYday = sum(days.filter(r => r.date === yday));
       const k7 = sum(days.filter(r => r.date >= d7));
@@ -4671,6 +4671,13 @@ const ROUTES = {
         today_by_account: Object.values(todayAcct).sort((a, b) => b.revenue - a.revenue),
         yesterday_by_account: ydayRows,
         ads_yesterday: adsRows,
+        /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the 7-day split on the home,
+           from eBay-attributed revenue (promoted) against total (the rest is organic). */
+        split_7d: {
+          total_rev: round2(k7.sold), promoted_rev: round2(k7.promoted),
+          organic_rev: round2(k7.sold - k7.promoted),
+          promoted_pct: k7.sold > 0 ? round2(k7.promoted / k7.sold * 100) : 0,
+        },
         health,
         duplicates: dups.results || [],
         loss_items: losses.results || [],

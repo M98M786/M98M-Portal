@@ -404,7 +404,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260823-0423';
+var BUILD = '20260823-0427';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14252,6 +14252,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.ov2 .range-label{width:100%;font-size:11.5px;color:var(--text-3);font-weight:600;padding:2px 4px 0}' +
     '.ov2 .alerts{border:1px solid rgba(240,96,90,.4);background:var(--bad-soft);border-radius:14px;padding:12px 14px;margin-bottom:20px;font-size:12.5px}' +
     '.ov2 .alerts a{font-weight:800}' +
+    /* R7-8 organic vs promoted split bar */
+    '.ov2 .ov-splitbar{height:16px;border-radius:8px;overflow:hidden;background:var(--ok,#2fb170);margin-top:8px}' +
+    '.ov2 .ov-splitbar i{display:block;height:100%;background:var(--gold-a);border-right:2px solid var(--panel-2)}' +
+    '.ov2 .ov-splitlg{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:9px;font-size:12.5px;font-weight:700}' +
     '.ov2 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px}' +
     '.ov2 .kpi{background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--gold-line);border-radius:14px;padding:14px 15px;position:relative;overflow:hidden}' +
     '.ov2 .kpi::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--tone,var(--gold-b));opacity:.65}' +
@@ -14745,12 +14749,23 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span class="v">' + oGBP(a.spend) + '</span>' +
         '<span class="rank-d ' + (a.roas === null ? '' : a.roas >= 5 ? 'up' : 'dn') + '" style="min-width:64px">ROAS ' + (a.roas === null ? '—' : oN(a.roas).toFixed(1)) + '</span></div>';
     }).join('');
+    /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the 7-day split on the home. */
+    var sp = O.ov.split_7d || {}, splitCard = '';
+    if (oN(sp.total_rev) > 0) {
+      var pPct = Math.max(0, Math.min(100, oN(sp.promoted_pct)));
+      splitCard = '<div class="o-card" style="margin-top:12px"><span class="card-t">Organic vs promoted sales · last 7 days</span>' +
+        '<div class="ov-splitbar"><i style="width:' + pPct + '%"></i></div>' +
+        '<div class="ov-splitlg"><span><b style="color:var(--gold-a)">Promoted</b> ' + oGBP(sp.promoted_rev) + ' · ' + pPct.toFixed(1) + '%</span>' +
+        '<span><b style="color:var(--ok,#2fb170)">Organic</b> ' + oGBP(sp.organic_rev) + ' · ' + (100 - pPct).toFixed(1) + '%</span>' +
+        '<span style="margin-left:auto;color:var(--text-3);font-weight:800">Total ' + oGBP(sp.total_rev) + '</span></div>' +
+        '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest</div></div>';
+    }
     box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">Yesterday per account · real spend</span>' +
       '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded yesterday — two accounts still need the marketing re-consent.</div>') + '</div></div>' +
       '<div class="o-card"><div class="gauge-wrap">' + oGauge(roas) +
       '<div class="g-side"><b>Blended ROAS yesterday</b><span>' + (roas === null ? '—' : roas.toFixed(1)) + '</span>' +
       '<b style="margin-top:8px">SOP target</b><span>≥ 5</span></div></div>' +
-      '<div class="kpi-s" style="margin-top:10px">revenue ÷ real ad spend · per-item attribution lands with the fee feed</div></div></div>';
+      '<div class="kpi-s" style="margin-top:10px">revenue ÷ real ad spend · per-item attribution lands with the fee feed</div></div></div>' + splitCard;
   }
 
   // ---------- returns & cases ----------
