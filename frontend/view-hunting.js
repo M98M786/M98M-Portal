@@ -495,17 +495,21 @@
     ship = huStr(huEl('huShip') ? huEl('huShip').value : '');
     if (ship) { payload.shipping = ship; }
 
-    btn.disabled = true;
+    /* R7-1: optimistic submit — the form clears the instant the click lands (Hasib: "same with
+       product hunter when he adds the data there"). The draft keeper holds every keystroke
+       until the server CONFIRMS; a refusal refills the whole form exactly as typed. */
+    huResetForm();
+    huCalcIdle('Submitted. The projection follows your next hunt.');
+    toast('Hunt submitted — saving…');
     api('submitHunt', payload).then(function (res) {
-      btn.disabled = false;
-      huResetForm();
-      /* the shell's draft keeper would refill the emptied form on the next render otherwise */
       if (typeof draftClear === 'function') { draftClear('hunting'); }
-      huCalcIdle('Submitted. The projection follows your next hunt.');
-      toast('Hunt submitted · ' + huStr(res.hunt_id) +
+      toast('Hunt saved · ' + huStr(res.hunt_id) +
         ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
       huLoadMine();
-    }).catch(function (e) { btn.disabled = false; toast('Not submitted: ' + e.message); });
+    }).catch(function (e) {
+      if (typeof draftRestore === 'function') { draftRestore('hunting'); }
+      toast('NOT saved — ' + e.message + ' · your typing is restored.');
+    });
   }
 
   // ---------- my hunts ----------
@@ -770,11 +774,14 @@
     if (act === 'reject') {
       if (!comment) { toast('A comment is mandatory when a hunt is not approved.'); if (cmt) { cmt.focus(); } return; }
       payload.decision = HU_NOT_APPROVED;
-      btn.disabled = true;
+      /* R7-1 (Hasib: "it feels like portal is sleeping… I need it on a micro second"):
+         OPTIMISTIC — the card leaves the screen the moment the click lands; the server call
+         runs behind it. A refusal brings the card back with the reason, nothing is lost. */
+      huCardGone(box, id, 'Not approved ✓');
       api('decideHunt', payload).then(function () {
-        toast('Recorded as NOT APPROVED — the hunter has your comment.');
-        huLoadQueue();
-      }).catch(function (e) { btn.disabled = false; toast('Not recorded: ' + e.message); });
+        huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
+        huLoadQueueStats();
+      }).catch(function (e) { huCardBack(box, id); toast('Not recorded — ' + e.message); });
       return;
     }
 
@@ -792,12 +799,41 @@
     payload.deadline_pkt = el ? huStr(el.value) : '';
     if (!payload.deadline_pkt) { toast('Set the listing deadline (Pakistan time).'); if (el) { el.focus(); } return; }
 
-    btn.disabled = true;
+    /* R7-1: optimistic approve — instant. The card collapses NOW; the task creation and sheet
+       copy happen behind it, and the toast upgrades itself when the server answers. */
+    huCardGone(box, id, 'Approved ✓ — assigning…');
     api('decideHunt', payload).then(function (res) {
       toast('Approved · task ' + huStr(res.task_id) + ' for ' + huStr(res.assigned_to) +
         ((res.central_copy && res.central_copy.ok === false) ? ' · the sheet copy is still pending' : ''));
-      huLoadQueue();
-    }).catch(function (e) { btn.disabled = false; toast('Not approved: ' + e.message); });
+      huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
+      huLoadQueueStats();
+    }).catch(function (e) { huCardBack(box, id); toast('NOT approved — ' + e.message); });
+  }
+
+  /** The optimistic pair: collapse a decided card instantly; resurrect it if the server says no. */
+  function huCardGone(box, id, note) {
+    var b = box.querySelector('button[data-hd][data-id="' + String(id).replace(/"/g, '') + '"]');
+    var card = b ? b.closest('.hu-item') : null;
+    if (!card) { return; }
+    card.dataset.huGone = '1';
+    card.style.transition = 'opacity .25s, max-height .3s .1s, margin .3s .1s, padding .3s .1s';
+    card.style.overflow = 'hidden';
+    card.style.maxHeight = card.offsetHeight + 'px';
+    requestAnimationFrame(function () {
+      card.style.opacity = '0.25';
+      card.style.maxHeight = '0px';
+      card.style.marginBottom = '0px';
+      card.style.paddingTop = '0px';
+      card.style.paddingBottom = '0px';
+    });
+    toast(note);
+  }
+  function huCardBack(box, id) {
+    var b = box.querySelector('button[data-hd][data-id="' + String(id).replace(/"/g, '') + '"]');
+    var card = b ? b.closest('.hu-item') : null;
+    if (!card) { huLoadQueue(); return; }                 // repainted meanwhile — refetch instead
+    card.style.opacity = ''; card.style.maxHeight = ''; card.style.marginBottom = '';
+    card.style.paddingTop = ''; card.style.paddingBottom = ''; delete card.dataset.huGone;
   }
 
 })();

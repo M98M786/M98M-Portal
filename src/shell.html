@@ -503,6 +503,7 @@ var DRAFT = (function(){
   return { restore: restore, clear: clear, flush: flush };
 })();
 function draftClear(view){ DRAFT.clear(view); }
+function draftRestore(view){ return DRAFT.restore(view); }
 function versionWatch(){
   var deferToastShown = false;
   function busyTyping(){
