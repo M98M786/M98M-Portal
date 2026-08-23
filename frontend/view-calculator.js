@@ -129,6 +129,19 @@
      ordered most-specific first; every name on the right is an exact CATS entry. The pick is a
      suggestion the seller can always override — the select stays live. */
   var OC_AUTO = [
+    /* R7 (Hasib: "doesn't select automatically the ebay category") — the rules now speak the
+       fleet's own catalogue first: cases, chargers, watch straps, camping, repair kits, the
+       words their 769 live titles actually use. Most-specific first, as before. */
+    [/\b(magsafe|phone case|flip case|wallet case|armou?r case|silicone case|bumper case|case for (iphone|samsung|galaxy|pixel|xiaomi)|screen protector|tempered glass)\b/, "Mobile Phones & Communication"],
+    [/\b(car charger|usb c? ?car|car hud|head up display|car power inverter|dash ?cam|car fuse|tire repair|tyre repair|dent (remover|repair)|car body|windscreen|wiper|car seat cover|seat belt|car mount|car holder|obd)\b/, "Vehicle Parts & Accessories (auto electrical)"],
+    [/\b(usb (charger|hub|adapter|cable)|wall charger|fast charg|power bank|charging (station|dock|cable)|wifi adapter|usb wifi|bluetooth (adapter|dongle|receiver))\b/, "Computers, Tablets & Networking (mouse, keyboard, USB)"],
+    [/\b(watch strap|watch band|watch case|smart ?watch)\b/, "Jewellery & Watches"],
+    [/\b(camping|lantern|torch|headlamp|head torch|sleeping bag|hiking|trekking)\b/, "Sporting Goods"],
+    [/\b(sandpaper|sander sheet|abrasive|clamp meter|multimeter|soldering|glue gun|glue tabs|repair kit|allen key|hex key|spanner|wrench|socket set|hook rack|wall hook|coat hook|door holder)\b/, "Home › Appliances / DIY Tools & Workshop"],
+    [/\b(led strip|motion sensor (light|strip)|pir |night ?light|ceiling (light|fan)|solar light|fairy light)\b/, "Home, Furniture & DIY (lighting, etc.)"],
+    [/\b(nail clipper|toe nail|pedicure|manicure|abdominal trainer|resistance (band|tube)|massage gun)\b/, "Health & Beauty (personal care)"],
+    [/\b(card holder|rfid)\b/, "Clothes › Women's Bags & Handbags"],
+    [/\b(backpack|rucksack|school bag)\b/, "Clothes › Women's Bags & Handbags"],
     [/\b(wig|hair extension|toupee|hairpiece)\b/, "Health › Hair Extensions & Wigs"],
     [/\b(vape|e-?cig|e-?liquid|smoking)\b/, "Health › Electronic Smoking"],
     [/\b(extension lead|power strip|surge protect|extension socket|usb socket|wall socket|plug adaptor|plug adapter)\b/, "Home › Power Strips & Surge Protectors"],

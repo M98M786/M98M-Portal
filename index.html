@@ -404,7 +404,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260823-0220';
+var BUILD = '20260823-0249';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -5592,6 +5592,19 @@ function createMeeting() {
      ordered most-specific first; every name on the right is an exact CATS entry. The pick is a
      suggestion the seller can always override — the select stays live. */
   var OC_AUTO = [
+    /* R7 (Hasib: "doesn't select automatically the ebay category") — the rules now speak the
+       fleet's own catalogue first: cases, chargers, watch straps, camping, repair kits, the
+       words their 769 live titles actually use. Most-specific first, as before. */
+    [/\b(magsafe|phone case|flip case|wallet case|armou?r case|silicone case|bumper case|case for (iphone|samsung|galaxy|pixel|xiaomi)|screen protector|tempered glass)\b/, "Mobile Phones & Communication"],
+    [/\b(car charger|usb c? ?car|car hud|head up display|car power inverter|dash ?cam|car fuse|tire repair|tyre repair|dent (remover|repair)|car body|windscreen|wiper|car seat cover|seat belt|car mount|car holder|obd)\b/, "Vehicle Parts & Accessories (auto electrical)"],
+    [/\b(usb (charger|hub|adapter|cable)|wall charger|fast charg|power bank|charging (station|dock|cable)|wifi adapter|usb wifi|bluetooth (adapter|dongle|receiver))\b/, "Computers, Tablets & Networking (mouse, keyboard, USB)"],
+    [/\b(watch strap|watch band|watch case|smart ?watch)\b/, "Jewellery & Watches"],
+    [/\b(camping|lantern|torch|headlamp|head torch|sleeping bag|hiking|trekking)\b/, "Sporting Goods"],
+    [/\b(sandpaper|sander sheet|abrasive|clamp meter|multimeter|soldering|glue gun|glue tabs|repair kit|allen key|hex key|spanner|wrench|socket set|hook rack|wall hook|coat hook|door holder)\b/, "Home › Appliances / DIY Tools & Workshop"],
+    [/\b(led strip|motion sensor (light|strip)|pir |night ?light|ceiling (light|fan)|solar light|fairy light)\b/, "Home, Furniture & DIY (lighting, etc.)"],
+    [/\b(nail clipper|toe nail|pedicure|manicure|abdominal trainer|resistance (band|tube)|massage gun)\b/, "Health & Beauty (personal care)"],
+    [/\b(card holder|rfid)\b/, "Clothes › Women's Bags & Handbags"],
+    [/\b(backpack|rucksack|school bag)\b/, "Clothes › Women's Bags & Handbags"],
     [/\b(wig|hair extension|toupee|hairpiece)\b/, "Health › Hair Extensions & Wigs"],
     [/\b(vape|e-?cig|e-?liquid|smoking)\b/, "Health › Electronic Smoking"],
     [/\b(extension lead|power strip|surge protect|extension socket|usb socket|wall socket|plug adaptor|plug adapter)\b/, "Home › Power Strips & Surge Protectors"],
@@ -10013,11 +10026,29 @@ VIEWS.dashboard = {
           else { p.rejected7++; totals.rejected7++; }
         }
       });
+      /* R7 (Hasib): "numbering of today how many products submitted today, yesterday, weekly,
+         monthly" — counted from every hunt's own submission stamp, decided or not. */
+      var subs = { today: 0, yesterday: 0, week: 0, month: 0 };
+      var pkDay = function (ms) { return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }); };
+      var todayPk = pkDay(Date.now()), ydayPk = pkDay(Date.now() - 86400000);
+      hunts.forEach(function (rec) {
+        var ts = Date.parse(huStr(rec.ts) || '') || 0;
+        if (!ts) { return; }
+        var d = pkDay(ts);
+        if (d === todayPk) { subs.today++; }
+        if (d === ydayPk) { subs.yesterday++; }
+        if (Date.now() - ts < 7 * 86400000) { subs.week++; }
+        if (Date.now() - ts < 30 * 86400000) { subs.month++; }
+      });
       var names = Object.keys(per).sort(function (a, b) { return per[b].pending - per[a].pending; });
       var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
         '<div class="hu-tile big"><span class="k">Pending review now</span><b class="num goldtext">' + totals.pending + '</b></div>' +
         '<div class="hu-tile"><span class="k">Approved · 7 days</span><b class="num" style="color:var(--ok)">' + totals.approved7 + '</b></div>' +
         '<div class="hu-tile"><span class="k">Rejected · 7 days</span><b class="num" style="color:var(--bad)">' + totals.rejected7 + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Submitted today</span><b class="num">' + subs.today + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Yesterday</span><b class="num">' + subs.yesterday + '</b></div>' +
+        '<div class="hu-tile"><span class="k">This week</span><b class="num">' + subs.week + '</b></div>' +
+        '<div class="hu-tile"><span class="k">This month</span><b class="num">' + subs.month + '</b></div>' +
         '</div>';
       if (!names.length) {
         h += '<div class="hu-hint" style="margin-top:0">No hunts on record yet.</div>';

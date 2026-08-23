@@ -617,11 +617,29 @@
           else { p.rejected7++; totals.rejected7++; }
         }
       });
+      /* R7 (Hasib): "numbering of today how many products submitted today, yesterday, weekly,
+         monthly" — counted from every hunt's own submission stamp, decided or not. */
+      var subs = { today: 0, yesterday: 0, week: 0, month: 0 };
+      var pkDay = function (ms) { return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }); };
+      var todayPk = pkDay(Date.now()), ydayPk = pkDay(Date.now() - 86400000);
+      hunts.forEach(function (rec) {
+        var ts = Date.parse(huStr(rec.ts) || '') || 0;
+        if (!ts) { return; }
+        var d = pkDay(ts);
+        if (d === todayPk) { subs.today++; }
+        if (d === ydayPk) { subs.yesterday++; }
+        if (Date.now() - ts < 7 * 86400000) { subs.week++; }
+        if (Date.now() - ts < 30 * 86400000) { subs.month++; }
+      });
       var names = Object.keys(per).sort(function (a, b) { return per[b].pending - per[a].pending; });
       var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
         '<div class="hu-tile big"><span class="k">Pending review now</span><b class="num goldtext">' + totals.pending + '</b></div>' +
         '<div class="hu-tile"><span class="k">Approved · 7 days</span><b class="num" style="color:var(--ok)">' + totals.approved7 + '</b></div>' +
         '<div class="hu-tile"><span class="k">Rejected · 7 days</span><b class="num" style="color:var(--bad)">' + totals.rejected7 + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Submitted today</span><b class="num">' + subs.today + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Yesterday</span><b class="num">' + subs.yesterday + '</b></div>' +
+        '<div class="hu-tile"><span class="k">This week</span><b class="num">' + subs.week + '</b></div>' +
+        '<div class="hu-tile"><span class="k">This month</span><b class="num">' + subs.month + '</b></div>' +
         '</div>';
       if (!names.length) {
         h += '<div class="hu-hint" style="margin-top:0">No hunts on record yet.</div>';
