@@ -443,9 +443,8 @@
           '<span class="pill ' + (g.open.length ? 'al-p-sev' : 'al-p-cat') + '">' + g.open.length + ' open</span>' +
           (g.done.length ? '<span class="al-when">' + g.done.length + ' handled</span>' : '') +
           (big ? '<button class="minibtn" data-al-expand="' + alAttr(t) + '">Show all</button>' +
-                 /* R7-7: money alerts can't be bulk-cleared — each needs its own feedback. */
-                 (alStrict(t) ? '<span class="al-note" style="margin-top:0">each needs feedback</span>'
-                              : '<button class="minibtn" data-al-bulk="' + alAttr(t) + '">Mark all ' + g.open.length + ' handled</button>') : '') +
+                 /* R7-7: money alerts can be batch-cleared only WITH a written note for the batch. */
+                 '<button class="minibtn' + (alStrict(t) ? ' hu-revbtn' : '') + '" data-al-bulk="' + alAttr(t) + '">Mark all ' + g.open.length + ' handled' + (alStrict(t) ? ' (note required)' : '') + '</button>' : '') +
           '</div>';
         var show = big ? g.open.slice(0, 2) : g.open.concat(g.done.slice(0, 3));
         h2 += '<div data-al-group="' + alAttr(t) + '">' + show.map(letterCard).join('') + '</div>';
@@ -486,8 +485,15 @@
       box.querySelectorAll('[data-al-bulk]').forEach(function (b) {
         b.onclick = function () {
           var t = this.getAttribute('data-al-bulk');
+          var payload = { type: t };
+          if (alStrict(t)) {
+            var note = window.prompt('These are pricing/advertising alerts. Write one note for the whole batch — what did you do about them?');
+            if (note === null) { return; }
+            if (String(note).trim().length < 8) { toast('A real note is required to clear pricing/advertising alerts in bulk.'); return; }
+            payload.note = String(note).trim();
+          }
           this.disabled = true; this.textContent = 'Handling…';
-          api('alertMailResolveAll', { type: t })
+          api('alertMailResolveAll', payload)
             .then(function (res) { toast((res && res.handled || 0) + ' letters handled.'); alLoadMail(); })
             .catch(function (e) { toast(e.message); alLoadMail(); });
         };

@@ -1006,6 +1006,10 @@ async function alertAckWatch(env) {
     "WHERE resolved_at = '' AND type != 'Alert not acknowledged in time' " +
     "  AND to_addr NOT IN ('management') " +
     "  AND created_at <= datetime('now', '-2 hours') " +
+    /* Only chase alerts raised since the SLA went live — the historical backlog predates the
+       rule and must not page management en masse (there were ~930 open when this shipped). */
+    "  AND created_at >= '2026-08-23 04:00:00' " +
+    "  AND created_at >= datetime('now', '-3 day') " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = 'engine:acksla:' || alert_log.id) " +
     'ORDER BY created_at ASC LIMIT 25'
   ).all()).results || [];
@@ -3663,16 +3667,20 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       const type = String(p.type || '').slice(0, 60);
       if (!type) throw new Error('SAY: which type?');
-      /* R7-7: money alerts can never be swept away in bulk — each must carry its own written
-         feedback, acknowledged one by one. */
-      if (alertStrict(type)) throw new Error('SAY: pricing/advertising alerts must be acknowledged one at a time, each with written feedback — bulk clear is not allowed for them');
+      /* R7-7: money alerts may be batch-cleared, but only WITH a written note that stands as the
+         feedback for the whole batch — a bare bulk-clear is blocked for them. */
+      const bulkNote = String(p.note || '').trim().slice(0, 400);
+      if (alertStrict(type) && bulkNote.length < 8) throw new Error('SAY: these are pricing/advertising alerts — add a note saying what you did before clearing the batch');
+      const noteVal = bulkNote || 'bulk';
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const addrs = [ctx.email];
       if (ctx.user.role === 'Advertising Manager') addrs.push('advertising');
+      /* ?5 (note) is always present, so all five positions are bound even when ?3/?4 are absent
+         from the SQL (mgmt path) — SQLite counts parameters by highest index. */
       const r = await ctx.env.DB.prepare(
-        "UPDATE alert_log SET resolved_by = ?1, resolved_at = datetime('now'), note = 'bulk' " +
+        "UPDATE alert_log SET resolved_by = ?1, resolved_at = datetime('now'), note = ?5 " +
         "WHERE resolved_at = '' AND type = ?2" + (mgmt ? '' : ' AND to_addr IN (?3, ?4)')
-      ).bind(...[ctx.email, type].concat(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).run();
+      ).bind(ctx.email, type, addrs[0] || ctx.email, addrs[1] || addrs[0] || ctx.email, noteVal).run();
       return { ok: true, handled: (r.meta && r.meta.changes) || 0 };
     },
   },
