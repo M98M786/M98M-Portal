@@ -378,6 +378,7 @@ function actionEnterItemId_(payload, ctx) {
       taskWrite_(sh, found, {
         item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
         submission_note: note, updated_at: stamp, time_taken_min: total,
+        comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
       });
       approver = String(rec.assigned_by || '').trim();
     }
@@ -802,9 +803,188 @@ function listingMirrorRevisit_(account, itemId, fields, sheetRow, actor) {
   return bridgeUpdateRow_(spec, itemHeader, itemId, values, LISTING_REVISION_COLS, actor);
 }
 
+// ---------- R7-4: the lister's in-progress states + the draft hand-off ----------
+/* Hasib (R7): the lister can flag a listing as "need more time" or "more information required
+ * from the hunter (send an alert to the hunter)", and — separately — "if the lister leaves the
+ * item in the draft, he can add the draft link and it alerts Husnain to make it live and add the
+ * item id". None of these touch the Pending→Working→Submitted machine that the rest of §8 relies
+ * on: a compact flag rides TASKS.comments as JSON, and the draft hand-off REASSIGNS the task to
+ * the go-live approver, who then enters the Item ID as its owner (the normal §8 chain follows). */
+
+/* The flag shares TASKS.comments with the return-note history (returnTask appends
+ * "[stamp] X returned: …" lines there). To never clobber that, the flag rides ONE tagged line
+ * and is merged in/out; every other line is preserved. */
+const LISTING_FLAG_TAG = '@LFLAG@';
+
+function listingFlagObj_(flag, by, extra) {
+  const o = { flag: flag, at: now_(), by: by };
+  Object.keys(extra || {}).forEach(function (k) { if (extra[k] !== '' && extra[k] != null) o[k] = extra[k]; });
+  return JSON.stringify(o).slice(0, 900);
+}
+
+/** Replace (or remove, when json is null) the single tagged flag line, keeping all other lines. */
+function listingMergeFlag_(prior, json) {
+  const kept = String(prior || '').split('\n').filter(function (l) { return l.indexOf(LISTING_FLAG_TAG) !== 0; });
+  if (json) kept.push(LISTING_FLAG_TAG + json);
+  return kept.join('\n').slice(0, 1900);
+}
+
+/** Find the caller's own open listing_new task (Management may act on anyone's). */
+function listingListerTask_(sh, payload, ctx, wantOpen) {
+  const found = taskFind_(sh, payload.task_id);
+  const rec = found.rec;
+  if (String(rec.type || '') !== 'listing_new') throw new Error('not a listing task');
+  if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email) && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+    throw new Error(SAFE_ERROR_PREFIX + 'not your task');
+  }
+  const status = String(rec.status || '');
+  if (wantOpen && status !== TASK_STATUS_PENDING && status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) {
+    throw new Error(SAFE_ERROR_PREFIX + 'this listing is not open — it is ' + (status || 'unknown'));
+  }
+  return found;
+}
+
+/** The hunt_id rides the listing_new task's details JSON; HUNTING_DB carries the hunter's email. */
+function listingHunterFor_(rec) {
+  try {
+    const parsed = JSON.parse(String(rec.details || '{}'));
+    const huntId = String((parsed && parsed.hunt_id) || '').trim();
+    if (!huntId) return null;
+    let hit = null;
+    readTab_('HUNTING_DB').forEach(function (r) { if (String(r.hunt_id || '') === huntId) hit = r; });
+    if (!hit) return null;
+    const email = String(hit.hunter_email || '').trim();
+    return email ? { email: email, hunt_id: huntId, title: String(hit.Title || rec.title || '') } : null;
+  } catch (e) { return null; }
+}
+
+function actionListerNeedTime_(payload, ctx) {
+  const reason = String(payload.reason || '').trim().slice(0, LISTING_MAX_TEXT);
+  if (!reason) throw new Error('say why you need more time');
+  const eta = String(payload.eta_pkt || '').trim();
+  const sh = tasksSheet_();
+  let rec = null, pushed = '';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = listingListerTask_(sh, payload, ctx, true);
+    rec = found.rec;
+    const patch = { comments: listingMergeFlag_(rec.comments, listingFlagObj_('needtime', ctx.ident.email, { reason: reason, eta: eta })), updated_at: now_() };
+    if (eta) {                                             // only ever push the deadline OUT, never in
+      const newMs = taskMs_(eta), oldMs = taskMs_(rec.deadline_pkt);
+      if (!isNaN(newMs) && (isNaN(oldMs) || newMs > oldMs)) { patch.deadline_pkt = taskPktIso_(eta); pushed = patch.deadline_pkt; }
+    }
+    taskWrite_(sh, found, patch);
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'LISTER_NEEDTIME', String(rec.task_id), '', pushed || '', reason.slice(0, 200));
+  const who = ctx.user.name || ctx.ident.email;
+  const msg = '🟡 ' + who + ' needs more time on "' + String(rec.title || rec.task_id).slice(0, 60) + '" · ' +
+    String(rec.account || '') + ' — ' + reason.slice(0, 300) + (pushed ? ' · new ETA ' + pushed : '');
+  const approver = String(rec.assigned_by || '').trim();
+  if (approver) notify_(approver, 'Listing needs more time', msg, 'task:' + String(rec.task_id));
+  else notifyManagement_('Listing needs more time', msg, 'task:' + String(rec.task_id));
+  return { task_id: String(rec.task_id), flag: 'needtime', deadline_pkt: pushed || taskPktIso_(rec.deadline_pkt) };
+}
+
+function actionListerNeedInfo_(payload, ctx) {
+  const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT);
+  if (!note) throw new Error('say what information you need from the hunter');
+  const sh = tasksSheet_();
+  let rec = null, hunter = null;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = listingListerTask_(sh, payload, ctx, true);
+    rec = found.rec;
+    hunter = listingHunterFor_(rec);
+    taskWrite_(sh, found, {
+      comments: listingMergeFlag_(rec.comments, listingFlagObj_('needinfo', ctx.ident.email, { note: note, hunter: hunter ? hunter.email : '' })),
+      updated_at: now_(),
+    });
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'LISTER_NEEDINFO', String(rec.task_id), '', hunter ? hunter.email : '(no hunter)', note.slice(0, 200));
+  const who = ctx.user.name || ctx.ident.email;
+  const title = String(rec.title || rec.task_id).slice(0, 60);
+  if (hunter) {
+    notify_(hunter.email, 'More info needed on your hunt',
+      '🟠 ' + who + ' is listing "' + title + '" and needs more from you: ' + note.slice(0, 400) +
+      ' — add what is missing (or revise the hunt) so the listing can go live.', 'hunt:' + hunter.hunt_id);
+  }
+  notifyManagement_('Listing waiting on hunter',
+    '🟠 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' needs more info' +
+    (hunter ? ' from ' + hunter.email : ' (hunter not found — please assign someone)') + ': ' + note.slice(0, 300),
+    'task:' + String(rec.task_id));
+  return { task_id: String(rec.task_id), flag: 'needinfo', hunter: hunter ? hunter.email : '' };
+}
+
+/** Hasib named Husnain for go-live; the portal routes by data, so a config key points at him and
+ * can be moved without code. Falls back to Listing Manager, then Team Lead. */
+function listingGoLivePerson_(all) {
+  const configured = normalizeEmail(getConfig('go_live_approver') || 'm98mtwo@gmail.com');
+  const approved = readTab_('USERS').filter(function (u) { return String(u.status || '') === 'approved'; });
+  for (let i = 0; i < approved.length; i++) {
+    if (normalizeEmail(approved[i].email) === configured) return { email: String(approved[i].email), name: String(approved[i].name || approved[i].email) };
+  }
+  return listingPickForRole_('Listing Manager', '', all, 'listing_new') ||
+    listingPickForRole_('Team Lead', '', all, 'listing_new') || null;
+}
+
+function actionListerDraft_(payload, ctx) {
+  const link = listingUrl_(payload.draft_link);
+  if (!link) throw new Error('add the eBay draft link (an http/https URL)');
+  const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT);
+  const sh = tasksSheet_();
+  let rec = null, go = null, from = '', handed = false;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = listingListerTask_(sh, payload, ctx, true);
+    rec = found.rec;
+    from = String(rec.assigned_to || '');
+    go = listingGoLivePerson_(readTab_('TASKS'));
+    if (!go) throw new Error('no go-live approver is set up — tell Management');
+    handed = normalizeEmail(go.email) !== normalizeEmail(rec.assigned_to);
+    const patch = {
+      comments: listingMergeFlag_(rec.comments, listingFlagObj_('draft', ctx.ident.email, { link: link, note: note, from: handed ? from : '' })),
+      status: TASK_STATUS_WORKING, updated_at: now_(),
+    };
+    if (handed) patch.assigned_to = go.email;              // owner moves so the approver can enter the Item ID
+    taskWrite_(sh, found, patch);
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'LISTER_DRAFT', String(rec.task_id), from, go.email, link.slice(0, 200));
+  const who = ctx.user.name || ctx.ident.email;
+  const title = String(rec.title || rec.task_id).slice(0, 60);
+  notify_(go.email, 'Draft listing to publish',
+    '🟣 ' + who + ' left "' + title + '" in draft · ' + String(rec.account || '') + '. Publish it on eBay, then open the task and enter the Item ID — that starts the campaign, supplier and 72-hour tasks.' +
+    (note ? ' Note: ' + note.slice(0, 300) : '') + ' Draft: ' + link, 'task:' + String(rec.task_id));
+  notifyManagement_('Draft handed to go-live',
+    '🟣 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' left it in draft; ' + go.name + ' will publish and add the Item ID.',
+    'task:' + String(rec.task_id));
+  return { task_id: String(rec.task_id), flag: 'draft', assigned_to: go.email, assigned_to_name: go.name, handed_off: handed, draft_link: link };
+}
+
+/** Take a need-time / need-info / draft flag back off a task once it is resolved. */
+function actionListerClearFlag_(payload, ctx) {
+  const sh = tasksSheet_();
+  let rec = null;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = listingListerTask_(sh, payload, ctx, false);
+    rec = found.rec;
+    taskWrite_(sh, found, { comments: listingMergeFlag_(rec.comments, null), updated_at: now_() });
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'LISTER_CLEARFLAG', String(rec.task_id), '', '', '');
+  return { task_id: String(rec.task_id), flag: '' };
+}
+
 const ACTIONS_LISTING = {
-  myListingWork:   [actionMyListingWork_, 'any'],
-  enterItemId:     [actionEnterItemId_, 'any'],
-  createRevision:  [actionCreateRevision_, 'any'],
-  revisionRevisit: [actionRevisionRevisit_, 'any'],
+  myListingWork:    [actionMyListingWork_, 'any'],
+  enterItemId:      [actionEnterItemId_, 'any'],
+  createRevision:   [actionCreateRevision_, 'any'],
+  revisionRevisit:  [actionRevisionRevisit_, 'any'],
+  listerNeedTime:   [actionListerNeedTime_, 'any'],   // lister-own or management, gated inside
+  listerNeedInfo:   [actionListerNeedInfo_, 'any'],   // alerts the hunter
+  listerDraft:      [actionListerDraft_, 'any'],      // hands the draft to the go-live approver
+  listerClearFlag:  [actionListerClearFlag_, 'any'],
 };

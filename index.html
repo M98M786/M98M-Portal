@@ -404,7 +404,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260823-0332';
+var BUILD = '20260823-0353';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -11346,6 +11346,19 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.ls-box .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-3);margin-bottom:5px}' +
     '.ls-box.ls-blue{background:var(--blue-soft);border-color:rgba(61,155,240,.30)}' +
     '.ls-box.ls-blue .k{color:var(--blue-2)}' +
+    /* R7-4 lister-state flag banners + the lever bar */
+    '.ls-flag{margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid var(--gold-line)}' +
+    '.ls-flag .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}' +
+    '.ls-flag .ls-txt{font-size:12.5px;line-height:1.55;font-weight:600;color:var(--text-2)}' +
+    '.ls-flag .ls-txt a{color:var(--blue-2);font-weight:700}' +
+    '.ls-flag-ft{display:flex;align-items:center;gap:10px;margin-top:9px}' +
+    '.ls-flag-ft .ls-sub2{margin-right:auto}' +
+    '.ls-flag-time{background:var(--warn-soft);border-color:rgba(255,159,67,.4)}.ls-flag-time .k{color:var(--warn)}' +
+    '.ls-flag-info{background:rgba(240,140,60,.12);border-color:rgba(240,140,60,.42)}.ls-flag-info .k{color:#E07B2F}' +
+    '.ls-flag-draft{background:rgba(150,110,230,.13);border-color:rgba(150,110,230,.42)}.ls-flag-draft .k{color:#9B6AE6}' +
+    '.ls-lever{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px dashed var(--gold-line-hi);background:rgba(120,132,152,.06)}' +
+    '.ls-lever-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-3)}' +
+    '.ls-lform{margin-top:12px;padding:12px 13px;border-radius:10px;border:1px solid var(--gold-line);background:var(--panel)}' +
     '.ls-txt{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.6}' +
     '.ls-txt a{color:var(--blue-2);font-weight:700;word-break:break-all}' +
     '.ls-rc{border:1px solid var(--gold-line-hi);border-radius:12px;padding:14px 16px;background:linear-gradient(135deg,rgba(233,169,60,.13),rgba(233,169,60,.02));margin-top:16px}' +
@@ -11671,7 +11684,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           (lsStr(lsVal(idx, LS_H.date)) ? lsChip('Selected Date', esc(lsStr(lsVal(idx, LS_H.date)))) : '') +
           (lsStr(lsVal(idx, LS_H.seasonal)) ? lsChip('Seasonal', esc(lsStr(lsVal(idx, LS_H.seasonal)))) : '') +
         '</div>' +
+        lsFlagBanner(j, id, status) +
         lsItemIdBox(j, id, status) +
+        lsListerBar(j, id, status) +
         lsMediaRow(idx, id) +
         lsCopyBlock(id, 'title', 'Title', lsStr(lsVal(idx, LS_H.title))) +
         lsCopyBlock(id, 'desc', 'DESCRIPTION', lsRaw(lsVal(idx, LS_H.desc))) +
@@ -11690,7 +11705,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   /** Return() appends "[stamp] Name returned: comment" to comments — the lister must see it. */
   function lsReturned(t, status) {
     if (status !== LS_WORKING && status !== LS_UPDATED) { return ''; }
-    var lines = lsRaw(t.comments).split('\n'), re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/, at = -1, i, m;
+    var lines = lsRaw(t.comments).split('\n').filter(function (l) { return l.indexOf('@LFLAG@') !== 0; });
+    var re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/, at = -1, i, m;
     for (i = 0; i < lines.length; i++) { if (re.test(lines[i])) { at = i; } }
     if (at < 0) { return ''; }
     m = re.exec(lines.slice(at).join('\n'));
@@ -11816,6 +11832,83 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="ls-btns"><button class="btn-gold" data-act="idConfirm" data-id="' + lsAttr(id) + '">Yes — confirm and fire the chain</button>' +
           '<button class="minibtn" data-act="idCancel" data-id="' + lsAttr(id) + '">Cancel</button></div>' +
       '</div>' +
+    '</div>';
+  }
+
+  // ---------- R7-4: lister states (need time / need info) + the draft hand-off ----------
+  /** The flag rides TASKS.comments as JSON; a returned-task note is plain text, so parse only
+      when it actually looks like our object. */
+  function lsFlag(j) {
+    var lines = lsStr(j.comments).split('\n'), i;
+    for (i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('@LFLAG@') === 0) {
+        try { var o = JSON.parse(lines[i].slice(7)); return (o && o.flag) ? o : null; } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  function lsFlagBanner(j, id, status) {
+    var f = lsFlag(j);
+    if (!f) { return ''; }
+    var open = status === LS_WORKING || status === LS_UPDATED || status === LS_PENDING;
+    var when = lsWhen(f.at) || '';
+    var body = '', cls = 'ls-flag';
+    if (f.flag === 'needtime') {
+      cls += ' ls-flag-time';
+      body = '<div class="k">⏳ Needs more time</div><div class="ls-txt">' + lsText(f.reason || '') +
+        (f.eta ? '<div class="ls-sub2" style="margin-top:6px">New ETA: <b>' + esc(lsWhen(f.eta) || f.eta) + '</b></div>' : '') + '</div>';
+    } else if (f.flag === 'needinfo') {
+      cls += ' ls-flag-info';
+      body = '<div class="k">🟠 Waiting on the hunter</div><div class="ls-txt">' + lsText(f.note || '') +
+        (f.hunter ? '<div class="ls-sub2" style="margin-top:6px">Alerted: ' + esc(f.hunter) + '</div>' : '') + '</div>';
+    } else if (f.flag === 'draft') {
+      cls += ' ls-flag-draft';
+      var url = safeUrl(lsStr(f.link));
+      body = '<div class="k">🟣 Left in draft — with go-live</div>' +
+        (url ? '<div class="ls-txt"><a href="' + lsAttr(url) + '" target="_blank" rel="noopener noreferrer">Open the eBay draft</a></div>' : '') +
+        (f.note ? '<div class="ls-txt" style="margin-top:4px">' + lsText(f.note) + '</div>' : '') +
+        (f.from ? '<div class="ls-sub2" style="margin-top:6px">Handed off by ' + esc(f.from) + '</div>' : '');
+    }
+    return '<div class="' + cls + '">' + body +
+      '<div class="ls-flag-ft"><span class="ls-sub2">Flagged ' + esc(when) + '</span>' +
+        (open ? '<button class="minibtn" data-act="flagClear" data-id="' + lsAttr(id) + '">Clear this flag</button>' : '') +
+      '</div></div>';
+  }
+
+  /** Three lister levers on an open job: need more time, need info from the hunter, or leave the
+      listing in draft for the go-live approver to publish. Each opens a small inline form. */
+  function lsListerBar(j, id, status) {
+    if (status !== LS_WORKING && status !== LS_UPDATED) { return ''; }
+    return '<div class="ls-lever"><div class="ls-lever-h">Not ready to enter an Item ID?</div>' +
+      '<div class="ls-btns">' +
+        '<button class="minibtn" data-act="needTimeF" data-id="' + lsAttr(id) + '">⏳ Need more time</button>' +
+        '<button class="minibtn" data-act="needInfoF" data-id="' + lsAttr(id) + '">🟠 Need info from hunter</button>' +
+        '<button class="minibtn" data-act="draftF" data-id="' + lsAttr(id) + '">🟣 Leave in draft</button>' +
+      '</div>' +
+      /* need-more-time form */
+      '<div class="ls-lform hidden" data-lform="time:' + lsAttr(id) + '">' +
+        '<div class="field" style="margin-top:0"><label>Why do you need more time?</label>' +
+          '<textarea class="ls-ta" data-ltime-reason="' + lsAttr(id) + '" placeholder="What is holding the listing up"></textarea></div>' +
+        '<div class="field" style="margin-top:10px"><label>New ETA (optional, Pakistan time)</label>' +
+          '<input class="ls-in" type="datetime-local" data-ltime-eta="' + lsAttr(id) + '"></div>' +
+        '<div class="ls-btns"><button class="btn-gold" data-act="needTime" data-id="' + lsAttr(id) + '">Send to your approver</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="time:' + lsAttr(id) + '">Cancel</button></div></div>' +
+      /* need-info-from-hunter form */
+      '<div class="ls-lform hidden" data-lform="info:' + lsAttr(id) + '">' +
+        '<div class="field" style="margin-top:0"><label>What do you need from the hunter?</label>' +
+          '<textarea class="ls-ta" data-linfo-note="' + lsAttr(id) + '" placeholder="e.g. a working supplier link, a clearer main image, the real UK sell price"></textarea></div>' +
+        '<div class="ls-btns"><button class="btn-gold" data-act="needInfo" data-id="' + lsAttr(id) + '">Alert the hunter</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="info:' + lsAttr(id) + '">Cancel</button></div></div>' +
+      /* leave-in-draft form */
+      '<div class="ls-lform hidden" data-lform="draft:' + lsAttr(id) + '">' +
+        '<div class="field" style="margin-top:0"><label>eBay draft link</label>' +
+          '<input class="ls-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/…" data-ldraft-link="' + lsAttr(id) + '"></div>' +
+        '<div class="field" style="margin-top:10px"><label>Note for go-live (optional)</label>' +
+          '<textarea class="ls-ta" data-ldraft-note="' + lsAttr(id) + '" placeholder="Anything the person publishing should know"></textarea></div>' +
+        '<div class="ls-btns"><button class="btn-gold" data-act="draft" data-id="' + lsAttr(id) + '">Hand to go-live</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="draft:' + lsAttr(id) + '">Cancel</button></div>' +
+        '<div class="ls-sub2" style="margin-top:8px">The task leaves your queue and goes to whoever publishes drafts; they add the Item ID once it is live.</div></div>' +
     '</div>';
   }
 
@@ -11997,6 +12090,68 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     if (act === 'idConfirm') { lsConfirmItemId(box, id, btn); return; }
     if (act === 'revisit') { lsRecordRevisit(box, id, btn); return; }
+
+    // R7-4 lister levers — open one inline form, close the others
+    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF') {
+      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : 'draft:';
+      var forms = box.querySelectorAll('[data-lform]'), j2;
+      for (j2 = 0; j2 < forms.length; j2++) {
+        var key = forms[j2].getAttribute('data-lform');
+        if (key === want + id) { forms[j2].classList.toggle('hidden'); }
+        else if (key.indexOf(':' + id) === key.length - (id.length + 1)) { forms[j2].classList.add('hidden'); }
+      }
+      return;
+    }
+    if (act === 'leverCancel') {
+      el = box.querySelector('[data-lform="' + String(id).replace(/"/g, '') + '"]');
+      if (el) { el.classList.add('hidden'); }
+      return;
+    }
+    if (act === 'needTime') { lsSendNeedTime(box, id, btn); return; }
+    if (act === 'needInfo') { lsSendNeedInfo(box, id, btn); return; }
+    if (act === 'draft') { lsSendDraft(box, id, btn); return; }
+    if (act === 'flagClear') { lsClearFlag(box, id, btn); return; }
+  }
+
+  function lsSendNeedTime(box, id, btn) {
+    var r = lsPick(box, 'data-ltime-reason', id), e = lsPick(box, 'data-ltime-eta', id);
+    var reason = r ? lsStr(r.value) : '';
+    if (!reason) { toast('Say why you need more time.'); if (r) { r.focus(); } return; }
+    btn.disabled = true;
+    api('listerNeedTime', { task_id: id, reason: reason, eta_pkt: e ? lsStr(e.value) : '' }).then(function () {
+      btn.disabled = false; toast('Your approver has been told — the flag is on the job.'); lsLoad();
+    }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
+  }
+
+  function lsSendNeedInfo(box, id, btn) {
+    var n = lsPick(box, 'data-linfo-note', id);
+    var note = n ? lsStr(n.value) : '';
+    if (!note) { toast('Say what you need from the hunter.'); if (n) { n.focus(); } return; }
+    btn.disabled = true;
+    api('listerNeedInfo', { task_id: id, note: note }).then(function (res) {
+      btn.disabled = false;
+      toast(res && res.hunter ? 'The hunter (' + res.hunter + ') has been alerted.' : 'Management notified — no hunter was on file.');
+      lsLoad();
+    }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
+  }
+
+  function lsSendDraft(box, id, btn) {
+    var l = lsPick(box, 'data-ldraft-link', id), n = lsPick(box, 'data-ldraft-note', id);
+    var link = l ? lsStr(l.value) : '';
+    if (!safeUrl(link)) { toast('Paste the eBay draft link (it must start with http/https).'); if (l) { l.focus(); } return; }
+    btn.disabled = true;
+    api('listerDraft', { task_id: id, draft_link: link, note: n ? lsStr(n.value) : '' }).then(function (res) {
+      btn.disabled = false;
+      toast('Handed to ' + (lsStr(res && res.assigned_to_name) || 'go-live') + ' — they publish it and add the Item ID.');
+      lsLoad();
+    }).catch(function (err) { btn.disabled = false; toast('Not handed off: ' + err.message); });
+  }
+
+  function lsClearFlag(box, id, btn) {
+    btn.disabled = true;
+    api('listerClearFlag', { task_id: id }).then(function () {
+      btn.disabled = false; toast('Flag cleared.'); lsLoad();
+    }).catch(function (err) { btn.disabled = false; toast('Not cleared: ' + err.message); });
   }
 
   function lsDoCopy(text, btn) {
