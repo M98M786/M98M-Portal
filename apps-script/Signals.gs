@@ -990,6 +990,12 @@ function runLossEscalationSweep() {
     try { nightWatchBootstrapOnce_(); }
     catch (e) { logActivity_('trigger', 'ERROR:nwBootstrap', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
+  /* R8 speed: today's Ali numbers reach the portal in ~5 minutes, not up to an hour. Today's
+   * tab only — the hourly full sweep still catches late edits on older tabs. */
+  if (typeof aliSweepFast === 'function') {
+    try { aliSweepFast(); }
+    catch (e) { logActivity_('trigger', 'ERROR:aliSweepFast', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 

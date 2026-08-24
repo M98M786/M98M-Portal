@@ -17955,6 +17955,12 @@ function runLossEscalationSweep() {
     try { nightWatchBootstrapOnce_(); }
     catch (e) { logActivity_('trigger', 'ERROR:nwBootstrap', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
+  /* R8 speed: today's Ali numbers reach the portal in ~5 minutes, not up to an hour. Today's
+   * tab only — the hourly full sweep still catches late edits on older tabs. */
+  if (typeof aliSweepFast === 'function') {
+    try { aliSweepFast(); }
+    catch (e) { logActivity_('trigger', 'ERROR:aliSweepFast', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
@@ -20661,6 +20667,49 @@ function nightWatchBootstrapOnce_() {
   } finally {
     props.deleteProperty('NW_BOOT_LOCK');
   }
+}
+
+/** R8 (Hasib 25 Aug: "make speed fast of the working of tracking and other things").
+ * The full aliSweep walks 7 days × every account — far too heavy for a 5-minute trigger. This
+ * one reads ONLY today's tab per account, so an Ali number typed by a processor reaches the
+ * portal within ~5 minutes instead of up to an hour. The hourly full sweep still backfills
+ * anything this misses (a late edit on an older tab). */
+function aliSweepFast() {
+  var conns = readTab_('CONNECTIONS').filter(function (c) {
+    return String(c.sheet_kind) === 'order_processing' && String(c.status || '').toLowerCase() !== 'off';
+  });
+  var ymd = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+  var candidates = ordersDayTabCandidates_(ymd);
+  var out = [], tabs = 0;
+  conns.forEach(function (c) {
+    var ss;
+    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
+    var sheets = ss.getSheets();
+    for (var s = 0; s < sheets.length; s++) {
+      if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
+      tabs++;
+      var values = sheets[s].getDataRange().getDisplayValues();
+      if (values.length < 2) break;
+      var cols = nbHeaderCols_(values[0]);
+      if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) break;
+      for (var r = 1; r < values.length; r++) {
+        var id = String(values[r][cols.ebayCol] || '').trim();
+        if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
+        var num = cols.aliNumCol >= 0 ? String(values[r][cols.aliNumCol] || '').replace(/\D/g, '') : '';
+        var link = cols.linkCol >= 0 ? String(values[r][cols.linkCol] || '').trim() : '';
+        if (num.length < 8) num = '';
+        if (link.indexOf('https://') !== 0) link = '';
+        if (num || link) out.push({ order_id: id, ali_order: num, ali_link: link });
+      }
+      break;                                               // today's tab only
+    }
+  });
+  var written = 0;
+  for (var i = 0; i < out.length; i += 400) {
+    var res = enginePost_('syncAliOrders', { rows: out.slice(i, i + 400) });
+    written += Number(res.written) || 0;
+  }
+  return { tabs: tabs, found: out.length, written: written };
 }
 
 function nightWatchHourlyRide() {

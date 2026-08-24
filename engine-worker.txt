@@ -105,7 +105,9 @@ export default {
        5-minute treadmill. */
     const jobs = {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch],
+      /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
+         carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill],
       '0 * * * *': [financeSync, csSync, autoMsgScan],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
@@ -118,7 +120,7 @@ export default {
       /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
          budget died with the upgrade. Each heavy family still keeps its own invocation. */
       '40 * * * *': [listingSync, trafficSync],
-      '50 * * * *': [marketingSync, feedbackSync, trackingBackfill],
+      '50 * * * *': [marketingSync, feedbackSync],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -573,7 +575,7 @@ async function trackingBackfill(env) {
   const rs = await env.DB.prepare(
     "SELECT o.order_id, o.account FROM orders o WHERE o.status = 'FULFILLED' " +
     "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') " +
-    "AND o.created_at >= datetime('now', '-90 day') ORDER BY o.created_at DESC LIMIT 18"
+    "AND o.created_at >= datetime('now', '-90 day') ORDER BY o.created_at DESC LIMIT 60"
   ).all();
   const rows = rs.results || [];
   let got = 0;
