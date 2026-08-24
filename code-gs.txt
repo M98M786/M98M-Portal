@@ -20076,7 +20076,7 @@ const ENGINE_RUNNABLE = {
     var yday = Utilities.formatDate(new Date(Date.now() - 86400000), 'Asia/Karachi', 'yyyy-MM-dd');
     readTab_('CONNECTIONS').forEach(function (c) {
       if (String(c.sheet_kind) !== 'order_processing' || String(c.status || '').toLowerCase() === 'off') return;
-      var row = { account: String(c.account || c.label || ''), id: String(c.spreadsheet_id || '').slice(0, 8) };
+      var row = { account: String(c.account_name || ''), status: String(c.status || ''), id: String(c.spreadsheet_id || '').slice(0, 8) || '(EMPTY)' };
       try {
         var ss = SpreadsheetApp.openById(String(c.spreadsheet_id));
         var names = ss.getSheets().map(function (s) { return s.getName(); });
