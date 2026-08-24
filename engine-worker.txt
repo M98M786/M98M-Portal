@@ -4781,6 +4781,21 @@ const ROUTES = {
   /* R5 sink for the hourly Apps Script day-tab sweep: order_id → AliExpress order number + link.
      A field only ever fills or corrects — an empty incoming value never erases what is stored,
      so a half-filled sheet row cannot blank a portal-entered number. */
+  /* Ops relay: run one whitelisted Apps Script job (engineRunJob) server-to-server — the AS /exec
+     shows curl an HTML wall, and the editor's Run picker resists automation, so this is the only
+     reliable remote lever. Key-gated on BOTH sides; the key never rides in a browser. */
+  asRunJob: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const key = await secret(ctx.env, 'SYNC_KEY');
+      const r = await fetch(ctx.env.AS_URL, {
+        method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, redirect: 'follow',
+        body: JSON.stringify({ action: 'engineRunJob', payload: { key, job: String(p.job || '') } }),
+      });
+      const text = await r.text();
+      try { return JSON.parse(text); } catch (e) { return { ok: false, status: r.status, raw: text.slice(0, 300) }; }
+    },
+  },
+
   syncAliOrders: {
     auth: 'sync', fn: async (p, ctx) => {
       const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 500);
