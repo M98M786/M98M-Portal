@@ -428,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260824-2151';
+var BUILD = '20260824-2213';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9361,6 +9361,97 @@ VIEWS.dashboard = {
 
 })();
 
+/* ---------- view-deptBoard.js ---------- */
+/* view-deptBoard.js — R8-1: "Pending tasks for <Department>" — management sees every
+ * department's live load; a department member sees their own first. System-made vs
+ * management-made split + decided-task history. Backend: deptPending (AS). */
+(function () {
+  'use strict';
+
+  var DB_ROLE_DEPT = {
+    'Product Hunter': 'Hunting', 'Item Lister': 'Listing', 'Listing Manager': 'Listing',
+    'Advertising Manager': 'Advertising', 'Order Processor': 'Orders', 'CS': 'CS',
+    'Pricing': 'Listing', 'Team Lead': 'Listing',
+  };
+
+  VIEW_CSS.push(
+    '.db-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}' +
+    '.db-card{border:1px solid var(--gold-line);border-radius:13px;padding:14px 16px;background:var(--panel-2)}' +
+    '.db-card.mine{border-color:var(--gold-line-hi);box-shadow:var(--glow-gold)}' +
+    '.db-card h3{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:8px}' +
+    '.db-n{font-size:24px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums}' +
+    '.db-sub{font-size:11px;color:var(--text-3);font-weight:700;margin-top:2px}' +
+    '.db-bad{color:var(--bad)}' +
+    '.db-row{display:flex;gap:10px;align-items:baseline;font-size:12px;font-weight:700;padding:4px 0}' +
+    '.db-row .k{color:var(--text-3);min-width:96px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}' +
+    '.db-hist{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--gold-line);font-size:12.5px}' +
+    '.db-hist .o{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:8px}' +
+    '.db-hist .o.sys{background:var(--blue-soft);color:var(--blue-2)}' +
+    '.db-hist .o.mgm{background:var(--warn-soft);color:var(--warn)}'
+  );
+
+  VIEWS.deptBoard = {
+    label: 'Departments',
+    icon: '<path d="M3 9h18M9 3v18M3 4h17v16H4z"/>',
+    roles: '*',
+    order: 3.5,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Pending tasks <span class="goldtext">by department</span></h1>' +
+          '<span class="sub">who is doing what right now — open work, overdue, and where every task came from</span>' +
+          '<button class="minibtn" id="dbRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="dbBody" class="enter d2"><div class="spinner"></div></div>' +
+        '<div class="card enter d3" style="margin-top:14px"><div class="hd">Recently completed ' +
+          '<span class="hint">newest first · who made the task</span></div>' +
+          '<div class="bd" id="dbHist"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      $('dbRefresh').onclick = dbLoad;
+      dbLoad();
+    }
+  };
+
+  function dbS(v) { return String(v == null ? '' : v); }
+
+  function dbLoad() {
+    api('deptPending', {}).then(function (d) {
+      d = d || {};
+      var mineDept = DB_ROLE_DEPT[(STATE.user && STATE.user.role) || ''] || '';
+      var depts = (d.departments || []).slice();
+      depts.sort(function (a, b) { return (b.dept === mineDept) - (a.dept === mineDept) || b.open - a.open; });
+      if (!depts.length) {
+        $('dbBody').innerHTML = '<div class="hu-hint">No open tasks anywhere — clean board.</div>';
+      } else {
+        $('dbBody').innerHTML = '<div class="db-grid">' + depts.map(function (r) {
+          var by = Object.keys(r.by_assignee || {}).map(function (k) { return { who: k, n: r.by_assignee[k] }; })
+            .sort(function (a, b) { return b.n - a.n; }).slice(0, 3);
+          return '<div class="db-card' + (r.dept === mineDept ? ' mine' : '') + '">' +
+            '<h3>Pending tasks for ' + esc(r.dept) + (r.dept === mineDept ? ' <span class="pill hu-wait" style="font-size:9.5px">your dept</span>' : '') + '</h3>' +
+            '<div class="db-n">' + r.open + (r.overdue ? ' <span class="db-bad" style="font-size:14px">· ' + r.overdue + ' overdue</span>' : '') + '</div>' +
+            '<div class="db-sub">oldest waiting since ' + esc(fmtPkt(r.oldest, true) || '—') + '</div>' +
+            '<div style="margin-top:9px">' +
+              '<div class="db-row"><span class="k">By system</span><span>' + (r.system_made || 0) + '</span></div>' +
+              '<div class="db-row"><span class="k">By management</span><span>' + (r.mgmt_made || 0) + '</span></div>' +
+              by.map(function (x) {
+                return '<div class="db-row"><span class="k">' + esc(dbS(x.who).split('@')[0]) + '</span><span>' + x.n + ' open</span></div>';
+              }).join('') +
+            '</div></div>';
+        }).join('') + '</div>';
+      }
+      var hist = d.history || [];
+      $('dbHist').innerHTML = hist.length ? hist.map(function (h) {
+        return '<div class="db-hist"><span class="o ' + (h.origin === 'system' ? 'sys' : 'mgm') + '">' + (h.origin === 'system' ? 'system' : 'mgmt') + '</span>' +
+          '<b style="min-width:82px">' + esc(dbS(h.dept)) + '</b>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dbS(h.title)) + '</span>' +
+          '<span style="color:var(--text-3);font-size:11px">' + esc(dbS(h.assigned_to).split('@')[0]) + ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
+      }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>';
+    }).catch(function (e) {
+      $('dbBody').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
+      $('dbHist').innerHTML = '';
+    });
+  }
+
+})();
+
 /* ---------- view-feedback.js ---------- */
 /* view-feedback.js — review 4: the Feedback dashboard. Every account's Seller Hub card
  * (score + positive %), positive/neutral/negative for today · yesterday · 30 days, and the
@@ -9512,6 +9603,139 @@ VIEWS.dashboard = {
       fbLoad();
     }
   };
+})();
+
+/* ---------- view-huntDesk.js ---------- */
+/* view-huntDesk.js — R8-2: the Product Hunting dashboard (Irfan and every hunter, plus a
+ * fleet view for Management/Team Lead). Backend: huntDesk · huntReasons · huntReasonAdd (AS)
+ * + missing-link tasks arrive as normal tasks. Design: docs/R8-DESIGN.md §2. */
+(function () {
+  'use strict';
+
+  var HD_MGMT_ROLES = ['Management', 'Ops Head', 'Team Lead'];
+  var HD_ROLES = ['Product Hunter', 'Management', 'Ops Head', 'Team Lead'];
+
+  VIEW_CSS.push(
+    '.hd-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
+    '.hd-tile{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.hd-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.hd-tile b{display:block;font-size:23px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.hd-tile .s{font-size:10.5px;color:var(--text-3);font-weight:700}' +
+    '.hd-tile.gold b{color:var(--gold-a)}.hd-tile.ok b{color:var(--ok)}.hd-tile.warn b{color:var(--warn)}.hd-tile.bad b{color:var(--bad)}' +
+    '.hd-task{border:1px solid var(--gold-line);border-radius:11px;padding:11px 13px;margin-top:9px;background:var(--panel)}' +
+    '.hd-task.warn{border-color:rgba(255,159,67,.45);background:var(--warn-soft)}' +
+    '.hd-task .t{font-weight:800;font-size:13px}' +
+    '.hd-task .m{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:3px}' +
+    '.hd-task .d{font-size:12px;color:var(--text-2);font-weight:600;margin-top:6px;white-space:pre-wrap;word-break:break-word}' +
+    '.hd-rsn{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;font-weight:700;border-bottom:1px solid var(--gold-line)}' +
+    '.hd-rsn .bar{flex:1;height:9px;border-radius:5px;background:rgba(120,132,152,.15);overflow:hidden}' +
+    '.hd-rsn .bar i{display:block;height:100%;background:var(--bad);border-radius:5px}' +
+    '.hd-rsn b{min-width:26px;text-align:right}' +
+    '.hd-add{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}' +
+    '.hd-add input{flex:1;min-width:200px;padding:9px 12px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}'
+  );
+
+  function hdS(v) { return String(v == null ? '' : v).trim(); }
+
+  VIEWS.huntDesk = {
+    label: 'Hunting dashboard',
+    icon: '<path d="M4 19V5"/><path d="M4 15l4-4 4 3 5-6 3 3"/><path d="M4 19h16"/>',
+    roles: HD_ROLES,
+    order: 14.5,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Hunting <span class="goldtext">dashboard</span></h1>' +
+          '<span class="sub">your hunting at a glance — approvals, revisions, link requests, and why products get rejected</span>' +
+          '<button class="minibtn" id="hdRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="hdTiles" class="enter d1"><div class="spinner"></div></div>' +
+        '<div class="card enter d2"><div class="hd">Needs your hand now ' +
+          '<span class="hint">revisions sent back to you and supplier-link requests — oldest first</span></div>' +
+          '<div class="bd" id="hdTasks"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Why products get rejected ' +
+          '<span class="hint">last 30 days</span></div>' +
+          '<div class="bd" id="hdReasons"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d3 hidden" id="hdFleetCard" style="margin-top:14px"><div class="hd">Hunter to hunter ' +
+          '<span class="hint">this month first</span></div>' +
+          '<div class="bd" id="hdFleet"></div></div>';
+    },
+    init: function () {
+      $('hdRefresh').onclick = hdLoad;
+      hdLoad();
+    }
+  };
+
+  function hdLoad() {
+    api('huntDesk', {}).then(function (d) {
+      d = d || {};
+      var m = d.mine || { hunted: 0, hunted_month: 0, approved: 0, approved_month: 0, pending: 0, revision: 0, rejected_30d: 0 };
+      var linkTasks = (d.open_tasks || []).filter(function (t) { return t.type === 'sourcing_link'; });
+      var revTasks = (d.open_tasks || []).filter(function (t) { return t.type !== 'sourcing_link'; });
+      $('hdTiles').innerHTML = '<div class="hd-tiles">' +
+        '<div class="hd-tile gold"><span class="k">Hunted · this month</span><b>' + (m.hunted_month || 0) + '</b><span class="s">' + (m.hunted || 0) + ' all time</span></div>' +
+        '<div class="hd-tile ok"><span class="k">Approved · this month</span><b>' + (m.approved_month || 0) + '</b><span class="s">' + (m.approved || 0) + ' all time</span></div>' +
+        '<div class="hd-tile"><span class="k">Awaiting approval</span><b>' + (m.pending || 0) + '</b></div>' +
+        '<div class="hd-tile warn"><span class="k">Revision required</span><b>' + ((m.revision || 0) + revTasks.length) + '</b><span class="s">sent back by Management</span></div>' +
+        '<div class="hd-tile bad"><span class="k">Link requests</span><b>' + linkTasks.length + '</b><span class="s">orders waiting on your links</span></div>' +
+        '<div class="hd-tile"><span class="k">Rejected · 30 days</span><b>' + (m.rejected_30d || 0) + '</b></div>' +
+      '</div>';
+
+      var tb = $('hdTasks');
+      if (!(d.open_tasks || []).length && !(m.revision || 0)) {
+        tb.innerHTML = '<div class="hu-hint" style="margin-top:0">Nothing waits on you — clear. New revisions and link requests land here with a bell.</div>';
+      } else {
+        var h = '';
+        if (m.revision) {
+          h += '<div class="hd-task warn"><div class="t">🟡 ' + m.revision + ' hunt(s) sent back for revision</div>' +
+            '<div class="m">Open <b>Product hunting → My hunts → Revision required</b> — each card carries what is missing and a Revise &amp; resubmit button.</div></div>';
+        }
+        (d.open_tasks || []).forEach(function (t) {
+          h += '<div class="hd-task' + (t.type === 'sourcing_link' ? ' warn' : '') + '">' +
+            '<div class="t">' + (t.type === 'sourcing_link' ? '🔗 ' : '🔧 ') + esc(hdS(t.title)) + '</div>' +
+            '<div class="m">' + esc(t.type) + (hdS(t.item_id) ? ' · item <span class="mono">' + esc(hdS(t.item_id)) + '</span>' : '') +
+              ' · due ' + esc(fmtPkt(t.deadline_pkt, true) || '—') + ' · ' + esc(hdS(t.status)) + '</div>' +
+            (hdS(t.details) ? '<div class="d">' + esc(hdS(t.details).slice(0, 260)) + '</div>' : '') +
+            '<div class="hu-btns" style="margin-top:8px">' +
+              (t.type === 'sourcing_link' ? '<button class="minibtn" data-hd-go="sourcing">Open Sourcing → add the link</button>' : '<button class="minibtn" data-hd-go="tasks">Open My tasks</button>') +
+            '</div></div>';
+        });
+        tb.innerHTML = h;
+        tb.querySelectorAll('[data-hd-go]').forEach(function (b) {
+          b.onclick = function () {
+            var k = this.getAttribute('data-hd-go');
+            try { location.hash = k; renderView(k); } catch (e) {}
+          };
+        });
+      }
+
+      var rb = $('hdReasons');
+      var rs = d.rejection_reasons || [];
+      if (!rs.length) {
+        rb.innerHTML = '<div class="hu-hint" style="margin-top:0">No rejections recorded in the last 30 days.</div>';
+      } else {
+        var mx = rs[0].n || 1;
+        rb.innerHTML = rs.map(function (r) {
+          return '<div class="hd-rsn"><span style="flex:0 0 min(46%,300px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(hdS(r.reason)) + '">' + esc(hdS(r.reason)) + '</span>' +
+            '<span class="bar"><i style="width:' + Math.max(4, Math.round(r.n / mx * 100)) + '%"></i></span><b>' + r.n + '</b></div>';
+        }).join('') + '<div class="hu-hint">Read these before the next hunt — they are the fastest way to raise your approval rate.</div>';
+      }
+
+      var mgmt = HD_MGMT_ROLES.indexOf((STATE.user && STATE.user.role) || '') >= 0 || (STATE.user && STATE.user.super);
+      if (mgmt && (d.hunters || []).length) {
+        $('hdFleetCard').classList.remove('hidden');
+        $('hdFleet').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
+          '<th style="text-align:left">Hunter</th><th>Hunted · month</th><th>Approved · month</th><th>Pending</th><th>In revision</th><th>Rejected · 30d</th></tr></thead><tbody>' +
+          d.hunters.map(function (p) {
+            return '<tr' + (p.my ? ' style="background:var(--blue-soft)"' : '') + '><td style="text-align:left;font-weight:800">' + esc(hdS(p.hunter).split('@')[0]) + '</td>' +
+              '<td class="num">' + p.hunted_month + '</td><td class="num" style="color:var(--ok)">' + p.approved_month + '</td>' +
+              '<td class="num">' + p.pending + '</td><td class="num"' + (p.revision ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.revision + '</td>' +
+              '<td class="num"' + (p.rejected_30d ? ' style="color:var(--bad)"' : '') + '>' + p.rejected_30d + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+    }).catch(function (e) {
+      $('hdTiles').innerHTML = '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>';
+      $('hdTasks').innerHTML = ''; $('hdReasons').innerHTML = '';
+    });
+  }
+
 })();
 
 /* ---------- view-hunting.js ---------- */
