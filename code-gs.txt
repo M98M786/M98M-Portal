@@ -21113,6 +21113,39 @@ function actionDecisionAct_(payload, ctx) {
   throw new Error('SAY: kind must be end or revise');
 }
 
+/* ---------- go-live desk: send a draft back to the lister (R8-3e) ---------- */
+function actionGoLiveReturn_(payload, ctx) {
+  const roles = ['Team Lead', 'Listing Manager', 'Management', 'Ops Head', 'CS'];
+  if (roles.indexOf(ctx.user.role) < 0 && !isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('role may not return drafts');
+  const note = String(payload.note || '').trim().slice(0, 500);
+  if (!note) throw new Error('SAY: say what the lister must fix');
+  const sh = tasksSheet_();
+  let rec = null, back = '';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = taskFind_(sh, payload.task_id);
+    rec = found.rec;
+    if (String(rec.type) !== 'listing_new') throw new Error('not a listing task');
+    /* The draft flag remembers who handed it over — that is who gets it back. */
+    let flag = null;
+    String(rec.comments || '').split('\n').forEach(function (l) {
+      if (l.indexOf(LISTING_FLAG_TAG) === 0) { try { flag = JSON.parse(l.slice(LISTING_FLAG_TAG.length)); } catch (e) {} }
+    });
+    back = normalizeEmail((flag && (flag.from || flag.by)) || '');
+    if (!back) throw new Error('SAY: this task has no record of the lister who left it — reassign it from My tasks');
+    taskWrite_(sh, found, {
+      assigned_to: back, status: TASK_STATUS_WORKING, updated_at: now_(),
+      comments: listingMergeFlag_(rec.comments, null) + '\n[' + now_() + '] ' + (ctx.user.name || ctx.ident.email) + ' returned: ' + note,
+    });
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'R8_GOLIVE_RETURN', String(rec.task_id), '', back, note.slice(0, 120));
+  notify_(back, 'Draft sent back',
+    '🟠 "' + String(rec.title || '').slice(0, 60) + '" · ' + String(rec.account || '') +
+    ' — ' + (ctx.user.name || 'Go-live') + ' sent your draft back: ' + note.slice(0, 300), 'task:' + String(rec.task_id));
+  return { task_id: String(rec.task_id), assigned_to: back };
+}
+
 /* ---------- staff reviews (R8-5) ---------- */
 const R8_REVIEW_HEADERS = ['review_id', 'email', 'week', 'rated_by', 'behavior', 'working', 'notes', 'created_at'];
 
@@ -21274,6 +21307,7 @@ const ACTIONS_R8 = {
   listerRejectRequest: [actionListerRejectRequest_, 'any'],
   mgmtRejectDecide:   [actionMgmtRejectDecide_, 'any'],  // mgmt gated inside
   decisionAct:        [actionDecisionAct_, 'any'],       // mgmt gated inside
+  goLiveReturn:       [actionGoLiveReturn_, 'any'],      // TL/mgmt gated inside
   staffReviewsPending: [actionStaffReviewsPending_, 'any'],
   staffReviewSave:    [actionStaffReviewSave_, 'any'],
   staffReviewHistory: [actionStaffReviewHistory_, 'any'],

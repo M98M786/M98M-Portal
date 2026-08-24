@@ -428,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260824-2219';
+var BUILD = '20260824-2221';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9603,6 +9603,139 @@ VIEWS.dashboard = {
       fbLoad();
     }
   };
+})();
+
+/* ---------- view-goLive.js ---------- */
+/* view-goLive.js — R8-3e: the go-live desk. Drafts a lister left behind (R7-4 @LFLAG@ draft)
+ * arrive here; the Team Lead / Husnain / Management opens the eBay draft, publishes it, and
+ * enters the Item ID right on this screen — the same §8 chain as My listings. Or sends it back
+ * to the lister with a note. Backend: myListingWork · enterItemId · listerNeedInfo-style return
+ * (taskReturnToLister via listerDraft's owner move is not needed — we reassign by returning). */
+(function () {
+  'use strict';
+
+  var GL_ROLES = ['Team Lead', 'Listing Manager', 'Management', 'Ops Head', 'CS'];
+
+  VIEW_CSS.push(
+    '.gl-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
+    '.gl-tile{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.gl-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.gl-tile b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.gl-tile.purple b{color:#9B6AE6}' +
+    '.gl-card{border:1px solid rgba(150,110,230,.42);background:rgba(150,110,230,.10);border-radius:13px;padding:14px 16px;margin-top:12px}' +
+    '.gl-card .t{font-weight:800;font-size:14px}' +
+    '.gl-card .m{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
+    '.gl-card .n{font-size:12.5px;color:var(--text-2);font-weight:600;margin-top:7px;white-space:pre-wrap}' +
+    '.gl-in{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.gl-2{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-top:10px}'
+  );
+
+  function glS(v) { return String(v == null ? '' : v).trim(); }
+  function glFlag(t) {
+    var lines = glS(t.comments).split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('@LFLAG@') === 0) {
+        try { var o = JSON.parse(lines[i].slice(7)); return (o && o.flag) ? o : null; } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  VIEWS.goLive = {
+    label: 'Go-live desk',
+    icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
+    roles: GL_ROLES,
+    order: 17.6,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Go-live <span class="goldtext">desk</span></h1>' +
+          '<span class="sub">drafts waiting to be published — open the draft, publish on eBay, enter the Item ID here</span>' +
+          '<button class="minibtn" id="glRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
+        '<div class="card enter d2"><div class="hd">Drafts assigned to you ' +
+          '<span class="hint">entering the Item ID fires the campaign, supplier and 72-hour tasks</span></div>' +
+          '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      $('glRefresh').onclick = glLoad;
+      glLoad();
+    }
+  };
+
+  function glLoad() {
+    api('myListingWork', {}).then(function (d) {
+      var all = (d && d.listings) || [];
+      var drafts = all.map(function (t) { return { t: t, f: glFlag(t) }; })
+        .filter(function (x) { return x.f && x.f.flag === 'draft'; });
+      var byAcct = {};
+      drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
+      $('glTiles').innerHTML = '<div class="gl-tiles">' +
+        '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
+        Object.keys(byAcct).map(function (a) {
+          return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
+        }).join('') + '</div>';
+
+      var box = $('glBody');
+      if (!drafts.length) {
+        box.innerHTML = '<div class="hu-hint" style="margin-top:0">No drafts waiting. When a lister leaves an item in draft, it lands here with its link.</div>';
+        return;
+      }
+      box.innerHTML = drafts.map(function (x) {
+        var t = x.t, f = x.f, id = glS(t.task_id);
+        var url = safeUrl(glS(f.link));
+        return '<div class="gl-card">' +
+          '<div class="t">🟣 ' + esc(glS(t.title) || id) + '</div>' +
+          '<div class="m"><span class="mono">' + esc(id) + '</span> · ' + esc(glS(t.account)) +
+            (f.from ? ' · left by ' + esc(glS(f.from).split('@')[0]) : '') + ' · flagged ' + esc(fmtPkt(f.at, true) || '') + '</div>' +
+          (f.note ? '<div class="n">' + esc(glS(f.note)) + '</div>' : '') +
+          '<div class="hu-btns" style="margin-top:10px">' +
+            (url ? '<a class="minibtn" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">Open the eBay draft ↗</a>' : '<span class="hu-hint" style="margin-top:0">No draft link was given</span>') +
+          '</div>' +
+          '<div class="gl-2">' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">eBay Item ID (once published)</label>' +
+              '<input class="gl-in mono" inputmode="numeric" placeholder="123456789012" data-gl-item="' + esc(id) + '"></div>' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Note (optional)</label>' +
+              '<input class="gl-in" data-gl-note="' + esc(id) + '" placeholder="anything the approver should know"></div>' +
+          '</div>' +
+          '<div class="hu-btns" style="margin-top:10px">' +
+            '<button class="btn-gold" data-gl-live="' + esc(id) + '">Make live — enter Item ID</button>' +
+            '<button class="minibtn" data-gl-back="' + esc(id) + '">Send back to the lister</button>' +
+          '</div></div>';
+      }).join('');
+
+      box.querySelectorAll('[data-gl-live]').forEach(function (b) {
+        b.onclick = function () {
+          var id = this.getAttribute('data-gl-live');
+          var inp = box.querySelector('[data-gl-item="' + id.replace(/"/g, '') + '"]');
+          var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
+          var v = inp ? glS(inp.value) : '';
+          if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
+          var btn = this; btn.disabled = true;
+          api('enterItemId', { task_id: id, item_id: v, note: note ? glS(note.value) : 'Published from the go-live desk.' })
+            .then(function (res) {
+              toast('Live · the campaign, supplier and 72-hour tasks are created.');
+              glLoad();
+            }).catch(function (e) { btn.disabled = false; toast('Not entered: ' + e.message); });
+        };
+      });
+      box.querySelectorAll('[data-gl-back]').forEach(function (b) {
+        b.onclick = function () {
+          var id = this.getAttribute('data-gl-back');
+          var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
+          var msg = note ? glS(note.value) : '';
+          if (!msg) { toast('Write what the lister must fix in the note box first.'); if (note) { note.focus(); } return; }
+          var btn = this; btn.disabled = true;
+          api('goLiveReturn', { task_id: id, note: msg }).then(function (r) {
+            toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
+            glLoad();
+          }).catch(function (e) { btn.disabled = false; toast(e.message); });
+        };
+      });
+    }).catch(function (e) {
+      $('glTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
+      $('glBody').innerHTML = '';
+    });
+  }
+
 })();
 
 /* ---------- view-huntDesk.js ---------- */
@@ -19134,6 +19267,82 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
 })();
 
+/* ---------- view-rev72.js ---------- */
+/* view-rev72.js — R8-3f: the 72-hour revision dashboard. Every listing_revision in flight,
+ * bucketed by its window: overdue · due today · ahead · done this week. Manager sees everyone,
+ * a lister sees their own. Backend: listDesk (rows carry type/deadline/assignee). */
+(function () {
+  'use strict';
+
+  var RV_ROLES = ['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head', 'Advertising Manager'];
+
+  VIEW_CSS.push(
+    '.rv-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
+    '.rv-t{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.rv-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.rv-t b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.rv-t.bad b{color:var(--bad)}.rv-t.warn b{color:var(--warn)}.rv-t.ok b{color:var(--ok)}' +
+    '.rv-sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);font-weight:800;margin:14px 0 6px}'
+  );
+
+  function rvS(v) { return String(v == null ? '' : v); }
+
+  VIEWS.rev72 = {
+    label: '72-hour revisions',
+    icon: '<path d="M12 8v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/>',
+    roles: RV_ROLES,
+    order: 17.7,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>72-hour <span class="goldtext">revisions</span></h1>' +
+          '<span class="sub">the day-3 revision on every listing — window 1:00–5:00 PM UK</span>' +
+          '<button class="minibtn" id="rvRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="rvTiles" class="enter d1"><div class="spinner"></div></div>' +
+        '<div class="card enter d2"><div class="bd" id="rvBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () { $('rvRefresh').onclick = rvLoad; rvLoad(); }
+  };
+
+  function rvLoad() {
+    api('listDesk', {}).then(function (d) {
+      var rows = ((d && d.rows) || []).filter(function (r) { return r.type === 'listing_revision'; });
+      var now = Date.now(), day = 86400000;
+      var late = [], today = [], ahead = [];
+      rows.forEach(function (r) {
+        var t = Date.parse(rvS(r.deadline_pkt)) || 0;
+        if (!t) { ahead.push(r); return; }
+        if (t < now) { late.push(r); } else if (t - now < day) { today.push(r); } else { ahead.push(r); }
+      });
+      $('rvTiles').innerHTML = '<div class="rv-tiles">' +
+        '<div class="rv-t bad"><span class="k">Overdue</span><b>' + late.length + '</b></div>' +
+        '<div class="rv-t warn"><span class="k">Due today</span><b>' + today.length + '</b></div>' +
+        '<div class="rv-t"><span class="k">Ahead</span><b>' + ahead.length + '</b></div>' +
+        '<div class="rv-t ok"><span class="k">In flight total</span><b>' + rows.length + '</b></div>' +
+      '</div>';
+      var sec = function (title, list) {
+        if (!list.length) { return ''; }
+        return '<div class="rv-sec">' + esc(title) + ' · ' + list.length + '</div>' +
+          '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
+          '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Assigned</th>' +
+          '<th style="text-align:left">Window ends</th><th style="text-align:left">Status</th></tr></thead><tbody>' +
+          list.map(function (r) {
+            return '<tr><td style="text-align:left;max-width:260px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rvS(r.title)) + '</div>' +
+              '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(rvS(r.item_id) || rvS(r.task_id)) + '</span></td>' +
+              '<td style="text-align:left">' + esc(rvS(r.account)) + '</td>' +
+              '<td style="text-align:left">' + esc(rvS(r.assigned_to).split('@')[0]) + '</td>' +
+              '<td style="text-align:left;white-space:nowrap' + (r.overdue ? ';color:var(--bad);font-weight:800' : '') + '">' + esc(fmtPkt(r.deadline_pkt, true) || '—') + '</td>' +
+              '<td style="text-align:left">' + esc(rvS(r.status)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      };
+      var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
+      $('rvBody').innerHTML = html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>';
+    }).catch(function (e) {
+      $('rvTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
+      $('rvBody').innerHTML = '';
+    });
+  }
+
+})();
+
 /* ---------- view-rota.js ---------- */
 /* §26 — Rules & SOPs (the living company law) and §5 — the rota.
  * Registers VIEWS.rules (everyone) and VIEWS.rota (Management / Ops Head). */
@@ -21825,6 +22034,109 @@ function saveSchedule() {
       if (canManage()) { axLoad(); }
     }
   };
+})();
+
+/* ---------- view-staffReviews.js ---------- */
+/* view-staffReviews.js — R8-5: weekly staff working & behavior reviews. Management rates each
+ * person 1–5 on behavior and on working, with a short note; the objective side (tasks done,
+ * overdue) is shown beside the form so the score is informed, not guessed. Everyone can read
+ * their own trend. Backend: staffReviewsPending · staffReviewSave · staffReviewHistory (AS). */
+(function () {
+  'use strict';
+
+  var SR_MGMT = ['Management', 'Ops Head'];
+
+  VIEW_CSS.push(
+    '.sr-row{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-top:10px;background:var(--panel-2)}' +
+    '.sr-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
+    '.sr-h b{font-size:13.5px;font-weight:800}' +
+    '.sr-h .role{font-size:11px;color:var(--text-3);font-weight:700}' +
+    '.sr-ctx{margin-left:auto;font-size:11px;color:var(--text-3);font-weight:700}' +
+    '.sr-ctx .bad{color:var(--bad)}' +
+    '.sr-f{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:10px;align-items:end}' +
+    '.sr-f label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:4px}' +
+    '.sr-in,.sr-sel{width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.sr-hist{display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--gold-line);font-size:12.5px;font-weight:700}' +
+    '.sr-star{color:var(--gold-a);letter-spacing:1px}'
+  );
+
+  function srS(v) { return String(v == null ? '' : v); }
+  function srStars(n) {
+    n = Math.max(0, Math.min(5, Number(n) || 0));
+    return '<span class="sr-star">' + '★'.repeat(n) + '<span style="opacity:.25">' + '★'.repeat(5 - n) + '</span></span>';
+  }
+
+  VIEWS.staffReviews = {
+    label: 'Staff reviews',
+    icon: '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 8.7l5.4-.8z"/>',
+    roles: '*',
+    order: 26.5,
+    render: function () {
+      var mgmt = SR_MGMT.indexOf((STATE.user && STATE.user.role) || '') >= 0 || (STATE.user && STATE.user.super);
+      return '<div class="hgroup enter d1"><h1>Staff <span class="goldtext">reviews</span></h1>' +
+          '<span class="sub">' + (mgmt ? 'behavior and working, 1–5, once a week — the numbers beside each name are this week’s facts'
+            : 'your weekly scores from Management') + '</span>' +
+          '<button class="minibtn" id="srRefresh" style="margin-left:auto">Refresh</button></div>' +
+        (mgmt ? '<div class="card enter d1"><div class="hd">This week ' +
+          '<span class="hint" id="srWeek"></span></div><div class="bd" id="srPending"><div class="spinner"></div></div></div>' : '') +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">' + (mgmt ? 'A person’s history' : 'Your history') +
+          '<span class="hint">newest week first</span></div>' +
+          '<div class="bd" id="srHist"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      $('srRefresh').onclick = srLoad;
+      srLoad();
+    }
+  };
+
+  function srLoad() {
+    var mgmt = SR_MGMT.indexOf((STATE.user && STATE.user.role) || '') >= 0 || (STATE.user && STATE.user.super);
+    if (mgmt) {
+      api('staffReviewsPending', {}).then(function (d) {
+        d = d || {};
+        if ($('srWeek')) { $('srWeek').textContent = srS(d.week); }
+        var list = d.pending || [];
+        var host = $('srPending');
+        if (!list.length) {
+          host.innerHTML = '<div class="hu-hint" style="margin-top:0">Everyone is reviewed for ' + esc(srS(d.week)) + ' ✓</div>';
+          return;
+        }
+        host.innerHTML = list.map(function (p) {
+          var e = srS(p.email);
+          return '<div class="sr-row"><div class="sr-h"><b>' + esc(srS(p.name)) + '</b>' +
+            '<span class="role">' + esc(srS(p.role)) + '</span>' +
+            '<span class="sr-ctx">' + p.tasks_done_7d + ' tasks done · 7d' +
+              (p.overdue_now ? ' · <span class="bad">' + p.overdue_now + ' overdue now</span>' : '') + '</span></div>' +
+            '<div class="sr-f">' +
+              '<div><label>Behavior</label><select class="sr-sel" data-sr-b="' + esc(e) + '">' +
+                [5, 4, 3, 2, 1].map(function (n) { return '<option value="' + n + '"' + (n === 4 ? ' selected' : '') + '>' + n + ' ' + '★'.repeat(n) + '</option>'; }).join('') + '</select></div>' +
+              '<div><label>Working</label><select class="sr-sel" data-sr-w="' + esc(e) + '">' +
+                [5, 4, 3, 2, 1].map(function (n) { return '<option value="' + n + '"' + (n === 4 ? ' selected' : '') + '>' + n + ' ' + '★'.repeat(n) + '</option>'; }).join('') + '</select></div>' +
+              '<div style="grid-column:span 2"><label>Note</label><input class="sr-in" data-sr-n="' + esc(e) + '" placeholder="what stood out this week"></div>' +
+              '<div><button class="btn-gold" data-sr-save="' + esc(e) + '" style="width:100%">Save review</button></div>' +
+            '</div></div>';
+        }).join('');
+        host.querySelectorAll('[data-sr-save]').forEach(function (b) {
+          b.onclick = function () {
+            var e = this.getAttribute('data-sr-save'), q = function (a) { return host.querySelector('[' + a + '="' + e.replace(/"/g, '') + '"]'); };
+            var btn = this; btn.disabled = true;
+            api('staffReviewSave', { email: e, behavior: (q('data-sr-b') || {}).value, working: (q('data-sr-w') || {}).value, notes: (q('data-sr-n') || {}).value || '' })
+              .then(function () { toast('Review saved.'); srLoad(); })
+              .catch(function (err) { btn.disabled = false; toast(err.message); });
+          };
+        });
+      }).catch(function (e) { $('srPending').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>'; });
+    }
+    api('staffReviewHistory', {}).then(function (d) {
+      var rows = (d && d.reviews) || [];
+      $('srHist').innerHTML = rows.length ? rows.map(function (r) {
+        return '<div class="sr-hist"><b style="min-width:78px">' + esc(srS(r.week)) + '</b>' +
+          '<span>behavior ' + srStars(r.behavior) + '</span><span>working ' + srStars(r.working) + '</span>' +
+          (r.notes ? '<span style="flex:1;color:var(--text-3);font-weight:600;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srS(r.notes)) + '</span>' : '') + '</div>';
+      }).join('') : '<div class="hu-hint" style="margin-top:0">No reviews recorded yet.</div>';
+    }).catch(function (e) { $('srHist').innerHTML = '<div class="hu-hint" style="margin-top:0">' + esc(e.message) + '</div>'; });
+  }
+
 })();
 
 /* ---------- view-tasks.js ---------- */
