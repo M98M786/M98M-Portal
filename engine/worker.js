@@ -3191,6 +3191,28 @@ const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
   enginePing: { auth: 'public', fn: async () => ({ pong: Date.now() }) },
 
+  /* SIGN-IN INDEPENDENCE (24 Aug outage): the Apps Script /exec started walling anonymous
+     requests, which took the whole TEAM's sign-in down — whoami and the public config lived
+     only there. Both now live here too, so the portal signs people in and routes them with the
+     Engine alone; Apps Script becomes a data backend, not a front door. */
+  getPublicConfig: {
+    auth: 'public', fn: async (p, ctx) => ({
+      service: 'M98M Portal', phase: 2,
+      engine_url: 'https://m98m-engine.m98m786.workers.dev/',
+      oauth_client_id: '1054155928251-ehfifr8bgd8bfaqa28uqm3bs225pkikr.apps.googleusercontent.com',
+      roles: ['Management', 'Ops Head', 'Team Lead', 'Listing Manager', 'Advertising Manager', 'CS', 'Product Hunter', 'Item Lister', 'Order Processor', 'Pricing'],
+    }),
+  },
+  whoami: {
+    auth: 'any', fn: async (p, ctx) => {
+      const u = ctx.user;
+      if (!u) return { status: 'none', email: ctx.email, name: ctx.email };
+      const csv = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
+      return { status: u.status, email: u.email, name: u.name, role: u.role, shift: '',
+        accounts: u.super ? 'ALL' : '', modules: csv(u.modules), tools: csv(u.tools), isSuper: !!u.super };
+    },
+  },
+
   engineHealth: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job').all();

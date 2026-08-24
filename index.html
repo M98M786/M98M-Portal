@@ -331,13 +331,16 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave'];
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
 var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking'];
+/* The Engine's address is stable infrastructure — baked as the fallback so sign-in and config
+   can reach it BEFORE any config exists (the AS front door proved it can vanish under everyone). */
+var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
 function engineCall(action, payload, timeoutMs){
-  var url = STATE.config && STATE.config.engine_url;
+  var url = (STATE.config && STATE.config.engine_url) || ENGINE_URL_DEFAULT;
   var ac = new AbortController();
   var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
   return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
@@ -425,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260824-1339';
+var BUILD = '20260824-1354';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -23050,7 +23053,12 @@ function boot(){
          no do they see the sign-in button. */
       trySilentSignIn();
     }
-  }).catch(function(e){ $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.'; });
+  }).catch(function(e){
+    /* Config fetch failed everywhere — if a cached copy exists, sign-in must still work: the
+       Engine answers whoami/sessionMint on its own now. Dead-end text only with NO config at all. */
+    if(STATE.config && STATE.config.oauth_client_id){ initGsi(); trySilentSignIn(); return; }
+    $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.';
+  });
 }
 window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };
 </script>
