@@ -20067,6 +20067,34 @@ const ENGINE_RUNNABLE = {
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
   runZeroSalesSweep: function () { return runZeroSalesSweep(); },
   aliSweep: function () { return typeof aliSweep === 'function' ? JSON.stringify(aliSweep()) : 'aliSweep absent'; },
+  /* 24 Aug diagnosis: today's orders missing from the workspace — list each order book's REAL
+   * tab names against the candidates the portal computes, so a naming drift or a dead importer
+   * is seen, not guessed. Read-only. */
+  dayTabDiag: function () {
+    var out = [];
+    var today = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+    var yday = Utilities.formatDate(new Date(Date.now() - 86400000), 'Asia/Karachi', 'yyyy-MM-dd');
+    readTab_('CONNECTIONS').forEach(function (c) {
+      if (String(c.sheet_kind) !== 'order_processing' || String(c.status || '').toLowerCase() === 'off') return;
+      var row = { account: String(c.account || c.label || ''), id: String(c.spreadsheet_id || '').slice(0, 8) };
+      try {
+        var ss = SpreadsheetApp.openById(String(c.spreadsheet_id));
+        var names = ss.getSheets().map(function (s) { return s.getName(); });
+        row.last6_tabs = names.slice(-6);
+        row.today_candidates = ordersDayTabCandidates_(today);
+        var hitT = null, hitY = null;
+        names.forEach(function (n) {
+          if (ordersTabIsCandidate_(n, ordersDayTabCandidates_(today))) hitT = n;
+          if (ordersTabIsCandidate_(n, ordersDayTabCandidates_(yday))) hitY = n;
+        });
+        row.today_tab = hitT || 'MISSING';
+        row.yday_tab = hitY || 'MISSING';
+        if (hitT) { try { row.today_rows = ss.getSheetByName(hitT).getLastRow() - 1; } catch (e2) { row.today_rows = '?'; } }
+      } catch (e) { row.error = String(e && e.message || e).slice(0, 120); }
+      out.push(row);
+    });
+    return JSON.stringify(out);
+  },
 };
 
 function actionEngineRunJob_(payload) {
