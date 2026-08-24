@@ -106,6 +106,7 @@ const ENGINE_RUNNABLE = {
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
   runZeroSalesSweep: function () { return runZeroSalesSweep(); },
+  aliSweep: function () { return typeof aliSweep === 'function' ? JSON.stringify(aliSweep()) : 'aliSweep absent'; },
 };
 
 function actionEngineRunJob_(payload) {

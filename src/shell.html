@@ -336,24 +336,45 @@ var ENGINE_ACTIONS = ['activeListings','engineHealth','ebayConsentLinks','ebaySu
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
 var ENGINE_WRITE_ACTIONS = ['campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking'];
-function engineApi(action, payload){
+function engineCall(action, payload, timeoutMs){
   var url = STATE.config && STATE.config.engine_url;
-  var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
   var ac = new AbortController();
-  var t = setTimeout(function(){ ac.abort(); }, isWrite ? 15000 : 2500);
+  var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
   return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
     .then(function(r){ return r.json(); })
-    .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; })
+    .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; },
+          function(e){ clearTimeout(t); throw e; });
+}
+function engineApi(action, payload){
+  var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
+  return engineCall(action, payload, isWrite ? 15000 : 2500)
     .catch(function(e){
-      clearTimeout(t);
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
         throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
+      /* A slow read is NOT an unknown action: heavy screens (item P&L / VAT, health with cold
+         caches) can pass 2.5s, and the AS fallback would answer 'unknown action' for an
+         engine-only name — a lie that made whole pages look broken. Ask AS only as a real
+         fallback; if IT doesn't know the action, give the Engine one patient retry and, failing
+         that, tell the truth. */
       return apiSend(action, payload).then(function(j){
-        if(!j.ok){ throw new Error(j.error||'request failed'); }
-        return j.data;
+        if(j.ok){ return j.data; }
+        if(String(j.error||'') === 'unknown action'){
+          return engineCall(action, payload, 12000).catch(function(e2){
+            throw new Error(e2 && e2.name === 'AbortError'
+              ? 'the Engine is taking long on this screen — wait a moment and press refresh'
+              : (e2 && e2.message) || 'request failed');
+          });
+        }
+        throw new Error(j.error||'request failed');
+      }, function(){
+        return engineCall(action, payload, 12000).catch(function(e2){
+          throw new Error(e2 && e2.name === 'AbortError'
+            ? 'the Engine is taking long on this screen — wait a moment and press refresh'
+            : (e2 && e2.message) || 'request failed');
+        });
       });
     });
 }
