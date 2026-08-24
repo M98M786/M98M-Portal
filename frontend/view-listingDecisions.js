@@ -38,7 +38,10 @@
           '<div class="ld-top"><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' +
             esc(String(r.title || r.item_id).slice(0, 90)) + '</a>' +
             '<span class="ld-meta">£' + (Number(r.price) || 0).toFixed(2) + ' · ' + esc(String(r.account)) + ' · ' + esc(String(r.item_id)) +
-            ' · listed ' + esc(String(r.born).slice(0, 10)) + ' (' + esc(String(r.clock)) + ') · 0 sold</span></div>';
+            ' · listed ' + esc(String(r.born).slice(0, 10)) + ' (' + esc(String(r.clock)) + ') · 0 sold' +
+            /* R8-2c: names on the record — who hunted it, who listed it. */
+            (r.hunter_email ? ' · hunted by ' + esc(String(r.hunter_email).split('@')[0]) : '') +
+            (r.lister_email ? ' · listed by ' + esc(String(r.lister_email).split('@')[0]) : '') + '</span></div>';
         var mayDecide = (d.canDecide !== undefined) ? d.canDecide : d.mgmt;
         if (pend && mayDecide) {
           h += '<div class="ld-acts">' +
@@ -63,10 +66,27 @@
           var sel = card.querySelector('[data-ld-a]');
           var assignee = sel ? String(sel.value || '') : '';
           if (verdict === 'REVISE' && !assignee) { toast('Pick which listing manager gets the revise job'); return; }
+          var itemId = card.getAttribute('data-ld');
+          /* R8-3c: the decision is a RECORD; the work is a TASK. zeroSaleDecide writes the
+             record, decisionAct creates the real job — end_listing to the Team Lead, or a
+             listing_revision to whoever actually listed it (provenance). */
+          var row = null;
+          (rows || []).forEach(function (x) { if (String(x.item_id) === itemId) { row = x; } });
           this.disabled = true;
-          api('zeroSaleDecide', { item_id: card.getAttribute('data-ld'), verdict: verdict, assignee: assignee }).then(function () {
-            toast(verdict === 'KEEP' ? 'Kept.' : verdict === 'END' ? 'End job sent to the Team Lead.' : 'Revise job sent.');
-            ldLoad();
+          api('zeroSaleDecide', { item_id: itemId, verdict: verdict, assignee: assignee }).then(function () {
+            if (verdict === 'KEEP') { toast('Kept.'); ldLoad(); return; }
+            return api('decisionAct', {
+              item_id: itemId, kind: verdict === 'END' ? 'end' : 'revise',
+              account: row ? String(row.account || '') : '', title: row ? String(row.title || '') : '',
+              assignee_email: assignee, note: '7 days live with no sale.',
+            }).then(function (r2) {
+              toast((verdict === 'END' ? 'End job sent to ' : 'Revision sent to ') +
+                (String(r2 && r2.assigned_to || '').split('@')[0] || 'the team') + '.');
+              ldLoad();
+            }).catch(function (e2) {
+              toast('Decision recorded, but the task did not go out: ' + e2.message);
+              ldLoad();
+            });
           }).catch(function (e) { toast(e.message); ldLoad(); });
         };
       });
