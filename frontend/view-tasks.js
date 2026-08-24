@@ -47,6 +47,18 @@
     '.tk-det{background:rgba(120,132,152,.10);border:1px solid var(--gold-line)}' +
     '.tk-note{background:var(--blue-soft);border:1px solid rgba(61,155,240,.30)}' +
     '.tk-note .k{color:var(--blue-2)}' +
+    /* R7-4 lister states (need-time / need-info / draft) on listing tasks */
+    '.tk-flag{margin-top:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line)}' +
+    '.tk-flag .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}' +
+    '.tk-flag .tk-txt a{color:var(--blue-2);font-weight:700}' +
+    '.tk-flag-time{background:var(--warn-soft);border-color:rgba(255,159,67,.4)}.tk-flag-time .k{color:var(--warn)}' +
+    '.tk-flag-info{background:rgba(240,140,60,.12);border-color:rgba(240,140,60,.42)}.tk-flag-info .k{color:#E07B2F}' +
+    '.tk-flag-draft{background:rgba(150,110,230,.13);border-color:rgba(150,110,230,.42)}.tk-flag-draft .k{color:#9B6AE6}' +
+    '.tk-flag-ft{display:flex;align-items:center;gap:10px;margin-top:9px}.tk-flag-ft .tk-sub{margin-right:auto}' +
+    '.tk-lever{margin-top:10px;padding:11px 13px;border-radius:10px;border:1px dashed var(--gold-line-hi);background:rgba(120,132,152,.06)}' +
+    '.tk-lever-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-3);margin-bottom:8px}' +
+    '.tk-lform{margin-top:10px;padding:11px 12px;border-radius:10px;border:1px solid var(--gold-line);background:var(--panel)}' +
+    '.tk-revbtn{border-color:rgba(255,159,67,.55)!important;color:var(--warn)!important}' +
     '.tk-form{margin-top:10px}' +
     '.tk-grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}' +
     '.tk-ta,.tk-in{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
@@ -164,7 +176,8 @@
   }
   /** Return() appends "[stamp] Name returned: comment" to comments — the employee must see the last one. */
   function tkReturned(comments) {
-    var lines = String(comments == null ? '' : comments).split('\n'), re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/, at = -1, i, m;
+    var lines = String(comments == null ? '' : comments).split('\n').filter(function (l) { return l.indexOf('@LFLAG@') !== 0; });
+    var re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/, at = -1, i, m;
     for (i = 0; i < lines.length; i++) { if (re.test(lines[i])) { at = i; } }
     if (at < 0) { return null; }
     m = re.exec(lines.slice(at).join('\n'));
@@ -393,6 +406,13 @@
       extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
         '<div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>';
     }
+    /* R7-4 (Hasib): the lister's states live on the task he actually works — a flag banner when
+       one is set, and the three levers (need more time · need info from the hunter · leave in
+       draft) on an open listing task. Same backend actions as the My-listings workspace. */
+    if (type === 'listing_new') {
+      extra += tkFlagBanner(t, id, status);
+      if (status === TK_WORKING || status === TK_UPDATED) { extra += tkListerBar(id); }
+    }
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
     }
@@ -407,6 +427,75 @@
         '<td class="tk-act">' + act + '</td>' +
       '</tr>' +
       (extra ? '<tr class="tk-x"><td colspan="6">' + extra + '</td></tr>' : '');
+  }
+
+  /* The flag rides TASKS.comments as one tagged line (shared with the returned-note history), so
+     parse only that line. Mirror of the engine's format and the My-listings view. */
+  function tkFlag(t) {
+    var lines = tkStr(t.comments).split('\n'), i;
+    for (i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('@LFLAG@') === 0) {
+        try { var o = JSON.parse(lines[i].slice(7)); return (o && o.flag) ? o : null; } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  function tkFlagBanner(t, id, status) {
+    var f = tkFlag(t);
+    if (!f) { return ''; }
+    var open = status === TK_WORKING || status === TK_UPDATED || status === TK_PENDING;
+    var cls = 'tk-flag', body = '';
+    if (f.flag === 'needtime') {
+      cls += ' tk-flag-time';
+      body = '<div class="k">⏳ Needs more time</div><div class="tk-txt">' + esc(tkStr(f.reason)) +
+        (f.eta ? '<div class="tk-sub" style="margin-top:6px">New ETA: <b>' + esc(tkWhen(f.eta) || f.eta) + '</b></div>' : '') + '</div>';
+    } else if (f.flag === 'needinfo') {
+      cls += ' tk-flag-info';
+      body = '<div class="k">🟠 Waiting on the hunter</div><div class="tk-txt">' + esc(tkStr(f.note)) +
+        (f.hunter ? '<div class="tk-sub" style="margin-top:6px">Alerted: ' + esc(f.hunter) + '</div>' : '') + '</div>';
+    } else if (f.flag === 'draft') {
+      cls += ' tk-flag-draft';
+      var url = safeUrl(tkStr(f.link));
+      body = '<div class="k">🟣 Left in draft — with go-live</div>' +
+        (url ? '<div class="tk-txt"><a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">Open the eBay draft</a></div>' : '') +
+        (f.note ? '<div class="tk-txt" style="margin-top:4px">' + esc(tkStr(f.note)) + '</div>' : '') +
+        (f.from ? '<div class="tk-sub" style="margin-top:6px">Handed off by ' + esc(f.from) + '</div>' : '');
+    }
+    return '<div class="' + cls + '">' + body +
+      '<div class="tk-flag-ft"><span class="tk-sub">Flagged ' + esc(tkWhen(f.at) || '') + '</span>' +
+        (open ? '<button class="minibtn" data-act="flagClear" data-id="' + tkAttr(id) + '">Clear this flag</button>' : '') +
+      '</div></div>';
+  }
+
+  function tkListerBar(id) {
+    return '<div class="tk-lever"><div class="tk-lever-h">Not ready to submit an Item ID?</div>' +
+      '<div class="tk-btns" style="margin-top:0">' +
+        '<button class="minibtn" data-act="needTimeF" data-id="' + tkAttr(id) + '">⏳ Need more time</button>' +
+        '<button class="minibtn" data-act="needInfoF" data-id="' + tkAttr(id) + '">🟠 Need info from hunter</button>' +
+        '<button class="minibtn" data-act="draftF" data-id="' + tkAttr(id) + '">🟣 Leave in draft</button>' +
+      '</div>' +
+      '<div class="tk-lform hidden" data-lform="time:' + tkAttr(id) + '">' +
+        '<div class="field"><label>Why do you need more time?</label>' +
+          '<textarea class="tk-ta" data-ltime-reason="' + tkAttr(id) + '" placeholder="What is holding the listing up"></textarea></div>' +
+        '<div class="field" style="margin-top:10px"><label>New ETA (optional, Pakistan time)</label>' +
+          '<input class="tk-in" type="datetime-local" data-ltime-eta="' + tkAttr(id) + '"></div>' +
+        '<div class="tk-btns"><button class="minibtn" data-act="needTime" data-id="' + tkAttr(id) + '">Send to your approver</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="time:' + tkAttr(id) + '">Cancel</button></div></div>' +
+      '<div class="tk-lform hidden" data-lform="info:' + tkAttr(id) + '">' +
+        '<div class="field"><label>What do you need from the hunter?</label>' +
+          '<textarea class="tk-ta" data-linfo-note="' + tkAttr(id) + '" placeholder="e.g. a working supplier link, a clearer main image, the real UK sell price"></textarea></div>' +
+        '<div class="tk-btns"><button class="minibtn" data-act="needInfo" data-id="' + tkAttr(id) + '">Alert the hunter</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="info:' + tkAttr(id) + '">Cancel</button></div></div>' +
+      '<div class="tk-lform hidden" data-lform="draft:' + tkAttr(id) + '">' +
+        '<div class="field"><label>eBay draft link</label>' +
+          '<input class="tk-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/…" data-ldraft-link="' + tkAttr(id) + '"></div>' +
+        '<div class="field" style="margin-top:10px"><label>Note for go-live (optional)</label>' +
+          '<textarea class="tk-ta" data-ldraft-note="' + tkAttr(id) + '" placeholder="Anything the person publishing should know"></textarea></div>' +
+        '<div class="tk-btns"><button class="minibtn" data-act="draft" data-id="' + tkAttr(id) + '">Hand to go-live</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="draft:' + tkAttr(id) + '">Cancel</button></div>' +
+        '<div class="tk-sub" style="margin-top:8px">The task leaves your queue and goes to whoever publishes drafts; they add the Item ID once it is live.</div></div>' +
+    '</div>';
   }
 
   function tkSubmitForm(t, id, type) {
@@ -438,6 +527,31 @@
       if (block) { block.classList.toggle('hidden'); }
       return;
     }
+    /* R7-4 lister levers — open one inline form, close the others; then the three actions. */
+    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF') {
+      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : 'draft:';
+      var forms = box.querySelectorAll('[data-lform]'), j;
+      for (j = 0; j < forms.length; j++) {
+        var key = forms[j].getAttribute('data-lform');
+        if (key === want + id) { forms[j].classList.toggle('hidden'); }
+        else if (key.slice(key.indexOf(':') + 1) === id) { forms[j].classList.add('hidden'); }
+      }
+      return;
+    }
+    if (act === 'leverCancel') {
+      block = box.querySelector('[data-lform="' + String(id).replace(/"/g, '') + '"]');
+      if (block) { block.classList.add('hidden'); }
+      return;
+    }
+    if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
+    if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
+    if (act === 'draft') { tkSendDraft(box, id, btn); return; }
+    if (act === 'flagClear') {
+      btn.disabled = true;
+      api('listerClearFlag', { task_id: id }).then(function () { toast('Flag cleared.'); tkLoadTasks(); })
+        .catch(function (e) { btn.disabled = false; toast('Not cleared: ' + e.message); });
+      return;
+    }
     form = tkPick(box, 'data-form', id);
     if (act === 'open') {
       if (form) { form.classList.remove('hidden'); var ta = tkPick(box, 'data-note', id); if (ta) { ta.focus(); } }
@@ -464,6 +578,38 @@
       api('submitTask', payload).then(function () { toast('Sent for approval.'); tkLoadTasks(); })
         .catch(function (e) { btn.disabled = false; toast('Not submitted: ' + e.message); });
     }
+  }
+
+  function tkSendNeedTime(box, id, btn) {
+    var r = tkPick(box, 'data-ltime-reason', id), e = tkPick(box, 'data-ltime-eta', id);
+    var reason = r ? tkStr(r.value) : '';
+    if (!reason) { toast('Say why you need more time.'); if (r) { r.focus(); } return; }
+    btn.disabled = true;
+    api('listerNeedTime', { task_id: id, reason: reason, eta_pkt: e ? tkStr(e.value) : '' }).then(function () {
+      toast('Your approver has been told — the flag is on the task.'); tkLoadTasks();
+    }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
+  }
+
+  function tkSendNeedInfo(box, id, btn) {
+    var n = tkPick(box, 'data-linfo-note', id);
+    var notev = n ? tkStr(n.value) : '';
+    if (!notev) { toast('Say what you need from the hunter.'); if (n) { n.focus(); } return; }
+    btn.disabled = true;
+    api('listerNeedInfo', { task_id: id, note: notev }).then(function (res) {
+      toast(res && res.hunter ? 'The hunter (' + res.hunter + ') has been alerted.' : 'Management notified — no hunter was on file.');
+      tkLoadTasks();
+    }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
+  }
+
+  function tkSendDraft(box, id, btn) {
+    var l = tkPick(box, 'data-ldraft-link', id), n = tkPick(box, 'data-ldraft-note', id);
+    var link = l ? tkStr(l.value) : '';
+    if (!safeUrl(link)) { toast('Paste the eBay draft link (it must start with http/https).'); if (l) { l.focus(); } return; }
+    btn.disabled = true;
+    api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '' }).then(function (res) {
+      toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' — they publish it and add the Item ID.');
+      tkLoadTasks();
+    }).catch(function (err) { btn.disabled = false; toast('Not handed off: ' + err.message); });
   }
 
   // ============================== PENDING APPROVALS ==============================
