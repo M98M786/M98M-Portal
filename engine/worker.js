@@ -110,7 +110,13 @@ export default {
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, trackingBackfill, nightlyCatchup, listingSync, trafficSync, marketingSync, feedbackSync],
+      /* FREE-PLAN LAW (24 Aug, the Cloudflare limit mail): one invocation carries ~50 subrequests
+         and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
+         accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
+         fresh budget; watcher fan-outs are capped inside the watchers themselves. */
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, nightlyCatchup],
+      '40 * * * *': [listingSync, trafficSync],
+      '50 * * * *': [marketingSync, feedbackSync, trackingBackfill],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -955,8 +961,9 @@ async function zeroSaleScan(env) {
     await notifyRole(env, 'Management', 'Zero-sale listings need a decision',
       queued + ' new listing(s) passed 7 days with no sale — decide end or revise on the Listing decisions board.',
       'engine:zerosale:' + ukDate(''));
-    /* the person who can actually revise it hears about each item with its reason, once ever */
-    for (const r of rows.slice(0, 12)) {
+    /* the person who can actually revise it hears about each item with its reason, once ever —
+       capped small: each letter fans to every holder of the role (free-plan subrequest law) */
+    for (const r of rows.slice(0, 3)) {
       await notifyRole(env, 'Listing Manager', 'Product revision needed (7-day no sale)',
         '🟠 ' + r.account + ' · ' + r.item_id + (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
         ' — ' + reasonFor(r), 'engine:zerosale:item:' + r.item_id);
@@ -978,7 +985,7 @@ async function cpcRevisionWatch(env) {
     "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-10 day') " +
     "  AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = i.item_id) " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log WHERE ref = 'engine:cpc72:' || i.item_id) " +
-    'ORDER BY born ASC LIMIT 12'
+    'ORDER BY born ASC LIMIT 3'
   ).all();
   for (const r of (rs.results || [])) {
     const msg = '⏱ 72-hour CPC revision due · ' + r.account + ' · ' + r.item_id +
@@ -1011,7 +1018,7 @@ async function alertAckWatch(env) {
     "  AND created_at >= '2026-08-23 04:00:00' " +
     "  AND created_at >= datetime('now', '-3 day') " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = 'engine:acksla:' || alert_log.id) " +
-    'ORDER BY created_at ASC LIMIT 25'
+    'ORDER BY created_at ASC LIMIT 3'
   ).all()).results || [];
   for (const r of rows) {
     const strict = alertStrict(r.type);
