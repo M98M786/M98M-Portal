@@ -4934,6 +4934,24 @@ const ROUTES = {
     },
   },
 
+  /* Key-gated twin of runJobNow (which is session/mgmt-gated). The build session holds the sync
+     key, not a portal session, so forcing a sync during a night repair had no lever at all. */
+  runJobKey: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll,
+        csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
+        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan,
+        selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
+        trackingBackfill, markEndedListings };
+      const fn = jobs[String(p.job || '')];
+      if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
+      await runJob(ctx.env, fn);
+      await flushNotifyQueue(ctx.env);
+      const st = await ctx.env.DB.prepare('SELECT job, account, cursor, last_ok, last_error FROM sync_state WHERE job = ?1').bind(String(p.job)).all();
+      return { ran: String(p.job), state: st.results || [] };
+    },
+  },
+
   /* Ops relay: run one whitelisted Apps Script job (engineRunJob) server-to-server — the AS /exec
      shows curl an HTML wall, and the editor's Run picker resists automation, so this is the only
      reliable remote lever. Key-gated on BOTH sides; the key never rides in a browser. */
