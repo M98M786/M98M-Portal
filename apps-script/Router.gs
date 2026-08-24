@@ -50,6 +50,7 @@ function mergeActions_() {
     typeof ACTIONS_ATTENDANCE !== 'undefined' ? ACTIONS_ATTENDANCE : null,
     typeof ACTIONS_AUDIT      !== 'undefined' ? ACTIONS_AUDIT      : null,
     typeof ACTIONS_ENGINE     !== 'undefined' ? ACTIONS_ENGINE     : null,
+    typeof ACTIONS_R8         !== 'undefined' ? ACTIONS_R8         : null,
   ];
   groups.forEach(function (g) {
     if (!g) return;

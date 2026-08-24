@@ -430,6 +430,21 @@ function actionEnterItemId_(payload, ctx) {
       'task:' + made.revision.task_id);
   }
 
+  /* R8-2c: the moment an item goes live, its provenance is history — who hunted it, who listed
+     it. Engine-side row, best-effort: a bridge hiccup must never fail the go-live itself. */
+  if (!idempotent) {
+    try {
+      const hunter = listingHunterFor_(rec);
+      const parsedD = listingParseDetails_(rec.details);
+      enginePost_('provenanceSet', {
+        item_id: itemId, account: String(rec.account || ''),
+        lister_email: String(rec.assigned_to || ''),
+        hunter_email: hunter ? String(hunter.email) : '',
+        hunt_id: hunter ? String(hunter.hunt_id) : String((parsedD && parsedD.hunt_id) || ''),
+      });
+    } catch (e) { logActivity_('system', 'R8_PROV_FAIL', itemId, '', '', String(e && e.message || e).slice(0, 120)); }
+  }
+
   const mirrorPayload = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
   const mirror = listingMirrorListingDone_(String(rec.account || ''), String(mirrorPayload['Title'] || ''), ctx.ident.email);
   return {
@@ -486,9 +501,15 @@ function actionCreateRevision_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + employee.email + ' · ' + changes.slice(0, 120));
+  /* R8-0a (the Irfan bug): a Product Hunter has no My-listings screen — pointing a hunter at
+     "My tasks" left the revision invisible in practice. The bell now names the screen that
+     actually shows it richly for their role. */
+  let empRole = '';
+  readTab_('USERS').forEach(function (u) { if (normalizeEmail(u.email) === normalizeEmail(employee.email)) empRole = String(u.role || ''); });
+  const whereTo = empRole === 'Product Hunter' ? 'open your Hunting dashboard — it is on your Revisions panel' : 'open My tasks';
   notify_(employee.email, 'Task assigned',
     '🔵 Revision requested by ' + ctx.user.name + ' · ' + itemId + ' — change this: ' + changes.slice(0, 200) +
-    '. UK window ' + win.uk + ' (' + win.pkt + ' Pakistan) on ' + win.uk_date + ' → open My tasks.',
+    '. UK window ' + win.uk + ' (' + win.pkt + ' Pakistan) on ' + win.uk_date + ' → ' + whereTo + '.',
     'task:' + taskId);
 
   const mirror = listingMirrorRevision_(account, {

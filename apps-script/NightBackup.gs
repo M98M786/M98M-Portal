@@ -304,6 +304,15 @@ function nightWatchBootstrapOnce_() {
 function nightWatchHourlyRide() {
   try { aliSweep(); }
   catch (e) { logActivity_('trigger', 'ERROR:aliSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* R8 rides: link-request sweep hourly; the weekly review nudge is a cheap no-op most hours. */
+  if (typeof orderLinkSweep === 'function') {
+    try { orderLinkSweep(); }
+    catch (e) { logActivity_('trigger', 'ERROR:orderLinkSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
+  if (typeof reviewWatch === 'function') {
+    try { reviewWatch(); }
+    catch (e) { logActivity_('trigger', 'ERROR:reviewWatch', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   if (!PropertiesService.getScriptProperties().getProperty('BACKUP_SS_MONEY')) {
     try { nightBackupPull(); }
     catch (e) { logActivity_('trigger', 'ERROR:firstBackup', '', '', '', String(e && e.stack || e).slice(0, 300)); }

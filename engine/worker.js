@@ -3744,9 +3744,10 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const rs = await ctx.env.DB.prepare(
-        'SELECT item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note ' +
-        'FROM listing_decisions ' + (mgmt ? '' : 'WHERE assignee = ?1 ') +
-        'ORDER BY CASE status WHEN \'PENDING\' THEN 0 ELSE 1 END, flagged_at DESC LIMIT 200'
+        'SELECT d.item_id, d.account, d.title, d.price, d.born, d.clock, d.flagged_at, d.status, d.decided_by, d.decided_at, d.assignee, d.note, ' +
+        'p.hunter_email, p.lister_email ' +
+        'FROM listing_decisions d LEFT JOIN provenance p ON p.item_id = d.item_id ' + (mgmt ? '' : 'WHERE d.assignee = ?1 ') +
+        'ORDER BY CASE d.status WHEN \'PENDING\' THEN 0 ELSE 1 END, d.flagged_at DESC LIMIT 200'
       ).bind(...(mgmt ? [] : [ctx.user.email])).all();
       let listers = [];
       if (mgmt) {
@@ -4075,6 +4076,13 @@ const ROUTES = {
           '. Revise the sale price or switch supplier.';
         await notifyRole(ctx.env, 'Pricing', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
         await notifyRole(ctx.env, 'Management', 'Price revision needed', msg, 'engine:costup:' + r.id + ':' + r.newC.toFixed(2));
+        /* R8-7: the price desk keeps every rise as a row — the letter fades, the desk remembers. */
+        const it = await ctx.env.DB.prepare('SELECT price FROM items_api WHERE item_id = ?1').bind(r.id).first();
+        const sell = it ? Number(it.price) || 0 : 0;
+        await ctx.env.DB.prepare(
+          "INSERT OR IGNORE INTO price_watch (item_id, account, old_cost, new_cost, sell_price, margin_after, alerted_at) " +
+          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))"
+        ).bind(r.id, r.account, r.oldC, r.newC, sell, round2(sell - r.newC)).run();
       }
       } catch (e) { /* letters are best-effort — the cost write above already succeeded */ }
       return { synced: batch.length, risers: risers.length };
@@ -4798,6 +4806,129 @@ const ROUTES = {
   /* R5 sink for the hourly Apps Script day-tab sweep: order_id → AliExpress order number + link.
      A field only ever fills or corrects — an empty incoming value never erases what is stored,
      so a half-filled sheet row cannot blank a portal-entered number. */
+  /* ---------------- R8: provenance, link requests, price desk, active split ---------------- */
+
+  /* R8-2c: who hunted it, who listed it — written at go-live (AS enterItemId bridges it here),
+     read by every board that names people. Sync-gated: only the backends write history. */
+  provenanceSet: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const id = String(p.item_id || '').replace(/\D/g, '');
+      if (!/^\d{9,15}$/.test(id)) throw new Error('SAY: invalid item_id');
+      await ctx.env.DB.prepare(
+        'INSERT INTO provenance (item_id, account, hunter_email, lister_email, hunt_id, listed_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(NULLIF(?6, ''), datetime('now'))) " +
+        'ON CONFLICT(item_id) DO UPDATE SET ' +
+        "account = CASE WHEN ?2 != '' THEN ?2 ELSE account END, " +
+        "hunter_email = CASE WHEN ?3 != '' THEN ?3 ELSE hunter_email END, " +
+        "lister_email = CASE WHEN ?4 != '' THEN ?4 ELSE lister_email END, " +
+        "hunt_id = CASE WHEN ?5 != '' THEN ?5 ELSE hunt_id END"
+      ).bind(id, String(p.account || ''), String(p.hunter_email || '').toLowerCase(),
+        String(p.lister_email || '').toLowerCase(), String(p.hunt_id || ''), String(p.listed_at || '')).run();
+      return { ok: true, item_id: id };
+    },
+  },
+  provenanceGet: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const id = String(p.item_id || '').replace(/\D/g, '');
+      const row = await ctx.env.DB.prepare('SELECT * FROM provenance WHERE item_id = ?1').bind(id).first();
+      return row || {};
+    },
+  },
+  /* Rating lands on the same row at approval time (R8-3g). */
+  provenanceRate: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const id = String(p.item_id || '').replace(/\D/g, '');
+      const rating = Math.max(1, Math.min(5, Number(p.rating) || 0));
+      if (!id || !rating) throw new Error('SAY: item_id and rating 1-5 needed');
+      await ctx.env.DB.prepare(
+        "INSERT INTO provenance (item_id, rating) VALUES (?1, ?2) ON CONFLICT(item_id) DO UPDATE SET rating = ?2"
+      ).bind(id, rating).run();
+      return { ok: true };
+    },
+  },
+  /* R8-2 tile 4 + the AS orderLinkSweep's shopping list: items with ORDERS but NO sourcing link,
+     joined to provenance so the task lands on the hunter who hunted it. */
+  missingLinkItems: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        "SELECT o.item_id, o.account, MIN(o.created_at) AS first_order, COUNT(*) AS orders_n, i.title, " +
+        "p.hunter_email, p.lister_email " +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id LEFT JOIN provenance p ON p.item_id = o.item_id ' +
+        "WHERE o.created_at >= datetime('now', '-14 day') AND o.status NOT IN ('CANCELLED','NOT_FOUND') " +
+        "AND NOT EXISTS (SELECT 1 FROM sourcing s WHERE s.item_id = o.item_id AND (COALESCE(s.s1,'') != '' OR COALESCE(s.s2,'') != '' OR COALESCE(s.s3,'') != '')) " +
+        "AND NOT EXISTS (SELECT 1 FROM items_facts f WHERE f.item_id = o.item_id AND (COALESCE(f.sup1_link,'') != '' OR COALESCE(f.current_sup,'') != '')) " +
+        'GROUP BY o.item_id ORDER BY orders_n DESC, first_order ASC LIMIT 60'
+      ).all();
+      return { items: rs.results || [] };
+    },
+  },
+  /* R8-7: the price desk — every recorded cost rise with its margin and ack state. */
+  priceBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Pricing', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const rows = await ctx.env.DB.prepare(
+        'SELECT w.item_id, w.account, w.old_cost, w.new_cost, w.sell_price, w.margin_after, w.alerted_at, ' +
+        'w.acked_by, w.acked_at, w.note, i.title, i.price AS price_now, i.status AS listing_status ' +
+        'FROM price_watch w LEFT JOIN items_api i ON i.item_id = w.item_id ' +
+        "WHERE w.alerted_at >= datetime('now', '-30 day') ORDER BY CASE WHEN w.acked_at = '' THEN 0 ELSE 1 END, w.alerted_at DESC LIMIT 200"
+      ).all();
+      const open = (rows.results || []).filter((r) => !String(r.acked_at || '')).length;
+      return { rows: rows.results || [], open, as_of: new Date().toISOString() };
+    },
+  },
+  priceAck: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Pricing'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const note = String(p.note || '').trim().slice(0, 300);
+      if (note.length < 3) throw new Error('SAY: write what you did about it');
+      const r = await ctx.env.DB.prepare(
+        "UPDATE price_watch SET acked_by = ?3, acked_at = datetime('now'), note = ?4 WHERE item_id = ?1 AND alerted_at = ?2 AND acked_at = ''"
+      ).bind(String(p.item_id || ''), String(p.alerted_at || ''), ctx.user.email, note).run();
+      if (!r.meta || !r.meta.changes) throw new Error('SAY: already handled — refresh');
+      return { ok: true };
+    },
+  },
+  /* R8-3d: ACTIVE listings split — CPC-family vs General/Dynamic, by REAL campaign membership. */
+  activeSplit: {
+    auth: 'any', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        "SELECT i.item_id, i.account, i.title, i.price, i.sold_qty, " +
+        "COALESCE((SELECT c.funding_model || '|' || c.name FROM campaign_ads ca JOIN campaigns c ON c.campaign_id = ca.campaign_id AND c.account = i.account " +
+        " WHERE ca.listing_id = i.item_id ORDER BY CASE WHEN UPPER(COALESCE(c.funding_model,'')) LIKE '%CLICK%' OR UPPER(COALESCE(c.name,'')) LIKE '%CPC%' THEN 0 ELSE 1 END LIMIT 1), '') AS camp " +
+        "FROM items_api i WHERE i.status = 'ACTIVE' ORDER BY i.account, i.item_id"
+      ).all();
+      const cpc = [], general = [], none = [];
+      for (const r of (rs.results || [])) {
+        const c = String(r.camp || '');
+        const isCpc = /CLICK|CPC/i.test(c);
+        const row = { item_id: r.item_id, account: r.account, title: r.title, price: r.price, sold_qty: r.sold_qty, campaign: c.split('|')[1] || '', type: c.split('|')[0] || '' };
+        if (!c) none.push(row); else if (isCpc) cpc.push(row); else general.push(row);
+      }
+      const per = (list) => {
+        const by = {};
+        for (const r of list) by[r.account] = (by[r.account] || 0) + 1;
+        return by;
+      };
+      return { cpc, general, uncampaigned: none,
+        counts: { cpc: cpc.length, general: general.length, uncampaigned: none.length },
+        by_account: { cpc: per(cpc), general: per(general), uncampaigned: per(none) },
+        as_of: new Date().toISOString() };
+    },
+  },
+  /* R8-6 (engine half): what waits on management, one call. */
+  mgmtPendingEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const one = async (sql) => { const r = await ctx.env.DB.prepare(sql).first(); return Number(r && r.n) || 0; };
+      return {
+        strict_alerts_open: await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND created_at >= '2026-08-23 04:00:00' AND (type LIKE '%rice%' OR type LIKE '%CPC%' OR type LIKE '%ampaign%' OR type LIKE '%aste%')"),
+        listing_decisions_pending: await one("SELECT COUNT(*) AS n FROM listing_decisions WHERE status = 'PENDING'"),
+        price_alerts_open: await one("SELECT COUNT(*) AS n FROM price_watch WHERE acked_at = ''"),
+        as_of: new Date().toISOString(),
+      };
+    },
+  },
+
   /* Ops relay: run one whitelisted Apps Script job (engineRunJob) server-to-server — the AS /exec
      shows curl an HTML wall, and the editor's Run picker resists automation, so this is the only
      reliable remote lever. Key-gated on BOTH sides; the key never rides in a browser. */

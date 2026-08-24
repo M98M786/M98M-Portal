@@ -230,8 +230,18 @@ function actionApproveTask_(payload, ctx) {
     const old = String(rec.status || '');
     if (old !== TASK_STATUS_SUBMITTED) throw new Error(SAFE_ERROR_PREFIX + 'task is not awaiting approval');
     stamp = now_();
-    taskWrite_(sh, found, { status: TASK_STATUS_COMPLETED, approved_by: ctx.ident.email, decided_at: stamp, updated_at: stamp });
-    logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)));
+    /* R8-3g: the approver may rate a listing 1-5 — the score rides the comments (parseable
+       'RATING:n' line, no schema change) and the provenance row engine-side. */
+    const rating = Math.max(0, Math.min(5, Number(payload.rating) || 0));
+    const patch = { status: TASK_STATUS_COMPLETED, approved_by: ctx.ident.email, decided_at: stamp, updated_at: stamp };
+    if (rating && String(rec.type) === 'listing_new') {
+      patch.comments = (String(rec.comments || '') + '\n[' + stamp + '] RATING:' + rating + ' by ' + ctx.ident.email).slice(0, 1900);
+    }
+    taskWrite_(sh, found, patch);
+    if (rating && String(rec.type) === 'listing_new' && String(rec.item_id || '')) {
+      try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rating }); } catch (e) {}
+    }
+    logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)) + (rating ? ' · rating ' + rating : ''));
   } finally { lock.releaseLock(); }
 
   taskChainNext_(rec, ctx);
