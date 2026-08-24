@@ -141,12 +141,20 @@
             bad ? '<span class="ah-lvl bad">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>' :
             /NOT_APPLICABLE/.test(ahStr(d.rating)) || !ahStr(d.rating) ? '<span class="ah-std-thr">too few to grade</span>' :
             '<span class="ah-lvl top">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>';
+          /* R8-4: current AND projected, side by side — the projection holds today's defect
+             count and adds the sales this account really runs at, so it shows where the rate
+             lands if nothing new goes wrong. Absent when eBay gave no count/transactions. */
+          var pj = d.projected;
+          var better = pj && have && Number(pj.rate) < Number(d.you);
           h += '<tr' + (bad ? ' class="ah-std-bad"' : '') + '>' +
             '<td>' + esc(label) + (d.dim ? ' · ' + esc(String(d.dim)) : '') + '</td>' +
-            '<td class="ah-num">' + (have ? Number(d.you).toFixed(2) + '%' : '—') + '</td>' +
+            '<td class="ah-num">' + (have ? Number(d.you).toFixed(2) + '%' : '—') +
+              (pj ? '<span class="ah-std-thr" style="display:block;font-weight:700;color:' + (better ? 'var(--ok)' : 'var(--text-3)') + '">' +
+                '→ ' + Number(pj.rate).toFixed(2) + '% projected</span>' : '') + '</td>' +
             '<td class="ah-std-thr">peers ' + (d.peer != null ? Number(d.peer).toFixed(2) + '%' : '—') +
               (d.count != null ? ' · ' + d.count + ' case(s)' : '') +
-              (d.transactions != null ? ' · ' + d.transactions + ' transactions' : '') + '</td>' +
+              (d.transactions != null ? ' · ' + d.transactions + ' transactions' : '') +
+              (pj ? '<span style="display:block">projection adds ' + pj.added_transactions + ' clean sales (30 days at today’s rate)</span>' : '') + '</td>' +
             '<td>' + verdict + '</td></tr>';
         });
       });

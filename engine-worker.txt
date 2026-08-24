@@ -66,7 +66,7 @@ export default {
          short in-isolate cache answers repeat visits in milliseconds and cuts D1 work ~10x.
          Role-DEPENDENT actions (alertMail, csDesk, toolHtml…) are deliberately absent. */
       const ROUTE_CACHE_MS = { itemPnl: 90000, dailyReport: 45000, itemRisk: 120000,
-        marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 60000, trafficBoard: 300000,
+        marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 20000, trafficBoard: 300000,
         deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
       const data = rcTtl
@@ -4652,7 +4652,10 @@ const ROUTES = {
      ROAS-5 target, live health, confirmed duplicates and the worst loss items. Sections whose
      feeds land in Phase D (returns/cases, staff) stay on their own screens — no fake numbers. */
   mgmtOverview: {
-    auth: 'mgmt', fn: async (p, ctx) => memo('mgmtOverview', 60000, async () => {
+    /* R8 Wave 3 (Hasib: "business overview and advertising still showing delayed numbers"):
+       the memo drops to 20s and every payload carries as_of, so any remaining lag is eBay's
+       own report lag — visible, not mysterious. */
+    auth: 'mgmt', fn: async (p, ctx) => memo('mgmtOverview', 20000, async () => {
       const today = ukDate('');
       const shift = (ymd, days) => {
         const d = new Date(ymd + 'T12:00:00Z');
@@ -4710,6 +4713,8 @@ const ROUTES = {
 
       return {
         date: today,
+        as_of: new Date().toISOString(),
+        freshness_note: 'live orders are current to the minute; ad spend follows eBay’s own report build (typically 5–10 minutes behind)',
         kpis: {
           today: { revenue: round2(kToday.sold), orders: todayCount },
           yesterday: { revenue: round2(kYday.sold), profit_est: round2(kYday.profit), ads: round2(kYday.ads) },
@@ -5349,6 +5354,12 @@ const ROUTES = {
          evaluation row — INAD comes per LISTING CATEGORY, INR per shipping region — and inside
          it RATE / COUNT / TRANSACTION_COUNT are sibling metrics; the peer average rides at
          benchmark.metadata.average and the verdict at benchmark.rating (LOW is good here). */
+      /* the real run-rate each account is selling at, for the projection below */
+      const ordRs = await ctx.env.DB.prepare(
+        "SELECT account, COUNT(*) AS n FROM orders WHERE created_at >= datetime('now','-7 day') AND status NOT IN ('CANCELLED','NOT_FOUND') GROUP BY account"
+      ).all();
+      const ordersRate = {};
+      for (const o of (ordRs.results || [])) ordersRate[o.account] = (Number(o.n) || 0) / 7;
       const metRs = await ctx.env.DB.prepare('SELECT account, metric_type, json, synced_at FROM cs_metrics ORDER BY account, metric_type').all();
       const metrics = (metRs.results || []).map((r) => {
         const dims = [];
@@ -5369,9 +5380,25 @@ const ROUTES = {
             });
           }
         } catch (e) { /* an unparsable evaluation stays empty, never a crash */ }
-        return { account: r.account, metric_type: r.metric_type, dims, synced_at: r.synced_at };
+        /* R8-4 (Hasib: "also start showing projected"). eBay's rate is defects ÷ transactions
+           over the evaluation window. The honest projection is arithmetic, not a guess: hold the
+           defect COUNT where it is, add the transactions this account is really running at
+           (last 7 days × 30/7), and report the rate that follows — with the assumption printed
+           beside it. No invented numbers: if eBay gave us no count or no transactions, the
+           projection is null and the screen says so. */
+        const proj = [];
+        for (const d of dims) {
+          if (d.count == null || !d.transactions) { proj.push(null); continue; }
+          const acctOrders = ordersRate[r.account] || 0;              // orders/day, last 7 days
+          const addTx = Math.round(acctOrders * 30);
+          const nextTx = d.transactions + addTx;
+          proj.push(nextTx > 0 ? { rate: Math.round((d.count / nextTx) * 10000) / 100, added_transactions: addTx } : null);
+        }
+        dims.forEach((d, i) => { d.projected = proj[i]; });
+        return { account: r.account, metric_type: r.metric_type, dims, synced_at: r.synced_at,
+          projection_note: 'projected = the same defect count spread over the transactions this account is running at (last 7 days, extended 30 days) — it assumes every new sale is clean' };
       });
-      return { now, trend: trend.results || [], sync: sync.results || [], standards, metrics };
+      return { now, trend: trend.results || [], sync: sync.results || [], standards, metrics, as_of: new Date().toISOString() };
     },
   },
 

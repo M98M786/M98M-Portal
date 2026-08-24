@@ -173,6 +173,15 @@
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
       O.ov = d || {};
+      /* R8 Wave 3: the delay Hasib saw was invisible, which made it feel broken. Now every
+         refresh stamps when these numbers were built, and says what lags and why. */
+      try {
+        var st = $('o2Stamp');
+        if (st && O.ov.as_of) {
+          st.textContent = 'live pulse per account · as of ' + (fmtPkt(O.ov.as_of, true) || '') +
+            (O.ov.freshness_note ? ' · ' + O.ov.freshness_note : '');
+        }
+      } catch (e) {}
       oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth();
       oPaintDated();          // the live "today" tile rides on this feed, not on dailyReport
     }).catch(function (e) { oFeedFailed('o2Today', 'today\u2019s live figures', e); });
@@ -617,7 +626,7 @@
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
-        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Profitability</h2><span class="hint">computed from the daily books over the chosen range</span>' +
           '<div class="tools"><div class="mode" id="o2Mode"><button data-o2-pmode="all" class="on">All accounts</button><button data-o2-pmode="acct">Account to account</button></div></div></div><div id="o2Profit"></div></div>' +

@@ -518,10 +518,28 @@
     }
   }
 
-  function loadGrid(date) {
+  function loadGrid(date, force) {
     var body = $('rgBody');
-    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d) {
+    var stamp = function (fresh) {
+      var el = $('rgStamp');
+      if (el) { el.textContent = (fresh ? 'updated ' : 'last answer ') + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
+    };
+    if (force) {                                   // skip the cache entirely — a real re-read
+      if (body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+      api('reportsGrid', date ? { date: date } : {}).then(function (d) {
+        try { cacheWrite('reportsGrid', date ? { date: date } : {}, d); } catch (e) {}
+        paintGrid(d || {}); stamp(true);
+      }).catch(function (e) {
+        if ($('rgBody')) {
+          $('rgBody').innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">' +
+            esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'The grid could not be refreshed: ' + e.message) + '</div></div>';
+        }
+      });
+      return;
+    }
+    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d, cached) {
       paintGrid(d || {});
+      stamp(!cached);
     });
     if (!gc.painted && body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
     gc.done.catch(function (e) {
@@ -544,6 +562,11 @@
           '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">' +
             '<div class="field" style="margin-top:0;min-width:168px"><label>Day</label><input type="date" id="rgDate"></div>' +
             '<button class="minibtn" id="rgToday" style="margin-bottom:1px">Today</button>' +
+            /* R8 Wave 3 (Hasib: "report grid is not getting updated"): the grid always painted a
+               cached copy first with no way to force a fresh read and no stamp — so a correct
+               refresh looked identical to a frozen one. Both are now explicit. */
+            '<button class="minibtn" id="rgRefresh" style="margin-bottom:1px">Refresh now</button>' +
+            '<span class="rp-note" id="rgStamp" style="margin-bottom:4px"></span>' +
           '</div>' +
           '<div class="rp-legend" id="rgLegend"></div>' +
         '</div></div>' +
@@ -554,6 +577,8 @@
       if (input) { input.onchange = function () { loadGrid(input.value); }; enhanceDate(input, { kind: 'day', tz: 'Pakistan' }); }
       var today = $('rgToday');
       if (today) { today.onclick = function () { if (input) { input.value = ''; } loadGrid(''); }; }
+      var rf = $('rgRefresh');
+      if (rf) { rf.onclick = function () { loadGrid(input ? input.value : '', true); }; }
       loadGrid('');
     }
   };

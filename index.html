@@ -428,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260824-2222';
+var BUILD = '20260824-2231';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1054,12 +1054,20 @@ VIEWS.home = {
             bad ? '<span class="ah-lvl bad">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>' :
             /NOT_APPLICABLE/.test(ahStr(d.rating)) || !ahStr(d.rating) ? '<span class="ah-std-thr">too few to grade</span>' :
             '<span class="ah-lvl top">' + esc(ahStr(d.rating).replace(/_/g, ' ')) + '</span>';
+          /* R8-4: current AND projected, side by side — the projection holds today's defect
+             count and adds the sales this account really runs at, so it shows where the rate
+             lands if nothing new goes wrong. Absent when eBay gave no count/transactions. */
+          var pj = d.projected;
+          var better = pj && have && Number(pj.rate) < Number(d.you);
           h += '<tr' + (bad ? ' class="ah-std-bad"' : '') + '>' +
             '<td>' + esc(label) + (d.dim ? ' · ' + esc(String(d.dim)) : '') + '</td>' +
-            '<td class="ah-num">' + (have ? Number(d.you).toFixed(2) + '%' : '—') + '</td>' +
+            '<td class="ah-num">' + (have ? Number(d.you).toFixed(2) + '%' : '—') +
+              (pj ? '<span class="ah-std-thr" style="display:block;font-weight:700;color:' + (better ? 'var(--ok)' : 'var(--text-3)') + '">' +
+                '→ ' + Number(pj.rate).toFixed(2) + '% projected</span>' : '') + '</td>' +
             '<td class="ah-std-thr">peers ' + (d.peer != null ? Number(d.peer).toFixed(2) + '%' : '—') +
               (d.count != null ? ' · ' + d.count + ' case(s)' : '') +
-              (d.transactions != null ? ' · ' + d.transactions + ' transactions' : '') + '</td>' +
+              (d.transactions != null ? ' · ' + d.transactions + ' transactions' : '') +
+              (pj ? '<span style="display:block">projection adds ' + pj.added_transactions + ' clean sales (30 days at today’s rate)</span>' : '') + '</td>' +
             '<td>' + verdict + '</td></tr>';
         });
       });
@@ -15148,6 +15156,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
       O.ov = d || {};
+      /* R8 Wave 3: the delay Hasib saw was invisible, which made it feel broken. Now every
+         refresh stamps when these numbers were built, and says what lags and why. */
+      try {
+        var st = $('o2Stamp');
+        if (st && O.ov.as_of) {
+          st.textContent = 'live pulse per account · as of ' + (fmtPkt(O.ov.as_of, true) || '') +
+            (O.ov.freshness_note ? ' · ' + O.ov.freshness_note : '');
+        }
+      } catch (e) {}
       oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth();
       oPaintDated();          // the live "today" tile rides on this feed, not on dailyReport
     }).catch(function (e) { oFeedFailed('o2Today', 'today\u2019s live figures', e); });
@@ -15592,7 +15609,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
-        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Profitability</h2><span class="hint">computed from the daily books over the chosen range</span>' +
           '<div class="tools"><div class="mode" id="o2Mode"><button data-o2-pmode="all" class="on">All accounts</button><button data-o2-pmode="acct">Account to account</button></div></div></div><div id="o2Profit"></div></div>' +
@@ -19413,10 +19430,28 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
   }
 
-  function loadGrid(date) {
+  function loadGrid(date, force) {
     var body = $('rgBody');
-    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d) {
+    var stamp = function (fresh) {
+      var el = $('rgStamp');
+      if (el) { el.textContent = (fresh ? 'updated ' : 'last answer ') + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
+    };
+    if (force) {                                   // skip the cache entirely — a real re-read
+      if (body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
+      api('reportsGrid', date ? { date: date } : {}).then(function (d) {
+        try { cacheWrite('reportsGrid', date ? { date: date } : {}, d); } catch (e) {}
+        paintGrid(d || {}); stamp(true);
+      }).catch(function (e) {
+        if ($('rgBody')) {
+          $('rgBody').innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd rp-note">' +
+            esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'The grid could not be refreshed: ' + e.message) + '</div></div>';
+        }
+      });
+      return;
+    }
+    var gc = cachedCall('reportsGrid', date ? { date: date } : {}, function (d, cached) {
       paintGrid(d || {});
+      stamp(!cached);
     });
     if (!gc.painted && body) { body.innerHTML = '<div class="card enter d3" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div>'; }
     gc.done.catch(function (e) {
@@ -19439,6 +19474,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">' +
             '<div class="field" style="margin-top:0;min-width:168px"><label>Day</label><input type="date" id="rgDate"></div>' +
             '<button class="minibtn" id="rgToday" style="margin-bottom:1px">Today</button>' +
+            /* R8 Wave 3 (Hasib: "report grid is not getting updated"): the grid always painted a
+               cached copy first with no way to force a fresh read and no stamp — so a correct
+               refresh looked identical to a frozen one. Both are now explicit. */
+            '<button class="minibtn" id="rgRefresh" style="margin-bottom:1px">Refresh now</button>' +
+            '<span class="rp-note" id="rgStamp" style="margin-bottom:4px"></span>' +
           '</div>' +
           '<div class="rp-legend" id="rgLegend"></div>' +
         '</div></div>' +
@@ -19449,6 +19489,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (input) { input.onchange = function () { loadGrid(input.value); }; enhanceDate(input, { kind: 'day', tz: 'Pakistan' }); }
       var today = $('rgToday');
       if (today) { today.onclick = function () { if (input) { input.value = ''; } loadGrid(''); }; }
+      var rf = $('rgRefresh');
+      if (rf) { rf.onclick = function () { loadGrid(input ? input.value : '', true); }; }
       loadGrid('');
     }
   };
