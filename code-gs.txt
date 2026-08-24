@@ -21271,6 +21271,108 @@ function actionMgmtPendingAS_(payload, ctx) {
     registrations: registrations, staff_reviews: reviewsPending, week: r8WeekKey_(), as_of: now_() };
 }
 
+/* ---------- the idea box (R8-11, Hasib 25 Aug): ANY staff member can send a product idea ----
+ * Hunters are not the only people who see products. The bar is open to everyone, every idea is
+ * kept with its author, and Management/hunters can turn a good one into a real hunt. */
+const R8_IDEA_HEADERS = ['idea_id', 'by_email', 'by_name', 'role', 'idea', 'link', 'why', 'status',
+  'decided_by', 'decided_at', 'comment', 'created_at'];
+const R8_IDEA_STATES = ['NEW', 'PICKED UP', 'HUNTED', 'NOT NOW'];
+
+function r8IdeaSheet_() {
+  const db = getPortalDb_(false);
+  let sh = db.getSheetByName('PRODUCT_IDEAS');
+  if (!sh) { sh = db.insertSheet('PRODUCT_IDEAS'); sh.appendRow(R8_IDEA_HEADERS); }
+  return sh;
+}
+
+function r8IdeaRows_() {
+  const values = r8IdeaSheet_().getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = {};
+    R8_IDEA_HEADERS.forEach(function (h, n) { row[h] = values[i][n]; });
+    row._row = i + 1;
+    out.push(row);
+  }
+  return out;
+}
+
+function actionIdeaSubmit_(payload, ctx) {
+  const idea = String(payload.idea || '').trim().slice(0, 300);
+  if (idea.length < 4) throw new Error('SAY: write the product idea');
+  const link = String(payload.link || '').trim().slice(0, 500);
+  if (link && !/^https?:\/\//i.test(link)) throw new Error('SAY: the link must start with http:// or https://');
+  const why = String(payload.why || '').trim().slice(0, 500);
+  const id = 'IDEA' + Utilities.getUuid().slice(0, 6).toUpperCase();
+  r8IdeaSheet_().appendRow([id, normalizeEmail(ctx.ident.email), String(ctx.user.name || ctx.ident.email),
+    String(ctx.user.role || ''), idea, link, why, 'NEW', '', '', '', now_()]);
+  logActivity_(ctx.ident.email, 'R8_IDEA', id, '', idea.slice(0, 80), '');
+  /* Hunters and Management both hear it — an idea nobody sees is an idea wasted. */
+  const seen = {};
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.status) !== 'approved') return;
+    const role = String(u.role || '');
+    if (role !== 'Product Hunter' && MGMT_ROLES.indexOf(role) < 0 && role !== 'Team Lead') return;
+    const e = normalizeEmail(u.email);
+    if (seen[e]) return;
+    seen[e] = true;
+    notify_(u.email, 'New product idea',
+      '💡 ' + String(ctx.user.name || ctx.ident.email) + ' (' + String(ctx.user.role || '') + ') suggests: ' +
+      idea.slice(0, 160) + (why ? ' — ' + why.slice(0, 120) : '') + ' → open the Idea box.', 'idea:' + id);
+  });
+  return { idea_id: id, status: 'NEW' };
+}
+
+function actionIdeaList_(payload, ctx) {
+  const mgmt = isMgmt_(ctx.user.role, ctx.ident.email) || ['Team Lead', 'Product Hunter'].indexOf(ctx.user.role) >= 0;
+  const me = normalizeEmail(ctx.ident.email);
+  const rows = r8IdeaRows_().filter(function (r) { return mgmt || normalizeEmail(r.by_email) === me; })
+    .map(function (r) {
+      return { idea_id: String(r.idea_id), by_name: String(r.by_name || ''), by_email: String(r.by_email || ''),
+        role: String(r.role || ''), idea: String(r.idea || ''), link: String(r.link || ''), why: String(r.why || ''),
+        status: String(r.status || 'NEW'), decided_by: String(r.decided_by || ''), decided_at: String(r.decided_at || ''),
+        comment: String(r.comment || ''), created_at: String(r.created_at || '') };
+    })
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  const counts = { NEW: 0, 'PICKED UP': 0, HUNTED: 0, 'NOT NOW': 0, mine: 0 };
+  rows.forEach(function (r) {
+    if (counts[r.status] !== undefined) counts[r.status]++;
+    if (normalizeEmail(r.by_email) === me) counts.mine++;
+  });
+  const per = {};
+  rows.forEach(function (r) {
+    const k = r.by_name || r.by_email;
+    per[k] = per[k] || { who: k, total: 0, hunted: 0 };
+    per[k].total++;
+    if (r.status === 'HUNTED') per[k].hunted++;
+  });
+  return { ideas: rows.slice(0, 200), counts: counts, can_decide: mgmt,
+    leaderboard: Object.keys(per).map(function (k) { return per[k]; }).sort(function (a, b) { return b.total - a.total; }).slice(0, 10),
+    states: R8_IDEA_STATES, as_of: now_() };
+}
+
+function actionIdeaDecide_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email) && ['Team Lead', 'Product Hunter'].indexOf(ctx.user.role) < 0) {
+    throw new Error('only hunters and management move ideas');
+  }
+  const status = String(payload.status || '').toUpperCase();
+  if (R8_IDEA_STATES.indexOf(status) < 0) throw new Error('SAY: status must be one of ' + R8_IDEA_STATES.join(' · '));
+  const comment = String(payload.comment || '').trim().slice(0, 300);
+  const sh = r8IdeaSheet_();
+  const rows = r8IdeaRows_();
+  let hit = null;
+  rows.forEach(function (r) { if (String(r.idea_id) === String(payload.idea_id)) hit = r; });
+  if (!hit) throw new Error('SAY: that idea is not on the list');
+  sh.getRange(hit._row, 8, 1, 4).setValues([[status, ctx.ident.email, now_(), comment]]);
+  logActivity_(ctx.ident.email, 'R8_IDEA_DECIDE', String(hit.idea_id), String(hit.status || ''), status, comment.slice(0, 120));
+  if (normalizeEmail(hit.by_email)) {
+    notify_(hit.by_email, 'Your product idea',
+      '💡 "' + String(hit.idea || '').slice(0, 80) + '" → ' + status +
+      (comment ? ' — ' + comment.slice(0, 160) : '') + '. Thank you for sending it.', 'idea:' + hit.idea_id);
+  }
+  return { idea_id: String(hit.idea_id), status: status };
+}
+
 /* ---------- provenance backfill (one-shot, ENGINE_RUNNABLE) ---------- */
 function r8ProvenanceBackfill() {
   let sent = 0, skipped = 0;
@@ -21312,6 +21414,9 @@ const ACTIONS_R8 = {
   staffReviewSave:    [actionStaffReviewSave_, 'any'],
   staffReviewHistory: [actionStaffReviewHistory_, 'any'],
   mgmtPendingAS:      [actionMgmtPendingAS_, 'any'],
+  ideaSubmit:         [actionIdeaSubmit_, 'any'],        // EVERY approved user may send an idea
+  ideaList:           [actionIdeaList_, 'any'],
+  ideaDecide:         [actionIdeaDecide_, 'any'],        // hunters/mgmt gated inside
 };
 
 
