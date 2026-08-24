@@ -5262,11 +5262,15 @@ const ROUTES = {
      nothing in his sheet automations is touched: their own apps and tokens stay as they are. */
   ebayConsentLinks: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const names = await ctx.env.DB.prepare('SELECT name FROM accounts WHERE api_enabled = 1').all();
+      /* Every account row gets a link — a NEW account (no token yet) is onboarded exactly the
+         same way as a re-consent, and its 'connected' flag lets the screen label which is which. */
+      const names = await ctx.env.DB.prepare(
+        "SELECT name, CASE WHEN COALESCE(oauth_ref,'') != '' THEN 1 ELSE 0 END AS connected FROM accounts ORDER BY connected ASC, name"
+      ).all();
       const out = [];
-      for (const r of (names.results || [])) out.push({ account: r.name, url: await ebayConsentUrl(ctx.env, r.name) });
+      for (const r of (names.results || [])) out.push({ account: r.name, connected: !!r.connected, url: await ebayConsentUrl(ctx.env, r.name) });
       return { links: out,
-        note: 'Open a link SIGNED INTO that selling account, click Agree, then copy the code from the resulting page (or its URL, code=…) and paste it here. This adds campaign, standards and fee access — nothing existing breaks.' };
+        note: 'Open a link SIGNED INTO that selling account, click Agree, then copy the code from the resulting page (or its URL, code=…) and paste it here. A new account connects and switches on the moment its code is accepted; re-consenting an existing one just refreshes its access. Nothing in the sheet automations is touched.' };
     },
   },
   /* Reuse path: Hasib's existing sheet-automation projects already hold per-account refresh
@@ -5306,8 +5310,11 @@ const ROUTES = {
          burning it on a bad submit loses the whole click-through. The state parameter carries
          the account the link was minted for; a URL pasted into the wrong row is refused, not
          silently bound to the wrong eBay identity. */
-      const prior = await ctx.env.DB.prepare('SELECT app_id FROM accounts WHERE name = ?1 AND api_enabled = 1').bind(account).first();
+      /* Accept any known account row — a NEW one (api_enabled = 0, no token) onboards through the
+         very same path and is switched on below when its token lands. */
+      const prior = await ctx.env.DB.prepare('SELECT app_id, api_enabled FROM accounts WHERE name = ?1').bind(account).first();
       if (!prior) throw new Error('SAY: unknown account row — refresh the screen and try again');
+      const isNew = !Number(prior.api_enabled);
       const st = code.match(/[?&]state=([^&\s]+)/);
       if (st && decodeURIComponent(st[1]) !== account) {
         throw new Error('SAY: that code belongs to "' + decodeURIComponent(st[1]).slice(0, 40) + '" — paste it into that account\'s row');
@@ -5317,13 +5324,13 @@ const ROUTES = {
       const t = await ebayExchangeCode(ctx.env, clean);
       // the new token was minted by the GLOBAL app — clear the per-account keyset so the
       // fallback in ebayCreds() applies; the sheet automations' own apps are untouched
-      const upd = await ctx.env.DB.prepare("UPDATE accounts SET oauth_ref = ?2, app_id = '', cert_id = '' WHERE name = ?1")
+      const upd = await ctx.env.DB.prepare("UPDATE accounts SET oauth_ref = ?2, app_id = '', cert_id = '', api_enabled = 1 WHERE name = ?1")
         .bind(account, String(t.refresh_token)).run();
       if (!upd.meta || !upd.meta.changes) throw new Error('SAY: the token could not be stored — the code is spent, redo the consent click');
       await ctx.env.HOT.delete('ebaytok:' + account);
       await ctx.env.DB.prepare(
-        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'EBAY_RECONSENT', ?2, ?3, 'global app, extended scopes', datetime('now'))"
-      ).bind(ctx.email, account, ('was app: ' + String(prior.app_id || '(global)')).slice(0, 120)).run();
+        "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, ?5, ?2, ?3, 'global app, extended scopes, api_enabled=1', datetime('now'))"
+      ).bind(ctx.email, account, (isNew ? 'new account onboarded' : 'was app: ' + String(prior.app_id || '(global)')).slice(0, 120), '', isNew ? 'EBAY_CONNECT_NEW' : 'EBAY_RECONSENT').run();
       // prove it immediately, on the scope that was missing before
       let marketing = 'not checked';
       try {

@@ -225,11 +225,14 @@
           var hh = '<p style="font-size:11.5px;color:var(--text-3);font-weight:600">' + esc(ahStr(r && r.note)) + '</p>';
           ((r && r.links) || []).forEach(function (l) {
             var aAttr = esc(ahStr(l.account)).replace(/"/g, '&quot;');
+            var isNew = !l.connected;
             hh += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--gold-line)">' +
-              '<b style="min-width:110px">' + esc(ahStr(l.account)) + '</b>' +
-              '<a href="' + esc(ahStr(l.url)) + '" target="_blank" rel="noopener" class="minibtn">Open consent page ↗</a>' +
+              '<b style="min-width:110px">' + esc(ahStr(l.account)) +
+                (isNew ? '<span style="display:block;color:var(--warn);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em">not connected yet</span>'
+                       : '<span style="display:block;color:var(--ok);font-size:10px;font-weight:700">connected · re-consent</span>') + '</b>' +
+              '<a href="' + esc(ahStr(l.url)) + '" target="_blank" rel="noopener" class="minibtn"' + (isNew ? ' style="border-color:rgba(255,159,67,.55);color:var(--warn)"' : '') + '>Open consent page ↗</a>' +
               '<input type="text" placeholder="paste the code (or the whole URL)" data-ah-code="' + aAttr + '" style="flex:1;min-width:180px" class="rc-in">' +
-              '<button class="minibtn" data-ah-submit="' + aAttr + '">Connect</button></div>';
+              '<button class="minibtn" data-ah-submit="' + aAttr + '">' + (isNew ? 'Connect account' : 'Connect') + '</button></div>';
           });
           host.innerHTML = hh;
           host.onclick = function (ev) {
