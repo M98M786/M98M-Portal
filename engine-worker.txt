@@ -115,14 +115,21 @@ export default {
          accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
          fresh budget; watcher fan-outs are capped inside the watchers themselves. */
       '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, nightlyCatchup],
-      '40 * * * *': [listingSync, trafficSync],
-      '50 * * * *': [marketingSync, feedbackSync, trackingBackfill],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
       '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
-    const fns = jobs[event.cron] || [];
+    let fns = jobs[event.cron] || [];
+    /* VIRTUAL SLOTS inside the 5-minute cron (the free plan allows only FIVE cron triggers per
+       account — a sixth registration is refused, code 10072). The :40 and :50 firings of the
+       5-minute slot become dedicated invocations for the heavy syncs, each with its own fresh
+       subrequest budget; the two skipped adsIntraday beats cost nothing (it runs 10×/hour). */
+    if (event.cron === '*/5 * * * *') {
+      const vmin = new Date(event.scheduledTime || Date.now()).getUTCMinutes();
+      if (vmin === 40) fns = [listingSync, trafficSync];
+      else if (vmin === 50) fns = [marketingSync, feedbackSync, trackingBackfill];
+    }
     ctx.waitUntil((async () => {
       try {
         /* The heartbeat is the black-box recorder: it proves in KV — a channel independent of
