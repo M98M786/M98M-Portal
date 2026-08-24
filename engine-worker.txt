@@ -115,21 +115,16 @@ export default {
          accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
          fresh budget; watcher fan-outs are capped inside the watchers themselves. */
       '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, nightlyCatchup],
+      /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
+         budget died with the upgrade. Each heavy family still keeps its own invocation. */
+      '40 * * * *': [listingSync, trafficSync],
+      '50 * * * *': [marketingSync, feedbackSync, trackingBackfill],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
       '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
     };
-    let fns = jobs[event.cron] || [];
-    /* VIRTUAL SLOTS inside the 5-minute cron (the free plan allows only FIVE cron triggers per
-       account — a sixth registration is refused, code 10072). The :40 and :50 firings of the
-       5-minute slot become dedicated invocations for the heavy syncs, each with its own fresh
-       subrequest budget; the two skipped adsIntraday beats cost nothing (it runs 10×/hour). */
-    if (event.cron === '*/5 * * * *') {
-      const vmin = new Date(event.scheduledTime || Date.now()).getUTCMinutes();
-      if (vmin === 40) fns = [listingSync, trafficSync];
-      else if (vmin === 50) fns = [marketingSync, feedbackSync, trackingBackfill];
-    }
+    const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
       try {
         /* The heartbeat is the black-box recorder: it proves in KV — a channel independent of
@@ -970,7 +965,7 @@ async function zeroSaleScan(env) {
       'engine:zerosale:' + ukDate(''));
     /* the person who can actually revise it hears about each item with its reason, once ever —
        capped small: each letter fans to every holder of the role (free-plan subrequest law) */
-    for (const r of rows.slice(0, 3)) {
+    for (const r of rows.slice(0, 8)) {
       await notifyRole(env, 'Listing Manager', 'Product revision needed (7-day no sale)',
         '🟠 ' + r.account + ' · ' + r.item_id + (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
         ' — ' + reasonFor(r), 'engine:zerosale:item:' + r.item_id);
@@ -992,7 +987,7 @@ async function cpcRevisionWatch(env) {
     "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-10 day') " +
     "  AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = i.item_id) " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log WHERE ref = 'engine:cpc72:' || i.item_id) " +
-    'ORDER BY born ASC LIMIT 3'
+    'ORDER BY born ASC LIMIT 10'
   ).all();
   for (const r of (rs.results || [])) {
     const msg = '⏱ 72-hour CPC revision due · ' + r.account + ' · ' + r.item_id +
@@ -1025,7 +1020,7 @@ async function alertAckWatch(env) {
     "  AND created_at >= '2026-08-23 04:00:00' " +
     "  AND created_at >= datetime('now', '-3 day') " +
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = 'engine:acksla:' || alert_log.id) " +
-    'ORDER BY created_at ASC LIMIT 3'
+    'ORDER BY created_at ASC LIMIT 10'
   ).all()).results || [];
   for (const r of rows) {
     const strict = alertStrict(r.type);
