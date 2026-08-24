@@ -34,6 +34,10 @@
     icon: '<path d="M4 19V5"/><path d="M4 15l4-4 4 3 5-6 3 3"/><path d="M4 19h16"/>',
     roles: HD_ROLES,
     order: 14.5,
+    /* R8: the badge is the Irfan fix made visible — a revision or a link request sent to a
+       hunter shows on the nav the moment they sign in, without opening anything. */
+    prefetch: function () { return hdCount(); },
+    badge: function () { return (STATE.counts && STATE.counts.huntDesk) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Hunting <span class="goldtext">dashboard</span></h1>' +
           '<span class="sub">your hunting at a glance — approvals, revisions, link requests, and why products get rejected</span>' +
@@ -55,8 +59,23 @@
     }
   };
 
+  /** Badge feed: what waits on THIS person — revisions sent back plus supplier-link requests. */
+  function hdCount() {
+    return api('huntDesk', {}).then(function (d) {
+      var m = (d && d.mine) || {};
+      var n = (Number(m.revision) || 0) + (((d && d.open_tasks) || []).length);
+      try { STATE.counts.huntDesk = n; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
+      return d;
+    });
+  }
+
   function hdLoad() {
     api('huntDesk', {}).then(function (d) {
+      try {
+        var m0 = d.mine || {};
+        STATE.counts.huntDesk = (Number(m0.revision) || 0) + ((d.open_tasks || []).length);
+        if (typeof refreshBadges === 'function') { refreshBadges(); }
+      } catch (e) {}
       d = d || {};
       var m = d.mine || { hunted: 0, hunted_month: 0, approved: 0, approved_month: 0, pending: 0, revision: 0, rejected_30d: 0 };
       var linkTasks = (d.open_tasks || []).filter(function (t) { return t.type === 'sourcing_link'; });

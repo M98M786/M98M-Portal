@@ -38,6 +38,7 @@
     icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
     roles: GL_ROLES,
     order: 17.6,
+    badge: function () { return (STATE.counts && STATE.counts.goLive) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Go-live <span class="goldtext">desk</span></h1>' +
           '<span class="sub">drafts waiting to be published — open the draft, publish on eBay, enter the Item ID here</span>' +
@@ -60,6 +61,7 @@
         .filter(function (x) { return x.f && x.f.flag === 'draft'; });
       var byAcct = {};
       drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
+      try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
       $('glTiles').innerHTML = '<div class="gl-tiles">' +
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {

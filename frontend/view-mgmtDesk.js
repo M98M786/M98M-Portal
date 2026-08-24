@@ -25,6 +25,7 @@
     icon: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z"/>',
     roles: MD_ROLES,
     order: 2.5,
+    badge: function () { return (STATE.counts && STATE.counts.mgmtDesk) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Management <span class="goldtext">desk</span></h1>' +
           '<span class="sub">everything that waits on a management decision — one page, live counts</span>' +
@@ -55,6 +56,12 @@
       api('mgmtPendingEngine', {}).catch(function () { return {}; }),
     ]).then(function (rs) {
       var a = rs[0] || {}, e = rs[1] || {};
+      /* R8: one number on the nav — everything genuinely waiting on a management decision. */
+      try {
+        STATE.counts.mgmtDesk = (a.hunt_approvals || 0) + (a.task_approvals || 0) + (a.reject_requests || 0) +
+          (a.registrations || 0) + (e.listing_decisions_pending || 0) + (e.price_alerts_open || 0);
+        if (typeof refreshBadges === 'function') { refreshBadges(); }
+      } catch (e2) {}
       box.innerHTML = '<div class="md-grid">' +
         mdQ('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         mdQ('Task approvals', a.task_approvals || 0, 'submitted, waiting on approval', 8, 'approvals') +

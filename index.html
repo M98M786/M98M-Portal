@@ -428,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260824-2325';
+var BUILD = '20260824-2356';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9654,6 +9654,7 @@ VIEWS.dashboard = {
     icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
     roles: GL_ROLES,
     order: 17.6,
+    badge: function () { return (STATE.counts && STATE.counts.goLive) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Go-live <span class="goldtext">desk</span></h1>' +
           '<span class="sub">drafts waiting to be published — open the draft, publish on eBay, enter the Item ID here</span>' +
@@ -9676,6 +9677,7 @@ VIEWS.dashboard = {
         .filter(function (x) { return x.f && x.f.flag === 'draft'; });
       var byAcct = {};
       drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
+      try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
       $('glTiles').innerHTML = '<div class="gl-tiles">' +
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {
@@ -9783,6 +9785,10 @@ VIEWS.dashboard = {
     icon: '<path d="M4 19V5"/><path d="M4 15l4-4 4 3 5-6 3 3"/><path d="M4 19h16"/>',
     roles: HD_ROLES,
     order: 14.5,
+    /* R8: the badge is the Irfan fix made visible — a revision or a link request sent to a
+       hunter shows on the nav the moment they sign in, without opening anything. */
+    prefetch: function () { return hdCount(); },
+    badge: function () { return (STATE.counts && STATE.counts.huntDesk) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Hunting <span class="goldtext">dashboard</span></h1>' +
           '<span class="sub">your hunting at a glance — approvals, revisions, link requests, and why products get rejected</span>' +
@@ -9804,8 +9810,23 @@ VIEWS.dashboard = {
     }
   };
 
+  /** Badge feed: what waits on THIS person — revisions sent back plus supplier-link requests. */
+  function hdCount() {
+    return api('huntDesk', {}).then(function (d) {
+      var m = (d && d.mine) || {};
+      var n = (Number(m.revision) || 0) + (((d && d.open_tasks) || []).length);
+      try { STATE.counts.huntDesk = n; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
+      return d;
+    });
+  }
+
   function hdLoad() {
     api('huntDesk', {}).then(function (d) {
+      try {
+        var m0 = d.mine || {};
+        STATE.counts.huntDesk = (Number(m0.revision) || 0) + ((d.open_tasks || []).length);
+        if (typeof refreshBadges === 'function') { refreshBadges(); }
+      } catch (e) {}
       d = d || {};
       var m = d.mine || { hunted: 0, hunted_month: 0, approved: 0, approved_month: 0, pending: 0, revision: 0, rejected_30d: 0 };
       var linkTasks = (d.open_tasks || []).filter(function (t) { return t.type === 'sourcing_link'; });
@@ -13452,6 +13473,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     icon: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z"/>',
     roles: MD_ROLES,
     order: 2.5,
+    badge: function () { return (STATE.counts && STATE.counts.mgmtDesk) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Management <span class="goldtext">desk</span></h1>' +
           '<span class="sub">everything that waits on a management decision — one page, live counts</span>' +
@@ -13482,6 +13504,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       api('mgmtPendingEngine', {}).catch(function () { return {}; }),
     ]).then(function (rs) {
       var a = rs[0] || {}, e = rs[1] || {};
+      /* R8: one number on the nav — everything genuinely waiting on a management decision. */
+      try {
+        STATE.counts.mgmtDesk = (a.hunt_approvals || 0) + (a.task_approvals || 0) + (a.reject_requests || 0) +
+          (a.registrations || 0) + (e.listing_decisions_pending || 0) + (e.price_alerts_open || 0);
+        if (typeof refreshBadges === 'function') { refreshBadges(); }
+      } catch (e2) {}
       box.innerHTML = '<div class="md-grid">' +
         mdQ('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         mdQ('Task approvals', a.task_approvals || 0, 'submitted, waiting on approval', 8, 'approvals') +
