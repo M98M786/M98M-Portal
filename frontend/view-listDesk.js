@@ -37,6 +37,9 @@
         '<div class="card enter d2" id="ldPeopleCard"><div class="hd">Lister to lister ' +
           '<span class="hint">open · overdue · due in 24h · awaiting approval</span></div>' +
           '<div class="bd" id="ldPeople"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">CPC pipeline ' +
+          '<span class="hint">the listings whose advertising is about to change — research, campaign set-up, potential-CPC reviews</span></div>' +
+          '<div class="bd" id="ldCpc"><div class="spinner"></div></div></div>' +
         '<div class="card enter d2" style="margin-top:14px"><div class="hd">The work, deadline first ' +
           '<span class="hint">every open listing task · reject-back needs a reason and Management approval</span></div>' +
           '<div class="bd" id="ldRows"><div class="spinner"></div></div></div>';
@@ -90,6 +93,31 @@
       } else {
         $('ldPeopleCard').style.display = d.mgmt ? '' : 'none';
       }
+
+      /* R8-8: the CPC pipeline — what advertising work is in flight, soonest deadline first. */
+      var cpc = d.cpc_pipeline || [], cc = d.cpc_counts || {};
+      var cpcNames = { cpc_research: 'CPC research', campaign_set: 'Campaign set-up', potential_cpc_review: 'Potential-CPC review' };
+      $('ldCpc').innerHTML = !cpc.length
+        ? '<div class="hu-hint" style="margin-top:0">No CPC work in flight right now.</div>'
+        : '<div class="ld-fam">' +
+            ['cpc_research', 'campaign_set', 'potential_cpc_review'].map(function (k) {
+              return '<div class="ld-f">' + esc(cpcNames[k]) + ' <b>' + (cc[k] || 0) + '</b></div>';
+            }).join('') +
+            (cc.overdue ? '<div class="ld-f" style="border-color:rgba(240,96,90,.45);color:var(--bad)">Overdue <b>' + cc.overdue + '</b></div>' : '') +
+          '</div>' +
+          '<div class="scroll"><table class="ir-tbl" style="min-width:700px"><thead><tr>' +
+          '<th style="text-align:left">Job</th><th style="text-align:left">Item</th><th style="text-align:left">Account</th>' +
+          '<th style="text-align:left">With</th><th style="text-align:left">Deadline</th><th style="text-align:left">Status</th></tr></thead><tbody>' +
+          cpc.map(function (r) {
+            return '<tr' + (r.overdue ? ' style="background:var(--bad-soft)"' : '') + '>' +
+              '<td style="text-align:left;font-weight:800">' + esc(cpcNames[r.type] || r.type) + '</td>' +
+              '<td style="text-align:left;max-width:250px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(ldS(r.title)) + '</div>' +
+                (ldS(r.item_id) ? '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(ldS(r.item_id)) + '</span>' : '') + '</td>' +
+              '<td style="text-align:left">' + esc(ldS(r.account)) + '</td>' +
+              '<td style="text-align:left">' + esc(ldS(r.assigned_to).split('@')[0]) + '</td>' +
+              '<td style="text-align:left;white-space:nowrap' + (r.overdue ? ';color:var(--bad);font-weight:800' : '') + '">' + esc(fmtPkt(r.deadline_pkt, true) || '—') + '</td>' +
+              '<td style="text-align:left">' + esc(ldS(r.status)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
 
       var rows = d.rows || [];
       var me = ((STATE.user && STATE.user.email) || '').toLowerCase();
@@ -148,7 +176,7 @@
       });
     }).catch(function (e) {
       $('ldTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = '';
+      $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = ''; $('ldCpc').innerHTML = '';
     });
   }
 

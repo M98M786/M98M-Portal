@@ -110,6 +110,8 @@ const ENGINE_RUNNABLE = {
   orderLinkSweep: function () { return typeof orderLinkSweep === 'function' ? String(orderLinkSweep()) : 'absent'; },
   reviewWatch: function () { return typeof reviewWatch === 'function' ? String(reviewWatch()) : 'absent'; },
   provenanceBackfill: function () { return typeof r8ProvenanceBackfill === 'function' ? String(r8ProvenanceBackfill()) : 'absent'; },
+  seedTasks: function () { return typeof r8SeedTasks === 'function' ? String(r8SeedTasks()) : 'absent'; },
+  aliSweepFast: function () { return typeof aliSweepFast === 'function' ? JSON.stringify(aliSweepFast()) : 'absent'; },
   /* 24 Aug diagnosis: today's orders missing from the workspace — list each order book's REAL
    * tab names against the candidates the portal computes, so a naming drift or a dead importer
    * is seen, not guessed. Read-only. */

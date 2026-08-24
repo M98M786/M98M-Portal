@@ -282,8 +282,30 @@ function actionListDesk_(payload, ctx) {
       item_id: String(t.item_id || '') });
   });
   rows.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
+  /* R8-8 (Hasib): "a dashboard of current pending cpc listings who are going to get updated" —
+     every CPC job in flight: the research, the campaign that follows it, and the potential-CPC
+     reviews. These are the listings whose advertising is about to change. */
+  const cpc = [];
+  const cpcCounts = { cpc_research: 0, campaign_set: 0, potential_cpc_review: 0, overdue: 0 };
+  readTab_('TASKS').forEach(function (t) {
+    const type = String(t.type || '');
+    if (['cpc_research', 'campaign_set', 'potential_cpc_review'].indexOf(type) < 0) return;
+    const status = String(t.status || '');
+    if ([TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED].indexOf(status) < 0) return;
+    const assignee = normalizeEmail(t.assigned_to);
+    if (!mgmt && assignee !== me && ctx.user.role !== 'Advertising Manager') return;
+    const dl = taskMs_(t.deadline_pkt);
+    const late = !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED;
+    if (cpcCounts[type] !== undefined) cpcCounts[type]++;
+    if (late) cpcCounts.overdue++;
+    cpc.push({ task_id: String(t.task_id), type: type, account: String(t.account || ''),
+      item_id: String(t.item_id || ''), title: String(t.title || '').slice(0, 90),
+      assigned_to: assignee, status: status, deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: late });
+  });
+  cpc.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
   return { mgmt: mgmt, per_assignee: Object.keys(perAssignee).map(function (k) { return perAssignee[k]; }).sort(function (a, b) { return b.open - a.open; }),
-    per_account: perAccount, families: fam, rows: rows.slice(0, 300), as_of: now_() };
+    per_account: perAccount, families: fam, rows: rows.slice(0, 300),
+    cpc_pipeline: cpc.slice(0, 200), cpc_counts: cpcCounts, as_of: now_() };
 }
 
 /* ---------- lister reject-back with management approval (R8-3b) ---------- */
@@ -686,6 +708,57 @@ function actionIdeaDecide_(payload, ctx) {
       (comment ? ' — ' + comment.slice(0, 160) : '') + '. Thank you for sending it.', 'idea:' + hit.idea_id);
   }
   return { idea_id: String(hit.idea_id), status: status };
+}
+
+/* ---------- R8-10: the human follow-ups, as real tasks ----------
+ * Hasib: "for all these things create tasks for Husnain or management". Each seed is keyed by a
+ * marker in the title, so running this twice never duplicates a task. */
+const R8_SEEDS = [
+  { key: 'R8-SEED-1', role: 'CS', title: 'Connect Sir Hasib’s order-processing sheet',
+    details: ['Sir Hasib now syncs from eBay (151 listings, 278 orders).',
+      'What is missing: his order book is not connected, so his orders have no day-tab workspace.',
+      'Do this: open the Portal DB → CONNECTIONS tab → the order_processing row with the empty spreadsheet_id.',
+      'Paste his Orders sheet id there (or create the sheet first, in the same shape as the other accounts).',
+      'Then tell Claude/Management so the Ali sweep can be verified against it.'] },
+  { key: 'R8-SEED-2', role: 'Management', title: 'Review the hunting rejection + revision reason lists',
+    details: ['The reason chips hunters and reviewers see are now data, not code.',
+      'Open Hunt approvals — the chips under the comment box are the live lists.',
+      'Add anything missing with "Add a reason"; they appear for everyone immediately.',
+      'Lists live in CONFIG: hunt_reject_reasons, hunt_revise_needs, lister_reject_reasons.'] },
+  { key: 'R8-SEED-3', role: 'Management', title: 'Do this week’s staff behavior + working reviews',
+    details: ['Open Staff reviews. Every approved person needs a behavior score and a working score, 1-5, plus a short note.',
+      'The facts beside each name (tasks done in 7 days, overdue now) come from the portal — the scores are your judgement.',
+      'A reminder goes out every Wednesday while any review is missing.'] },
+  { key: 'R8-SEED-4', role: 'Management', title: 'Walk the new department + hunting dashboards with the team',
+    details: ['New screens are live: Departments, Hunting dashboard, Listing desk, Go-live desk, 72-hour revisions, Management desk, Price revisions, Live listings split, Idea box.',
+      'Two that need announcing to everyone: the Idea box (anyone can send a product idea) and the Hunting dashboard (Irfan sees his revisions there).',
+      'Listers: the "Can’t list this" button now sends a rejection request to Management instead of stalling.'] },
+];
+
+function r8SeedTasks() {
+  const all = readTab_('TASKS');
+  const users = readTab_('USERS').filter(function (u) { return String(u.status) === 'approved'; });
+  const sh = tasksSheet_();
+  const stamp = now_();
+  let made = 0, skipped = 0;
+  R8_SEEDS.forEach(function (s) {
+    const exists = all.some(function (t) { return String(t.details || '').indexOf(s.key) >= 0; });
+    if (exists) { skipped++; return; }
+    let who = null;
+    users.forEach(function (u) { if (!who && String(u.role || '') === s.role) who = { email: String(u.email), name: String(u.name || u.email) }; });
+    if (!who) users.forEach(function (u) { if (!who && MGMT_ROLES.indexOf(String(u.role || '')) >= 0) who = { email: String(u.email), name: String(u.name || u.email) }; });
+    if (!who) { skipped++; return; }
+    const taskId = listingCreateTask_(sh, {
+      type: 'general', account: '', item_id: '',
+      title: s.title,
+      details: listingLines_(s.details.concat(['', 'marker: ' + s.key])),
+      assigned_by: 'system', assigned_to: who.email,
+      priority: 'normal', deadline_pkt: taskPktIso_(new Date(Date.now() + 2 * 86400000)), stamp: stamp,
+    });
+    notify_(who.email, 'Task assigned', '📋 ' + s.title + ' — see the task for the steps.', 'task:' + taskId);
+    made++;
+  });
+  return 'seeds: ' + made + ' created, ' + skipped + ' already there';
 }
 
 /* ---------- provenance backfill (one-shot, ENGINE_RUNNABLE) ---------- */
