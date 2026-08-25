@@ -3654,7 +3654,11 @@ const ROUTES = {
           "FROM orders WHERE status NOT IN ('FULFILLED', 'NOT_FOUND', 'CANCELLED') AND created_at >= datetime('now', '-6 day')"
         ).bind(new Date().toISOString()).first()) || {};
         const zs = await one("SELECT COUNT(*) AS n FROM listing_decisions WHERE status = 'PENDING'");
-        const mail = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''");
+        /* The strip must show what is ACTIONABLE, not a lifetime pile. 2,222 unread letters is a
+           number nobody can work, and it buries today's real ones. Show the last 48 hours (and
+           carry the full backlog separately so the Alerts screen can still state it honestly). */
+        const mail = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND type != 'ack-sla-marker' AND created_at >= datetime('now','-2 day')");
+        const mailAll = await one("SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND type != 'ack-sla-marker'");
         const unc = await one(
           "SELECT COUNT(*) AS n FROM items_api ia WHERE status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = ia.item_id)");
         const dup = await one(
@@ -3671,6 +3675,7 @@ const ROUTES = {
           ad_spend_today: Number(ads.spend) || 0, ad_sold_today: Number(ads.sold) || 0, waste_n: Number(ads.waste_n) || 0,
           overdue: Number(disp.overdue) || 0, awaiting: Number(disp.awaiting) || 0,
           zero_sale_pending: Number(zs.n) || 0, letters_open: Number(mail.n) || 0,
+          letters_backlog: Number(mailAll.n) || 0,
           uncampaigned: Number(unc.n) || 0, duplicates: Number(dup.n) || 0,
           impressions_today: Number(traffic.impressions) || 0, views_today: Number(traffic.views) || 0,
           traffic_date: String(traffic.date || ''),

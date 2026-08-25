@@ -711,7 +711,10 @@
         t('traffic', 'Impressions · ' + (d.traffic_date ? esc(String(d.traffic_date).slice(5)) : 'latest'), (Number(d.impressions_today) >= 10000 ? (d.impressions_today / 1000).toFixed(1) + 'k' : d.impressions_today), d.views_today + ' listing views · eBay trails a day') +
         t('listingDecisions', 'Zero-sale decisions', d.zero_sale_pending, 'waiting on Management', Number(d.zero_sale_pending) > 0) +
         t('campaignWatch', 'Campaign gaps', (Number(d.uncampaigned) || 0) + ' / ' + (Number(d.duplicates) || 0), 'no campaign / duplicated', Number(d.duplicates) > 0) +
-        t('alerts', 'Unhandled letters', d.letters_open, 'the Engine’s own bells', Number(d.letters_open) > 0) +
+        t('alerts', 'Letters · 48h', d.letters_open,
+          Number(d.letters_backlog) > Number(d.letters_open)
+            ? Number(d.letters_backlog).toLocaleString('en-GB') + ' unread in total'
+            : 'the Engine’s own bells', Number(d.letters_open) > 0) +
         t('activeListings', 'Active listings', d.active_listings, 'all accounts') +
       '</div>';
     }).catch(function (e) {
