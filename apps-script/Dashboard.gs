@@ -717,14 +717,34 @@ function dashReadCache_() {
   return { byAccount: byAccount };
 }
 
+/* Every metric the portal shows passes through here — month tiles, day entries and ranges alike.
+   The earlier guard only covered sheet_tiles (the workbook's OWN tile), so a broken formula still
+   reached the screen through card.tiles: Orders read -2,166,236,892,002 and Margin
+   -2,209,165,037,298 on the account cards after that fix was already live. One cell that far
+   outside trade is a broken formula, not a fact — refuse it everywhere, not in one of two places. */
 function dashPickMetrics_(source, wanted) {
   const out = {};
   wanted.forEach(function (m) {
     if (!source || !Object.prototype.hasOwnProperty.call(source, m)) return;
     const v = dashRoundMetric_(m, Number(source[m]));
-    if (v !== null) out[m] = v;
+    if (v === null) return;
+    if (dashSaneNumber_(v) === null) return;
+    out[m] = v;
   });
   return out;
+}
+
+/** Which of the wanted metrics this record had to refuse, so a screen can name the bad cell. */
+function dashBrokenMetrics_(source, wanted) {
+  const bad = [];
+  if (!source) return bad;
+  wanted.forEach(function (m) {
+    if (!Object.prototype.hasOwnProperty.call(source, m)) return;
+    const v = dashRoundMetric_(m, Number(source[m]));
+    if (v === null) return;
+    if (dashSaneNumber_(v) === null) bad.push({ metric: m, value: String(v).slice(0, 28) });
+  });
+  return bad;
 }
 
 function dashMonthCard_(bucket, period, wanted, ctx) {
@@ -737,7 +757,7 @@ function dashMonthCard_(bucket, period, wanted, ctx) {
   };
   if (!raw) return card;
   const sheet = {};
-  const broken = [];
+  const broken = dashBrokenMetrics_(raw, wanted);
   DASH_TILES.concat([DASH_METRIC_RETURNS_OLD]).forEach(function (m) {
     // The old-returns figure the tile LABEL spells out rides on the RETURNS tile's permission.
     const gate = m === DASH_METRIC_RETURNS_OLD ? DASH_TILE_RETURNS : m;
