@@ -938,18 +938,29 @@ function enterApp(user){
   if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
   /* Management lands on the live Business overview, not the generic home — the screen that
      answers "how is the business right now" should be the first thing the owner sees. */
-  var landing=(VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home';
+  /* Where a person lands: their own department's task board if they have one — that is the
+     "first page" Hasib asked for — otherwise the management overview, otherwise home. */
+  var DEPT_LANDING = { 'Item Lister':'tasksListing', 'Listing Manager':'tasksListing',
+    'Product Hunter':'tasksHunting', 'Order Processor':'tasksOrders',
+    'Advertising Manager':'tasksAds', 'CS':'tasksCS' };
+  var myDeptView = DEPT_LANDING[(STATE.user && STATE.user.role) || ''];
+  var landing = (myDeptView && VIEWS[myDeptView] && canSee(VIEWS[myDeptView])) ? myDeptView
+    : ((VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home');
   var nav=$('nav'); nav.innerHTML='';
   /* Night list: "make a main dashboard of every department... i don't want tools to be treated
      as separate tools". The nav is grouped BY DEPARTMENT, each group led by that department's
      main dashboard; a role only sees the groups it can open, so nothing is hidden — the
      duplicates are simply no longer scattered as one flat pile. */
+  /* Hasib (25 Aug): "separate task dashboard of each department as the FIRST PAGE in menu of
+     that specific department". Each group therefore opens with its own live task board, and the
+     R8 screens sit with their department instead of falling into a nameless 'More' pile. */
   var NAV_DEPTS = [
-    { name:'Management',  keys:['overview','kpis','dailyReport','accountReport','accountHealth','alerts','reports','reportsGrid','perf','signals','approvals','staffAdmin','rota','team','meetings','agenda'] },
-    { name:'Advertising', keys:['adsCentre','campaignWatch','traffic','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
-    { name:'Orders',      keys:['ordersBoard','orders','dispatch','recheck','returns','wrongOrders'] },
-    { name:'Listings',    keys:['activeListings','listingDecisions','listing','hunting','huntQueue','pipeline','calculator'] },
-    { name:'CS',          keys:['csDesk','cs','inbox'] },
+    { name:'Management',  keys:['mgmtDesk','deptBoard','overview','kpis','dailyReport','accountReport','accountHealth','alerts','reports','reportsGrid','perf','signals','approvals','staffAdmin','staffReviews','priceDesk','rota','team','meetings','agenda'] },
+    { name:'Advertising', keys:['tasksAds','adsCentre','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','dispatch','sourcing','recheck','returns','wrongOrders'] },
+    { name:'Listings',    keys:['tasksListing','listDesk','goLive','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
+    { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','ideaBox'] },
+    { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] },
     { name:'My desk',     keys:['home','dashboard','tasks','rules','tools'] }
   ];
   var placed = {};
