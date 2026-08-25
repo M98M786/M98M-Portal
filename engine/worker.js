@@ -3712,12 +3712,15 @@ const ROUTES = {
       const addrs = [ctx.user.email];
       if (ctx.user.role === 'Advertising Manager') addrs.push('advertising');
       const rs = await ctx.env.DB.prepare(
+        /* 'ack-sla-marker' rows are INTERNAL dedupe records written by alertAckWatch so a breach
+           is chased once — they carry no message and must never appear as mail (110 of them had
+           landed in Management's inbox before this filter). */
         'SELECT id, to_addr, type, message, ref, created_at, resolved_by, resolved_at, note FROM alert_log ' +
-        (mgmt ? '' : 'WHERE to_addr IN (?1, ?2) ') +
+        (mgmt ? "WHERE type != 'ack-sla-marker' " : "WHERE type != 'ack-sla-marker' AND to_addr IN (?1, ?2) ") +
         "ORDER BY CASE WHEN resolved_at = '' THEN 0 ELSE 1 END, id DESC LIMIT 200"
       ).bind(...(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).all();
       const open = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = ''" + (mgmt ? '' : ' AND to_addr IN (?1, ?2)')
+        "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND type != 'ack-sla-marker'" + (mgmt ? '' : ' AND to_addr IN (?1, ?2)')
       ).bind(...(mgmt ? [] : [addrs[0], addrs[1] || addrs[0]])).first();
       return { rows: rs.results || [], open: Number(open && open.n) || 0, mgmt };
     },
