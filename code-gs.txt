@@ -20683,22 +20683,35 @@ function aliSweepFast() {
   var ymd = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
   var candidates = ordersDayTabCandidates_(ymd);
   var out = [], tabs = 0;
+  /* Hard budget: this shares the 5-minute trigger with the loss sweep, and Apps Script kills a
+   * run at 6 minutes. Whatever is read by the cutoff is pushed; the rest catches the next tick
+   * (5 minutes) or the hourly full sweep. Never let the fast path starve its neighbours. */
+  var deadline = Date.now() + 90000;
   conns.forEach(function (c) {
+    if (Date.now() > deadline) return;
     var ss;
     try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
     var sheets = ss.getSheets();
     for (var s = 0; s < sheets.length; s++) {
       if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
       tabs++;
-      var values = sheets[s].getDataRange().getDisplayValues();
-      if (values.length < 2) break;
-      var cols = nbHeaderCols_(values[0]);
+      /* COLUMN-LIMITED read (25 Aug): getDataRange() pulls every column of a populated day tab —
+       * it cost 3s on empty tabs at dawn but 102s once the team filled them, and this rides the
+       * 5-minute trigger. Read the header row, then ONLY the span of columns actually needed. */
+      var sheet = sheets[s];
+      var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+      if (lastRow < 2 || lastCol < 1) break;
+      var cols = nbHeaderCols_(sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0]);
       if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) break;
-      for (var r = 1; r < values.length; r++) {
-        var id = String(values[r][cols.ebayCol] || '').trim();
+      var idxs = [cols.ebayCol, cols.aliNumCol, cols.linkCol].filter(function (i) { return i >= 0; });
+      var minC = Math.min.apply(null, idxs), maxC = Math.max.apply(null, idxs);
+      var span = sheet.getRange(2, minC + 1, lastRow - 1, maxC - minC + 1).getDisplayValues();
+      for (var r = 0; r < span.length; r++) {
+        var row = span[r];
+        var id = String(row[cols.ebayCol - minC] || '').trim();
         if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
-        var num = cols.aliNumCol >= 0 ? String(values[r][cols.aliNumCol] || '').replace(/\D/g, '') : '';
-        var link = cols.linkCol >= 0 ? String(values[r][cols.linkCol] || '').trim() : '';
+        var num = cols.aliNumCol >= 0 ? String(row[cols.aliNumCol - minC] || '').replace(/\D/g, '') : '';
+        var link = cols.linkCol >= 0 ? String(row[cols.linkCol - minC] || '').trim() : '';
         if (num.length < 8) num = '';
         if (link.indexOf('https://') !== 0) link = '';
         if (num || link) out.push({ order_id: id, ali_order: num, ali_link: link });
