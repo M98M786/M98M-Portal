@@ -20661,8 +20661,10 @@ function nbHeaderCols_(headers) {
     if (n === 'new ali link' && linkCol < 0) linkCol = i;
     if (n === 'ali express link' && aliLinkCol < 0) aliLinkCol = i;
   }
-  if (linkCol < 0) linkCol = aliLinkCol;                  // fall back to 'Ali Express Link'
-  return { ebayCol: ebayCol, aliNumCol: aliNumCol, linkCol: linkCol };
+  /* Return BOTH link columns. Preferring one is wrong: HAFIZA BHAJI has an empty 'New Ali Link'
+   * and 8 filled rows in 'Ali Express Link' — the processors' real work was invisible because
+   * the sweep looked only at the preferred-but-empty column. Each ROW takes whichever is set. */
+  return { ebayCol: ebayCol, aliNumCol: aliNumCol, linkCol: linkCol, altLinkCol: aliLinkCol };
 }
 
 function aliSweep() {
@@ -20689,8 +20691,9 @@ function aliSweep() {
         for (var r = 1; r < values.length; r++) {
           var id = String(values[r][cols.ebayCol] || '').trim();
           if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
-          var num = cols.aliNumCol >= 0 ? String(values[r][cols.aliNumCol] || '').replace(/\D/g, '') : '';
+            var num = cols.aliNumCol >= 0 ? String(values[r][cols.aliNumCol] || '').replace(/\D/g, '') : '';
           var link = cols.linkCol >= 0 ? String(values[r][cols.linkCol] || '').trim() : '';
+          if (!link && cols.altLinkCol >= 0) link = String(values[r][cols.altLinkCol] || '').trim();
           if (num.length < 8) num = '';
           if (link.indexOf('https://') !== 0) link = '';
           if (num || link) out.push({ order_id: id, ali_order: num, ali_link: link });
@@ -20764,7 +20767,7 @@ function aliSweepFast() {
       if (lastRow < 2 || lastCol < 1) break;
       var cols = nbHeaderCols_(sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0]);
       if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) break;
-      var idxs = [cols.ebayCol, cols.aliNumCol, cols.linkCol].filter(function (i) { return i >= 0; });
+      var idxs = [cols.ebayCol, cols.aliNumCol, cols.linkCol, cols.altLinkCol].filter(function (i) { return i >= 0; });
       var minC = Math.min.apply(null, idxs), maxC = Math.max.apply(null, idxs);
       var span = sheet.getRange(2, minC + 1, lastRow - 1, maxC - minC + 1).getDisplayValues();
       for (var r = 0; r < span.length; r++) {
@@ -20773,6 +20776,7 @@ function aliSweepFast() {
         if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
         var num = cols.aliNumCol >= 0 ? String(row[cols.aliNumCol - minC] || '').replace(/\D/g, '') : '';
         var link = cols.linkCol >= 0 ? String(row[cols.linkCol - minC] || '').trim() : '';
+        if (!link && cols.altLinkCol >= 0) link = String(row[cols.altLinkCol - minC] || '').trim();
         if (num.length < 8) num = '';
         if (link.indexOf('https://') !== 0) link = '';
         if (num || link) out.push({ order_id: id, ali_order: num, ali_link: link });
