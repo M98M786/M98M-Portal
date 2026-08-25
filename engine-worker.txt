@@ -4859,8 +4859,12 @@ const ROUTES = {
         "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ALI_LINK_ADDED', ?2, '', ?3, datetime('now'))"
       ).bind(ctx.email, account + ':' + orderId, (link + (aliOrder ? ' #' + aliOrder : '')).slice(0, 200)).run();
       return { saved: true, sheet,
+        /* An account with no order book (Sir Hasib) must not read as a failure: the link IS
+           saved and the order IS processed — there is simply no day tab to mirror it into. */
         note: sheet.ok ? (sheet.shadow ? 'recorded in the Engine; the sheet write is in SHADOW (logged, not written) until the shadow flip' : 'written to the Engine AND the day tab')
-          : 'saved in the Engine; the sheet side answered: ' + String(sheet.reason || '') };
+          : (/not connected|no such|unknown connection|Invalid argument: id|spreadsheet/i.test(String(sheet.reason || ''))
+            ? 'Link saved ✓ — this account has no order sheet connected, so the portal is the record for it.'
+            : 'saved in the Engine; the sheet side answered: ' + String(sheet.reason || '')) };
     },
   },
 
