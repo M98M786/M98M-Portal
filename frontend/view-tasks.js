@@ -474,7 +474,17 @@
         '<button class="minibtn" data-act="needTimeF" data-id="' + tkAttr(id) + '">⏳ Need more time</button>' +
         '<button class="minibtn" data-act="needInfoF" data-id="' + tkAttr(id) + '">🟠 Need info from hunter</button>' +
         '<button class="minibtn" data-act="draftF" data-id="' + tkAttr(id) + '">🟣 Leave in draft</button>' +
+        '<button class="minibtn tk-revbtn" data-act="rejectF" data-id="' + tkAttr(id) + '">🚫 Reject this item</button>' +
       '</div>' +
+      /* 26 Aug (owner): "update the portals of product listers to reject the items, they still
+         have no option for that." The lister asks to reject with a reason; Management decides.
+         Backend listerRejectRequest already existed - this is the button it was missing. */
+      '<div class="tk-lform hidden" data-lform="reject:' + tkAttr(id) + '">' +
+        '<div class="field"><label>Why should this item not be listed?</label>' +
+          '<select class="tk-in" data-lreject-reason="' + tkAttr(id) + '"><option value="">Pick a reason…</option></select></div>' +
+        '<div class="tk-btns"><button class="minibtn tk-revbtn" data-act="reject" data-id="' + tkAttr(id) + '">Request rejection</button>' +
+          '<button class="minibtn" data-act="leverCancel" data-id="reject:' + tkAttr(id) + '">Cancel</button></div>' +
+        '<div class="tk-sub" style="margin-top:8px">This goes to Management to approve or deny — the item is not rejected until they agree.</div></div>' +
       '<div class="tk-lform hidden" data-lform="time:' + tkAttr(id) + '">' +
         '<div class="field"><label>Why do you need more time?</label>' +
           '<textarea class="tk-ta" data-ltime-reason="' + tkAttr(id) + '" placeholder="What is holding the listing up"></textarea></div>' +
@@ -528,8 +538,9 @@
       return;
     }
     /* R7-4 lister levers — open one inline form, close the others; then the three actions. */
-    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF') {
-      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : 'draft:';
+    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF' || act === 'rejectF') {
+      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : act === 'draftF' ? 'draft:' : 'reject:';
+      if (act === 'rejectF') { tkFillRejectReasons(box, id); }
       var forms = box.querySelectorAll('[data-lform]'), j;
       for (j = 0; j < forms.length; j++) {
         var key = forms[j].getAttribute('data-lform');
@@ -546,6 +557,7 @@
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
     if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
     if (act === 'draft') { tkSendDraft(box, id, btn); return; }
+    if (act === 'reject') { tkSendReject(box, id, btn); return; }
     if (act === 'flagClear') {
       btn.disabled = true;
       api('listerClearFlag', { task_id: id }).then(function () { toast('Flag cleared.'); tkLoadTasks(); })
@@ -597,6 +609,36 @@
     btn.disabled = true;
     api('listerNeedInfo', { task_id: id, note: notev }).then(function (res) {
       toast(res && res.hunter ? 'The hunter (' + res.hunter + ') has been alerted.' : 'Management notified — no hunter was on file.');
+      tkLoadTasks();
+    }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
+  }
+
+  /* The lister's rejection reasons are Management-managed data (huntReasons.lister_reject).
+     Cached after the first fetch so opening the picker on the next row is instant. */
+  var TK_REJECT_REASONS = null;
+  function tkFillRejectReasons(box, id) {
+    var sel = box.querySelector('[data-lreject-reason="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    if (!sel) { sel = [].slice.call(box.querySelectorAll('[data-lreject-reason]')).filter(function (e) { return e.getAttribute('data-lreject-reason') === id; })[0]; }
+    if (!sel) { return; }
+    var paint = function (list) {
+      if (sel.options.length > 1) { return; }               // already filled
+      list.forEach(function (r) { var o = document.createElement('option'); o.value = r; o.textContent = r; sel.appendChild(o); });
+    };
+    if (TK_REJECT_REASONS) { paint(TK_REJECT_REASONS); return; }
+    api('huntReasons', {}).then(function (d) {
+      TK_REJECT_REASONS = (d && d.lister_reject && d.lister_reject.length) ? d.lister_reject
+        : ['Not enough profit', 'No reliable supplier', 'Poor demand', 'Restricted / risky category', 'Duplicate of a live listing'];
+      paint(TK_REJECT_REASONS);
+    }).catch(function () { paint(['Not enough profit', 'No reliable supplier', 'Poor demand', 'Restricted / risky category', 'Duplicate of a live listing']); });
+  }
+
+  function tkSendReject(box, id, btn) {
+    var sel = [].slice.call(box.querySelectorAll('[data-lreject-reason]')).filter(function (e) { return e.getAttribute('data-lreject-reason') === id; })[0];
+    var reason = sel ? tkStr(sel.value) : '';
+    if (!reason) { toast('Pick a reason first.'); if (sel) { sel.focus(); } return; }
+    btn.disabled = true;
+    api('listerRejectRequest', { task_id: id, reason: reason }).then(function () {
+      toast('Sent to Management — they approve or deny the rejection.');
       tkLoadTasks();
     }).catch(function (err) { btn.disabled = false; toast('Not sent: ' + err.message); });
   }
