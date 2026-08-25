@@ -27,11 +27,15 @@ function pushEngineSync() {
   });
   const su = enginePost_('syncUsers', { users: users });
 
-  // A5 answer (contract §11): exactly these five have API; the rest ride the sheets bridge.
-  const apiNorm = ['hafiza', 'abrt', 'saif', 'azhar bhai', 'amna'];
+  /* Which accounts have API is NOT a hardcoded fact any more (25 Aug). The old list named five
+   * and explicitly excluded 'hasib', so the hour after Sir Hasib was connected this push turned
+   * him back off — his 151 listings and 278 orders vanished from every screen for a day. The
+   * Engine now keeps any account that holds a real refresh token switched on regardless of what
+   * this list says; this list is only the starting hint for accounts with no token yet. */
+  const apiNorm = ['hafiza', 'abrt', 'saif', 'azhar bhai', 'amna', 'hasib'];
   const accounts = (connectionHealth().perAccount || []).map(function (a) {
     const n = String(a.account || '').toLowerCase();
-    const enabled = apiNorm.some(function (k) { return n.indexOf(k) >= 0; }) && n.indexOf('hasib') < 0;
+    const enabled = apiNorm.some(function (k) { return n.indexOf(k) >= 0; });
     return { name: String(a.account || ''), api_enabled: enabled };
   });
   const sa = enginePost_('syncAccounts', { accounts: accounts });

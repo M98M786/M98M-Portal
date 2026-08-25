@@ -225,12 +225,18 @@ function nightBackupPull() {
  * sheet's own capital-N 'Order Number'), and 'New Ali Link'; only filled values travel. */
 
 function nbHeaderCols_(headers) {
-  var ebayCol = -1, aliNumCol = -1, linkCol = -1, seen = 0;
+  var ebayCol = -1, aliNumCol = -1, linkCol = -1, aliLinkCol = -1, seen = 0;
   for (var i = 0; i < headers.length; i++) {
     var n = bridgeNormalizeHeader_(String(headers[i] || ''));
     if (n === 'order number') { if (seen === 0) ebayCol = i; else if (aliNumCol < 0) aliNumCol = i; seen++; }
+    /* 25 Aug: the sweep only ever looked for 'New Ali Link' — but TWO of the four order books
+     * (AZHAR ABRT, Amna Baji) have no such column; they carry 'Ali Express Link' instead, and
+     * that is the column processors actually fill. Accept either, preferring 'New Ali Link'
+     * when a book has both. */
     if (n === 'new ali link' && linkCol < 0) linkCol = i;
+    if (n === 'ali express link' && aliLinkCol < 0) aliLinkCol = i;
   }
+  if (linkCol < 0) linkCol = aliLinkCol;                  // fall back to 'Ali Express Link'
   return { ebayCol: ebayCol, aliNumCol: aliNumCol, linkCol: linkCol };
 }
 

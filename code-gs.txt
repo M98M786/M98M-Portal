@@ -20024,11 +20024,15 @@ function pushEngineSync() {
   });
   const su = enginePost_('syncUsers', { users: users });
 
-  // A5 answer (contract §11): exactly these five have API; the rest ride the sheets bridge.
-  const apiNorm = ['hafiza', 'abrt', 'saif', 'azhar bhai', 'amna'];
+  /* Which accounts have API is NOT a hardcoded fact any more (25 Aug). The old list named five
+   * and explicitly excluded 'hasib', so the hour after Sir Hasib was connected this push turned
+   * him back off — his 151 listings and 278 orders vanished from every screen for a day. The
+   * Engine now keeps any account that holds a real refresh token switched on regardless of what
+   * this list says; this list is only the starting hint for accounts with no token yet. */
+  const apiNorm = ['hafiza', 'abrt', 'saif', 'azhar bhai', 'amna', 'hasib'];
   const accounts = (connectionHealth().perAccount || []).map(function (a) {
     const n = String(a.account || '').toLowerCase();
-    const enabled = apiNorm.some(function (k) { return n.indexOf(k) >= 0; }) && n.indexOf('hasib') < 0;
+    const enabled = apiNorm.some(function (k) { return n.indexOf(k) >= 0; });
     return { name: String(a.account || ''), api_enabled: enabled };
   });
   const sa = enginePost_('syncAccounts', { accounts: accounts });
@@ -20646,12 +20650,18 @@ function nightBackupPull() {
  * sheet's own capital-N 'Order Number'), and 'New Ali Link'; only filled values travel. */
 
 function nbHeaderCols_(headers) {
-  var ebayCol = -1, aliNumCol = -1, linkCol = -1, seen = 0;
+  var ebayCol = -1, aliNumCol = -1, linkCol = -1, aliLinkCol = -1, seen = 0;
   for (var i = 0; i < headers.length; i++) {
     var n = bridgeNormalizeHeader_(String(headers[i] || ''));
     if (n === 'order number') { if (seen === 0) ebayCol = i; else if (aliNumCol < 0) aliNumCol = i; seen++; }
+    /* 25 Aug: the sweep only ever looked for 'New Ali Link' — but TWO of the four order books
+     * (AZHAR ABRT, Amna Baji) have no such column; they carry 'Ali Express Link' instead, and
+     * that is the column processors actually fill. Accept either, preferring 'New Ali Link'
+     * when a book has both. */
     if (n === 'new ali link' && linkCol < 0) linkCol = i;
+    if (n === 'ali express link' && aliLinkCol < 0) aliLinkCol = i;
   }
+  if (linkCol < 0) linkCol = aliLinkCol;                  // fall back to 'Ali Express Link'
   return { ebayCol: ebayCol, aliNumCol: aliNumCol, linkCol: linkCol };
 }
 

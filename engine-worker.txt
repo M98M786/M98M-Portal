@@ -3290,8 +3290,13 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       for (const a of (p.accounts || [])) {
         await ctx.env.DB.prepare(
+          /* NEVER switch off an account that holds a working eBay token (25 Aug): Apps Script
+             pushes a HARDCODED list of API accounts, and Sir Hasib was not on it — so every
+             hourly sync silently set api_enabled = 0 and every sync skipped him (151 listings
+             and 278 orders went missing for a day). A stored refresh token is the truth about
+             whether an account can talk to eBay; a stale list is not allowed to override it. */
           'INSERT INTO accounts (name, api_enabled) VALUES (?1, ?2) ' +
-          'ON CONFLICT(name) DO UPDATE SET api_enabled = ?2'
+          "ON CONFLICT(name) DO UPDATE SET api_enabled = CASE WHEN length(COALESCE(oauth_ref,'')) > 50 THEN 1 ELSE ?2 END"
         ).bind(String(a.name || ''), a.api_enabled ? 1 : 0).run();
       }
       return { synced: (p.accounts || []).length };
