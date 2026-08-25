@@ -332,6 +332,15 @@ function apiRetrySingly(batch){
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
 var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave'];
+/* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
+   the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
+   3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
+   same question from D1 in ~50ms. Until the Worker carrying them is deployed the Engine replies
+   'unknown action' and the call falls back to the sheet backend, so the page is CORRECT today and
+   simply becomes fast the day the Worker lands - no second frontend release needed.
+   Only 'unknown action' falls back. An auth failure or a real error must still surface, which is
+   the R6c rule below: a mis-routed call must never be silently papered over. */
+var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine' };
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -400,6 +409,17 @@ function api(action, payload){
       }, 250);
     });
   }
+  if(ENGINE_PREFERRED[action] && (STATE.idToken || STATE.session) && STATE.config && STATE.config.engine_url){
+    return engineApi(ENGINE_PREFERRED[action], payload).catch(function(e){
+      if(String((e && e.message) || e) !== 'unknown action'){ throw e; }
+      return apiViaSheet(action, payload);
+    });
+  }
+  return apiViaSheet(action, payload);
+}
+
+/** The sheet backend path: straight out before sign-in, batched after. */
+function apiViaSheet(action, payload){
   // Before sign-in there is no token, so those calls cannot be batched — send them straight out.
   if((!STATE.idToken && !STATE.session) || action === 'batch'){
     return apiSend(action, payload).then(function(j){
