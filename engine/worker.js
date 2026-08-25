@@ -116,7 +116,7 @@ export default {
          and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
          accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
          fresh budget; watcher fan-outs are capped inside the watchers themselves. */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, nightlyCatchup],
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, nightlyCatchup],
       /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
          budget died with the upgrade. Each heavy family still keeps its own invocation. */
       '40 * * * *': [listingSync, trafficSync],
@@ -930,6 +930,39 @@ async function uncampaignedDigest(env) {
       '. The full list is on the Campaign watch screen.', 'engine:uncamp:' + today);
   }
   await ctx_setSync(env, 'uncampaignedDigest', '', today);
+}
+
+/* 25 Aug — the month-long blind spot. Azhar Bhai had EVERY campaign paused since ~22 July:
+   impressions fell to 22,657 against 316k-440k on the other accounts, sold_30d hit 0 across all
+   186 listings, and orders stopped dead — while the account still read ACTIVE, TOP_RATED and
+   fully stocked on every dashboard. Nothing watched for it, because every existing ad alarm asks
+   about ITEMS inside a campaign; none asked whether the account had a running campaign at all.
+   An account with listings but no running campaign is a switched-off shop, and Management hears
+   about it the same day. Once per day per account, so it cannot flood the way the ack alerts did. */
+async function darkAccountWatch(env) {
+  const today = ukDate('');
+  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'darkAccountWatch' AND account = ''").first();
+  if (st && String(st.cursor) === today) return;
+  const rs = await env.DB.prepare(
+    "SELECT a.name AS account, " +
+    "  COALESCE((SELECT COUNT(*) FROM items_api i WHERE i.account = a.name AND i.status = 'ACTIVE'), 0) AS live, " +
+    "  COALESCE((SELECT COUNT(*) FROM campaigns c WHERE c.account = a.name AND c.status LIKE '%RUNNING%'), 0) AS running, " +
+    "  COALESCE((SELECT COUNT(*) FROM campaigns c WHERE c.account = a.name), 0) AS camps " +
+    'FROM accounts a'
+  ).all();
+  const dark = (rs.results || []).filter((r) => Number(r.live) > 0 && Number(r.running) === 0);
+  for (const d of dark) {
+    /* say the size of it — "8 campaigns, all paused" is a different job from "never set up" */
+    const how = Number(d.camps) > 0 ? Number(d.camps) + ' campaign(s) exist but NONE is running' : 'no campaigns at all';
+    await notifyRole(env, 'Management', 'Account is dark: ' + d.account,
+      d.account + ' has ' + d.live + ' active listing(s) and ' + how + '. Promoted placement is where most ' +
+      'of the revenue comes from, so an account in this state stops selling while still looking healthy — ' +
+      'its listings stay ACTIVE and its seller level stays put. Check Campaign watch for this account.',
+      'engine:dark:' + d.account + ':' + today);
+    await notifyRole(env, 'Advertising Manager', 'Account is dark: ' + d.account,
+      d.account + ': ' + d.live + ' active listing(s), ' + how + '.', 'engine:darkadv:' + d.account + ':' + today);
+  }
+  await ctx_setSync(env, 'darkAccountWatch', '', today);
 }
 
 async function zeroSaleScan(env) {
@@ -5111,7 +5144,7 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll,
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
-        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan,
+        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings };
       const fn = jobs[String(p.job || '')];
@@ -5638,7 +5671,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
