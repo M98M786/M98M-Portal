@@ -29,7 +29,11 @@
   VIEWS.deptBoard = {
     label: 'Departments',
     icon: '<path d="M3 9h18M9 3v18M3 4h17v16H4z"/>',
-    roles: '*',
+    /* Was '*'. Every person in the company could see every department's open load and who was
+       carrying it. That is a management view: a lister does not need Advertising's backlog, and
+       showing it to them is how the boards came to feel like noise. Department members get their
+       OWN board (tasksListing, tasksHunting, ...) as their landing page instead. */
+    roles: ['Management', 'Ops Head', 'Team Lead'],
     order: 3.5,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Pending tasks <span class="goldtext">by department</span></h1>' +

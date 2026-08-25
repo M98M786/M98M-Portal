@@ -18,7 +18,7 @@
       roles: ['Product Hunter', 'Team Lead', 'Management', 'Ops Head'] },
     { dept: 'Orders', key: 'tasksOrders', label: 'Order tasks',
       icon: '<path d="M3 6h18l-2 12H5z"/><path d="M9 10h6"/>',
-      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'CS'] },
+      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head'] },
     { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
       icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
       roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'] },
@@ -58,6 +58,10 @@
   /* One live timer for whichever department page is open. renderView() replaces the DOM, so the
      timer must die with it — otherwise five pages' timers pile up and hammer the backend. */
   var DT_TIMER = null;
+  /* 20 seconds, not 45: a processor finishing a task wants the board to agree with them while
+     they are still looking at it. The read is cheap and the page paints from the last answer
+     first, so a tick costs a background request, not a spinner. */
+  var DT_REFRESH_MS = 20000;
   function dtStopTimer() { if (DT_TIMER) { clearInterval(DT_TIMER); DT_TIMER = null; } }
 
   function dtPaint(deptName) {
@@ -141,7 +145,7 @@
         DT_TIMER = setInterval(function () {
           if (!$('dtBody')) { dtStopTimer(); return; }
           go();
-        }, 45000);
+        }, DT_REFRESH_MS);
       }
     };
   });

@@ -21392,12 +21392,27 @@ function actionHuntReasonAdd_(payload, ctx) {
 }
 
 /* ---------- department pending boards (R8-1) ---------- */
+/* Every task type the portal can create must appear here. 'loss_review' did not, and 32 live
+   loss tasks - real work, assigned to the Advertising module holder by Signals.gs - fell through
+   to 'General', a bucket with no department page. So the Advertising board read empty while a
+   third of the open work in the business sat inside it, which is what "the boards show fake
+   numbers" meant. A missing type must never again be silently absorbed: r8DeptOfType_ reports
+   what it could not place so the board can say so out loud. */
 const R8_DEPT_OF_TYPE = {
-  listing_new: 'Listing', listing_revision: 'Listing', campaign_set: 'Advertising',
-  cpc_research: 'Advertising', potential_cpc_review: 'Advertising',
-  supplier_add: 'Orders', sourcing_link: 'Hunting', hunt_revision: 'Hunting',
-  end_listing: 'Listing', query: 'CS', general: 'General',
+  listing_new: 'Listing', listing_revision: 'Listing', end_listing: 'Listing',
+  campaign_set: 'Advertising', cpc_research: 'Advertising', potential_cpc_review: 'Advertising',
+  loss_review: 'Advertising',
+  supplier_add: 'Orders',
+  sourcing_link: 'Hunting', hunt_revision: 'Hunting',
+  query: 'CS',
+  general: 'General',
 };
+/* TASK_TYPES is the authoritative list in Tasks.gs; anything in it that is missing above is a
+   bug, not a 'General' task. Surfaced rather than swallowed. */
+function r8UnmappedTypes_() {
+  const known = (typeof TASK_TYPES !== 'undefined' && TASK_TYPES) || [];
+  return known.filter(function (t) { return !Object.prototype.hasOwnProperty.call(R8_DEPT_OF_TYPE, t); });
+}
 
 function r8IsSystemActor_(email) {
   const e = String(email || '').toLowerCase();
@@ -21432,7 +21447,8 @@ function actionDeptPending_(payload, ctx) {
   history.sort(function (a, b) { return String(b.decided_at).localeCompare(String(a.decided_at)); });
   return { departments: Object.keys(depts).map(function (k) { return depts[k]; })
       .sort(function (a, b) { return b.open - a.open; }),
-    history: history.slice(0, 40), as_of: now_() };
+    history: history.slice(0, 40), as_of: now_(),
+    unmapped_types: r8UnmappedTypes_() };
 }
 
 /* ---------- hunting desk (R8-2) ---------- */

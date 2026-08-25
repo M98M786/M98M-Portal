@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2244';
+var BUILD = '20260825-2307';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -8634,18 +8634,18 @@ function createMeeting() {
     if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     cdFetch().then(cdPaint).catch(function (e) {
       if (had) { toast('Showing the last picture — could not refresh just now.'); return; }
-      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load the live desk.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load the customer service desk.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
     });
   }
 
   VIEWS.csDesk = {
-    label: 'CS live desk',
+    label: 'Customer service desk',
     order: 12,
     roles: ['Management', 'Ops Head', 'CS'],
     icon: '<path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3l-9 9"/><path d="M15 3h6v6"/>',
     prefetch: function () { return cdFetch(); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>CS <span class="goldtext">live desk</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>Customer <span class="goldtext">service desk</span></h1>' +
           '<span class="sub">Straight from eBay every hour · violations checked every 5 minutes · respond-by clocks first</span>' +
           '<button class="minibtn" id="cdRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="card enter d2"><div class="bd"><div id="cdBody"><div class="spinner"></div></div></div></div>' +
@@ -9448,7 +9448,11 @@ VIEWS.dashboard = {
   VIEWS.deptBoard = {
     label: 'Departments',
     icon: '<path d="M3 9h18M9 3v18M3 4h17v16H4z"/>',
-    roles: '*',
+    /* Was '*'. Every person in the company could see every department's open load and who was
+       carrying it. That is a management view: a lister does not need Advertising's backlog, and
+       showing it to them is how the boards came to feel like noise. Department members get their
+       OWN board (tasksListing, tasksHunting, ...) as their landing page instead. */
+    roles: ['Management', 'Ops Head', 'Team Lead'],
     order: 3.5,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Pending tasks <span class="goldtext">by department</span></h1>' +
@@ -9528,7 +9532,7 @@ VIEWS.dashboard = {
       roles: ['Product Hunter', 'Team Lead', 'Management', 'Ops Head'] },
     { dept: 'Orders', key: 'tasksOrders', label: 'Order tasks',
       icon: '<path d="M3 6h18l-2 12H5z"/><path d="M9 10h6"/>',
-      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'CS'] },
+      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head'] },
     { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
       icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
       roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'] },
@@ -9568,6 +9572,10 @@ VIEWS.dashboard = {
   /* One live timer for whichever department page is open. renderView() replaces the DOM, so the
      timer must die with it — otherwise five pages' timers pile up and hammer the backend. */
   var DT_TIMER = null;
+  /* 20 seconds, not 45: a processor finishing a task wants the board to agree with them while
+     they are still looking at it. The read is cheap and the page paints from the last answer
+     first, so a tick costs a background request, not a spinner. */
+  var DT_REFRESH_MS = 20000;
   function dtStopTimer() { if (DT_TIMER) { clearInterval(DT_TIMER); DT_TIMER = null; } }
 
   function dtPaint(deptName) {
@@ -9651,7 +9659,7 @@ VIEWS.dashboard = {
         DT_TIMER = setInterval(function () {
           if (!$('dtBody')) { dtStopTimer(); return; }
           go();
-        }, 45000);
+        }, DT_REFRESH_MS);
       }
     };
   });

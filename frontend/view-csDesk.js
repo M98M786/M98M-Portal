@@ -247,18 +247,18 @@
     if (!had) { box.innerHTML = '<div class="spinner"></div>'; }
     cdFetch().then(cdPaint).catch(function (e) {
       if (had) { toast('Showing the last picture — could not refresh just now.'); return; }
-      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load the live desk.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load the customer service desk.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
     });
   }
 
   VIEWS.csDesk = {
-    label: 'CS live desk',
+    label: 'Customer service desk',
     order: 12,
     roles: ['Management', 'Ops Head', 'CS'],
     icon: '<path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3l-9 9"/><path d="M15 3h6v6"/>',
     prefetch: function () { return cdFetch(); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>CS <span class="goldtext">live desk</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>Customer <span class="goldtext">service desk</span></h1>' +
           '<span class="sub">Straight from eBay every hour · violations checked every 5 minutes · respond-by clocks first</span>' +
           '<button class="minibtn" id="cdRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="card enter d2"><div class="bd"><div id="cdBody"><div class="spinner"></div></div></div></div>' +
