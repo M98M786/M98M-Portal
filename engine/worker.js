@@ -2930,15 +2930,15 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
 
 /* The ISO instant where the current UK trading day began — for comparing against raw UTC
    created_at stamps in SQL. Same probe ordersBoard uses: try GMT, then BST. */
-function ukDayStartIso() {
-  const today = ukDate('');
-  let ms = Date.parse(today + 'T00:00:00Z');
+function ukDayStartIsoFor(day) {
+  let ms = Date.parse(day + 'T00:00:00Z');
   for (const off of [0, -3600000]) {
-    const cand = Date.parse(today + 'T00:00:00Z') + off;
-    if (ukDate(new Date(cand).toISOString()) === today && ukDate(new Date(cand - 1000).toISOString()) !== today) { ms = cand; break; }
+    const cand = Date.parse(day + 'T00:00:00Z') + off;
+    if (ukDate(new Date(cand).toISOString()) === day && ukDate(new Date(cand - 1000).toISOString()) !== day) { ms = cand; break; }
   }
   return new Date(ms).toISOString();
 }
+function ukDayStartIso() { return ukDayStartIsoFor(ukDate('')); }
 
 /* Nightly rollups (§3): sales_daily per account per UK day (last 8 days re-rolled, so late
    orders correct yesterday), avg_profit_7d per item, and the daily_health snapshot. Ads spend
@@ -3144,7 +3144,13 @@ async function cpcAudit(env) {
    an account with no rows in a table still reports 0 rather than dropping out of the list. */
 async function computeHealth(env) {
   const accs = await env.DB.prepare('SELECT name FROM accounts').all();
-  const cut7 = new Date(Date.now() - 7 * 86400000).toISOString();
+  /* The window must be the SAME one the week KPI uses, or the per-account "Revenue 7d" tiles and
+     the headline sit on one screen disagreeing. A rolling 168 hours reached back into the evening
+     of day -7 and quietly added a part-day the headline never counted (£13,037 of tiles under an
+     £11,586 headline). This is UK calendar days, today-6 through today, exactly like sales_daily. */
+  const hToday = ukDate('');
+  const hFrom = (() => { const d = new Date(hToday + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 6); return d.toISOString().slice(0, 10); })();
+  const cut7 = ukDayStartIsoFor(hFrom);
   const [li, od, lo, ca] = await env.DB.batch([
     env.DB.prepare("SELECT account, COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' GROUP BY account"),
     env.DB.prepare('SELECT account, COUNT(*) AS n, COALESCE(SUM(sold), 0) AS rev FROM orders WHERE created_at >= ?1 GROUP BY account').bind(cut7),
