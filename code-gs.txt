@@ -5706,6 +5706,19 @@ const HUNT_LISTER_WHITELIST = HUNT_LIMITED_MAP.map(function (p) { return p[0]; }
 
 // Dropdown values verbatim from the live sheet, header-echo placeholders excluded — those are
 // pseudo-placeholders the sheet uses as a prompt, not decisions (they appear as data 48 times).
+/* 26 Aug (owner): "Hunting will be of two types — seasonal item or consistent item. He will
+   select at the start of the item." Stored in the existing 'Seasonal' column; approvals split by
+   it into a Seasonal tray and a Consistent tray. Required at submit so nothing lands untyped. */
+const HUNT_KINDS = ['Seasonal', 'Consistent'];
+const HC_KIND = 'Seasonal';
+function huntKind_(value, required) {
+  const s = String(value === null || value === undefined ? '' : value).trim();
+  if (!s) { if (required) throw new Error(SAFE_ERROR_PREFIX + 'choose Seasonal or Consistent'); return ''; }
+  for (let i = 0; i < HUNT_KINDS.length; i++) {
+    if (huntNormKey_(HUNT_KINDS[i]) === huntNormKey_(s)) return HUNT_KINDS[i];
+  }
+  throw new Error(SAFE_ERROR_PREFIX + 'the item type must be Seasonal or Consistent');
+}
 const HUNT_ADVERTISING_TYPES = ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
   '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'];
 const HUNT_CPC_PLACEHOLDER = 'CPC Selling Chance';
@@ -5758,6 +5771,7 @@ function actionSubmitHunt_(payload, ctx) {
   // no digit at all is not a price and would silently cost the calculator its only inputs.
   if (huntFirstNumber_(cols[HC_CALC_PRICE]) === null) throw new Error('a numeric price is required: ' + HC_CALC_PRICE);
   if (huntFirstNumber_(cols[HC_SOURCE_PRICE]) === null) throw new Error('a numeric price is required: ' + HC_SOURCE_PRICE);
+  cols[HC_KIND] = huntKind_(cols[HC_KIND], true);   // Seasonal | Consistent — required at submit
 
   const advertising = huntAdvertisingType_(cols[HC_CPC], false);
   cols[HC_CPC] = advertising;
@@ -5857,6 +5871,7 @@ function actionHuntQueue_(payload, ctx) {
     count: rows.length,
     can_decide: isMgmt_(ctx.user.role, ctx.ident.email),
     advertising_types: HUNT_ADVERTISING_TYPES,
+    hunt_kinds: HUNT_KINDS,
   };
 }
 

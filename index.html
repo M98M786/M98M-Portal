@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2338';
+var BUILD = '20260825-2350';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10184,7 +10184,8 @@ VIEWS.dashboard = {
     { title: 'Selection', hint: 'what this item is and how you would run it', fields: [
       { col: 'Main Keyword Terapeak link', req: true, wide: true,
         hint: 'The main keyword as plain text — on the live sheet this column holds no URLs; the Terapeak screenshot goes below.' },
-      { col: 'Seasonal', hint: 'A seasonal tag is enough on its own to enter the Seasonal campaign tier.' },
+      { col: 'Seasonal', label: 'Item type', type: 'select', req: true, opts: ['Consistent', 'Seasonal'],
+        hint: 'Chosen at the start: Consistent = sells all year; Seasonal = holiday/weather-driven. Sorts it into the right approval queue.' },
       { col: 'CPC Selling Chance', type: 'select', opts: HU_ADV_TYPES,
         hint: 'Leave blank if unsure — Management sets it at approval.' }
     ] },
@@ -10959,19 +10960,56 @@ VIEWS.dashboard = {
     });
   }
 
+  /* Owner 26 Aug: hunt approvals split by item type. Two trays — Seasonal and Consistent — plus
+     an All view, driven by the 'Seasonal' value the hunter chose at submit. The tab is remembered
+     across refreshes so a reviewer working the Consistent tray is not thrown back to All every
+     20 seconds. Anything with no type yet (older rows) shows under 'Unsorted' so it is never lost. */
+  var HU_QK = 'all';
+  function huKindOf(rec) {
+    var v = huStr(rec['Seasonal']).toLowerCase();
+    if (v.indexOf('season') >= 0) { return 'Seasonal'; }
+    if (v.indexOf('consist') >= 0) { return 'Consistent'; }
+    return 'Unsorted';
+  }
   function huPaintQueue(box, d) {
-    var hunts = (d && d.hunts) || [];
+    var all = (d && d.hunts) || [];
     var types = (d && d.advertising_types && d.advertising_types.length) ? d.advertising_types : HU_ADV_TYPES;
     var can = !!(d && d.can_decide);
-    huCount('huntQueue', hunts.length);
-    if (!hunts.length) {
-      box.innerHTML = '<div class="hu-empty">No hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
-      return;
+    huCount('huntQueue', all.length);
+
+    var counts = { all: all.length, Seasonal: 0, Consistent: 0, Unsorted: 0 };
+    all.forEach(function (r) { counts[huKindOf(r)]++; });
+    var tabDefs = [['all', 'All']];
+    (d && d.hunt_kinds && d.hunt_kinds.length ? d.hunt_kinds : ['Seasonal', 'Consistent']).forEach(function (k) { tabDefs.push([k, k + ' items']); });
+    if (counts.Unsorted) { tabDefs.push(['Unsorted', 'Unsorted']); }
+    if (['all', 'Seasonal', 'Consistent', 'Unsorted'].indexOf(HU_QK) < 0) { HU_QK = 'all'; }
+
+    var tabs = '<div class="hu-qtabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+      tabDefs.map(function (t) {
+        var n = counts[t[0]] || 0;
+        return '<button class="hu-qtab' + (HU_QK === t[0] ? ' on' : '') + '" data-qk="' + huAttr(t[0]) + '"' +
+          ' style="padding:7px 13px;border-radius:9px;border:1px solid var(--gold-line' + (HU_QK === t[0] ? '-hi' : '') +
+          ');background:var(--panel' + (HU_QK === t[0] ? '-2' : '') + ');color:var(--text);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer">' +
+          esc(t[1]) + ' <b style="color:var(--gold-a)">' + n + '</b></button>';
+      }).join('') + '</div>';
+
+    var hunts = HU_QK === 'all' ? all : all.filter(function (r) { return huKindOf(r) === HU_QK; });
+
+    var body;
+    if (!all.length) {
+      body = '<div class="hu-empty">No hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
+    } else if (!hunts.length) {
+      body = '<div class="hu-hint" style="margin-top:0">Nothing in the ' + esc(HU_QK === 'all' ? 'queue' : HU_QK + ' tray') + ' right now.</div>';
+    } else {
+      body = (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
+          'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
+        hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
     }
-    box.innerHTML = (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
-        'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
-      hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
-    if (can) { huWireQueue(box); }
+    box.innerHTML = (all.length ? tabs : '') + body;
+    box.querySelectorAll('[data-qk]').forEach(function (b) {
+      b.onclick = function () { HU_QK = this.getAttribute('data-qk'); huPaintQueue(box, d); };
+    });
+    if (can && hunts.length) { huWireQueue(box); }
   }
 
   function huLoadQueue() {
