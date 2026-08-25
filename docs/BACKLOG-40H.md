@@ -153,7 +153,13 @@ only the second one counts here.
   Listings · Hunting · CS.
 - [x] **DONE (verified)** — Yousaf (m98mseven) freed: role cleared, status disabled, renamed
   "Yousaf Free Email". Directory active count 14 → 13, no longer listed.
-- [ ] **TODO (next)** — Hunting two types: hunter picks **Seasonal** or **Consistent** at submit
+- [x] **DONE (verified on screen)** — Hunting two types: hunter picks **Seasonal** or **Consistent** at submit
   (reuse the existing `Seasonal` column in HUNTING_COLS); Hunt approvals splits into **Seasonal
   items approval** and **Consistent items approval**. Backend: submit captures the kind + huntQueue
   returns it per row; frontend: selector on submit + two-tab filter on the approvals queue.
+
+### Hunting two-types — verified 26 Aug
+Submit form: required "Item type" selector (Consistent/Seasonal). Backend huntKind_ rejects
+untyped. Hunt approvals split into tabs **All 1 · Seasonal 0 · Consistent 0 · Unsorted 1** — the
+one pre-existing hunt correctly sits in Unsorted (nothing hidden); clicking Seasonal shows
+"Nothing in the Seasonal tray right now." Tab filter + counts confirmed live.
