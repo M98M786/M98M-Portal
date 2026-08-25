@@ -3270,6 +3270,86 @@ const ROUTES = {
 
   /* Apps Script pushes its USERS + accounts registry here after every change, so
      the edge's role/module truth is at most one change behind the Portal DB. */
+  /* ---------------- SPEED Phase 2: the task mirror ----------------
+     Every task screen used to re-read the Google Sheet on each click — 4.2s a page, and the
+     department boards are people's landing pages. Apps Script now pushes TASKS here and the
+     boards read D1 instead (~50ms). The SHEET stays the master: this table is a mirror, and a
+     row that vanishes from the sheet is swept out by the `stale` pass below. */
+  syncTasks: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rows = Array.isArray(p.tasks) ? p.tasks : [];
+      const full = String(p.full || '') === 'true';       // a complete push may retire missing rows
+      /* The stamp comes FROM the caller and is one value for the whole multi-slice push. Minting
+         it per request here would give each slice its own stamp, and the final slice's sweep
+         would then delete every row the earlier slices had just written. */
+      const stamp = String(p.stamp || '').slice(0, 40) || new Date().toISOString();
+      const stmts = rows.map((t) => ctx.env.DB.prepare(
+        'INSERT INTO tasks (task_id, type, account, item_id, title, details, comments, assigned_by, assigned_to, ' +
+        'priority, deadline_pkt, status, created_at, updated_at, submitted_at, approved_by, decided_at, synced_at) ' +
+        'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) ' +
+        'ON CONFLICT(task_id) DO UPDATE SET type=?2, account=?3, item_id=?4, title=?5, details=?6, comments=?7, ' +
+        'assigned_by=?8, assigned_to=?9, priority=?10, deadline_pkt=?11, status=?12, created_at=?13, updated_at=?14, ' +
+        'submitted_at=?15, approved_by=?16, decided_at=?17, synced_at=?18'
+      ).bind(
+        String(t.task_id || ''), String(t.type || ''), String(t.account || ''), String(t.item_id || ''),
+        String(t.title || '').slice(0, 400), String(t.details || '').slice(0, 8000), String(t.comments || '').slice(0, 2000),
+        String(t.assigned_by || '').toLowerCase(), String(t.assigned_to || '').toLowerCase(), String(t.priority || ''),
+        String(t.deadline_pkt || ''), String(t.status || ''), String(t.created_at || ''), String(t.updated_at || ''),
+        String(t.submitted_at || ''), String(t.approved_by || ''), String(t.decided_at || ''), stamp
+      ));
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      let retired = 0;
+      if (full && rows.length) {
+        /* the sheet is the master — anything it no longer carries must not linger on a board */
+        const r = await ctx.env.DB.prepare('DELETE FROM tasks WHERE synced_at != ?1').bind(stamp).run();
+        retired = (r.meta && r.meta.changes) || 0;
+      }
+      await ctx_setSync(ctx.env, 'taskMirror', '', String(rows.length) + ' tasks');
+      return { synced: rows.length, retired };
+    },
+  },
+
+  /* The board reads, served from the mirror. These MUST agree with the Apps Script versions
+     (R8.gs actionDeptPending_/actionListDesk_) row for row — same department map, same open
+     statuses, same overdue rule — or the fast page would quietly disagree with the slow one. */
+  deptPendingEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      const DEPT_OF_TYPE = { listing_new: 'Listing', listing_revision: 'Listing', campaign_set: 'Advertising',
+        cpc_research: 'Advertising', potential_cpc_review: 'Advertising', supplier_add: 'Orders',
+        sourcing_link: 'Hunting', hunt_revision: 'Hunting', end_listing: 'Listing', query: 'CS', general: 'General' };
+      const OPEN = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
+      const rs = await ctx.env.DB.prepare(
+        'SELECT task_id, type, status, assigned_to, assigned_by, deadline_pkt, created_at, decided_at, title FROM tasks'
+      ).all();
+      const nowMs = Date.now();
+      const depts = {}, history = [];
+      const isSystem = (e) => { const s = String(e || '').toLowerCase(); return !s || s.indexOf('@') < 0 || s === 'system' || s.indexOf('engine') === 0; };
+      for (const t of (rs.results || [])) {
+        const dept = DEPT_OF_TYPE[String(t.type || 'general')] || 'General';
+        const status = String(t.status || '');
+        const rec = depts[dept] = depts[dept] || { dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+        if (status === 'Completed') {
+          if (t.decided_at) history.push({ dept, type: String(t.type || ''), title: String(t.title || '').slice(0, 80),
+            assigned_to: String(t.assigned_to || ''), origin: isSystem(t.assigned_by) ? 'system' : 'management',
+            decided_at: String(t.decided_at) });
+          continue;
+        }
+        if (OPEN.indexOf(status) < 0) continue;
+        rec.open++;
+        if (isSystem(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
+        const who = String(t.assigned_to || '(unassigned)');
+        rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
+        const dl = Date.parse(String(t.deadline_pkt || ''));
+        if (!isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval') rec.overdue++;
+        const created = String(t.created_at || '');
+        if (created && (!rec.oldest || created < rec.oldest)) rec.oldest = created;
+      }
+      history.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
+      return { departments: Object.values(depts).sort((a, b) => b.open - a.open),
+        history: history.slice(0, 40), as_of: new Date().toISOString(), source: 'engine' };
+    },
+  },
+
   syncUsers: {
     auth: 'sync', fn: async (p, ctx) => {
       const users = p.users || [];

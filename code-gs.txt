@@ -20062,8 +20062,17 @@ function pushEngineSync() {
   try { costs = pushEngineCosts(); }
   catch (e) { logActivity_('system', 'ENGINE_COST_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
 
+  /* SPEED Phase 2 (25 Aug). Every department's landing page used to re-read the TASKS tab on
+   * each open — 4.2 seconds, on the first screen a person sees each morning. The tab stays the
+   * master record; this mirrors it into D1 so the boards can answer in ~50ms. Dates go through
+   * taskPktIso_ here, not at the far end, so the Worker compares the same strings Apps Script
+   * does and the fast board can never disagree with the slow one. */
+  let mirrored = '';
+  try { mirrored = pushEngineTasks(); }
+  catch (e) { logActivity_('system', 'ENGINE_TASKS_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
+
   logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
-  return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs;
+  return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs + ' · ' + mirrored;
 }
 
 
@@ -20118,6 +20127,7 @@ function actionEngineSheetWrite_(payload) {
 const ENGINE_RUNNABLE = {
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
+  pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -20434,6 +20444,41 @@ function enrichEngineFacts_() {
   });
   factProps.setProperty('FACTS_CURSOR', String((factStopped + 1) % Math.max(1, allAccounts.length)));
   return pushed;
+}
+
+
+/** Mirror the TASKS tab into D1 so department boards answer from the edge (SPEED Phase 2).
+ *  Full push every time — TASKS is a few thousand rows at most, and a full push is the only
+ *  way a task DELETED from the sheet also leaves the boards. Sent in slices so one oversized
+ *  body can never fail the whole sync. */
+function pushEngineTasks() {
+  const rows = readTab_('TASKS');
+  const out = rows.map(function (t) {
+    return {
+      task_id: String(t.task_id || ''), type: String(t.type || ''), account: String(t.account || ''),
+      item_id: String(t.item_id || ''), title: String(t.title || ''), details: String(t.details || ''),
+      comments: String(t.comments || ''), assigned_by: String(t.assigned_by || ''),
+      assigned_to: String(t.assigned_to || ''), priority: String(t.priority || ''),
+      deadline_pkt: taskPktIso_(t.deadline_pkt), status: String(t.status || ''),
+      created_at: taskPktIso_(t.created_at), updated_at: taskPktIso_(t.updated_at),
+      submitted_at: taskPktIso_(t.submitted_at), approved_by: String(t.approved_by || ''),
+      decided_at: taskPktIso_(t.decided_at),
+    };
+  }).filter(function (t) { return t.task_id; });
+
+  let sent = 0, retired = 0;
+  const SLICE = 300;
+  /* ONE stamp for every slice of this push: the final slice retires whatever this stamp did not
+   * touch, so a per-slice stamp would wipe the slices before it. */
+  const stamp = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'") + '#' + Math.floor(Math.random() * 1e6);
+  for (let i = 0; i < out.length; i += SLICE) {
+    const last = i + SLICE >= out.length;
+    /* only the FINAL slice may retire rows — the sweep needs the whole push written first */
+    const r = enginePost_('syncTasks', { tasks: out.slice(i, i + SLICE), stamp: stamp, full: last ? 'true' : '' });
+    sent += Number(r.synced || 0);
+    retired += Number(r.retired || 0);
+  }
+  return sent + ' tasks mirrored' + (retired ? ', ' + retired + ' retired' : '');
 }
 
 
