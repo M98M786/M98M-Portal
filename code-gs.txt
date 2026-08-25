@@ -20128,6 +20128,7 @@ const ENGINE_RUNNABLE = {
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
+  connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -22009,6 +22010,71 @@ function extractSheetId_(url) {
 function inferGlobalKind_(name) {
   for (let i = 0; i < GLOBAL_NAME_HINTS.length; i++) if (GLOBAL_NAME_HINTS[i][0].test(name)) return GLOBAL_NAME_HINTS[i][1];
   return null;
+}
+
+/* 25 Aug — Sir Hasib's order-processing book was never in the registry, so CONNECTIONS had no
+   order_processing row for him and the Ali sweep had nothing to read. Every one of his 299 orders
+   since the account went live carried no AliExpress number and no link, while the four connected
+   accounts sat at 97-99% coverage. Verified before linking: the book's "25 August" tab carries the
+   standard header shape and its first order, 15-15067-04501, is Sir Hasib's own row in D1.
+
+   Deliberately NOT importRegistry(). A full re-import rewrites every CONNECTIONS row from the
+   registry, and at least one row here was corrected by hand and never pushed back to the registry
+   (Azhar Bhai's account_report was repointed off a blank book). Re-importing would revert that
+   silently. So this writes the ONE row that is missing, and also fills the registry so a future
+   import agrees with us instead of undoing us. */
+const PENDING_SHEET_LINKS = [
+  { account: 'Sir Hasib', kind: 'order_processing', registryTab: 'Order Processing Sheets',
+    id: '1MJK7wt3r3w-7JCCZjaSGxU23ZftbqerS7LlKAk-qwmQ', note: 'Sir Hasib' },
+];
+
+function connectPendingSheets() {
+  const out = [];
+  const db = getPortalDb_(false);
+  const conn = db.getSheetByName('CONNECTIONS');
+  const rows = conn.getDataRange().getValues();
+  const existing = {};
+  for (let i = 1; i < rows.length; i++) existing[rows[i][1] + '|' + rows[i][2] + '|' + rows[i][3]] = i + 1;
+
+  let regId = '';
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][1]) === 'global' && String(rows[i][3]) === 'registry') { regId = String(rows[i][4] || ''); break; }
+  }
+
+  PENDING_SHEET_LINKS.forEach(function (p) {
+    const key = 'account|' + p.account + '|' + p.kind;
+    const before = existing[key] ? String(conn.getRange(existing[key], 5).getValue() || '') : '';
+    if (before && before !== p.id) {                      // never silently repoint a live link
+      out.push('SKIP ' + key + ' — already points at ' + before);
+      return;
+    }
+    upsert_(conn, existing, 'account', p.account, p.kind, p.id, 'linked', p.note || p.account);
+    out.push('linked ' + key + ' -> ' + p.id);
+
+    if (regId && p.registryTab) {
+      try {
+        const sh = SpreadsheetApp.openById(regId).getSheetByName(p.registryTab);
+        if (!sh) { out.push('registry tab missing: ' + p.registryTab); return; }
+        const v = sh.getDataRange().getValues();
+        const url = 'https://docs.google.com/spreadsheets/d/' + p.id + '/edit';
+        let at = -1;
+        for (let i = 1; i < v.length; i++) {
+          if (String(v[i][0] || '').trim().toLowerCase() === p.account.toLowerCase()) { at = i + 1; break; }
+        }
+        if (at > 0) {
+          if (String(v[at - 1][1] || '').trim()) { out.push('registry already had a link for ' + p.account + ' — left alone'); }
+          else { sh.getRange(at, 2).setValue(url); out.push('registry row ' + at + ' filled'); }
+        } else {
+          sh.appendRow([p.account, url]);
+          out.push('registry row appended for ' + p.account);
+        }
+      } catch (e) { out.push('registry write failed: ' + String(e && e.message || e).slice(0, 80)); }
+    }
+  });
+
+  const msg = out.join(' | ');
+  logActivity_('system', 'CONNECT_PENDING', '', '', '', msg.slice(0, 400));
+  return msg;
 }
 
 /** §6 checklist: per active account ×4, globals ×11. Missing = "not connected yet". */
