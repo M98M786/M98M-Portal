@@ -1580,7 +1580,15 @@ async function financeSync(env) {
         '&filter=' + encodeURIComponent('transactionDate:[' + since + '..]'), tok);
       if (r.status === 403) throw new Error(acct + ' finances 403 — this account\'s token still lacks sell.finances: re-consent it');
       if (!r.ok) throw new Error(acct + ' finances ' + r.status + ': ' + (await r.text()).slice(0, 120));
-      const d = await r.json();
+      /* eBay's finances endpoint answers 200 with an EMPTY BODY now and then (seen on Azhar Bhai,
+         24 Aug: every hourly run died on "Unexpected end of JSON input" and the fee feed stalled
+         7 hours). An empty page means no more transactions — end the walk, keep what we have,
+         never throw away the pages already collected. */
+      const raw = await r.text();
+      if (!raw.trim()) break;
+      let d;
+      try { d = JSON.parse(raw); }
+      catch (e) { break; }
       txs.push(...(d.transactions || []));
       if ((d.transactions || []).length < 100) break;
     }
