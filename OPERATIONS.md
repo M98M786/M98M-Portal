@@ -76,7 +76,16 @@ Three independent layers, none sharing a failure mode:
 2. **Drive copy of the Portal DB, nightly** — the long-standing `nightlyBackup` file copy (30-day retention), untouched.
 3. **Local copies on the office Mac** — the Night Watch session exports the four backup sheets as .xlsx into `Documents/Claude Code/M98M-Backups/<date>/` each night it runs, pruning after 21 days.
 
-Apps Script has **no triggers of its own** for any of this (house rule: no ScriptApp scope). The hourly work rides `runMissedCheckpointSweep`, the nightly work rides `nightlyBackup` — same pattern as every other sweep.
+4. **The product hunting backup workbook** — *Product Hunting Backup Sheet*, three trays (**Pending For Approval · Approved · No Approved**) carrying the same 41 columns as `HUNTING_DB`. This one is different from the three above: it is not a nightly snapshot but a **live mirror**. A product is written into it the moment it is submitted, approved, not approved or sent back for revision (`huntBackupUpsert_`, from the three hunting handlers), and `huntBackupSync` re-reads the whole hunting database **every 5 minutes** and repairs anything that drifted — an Approval Status edited straight in a sheet, a row somebody dragged, a write that never landed. It fingerprints the database first, so a quiet sweep costs one read and never opens the workbook.
+
+   Three rules worth knowing before you touch it:
+   - **Nothing is ever deleted.** A product that disappears from `HUNTING_DB` keeps its row at the bottom of the tray it was last in.
+   - **An empty read is refused, not mirrored.** A Google fault cannot blank the file.
+   - **Do not rename the three tabs** — the portal finds them by name. The *Backup Status* tab shows when the last real change was mirrored; that stamp moves only when something actually changed, so a quiet day is not a broken backup.
+
+   It is itself a single Drive file, so `huntBackupDailyCopy_` drops a dated duplicate into the same owner-only *M98M Portal Backups* folder on the same 30-day prune. Reviewers reach the workbook from **Hunt approvals → Backup sheet**; hunters deliberately get no link, because it holds every hunter's rows and their profit figures (§4.2).
+
+Apps Script has **no triggers of its own** for any of this (house rule: no ScriptApp scope). The hourly work rides `runMissedCheckpointSweep`, the nightly work rides `nightlyBackup`, the 5-minute work rides `runLossEscalationSweep` — same pattern as every other sweep.
 
 ## 6c. Order processing & sourcing (R5)
 
