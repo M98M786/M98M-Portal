@@ -1037,6 +1037,12 @@ async function alertAckWatch(env) {
     due.push({ id: r.id, strict, ageH, type: String(r.type), to: String(r.to_addr) });
   }
   if (!due.length) return;
+  /* ONCE A DAY, not hourly (25 Aug): the hourly digest × every Management recipient had itself
+     become the single biggest pile of unread mail (498 of 2,045). The Management desk already
+     shows the live unacknowledged count all day — this letter only needs to open the day. */
+  const dayRef = 'engine:acksla:day:' + ukDate('');
+  const already = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(dayRef).first();
+  if (already) return;
   const strictN = due.filter((d) => d.strict).length;
   const lines = due.slice(0, 8).map((d) =>
     (d.strict ? '⛔ ' : '⚠ ') + d.type + ' → ' + String(d.to).split('@')[0] + ' (' + d.ageH + 'h)').join(' · ');
@@ -1044,8 +1050,7 @@ async function alertAckWatch(env) {
     ': ' + lines + (due.length > 8 ? ' … and ' + (due.length - 8) + ' more' : '') +
     ' — open the Alerts screen and acknowledge each with written feedback.';
   /* the ref carries every id chased in this digest, so each is marked done exactly once */
-  await notifyRole(env, 'Management', 'Alert not acknowledged in time', msg,
-    'engine:acksla:' + due.map((d) => d.id).join('-').slice(0, 90));
+  await notifyRole(env, 'Management', 'Alert not acknowledged in time', msg, dayRef);
   for (const d of due) {
     await env.DB.prepare(
       "INSERT INTO alert_log (to_addr, type, message, ref, created_at) " +
