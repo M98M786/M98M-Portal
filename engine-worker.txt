@@ -2593,26 +2593,26 @@ async function wasteAlarm(env) {
     'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id ' +
     'WHERE t.day = ?1 AND (t.spend + t.cpc_spend) >= 3 AND (t.sales + t.cpc_sales) = 0 LIMIT 20'
   ).bind(day).all();
-  for (const r of (rs.results || [])) {
-    /* Once per item per day means the BELL too, not just the letter: the query re-matches a
-       wasting item on every 5-minute tick, so the letter file is checked BEFORE queueing —
-       without this, one bad item rang ~180 times a day. */
-    const rung = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1')
-      .bind('waste:' + r.item_id + ':' + day).first();
-    if (rung) continue;
-    await queueNotify(env, 'advertising', 'Ad waste',
-      '🔴 £' + Number(r.sp).toFixed(2) + ' spent TODAY on ' + r.item_id + ' · ' + r.account +
-      (r.title ? ' · ' + String(r.title).slice(0, 55) : '') +
-      ' — and not one order. Pause it or fix it: every hour it runs is money gone.',
-      'waste:' + r.item_id + ':' + day);
-    await queueNotify(env, 'management', 'Ad waste',
-      '🔴 £' + Number(r.sp).toFixed(2) + ' today, zero orders — ' + r.item_id + ' · ' + r.account + ' (advertising has been told).',
-      'waste-m:' + r.item_id + ':' + day);
-    /* Review 4: Team Lead gets LOSS alerts — and nothing else of the money picture */
-    await notifyRole(env, 'Team Lead', 'Ad waste',
-      '🔴 Losing money: £' + Number(r.sp).toFixed(2) + ' spent today on ' + r.item_id + ' · ' + r.account + ' with zero orders — chase it.',
-      'waste-tl:' + r.item_id + ':' + day);
-  }
+  /* ONE DIGEST A DAY (Hasib, 25 Aug): this fired per item per recipient and became 264 unread
+     letters. The wasting items are all named in a single letter now; the Ads command centre
+     shows the live per-item picture continuously for anyone who wants to act mid-day. */
+  const items = rs.results || [];
+  if (!items.length) return;
+  const dayRef = 'waste:day:' + day;
+  const rung = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(dayRef).first();
+  if (rung) return;
+  const total = items.reduce((t, r) => t + (Number(r.sp) || 0), 0);
+  const lines = items.slice(0, 10).map((r) => '£' + Number(r.sp).toFixed(2) + ' ' + r.item_id + ' (' + r.account +
+    (r.title ? ' · ' + String(r.title).slice(0, 32) : '') + ')').join(' · ');
+  const msg = '🔴 Ad waste today: ' + items.length + ' item(s) took £' + total.toFixed(2) +
+    ' and returned ZERO orders — ' + lines + (items.length > 10 ? ' … +' + (items.length - 10) + ' more' : '') +
+    '. Pause or fix them: every hour they run is money gone. Full list on the Ads command centre.';
+  await queueNotify(env, 'advertising', 'Ad waste', msg, dayRef);
+  await queueNotify(env, 'management', 'Ad waste', msg, 'waste-m:day:' + day);
+  /* Review 4: Team Lead gets LOSS alerts — and nothing else of the money picture */
+  await notifyRole(env, 'Team Lead', 'Ad waste',
+    '🔴 Losing money today: ' + items.length + ' item(s), £' + total.toFixed(2) + ' spent, zero orders — chase advertising.',
+    'waste-tl:day:' + day);
 }
 
 /* ---------------- TRAFFIC (Hasib item 11): eBay's own Traffic Report, proven in the probe.
@@ -3072,6 +3072,7 @@ async function cpcAudit(env) {
     'ORDER BY f.profit ASC LIMIT 40'
   ).bind(CPC_MIN_PROFIT).all();
   const today = ukDate('');
+  const digest = [];
   for (const r of (bad.results || [])) {
     const seen = await env.DB.prepare(
       "SELECT 1 AS x FROM campaign_events WHERE change_type = 'cpc_rule' AND item_id = ?1 AND date(at) = date('now')"
@@ -3085,9 +3086,21 @@ async function cpcAudit(env) {
       "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'cpc_rule', ?4, ?5, '', datetime('now'))"
     ).bind(String(r.account), String(r.campaign_name || r.campaign_type), String(r.item_id),
       'profit £' + Number(r.profit).toFixed(2), 'below £' + CPC_MIN_PROFIT.toFixed(2)).run();
-    await queueNotify(env, 'advertising', 'Wrong CPC decision', msg, 'engine:cpcrule:' + r.item_id + ':' + today);
-    await queueNotify(env, 'management', 'Wrong CPC decision', msg, 'engine:cpcrule:' + r.item_id + ':' + today);
+    /* the per-item campaign_events row above IS the audit trail; the LETTER is now one a day */
+    digest.push(r);
   }
+  if (!digest.length) return;
+  const cpcDayRef = 'engine:cpcrule:day:' + today;
+  const already = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(cpcDayRef).first();
+  if (already) return;
+  const cpcLines = digest.slice(0, 10).map((r) => '£' + Number(r.profit).toFixed(2) + ' ' + r.item_id +
+    ' (' + r.account + (r.title ? ' · ' + String(r.title).slice(0, 32) : '') + ')').join(' · ');
+  const cpcMsg = '🔴 Wrong CPC decision · ' + digest.length + ' item(s) sit in CPC campaigns below the £' +
+    CPC_MIN_PROFIT.toFixed(2) + ' profit floor — ' + cpcLines +
+    (digest.length > 10 ? ' … +' + (digest.length - 10) + ' more' : '') +
+    '. Every CPC sale on these loses money: move them out of CPC or reprice them.';
+  await queueNotify(env, 'advertising', 'Wrong CPC decision', cpcMsg, cpcDayRef);
+  await queueNotify(env, 'management', 'Wrong CPC decision', cpcMsg, 'engine:cpcrule-m:day:' + today);
 }
 
 /* One shape for both the nightly snapshot and the live Account-health screen. */
