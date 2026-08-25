@@ -33,7 +33,7 @@
   };
 
   function rvLoad() {
-    api('listDesk', {}).then(function (d) {
+    cachedCall('listDesk', {}, function (d) {
       var rows = ((d && d.rows) || []).filter(function (r) { return r.type === 'listing_revision'; });
       var now = Date.now(), day = 86400000;
       var late = [], today = [], ahead = [];
@@ -65,7 +65,7 @@
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
       $('rvBody').innerHTML = html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>';
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('rvTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('rvBody').innerHTML = '';
     });

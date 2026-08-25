@@ -49,7 +49,7 @@
   function dbS(v) { return String(v == null ? '' : v); }
 
   function dbLoad() {
-    api('deptPending', {}).then(function (d) {
+    cachedCall('deptPending', {}, function (d) {
       d = d || {};
       var mineDept = DB_ROLE_DEPT[(STATE.user && STATE.user.role) || ''] || '';
       var depts = (d.departments || []).slice();
@@ -80,7 +80,7 @@
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dbS(h.title)) + '</span>' +
           '<span style="color:var(--text-3);font-size:11px">' + esc(dbS(h.assigned_to).split('@')[0]) + ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
       }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>';
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('dbBody').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('dbHist').innerHTML = '';
     });

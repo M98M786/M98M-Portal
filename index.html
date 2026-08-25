@@ -428,7 +428,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-1649';
+var BUILD = '20260825-1700';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9434,7 +9434,7 @@ VIEWS.dashboard = {
   function dbS(v) { return String(v == null ? '' : v); }
 
   function dbLoad() {
-    api('deptPending', {}).then(function (d) {
+    cachedCall('deptPending', {}, function (d) {
       d = d || {};
       var mineDept = DB_ROLE_DEPT[(STATE.user && STATE.user.role) || ''] || '';
       var depts = (d.departments || []).slice();
@@ -9465,7 +9465,7 @@ VIEWS.dashboard = {
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dbS(h.title)) + '</span>' +
           '<span style="color:var(--text-3);font-size:11px">' + esc(dbS(h.assigned_to).split('@')[0]) + ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
       }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>';
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('dbBody').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('dbHist').innerHTML = '';
     });
@@ -9539,8 +9539,9 @@ VIEWS.dashboard = {
   function dtPaint(deptName) {
     var host = $('dtBody');
     if (!host) { dtStopTimer(); return; }                 // the user navigated away
-    api('deptPending', {}).then(function (d) {
+    var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
+      if (cached) { var st0 = $('dtStamp'); if (st0) { st0.textContent = 'last answer · refreshing…'; } }
       var all = (d && d.departments) || [];
       var mine = null;
       all.forEach(function (x) { if (x.dept === deptName) { mine = x; } });
@@ -9583,7 +9584,12 @@ VIEWS.dashboard = {
               '<span style="color:var(--text-3);font-size:11px;white-space:nowrap">' + esc(dtS(h.assigned_to).split('@')[0]) +
               ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
           }).join('') : '');
-    }).catch(function (e) {
+    });
+    /* cachedCall answers {painted, done} — the promise lives on .done, and a refresh failure on
+       an already-painted screen is a toast, not a wipe of good data. */
+    if (!hc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
+    hc.done.catch(function (e) {
+      if (hc.painted) { return; }
       if ($('dtBody')) { $('dtBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>'; }
     });
   }
@@ -9973,13 +9979,14 @@ VIEWS.dashboard = {
     return api('huntDesk', {}).then(function (d) {
       var m = (d && d.mine) || {};
       var n = (Number(m.revision) || 0) + (((d && d.open_tasks) || []).length);
+      try { cacheWrite('huntDesk', {}, d); } catch (e) {}   // warms the instant paint below
       try { STATE.counts.huntDesk = n; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
       return d;
     });
   }
 
   function hdLoad() {
-    api('huntDesk', {}).then(function (d) {
+    var hc = cachedCall('huntDesk', {}, function (d) {
       try {
         var m0 = d.mine || {};
         STATE.counts.huntDesk = (Number(m0.revision) || 0) + ((d.open_tasks || []).length);
@@ -10050,7 +10057,7 @@ VIEWS.dashboard = {
               '<td class="num"' + (p.rejected_30d ? ' style="color:var(--bad)"' : '') + '>' + p.rejected_30d + '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('hdTiles').innerHTML = '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>';
       $('hdTasks').innerHTML = ''; $('hdReasons').innerHTML = '';
     });
@@ -12071,7 +12078,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     api('huntReasons', {}).then(function (r) {
       if (r && r.lister_reject && r.lister_reject.length) { LD_REASONS = r.lister_reject; }
     }).catch(function () {});
-    api('listDesk', {}).then(function (d) {
+    cachedCall('listDesk', {}, function (d) {
       d = d || {};
       var per = d.per_assignee || [];
       var totals = per.reduce(function (t, p) {
@@ -12189,7 +12196,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           }).catch(function (e) { btn.disabled = false; toast(e.message); });
         };
       });
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('ldTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = ''; $('ldCpc').innerHTML = '';
     });
@@ -19904,7 +19911,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   };
 
   function rvLoad() {
-    api('listDesk', {}).then(function (d) {
+    cachedCall('listDesk', {}, function (d) {
       var rows = ((d && d.rows) || []).filter(function (r) { return r.type === 'listing_revision'; });
       var now = Date.now(), day = 86400000;
       var late = [], today = [], ahead = [];
@@ -19936,7 +19943,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
       $('rvBody').innerHTML = html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>';
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('rvTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('rvBody').innerHTML = '';
     });

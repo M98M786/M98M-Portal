@@ -63,8 +63,9 @@
   function dtPaint(deptName) {
     var host = $('dtBody');
     if (!host) { dtStopTimer(); return; }                 // the user navigated away
-    api('deptPending', {}).then(function (d) {
+    var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
+      if (cached) { var st0 = $('dtStamp'); if (st0) { st0.textContent = 'last answer · refreshing…'; } }
       var all = (d && d.departments) || [];
       var mine = null;
       all.forEach(function (x) { if (x.dept === deptName) { mine = x; } });
@@ -107,7 +108,12 @@
               '<span style="color:var(--text-3);font-size:11px;white-space:nowrap">' + esc(dtS(h.assigned_to).split('@')[0]) +
               ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
           }).join('') : '');
-    }).catch(function (e) {
+    });
+    /* cachedCall answers {painted, done} — the promise lives on .done, and a refresh failure on
+       an already-painted screen is a toast, not a wipe of good data. */
+    if (!hc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
+    hc.done.catch(function (e) {
+      if (hc.painted) { return; }
       if ($('dtBody')) { $('dtBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>'; }
     });
   }

@@ -56,7 +56,7 @@
     api('huntReasons', {}).then(function (r) {
       if (r && r.lister_reject && r.lister_reject.length) { LD_REASONS = r.lister_reject; }
     }).catch(function () {});
-    api('listDesk', {}).then(function (d) {
+    cachedCall('listDesk', {}, function (d) {
       d = d || {};
       var per = d.per_assignee || [];
       var totals = per.reduce(function (t, p) {
@@ -174,7 +174,7 @@
           }).catch(function (e) { btn.disabled = false; toast(e.message); });
         };
       });
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('ldTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
       $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = ''; $('ldCpc').innerHTML = '';
     });

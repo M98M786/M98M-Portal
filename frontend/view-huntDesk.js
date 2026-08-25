@@ -64,13 +64,14 @@
     return api('huntDesk', {}).then(function (d) {
       var m = (d && d.mine) || {};
       var n = (Number(m.revision) || 0) + (((d && d.open_tasks) || []).length);
+      try { cacheWrite('huntDesk', {}, d); } catch (e) {}   // warms the instant paint below
       try { STATE.counts.huntDesk = n; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
       return d;
     });
   }
 
   function hdLoad() {
-    api('huntDesk', {}).then(function (d) {
+    var hc = cachedCall('huntDesk', {}, function (d) {
       try {
         var m0 = d.mine || {};
         STATE.counts.huntDesk = (Number(m0.revision) || 0) + ((d.open_tasks || []).length);
@@ -141,7 +142,7 @@
               '<td class="num"' + (p.rejected_30d ? ' style="color:var(--bad)"' : '') + '>' + p.rejected_30d + '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
-    }).catch(function (e) {
+    }).done.catch(function (e) {
       $('hdTiles').innerHTML = '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>';
       $('hdTasks').innerHTML = ''; $('hdReasons').innerHTML = '';
     });
