@@ -58,6 +58,11 @@
         if ($('srWeek')) { $('srWeek').textContent = srS(d.week); }
         var list = d.pending || [];
         var host = $('srPending');
+        /* These calls take about four seconds. Click away inside that window and renderView has
+           already replaced the DOM, so the host is gone and painting into it throws an uncaught
+           TypeError — which then swallows any real error behind it. $('srWeek') just above was
+           already guarded; these were not. */
+        if (!host) { return; }
         if (!list.length) {
           host.innerHTML = '<div class="hu-hint" style="margin-top:0">Everyone is reviewed for ' + esc(srS(d.week)) + ' ✓</div>';
           return;
@@ -86,16 +91,23 @@
               .catch(function (err) { btn.disabled = false; toast(err.message); });
           };
         });
-      }).catch(function (e) { $('srPending').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>'; });
+      }).catch(function (e) {
+        var box = $('srPending');
+        if (box) { box.innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>'; }
+      });
     }
     api('staffReviewHistory', {}).then(function (d) {
       var rows = (d && d.reviews) || [];
+      if (!$('srHist')) { return; }
       $('srHist').innerHTML = rows.length ? rows.map(function (r) {
         return '<div class="sr-hist"><b style="min-width:78px">' + esc(srS(r.week)) + '</b>' +
           '<span>behavior ' + srStars(r.behavior) + '</span><span>working ' + srStars(r.working) + '</span>' +
           (r.notes ? '<span style="flex:1;color:var(--text-3);font-weight:600;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srS(r.notes)) + '</span>' : '') + '</div>';
       }).join('') : '<div class="hu-hint" style="margin-top:0">No reviews recorded yet.</div>';
-    }).catch(function (e) { $('srHist').innerHTML = '<div class="hu-hint" style="margin-top:0">' + esc(e.message) + '</div>'; });
+    }).catch(function (e) {
+      var hb = $('srHist');
+      if (hb) { hb.innerHTML = '<div class="hu-hint" style="margin-top:0">' + esc(e.message) + '</div>'; }
+    });
   }
 
 })();
