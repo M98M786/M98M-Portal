@@ -1003,6 +1003,12 @@ function runLossEscalationSweep() {
     try { huntBackupSync(); }
     catch (e) { logActivity_('trigger', 'ERROR:huntBackupSync', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
+  /* And its dated Drive copy. Day-gated by property, so 287 of the day's 288 sweeps cost one
+   * property read — and the copy no longer depends on any single trigger surviving. */
+  if (typeof huntBackupDailyCopy_ === 'function') {
+    try { huntBackupDailyCopy_(); }
+    catch (e) { logActivity_('trigger', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
