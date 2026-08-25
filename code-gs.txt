@@ -20144,6 +20144,16 @@ const ENGINE_RUNNABLE = {
           });
           row.order_ids_seen = ids;
           row.rows_with_ali = filled;
+          /* which columns do the processors ACTUALLY fill? count non-empty per header */
+          var fillCount = {};
+          headers.forEach(function (h, i) {
+            var name = String(h).replace(/\s+/g, ' ').trim();
+            if (!name) return;
+            var n = 0;
+            vals.forEach(function (v) { if (String(v[i] || '').trim() !== '') n++; });
+            if (n > 0) fillCount[name + '[' + i + ']'] = n;
+          });
+          row.filled_columns = fillCount;
         }
       } catch (e) { row.error = String(e && e.message || e).slice(0, 90); }
       out.push(row);
