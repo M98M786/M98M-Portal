@@ -1044,7 +1044,12 @@ function enterApp(user){
    answer still passes the server's own role check on the way out. Failures are ignored on
    purpose: a warm-up is a courtesy, and every screen still loads normally on its own. */
 function warmUp(){
-  if(!STATE.idToken) return;
+  /* 26 Aug: this read `if(!STATE.idToken) return;` — and a returning member of staff has NO
+     idToken. They are signed in by the stored session token (api() treats either as auth), so
+     the whole warm-up has been dead for everyone past their first Google sign-in, which is
+     everyone, every day. The feature written to stop people "starting a three-second wait" was
+     never running for the people who wait. Either credential means signed in. */
+  if(!STATE.idToken && !STATE.session) return;
   /* Settle the Engine-vs-sheet question OFF the critical path. Probing on the first real call
      made the opening department board pay ~3s for a capability that may not be deployed yet —
      a live cost for a benefit that had not landed. Doing it here means the answer is already
