@@ -142,3 +142,18 @@ only the second one counts here.
   auto-expiry of old letters.
 - **Zain: 8 open, all 8 overdue, 0 done in 7 days** — every one a loss-review task. Advertising's
   loss queue is not being worked.
+
+## 12. Nav order, Yousaf, Hunting types  (26 Aug batch)
+
+- [x] **DONE (verified on screen)** — Nav reordered: **My desk first for everyone**; Management
+  leads with the desk + Sales analysis + account/business screens; the scheduling/personal-report
+  line (Staff reviews, Rota, My reports, Reports grid, My performance, Team performance, Meetings,
+  Daily agenda) kept together at the end. Marketing→Advertising, Item risk + VAT→Management, so the
+  "More" catch-all is gone. Verified: group order My desk · Management · Advertising · Orders ·
+  Listings · Hunting · CS.
+- [x] **DONE (verified)** — Yousaf (m98mseven) freed: role cleared, status disabled, renamed
+  "Yousaf Free Email". Directory active count 14 → 13, no longer listed.
+- [ ] **TODO (next)** — Hunting two types: hunter picks **Seasonal** or **Consistent** at submit
+  (reuse the existing `Seasonal` column in HUNTING_COLS); Hunt approvals splits into **Seasonal
+  items approval** and **Consistent items approval**. Backend: submit captures the kind + huntQueue
+  returns it per row; frontend: selector on submit + two-tab filter on the approvals queue.
