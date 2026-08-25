@@ -127,6 +127,9 @@ const ENGINE_RUNNABLE = {
   provenanceBackfill: function () { return typeof r8ProvenanceBackfill === 'function' ? String(r8ProvenanceBackfill()) : 'absent'; },
   seedTasks: function () { return typeof r8SeedTasks === 'function' ? String(r8SeedTasks()) : 'absent'; },
   aliSweepFast: function () { return typeof aliSweepFast === 'function' ? JSON.stringify(aliSweepFast()) : 'absent'; },
+  /* Forced, because the only reason to kick this by hand is that the workbook already disagrees
+   * with HUNTING_DB — and an unforced run would read the fingerprint and decide nothing moved. */
+  huntBackupSync: function () { return typeof huntBackupSync === 'function' ? JSON.stringify(huntBackupSync(true)) : 'absent'; },
   /* 25 Aug: "orders of 25th still not have aliexpress links" — dump today's tab HEADERS and how
    * many rows actually carry an Ali number/link, per account. Separates "team hasn't typed them"
    * from "the portal cannot see the columns". Read-only. */

@@ -17,7 +17,7 @@ GS_ORDER = [
     'SheetBridge.gs', 'Brain.gs',
     'Tasks.gs', 'Schedules.gs', 'Reports.gs', 'Messaging.gs',
     'Agenda.gs', 'Meetings.gs', 'RulesAck.gs',
-    'Hunting.gs', 'Listing.gs', 'CpcResearch.gs', 'PotentialCpc.gs',
+    'Hunting.gs', 'HuntBackup.gs', 'Listing.gs', 'CpcResearch.gs', 'PotentialCpc.gs',
     'Advertising.gs', 'Orders.gs', 'Recheck.gs', 'CustomerService.gs', 'Embeds.gs',
     'Dashboard.gs', 'Alerts.gs', 'Performance.gs', 'Signals.gs', 'StaffAdmin.gs', 'Attendance.gs',
     'Integrity.gs', 'AuditAgent.gs', 'Engine.gs', 'NightBackup.gs',

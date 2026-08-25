@@ -205,6 +205,11 @@ function actionSubmitHunt_(payload, ctx) {
     (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
 
   const mirror = huntMirrorAppend_(cols, ctx.ident.email);
+  /* 26 Aug: and into the backup workbook's pending tray in the same breath, so a hunt exists in
+   * two books from the second it is submitted. HuntBackup swallows its own failures. */
+  if (typeof huntBackupUpsert_ === 'function') {
+    huntBackupUpsert_(huntBackupRecord_(huntId, ctx.ident.email, stamp, cols));
+  }
   return {
     hunt_id: huntId,
     approval_status: HUNT_PENDING,
@@ -287,6 +292,11 @@ function actionDecideHunt_(payload, ctx) {
       rpatch[HC_COMMENTS] = comment;
       huntWrite_(rsh, rfound, rpatch);
     } finally { rlock.releaseLock(); }
+    if (typeof huntBackupUpsert_ === 'function') {
+      rrec[HC_APPROVAL] = HUNT_REVISION;
+      rrec[HC_COMMENTS] = comment;
+      huntBackupUpsert_(rrec);                     // stays in the pending tray, carrying its reason
+    }
     logActivity_(ctx.ident.email, 'HUNT_REVISION_REQUESTED', rrec.hunt_id, HUNT_PENDING, HUNT_REVISION, comment.slice(0, 200));
     notify_(rrec.hunter_email, 'Revision required',
       '🟡 Your hunt "' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 120) + '" needs more before a decision: ' +
@@ -352,6 +362,14 @@ function actionDecideHunt_(payload, ctx) {
 
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
   const mirror = huntMirrorDecision_(rec, decision, comment, approving ? account : '', advertising, ctx.ident.email);
+  /* 26 Aug: the backup workbook moves it out of the pending tray and into approved / not
+   * approved. rec already carries the account and advertising type set above. */
+  if (typeof huntBackupUpsert_ === 'function') {
+    rec[HC_APPROVAL] = decision;
+    if (comment) rec[HC_COMMENTS] = comment;
+    if (approving) rec[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
+    huntBackupUpsert_(rec);
+  }
   let central = { ok: false, reason: 'not applicable' };
 
   if (approving) {
@@ -743,6 +761,10 @@ function actionReviseHunt_(payload, ctx) {
 
   logActivity_(ctx.ident.email, 'REVISE_HUNT', rec.hunt_id, String(rec.approval_status || 'PENDING'), 'PENDING',
     Object.keys(sent).join(',').slice(0, 200));
+  if (typeof huntBackupUpsert_ === 'function') {
+    Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
+    huntBackupUpsert_(rec);                        // the revised fields reach the backup too
+  }
   return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
 }
 

@@ -996,6 +996,13 @@ function runLossEscalationSweep() {
     try { aliSweepFast(); }
     catch (e) { logActivity_('trigger', 'ERROR:aliSweepFast', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
+  /* 26 Aug: the hunting backup workbook reconciles here rather than on the hourly clock, because
+   * "as soon as Irfan enters the product" is the whole point of it. Cheap by design — it reads
+   * HUNTING_DB, and unless the fingerprint moved it never opens the workbook at all. */
+  if (typeof huntBackupSync === 'function') {
+    try { huntBackupSync(); }
+    catch (e) { logActivity_('trigger', 'ERROR:huntBackupSync', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
