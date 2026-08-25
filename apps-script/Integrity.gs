@@ -32,6 +32,12 @@ function nightlyBackup() {
       try { nightBackupPull(); }
       catch (e) { logActivity_('backup', 'ERROR:nightBackupPull', '', '', '', String(e && e.stack || e).slice(0, 300)); }
     }
+    /* 26 Aug: the hunting backup workbook is a second Drive file, so the Portal DB copy above
+     * does not cover it. Day-gated inside — the hourly sweep calls it too. */
+    if (typeof huntBackupDailyCopy_ === 'function') {
+      try { huntBackupDailyCopy_(); }
+      catch (e) { logActivity_('backup', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+    }
     return 'Backed up as "' + copy.getName() + '". Pruned ' + pruned + ' copy(ies) older than ' + BACKUP_KEEP_DAYS + ' days.';
   } catch (err) {
     // A failed backup must shout, not fail silently — silence is how people discover at the worst

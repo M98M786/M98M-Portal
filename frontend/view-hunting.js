@@ -11,6 +11,12 @@
   var HU_NOT_APPROVED = 'NOT APPROVED';
   var HU_REVISION = 'REVISION REQUIRED';
 
+  /* The backup workbook HuntBackup.gs mirrors every hunt into (pending · approved · not approved).
+     Reviewers only: it holds every hunter's rows and their profit figures, which §4.2 keeps away
+     from hunters — and Drive would refuse them anyway, so a link on the hunting screen would be
+     both a leak of intent and a dead end. */
+  var HU_BACKUP_URL = 'https://docs.google.com/spreadsheets/d/14TbZlKmBHkawydJXjHif8xKCnYzA7-Wm-3rZOW8fBzI/edit';
+
   /* R7-5 (Hasib): "add some auto selected reasons of disapproving the product" and "give the
      option… what more required" — chips that compose the comment; free text welcome around them. */
   var HU_REJECT_REASONS = ['Profit too thin after fees', 'Too many competitors',
@@ -682,7 +688,10 @@
     render: function () {
       return '<div class="hgroup enter d1"><h1>Hunt approvals</h1>' +
           '<span class="sub">Oldest waits longest · nothing is listed until you decide</span>' +
-          '<button class="minibtn" id="huQRefresh" style="margin-left:auto">Refresh</button>' +
+          '<a class="minibtn" href="' + HU_BACKUP_URL + '" target="_blank" rel="noopener" ' +
+            'title="Every hunt, mirrored as it happens: pending · approved · not approved" ' +
+            'style="margin-left:auto">Backup sheet</a>' +
+          '<button class="minibtn" id="huQRefresh" style="margin-left:8px">Refresh</button>' +
         '</div>' +
         /* R6 (Hasib): "dashboard that shows number of products pending for approval, how many got
            rejected in past 7 days, from every individual, and how much are still pending" */

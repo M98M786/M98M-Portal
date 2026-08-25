@@ -157,6 +157,13 @@ function runMissedCheckpointSweep() {
     try { nightWatchHourlyRide(); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
+  /* 26 Aug: the hunting backup workbook's dated Drive copy. It is day-gated by property, so the
+   * first hour of the Pakistan day to reach here takes it and the other 23 are no-ops — which
+   * also means it still happens on a day the nightly trigger missed. */
+  if (typeof huntBackupDailyCopy_ === 'function') {
+    try { huntBackupDailyCopy_(); }
+    catch (e) { logActivity_('trigger', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
 }
 
 function runSubmissionEscalationSweep() {

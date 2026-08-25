@@ -769,6 +769,13 @@ function runMissedCheckpointSweep() {
     try { nightWatchHourlyRide(); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
+  /* 26 Aug: the hunting backup workbook's dated Drive copy. It is day-gated by property, so the
+   * first hour of the Pakistan day to reach here takes it and the other 23 are no-ops — which
+   * also means it still happens on a day the nightly trigger missed. */
+  if (typeof huntBackupDailyCopy_ === 'function') {
+    try { huntBackupDailyCopy_(); }
+    catch (e) { logActivity_('trigger', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  }
 }
 
 function runSubmissionEscalationSweep() {
@@ -6547,7 +6554,12 @@ function huntBackupSync(force) {
   const props = PropertiesService.getScriptProperties();
   const fp = Utilities.base64Encode(
     Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, print.join(''), Utilities.Charset.UTF_8));
-  if (!force && fp === props.getProperty(HUNT_BACKUP_FP_PROP)) return 'unchanged (' + live.length + ' hunts)';
+  /* A bumped format version has to reach a workbook that is otherwise sitting still, so it counts
+   * as a reason to open the book — one property read, and cosmetics can never wait on a hunt. */
+  const fmtStale = props.getProperty(HUNT_BACKUP_FMT_PROP) !== HUNT_BACKUP_FMT_VERSION;
+  if (!force && !fmtStale && fp === props.getProperty(HUNT_BACKUP_FP_PROP)) {
+    return 'unchanged (' + live.length + ' hunts)';
+  }
 
   live.sort(function (a, b) { return String(a.ts).localeCompare(String(b.ts)); });
   const want = {};
@@ -6584,10 +6596,128 @@ function huntBackupSync(force) {
     out.tabs[t.name] = block.length;
   });
 
+  try { huntBackupFormat_(ss); } catch (e) { /* cosmetics never block the mirror */ }
+  try { huntBackupStatus_(ss, out); } catch (e) { /* nor does the status page */ }
+
   props.setProperty(HUNT_BACKUP_FP_PROP, fp);
   logActivity_('trigger', 'HUNT_BACKUP_SYNC', huntBackupBookId_(), '', '',
     out.hunts + ' hunts · ' + JSON.stringify(out.tabs) + (out.orphans ? ' · ' + out.orphans + ' orphan' : ''));
   return out;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+
+/** The page somebody opens to answer "is this thing still working?". Written only on a real
+ * mirror, and it says so — a stamp that moved three days ago on a quiet week is the truth, and
+ * pretending otherwise by touching it every five minutes would cost a workbook open each time. */
+const HUNT_BACKUP_STATUS_TAB = 'Backup Status';
+
+function huntBackupStatus_(ss, out) {
+  let sh = null;
+  const want = HUNT_BACKUP_STATUS_TAB.toLowerCase();
+  ss.getSheets().forEach(function (s) { if (s.getName().trim().toLowerCase() === want) sh = s; });
+  if (!sh) sh = ss.insertSheet(HUNT_BACKUP_STATUS_TAB, 0);
+  const stamp = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd HH:mm') + ' PKT';
+  const rows = [
+    ['M98M — product hunting backup', ''],
+    ['', ''],
+    ['Last change mirrored', stamp],
+    ['Products in the backup', out.hunts + out.orphans],
+    ['', ''],
+    ['Pending For Approval', out.tabs['Pending For Approval'] || 0],
+    ['Approved', out.tabs['Approved'] || 0],
+    ['No Approved', out.tabs['No Approved'] || 0],
+    ['Kept after removal from the portal', out.orphans],
+    ['', ''],
+    ['Source', 'M98M Portal DB — HUNTING_DB tab'],
+    ['', ''],
+    ['How this stays current', ''],
+    ['A product is written here the moment it is submitted, approved, not approved or sent back for revision.', ''],
+    ['The portal also re-reads the whole hunting database every 5 minutes and repairs anything that drifted.', ''],
+    ['The stamp above moves only when something actually changed — a quiet day is not a broken backup.', ''],
+    ['Nothing is ever deleted here. A product removed from the portal keeps its row at the bottom of its tray.', ''],
+    ['Do not rename the three tabs: the portal finds them by name.', ''],
+  ];
+  huntBackupGrow_(sh, rows.length, 2);
+  sh.getRange(1, 1, rows.length, 2).setValues(rows);
+  sh.getRange(1, 1).setFontWeight('bold').setFontSize(13);
+  sh.getRange(3, 1, 7, 1).setFontWeight('bold');
+  sh.getRange(13, 1).setFontWeight('bold');
+  sh.setColumnWidth(1, 620);
+  sh.setColumnWidth(2, 220);
+  if (sh.getMaxRows() > rows.length) sh.getRange(rows.length + 1, 1, sh.getMaxRows() - rows.length, 2).clearContent();
+  try { sh.setTabColor('#5f6368'); } catch (e) { /* older Sheets */ }
+  return stamp;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+
+/** Widths, tab colours and a filter row — applied once and re-applied only when this version
+ * string is bumped, because 41 setColumnWidth calls every five minutes would be absurd. */
+const HUNT_BACKUP_FMT_VERSION = 'fmt-1';
+const HUNT_BACKUP_FMT_PROP = 'HUNT_BACKUP_FMT';
+const HUNT_BACKUP_WIDTHS = {
+  'hunt_id': 95, 'hunter_email': 165, 'ts': 155, 'Selected By': 135, 'Approval Status': 125,
+  'Comments': 230, 'Date Added': 105, 'Account Selected': 125, 'Listing Status': 105,
+  'Seasonal': 85, 'Title': 280, 'IMAGE': 120, 'DESCRIPTION': 250, 'Category': 135,
+  'Source Price': 95, 'E-Bey Caluclator + £4': 115, 'CPC Selling Chance': 140, 'Sell Through': 95,
+  'Competitors': 105, 'TOP THREE SALES': 125, 'Total Competitors on main keyword': 150,
+  'Price Range ANALYSIS': 140, 'Sold Unit ANALYSIS': 130, 'Our Profit': 95, 'ROI': 80,
+  'Comment': 220, 'Comments given by': 140, 'Prime Competitor Selling Price': 150,
+  'Competitor High Selling Price': 150, 'Campaign category': 140,
+};
+const HUNT_BACKUP_TAB_COLOURS = {
+  'Pending For Approval': '#f9ab00',        // amber: somebody still owes this a decision
+  'Approved': '#188038',
+  'No Approved': '#c5221f',
+};
+
+function huntBackupFormat_(ss) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty(HUNT_BACKUP_FMT_PROP) === HUNT_BACKUP_FMT_VERSION) return 'already ' + HUNT_BACKUP_FMT_VERSION;
+  HUNT_BACKUP_TABS.forEach(function (t) {
+    const sh = huntBackupTab_(ss, t.name);
+    HUNT_BACKUP_HEADERS.forEach(function (h, i) {
+      // Every link column shares one width; naming them all would be a list nobody maintains.
+      const w = HUNT_BACKUP_WIDTHS[h] || 165;
+      try { sh.setColumnWidth(i + 1, w); } catch (e) { /* a merged or protected column */ }
+    });
+    try { if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), HUNT_BACKUP_HEADERS.length).createFilter(); }
+    catch (e) { /* a filter already exists, or the sheet is protected */ }
+    try { sh.setTabColor(HUNT_BACKUP_TAB_COLOURS[t.name] || null); } catch (e) { /* older Sheets */ }
+  });
+  props.setProperty(HUNT_BACKUP_FMT_PROP, HUNT_BACKUP_FMT_VERSION);
+  return 'applied ' + HUNT_BACKUP_FMT_VERSION;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+
+/** A backup nobody can restore is decoration. The three trays live in ONE Drive file, so a bad
+ * edit inside it — a sort with the header row selected, a deleted tab — would take the copy with
+ * it. Once a Pakistan day, a dated duplicate lands in the same owner-only folder the Portal DB
+ * backups use, and prunes on the same 30-day clock.
+ *
+ * Day-gated by property rather than by trigger, so it does not matter which of the two callers
+ * (nightlyBackup, or the hourly sweep) reaches it first — the second one is a no-op. */
+const HUNT_BACKUP_COPY_DAY_PROP = 'HUNT_BACKUP_COPY_DAY';
+
+function huntBackupDailyCopy_() {
+  const props = PropertiesService.getScriptProperties();
+  const day = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+  if (props.getProperty(HUNT_BACKUP_COPY_DAY_PROP) === day) return 'already copied ' + day;
+  if (typeof backupFolder_ !== 'function') return 'backup folder helper absent';
+  try {
+    const folder = backupFolder_();
+    const copy = DriveApp.getFileById(huntBackupBookId_())
+      .makeCopy('Product Hunting Backup — ' + day, folder);
+    props.setProperty(HUNT_BACKUP_COPY_DAY_PROP, day);
+    if (typeof backupPrune_ === 'function') { try { backupPrune_(folder); } catch (e) { /* pruned next run */ } }
+    logActivity_('backup', 'HUNT_BACKUP_COPY', copy.getId(), '', copy.getName(), day);
+    return copy.getName();
+  } catch (e) {
+    logActivity_('backup', 'ERROR:huntBackupCopy', huntBackupBookId_(), '', '', String(e && e.message || e).slice(0, 300));
+    return 'copy failed: ' + String(e && e.message || e);
+  }
 }
 
 
@@ -19934,6 +20064,12 @@ function nightlyBackup() {
     if (typeof nightBackupPull === 'function') {
       try { nightBackupPull(); }
       catch (e) { logActivity_('backup', 'ERROR:nightBackupPull', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+    }
+    /* 26 Aug: the hunting backup workbook is a second Drive file, so the Portal DB copy above
+     * does not cover it. Day-gated inside — the hourly sweep calls it too. */
+    if (typeof huntBackupDailyCopy_ === 'function') {
+      try { huntBackupDailyCopy_(); }
+      catch (e) { logActivity_('backup', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
     }
     return 'Backed up as "' + copy.getName() + '". Pruned ' + pruned + ' copy(ies) older than ' + BACKUP_KEEP_DAYS + ' days.';
   } catch (err) {
