@@ -3104,30 +3104,38 @@ async function cpcAudit(env) {
 }
 
 /* One shape for both the nightly snapshot and the live Account-health screen. */
+/* SPEED Phase 3 (25 Aug). This ran FOUR queries per account inside a loop — 28 sequential D1
+   round-trips for seven accounts, and it sits on the critical path of mgmtOverview, the screen
+   Management opens first. Same four questions, asked once each with GROUP BY, then stitched in
+   memory: 28 round-trips become 4. The numbers are unchanged — every account still appears, and
+   an account with no rows in a table still reports 0 rather than dropping out of the list. */
 async function computeHealth(env) {
   const accs = await env.DB.prepare('SELECT name FROM accounts').all();
   const cut7 = new Date(Date.now() - 7 * 86400000).toISOString();
-  const out = [];
-  for (const a of (accs.results || [])) {
-    const li = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE account = ?1 AND status = 'ACTIVE'").bind(a.name).first();
-    const od = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(sold), 0) AS rev FROM orders WHERE account = ?1 AND created_at >= ?2').bind(a.name, cut7).first();
-    const lo = await env.DB.prepare(
-      'SELECT COUNT(*) AS n FROM items_facts f JOIN items_api i ON i.item_id = f.item_id WHERE i.account = ?1 AND f.profit < 0'
-    ).bind(a.name).first();
-    const ca = await env.DB.prepare(
-      "SELECT COALESCE(SUM(CASE WHEN status LIKE '%RUNNING%' THEN 1 ELSE 0 END), 0) AS run_n, COUNT(*) AS all_n FROM campaigns WHERE account = ?1"
-    ).bind(a.name).first();
-    out.push({
+  const [li, od, lo, ca] = await env.DB.batch([
+    env.DB.prepare("SELECT account, COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' GROUP BY account"),
+    env.DB.prepare('SELECT account, COUNT(*) AS n, COALESCE(SUM(sold), 0) AS rev FROM orders WHERE created_at >= ?1 GROUP BY account').bind(cut7),
+    env.DB.prepare('SELECT i.account AS account, COUNT(*) AS n FROM items_facts f JOIN items_api i ON i.item_id = f.item_id WHERE f.profit < 0 GROUP BY i.account'),
+    env.DB.prepare("SELECT account, COALESCE(SUM(CASE WHEN status LIKE '%RUNNING%' THEN 1 ELSE 0 END), 0) AS run_n, COUNT(*) AS all_n FROM campaigns GROUP BY account"),
+  ]);
+  const idx = (rs) => {
+    const m = {};
+    for (const r of ((rs && rs.results) || [])) m[String(r.account || '')] = r;
+    return m;
+  };
+  const mLi = idx(li), mOd = idx(od), mLo = idx(lo), mCa = idx(ca);
+  return (accs.results || []).map((a) => {
+    const o = mOd[a.name] || {}, c = mCa[a.name] || {};
+    return {
       account: a.name,
-      listings: (li && li.n) || 0,
-      orders_7d: (od && od.n) || 0,
-      revenue_7d: round2((od && od.rev) || 0),
-      loss_items: (lo && lo.n) || 0,
-      campaigns_running: (ca && ca.run_n) || 0,
-      campaigns_total: (ca && ca.all_n) || 0,
-    });
-  }
-  return out;
+      listings: (mLi[a.name] || {}).n || 0,
+      orders_7d: o.n || 0,
+      revenue_7d: round2(o.rev || 0),
+      loss_items: (mLo[a.name] || {}).n || 0,
+      campaigns_running: c.run_n || 0,
+      campaigns_total: c.all_n || 0,
+    };
+  });
 }
 async function backup(env) {
   if (!env.BACKUPS) return;
