@@ -341,6 +341,11 @@ var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard
    Only 'unknown action' falls back. An auth failure or a real error must still surface, which is
    the R6c rule below: a mis-routed call must never be silently papered over. */
 var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine' };
+/* Remember a miss. Without this the probe is paid on EVERY call — the department boards refresh
+   themselves every 45 seconds, so a not-yet-deployed Engine action turned a 5.5s page into a 7.5s
+   page instead of leaving it unchanged. One failed probe per tab is the most this may ever cost.
+   Cleared on reload, so shipping the Worker needs no frontend change: the next page load finds it. */
+var ENGINE_MISSING = {};
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
@@ -409,9 +414,11 @@ function api(action, payload){
       }, 250);
     });
   }
-  if(ENGINE_PREFERRED[action] && (STATE.idToken || STATE.session) && STATE.config && STATE.config.engine_url){
+  if(ENGINE_PREFERRED[action] && !ENGINE_MISSING[action] && (STATE.idToken || STATE.session)
+     && STATE.config && STATE.config.engine_url){
     return engineApi(ENGINE_PREFERRED[action], payload).catch(function(e){
       if(String((e && e.message) || e) !== 'unknown action'){ throw e; }
+      ENGINE_MISSING[action] = true;                 // probe once per tab, never again
       return apiViaSheet(action, payload);
     });
   }
