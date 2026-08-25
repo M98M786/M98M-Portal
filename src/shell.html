@@ -1045,6 +1045,20 @@ function enterApp(user){
    purpose: a warm-up is a courtesy, and every screen still loads normally on its own. */
 function warmUp(){
   if(!STATE.idToken) return;
+  /* Settle the Engine-vs-sheet question OFF the critical path. Probing on the first real call
+     made the opening department board pay ~3s for a capability that may not be deployed yet —
+     a live cost for a benefit that had not landed. Doing it here means the answer is already
+     known by the time anyone opens the page: if the Engine has the action, that page becomes a
+     ~50ms read; if it does not, nothing was ever slower than before. */
+  try{
+    Object.keys(ENGINE_PREFERRED).forEach(function(a){
+      if(ENGINE_MISSING[a]) return;
+      if(!(STATE.config && STATE.config.engine_url)) return;
+      engineApi(ENGINE_PREFERRED[a], {}).catch(function(e){
+        if(String((e && e.message) || e) === 'unknown action'){ ENGINE_MISSING[a] = true; }
+      });
+    });
+  }catch(e){}
   try{
     viewList().forEach(function(v){
       var view = VIEWS[v.key];
