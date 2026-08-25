@@ -42,22 +42,22 @@
   function spPaint() {
     var d = SP_DATA; if (!d) { return; }
     var c = d.counts || {};
-    $('spTiles').innerHTML = '<div class="sp-tiles">' +
+    setHTML('spTiles', '<div class="sp-tiles">' +
       '<div class="sp-t cpc' + (SP_TAB === 'cpc' ? ' on' : '') + '" data-sp="cpc"><span class="k">CPC live</span><b>' + (c.cpc || 0) + '</b></div>' +
       '<div class="sp-t gen' + (SP_TAB === 'general' ? ' on' : '') + '" data-sp="general"><span class="k">General &amp; Dynamic live</span><b>' + (c.general || 0) + '</b></div>' +
       '<div class="sp-t non' + (SP_TAB === 'uncampaigned' ? ' on' : '') + '" data-sp="uncampaigned"><span class="k">In no campaign</span><b>' + (c.uncampaigned || 0) + '</b></div>' +
       '<div class="sp-t"><span class="k">As of</span><b style="font-size:13px">' + esc(fmtPkt(d.as_of, true) || '—') + '</b></div>' +
-    '</div>';
+    '</div>');
     $('spTiles').querySelectorAll('[data-sp]').forEach(function (t) {
       t.onclick = function () { SP_TAB = this.getAttribute('data-sp'); spPaint(); };
     });
     var by = (d.by_account || {})[SP_TAB] || {};
-    $('spAcc').innerHTML = '<div class="sp-acc">' + Object.keys(by).sort(function (a, b) { return by[b] - by[a]; })
-      .map(function (a) { return '<div class="sp-a">' + esc(a) + ' <b>' + by[a] + '</b></div>'; }).join('') + '</div>';
+    setHTML('spAcc', '<div class="sp-acc">' + Object.keys(by).sort(function (a, b) { return by[b] - by[a]; })
+      .map(function (a) { return '<div class="sp-a">' + esc(a) + ' <b>' + by[a] + '</b></div>'; }).join('') + '</div>');
     var list = d[SP_TAB] || [];
-    $('spHead').innerHTML = (SP_TAB === 'cpc' ? 'CPC live listings' : SP_TAB === 'general' ? 'General &amp; Dynamic live listings' : 'Live but in no campaign') +
-      ' <span class="hint">' + list.length + ' item(s)</span>';
-    $('spBody').innerHTML = list.length ? '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
+    setHTML('spHead', (SP_TAB === 'cpc' ? 'CPC live listings' : SP_TAB === 'general' ? 'General &amp; Dynamic live listings' : 'Live but in no campaign') +
+      ' <span class="hint">' + list.length + ' item(s)</span>');
+    setHTML('spBody', list.length ? '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
       '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Campaign</th><th>Price</th><th>Sold</th></tr></thead><tbody>' +
       list.slice(0, 400).map(function (r) {
         return '<tr><td style="text-align:left;max-width:290px"><a href="https://www.ebay.co.uk/itm/' + esc(spS(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
@@ -69,14 +69,14 @@
           '<td class="num">' + (Number(r.sold_qty) || 0) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       (list.length > 400 ? '<div class="hu-hint">Showing the first 400 of ' + list.length + '.</div>' : '')
-      : '<div class="hu-hint" style="margin-top:0">Nothing in this group.</div>';
+      : '<div class="hu-hint" style="margin-top:0">Nothing in this group.</div>');
   }
 
   function spLoad() {
     api('activeSplit', {}).then(function (d) { SP_DATA = d || {}; spPaint(); })
       .catch(function (e) {
-        $('spTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-        $('spBody').innerHTML = '';
+        setHTML('spTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+        setHTML('spBody', '');
       });
   }
 

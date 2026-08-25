@@ -241,6 +241,13 @@ input,select{font:inherit}
 var BACKEND = "https://script.google.com/macros/s/AKfycbx1_6VpJUMVEJeifbwq79DIhNwhZgzHmPxRuC2oj6my3b1Kl2mpowSGjNMAM8D3bLP1wg/exec";
 var STATE = { idToken:null, session:null, user:null, config:null, counts:{} };
 var $ = function(id){ return document.getElementById(id); };
+/* Paint into a host that navigation may already have removed. Every board in this app is backed
+   by a 4-6 second Apps Script call, so there is a wide window in which a person clicks away,
+   renderView replaces the DOM, and the answer then lands on an element that no longer exists.
+   `$('x').innerHTML = ...` threw an uncaught TypeError there — and when it happened inside a
+   .catch it replaced the real error message with a null-property crash, which is how a readable
+   "could not load" turned into silence. Returns whether it painted, for callers that care. */
+function setHTML(id, html){ var el = $(id); if(!el){ return false; } el.innerHTML = html; return true; }
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
@@ -455,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2200';
+var BUILD = '20260825-2206';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9467,9 +9474,9 @@ VIEWS.dashboard = {
       var depts = (d.departments || []).slice();
       depts.sort(function (a, b) { return (b.dept === mineDept) - (a.dept === mineDept) || b.open - a.open; });
       if (!depts.length) {
-        $('dbBody').innerHTML = '<div class="hu-hint">No open tasks anywhere — clean board.</div>';
+        setHTML('dbBody', '<div class="hu-hint">No open tasks anywhere — clean board.</div>');
       } else {
-        $('dbBody').innerHTML = '<div class="db-grid">' + depts.map(function (r) {
+        setHTML('dbBody', '<div class="db-grid">' + depts.map(function (r) {
           var by = Object.keys(r.by_assignee || {}).map(function (k) { return { who: k, n: r.by_assignee[k] }; })
             .sort(function (a, b) { return b.n - a.n; }).slice(0, 3);
           return '<div class="db-card' + (r.dept === mineDept ? ' mine' : '') + '">' +
@@ -9483,18 +9490,18 @@ VIEWS.dashboard = {
                 return '<div class="db-row"><span class="k">' + esc(dbS(x.who).split('@')[0]) + '</span><span>' + x.n + ' open</span></div>';
               }).join('') +
             '</div></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>');
       }
       var hist = d.history || [];
-      $('dbHist').innerHTML = hist.length ? hist.map(function (h) {
+      setHTML('dbHist', hist.length ? hist.map(function (h) {
         return '<div class="db-hist"><span class="o ' + (h.origin === 'system' ? 'sys' : 'mgm') + '">' + (h.origin === 'system' ? 'system' : 'mgmt') + '</span>' +
           '<b style="min-width:82px">' + esc(dbS(h.dept)) + '</b>' +
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dbS(h.title)) + '</span>' +
           '<span style="color:var(--text-3);font-size:11px">' + esc(dbS(h.assigned_to).split('@')[0]) + ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
-      }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>';
+      }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>');
     }).done.catch(function (e) {
-      $('dbBody').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('dbHist').innerHTML = '';
+      setHTML('dbBody', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('dbHist', '');
     });
   }
 
@@ -9869,11 +9876,11 @@ VIEWS.dashboard = {
       var byAcct = {};
       drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
       try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
-      $('glTiles').innerHTML = '<div class="gl-tiles">' +
+      setHTML('glTiles', '<div class="gl-tiles">' +
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {
           return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>');
 
       var box = $('glBody');
       if (!drafts.length) {
@@ -9932,8 +9939,8 @@ VIEWS.dashboard = {
         };
       });
     }).catch(function (e) {
-      $('glTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('glBody').innerHTML = '';
+      setHTML('glTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('glBody', '');
     });
   }
 
@@ -10023,14 +10030,14 @@ VIEWS.dashboard = {
       var m = d.mine || { hunted: 0, hunted_month: 0, approved: 0, approved_month: 0, pending: 0, revision: 0, rejected_30d: 0 };
       var linkTasks = (d.open_tasks || []).filter(function (t) { return t.type === 'sourcing_link'; });
       var revTasks = (d.open_tasks || []).filter(function (t) { return t.type !== 'sourcing_link'; });
-      $('hdTiles').innerHTML = '<div class="hd-tiles">' +
+      setHTML('hdTiles', '<div class="hd-tiles">' +
         '<div class="hd-tile gold"><span class="k">Hunted · this month</span><b>' + (m.hunted_month || 0) + '</b><span class="s">' + (m.hunted || 0) + ' all time</span></div>' +
         '<div class="hd-tile ok"><span class="k">Approved · this month</span><b>' + (m.approved_month || 0) + '</b><span class="s">' + (m.approved || 0) + ' all time</span></div>' +
         '<div class="hd-tile"><span class="k">Awaiting approval</span><b>' + (m.pending || 0) + '</b></div>' +
         '<div class="hd-tile warn"><span class="k">Revision required</span><b>' + ((m.revision || 0) + revTasks.length) + '</b><span class="s">sent back by Management</span></div>' +
         '<div class="hd-tile bad"><span class="k">Link requests</span><b>' + linkTasks.length + '</b><span class="s">orders waiting on your links</span></div>' +
         '<div class="hd-tile"><span class="k">Rejected · 30 days</span><b>' + (m.rejected_30d || 0) + '</b></div>' +
-      '</div>';
+      '</div>');
 
       var tb = $('hdTasks');
       if (!(d.open_tasks || []).length && !(m.revision || 0)) {
@@ -10075,18 +10082,18 @@ VIEWS.dashboard = {
       var mgmt = HD_MGMT_ROLES.indexOf((STATE.user && STATE.user.role) || '') >= 0 || (STATE.user && STATE.user.super);
       if (mgmt && (d.hunters || []).length) {
         $('hdFleetCard').classList.remove('hidden');
-        $('hdFleet').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
+        setHTML('hdFleet', '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
           '<th style="text-align:left">Hunter</th><th>Hunted · month</th><th>Approved · month</th><th>Pending</th><th>In revision</th><th>Rejected · 30d</th></tr></thead><tbody>' +
           d.hunters.map(function (p) {
             return '<tr' + (p.my ? ' style="background:var(--blue-soft)"' : '') + '><td style="text-align:left;font-weight:800">' + esc(hdS(p.hunter).split('@')[0]) + '</td>' +
               '<td class="num">' + p.hunted_month + '</td><td class="num" style="color:var(--ok)">' + p.approved_month + '</td>' +
               '<td class="num">' + p.pending + '</td><td class="num"' + (p.revision ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.revision + '</td>' +
               '<td class="num"' + (p.rejected_30d ? ' style="color:var(--bad)"' : '') + '>' + p.rejected_30d + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
       }
     }).done.catch(function (e) {
-      $('hdTiles').innerHTML = '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>';
-      $('hdTasks').innerHTML = ''; $('hdReasons').innerHTML = '';
+      setHTML('hdTiles', '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>');
+      setHTML('hdTasks', ''); setHTML('hdReasons', '');
     });
   }
 
@@ -11243,12 +11250,12 @@ VIEWS.dashboard = {
     api('ideaList', {}).then(function (d) {
       d = d || {};
       var c = d.counts || {};
-      $('ibTiles').innerHTML = '<div class="ib-tiles">' +
+      setHTML('ibTiles', '<div class="ib-tiles">' +
         '<div class="ib-t"><span class="k">New</span><b style="color:var(--blue-2)">' + (c.NEW || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Picked up</span><b style="color:var(--warn)">' + (c['PICKED UP'] || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Hunted</span><b style="color:var(--ok)">' + (c.HUNTED || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Your ideas</span><b class="goldtext">' + (c.mine || 0) + '</b></div>' +
-      '</div>';
+      '</div>');
       if ($('ibScope')) { $('ibScope').textContent = d.can_decide ? 'everyone’s ideas · newest first' : 'your ideas · newest first'; }
       var list = d.ideas || [];
       var host = $('ibList');
@@ -11286,7 +11293,7 @@ VIEWS.dashboard = {
         };
       });
     }).catch(function (e) {
-      $('ibList').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>';
+      setHTML('ibList', '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>');
     });
   }
 
@@ -11477,7 +11484,7 @@ VIEWS.inbox = {
       ibMergeThreads(d.threads || [], true);
       ibDrawThreads();
     }).done['catch'](function () {
-      if (!IB.loaded && $('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
+      if (!IB.loaded && $('ibThreads')) setHTML('ibThreads', '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>');
     });
     ibPollNow();
   }
@@ -11688,7 +11695,7 @@ function ibDrawPicker() {
     h += '<button class="ib-pick" data-p="' + (IB.pick.length - 1) + '">' +
         '<span style="font-weight:800;font-size:13px">Start a conversation with ' + esc(q) + '</span></button>';
   }
-  $('ibPick').innerHTML = h || '<div class="ib-empty">No match yet — type the full company email to start a new conversation.</div>';
+  setHTML('ibPick', h || '<div class="ib-empty">No match yet — type the full company email to start a new conversation.</div>');
 }
 
 function ibKnown(email) {
@@ -12111,12 +12118,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var totals = per.reduce(function (t, p) {
         return { open: t.open + p.open, overdue: t.overdue + p.overdue, due: t.due + p.due_today, sub: t.sub + p.submitted };
       }, { open: 0, overdue: 0, due: 0, sub: 0 });
-      $('ldTiles').innerHTML = '<div class="ld-tiles">' +
+      setHTML('ldTiles', '<div class="ld-tiles">' +
         '<div class="ld-tile gold"><span class="k">Open listing tasks</span><b>' + totals.open + '</b></div>' +
         '<div class="ld-tile bad"><span class="k">Overdue</span><b>' + totals.overdue + '</b></div>' +
         '<div class="ld-tile"><span class="k">Due in 24h</span><b>' + totals.due + '</b></div>' +
         '<div class="ld-tile blue"><span class="k">Awaiting approval</span><b>' + totals.sub + '</b></div>' +
-      '</div>';
+      '</div>');
 
       var f = d.families || {};
       var famRow = ['CPC', 'General/Dynamic', 'Unassigned'].map(function (k) {
@@ -12127,10 +12134,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var accRow = Object.keys(acc).sort(function (a, b) { return acc[b] - acc[a]; }).map(function (k) {
         return '<div class="ld-f">' + esc(k) + ' <b>' + acc[k] + '</b> pending</div>';
       }).join('');
-      $('ldFams').innerHTML = '<div class="ld-fam">' + famRow + '</div>' + (accRow ? '<div class="ld-fam">' + accRow + '</div>' : '');
+      setHTML('ldFams', '<div class="ld-fam">' + famRow + '</div>' + (accRow ? '<div class="ld-fam">' + accRow + '</div>' : ''));
 
       if (d.mgmt && per.length) {
-        $('ldPeople').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
+        setHTML('ldPeople', '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
           '<th style="text-align:left">Lister</th><th>Open</th><th>Overdue</th><th>Due 24h</th><th>Awaiting approval</th></tr></thead><tbody>' +
           per.map(function (p) {
             return '<tr><td style="text-align:left;font-weight:800">' + esc(ldS(p.assignee).split('@')[0]) + '</td>' +
@@ -12138,7 +12145,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
               '<td class="num"' + (p.overdue ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.overdue + '</td>' +
               '<td class="num"' + (p.due_today ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.due_today + '</td>' +
               '<td class="num">' + p.submitted + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
       } else {
         $('ldPeopleCard').style.display = d.mgmt ? '' : 'none';
       }
@@ -12146,7 +12153,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       /* R8-8: the CPC pipeline — what advertising work is in flight, soonest deadline first. */
       var cpc = d.cpc_pipeline || [], cc = d.cpc_counts || {};
       var cpcNames = { cpc_research: 'CPC research', campaign_set: 'Campaign set-up', potential_cpc_review: 'Potential-CPC review' };
-      $('ldCpc').innerHTML = !cpc.length
+      setHTML('ldCpc', !cpc.length
         ? '<div class="hu-hint" style="margin-top:0">No CPC work in flight right now.</div>'
         : '<div class="ld-fam">' +
             ['cpc_research', 'campaign_set', 'potential_cpc_review'].map(function (k) {
@@ -12166,15 +12173,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
               '<td style="text-align:left">' + esc(ldS(r.assigned_to).split('@')[0]) + '</td>' +
               '<td style="text-align:left;white-space:nowrap' + (r.overdue ? ';color:var(--bad);font-weight:800' : '') + '">' + esc(fmtPkt(r.deadline_pkt, true) || '—') + '</td>' +
               '<td style="text-align:left">' + esc(ldS(r.status)) + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
 
       var rows = d.rows || [];
       var me = ((STATE.user && STATE.user.email) || '').toLowerCase();
       if (!rows.length) {
-        $('ldRows').innerHTML = '<div class="hu-hint" style="margin-top:0">No open listing work.</div>';
+        setHTML('ldRows', '<div class="hu-hint" style="margin-top:0">No open listing work.</div>');
         return;
       }
-      $('ldRows').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+      setHTML('ldRows', '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
         '<th style="text-align:left">Task</th><th style="text-align:left">Family</th><th style="text-align:left">Account</th>' +
         '<th style="text-align:left">Assigned</th><th style="text-align:left">Deadline</th><th style="text-align:left">Status</th><th></th></tr></thead><tbody>' +
         rows.map(function (r) {
@@ -12196,7 +12203,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
                 '<button class="minibtn" data-ld-send="' + esc(ldS(r.task_id)) + '">Send to Management</button>' +
                 '<button class="minibtn" data-ld-cancel="' + esc(ldS(r.task_id)) + '">Cancel</button>' +
               '</div></div></td></tr>' : '');
-        }).join('') + '</tbody></table></div>';
+        }).join('') + '</tbody></table></div>');
 
       var box = $('ldRows');
       box.querySelectorAll('[data-ld-rej]').forEach(function (b) {
@@ -12224,8 +12231,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         };
       });
     }).done.catch(function (e) {
-      $('ldTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = ''; $('ldCpc').innerHTML = '';
+      setHTML('ldTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('ldPeople', ''); setHTML('ldRows', ''); setHTML('ldCpc', '');
     });
   }
 
@@ -13435,22 +13442,22 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function spPaint() {
     var d = SP_DATA; if (!d) { return; }
     var c = d.counts || {};
-    $('spTiles').innerHTML = '<div class="sp-tiles">' +
+    setHTML('spTiles', '<div class="sp-tiles">' +
       '<div class="sp-t cpc' + (SP_TAB === 'cpc' ? ' on' : '') + '" data-sp="cpc"><span class="k">CPC live</span><b>' + (c.cpc || 0) + '</b></div>' +
       '<div class="sp-t gen' + (SP_TAB === 'general' ? ' on' : '') + '" data-sp="general"><span class="k">General &amp; Dynamic live</span><b>' + (c.general || 0) + '</b></div>' +
       '<div class="sp-t non' + (SP_TAB === 'uncampaigned' ? ' on' : '') + '" data-sp="uncampaigned"><span class="k">In no campaign</span><b>' + (c.uncampaigned || 0) + '</b></div>' +
       '<div class="sp-t"><span class="k">As of</span><b style="font-size:13px">' + esc(fmtPkt(d.as_of, true) || '—') + '</b></div>' +
-    '</div>';
+    '</div>');
     $('spTiles').querySelectorAll('[data-sp]').forEach(function (t) {
       t.onclick = function () { SP_TAB = this.getAttribute('data-sp'); spPaint(); };
     });
     var by = (d.by_account || {})[SP_TAB] || {};
-    $('spAcc').innerHTML = '<div class="sp-acc">' + Object.keys(by).sort(function (a, b) { return by[b] - by[a]; })
-      .map(function (a) { return '<div class="sp-a">' + esc(a) + ' <b>' + by[a] + '</b></div>'; }).join('') + '</div>';
+    setHTML('spAcc', '<div class="sp-acc">' + Object.keys(by).sort(function (a, b) { return by[b] - by[a]; })
+      .map(function (a) { return '<div class="sp-a">' + esc(a) + ' <b>' + by[a] + '</b></div>'; }).join('') + '</div>');
     var list = d[SP_TAB] || [];
-    $('spHead').innerHTML = (SP_TAB === 'cpc' ? 'CPC live listings' : SP_TAB === 'general' ? 'General &amp; Dynamic live listings' : 'Live but in no campaign') +
-      ' <span class="hint">' + list.length + ' item(s)</span>';
-    $('spBody').innerHTML = list.length ? '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
+    setHTML('spHead', (SP_TAB === 'cpc' ? 'CPC live listings' : SP_TAB === 'general' ? 'General &amp; Dynamic live listings' : 'Live but in no campaign') +
+      ' <span class="hint">' + list.length + ' item(s)</span>');
+    setHTML('spBody', list.length ? '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
       '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Campaign</th><th>Price</th><th>Sold</th></tr></thead><tbody>' +
       list.slice(0, 400).map(function (r) {
         return '<tr><td style="text-align:left;max-width:290px"><a href="https://www.ebay.co.uk/itm/' + esc(spS(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
@@ -13462,14 +13469,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<td class="num">' + (Number(r.sold_qty) || 0) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       (list.length > 400 ? '<div class="hu-hint">Showing the first 400 of ' + list.length + '.</div>' : '')
-      : '<div class="hu-hint" style="margin-top:0">Nothing in this group.</div>';
+      : '<div class="hu-hint" style="margin-top:0">Nothing in this group.</div>');
   }
 
   function spLoad() {
     api('activeSplit', {}).then(function (d) { SP_DATA = d || {}; spPaint(); })
       .catch(function (e) {
-        $('spTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-        $('spBody').innerHTML = '';
+        setHTML('spTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+        setHTML('spBody', '');
       });
   }
 
@@ -13754,7 +13761,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         $('mdRejNo').onclick = function () { act(false); };
       });
     }).catch(function () {
-      $('mdRejReq').innerHTML = '<div class="hu-hint" style="margin-top:0">Requests could not load just now.</div>';
+      setHTML('mdRejReq', '<div class="hu-hint" style="margin-top:0">Requests could not load just now.</div>');
     });
   }
 
@@ -16678,9 +16685,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var b = api('teamPerformance', { period: other });
     tc.done.catch(function (e) {
       if (tc.painted || !$('pfTeamGrid')) { return; }
-      $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
+      setHTML('pfTeamGrid', '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-          : 'The grid could not be loaded. Please try again.') + '</div>';
+          : 'The grid could not be loaded. Please try again.') + '</div>');
     });
     b.then(function (d) { TEAM[other] = d || null; if (typeof cacheWrite === 'function') { cacheWrite('teamPerformance', { period: other }, d); } }).catch(function () {});
     return tc.done;
@@ -16912,9 +16919,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     return ec.done.catch(function (e) {
       EVAL = EVAL || {};
       if (ec.painted || !$('pfEvHist')) { return; }
-      $('pfEvHist').innerHTML = '<div class="pf-note">' +
+      setHTML('pfEvHist', '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-          : 'The evaluation history could not be loaded. Please try again.') + '</div>';
+          : 'The evaluation history could not be loaded. Please try again.') + '</div>');
     });
   }
 
@@ -18355,12 +18362,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var rows = d.rows || [];
       var open = rows.filter(function (r) { return !pdS(r.acked_at); });
       var thin = open.filter(function (r) { return Number(r.margin_after) < 2; });
-      $('pdTiles').innerHTML = '<div class="pd-tiles">' +
+      setHTML('pdTiles', '<div class="pd-tiles">' +
         '<div class="pd-t bad"><span class="k">Open alerts</span><b>' + open.length + '</b></div>' +
         '<div class="pd-t bad"><span class="k">Margin under £2</span><b>' + thin.length + '</b></div>' +
         '<div class="pd-t ok"><span class="k">Handled · 30 days</span><b>' + (rows.length - open.length) + '</b></div>' +
         '<div class="pd-t"><span class="k">As of</span><b style="font-size:13px">' + esc(fmtPkt(d.as_of, true) || '—') + '</b></div>' +
-      '</div>';
+      '</div>');
       var box = $('pdBody');
       if (!rows.length) {
         box.innerHTML = '<div class="hu-hint" style="margin-top:0">No cost rises recorded in the last 30 days. When a supplier cost climbs more than 30p, it lands here.</div>';
@@ -18402,8 +18409,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         };
       });
     }).catch(function (e) {
-      $('pdTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('pdBody').innerHTML = '';
+      setHTML('pdTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('pdBody', '');
     });
   }
 
@@ -19952,12 +19959,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         if (!t) { ahead.push(r); return; }
         if (t < now) { late.push(r); } else if (t - now < day) { today.push(r); } else { ahead.push(r); }
       });
-      $('rvTiles').innerHTML = '<div class="rv-tiles">' +
+      setHTML('rvTiles', '<div class="rv-tiles">' +
         '<div class="rv-t bad"><span class="k">Overdue</span><b>' + late.length + '</b></div>' +
         '<div class="rv-t warn"><span class="k">Due today</span><b>' + today.length + '</b></div>' +
         '<div class="rv-t"><span class="k">Ahead</span><b>' + ahead.length + '</b></div>' +
         '<div class="rv-t ok"><span class="k">In flight total</span><b>' + rows.length + '</b></div>' +
-      '</div>';
+      '</div>');
       var sec = function (title, list) {
         if (!list.length) { return ''; }
         return '<div class="rv-sec">' + esc(title) + ' · ' + list.length + '</div>' +
@@ -19974,10 +19981,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           }).join('') + '</tbody></table></div>';
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
-      $('rvBody').innerHTML = html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>';
+      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
-      $('rvTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('rvBody').innerHTML = '';
+      setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('rvBody', '');
     });
   }
 

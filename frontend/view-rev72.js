@@ -42,12 +42,12 @@
         if (!t) { ahead.push(r); return; }
         if (t < now) { late.push(r); } else if (t - now < day) { today.push(r); } else { ahead.push(r); }
       });
-      $('rvTiles').innerHTML = '<div class="rv-tiles">' +
+      setHTML('rvTiles', '<div class="rv-tiles">' +
         '<div class="rv-t bad"><span class="k">Overdue</span><b>' + late.length + '</b></div>' +
         '<div class="rv-t warn"><span class="k">Due today</span><b>' + today.length + '</b></div>' +
         '<div class="rv-t"><span class="k">Ahead</span><b>' + ahead.length + '</b></div>' +
         '<div class="rv-t ok"><span class="k">In flight total</span><b>' + rows.length + '</b></div>' +
-      '</div>';
+      '</div>');
       var sec = function (title, list) {
         if (!list.length) { return ''; }
         return '<div class="rv-sec">' + esc(title) + ' · ' + list.length + '</div>' +
@@ -64,10 +64,10 @@
           }).join('') + '</tbody></table></div>';
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
-      $('rvBody').innerHTML = html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>';
+      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
-      $('rvTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('rvBody').innerHTML = '';
+      setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('rvBody', '');
     });
   }
 

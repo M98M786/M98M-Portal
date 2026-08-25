@@ -62,12 +62,12 @@
       var totals = per.reduce(function (t, p) {
         return { open: t.open + p.open, overdue: t.overdue + p.overdue, due: t.due + p.due_today, sub: t.sub + p.submitted };
       }, { open: 0, overdue: 0, due: 0, sub: 0 });
-      $('ldTiles').innerHTML = '<div class="ld-tiles">' +
+      setHTML('ldTiles', '<div class="ld-tiles">' +
         '<div class="ld-tile gold"><span class="k">Open listing tasks</span><b>' + totals.open + '</b></div>' +
         '<div class="ld-tile bad"><span class="k">Overdue</span><b>' + totals.overdue + '</b></div>' +
         '<div class="ld-tile"><span class="k">Due in 24h</span><b>' + totals.due + '</b></div>' +
         '<div class="ld-tile blue"><span class="k">Awaiting approval</span><b>' + totals.sub + '</b></div>' +
-      '</div>';
+      '</div>');
 
       var f = d.families || {};
       var famRow = ['CPC', 'General/Dynamic', 'Unassigned'].map(function (k) {
@@ -78,10 +78,10 @@
       var accRow = Object.keys(acc).sort(function (a, b) { return acc[b] - acc[a]; }).map(function (k) {
         return '<div class="ld-f">' + esc(k) + ' <b>' + acc[k] + '</b> pending</div>';
       }).join('');
-      $('ldFams').innerHTML = '<div class="ld-fam">' + famRow + '</div>' + (accRow ? '<div class="ld-fam">' + accRow + '</div>' : '');
+      setHTML('ldFams', '<div class="ld-fam">' + famRow + '</div>' + (accRow ? '<div class="ld-fam">' + accRow + '</div>' : ''));
 
       if (d.mgmt && per.length) {
-        $('ldPeople').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
+        setHTML('ldPeople', '<div class="scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
           '<th style="text-align:left">Lister</th><th>Open</th><th>Overdue</th><th>Due 24h</th><th>Awaiting approval</th></tr></thead><tbody>' +
           per.map(function (p) {
             return '<tr><td style="text-align:left;font-weight:800">' + esc(ldS(p.assignee).split('@')[0]) + '</td>' +
@@ -89,7 +89,7 @@
               '<td class="num"' + (p.overdue ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + p.overdue + '</td>' +
               '<td class="num"' + (p.due_today ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.due_today + '</td>' +
               '<td class="num">' + p.submitted + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
       } else {
         $('ldPeopleCard').style.display = d.mgmt ? '' : 'none';
       }
@@ -97,7 +97,7 @@
       /* R8-8: the CPC pipeline — what advertising work is in flight, soonest deadline first. */
       var cpc = d.cpc_pipeline || [], cc = d.cpc_counts || {};
       var cpcNames = { cpc_research: 'CPC research', campaign_set: 'Campaign set-up', potential_cpc_review: 'Potential-CPC review' };
-      $('ldCpc').innerHTML = !cpc.length
+      setHTML('ldCpc', !cpc.length
         ? '<div class="hu-hint" style="margin-top:0">No CPC work in flight right now.</div>'
         : '<div class="ld-fam">' +
             ['cpc_research', 'campaign_set', 'potential_cpc_review'].map(function (k) {
@@ -117,15 +117,15 @@
               '<td style="text-align:left">' + esc(ldS(r.assigned_to).split('@')[0]) + '</td>' +
               '<td style="text-align:left;white-space:nowrap' + (r.overdue ? ';color:var(--bad);font-weight:800' : '') + '">' + esc(fmtPkt(r.deadline_pkt, true) || '—') + '</td>' +
               '<td style="text-align:left">' + esc(ldS(r.status)) + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
 
       var rows = d.rows || [];
       var me = ((STATE.user && STATE.user.email) || '').toLowerCase();
       if (!rows.length) {
-        $('ldRows').innerHTML = '<div class="hu-hint" style="margin-top:0">No open listing work.</div>';
+        setHTML('ldRows', '<div class="hu-hint" style="margin-top:0">No open listing work.</div>');
         return;
       }
-      $('ldRows').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+      setHTML('ldRows', '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
         '<th style="text-align:left">Task</th><th style="text-align:left">Family</th><th style="text-align:left">Account</th>' +
         '<th style="text-align:left">Assigned</th><th style="text-align:left">Deadline</th><th style="text-align:left">Status</th><th></th></tr></thead><tbody>' +
         rows.map(function (r) {
@@ -147,7 +147,7 @@
                 '<button class="minibtn" data-ld-send="' + esc(ldS(r.task_id)) + '">Send to Management</button>' +
                 '<button class="minibtn" data-ld-cancel="' + esc(ldS(r.task_id)) + '">Cancel</button>' +
               '</div></div></td></tr>' : '');
-        }).join('') + '</tbody></table></div>';
+        }).join('') + '</tbody></table></div>');
 
       var box = $('ldRows');
       box.querySelectorAll('[data-ld-rej]').forEach(function (b) {
@@ -175,8 +175,8 @@
         };
       });
     }).done.catch(function (e) {
-      $('ldTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('ldPeople').innerHTML = ''; $('ldRows').innerHTML = ''; $('ldCpc').innerHTML = '';
+      setHTML('ldTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('ldPeople', ''); setHTML('ldRows', ''); setHTML('ldCpc', '');
     });
   }
 

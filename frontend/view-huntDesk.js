@@ -81,14 +81,14 @@
       var m = d.mine || { hunted: 0, hunted_month: 0, approved: 0, approved_month: 0, pending: 0, revision: 0, rejected_30d: 0 };
       var linkTasks = (d.open_tasks || []).filter(function (t) { return t.type === 'sourcing_link'; });
       var revTasks = (d.open_tasks || []).filter(function (t) { return t.type !== 'sourcing_link'; });
-      $('hdTiles').innerHTML = '<div class="hd-tiles">' +
+      setHTML('hdTiles', '<div class="hd-tiles">' +
         '<div class="hd-tile gold"><span class="k">Hunted · this month</span><b>' + (m.hunted_month || 0) + '</b><span class="s">' + (m.hunted || 0) + ' all time</span></div>' +
         '<div class="hd-tile ok"><span class="k">Approved · this month</span><b>' + (m.approved_month || 0) + '</b><span class="s">' + (m.approved || 0) + ' all time</span></div>' +
         '<div class="hd-tile"><span class="k">Awaiting approval</span><b>' + (m.pending || 0) + '</b></div>' +
         '<div class="hd-tile warn"><span class="k">Revision required</span><b>' + ((m.revision || 0) + revTasks.length) + '</b><span class="s">sent back by Management</span></div>' +
         '<div class="hd-tile bad"><span class="k">Link requests</span><b>' + linkTasks.length + '</b><span class="s">orders waiting on your links</span></div>' +
         '<div class="hd-tile"><span class="k">Rejected · 30 days</span><b>' + (m.rejected_30d || 0) + '</b></div>' +
-      '</div>';
+      '</div>');
 
       var tb = $('hdTasks');
       if (!(d.open_tasks || []).length && !(m.revision || 0)) {
@@ -133,18 +133,18 @@
       var mgmt = HD_MGMT_ROLES.indexOf((STATE.user && STATE.user.role) || '') >= 0 || (STATE.user && STATE.user.super);
       if (mgmt && (d.hunters || []).length) {
         $('hdFleetCard').classList.remove('hidden');
-        $('hdFleet').innerHTML = '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
+        setHTML('hdFleet', '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
           '<th style="text-align:left">Hunter</th><th>Hunted · month</th><th>Approved · month</th><th>Pending</th><th>In revision</th><th>Rejected · 30d</th></tr></thead><tbody>' +
           d.hunters.map(function (p) {
             return '<tr' + (p.my ? ' style="background:var(--blue-soft)"' : '') + '><td style="text-align:left;font-weight:800">' + esc(hdS(p.hunter).split('@')[0]) + '</td>' +
               '<td class="num">' + p.hunted_month + '</td><td class="num" style="color:var(--ok)">' + p.approved_month + '</td>' +
               '<td class="num">' + p.pending + '</td><td class="num"' + (p.revision ? ' style="color:var(--warn);font-weight:800"' : '') + '>' + p.revision + '</td>' +
               '<td class="num"' + (p.rejected_30d ? ' style="color:var(--bad)"' : '') + '>' + p.rejected_30d + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
       }
     }).done.catch(function (e) {
-      $('hdTiles').innerHTML = '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>';
-      $('hdTasks').innerHTML = ''; $('hdReasons').innerHTML = '';
+      setHTML('hdTiles', '<div class="hu-hint">The dashboard could not load: ' + esc(e.message) + '</div>');
+      setHTML('hdTasks', ''); setHTML('hdReasons', '');
     });
   }
 

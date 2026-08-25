@@ -46,12 +46,12 @@
       var rows = d.rows || [];
       var open = rows.filter(function (r) { return !pdS(r.acked_at); });
       var thin = open.filter(function (r) { return Number(r.margin_after) < 2; });
-      $('pdTiles').innerHTML = '<div class="pd-tiles">' +
+      setHTML('pdTiles', '<div class="pd-tiles">' +
         '<div class="pd-t bad"><span class="k">Open alerts</span><b>' + open.length + '</b></div>' +
         '<div class="pd-t bad"><span class="k">Margin under £2</span><b>' + thin.length + '</b></div>' +
         '<div class="pd-t ok"><span class="k">Handled · 30 days</span><b>' + (rows.length - open.length) + '</b></div>' +
         '<div class="pd-t"><span class="k">As of</span><b style="font-size:13px">' + esc(fmtPkt(d.as_of, true) || '—') + '</b></div>' +
-      '</div>';
+      '</div>');
       var box = $('pdBody');
       if (!rows.length) {
         box.innerHTML = '<div class="hu-hint" style="margin-top:0">No cost rises recorded in the last 30 days. When a supplier cost climbs more than 30p, it lands here.</div>';
@@ -93,8 +93,8 @@
         };
       });
     }).catch(function (e) {
-      $('pdTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('pdBody').innerHTML = '';
+      setHTML('pdTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('pdBody', '');
     });
   }
 

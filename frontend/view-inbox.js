@@ -182,7 +182,7 @@ VIEWS.inbox = {
       ibMergeThreads(d.threads || [], true);
       ibDrawThreads();
     }).done['catch'](function () {
-      if (!IB.loaded && $('ibThreads')) $('ibThreads').innerHTML = '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>';
+      if (!IB.loaded && $('ibThreads')) setHTML('ibThreads', '<div class="ib-empty">Conversations could not be loaded. They will appear on the next refresh.</div>');
     });
     ibPollNow();
   }
@@ -393,7 +393,7 @@ function ibDrawPicker() {
     h += '<button class="ib-pick" data-p="' + (IB.pick.length - 1) + '">' +
         '<span style="font-weight:800;font-size:13px">Start a conversation with ' + esc(q) + '</span></button>';
   }
-  $('ibPick').innerHTML = h || '<div class="ib-empty">No match yet — type the full company email to start a new conversation.</div>';
+  setHTML('ibPick', h || '<div class="ib-empty">No match yet — type the full company email to start a new conversation.</div>');
 }
 
 function ibKnown(email) {

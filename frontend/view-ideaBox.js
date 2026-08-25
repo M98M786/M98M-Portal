@@ -82,12 +82,12 @@
     api('ideaList', {}).then(function (d) {
       d = d || {};
       var c = d.counts || {};
-      $('ibTiles').innerHTML = '<div class="ib-tiles">' +
+      setHTML('ibTiles', '<div class="ib-tiles">' +
         '<div class="ib-t"><span class="k">New</span><b style="color:var(--blue-2)">' + (c.NEW || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Picked up</span><b style="color:var(--warn)">' + (c['PICKED UP'] || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Hunted</span><b style="color:var(--ok)">' + (c.HUNTED || 0) + '</b></div>' +
         '<div class="ib-t"><span class="k">Your ideas</span><b class="goldtext">' + (c.mine || 0) + '</b></div>' +
-      '</div>';
+      '</div>');
       if ($('ibScope')) { $('ibScope').textContent = d.can_decide ? 'everyone’s ideas · newest first' : 'your ideas · newest first'; }
       var list = d.ideas || [];
       var host = $('ibList');
@@ -125,7 +125,7 @@
         };
       });
     }).catch(function (e) {
-      $('ibList').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>';
+      setHTML('ibList', '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>');
     });
   }
 

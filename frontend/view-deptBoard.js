@@ -55,9 +55,9 @@
       var depts = (d.departments || []).slice();
       depts.sort(function (a, b) { return (b.dept === mineDept) - (a.dept === mineDept) || b.open - a.open; });
       if (!depts.length) {
-        $('dbBody').innerHTML = '<div class="hu-hint">No open tasks anywhere — clean board.</div>';
+        setHTML('dbBody', '<div class="hu-hint">No open tasks anywhere — clean board.</div>');
       } else {
-        $('dbBody').innerHTML = '<div class="db-grid">' + depts.map(function (r) {
+        setHTML('dbBody', '<div class="db-grid">' + depts.map(function (r) {
           var by = Object.keys(r.by_assignee || {}).map(function (k) { return { who: k, n: r.by_assignee[k] }; })
             .sort(function (a, b) { return b.n - a.n; }).slice(0, 3);
           return '<div class="db-card' + (r.dept === mineDept ? ' mine' : '') + '">' +
@@ -71,18 +71,18 @@
                 return '<div class="db-row"><span class="k">' + esc(dbS(x.who).split('@')[0]) + '</span><span>' + x.n + ' open</span></div>';
               }).join('') +
             '</div></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>');
       }
       var hist = d.history || [];
-      $('dbHist').innerHTML = hist.length ? hist.map(function (h) {
+      setHTML('dbHist', hist.length ? hist.map(function (h) {
         return '<div class="db-hist"><span class="o ' + (h.origin === 'system' ? 'sys' : 'mgm') + '">' + (h.origin === 'system' ? 'system' : 'mgmt') + '</span>' +
           '<b style="min-width:82px">' + esc(dbS(h.dept)) + '</b>' +
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dbS(h.title)) + '</span>' +
           '<span style="color:var(--text-3);font-size:11px">' + esc(dbS(h.assigned_to).split('@')[0]) + ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
-      }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>';
+      }).join('') : '<div class="hu-hint" style="margin-top:0">Nothing completed yet today.</div>');
     }).done.catch(function (e) {
-      $('dbBody').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('dbHist').innerHTML = '';
+      setHTML('dbBody', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('dbHist', '');
     });
   }
 

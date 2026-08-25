@@ -562,9 +562,9 @@
     var b = api('teamPerformance', { period: other });
     tc.done.catch(function (e) {
       if (tc.painted || !$('pfTeamGrid')) { return; }
-      $('pfTeamGrid').innerHTML = '<div class="pf-note">' +
+      setHTML('pfTeamGrid', '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-          : 'The grid could not be loaded. Please try again.') + '</div>';
+          : 'The grid could not be loaded. Please try again.') + '</div>');
     });
     b.then(function (d) { TEAM[other] = d || null; if (typeof cacheWrite === 'function') { cacheWrite('teamPerformance', { period: other }, d); } }).catch(function () {});
     return tc.done;
@@ -796,9 +796,9 @@
     return ec.done.catch(function (e) {
       EVAL = EVAL || {};
       if (ec.painted || !$('pfEvHist')) { return; }
-      $('pfEvHist').innerHTML = '<div class="pf-note">' +
+      setHTML('pfEvHist', '<div class="pf-note">' +
         esc(e.message === 'auth' ? 'Your sign-in expired — please sign in again.'
-          : 'The evaluation history could not be loaded. Please try again.') + '</div>';
+          : 'The evaluation history could not be loaded. Please try again.') + '</div>');
     });
   }
 

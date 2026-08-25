@@ -114,7 +114,7 @@
         $('mdRejNo').onclick = function () { act(false); };
       });
     }).catch(function () {
-      $('mdRejReq').innerHTML = '<div class="hu-hint" style="margin-top:0">Requests could not load just now.</div>';
+      setHTML('mdRejReq', '<div class="hu-hint" style="margin-top:0">Requests could not load just now.</div>');
     });
   }
 

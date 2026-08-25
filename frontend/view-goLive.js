@@ -62,11 +62,11 @@
       var byAcct = {};
       drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
       try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
-      $('glTiles').innerHTML = '<div class="gl-tiles">' +
+      setHTML('glTiles', '<div class="gl-tiles">' +
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {
           return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>');
 
       var box = $('glBody');
       if (!drafts.length) {
@@ -125,8 +125,8 @@
         };
       });
     }).catch(function (e) {
-      $('glTiles').innerHTML = '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>';
-      $('glBody').innerHTML = '';
+      setHTML('glTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('glBody', '');
     });
   }
 
