@@ -185,11 +185,23 @@ function ordersDayTabCandidates_(ymd) {
 /** The bridge accepts a UNIQUE containment match when no tab matches exactly, which would let
  * '8 August' land on '18 August' in a month whose 8th has no tab yet. Every resolved tab name is
  * therefore checked back against the candidates before a single row is used. */
+/* '9august' and '9 August' are the same trading day, but bridgeNormalizeHeader_ only splits on
+   NON-alphanumerics and there is nothing between the 9 and the a — so the two normalise apart and
+   the day is skipped whole. Sir Hasib's book really does carry a tab named '9august' (and
+   ' 11 august', which trim already handles). Put a space back on any digit/letter boundary before
+   comparing. Scoped to tab names on purpose: bridgeNormalizeHeader_ is shared with header
+   matching across the whole bridge and is not worth destabilising for this. */
+function ordersTabDayKey_(s) {
+  return bridgeNormalizeHeader_(String(s === null || s === undefined ? '' : s)
+    .replace(/(\d)([A-Za-z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2'));
+}
+
 function ordersTabIsCandidate_(tabName, candidates) {
-  const got = bridgeNormalizeHeader_(tabName);
+  const got = ordersTabDayKey_(tabName);
   if (!got) return false;
   for (let i = 0; i < candidates.length; i++) {
-    if (bridgeNormalizeHeader_(candidates[i]) === got) return true;
+    if (ordersTabDayKey_(candidates[i]) === got) return true;
   }
   return false;
 }

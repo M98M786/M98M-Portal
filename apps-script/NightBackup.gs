@@ -252,7 +252,10 @@ function aliSweep() {
     try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
     var sheets = ss.getSheets();
     for (var back = 0; back <= 6; back++) {
-      var ymd = Utilities.formatDate(new Date(Date.now() - back * 86400000), 'Asia/Karachi', 'yyyy-MM-dd');
+      /* UK day, like the tabs themselves — see aliSweepFast. Asking Karachi put the window a
+         day ahead, so back=0 hunted a tab that does not exist yet and the far end of the range
+         lost a real day off the bottom. */
+      var ymd = Utilities.formatDate(new Date(Date.now() - back * 86400000), 'Europe/London', 'yyyy-MM-dd');
       var candidates = ordersDayTabCandidates_(ymd);
       for (var s = 0; s < sheets.length; s++) {
         if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
