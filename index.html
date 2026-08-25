@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2332';
+var BUILD = '20260825-2338';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -24496,12 +24496,12 @@ function enterApp(user){
     { name:'My desk',     keys:['home','tasks','approvals','tools','rules'] },
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
-        'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','priceDesk',
+        'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','priceDesk',
         'signals','alerts',
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
-    { name:'Advertising', keys:['tasksAds','adsCentre','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','dispatch','sourcing','recheck','returns','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','ideaBox'] },
