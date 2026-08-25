@@ -1024,15 +1024,33 @@ async function alertAckWatch(env) {
     "  AND NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = 'engine:acksla:' || alert_log.id) " +
     'ORDER BY created_at ASC LIMIT 10'
   ).all()).results || [];
+  /* ONE DIGEST, not one letter per alert (25 Aug): this watcher was the single biggest producer
+     in the notify queue — 237 of 813 queued letters — because every breach fanned out to every
+     Management recipient. A reminder about unacknowledged mail must never itself become a flood.
+     The per-alert dedupe still rides on each id, so nothing is chased twice. */
+  const due = [];
   for (const r of rows) {
     const strict = alertStrict(r.type);
     const ageMs = Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z');
     const ageH = isFinite(ageMs) ? Math.floor(ageMs / 3600000) : 2;
     if (!strict && ageH < 6) continue;                     // gentle 6-hour grace for non-money alerts
-    const msg = (strict ? '⛔ STRICT SLA breach (2h) · ' : '⚠ Alert unacknowledged · ') +
-      String(r.type) + ' → ' + String(r.to_addr) + ' has sat ' + ageH + 'h with no written feedback. ' +
-      'Original: ' + String(r.message || '').slice(0, 180) + ' — chase the acknowledgement now.';
-    await notifyRole(env, 'Management', 'Alert not acknowledged in time', msg, 'engine:acksla:' + r.id);
+    due.push({ id: r.id, strict, ageH, type: String(r.type), to: String(r.to_addr) });
+  }
+  if (!due.length) return;
+  const strictN = due.filter((d) => d.strict).length;
+  const lines = due.slice(0, 8).map((d) =>
+    (d.strict ? '⛔ ' : '⚠ ') + d.type + ' → ' + String(d.to).split('@')[0] + ' (' + d.ageH + 'h)').join(' · ');
+  const msg = due.length + ' alert(s) unacknowledged' + (strictN ? ', ' + strictN + ' past the 2-hour money SLA' : '') +
+    ': ' + lines + (due.length > 8 ? ' … and ' + (due.length - 8) + ' more' : '') +
+    ' — open the Alerts screen and acknowledge each with written feedback.';
+  /* the ref carries every id chased in this digest, so each is marked done exactly once */
+  await notifyRole(env, 'Management', 'Alert not acknowledged in time', msg,
+    'engine:acksla:' + due.map((d) => d.id).join('-').slice(0, 90));
+  for (const d of due) {
+    await env.DB.prepare(
+      "INSERT INTO alert_log (to_addr, type, message, ref, created_at) " +
+      "SELECT 'management', 'ack-sla-marker', '', ?1, datetime('now') WHERE NOT EXISTS (SELECT 1 FROM alert_log WHERE ref = ?1)"
+    ).bind('engine:acksla:' + d.id).run();
   }
 }
 
@@ -1186,7 +1204,9 @@ async function flushNotifyQueue(env) {
      a claimed row is invisible to other flushes for 60 seconds, far past the 8-second send. */
   const rs = await env.DB.prepare(
     "SELECT id, to_addr, type, message, ref, tries FROM notify_queue " +
-    "WHERE claimed_at = '' OR claimed_at < datetime('now', '-60 second') ORDER BY id LIMIT 8"
+    /* 8 → 40 (25 Aug): the free plan's 50-subrequest budget forced a tiny batch; on Workers Paid
+       (1000) the queue drains 5x faster. It had built an 813-letter, 11-hour backlog. */
+    "WHERE claimed_at = '' OR claimed_at < datetime('now', '-60 second') ORDER BY id LIMIT 40"
   ).all();
   for (const row of (rs.results || [])) {
     const claim = await env.DB.prepare(
