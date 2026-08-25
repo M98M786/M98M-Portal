@@ -20109,6 +20109,47 @@ const ENGINE_RUNNABLE = {
   provenanceBackfill: function () { return typeof r8ProvenanceBackfill === 'function' ? String(r8ProvenanceBackfill()) : 'absent'; },
   seedTasks: function () { return typeof r8SeedTasks === 'function' ? String(r8SeedTasks()) : 'absent'; },
   aliSweepFast: function () { return typeof aliSweepFast === 'function' ? JSON.stringify(aliSweepFast()) : 'absent'; },
+  /* 25 Aug: "orders of 25th still not have aliexpress links" — dump today's tab HEADERS and how
+   * many rows actually carry an Ali number/link, per account. Separates "team hasn't typed them"
+   * from "the portal cannot see the columns". Read-only. */
+  aliColumnDiag: function () {
+    var out = [];
+    var ymd = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+    var candidates = ordersDayTabCandidates_(ymd);
+    readTab_('CONNECTIONS').forEach(function (c) {
+      if (String(c.sheet_kind) !== 'order_processing' || String(c.status || '').toLowerCase() === 'off') return;
+      var row = { account: String(c.account_name || '') };
+      try {
+        var ss = SpreadsheetApp.openById(String(c.spreadsheet_id));
+        var sheets = ss.getSheets(), hit = null;
+        for (var s = 0; s < sheets.length; s++) {
+          if (ordersTabIsCandidate_(sheets[s].getName(), candidates)) { hit = sheets[s]; break; }
+        }
+        if (!hit) { row.tab = 'MISSING'; out.push(row); return; }
+        row.tab = hit.getName();
+        var lastRow = hit.getLastRow(), lastCol = hit.getLastColumn();
+        row.rows = lastRow - 1;
+        var headers = hit.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+        row.headers = headers.map(function (h) { return String(h).replace(/\s+/g, ' ').trim(); }).slice(0, 14);
+        var cols = nbHeaderCols_(headers);
+        row.detected = { ebay: cols.ebayCol, aliNum: cols.aliNumCol, link: cols.linkCol };
+        if (lastRow > 1) {
+          var vals = hit.getRange(2, 1, Math.min(lastRow - 1, 30), lastCol).getDisplayValues();
+          var filled = 0, ids = 0;
+          vals.forEach(function (v) {
+            if (cols.ebayCol >= 0 && /^\d{2}-\d{5}-\d{5}$/.test(String(v[cols.ebayCol] || '').trim())) ids++;
+            var n = cols.aliNumCol >= 0 ? String(v[cols.aliNumCol] || '').replace(/\D/g, '') : '';
+            var l = cols.linkCol >= 0 ? String(v[cols.linkCol] || '').trim() : '';
+            if (n.length >= 8 || l.indexOf('https://') === 0) filled++;
+          });
+          row.order_ids_seen = ids;
+          row.rows_with_ali = filled;
+        }
+      } catch (e) { row.error = String(e && e.message || e).slice(0, 90); }
+      out.push(row);
+    });
+    return JSON.stringify(out);
+  },
   /* 24 Aug diagnosis: today's orders missing from the workspace — list each order book's REAL
    * tab names against the candidates the portal computes, so a naming drift or a dead importer
    * is seen, not guessed. Read-only. */
