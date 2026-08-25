@@ -535,12 +535,17 @@
     var sp = O.ov.split_7d || {}, splitCard = '';
     if (oN(sp.total_rev) > 0) {
       var pPct = Math.max(0, Math.min(100, oN(sp.promoted_pct)));
-      splitCard = '<div class="o-card" style="margin-top:12px"><span class="card-t">Organic vs promoted sales · last 7 days</span>' +
+      /* The card is rollup-only on purpose (promoted revenue needs ads_rev, which today's live
+         orders have not got yet). Say the window out loud — an unlabelled "last 7 days" here
+         next to a live "last 7 days" tile is what made the two totals look like a bug. */
+      var spThrough = sp.through ? ' \u00b7 through ' + esc(String(sp.through)) : '';
+      splitCard = '<div class="o-card" style="margin-top:12px"><span class="card-t">Organic vs promoted sales \u00b7 settled days' + spThrough + '</span>' +
         '<div class="ov-splitbar"><i style="width:' + pPct + '%"></i></div>' +
         '<div class="ov-splitlg"><span><b style="color:var(--gold-a)">Promoted</b> ' + oGBP(sp.promoted_rev) + ' · ' + pPct.toFixed(1) + '%</span>' +
         '<span><b style="color:var(--ok,#2fb170)">Organic</b> ' + oGBP(sp.organic_rev) + ' · ' + (100 - pPct).toFixed(1) + '%</span>' +
         '<span style="margin-left:auto;color:var(--text-3);font-weight:800">Total ' + oGBP(sp.total_rev) + '</span></div>' +
-        '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest</div></div>';
+        '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest' +
+          (sp.basis ? ' \u00b7 ' + esc(String(sp.basis)) : '') + '</div></div>';
     }
     box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">Yesterday per account · real spend</span>' +
       '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded yesterday — two accounts still need the marketing re-consent.</div>') + '</div></div>' +

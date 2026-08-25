@@ -4829,6 +4829,17 @@ const ROUTES = {
       }
       kToday.sold = round2(Object.values(todayAcct).reduce((t, a) => t + a.revenue, 0)) || kToday.sold;
 
+      /* 25 Aug — the two-numbers-on-one-screen bug. `week` summed sales_daily, but sales_daily is
+         the NIGHTLY rollup: mid-afternoon it held £17 of today against £1,024 of real orders, so
+         "last 7 days" read ~£1,000 light while the Collective tile (which counts live orders)
+         read the truth. Same screen, same label, two answers. Swap today's stub for the live
+         figure so both agree. The stub is SUBTRACTED first — adding blindly would double-count
+         whatever the rollup had already written. */
+      const k7StubToday = sum(days.filter(r => r.date === today)).sold;
+      const k7LiveToday = round2(Object.values(todayAcct).reduce((t, a) => t + a.revenue, 0));
+      const k7Rollup = round2(k7.sold);                     // what the completed rollup can vouch for
+      if (k7LiveToday > 0) k7.sold = round2(k7.sold - k7StubToday + k7LiveToday);
+
       const ydayRows = days.filter(r => r.date === yday).map(r => ({ account: r.account, profit: r.profit, ads: r.ads, sold: r.sold }));
 
       const adsSale = await ctx.env.DB.prepare(
@@ -4859,17 +4870,24 @@ const ROUTES = {
         kpis: {
           today: { revenue: round2(kToday.sold), orders: todayCount },
           yesterday: { revenue: round2(kYday.sold), profit_est: round2(kYday.profit), ads: round2(kYday.ads) },
-          week: { revenue: round2(k7.sold), profit_est: round2(k7.profit), ads: round2(k7.ads) },
+          week: { revenue: round2(k7.sold), profit_est: round2(k7.profit), ads: round2(k7.ads),
+            live_today_included: k7LiveToday > 0, rollup_only: k7Rollup },
         },
         today_by_account: Object.values(todayAcct).sort((a, b) => b.revenue - a.revenue),
         yesterday_by_account: ydayRows,
         ads_yesterday: adsRows,
         /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the 7-day split on the home,
            from eBay-attributed revenue (promoted) against total (the rest is organic). */
+        /* The split can only speak for days the rollup has finished: promoted revenue comes from
+           ads_rev, which today's live orders do not carry. So it reports the ROLLUP total, not the
+           live one, and states its own window — a card that silently mixed live and rollup revenue
+           is how the £11.6k / £12.6k confusion started. */
         split_7d: {
-          total_rev: round2(k7.sold), promoted_rev: round2(k7.promoted),
-          organic_rev: round2(k7.sold - k7.promoted),
-          promoted_pct: k7.sold > 0 ? round2(k7.promoted / k7.sold * 100) : 0,
+          total_rev: k7Rollup, promoted_rev: round2(k7.promoted),
+          organic_rev: round2(k7Rollup - k7.promoted),
+          promoted_pct: k7Rollup > 0 ? round2(k7.promoted / k7Rollup * 100) : 0,
+          through: k7StubToday > 0 ? today : yday,
+          basis: 'settled days only — today lands after tonight’s rollup',
         },
         health,
         duplicates: dups.results || [],
