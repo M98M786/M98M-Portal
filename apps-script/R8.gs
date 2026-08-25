@@ -811,6 +811,89 @@ function r8ProvenanceBackfill() {
 }
 
 /* ---------- registry ---------- */
+/* ---------- staff oversight dossier (Sales Operations, 26 Aug) ----------
+   "give me access to each and every single mindset, each and every single alert, workflow, of
+   each staff." One person, everything about them on one screen: their live workflow (tasks),
+   every letter that reached them (alerts), their behaviour/working reviews (the mindset), and
+   the hard facts (done in 7 days, overdue now). Read-only. Gated to the oversight tier — the
+   Sales Operations role plus Management/Ops Head/Team Lead — never to peers. */
+function r8IsOversight_(role, email) {
+  return isMgmt_(role, email) || role === 'Team Lead' || role === 'Sales Operations';
+}
+
+function actionStaffDossier_(payload, ctx) {
+  if (!r8IsOversight_(ctx.user.role, ctx.ident.email)) throw new Error('oversight only');
+  const target = normalizeEmail(payload.email || '');
+  if (!target) {
+    /* no email → the roster to choose from */
+    const roster = readTab_('USERS').filter(function (u) { return String(u.status) === 'approved'; })
+      .map(function (u) { return { email: normalizeEmail(u.email), name: String(u.name || u.email), role: String(u.role || '') }; })
+      .sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+    return { roster: roster };
+  }
+
+  const user = readTab_('USERS').filter(function (u) { return normalizeEmail(u.email) === target; })[0] || null;
+  const profile = user ? {
+    email: target, name: String(user.name || target), role: String(user.role || ''),
+    status: String(user.status || ''), shift: String(user.shift || ''),
+    joined_at: taskPktIso_(user.joined_at), accounts: String(user.accounts_access || ''),
+  } : { email: target, name: target, role: '', status: 'not found' };
+
+  const nowMs = Date.now();
+  const OPEN = [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED];
+  const workflow = { open: [], recent_done: [], done_7d: 0, overdue_now: 0, avg_turnaround_min: 0 };
+  let turnSum = 0, turnN = 0;
+  const cut7 = nowMs - 7 * 86400000;
+  readTab_('TASKS').forEach(function (t) {
+    if (normalizeEmail(t.assigned_to) !== target) return;
+    const status = String(t.status || '');
+    const dept = R8_DEPT_OF_TYPE[String(t.type || 'general')] || 'General';
+    if (status === TASK_STATUS_COMPLETED) {
+      const dMs = taskMs_(t.decided_at);
+      if (!isNaN(dMs) && dMs >= cut7) workflow.done_7d++;
+      const mins = taskElapsedMin_(t.created_at, dMs);
+      if (mins > 0) { turnSum += mins; turnN++; }
+      if (!isNaN(dMs)) workflow.recent_done.push({ type: String(t.type || ''), dept: dept,
+        title: String(t.title || '').slice(0, 80), decided_at: taskPktIso_(t.decided_at) });
+      return;
+    }
+    if (OPEN.indexOf(status) < 0) return;
+    const dl = taskMs_(t.deadline_pkt);
+    const overdue = !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED;
+    if (overdue) workflow.overdue_now++;
+    workflow.open.push({ task_id: String(t.task_id || ''), type: String(t.type || ''), dept: dept,
+      title: String(t.title || '').slice(0, 80), status: status, account: String(t.account || ''),
+      deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: overdue, created_at: taskPktIso_(t.created_at) });
+  });
+  workflow.open.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
+  workflow.recent_done.sort(function (a, b) { return String(b.decided_at).localeCompare(String(a.decided_at)); });
+  workflow.recent_done = workflow.recent_done.slice(0, 20);
+  workflow.avg_turnaround_min = turnN ? Math.round(turnSum / turnN) : 0;
+
+  const alerts = [];
+  readTab_('NOTIFICATIONS').forEach(function (n) {
+    if (normalizeEmail(n.to) !== target) return;
+    alerts.push({ type: String(n.type || ''), message: String(n.message || '').slice(0, 200),
+      from: String(n.from || ''), created_at: taskPktIso_(n.created_at), read: String(n.read_at || '') !== '' });
+  });
+  alerts.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  const unread = alerts.filter(function (a) { return !a.read; }).length;
+
+  const reviews = r8ReviewRows_().filter(function (r) { return normalizeEmail(r.email) === target; })
+    .sort(function (a, b) { return String(b.week).localeCompare(String(a.week)); }).slice(0, 26)
+    .map(function (r) { return { week: String(r.week), behavior: Number(r.behavior) || 0,
+      working: Number(r.working) || 0, notes: String(r.notes || ''), rated_by: String(r.rated_by || '') }; });
+  const lastReview = reviews[0] || null;
+
+  return {
+    profile: profile,
+    workflow: workflow,
+    alerts: { unread: unread, total: alerts.length, items: alerts.slice(0, 40) },
+    reviews: { last: lastReview, history: reviews },
+    as_of: now_(),
+  };
+}
+
 const ACTIONS_R8 = {
   huntReasons:        [actionHuntReasons_, 'any'],
   huntReasonAdd:      [actionHuntReasonAdd_, 'any'],     // mgmt gated inside
@@ -825,6 +908,7 @@ const ACTIONS_R8 = {
   staffReviewsPending: [actionStaffReviewsPending_, 'any'],
   staffReviewSave:    [actionStaffReviewSave_, 'any'],
   staffReviewHistory: [actionStaffReviewHistory_, 'any'],
+  staffDossier:       [actionStaffDossier_, 'any'],
   mgmtPendingAS:      [actionMgmtPendingAS_, 'any'],
   ideaSubmit:         [actionIdeaSubmit_, 'any'],        // EVERY approved user may send an idea
   ideaList:           [actionIdeaList_, 'any'],

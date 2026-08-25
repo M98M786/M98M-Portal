@@ -117,6 +117,7 @@ const ENGINE_RUNNABLE = {
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
+  setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

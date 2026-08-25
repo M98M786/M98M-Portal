@@ -976,7 +976,9 @@ function enterApp(user){
      "first page" Hasib asked for — otherwise the management overview, otherwise home. */
   var DEPT_LANDING = { 'Item Lister':'tasksListing', 'Listing Manager':'tasksListing',
     'Product Hunter':'tasksHunting', 'Order Processor':'tasksOrders',
-    'Advertising Manager':'tasksAds', 'CS':'tasksCS' };
+    'Advertising Manager':'tasksAds', 'CS':'tasksCS',
+    /* Sales Operations watches people, not a queue — land them on the oversight dossier. */
+    'Sales Operations':'staffOversight' };
   var myDeptView = DEPT_LANDING[(STATE.user && STATE.user.role) || ''];
   var landing = (myDeptView && VIEWS[myDeptView] && canSee(VIEWS[myDeptView])) ? myDeptView
     : ((VIEWS.overview&&canSee(VIEWS.overview))?'overview':'home');

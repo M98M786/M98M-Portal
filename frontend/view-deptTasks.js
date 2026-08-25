@@ -12,19 +12,19 @@
   var DT_DEPTS = [
     { dept: 'Listing', key: 'tasksListing', label: 'Listing tasks',
       icon: '<path d="M4 5h16M4 10h16M4 15h10"/><path d="m15 17 2 2 4-4"/>',
-      roles: ['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head'] },
+      roles: ['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
     { dept: 'Hunting', key: 'tasksHunting', label: 'Hunting tasks',
       icon: '<path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/><path d="M16 16l4.5 4.5"/>',
-      roles: ['Product Hunter', 'Team Lead', 'Management', 'Ops Head'] },
+      roles: ['Product Hunter', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
     { dept: 'Orders', key: 'tasksOrders', label: 'Order tasks',
       icon: '<path d="M3 6h18l-2 12H5z"/><path d="M9 10h6"/>',
-      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head'] },
+      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
     { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
       icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
-      roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'] },
+      roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
     { dept: 'CS', key: 'tasksCS', label: 'CS tasks',
       icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-      roles: ['CS', 'Team Lead', 'Management', 'Ops Head'] },
+      roles: ['CS', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
   ];
 
   VIEW_CSS.push(

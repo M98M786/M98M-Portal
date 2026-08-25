@@ -91,6 +91,31 @@ const PENDING_SHEET_LINKS = [
     id: '1MJK7wt3r3w-7JCCZjaSGxU23ZftbqerS7LlKAk-qwmQ', note: 'Sir Hasib' },
 ];
 
+/* One-shot: put Ubaid on the new Sales Operations department (26 Aug, owner request). Role
+   changes normally require a super admin through updateStaff; this is the maintenance path, run
+   server-side and key-gated via ENGINE_RUNNABLE. It writes ONE cell — the role — after checking
+   the target exists and the role is valid, and refuses to touch a super admin. Idempotent. */
+function setSalesOpsRole() {
+  const TARGET = 'm98mthree@gmail.com';   // Ubaid Kaleem
+  const ROLE = 'Sales Operations';
+  if (ROLES.indexOf(ROLE) < 0) return 'ABORT: ' + ROLE + ' is not in ROLES — deploy Config first';
+  const sh = getPortalDb_(false).getSheetByName('USERS');
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(function (h) { return String(h); });
+  const emailCol = head.indexOf('email'), roleCol = head.indexOf('role');
+  if (emailCol < 0 || roleCol < 0) return 'ABORT: USERS is missing email/role columns';
+  for (let i = 1; i < vals.length; i++) {
+    if (normalizeEmail(vals[i][emailCol]) !== normalizeEmail(TARGET)) continue;
+    if (isSuperAdmin(vals[i][emailCol])) return 'REFUSED: target is a super admin';
+    const before = String(vals[i][roleCol] || '');
+    if (before === ROLE) return 'already ' + ROLE;
+    sh.getRange(i + 1, roleCol + 1).setValue(ROLE);
+    logActivity_('system', 'ROLE_SET', TARGET, before, ROLE, 'Sales Operations department');
+    return 'set ' + TARGET + ': ' + before + ' -> ' + ROLE;
+  }
+  return 'ABORT: ' + TARGET + ' not found in USERS';
+}
+
 function connectPendingSheets() {
   const out = [];
   const db = getPortalDb_(false);

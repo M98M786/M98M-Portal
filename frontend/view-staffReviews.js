@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  var SR_MGMT = ['Management', 'Ops Head'];
+  var SR_MGMT = ['Management', 'Ops Head', 'Sales Operations'];
 
   VIEW_CSS.push(
     '.sr-row{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-top:10px;background:var(--panel-2)}' +

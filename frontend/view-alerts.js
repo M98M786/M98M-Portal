@@ -30,7 +30,7 @@
 
   /* §4.3's business-dashboard row plus the Advertising Manager's ads view. The server gates every
      one of these actions again; this list only decides whether the nav item exists. */
-  var AL_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+  var AL_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Sales Operations', 'Advertising Manager', 'CS'];
   var AL_MGMT = ['Management', 'Ops Head'];          // mirrors MGMT_ROLES — the only roles the server lets recompute
 
   var AL_TZ_PKT = 'Asia/Karachi';

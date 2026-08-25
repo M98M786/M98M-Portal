@@ -33,7 +33,7 @@
        carrying it. That is a management view: a lister does not need Advertising's backlog, and
        showing it to them is how the boards came to feel like noise. Department members get their
        OWN board (tasksListing, tasksHunting, ...) as their landing page instead. */
-    roles: ['Management', 'Ops Head', 'Team Lead'],
+    roles: ['Management', 'Ops Head', 'Team Lead', 'Sales Operations'],
     order: 3.5,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Pending tasks <span class="goldtext">by department</span></h1>' +

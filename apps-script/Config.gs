@@ -37,7 +37,7 @@ const DB_TABS = {
 // The 33 real hunting columns, verbatim from the live workbook (header row 1, A–AG).
 const HUNTING_COLS = ['Selected By','Approval Status','Comments','Date Added','Account Selected','Listing Status','Seasonal','Main Keyword Terapeak link','Image Link of avg sold price','Image Link of Zik analytics','Terapeak overview','Temu Link','Product Link 1 Main supplier','Product Link 2','Product Link 3','Ebay Link','Title','Image Link','IMAGE','DESCRIPTION','Category','Source Price','E-Bey Caluclator + £4','CPC Selling Chance','Sell Through','Competitors','TOP THREE SALES','Total Competitors on main keyword','Price Range ANALYSIS','Sold Unit ANALYSIS','Our Profit','ROI','Comment','Comments given by','High Price Link','Prime Competitor Selling Price','Competitor High Selling Price','Campaign category'];
 
-const ROLES = ['Management','Ops Head','Team Lead','Listing Manager','Advertising Manager','CS','Product Hunter','Item Lister','Order Processor','Pricing'];
+const ROLES = ['Management','Ops Head','Team Lead','Sales Operations','Listing Manager','Advertising Manager','CS','Product Hunter','Item Lister','Order Processor','Pricing'];
 
 /* V2 access model (§8/§24 of the V2 contract): a person's screens = their role's defaults
  * PLUS the modules on their USERS row; '-key' entries subtract a default. 'team-lead' is a

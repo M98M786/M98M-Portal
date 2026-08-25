@@ -6,7 +6,7 @@
  * hardcodes no vocabulary, no staff name and no account name (the built page is public). */
 (function () {
 
-  var TEAM_ROLES = ['Management', 'Ops Head', 'Team Lead'];   // §12.1 "Mgmt+TL"; §4.4 adds Ops Head
+  var TEAM_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Sales Operations'];   // §12.1 "Mgmt+TL"; §4.4 adds Ops Head; Sales Ops watches
   /* §4.3 grants the manual evaluation to Management and Team Lead, and §4.4 is explicit that the
    * Front Head of Operations does NOT get it — so the rubric card is narrower than the view.
    * This is presentation only: actionSaveEvaluation_ / actionEvaluations_ refuse it server-side. */
