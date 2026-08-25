@@ -123,3 +123,22 @@ only the second one counts here.
 - **1,381 historical orders** (Jul–18 Aug) have supplier links in the sheet but no order row
   in D1, because they predate his API. Backfilling means inserting sheet-derived rows into
   an eBay-sourced table, which could skew revenue. His call.
+
+## 11. Sales Operations department + staff oversight  (NEW — DONE, verified on screen)
+
+- [x] **DONE (verified)** — 'Sales Operations' role added to ROLES; Ubaid (m98mthree) moved
+  Pricing → Sales Operations via a key-gated one-shot. Verified: role appears in the config
+  list; the one-shot returned "set m98mthree@gmail.com: Pricing -> Sales Operations".
+- [x] **DONE (verified)** — oversight wiring: Sales Operations added to the department overview,
+  staff reviews, performance, alerts centre and all 5 department task boards.
+- [x] **DONE (verified on screen)** — new `Staff oversight` page + `staffDossier` action. Pick a
+  person → their open workflow (with overdue flags), done-in-7-days, avg turnaround, every alert
+  that reached them, and their behaviour/working review history. Rendered live for Zain: 8 open /
+  8 overdue, 1833 alerts, review ★★★★/★★★★. All four sections paint. Read-only, oversight tier only.
+
+### Operational findings this surfaced (for Hasib, not code bugs)
+- **Alert feeds are drowning**: Fasieh 2,774 unread, Zain 1,833 unread. The notification system
+  has no read/clear-down, so letters pile up unboundedly. Worth a "mark all read" and/or an
+  auto-expiry of old letters.
+- **Zain: 8 open, all 8 overdue, 0 done in 7 days** — every one a loss-review task. Advertising's
+  loss queue is not being worked.
