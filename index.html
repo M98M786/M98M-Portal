@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2320';
+var BUILD = '20260825-2332';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -24486,14 +24486,26 @@ function enterApp(user){
   /* Hasib (25 Aug): "separate task dashboard of each department as the FIRST PAGE in menu of
      that specific department". Each group therefore opens with its own live task board, and the
      R8 screens sit with their department instead of falling into a nameless 'More' pile. */
+  /* Order (26 Aug, owner): "send my desk as the first department ... for every department". My
+     desk leads for EVERYONE - a lister sees My desk then Listings, a manager sees My desk then
+     Management. Within Management the daily drivers come first (the desk, then Sales analysis and
+     the business/account screens, then signals/alerts, then the staff block); the scheduling and
+     personal-report items - rota, my reports, team performance, meetings, daily agenda - are the
+     "less important stuff in the end", kept together in one line at the bottom of the group. */
   var NAV_DEPTS = [
-    { name:'Management',  keys:['mgmtDesk','deptBoard','overview','kpis','dailyReport','accountReport','accountHealth','alerts','reports','reportsGrid','perf','signals','approvals','staffAdmin','staffReviews','priceDesk','rota','team','meetings','agenda'] },
+    { name:'My desk',     keys:['home','tasks','approvals','tools','rules'] },
+    { name:'Management',  keys:[
+        'mgmtDesk','deptBoard',
+        'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','priceDesk',
+        'signals','alerts',
+        'staffAdmin','staffOversight','staffReviews',
+        /* less important — kept in a line at the end */
+        'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','dispatch','sourcing','recheck','returns','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','ideaBox'] },
-    { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] },
-    { name:'My desk',     keys:['home','dashboard','tasks','rules','tools'] }
+    { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
   ];
   var placed = {};
   function navLink(v){

@@ -20571,6 +20571,7 @@ const ENGINE_RUNNABLE = {
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
   setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },
+  freeYousafEmail: function () { return typeof freeYousafEmail === 'function' ? String(freeYousafEmail()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -22615,6 +22616,35 @@ function setSalesOpsRole() {
     return 'set ' + TARGET + ': ' + before + ' -> ' + ROLE;
   }
   return 'ABORT: ' + TARGET + ' not found in USERS';
+}
+
+/* One-shot: free up Yousaf's email (26 Aug, owner request — "remove Yousaf from his role and
+   make it a free email"). Deactivates the account so it holds no role and cannot sign in, and
+   renames it so the directory reads plainly that this address is now spare, matching the other
+   free-email accounts in the roster. Idempotent; refuses a super admin. */
+function freeYousafEmail() {
+  const TARGET = 'm98mseven@gmail.com';   // Yousaf Bhai
+  const sh = getPortalDb_(false).getSheetByName('USERS');
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(function (h) { return String(h); });
+  const c = {};
+  ['email', 'name', 'role', 'status', 'deactivated_at', 'notes'].forEach(function (k) { c[k] = head.indexOf(k); });
+  if (c.email < 0 || c.status < 0) return 'ABORT: USERS missing columns';
+  for (let i = 1; i < vals.length; i++) {
+    if (normalizeEmail(vals[i][c.email]) !== normalizeEmail(TARGET)) continue;
+    if (isSuperAdmin(vals[i][c.email])) return 'REFUSED: target is a super admin';
+    const beforeRole = String(vals[i][c.role] || ''), beforeStatus = String(vals[i][c.status] || '');
+    if (beforeStatus === SADM_STATUS_DISABLED && String(vals[i][c.name] || '').indexOf('Free Email') >= 0) return 'already freed';
+    const row = i + 1;
+    sh.getRange(row, c.status + 1).setValue(SADM_STATUS_DISABLED);
+    if (c.deactivated_at >= 0) sh.getRange(row, c.deactivated_at + 1).setValue(now_());
+    if (c.name >= 0) sh.getRange(row, c.name + 1).setValue('Yousaf Free Email');
+    if (c.role >= 0) sh.getRange(row, c.role + 1).setValue('');
+    if (c.notes >= 0) sh.getRange(row, c.notes + 1).setValue('Freed 26 Aug by owner request (was ' + beforeRole + ').');
+    logActivity_('system', 'STAFF_FREED', TARGET, beforeRole + '|' + beforeStatus, 'disabled|free email', 'owner request');
+    return 'freed ' + TARGET + ' (was ' + beforeRole + '/' + beforeStatus + ')';
+  }
+  return 'ABORT: ' + TARGET + ' not found';
 }
 
 function connectPendingSheets() {
