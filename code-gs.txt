@@ -14200,6 +14200,7 @@ function dashMonthCard_(bucket, period, wanted, ctx) {
   };
   if (!raw) return card;
   const sheet = {};
+  const broken = [];
   DASH_TILES.concat([DASH_METRIC_RETURNS_OLD]).forEach(function (m) {
     // The old-returns figure the tile LABEL spells out rides on the RETURNS tile's permission.
     const gate = m === DASH_METRIC_RETURNS_OLD ? DASH_TILE_RETURNS : m;
@@ -14207,9 +14208,17 @@ function dashMonthCard_(bucket, period, wanted, ctx) {
     const key = DASH_SHEET_PREFIX + m;
     if (!Object.prototype.hasOwnProperty.call(raw, key)) return;
     const v = dashRoundMetric_(m, Number(raw[key]));
-    if (v !== null) sheet[m] = v;
+    if (v === null) return;
+    /* The fleet total already refuses a broken workbook cell (dashCollective_), but the ACCOUNT
+       card printed the same cell raw — which is how a Margin tile of -2,209,167,756,002 kept
+       reaching Management's screen after the collective figure had been cleaned. A number this
+       far outside trade is a broken formula in the workbook, not a business fact: name the cell
+       instead of rendering it, so the screen can say which sheet to fix. */
+    if (dashSaneNumber_(v) === null) { broken.push({ metric: m, value: String(v).slice(0, 28) }); return; }
+    sheet[m] = v;
   });
   card.sheet_tiles = dashStrip_(sheet, ctx);
+  card.sheet_broken = broken;
   card.sheet_source = String(raw[DASH_METRIC_SHEET_SOURCE] || '');
   card.banner = String(raw[DASH_METRIC_BANNER] || '');
   card.latest_day = String(raw[DASH_METRIC_LATEST_DAY] || '');
@@ -14227,6 +14236,9 @@ function dashDiscrepancies_(account, card, wanted) {
     if (!Object.prototype.hasOwnProperty.call(card.sheet_tiles, metric)) return;
     const mine = Number(card.tiles[metric]), theirs = Number(card.sheet_tiles[metric]);
     if (!isFinite(mine) || !isFinite(theirs)) return;
+    /* Never raise a "these disagree" row against a cell we already know is broken — it produced
+       a £2.2tn "difference" and buried the real discrepancies underneath it. */
+    if (dashSaneNumber_(mine) === null || dashSaneNumber_(theirs) === null) return;
     const diff = mine - theirs;
     const ref = Math.abs(theirs) || Math.abs(mine);
     const pct = ref ? Math.abs(diff) / ref : 0;
