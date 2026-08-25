@@ -24,6 +24,8 @@ var C_WASTE  = 'Ad Waste';
 var dbData = null;
 
 VIEW_CSS.push(
+  '.db-excl{border:1px solid rgba(240,96,90,.45);background:var(--bad-soft);border-radius:11px;' +
+    'padding:11px 14px;margin:-8px 0 18px;font-size:12.5px;font-weight:700;line-height:1.55;color:var(--text-2)}' +
   '.db-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--gold-line);' +
     'border:1px solid var(--gold-line);border-radius:12px;overflow:hidden;margin:18px 0 20px}' +
   '.db-kpi{background:var(--panel);padding:15px 16px 14px;min-width:0}' +
@@ -95,7 +97,18 @@ function kpiStrip(d) {
     kpi('Margin', isFinite(margin) ? margin.toFixed(1) + '%' : '—',
         isFinite(ali) ? 'AliExpress ' + gbp(ali) : '', '') +
     kpi('Ads incl VAT', gbp(ads), isFinite(nt) ? 'N/T ' + nt.toFixed(2) : '', 'blue') +
-  '</div>';
+  '</div>' + excludedNote(d);
+}
+/* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
+   fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */
+function excludedNote(d) {
+  var ex = (d.collective && d.collective.month && d.collective.month.excluded) || [];
+  if (!ex.length) { return ''; }
+  var who = {};
+  ex.forEach(function (e) { (who[e.account] = who[e.account] || []).push(e.metric); });
+  var lines = Object.keys(who).map(function (a) { return esc(a) + ' (' + esc(who[a].join(', ')) + ')'; }).join(' · ');
+  return '<div class="db-excl">⚠ Some figures were left out of these totals because the workbook returned an impossible value: ' +
+    lines + '. Fix the formula in that sheet — the rest of the numbers above are unaffected.</div>';
 }
 function kpi(lab, val, note, cls) {
   return '<div class="db-kpi ' + cls + '"><div class="lab">' + esc(lab) + '</div>' +

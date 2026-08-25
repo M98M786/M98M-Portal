@@ -808,9 +808,20 @@ function dashBannerNote_(account, card) {
   };
 }
 
+/* A workbook formula can go wrong — Amna Baji's August 'Returns' read -2,209,177,692,004 and its
+ * Margin tile -220,916,775,600,441%, and those poisoned the FLEET tiles: the collective Orders
+ * count showed -2,166,236,889,374 to Management. One broken cell must never rewrite the group's
+ * numbers. Anything past a sane business bound is refused from the sum and reported instead. */
+const DASH_SANE_ABS = 100000000;                          // £100m / 100m units — far above real trade
+function dashSaneNumber_(v) {
+  const n = Number(v);
+  return isFinite(n) && Math.abs(n) < DASH_SANE_ABS ? n : null;
+}
+
 function dashCollective_(cards, key, wanted) {
   const totals = {};
   let included = 0;
+  const rejected = [];
   cards.forEach(function (c) {
     const tiles = c[key] && c[key].tiles;
     if (!tiles || !Object.keys(tiles).length) return;
@@ -818,7 +829,9 @@ function dashCollective_(cards, key, wanted) {
     DASH_SUMMABLE.forEach(function (m) {
       if (wanted.indexOf(m) < 0) return;
       if (!Object.prototype.hasOwnProperty.call(tiles, m)) return;
-      totals[m] = (totals[m] || 0) + Number(tiles[m]);
+      const n = dashSaneNumber_(tiles[m]);
+      if (n === null) { rejected.push({ account: c.account, metric: m, value: String(tiles[m]).slice(0, 24) }); return; }
+      totals[m] = (totals[m] || 0) + n;
     });
   });
   // Ratios are recomputed from the summed components — six accounts' margins do not average.
@@ -834,7 +847,9 @@ function dashCollective_(cards, key, wanted) {
     const v = dashRoundMetric_(m, Number(totals[m]));
     if (v !== null) out[m] = v;
   });
-  return { tiles: out, accounts_included: included };
+  return { tiles: out, accounts_included: included,
+    /* named, not hidden: the screen can say WHOSE cell is broken instead of showing a wrong total */
+    excluded: rejected };
 }
 
 function dashDayEntry_(bucket, ymd, wanted, ctx) {
