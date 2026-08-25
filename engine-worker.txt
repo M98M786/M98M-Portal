@@ -2927,6 +2927,12 @@ function ukDate(iso) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
+/* AliExpress product URLs carry a long signed query string. The old 400-character cap cut 1,199
+   of the 1,281 stored links (93.6%) mid-query, 91 of them mid-percent-escape. They still open,
+   because the /item/<id>.html path survives ahead of the '?' — but a truncated URL cannot be
+   compared, deduped or re-validated, and a short-form AliExpress link carrying its product id
+   only in the query would be destroyed outright. D1 TEXT has no length limit; the cap was ours. */
+const ALI_LINK_MAX = 2048;
 
 /* The ISO instant where the current UK trading day began — for comparing against raw UTC
    created_at stamps in SQL. Same probe ordersBoard uses: try GMT, then BST. */
@@ -4988,11 +4994,11 @@ const ROUTES = {
       await ctx.env.DB.prepare(
         "UPDATE orders SET ali_link = CASE WHEN ?2 != '' THEN ?2 ELSE ali_link END, " +
         "ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE ali_order END WHERE order_id = ?1"
-      ).bind(orderId, link.slice(0, 400), aliOrder).run();
+      ).bind(orderId, link.slice(0, ALI_LINK_MAX), aliOrder).run();
       let sheet = { ok: false, reason: 'bridge did not answer' };
       try {
         const values = {};
-        if (link) values['New Ali Link'] = link.slice(0, 400);
+        if (link) values['New Ali Link'] = link.slice(0, ALI_LINK_MAX);
         if (aliOrder) values['Order Number'] = aliOrder;
         const r = await fetch(ctx.env.AS_URL, {
           method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
@@ -5185,15 +5191,24 @@ const ROUTES = {
         const id = String(r.order_id || '').trim();
         if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
         const ord = String(r.ali_order || '').replace(/\D/g, '').slice(0, 25);
-        const link = String(r.ali_link || '').trim().slice(0, 400);
+        const link = String(r.ali_link || '').trim().slice(0, ALI_LINK_MAX);
         if (!ord && (!link || !/^https:\/\//i.test(link))) continue;
         stmts.push(ctx.env.DB.prepare(
           "UPDATE orders SET ali_order = CASE WHEN ?2 != '' THEN ?2 ELSE ali_order END, " +
           "ali_link = CASE WHEN ?3 != '' AND ?3 LIKE 'https://%' THEN ?3 ELSE ali_link END WHERE order_id = ?1"
         ).bind(id, ord.length >= 8 ? ord : '', link));
       }
-      for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
-      return { received: rows.length, written: stmts.length };
+      /* `written` used to be stmts.length — the number of statements PREPARED. The UPDATE keys on
+         order_id, so a link for an order eBay has not imported yet matches nothing and is dropped
+         silently; a genuine loss and a clean run reported the identical number, and that number is
+         what gets stamped into ALI_SWEEP_LAST as truth. Count what D1 says it actually changed,
+         and return both so a gap between them is visible. */
+      let changed = 0;
+      for (let i = 0; i < stmts.length; i += 50) {
+        const res = await ctx.env.DB.batch(stmts.slice(i, i + 50));
+        for (const x of (res || [])) changed += (x && x.meta && x.meta.changes) || 0;
+      }
+      return { received: rows.length, written: changed, prepared: stmts.length };
     },
   },
 
@@ -5317,7 +5332,7 @@ const ROUTES = {
       for (const r of rows) {
         const id = String(r.item_id || '').trim();
         if (!/^\d{9,14}$/.test(id)) continue;
-        const clean = (v) => { const s = String(v || '').trim().slice(0, 400); return /^https:\/\//i.test(s) ? s : ''; };
+        const clean = (v) => { const s = String(v || '').trim().slice(0, ALI_LINK_MAX); return /^https:\/\//i.test(s) ? s : ''; };
         stmts.push(ctx.env.DB.prepare(
           'INSERT INTO sourcing (item_id, account, s1, s2, s3, updated_by, updated_at) ' +
           "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
@@ -5338,7 +5353,7 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const itemId = String(p.item_id || '').trim(), slot = Number(p.slot);
-      const url = String(p.url || '').trim().slice(0, 400);
+      const url = String(p.url || '').trim().slice(0, ALI_LINK_MAX);
       if (!/^\d{9,14}$/.test(itemId)) throw new Error('SAY: that item id does not look right');
       if ([1, 2, 3].indexOf(slot) < 0) throw new Error('SAY: slot must be 1, 2 or 3');
       if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('SAY: a supplier link must be a full https:// URL');

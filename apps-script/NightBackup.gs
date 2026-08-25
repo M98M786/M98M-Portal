@@ -262,7 +262,12 @@ function aliSweep() {
         var values = sheets[s].getDataRange().getDisplayValues();
         if (values.length < 2) continue;
         var cols = nbHeaderCols_(values[0]);
-        if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) continue;
+        /* altLinkCol belongs in this gate. nbHeaderCols_ returns it precisely so the per-row
+           fallback below can reach 'Ali Express Link' when a book has no 'New Ali Link' column —
+           but leaving it out here skipped the whole TAB before a single row was read, cancelling
+           that fix for exactly the books it was written for. Passes today only because every live
+           book still carries a second 'Order Number'; it fires the moment one is renamed. */
+        if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0 && cols.altLinkCol < 0)) continue;
         for (var r = 1; r < values.length; r++) {
           var id = String(values[r][cols.ebayCol] || '').trim();
           if (!/^\d{2}-\d{5}-\d{5}$/.test(id)) continue;
@@ -319,8 +324,19 @@ function aliSweepFast() {
   var conns = readTab_('CONNECTIONS').filter(function (c) {
     return String(c.sheet_kind) === 'order_processing' && String(c.status || '').toLowerCase() !== 'off';
   });
-  var ymd = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+  /* The day tabs are named on the UK trading day, not Pakistan's. Asking Karachi for "today"
+     put this four hours ahead: between 19:00 and 23:00 UTC it hunted for a tab that does not
+     exist yet and pushed nothing, every night. The hourly full sweep backfilled it, so this cost
+     latency rather than data — but the 5-minute sweep was dead for a third of the evening. Try
+     the UK day first and keep the Karachi day as a fallback, so a book named either way is read. */
+  var ymd = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+  var ymdPkt = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
   var candidates = ordersDayTabCandidates_(ymd);
+  if (ymdPkt !== ymd) {
+    ordersDayTabCandidates_(ymdPkt).forEach(function (c) {
+      if (candidates.indexOf(c) < 0) candidates.push(c);
+    });
+  }
   var out = [], tabs = 0;
   /* Hard budget: this shares the 5-minute trigger with the loss sweep, and Apps Script kills a
    * run at 6 minutes. Whatever is read by the cutoff is pushed; the rest catches the next tick
@@ -341,7 +357,7 @@ function aliSweepFast() {
       var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
       if (lastRow < 2 || lastCol < 1) break;
       var cols = nbHeaderCols_(sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0]);
-      if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0)) break;
+      if (cols.ebayCol < 0 || (cols.aliNumCol < 0 && cols.linkCol < 0 && cols.altLinkCol < 0)) break;   // altLinkCol: see aliSweep
       var idxs = [cols.ebayCol, cols.aliNumCol, cols.linkCol, cols.altLinkCol].filter(function (i) { return i >= 0; });
       var minC = Math.min.apply(null, idxs), maxC = Math.max.apply(null, idxs);
       var span = sheet.getRange(2, minC + 1, lastRow - 1, maxC - minC + 1).getDisplayValues();
