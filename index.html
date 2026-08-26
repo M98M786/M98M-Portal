@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260826-0032';
+var BUILD = '20260826-0123';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1330,7 +1330,7 @@ VIEWS.home = {
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, mode: 'daily', modeSet: false };
+  var AR = { data: null, mode: 'daily', modeSet: false, acc: '' };
   function arMgmt() { var r = (STATE.user && STATE.user.role) || ''; return r === 'Management' || r === 'Ops Head' || (STATE.user && STATE.user.super); }   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
@@ -1438,7 +1438,8 @@ VIEWS.home = {
         var slot = $('arEngine');
         if (!slot) { return; }
         api('dailyReport', {}).then(function (d) {
-          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account) === (($('arAcc') && $('arAcc').value) || ''); }).slice(0, 21);
+          var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
+          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account).trim() === String(want).trim(); }).slice(0, 21);
           if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
           var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
             ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -1492,6 +1493,7 @@ VIEWS.home = {
 
   function arLoad() {
     var acc = $('arAcc') ? $('arAcc').value : '';
+    AR.acc = acc;   // hold it: the engine table must not depend on the live DOM value, which can be blank by the time its async filter runs
     if (!AR.modeSet && arMgmt()) { AR.mode = 'engine'; AR.modeSet = true; }
     var host = $('arBody');
     if (!host) { return; }

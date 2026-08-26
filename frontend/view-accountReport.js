@@ -15,7 +15,7 @@
      ninety degrees, and to anyone who lives in that sheet it looks 'transposed'. Both
      orientations are kept and one Flip button swaps them — the reader chooses the one that
      matches the paper in their head. */
-  var AR = { data: null, mode: 'daily', modeSet: false };
+  var AR = { data: null, mode: 'daily', modeSet: false, acc: '' };
   function arMgmt() { var r = (STATE.user && STATE.user.role) || ''; return r === 'Management' || r === 'Ops Head' || (STATE.user && STATE.user.super); }   // daily → workbook → list, one button cycles
 
   /* The bridge keys each cell by its header ONLY when the header is non-blank and not already
@@ -123,7 +123,8 @@
         var slot = $('arEngine');
         if (!slot) { return; }
         api('dailyReport', {}).then(function (d) {
-          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account) === (($('arAcc') && $('arAcc').value) || ''); }).slice(0, 21);
+          var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
+          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account).trim() === String(want).trim(); }).slice(0, 21);
           if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
           var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
             ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -177,6 +178,7 @@
 
   function arLoad() {
     var acc = $('arAcc') ? $('arAcc').value : '';
+    AR.acc = acc;   // hold it: the engine table must not depend on the live DOM value, which can be blank by the time its async filter runs
     if (!AR.modeSet && arMgmt()) { AR.mode = 'engine'; AR.modeSet = true; }
     var host = $('arBody');
     if (!host) { return; }
