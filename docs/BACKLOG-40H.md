@@ -181,3 +181,17 @@ one pre-existing hunt correctly sits in Unsorted (nothing hidden); clicking Seas
     deploy (WAF), (2) AUTOMSG_LIVE must be armed — currently false, so every message is SHADOW
     (recorded, not sent). Arming live is the owner's call.
   - After deploy: move templates arrived → ordered + enable; then owner arms AUTOMSG_LIVE.
+
+## 14. Auto-message templates carry real order details  (DONE, verified)
+
+- [x] **DONE (verified on screen)** — the buyer-message templates now substitute the real order
+  number, item name and buyer. Fixed entirely in the frontend (no engine change):
+  - On save, cdNormPlaceholders converts single-brace / friendly / literal-sample placeholders
+    ({00-00000-00000}, {Sample Item}, {order}, {Order ID}, {buyer}) to the {{order}} {{item}}
+    {{buyer}} tokens the deployed engine fills. Sentinel-protected so {{order}} is never nested.
+  - Insert buttons (buyer name / order number / item name) drop the right token at the cursor.
+  - "Preview with a real order" fills the template with a real recent order for the account.
+  - Verified live: "Order ID: {00-00000-00000} Item Name: {Sample Item} Hi {buyer}!" previewed as
+    "Order ID: 18-15052-74974 Item Name: Rechargeable USB LED Motion Sensor Light... Hi fayne23!"
+    - no stray braces, no placeholder literals.
+  NOTE: still SHADOW (AUTOMSG_LIVE off) - nothing sends to buyers until the owner arms it.
