@@ -67,9 +67,16 @@ only the second one counts here.
 - [ ] **TODO** — proper Hunt approvals page.
 - [ ] **TODO** — hunting gets three pages: **Approved · Not approved · Pending approval**,
   each with archive access.
-- [ ] **TODO** — **AliExpress title database**. Hunters must record the AliExpress title.
-  On entry, check it against every previous record *including rejected ones* and tell the
-  hunter what happened last time. Stop duplicate hunting.
+- [~] **BUILT + committed; backend deploy pending** — AliExpress duplicate detection.
+  Backend huntDuplicateCheck matches a hunt by the AliExpress product ID (from any supplier link)
+  and folded-title overlap, returns every prior hunt of the same product - rejected first, with
+  reason/hunter/date. Frontend: the submit form checks as the hunter finishes the Title or main
+  AliExpress link, plus a "Check for duplicates" button and a soft submit-gate (red banner for a
+  prior REJECTION, amber for a prior hunt; a deliberate second click proceeds).
+  STATUS: frontend LIVE, backend code saved to Drive but the Apps Script deploy is fighting
+  Google's flaky UI tonight - intermittent "edit pencil never appeared" / menu-item not clicking.
+  GRACEFUL: until deployed, huntDuplicateCheck returns unknown action -> the .catch treats it as
+  no duplicates -> hunts submit normally. No broken state. Retry deploy next tick on a fresh page.
 
 ## 5. Product revision  (DONE v59, verified backend live)
 
