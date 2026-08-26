@@ -75,8 +75,14 @@ only the second one counts here.
 
 ## 6. CPC
 
-- [ ] **TODO** — separate **CPC items**, **General items**, and **CPC pending items**.
-  None of these exist yet.
+- [x] **VERIFIED WORKING** — the CPC / General / pending separation already exists and has real
+  data: the "Live listings split" view (under Advertising) shows CPC live **485**, General &
+  Dynamic live **260**, In no campaign (pending a decision) **200**, by real eBay campaign
+  membership, with clickable tabs and per-item lists. Rendered live on screen 26 Aug.
+  This read empty during the broken-boards era (the loss_review map bug, fixed v54); the view
+  itself was always working. Task-side CPC pipeline (listDesk) correctly shows 0 because no
+  cpc_research/campaign_set tasks exist right now - the 48 pending listing tasks are all
+  General/Dynamic type.
 
 ## 7. Signals & notifications
 
