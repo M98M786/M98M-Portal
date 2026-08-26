@@ -95,10 +95,16 @@ only the second one counts here.
 
 ## 8. Account report
 
-- [ ] **TODO** — page is not working. Fix it and give the stats a proper HTML presentation.
-  *Known:* Sir Hasib returns 0 rows — he has no `account_report` book (it does not exist).
-  Every other account's daily tabs stop at **23–25 July**: the report agents have not run
-  in a month. That part is Hasib-side, outside the portal.
+- [x] **DONE (verified on screen)** — two bugs fixed:
+  (1) the engine stats table filtered dailyReport by a live-DOM account value that was blank by
+      the time the async filter ran, so every account showed "No book rows". Now holds the chosen
+      account in state. Renders the proper HTML table (Revenue/OE/Cost/Ads/ROAS/0.8 law/Returns/
+      Actual) for all connected accounts - verified 21 rows for ABRT.
+  (2) engine mode was gated behind the sheet-based accountReportRows, so Sir Hasib (no report
+      book) saw "not connected yet" even though the engine had his figures. Engine mode now paints
+      straight from D1 - verified Sir Hasib shows 6 days incl. 24 Aug £517 revenue, 4.2x ROAS.
+  *Still Hasib-side:* the report AGENTS that fill the sheet books stopped ~23-25 July; engine mode
+  bypasses that by reading D1, so the portal page is no longer dependent on those agents.
 
 ## 9. Naming
 
