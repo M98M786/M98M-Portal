@@ -569,6 +569,9 @@ function actionStaffReviewSave_(payload, ctx) {
   const sh = r8ReviewsSheet_();
   sh.appendRow(['SR' + Utilities.getUuid().slice(0, 8), email, week, ctx.ident.email, behavior, working, notes, now_()]);
   logActivity_(ctx.ident.email, 'R8_STAFF_REVIEW', email, '', week, 'b' + behavior + ' w' + working);
+  /* 26 Aug (owner): staff matters notify the staff member too. Neutral wording — it points them
+     to their own reviews rather than firing raw scores at them in a bell. */
+  try { notify_(email, 'Weekly review', '⭐ Your weekly review for ' + week + ' has been recorded — open Staff reviews to see it.', 'review:' + week + ':' + email); } catch (e) {}
   return { ok: true, week: week };
 }
 

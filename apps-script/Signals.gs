@@ -46,7 +46,11 @@ const SIG_COUNT_ONLY_TYPES = [SIG_TYPE_RETURNS];
  * who entered the Item ID (their listing_new task), and every other lister sees nothing. */
 const SIG_TARGET_OWNING_LISTER = 'owning lister';
 
-const SIG_ROLES_NEGATIVE = 'Management, Ops Head, Team Lead, CS';
+/* 26 Aug (owner): "send price-related and negative sales-analysis figures to the advertising
+   manager too — I am talking about signals." An item that went negative is a price/margin problem
+   the Advertising Manager can act on (pause the ad, move the tier), so they now receive and can
+   see this signal alongside Management. WORST_CPC already reached them. */
+const SIG_ROLES_NEGATIVE = 'Management, Ops Head, Team Lead, CS, Advertising Manager';
 const SIG_ROLES_WORST_CPC = 'Management, Ops Head, Advertising Manager';
 const SIG_ROLES_RETURNS = 'Management, Ops Head, CS, ' + SIG_TARGET_OWNING_LISTER;
 
