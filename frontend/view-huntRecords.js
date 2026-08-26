@@ -49,7 +49,7 @@
     return '<a href="' + hrAttr(u) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
-  var HR = { tab: 'pending', cache: {}, counts: null, query: '' };
+  var HR = { tab: 'pending', cache: {}, counts: null, query: '', seq: 0 };
 
   VIEWS.huntRecords = {
     label: 'Hunt records',
@@ -98,14 +98,20 @@
     if (!force && HR.cache[tabKey]) { hrPaint(tabKey); return; }
     body.innerHTML = '<div class="spinner"></div>';
     var tab = HR_TABS.filter(function (t) { return t.key === tabKey; })[0];
+    /* Race guard (26 Aug): on a cold boot the view's first fetch is queued behind the sign-in
+       warm-up mega-batch, so it can land many seconds AFTER a Refresh the user pressed in the
+       meantime. Without this, that stale response repainted the screen — overwriting good rows
+       with an empty state. Every load takes a monotonic ticket; only the latest may paint. The
+       result is still cached whatever the ticket, so switching tabs stays instant. */
+    var seq = ++HR.seq;
     api('huntRecords', { status: tab.status }).then(function (d) {
-      if (HR.tab !== tabKey) { HR.cache[tabKey] = d || {}; return; }   // user switched away mid-flight
-      HR.cache[tabKey] = d || {};
+      HR.cache[tabKey] = d || {};                        // cache regardless — a later tab switch reuses it
       if (d && d.counts) { HR.counts = d.counts; hrRenderTabs(); }
+      if (seq !== HR.seq || HR.tab !== tabKey) { return; }   // a newer load (or tab) superseded this one
       hrPaint(tabKey);
     }).catch(function (e) {
-      if ($('hrBody') && HR.tab === tabKey) {
-        $('hrBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>';
+      if (seq === HR.seq && $('hrBody') && HR.tab === tabKey) {
+        $('hrBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load — the backend is slow right now. Press Refresh. (' + esc(e.message) + ')</div>';
       }
     });
   }
