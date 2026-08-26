@@ -101,6 +101,8 @@
     '.od-tab.on{border-color:var(--gold-line-hi);color:var(--gold-a);background:linear-gradient(135deg,rgba(233,169,60,.16),rgba(233,169,60,.03))}' +
     '.od-sum{display:flex;flex-wrap:wrap;gap:9px;margin-top:13px}' +
     '.od-chip{font-size:11.5px;font-weight:700;color:var(--text);border:1px solid var(--gold-line);border-radius:8px;padding:5px 11px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}' +
+    '.od-chipbtn{background:var(--panel);font:inherit;font-weight:700}' +
+    '.od-chipbtn.on{border-color:var(--gold-line-hi);background:var(--panel-2);box-shadow:var(--glow-gold)}' +
     '.od-chip .k{color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:800;margin-right:6px}' +
     '.od-chip.od-warn{border-color:rgba(255,159,67,.45);color:var(--warn)}' +
     '.od-chip.od-bad{border-color:rgba(240,96,90,.45);color:var(--bad)}' +
@@ -450,6 +452,7 @@
         return;
       }
       box.innerHTML = orders.map(odCard).join('');
+      odApplyFilter();   // keep the active chip filter after a list repaint
       odWire(box);
       /* eBay's accepted-carrier list for this account, fetched once and shared by every card. */
       (function () {
@@ -558,9 +561,9 @@
       if (!odStr(orders[i][OD_H.cost])) { noCost++; }
       else if (!odStr(orders[i][OD_H.tracking])) { noTrack++; }
     }
-    chips += odChip('Orders', esc(odInt(d.count)));
-    chips += odChip('To purchase', esc(String(noCost)), noCost ? 'od-warn' : '');
-    chips += odChip('Awaiting tracking', esc(String(noTrack)), noTrack ? 'od-warn' : '');
+    chips += odChip('Orders', esc(odInt(d.count)), '', 'all');
+    chips += odChip('To purchase', esc(String(noCost)), noCost ? 'od-warn' : '', 'cost');
+    chips += odChip('Awaiting tracking', esc(String(noTrack)), noTrack ? 'od-warn' : '', 'track');
     if (t) {
       /* The tab's own row-2 totals line, read back rather than re-added here — the sheet's
          arithmetic stays the sheet's. */
@@ -570,10 +573,52 @@
     }
     if (!d.can_write) { chips += odChip('Read only', 'your role does not write order rows'); }
     if (d.truncated) { chips += odChip('Long tab', 'the portal read the first rows only', 'od-bad'); }
-    sum.innerHTML = chips;
+    sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
+    odWireChips();
+    odApplyFilter();
   }
-  function odChip(k, v, cls) {
+  function odChip(k, v, cls, filter) {
+    /* Owner: "any numbering data will take you to that specific page." A chip with a filter key
+       becomes a button that shows only the matching order cards and scrolls to them. */
+    if (filter) {
+      var on = (OD_FILTER === filter) || (filter === 'all' && OD_FILTER === 'all');
+      return '<button class="od-chip od-chipbtn' + (cls ? ' ' + cls : '') + (on ? ' on' : '') +
+        '" data-od-filter="' + filter + '" style="cursor:pointer"><span class="k">' + esc(k) + '</span>' + v + '</button>';
+    }
     return '<span class="od-chip' + (cls ? ' ' + cls : '') + '"><span class="k">' + esc(k) + '</span>' + v + '</span>';
+  }
+
+  /* the live filter over today's order cards */
+  var OD_FILTER = 'all';
+  function odApplyFilter() {
+    var list = $('odList');
+    if (!list) { return; }
+    var cards = list.querySelectorAll('[data-od-state]'), shown = 0, i;
+    for (i = 0; i < cards.length; i++) {
+      var st = cards[i].getAttribute('data-od-state');
+      var vis = OD_FILTER === 'all' || st === OD_FILTER;
+      cards[i].style.display = vis ? '' : 'none';
+      if (vis) { shown++; }
+    }
+    var note = $('odFilterNote');
+    if (note) {
+      note.textContent = OD_FILTER === 'all' ? '' :
+        'Showing ' + shown + ' ' + (OD_FILTER === 'cost' ? 'still to purchase' : 'awaiting tracking') + ' · tap Orders to show all';
+      note.style.display = OD_FILTER === 'all' ? 'none' : 'block';
+    }
+  }
+  function odWireChips() {
+    var sum = $('odSummary');
+    if (!sum) { return; }
+    sum.querySelectorAll('[data-od-filter]').forEach(function (b) {
+      b.onclick = function () {
+        OD_FILTER = this.getAttribute('data-od-filter');
+        sum.querySelectorAll('[data-od-filter]').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-od-filter') === OD_FILTER); });
+        odApplyFilter();
+        var list = $('odList');
+        if (list && OD_FILTER !== 'all' && list.scrollIntoView) { list.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      };
+    });
   }
 
   // ---------- one order row ----------
@@ -582,10 +627,13 @@
     var title = odStr(o[OD_H.title]) || 'Order';
     var status = odStr(o[OD_H.status]);
     var cols = (OD_DATA && OD_DATA.columns) || [];
+    /* work state, so the summary chips can filter the list: no cost yet = still to purchase;
+       cost but no tracking = awaiting tracking; both = done. */
+    var state = !odStr(o[OD_H.cost]) ? 'cost' : (!odStr(o[OD_H.tracking]) ? 'track' : 'done');
 
     /* The pill is always in the DOM, empty and hidden when the cell is blank, so recording a
        status on a row that had none can light it up without re-rendering the card. */
-    return '<div class="card od-row" data-card="' + odAttr(row) + '"><div class="hd">' +
+    return '<div class="card od-row" data-card="' + odAttr(row) + '" data-od-state="' + state + '"><div class="hd">' +
         '<span class="od-name">' + esc(title) + '</span>' +
         '<span class="pill ' + odStatusPill(status) + (status ? '' : ' hidden') + '" data-pill="' + odAttr(row) + '">' +
           esc(status) + '</span>' +
