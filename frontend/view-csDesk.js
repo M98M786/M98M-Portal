@@ -193,17 +193,21 @@
      gets always carries their real order number, item and name. Idempotent: {{order}} stays. */
   function cdNormPlaceholders(tpl) {
     var s = String(tpl == null ? '' : tpl);
-    var maps = [
-      [/\{\{\s*(order id|order_id|order no|order number|orderid)\s*\}\}/gi, '{{order}}'],
-      [/\{\{\s*(item name|item_name|item title|title|product)\s*\}\}/gi, '{{item}}'],
-      [/\{\{\s*(buyer name|buyer_name|name|customer)\s*\}\}/gi, '{{buyer}}'],
-      // single-brace friendly names and the literal sample placeholders
-      [/\{\s*0{2}-0{5}-0{5}\s*\}/g, '{{order}}'],
-      [/\{\s*(order id|order_id|order no|order number|orderid|order)\s*\}/gi, '{{order}}'],
-      [/\{\s*(sample item|item name|item_name|item title|title|product|item)\s*\}/gi, '{{item}}'],
-      [/\{\s*(buyer name|buyer_name|buyer|name|customer)\s*\}/gi, '{{buyer}}']
-    ];
-    maps.forEach(function (m) { s = s.replace(m[0], m[1]); });
+    // 1) protect already-correct {{word}} tokens so nothing below can nest inside them
+    var saved = [];
+    s = s.replace(/\{\{\s*\w+\s*\}\}/g, function (m) { saved.push(m); return '\uE000' + (saved.length - 1) + '\uE001'; });
+    // 2) single-brace friendly names and the literal sample placeholders -> a sentinel (not {{}} yet,
+    //    so a later pattern cannot match the braces we would have written)
+    s = s.replace(/\{\s*(0{2}-0{5}-0{5}|order id|order_id|order no|order number|orderid|order)\s*\}/gi, '\uE010order\uE011');
+    s = s.replace(/\{\s*(sample item|item name|item_name|item title|title|product|item)\s*\}/gi, '\uE010item\uE011');
+    s = s.replace(/\{\s*(buyer name|buyer_name|buyer|name|customer)\s*\}/gi, '\uE010buyer\uE011');
+    // 3) restore protected tokens, then turn sentinels into real {{...}}
+    s = s.replace(/\uE000(\d+)\uE001/g, function (m, i) { return saved[Number(i)]; });
+    s = s.replace(/\uE010(\w+)\uE011/g, function (m, k) { return '{{' + k + '}}'; });
+    // 4) fold friendly spellings that were written WITH double braces, e.g. {{Order ID}} -> {{order}}
+    s = s.replace(/\{\{\s*(order id|order_id|order no|order number|orderid)\s*\}\}/gi, '{{order}}');
+    s = s.replace(/\{\{\s*(item name|item_name|item title|title|product)\s*\}\}/gi, '{{item}}');
+    s = s.replace(/\{\{\s*(buyer name|buyer_name|name|customer)\s*\}\}/gi, '{{buyer}}');
     return s.slice(0, 900);
   }
 
