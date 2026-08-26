@@ -37,8 +37,9 @@ only the second one counts here.
 ## 2. Orders
 
 - [ ] **TODO** — proper links throughout orders.
-- [ ] **TODO** — today's orders: show how many are **awaiting tracking**.
-- [ ] **TODO** — make that count a **live button**: click → the exact orders behind it.
+- [x] **DONE (verified)** — today's orders shows the awaiting-tracking count (verified 30 on ABRT 25 Aug).
+- [x] **DONE (verified on screen)** — the count is a live button: clicking 'Awaiting tracking' shows only
+  those 30 orders and scrolls to them; 'To purchase' → 2; 'Orders' → all 32. Note + highlight confirmed.
 - [ ] **TODO** — generalise: **every number on an orders page drills through** to the rows
   behind it. No dead-end figures.
 - [ ] **TODO** — orders tab shows that specific day.
