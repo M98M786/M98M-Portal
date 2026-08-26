@@ -2223,7 +2223,7 @@ async function standardsSync(env) {
    (a feedback ID, a return ID…) — an event queues its message once, ever. Templates speak with
    {{buyer}}, {{item}}, {{order}}. 'arrived' appears in the controls but detection waits on
    delivery events — the desk says so instead of pretending. */
-const AUTOMSG_TRIGGERS = ['shipped', 'arrived', 'return_opened', 'neg_fb', 'pos_fb', 'buyer_query'];
+const AUTOMSG_TRIGGERS = ['ordered', 'shipped', 'arrived', 'return_opened', 'neg_fb', 'pos_fb', 'buyer_query'];
 
 function renderTemplate(tpl, vars) {
   return String(tpl || '').replace(/\{\{(\w+)\}\}/g, (m, k) => String(vars[k] || '')).slice(0, 900);
@@ -2254,6 +2254,20 @@ async function autoMsgScan(env) {
     for (const t of (tRs.results || [])) titles[t.item_id] = t.title;
     const withTitle = v => ({ ...v, item: String(titles[v.item_id] || v.item_id || '') });
 
+    if (cfg.ordered) {
+      /* 'ordered' = the buyer has just paid — an order row exists (these accounts are immediate-pay,
+         so a row IS a paid order). This is the earliest touch: the "thanks, your order is placed"
+         note. A 1-day window keeps a first enable from messaging every historic buyer at once, and
+         INSERT OR IGNORE on 'ord:'+order_id means each buyer is thanked exactly once. delay_min lets
+         it wait a few minutes after payment rather than firing the same second. */
+      const rs = await env.DB.prepare(
+        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND buyer != '' " +
+        "AND status NOT IN ('CANCELLED','NOT_FOUND') AND created_at >= datetime('now', '-1 day')"
+      ).bind(acct).all();
+      for (const o of (rs.results || [])) {
+        await queue('ordered', 'ord:' + o.order_id, withTitle({ buyer: o.buyer, order: o.order_id, item_id: o.item_id }));
+      }
+    }
     if (cfg.shipped) {
       // 6 days, matching the order window — a parcel fulfilled on day 4 still deserves its note
       const rs = await env.DB.prepare(
@@ -4712,7 +4726,7 @@ const ROUTES = {
       return { accounts: (accs.results || []).map(a => a.name), triggers: AUTOMSG_TRIGGERS,
         rows: rows.results || [], queue: tail.results || [],
         live: String(ctx.env.AUTOMSG_LIVE) === 'true',
-        note: "'arrived' fires when eBay's estimated delivery date passes — the API has no carrier scans, so it means 'should have arrived by now'" };
+        note: "'ordered' fires right after the buyer pays (delay_min later) — the order-confirmation touch. 'shipped' fires when tracking goes up. 'arrived' fires when eBay's estimated delivery date passes (no carrier scans, so 'should have arrived by now')." };
     },
   },
 
