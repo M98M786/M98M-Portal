@@ -64,9 +64,21 @@ only the second one counts here.
 - [x] **DONE (live, verified)** — product listers can reject: 'Reject this item' button on the
   lister task bar, reason picker from lister_reject_reasons, calls listerRejectRequest → Management
   decides. Backend already existed; button was missing. Verified: reasons load, button in bundle.
-- [ ] **TODO** — proper Hunt approvals page.
-- [ ] **TODO** — hunting gets three pages: **Approved · Not approved · Pending approval**,
-  each with archive access.
+- [x] **DONE** — proper Hunt approvals page (huntQueue): pulse per hunter, waiting-for-decision
+  tray split Seasonal/Consistent, decision records. Was already live and verified.
+- [x] **DONE (v63, verified on screen)** — hunting now has three dedicated record pages:
+  **Pending approval · Approved · Not approved**, each the FULL archive (no date cutoff), newest
+  first. New `Hunt records` view under the Hunting nav group + backend `huntRecords` action
+  (status = pending | approved | not approved | all), read-only, hunt roles gated inside,
+  profit/PII stripped per role. Each row: status, product + hunt id, item type (Seasonal/
+  Consistent), hunter, account (approved tab), the rejection reason / comment, supplier + eBay
+  links, submit date; per-tab count badges + live search.
+  *Verified live as Management:* Pending 22 · Approved 53 · Not approved 48 (matches
+  huntStatusCounts_); Approved rows carry the account (HAFIZA BHAJI, AZHAR ABRT); Not-approved
+  rows carry the reason ("2M MTB Road Bike — not a cpc product"), so a hunter reads why before
+  hunting the next one. Fixed a race in the view (a slow cold-boot fetch, queued behind the
+  sign-in warm-up batch, was landing after a Refresh and blanking good rows) with a monotonic
+  request ticket — confirmed the render held 35s after the stale boot response landed.
 - [x] **DONE (v61, verified end-to-end)** — AliExpress duplicate detection.
   Backend huntDuplicateCheck matches a hunt by the AliExpress product ID (from any supplier link)
   and folded-title overlap, returns every prior hunt of the same product - rejected first, with
