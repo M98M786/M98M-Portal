@@ -190,6 +190,15 @@
     if (flipBtn) { flipBtn.style.display = 'none'; }
     if (!acc) { host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Choose an account to open its report.</div>'; return; }
     host.innerHTML = '<div class="spinner"></div>';
+    /* Engine mode reads the D1 books (dailyReport), which exist for EVERY account - so it must not
+       be gated on the sheet-based accountReportRows. That gate is why Sir Hasib, whose Daily Account
+       Report workbook does not exist, saw "not connected yet" even though the engine has all his
+       figures. In engine mode render straight from D1; the workbook is only needed for list mode. */
+    if (AR.mode === 'engine' && arMgmt()) {
+      AR.data = { headers: [], rows: [] };   // engine mode paints from dailyReport, not from this
+      arRender();
+      return;
+    }
     api('accountReportRows', { account: acc }).then(function (r) {
       if (!r || r.ok === false) {
         host.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' + esc(String((r && r.reason) || 'Could not read it.')) +
