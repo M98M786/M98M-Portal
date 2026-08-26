@@ -6107,6 +6107,78 @@ function huntNormKey_(s) {
 /** Accepts payload.columns (or the payload itself) keyed by any spelling of the 33 column names.
  * A portal-owned column arriving with a value is refused rather than ignored — a form that tries
  * to set its own Approval Status or Our Profit is a bug or an attack, not a preference. */
+/* ---------- duplicate check (26 Aug, owner) ----------
+   "It is necessary for the product hunter to add the AliExpress title. If that item is already in
+   the system, or was previously rejected, tell him about the previous record — I don't want my
+   hunters finding duplicate products." Read-only. Matches two ways: the AliExpress PRODUCT ID
+   pulled from any supplier link (the reliable key - titles drift, ids do not), and a folded-title
+   overlap. Returns every prior hunt of the same product with what happened to it, rejected ones
+   included, so the hunter sees the history before wasting time on a dead product. */
+const HUNT_DUP_SUPPLIER_COLS = [HC_SUPPLIER_1, 'Product Link 2', 'Product Link 3'];
+function huntAliItemId_(url) {
+  const m = String(url || '').match(/\/item\/(\d{6,})\.html/) || String(url || '').match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/);
+  return m ? m[1] : '';
+}
+function huntTitleTokens_(title) {
+  const k = huntNormKey_(title);
+  return k ? k.split(' ').filter(function (w) { return w.length >= 3; }) : [];
+}
+function actionHuntDuplicateCheck_(payload, ctx) {
+  const title = String(payload.title || '').trim();
+  const link = String(payload.link || payload.ali_link || '').trim();
+  const wantId = huntAliItemId_(link);
+  const wantTokens = huntTitleTokens_(title);
+  const wantSet = {}; wantTokens.forEach(function (w) { wantSet[w] = 1; });
+  if (!wantId && wantTokens.length < 2) {
+    return { checked: false, reason: 'paste the AliExpress link or a fuller title to check', matches: [] };
+  }
+  const me = normalizeEmail(ctx.ident.email);
+  const names = {};
+  readTab_('USERS').forEach(function (u) { names[normalizeEmail(u.email)] = String(u.name || u.email); });
+  const matches = [];
+  readTab_('HUNTING_DB').forEach(function (r) {
+    const rec = huntRecord_(r);
+    /* id match: the same AliExpress product in ANY of this hunt's supplier links */
+    let idHit = false;
+    if (wantId) {
+      for (let i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
+        if (huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]) === wantId) { idHit = true; break; }
+      }
+    }
+    /* title match: enough shared significant words to be the same product */
+    let overlap = 0;
+    if (wantTokens.length >= 2) {
+      const seen = {};
+      huntTitleTokens_(rec[HC_TITLE]).forEach(function (w) { if (wantSet[w] && !seen[w]) { seen[w] = 1; overlap++; } });
+    }
+    const titleHit = wantTokens.length >= 2 && overlap >= Math.max(3, Math.ceil(wantTokens.length * 0.6));
+    if (!idHit && !titleHit) return;
+    matches.push({
+      hunt_id: String(rec.hunt_id || ''),
+      title: String(rec[HC_TITLE] || '').slice(0, 120),
+      status: rec.approval_status || HUNT_PENDING,
+      status_label: rec.approval_status === HUNT_APPROVED ? 'approved'
+        : rec.approval_status === HUNT_NOT_APPROVED ? 'rejected'
+        : rec.approval_status === HUNT_REVISION ? 'sent back' : 'pending',
+      reason: String(rec[HC_COMMENTS] || '').replace(/\s+/g, ' ').slice(0, 160),
+      hunter: names[normalizeEmail(rec.hunter_email)] || String(rec.hunter_email || ''),
+      by_me: normalizeEmail(rec.hunter_email) === me,
+      date: String(rec[HC_DATE_ADDED] || '') || huntCellOut_(rec.ts),
+      match: idHit ? 'same AliExpress product' : 'same title',
+      ali_id: wantId || '',
+    });
+  });
+  /* rejected first (the most useful warning), then approved, then pending; newest within each */
+  const rank = { rejected: 0, approved: 1, 'sent back': 2, pending: 3 };
+  matches.sort(function (a, b) {
+    const d = (rank[a.status_label] || 9) - (rank[b.status_label] || 9);
+    return d !== 0 ? d : String(b.date).localeCompare(String(a.date));
+  });
+  return { checked: true, ali_id: wantId, count: matches.length,
+    rejected: matches.filter(function (m) { return m.status_label === 'rejected'; }).length,
+    matches: matches.slice(0, 12) };
+}
+
 function huntColumnsFromPayload_(payload) {
   const src = (payload && typeof payload.columns === 'object' && payload.columns) ? payload.columns : (payload || {});
   const out = {};
@@ -6387,6 +6459,7 @@ function actionReviseHunt_(payload, ctx) {
 
 const ACTIONS_HUNTING = {
   submitHunt: [actionSubmitHunt_, 'any'],
+  huntDuplicateCheck: [actionHuntDuplicateCheck_, 'any'],
   myHunts:    [actionMyHunts_, 'any'],
   huntQueue:  [actionHuntQueue_, 'any'],   // reviewers gated inside
   decideHunt: [actionDecideHunt_, 'any'],  // Management / Ops Head gated inside

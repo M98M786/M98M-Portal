@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260826-0221';
+var BUILD = '20260826-0308';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10555,7 +10555,9 @@ VIEWS.dashboard = {
         '<div class="card enter d1"><div class="hd">New hunt ' +
           '<span class="hint">Five fields are required · everything else strengthens the case</span></div>' +
           '<div class="bd"><div id="huRevBand" style="display:none"></div>' + HU_SECTIONS.map(huSection).join('') +
+            '<div id="huDupBand" style="display:none;margin:10px 0"></div>' +
             '<div class="hu-btns"><button class="btn-gold" id="huSend">Submit hunt</button>' +
+              '<button class="minibtn" id="huDupBtn">Check for duplicates</button>' +
               '<button class="minibtn" id="huClear">Clear form</button>' +
               '<span class="hu-hint" style="margin-top:0">Nothing is listed until Management approves it.</span></div>' +
           '</div>' +
@@ -10639,6 +10641,12 @@ VIEWS.dashboard = {
     huCalcIdle('Type a source price and an intended sell price — the projection appears here.');
     huEl('huClear').onclick = function () { huSetRevise(null); huResetForm(); huCalcIdle('Cleared. The projection follows your next price.'); };
     huEl('huSend').onclick = huSubmit;
+    var dupBtn = huEl('huDupBtn'); if (dupBtn) { dupBtn.onclick = function () { huRunDupCheck(false); }; }
+    /* auto-check when the hunter finishes the title or the main AliExpress link */
+    ['Title', 'Product Link 1 Main supplier'].forEach(function (col) {
+      var f = huFieldFor(col), el = f ? huEl(f.id) : null;
+      if (el) { el.addEventListener('blur', function () { huRunDupCheck(true); }); }
+    });
     huEl('huFilter').onchange = huLoadMine;
   }
 
@@ -10719,6 +10727,41 @@ VIEWS.dashboard = {
   }
 
   // ---------- submission ----------
+  /* 26 Aug (owner): warn the hunter when the product was hunted or REJECTED before, so nobody
+     wastes time re-finding a dead product. Soft block: the first Submit after a match shows the
+     history and asks for a second, deliberate click. */
+  var HU_DUP_ACK = '';   // the title+link signature the hunter has acknowledged
+  function huDupSig() { return huNorm(huValue('Title')) + '|' + huNorm(huValue('Product Link 1 Main supplier')); }
+  function huNorm(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function huRunDupCheck(silent, done) {
+    var band = huEl('huDupBand');
+    var title = huValue('Title'), link = huValue('Product Link 1 Main supplier');
+    if (!band || (!title && !link)) { if (done) { done(0); } return; }
+    api('huntDuplicateCheck', { title: title, link: link }).then(function (d) {
+      if (!huEl('huDupBand')) { if (done) { done(0); } return; }
+      var m = (d && d.matches) || [];
+      if (!d || !d.checked || !m.length) {
+        band.style.display = silent ? 'none' : 'block';
+        if (!silent) { band.innerHTML = '<div class="hu-hint" style="margin:0;border:1px solid var(--gold-line);border-radius:9px;padding:8px 11px">No earlier hunt matches this product — you are clear to submit.</div>'; }
+        if (done) { done(0); }
+        return;
+      }
+      var rej = d.rejected || 0;
+      band.style.display = 'block';
+      band.innerHTML = '<div style="border:1px solid ' + (rej ? 'var(--bad)' : 'var(--warn)') + ';border-radius:10px;padding:10px 13px;background:' + (rej ? 'var(--bad-soft,rgba(255,90,90,.08))' : 'var(--warn-soft)') + '">' +
+        '<div style="font-weight:800;font-size:13px;color:' + (rej ? 'var(--bad)' : 'var(--warn)') + '">' +
+          (rej ? '🚫 This product was REJECTED before' : '⚠️ This product has been hunted before') + ' · ' + m.length + ' record(s)</div>' +
+        '<div style="margin-top:6px">' + m.map(function (x) {
+          return '<div style="font-size:12px;padding:4px 0;border-top:1px solid var(--gold-line)"><b>' + esc(x.status_label) + '</b>' +
+            ' · ' + esc(x.title) + ' · ' + esc(x.hunter).split('@')[0] + (x.date ? ' · ' + esc(String(x.date).slice(0,10)) : '') +
+            ' · <span style="color:var(--text-3)">' + esc(x.match) + '</span>' +
+            (x.reason ? '<div style="color:var(--text-2);font-size:11.5px">reason: ' + esc(x.reason) + '</div>' : '') + '</div>';
+        }).join('') + '</div>' +
+        '<div class="hu-hint" style="margin:8px 0 0">Read these before submitting. If it is genuinely different, Submit again to proceed.</div></div>';
+      if (done) { done(m.length); }
+    }).catch(function () { if (done) { done(0); } });
+  }
+
   function huSubmit() {
     var btn = this, payload = { columns: {} }, i, col, v, ship;
     for (i = 0; i < HU_REQUIRED.length; i++) {
@@ -10734,6 +10777,16 @@ VIEWS.dashboard = {
         toast(HU_PRICE_COLS[i] + ' needs a number — a range like "3.02 - 3.30" is fine.');
         return;
       }
+    }
+    /* soft duplicate gate: warn once, proceed on the acknowledged second click */
+    if (huDupSig() !== HU_DUP_ACK) {
+      var self = this;
+      huRunDupCheck(false, function (n) {
+        HU_DUP_ACK = huDupSig();
+        if (n > 0) { toast('This product has been hunted before — see the note, then Submit again if it is different.'); }
+        else { huSubmit.call(self); }   // clear — go straight through
+      });
+      return;
     }
     for (i = 0; i < HU_FLAT.length; i++) {
       col = HU_FLAT[i].col;
