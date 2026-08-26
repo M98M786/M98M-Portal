@@ -55,7 +55,9 @@ only the second one counts here.
 
 ## 4. Listing / hunting
 
-- [ ] **TODO** — product listers still have **no reject option**. Add it.
+- [x] **DONE (live, verified)** — product listers can reject: 'Reject this item' button on the
+  lister task bar, reason picker from lister_reject_reasons, calls listerRejectRequest → Management
+  decides. Backend already existed; button was missing. Verified: reasons load, button in bundle.
 - [ ] **TODO** — proper Hunt approvals page.
 - [ ] **TODO** — hunting gets three pages: **Approved · Not approved · Pending approval**,
   each with archive access.
