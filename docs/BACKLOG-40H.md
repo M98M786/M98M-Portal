@@ -67,16 +67,16 @@ only the second one counts here.
 - [ ] **TODO** — proper Hunt approvals page.
 - [ ] **TODO** — hunting gets three pages: **Approved · Not approved · Pending approval**,
   each with archive access.
-- [~] **BUILT + committed; backend deploy pending** — AliExpress duplicate detection.
+- [x] **DONE (v61, verified end-to-end)** — AliExpress duplicate detection.
   Backend huntDuplicateCheck matches a hunt by the AliExpress product ID (from any supplier link)
   and folded-title overlap, returns every prior hunt of the same product - rejected first, with
   reason/hunter/date. Frontend: the submit form checks as the hunter finishes the Title or main
   AliExpress link, plus a "Check for duplicates" button and a soft submit-gate (red banner for a
   prior REJECTION, amber for a prior hunt; a deliberate second click proceeds).
-  STATUS: frontend LIVE, backend code saved to Drive but the Apps Script deploy is fighting
-  Google's flaky UI tonight - intermittent "edit pencil never appeared" / menu-item not clicking.
-  GRACEFUL: until deployed, huntDuplicateCheck returns unknown action -> the .catch treats it as
-  no duplicates -> hunts submit normally. No broken state. Retry deploy next tick on a fresh page.
+  VERIFIED: backend v61 live; tested with a real hunt title ("vacuum storage bags") - found 5
+  prior hunts, 3 rejected, each with status/hunter/date/match-type. A hunter entering that product
+  now sees the full history, rejected first. Deploy tip that finally worked: set the viewport to
+  EXACTLY 800x600 (== screenshot frame) so coordinate clicks are 1:1, then drive via DOM dispatch.
 
 ## 5. Product revision  (DONE v59, verified backend live)
 
