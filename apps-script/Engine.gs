@@ -19,6 +19,116 @@ function enginePost_(action, payload) {
 }
 
 /** Trigger candidate (hourly) and also safe to run by hand after staff changes. */
+/* ---------- service-metric watch (26 Aug, owner) ----------
+   "Detect transaction defect, new late-shipment case, any change in any service-metrics number,
+   positive-feedback rating change — send it to Customer Service and Management." The engine syncs
+   seller standards, the two customer-service metrics and the feedback summary into D1 but never
+   watched them for CHANGE. This reads those tables through the engine (the worker is reachable even
+   while the Cloudflare dashboard API is blocked), diffs against yesterday's snapshot in Script
+   Properties, and letters CS + Management on every movement. Once per UK day, so a metric that
+   flickers cannot spam the desk. */
+function metricsNotifyCsMgmt_(type, message, ref) {
+  const seen = {};
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.status) !== 'approved') return;
+    const role = String(u.role || '');
+    if (MGMT_ROLES.indexOf(role) < 0 && role !== 'CS') return;
+    const e = normalizeEmail(u.email);
+    if (seen[e]) return; seen[e] = 1;
+    notify_(u.email, type, message, ref);
+  });
+  (typeof SUPER_ADMINS !== 'undefined' ? SUPER_ADMINS : []).forEach(function (e) {
+    if (!seen[normalizeEmail(e)]) { seen[normalizeEmail(e)] = 1; notify_(e, type, message, ref); }
+  });
+}
+
+/** One account's watched numbers, folded to a compact comparable object. */
+function metricsSignature_(standardsRows, csMetricRows, feedbackRows, account) {
+  const sig = { level: '', metrics: {}, inad: '', inr: '', fb_score: '', fb_pos: '', fb_neg: '' };
+  const sRow = standardsRows.filter(function (r) { return String(r.account) === account; })[0];
+  if (sRow) {
+    try {
+      const arr = JSON.parse(sRow.json || '[]');
+      const prof = (arr && arr.length) ? arr[0] : null;
+      if (prof) {
+        sig.level = String(prof.standardsLevel || '');
+        (prof.metrics || []).forEach(function (m) {
+          if (m && m.metricKey) sig.metrics[String(m.metricKey)] = String(m.value);
+        });
+      }
+    } catch (e) {}
+  }
+  csMetricRows.filter(function (r) { return String(r.account) === account; }).forEach(function (r) {
+    try {
+      const j = JSON.parse(r.json || '{}');
+      const rate = j && j.customerServiceMetric ? '' : (j && j.value !== undefined ? String(j.value) : '');
+      const v = (j && j.metricValue) || (j && j.value) || (j && j.customerServiceMetric) || rate || '';
+      if (String(r.metric_type) === 'ITEM_NOT_AS_DESCRIBED') sig.inad = JSON.stringify(v).slice(0, 60);
+      if (String(r.metric_type) === 'ITEM_NOT_RECEIVED') sig.inr = JSON.stringify(v).slice(0, 60);
+    } catch (e) {}
+  });
+  const fRow = feedbackRows.filter(function (r) { return String(r.account) === account; })[0];
+  if (fRow) { sig.fb_score = String(fRow.score); sig.fb_pos = String(fRow.pos_pct); sig.fb_neg = String(fRow.neg_30d); }
+  return sig;
+}
+
+function metricsRowsFrom_(dump) {
+  const h = dump.header || [];
+  return (dump.rows || []).map(function (row) { const o = {}; h.forEach(function (c, i) { o[c] = row[i]; }); return o; });
+}
+
+function metricsWatch() {
+  const props = PropertiesService.getScriptProperties();
+  const ukDay = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+  if (props.getProperty('METRICS_WATCH_DAY') === ukDay) return 'already ran today';
+
+  let standards, csm, fb;
+  try {
+    standards = metricsRowsFrom_(enginePost_('backupDump', { table: 'cs_standards' }));
+    csm = metricsRowsFrom_(enginePost_('backupDump', { table: 'cs_metrics' }));
+    fb = metricsRowsFrom_(enginePost_('backupDump', { table: 'feedback_summary' }));
+  } catch (e) { return 'engine read failed: ' + String(e && e.message || e).slice(0, 120); }
+
+  const accounts = {};
+  [standards, fb, csm].forEach(function (rows) { rows.forEach(function (r) { if (r.account) accounts[String(r.account)] = 1; }); });
+
+  const prev = (function () { try { return JSON.parse(props.getProperty('METRICS_SNAPSHOT') || '{}'); } catch (e) { return {}; } })();
+  const next = {};
+  let changed = 0;
+  const NICE = { TRANSACTION_DEFECT_RATE: 'transaction defect rate', SHIPPING_MISS_RATE: 'late shipment rate',
+    LATE_SHIPMENT_RATE: 'late shipment rate', CASES_CLOSED_WITHOUT_SELLER_RESOLUTION: 'cases not resolved' };
+
+  Object.keys(accounts).forEach(function (acct) {
+    const sig = metricsSignature_(standards, csm, fb, acct);
+    next[acct] = sig;
+    const was = prev[acct];
+    if (!was) return;                          // first time we see an account is not a "change"
+    const notes = [];
+    if (sig.level && was.level && sig.level !== was.level) notes.push('seller level ' + was.level + ' → ' + sig.level);
+    Object.keys(sig.metrics).forEach(function (k) {
+      if (was.metrics && was.metrics[k] !== undefined && was.metrics[k] !== sig.metrics[k]) {
+        notes.push((NICE[k] || k.replace(/_/g, ' ').toLowerCase()) + ' ' + was.metrics[k] + ' → ' + sig.metrics[k]);
+      }
+    });
+    if (was.inad && sig.inad && was.inad !== sig.inad) notes.push('“item not as described” metric moved');
+    if (was.inr && sig.inr && was.inr !== sig.inr) notes.push('“item not received” metric moved');
+    if (was.fb_score && sig.fb_score && was.fb_score !== sig.fb_score) notes.push('feedback score ' + was.fb_score + ' → ' + sig.fb_score);
+    if (was.fb_pos && sig.fb_pos && was.fb_pos !== sig.fb_pos) notes.push('positive-feedback % ' + was.fb_pos + ' → ' + sig.fb_pos);
+    if (was.fb_neg !== undefined && sig.fb_neg !== undefined && was.fb_neg !== sig.fb_neg) notes.push('negatives (30d) ' + was.fb_neg + ' → ' + sig.fb_neg);
+    if (notes.length) {
+      changed++;
+      metricsNotifyCsMgmt_('Service metric changed',
+        '📉 ' + acct + ' — ' + notes.join(' · ') + '. eBay account health moved; check the Customer service desk / Feedback board.',
+        'metricswatch:' + acct + ':' + ukDay);
+    }
+  });
+
+  props.setProperty('METRICS_SNAPSHOT', JSON.stringify(next).slice(0, 9000));
+  props.setProperty('METRICS_WATCH_DAY', ukDay);
+  logActivity_('system', 'METRICS_WATCH', 'all', '', String(changed) + ' account(s) changed', Object.keys(accounts).length + ' watched');
+  return 'metricsWatch: ' + changed + ' change(s) across ' + Object.keys(accounts).length + ' account(s)';
+}
+
 function pushEngineSync() {
   const users = readTab_('USERS').map(function (u) {
     return { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''),
@@ -58,6 +168,8 @@ function pushEngineSync() {
   let mirrored = '';
   try { mirrored = pushEngineTasks(); }
   catch (e) { logActivity_('system', 'ENGINE_TASKS_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
+
+  try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
 
   logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
   return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs + ' · ' + mirrored;
@@ -116,6 +228,7 @@ const ENGINE_RUNNABLE = {
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
+  metricsWatch: function () { return typeof metricsWatch === 'function' ? String(metricsWatch()) : 'absent'; },
   connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
   setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },
   freeYousafEmail: function () { return typeof freeYousafEmail === 'function' ? String(freeYousafEmail()) : 'absent'; },
