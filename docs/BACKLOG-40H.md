@@ -105,8 +105,17 @@ only the second one counts here.
   Advertising Manager. Takes effect on the next signal run.
 - [x] **DONE (v58)** — when a weekly review is saved, the reviewed staff member gets a neutral bell
   pointing them to Staff reviews (management already sees it). More staff-matter events can follow.
-- [ ] **TODO** — detect and route to **CS + Management**: transaction defect, new late
-  shipment case, any service-metric movement, positive-feedback rating change.
+- [x] **DONE (v62, verified live)** — detect and route to **CS + Management**: transaction
+  defect, new late-shipment case, any service-metric movement, positive-feedback rating change.
+  `metricsWatch` (Apps Script — deploys while the Worker is WAF-blocked) reads cs_standards /
+  cs_metrics / feedback_summary through the engine, folds each account's watched numbers
+  (seller level, every standards metric incl. defect + late-shipment rates, INAD/INR service
+  metrics, feedback score / positive% / 30-day negatives) into a signature, diffs against a
+  Script-Properties snapshot, and letters CS + Management on every movement — naming the metric
+  and its old→new value. Once per UK day (guarded, so a flickering metric can't spam the desk);
+  first sighting of an account is not treated as a change. Runs off hourly pushEngineSync +
+  registered as a runnable. *Verified:* `asRunJob metricsWatch` → "0 change(s) across 6 account(s)"
+  (baseline set), second call → "already ran today" (guard holds).
 
 ## 8. Account report
 

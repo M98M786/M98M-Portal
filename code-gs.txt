@@ -6457,11 +6457,63 @@ function actionReviseHunt_(payload, ctx) {
   return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
 }
 
+/* ---------- the records archive (26 Aug, owner) ----------
+   "Hunting gets three pages: Products not approved · Approved · Pending approval, each with
+   archive access." The decision queue (huntQueue) only shows what still needs deciding; this is
+   the browsable record of everything, by outcome, newest first — so a hunter can see what was
+   approved, read every rejection reason before hunting the next one, and check what is still in
+   the pipeline. Read-only for everyone who works with hunting; profit/PII stripped per role by
+   stripForRole_. Reviewers still DECIDE on the Hunt approvals page — this page decides nothing. */
+const HUNT_RECORDS_ROLES = ['Product Hunter', 'Team Lead', 'Ops Head', 'Management',
+  'Order Processor', 'Advertising Manager', 'Listing Manager', 'Sales Operations'];
+
+function huntStatusCounts_() {
+  const c = { approved: 0, not_approved: 0, pending: 0, revision: 0, total: 0 };
+  readTab_('HUNTING_DB').forEach(function (r) {
+    const s = huntCanonStatus_(r[HC_APPROVAL]);
+    c.total++;
+    if (s === HUNT_APPROVED) c.approved++;
+    else if (s === HUNT_NOT_APPROVED) c.not_approved++;
+    else if (s === HUNT_REVISION) c.revision++;
+    else c.pending++;
+  });
+  return c;
+}
+
+function actionHuntRecords_(payload, ctx) {
+  if (HUNT_RECORDS_ROLES.indexOf(ctx.user.role) < 0 && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+    throw authErr_('not permitted to view hunt records', ctx.ident.email);
+  }
+  const want = huntStatusFilter_(payload.status);        // null=all · ''=pending · APPROVED · NOT APPROVED
+  const cap = Math.max(1, Math.min(600, Number(payload.limit) || 400));
+  const names = {};
+  readTab_('USERS').forEach(function (u) { names[normalizeEmail(u.email)] = String(u.name || u.email); });
+
+  let total = 0;
+  const rows = [];
+  readTab_('HUNTING_DB').forEach(function (r) {
+    const rec = huntRecord_(r);
+    if (want !== null && rec.approval_status !== want) return;
+    total++;
+    rec.hunter_name = names[normalizeEmail(rec.hunter_email)] || String(rec.hunter_email || '');
+    rows.push(rec);
+  });
+  rows.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });   // newest first — the archive
+
+  return {
+    hunts: stripForRole_(rows.slice(0, cap), ctx.user.role, ctx.ident.email),
+    total: total, shown: Math.min(total, cap), capped: total > cap,
+    counts: huntStatusCounts_(), hunt_kinds: HUNT_KINDS,
+    can_decide: isMgmt_(ctx.user.role, ctx.ident.email),
+  };
+}
+
 const ACTIONS_HUNTING = {
   submitHunt: [actionSubmitHunt_, 'any'],
   huntDuplicateCheck: [actionHuntDuplicateCheck_, 'any'],
   myHunts:    [actionMyHunts_, 'any'],
   huntQueue:  [actionHuntQueue_, 'any'],   // reviewers gated inside
+  huntRecords:[actionHuntRecords_, 'any'], // read-only archive, hunt roles gated inside
   decideHunt: [actionDecideHunt_, 'any'],  // Management / Ops Head gated inside
   reviseHunt: [actionReviseHunt_, 'any'],  // hunter-own or management, gated inside
 };
