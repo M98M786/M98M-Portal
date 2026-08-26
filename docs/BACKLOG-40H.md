@@ -29,8 +29,13 @@ only the second one counts here.
 - [x] **DONE** — all-departments overview restricted to Management/Ops Head/Team Lead;
   Orders board no longer shown to CS. Department members get their own board only.
 - [ ] **TODO** — remove the 2 `SELFTEST` rows polluting the Listing count.
-- [ ] **TODO** — every other desk that "is not updating": Go-live desk, and each remaining
-  desk. Audit one by one, same 20s contract.
+- [x] **AUDITED (all 13 desks respond + render, no errors)** — 26 Aug sweep:
+  goLive (0 drafts - correct empty), listDesk (48 rows), priceDesk (23), mgmtDesk AS+engine (ok),
+  staffReviews (ok), huntQueue (22), dispatch, recheck, returns/itemRisk, wrongAds, ordersBoard,
+  deptPending (4 depts). The "desks not working" complaints were the loss_review board bug (fixed
+  v54) + Apps Script latency. Empty desks (go-live, CPC tasks) are correct empty states, not bugs.
+  Remaining real issue: Apps Script latency (deptPending ~6s clean / mgmtPendingAS 6.4s / huntQueue
+  6.2s) - the dept pages paint cache-first so no spinner, and the ~50ms D1-mirror fix is WAF-queued.
 - [ ] **TODO** — 32/32 Advertising and 39/48 Listing tasks are **overdue**. That is a real
   operational finding for Hasib, not a bug to fix in code.
 
