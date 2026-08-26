@@ -165,3 +165,19 @@ Submit form: required "Item type" selector (Consistent/Seasonal). Backend huntKi
 untyped. Hunt approvals split into tabs **All 1 · Seasonal 0 · Consistent 0 · Unsorted 1** — the
 one pre-existing hunt correctly sits in Unsorted (nothing hidden); clicking Seasonal shows
 "Nothing in the Seasonal tray right now." Tab filter + counts confirmed live.
+
+## 13. Buyer auto-message: "order placed" after payment (Sir Hasib + ABRT)
+
+- [~] **BUILT, blocked on deploy + live switch** — owner: send the order-confirmation to buyers
+  on Sir Hasib and ABRT after they pay.
+  - The templates already existed for both accounts but on the WRONG trigger ('arrived' = delivery
+    estimate passed, ~a week later). The text is "your order has been placed successfully…" — an
+    order confirmation. Enabling it there would message buyers after delivery. Left OFF; did not
+    enable.
+  - Added an 'ordered' trigger to the engine (fires right after a paid order appears, delay_min
+    later; 1-day window + dedup so first-enable is safe). Committed; **queued behind the Cloudflare
+    WAF block** with the other engine changes.
+  - **Nothing has been sent to any buyer.** Two gates remain, both by design: (1) the engine must
+    deploy (WAF), (2) AUTOMSG_LIVE must be armed — currently false, so every message is SHADOW
+    (recorded, not sent). Arming live is the owner's call.
+  - After deploy: move templates arrived → ordered + enable; then owner arms AUTOMSG_LIVE.
