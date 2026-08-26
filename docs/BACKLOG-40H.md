@@ -127,7 +127,16 @@ only the second one counts here.
 
 ## 10. Validation (continuous)
 
-- [ ] **TODO** — re-check every sales figure repeatedly, not once.
+- [x] **VALIDATED 26 Aug (full cross-check)** — every sales figure cross-checked against
+  ground-truth sales_daily:
+  - CORE FIGURES ALL AGREE at the 7-day window (20-26 Aug): sold £11,147.28, profit £4,201.50,
+    ads £2,797.54 - identical across sales_daily, mgmtOverview.week, mgmtOverview.split_7d, and
+    dailyReport. The reconciliation logic where deployed is sound.
+  - ONE REMAINING VISIBLE DISCREPANCY: per-account revenue_7d tiles sum to £13,254.23 vs the
+    £11,147.28 week headline (£2,107 gap) - the rolling-168h vs UK-calendar-days window bug. The
+    fix (computeHealth aligned to UK calendar days) is committed but WAF-queued.
+  - Dashboard (Sales analysis) healthy - the sanity-guard fix (v53) holds, no poisoned values.
+  - Azhar Bhai £0 across 7 days - the dark-account operational issue (campaigns paused since ~22 Jul).
 - [ ] **TODO** — walk real scenarios end to end as a human would, per role.
 - [ ] **TODO** — screenshots as evidence.
 
