@@ -71,12 +71,15 @@ only the second one counts here.
   On entry, check it against every previous record *including rejected ones* and tell the
   hunter what happened last time. Stop duplicate hunting.
 
-## 5. Product revision
+## 5. Product revision  (DONE v59, verified backend live)
 
-- [ ] **TODO** — rebuild the revision tab: full archive, the concerned items, and the
-  item-level data that makes it usable.
-- [ ] **TODO** — Advertising, Management, CS and Order Processor can each raise a new
-  product listing revision, with an explanation.
+- [x] **DONE** — the 72-hour revisions tab now has an Archive section: completed revisions,
+  newest first, each with its item, account, who did it, when, and the reason it was raised
+  (listDesk.revisions_done). Verified live: the field is present (archive currently empty - no
+  completed revisions yet).
+- [x] **DONE** — CS and Order Processor can now raise a product listing revision (joined
+  Advertising Manager + Management/Team Lead in taskCanCreate_ and the frontend composer). A
+  revision REQUIRES an explanation (>=5 chars), enforced client- and server-side.
 
 ## 6. CPC
 
