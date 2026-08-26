@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260825-2359';
+var BUILD = '20260826-0017';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -8573,6 +8573,43 @@ function createMeeting() {
    * template, delay. SHADOW until Management arms AUTOMSG_LIVE; the banner says which. */
   var CD_AM = null;
 
+  /* 26 Aug (owner: "send this kind of message with proper details with specific orders"). The
+     engine only fills {{double-brace}} tokens, so a template written with single braces or friendly
+     names — {order}, {Order ID}, {Sample Item}, {00-00000-00000} — would reach the buyer LITERALLY.
+     Normalise every common spelling to the three the engine understands, on save, so what the buyer
+     gets always carries their real order number, item and name. Idempotent: {{order}} stays. */
+  function cdNormPlaceholders(tpl) {
+    var s = String(tpl == null ? '' : tpl);
+    var maps = [
+      [/\{\{\s*(order id|order_id|order no|order number|orderid)\s*\}\}/gi, '{{order}}'],
+      [/\{\{\s*(item name|item_name|item title|title|product)\s*\}\}/gi, '{{item}}'],
+      [/\{\{\s*(buyer name|buyer_name|name|customer)\s*\}\}/gi, '{{buyer}}'],
+      // single-brace friendly names and the literal sample placeholders
+      [/\{\s*0{2}-0{5}-0{5}\s*\}/g, '{{order}}'],
+      [/\{\s*(order id|order_id|order no|order number|orderid|order)\s*\}/gi, '{{order}}'],
+      [/\{\s*(sample item|item name|item_name|item title|title|product|item)\s*\}/gi, '{{item}}'],
+      [/\{\s*(buyer name|buyer_name|buyer|name|customer)\s*\}/gi, '{{buyer}}']
+    ];
+    maps.forEach(function (m) { s = s.replace(m[0], m[1]); });
+    return s.slice(0, 900);
+  }
+
+  /* A preview that fills the three tokens with a REAL recent order for the chosen account, so the
+     desk sees exactly what a buyer would receive — never "{Sample Item}". Falls back to a clearly
+     real-shaped sample if no order is to hand. */
+  var CD_PREVIEW_ORDER = {};
+  function cdFillPreview(tpl, sample) {
+    var norm = cdNormPlaceholders(tpl);
+    return norm.replace(/\{\{\s*(\w+)\s*\}\}/g, function (m, k) {
+      k = k.toLowerCase();
+      if (k === 'order') { return sample.order || '00-00000-00000'; }
+      if (k === 'item') { return sample.item || 'your item'; }
+      if (k === 'buyer') { return sample.buyer || 'there'; }
+      return '';
+    });
+  }
+
+
   function cdAutoMsgs() {
     var host = $('cdAuto');
     if (!host) { return; }
@@ -8599,14 +8636,22 @@ function createMeeting() {
       '<select class="alx-sel" id="cdAmAcc" style="margin-left:auto">' + accs.map(function (a) {
         return '<option' + (a === acct ? ' selected' : '') + '>' + esc(a) + '</option>';
       }).join('') + '</select></div>';
-    h += '<div class="scroll"><table class="cd-tbl" style="min-width:640px"><thead><tr><th>Trigger</th><th>On</th><th>Delay (min)</th><th>Template — {{buyer}} {{item}} {{order}}</th><th></th></tr></thead><tbody>';
+    h += '<div class="scroll"><table class="cd-tbl" style="min-width:640px"><thead><tr><th>Trigger</th><th>On</th><th>Delay (min)</th><th>Template — use the insert buttons; {{buyer}} {{order}} {{item}} become the real details</th><th></th></tr></thead><tbody>';
     (d.triggers || []).forEach(function (k) {
       var r = byKind[k] || { enabled: 0, delay_min: 0, template: '' };
       h += '<tr data-cd-amrow="' + esc(k) + '">' +
         '<td style="font-weight:700;white-space:nowrap">' + esc(labels[k] || k) + (k === 'arrived' ? '<div style="font-size:10px;color:var(--text-3)">fires when eBay\'s delivery estimate passes</div>' : '') + '</td>' +
         '<td><input type="checkbox" data-am-on ' + (Number(r.enabled) ? 'checked' : '') + '></td>' +
         '<td><input type="number" data-am-delay value="' + (Number(r.delay_min) || 0) + '" min="0" max="1440" style="width:70px" class="rc-in"></td>' +
-        '<td><input type="text" data-am-tpl value="' + esc(cdStr(r.template)).replace(/"/g, '&quot;') + '" placeholder="Hi {{buyer}}, …" style="width:100%" class="rc-in"></td>' +
+        '<td><input type="text" data-am-tpl value="' + esc(cdStr(r.template)).replace(/"/g, '&quot;') + '" placeholder="Hi {{buyer}}, your order {{order}} for {{item}} …" style="width:100%" class="rc-in">' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px;align-items:center">' +
+            '<span style="font-size:10.5px;color:var(--text-3);font-weight:700">insert:</span>' +
+            '<button class="minibtn" data-am-ins="{{buyer}}" style="padding:2px 8px;font-size:10.5px">buyer name</button>' +
+            '<button class="minibtn" data-am-ins="{{order}}" style="padding:2px 8px;font-size:10.5px">order number</button>' +
+            '<button class="minibtn" data-am-ins="{{item}}" style="padding:2px 8px;font-size:10.5px">item name</button>' +
+            '<button class="minibtn" data-am-preview style="padding:2px 8px;font-size:10.5px;margin-left:auto">Preview with a real order</button>' +
+          '</div>' +
+          '<div data-am-pv style="display:none;margin-top:6px;padding:8px 10px;border:1px solid var(--gold-line);border-radius:8px;background:var(--panel);font-size:12px;color:var(--text-2);white-space:pre-wrap"></div></td>' +
         '<td><button class="minibtn" data-am-save>Save</button></td></tr>';
     });
     h += '</tbody></table></div>';
@@ -8699,7 +8744,52 @@ function createMeeting() {
       var auto = $('cdAuto');
       if (auto) {
         auto.onclick = function (ev) {
-          var b = ev.target && ev.target.closest ? ev.target.closest('[data-am-save]') : null;
+          var tgt = ev.target && ev.target.closest ? ev.target : null;
+          /* insert a token at the cursor of this row's template input */
+          var ins = tgt && tgt.closest ? tgt.closest('[data-am-ins]') : null;
+          if (ins) {
+            var rowI = ins.closest('[data-cd-amrow]');
+            var inp = rowI && rowI.querySelector('[data-am-tpl]');
+            if (inp) {
+              var tok = ins.getAttribute('data-am-ins');
+              var p0 = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
+              var p1 = inp.selectionEnd == null ? inp.value.length : inp.selectionEnd;
+              inp.value = inp.value.slice(0, p0) + tok + inp.value.slice(p1);
+              inp.focus(); try { inp.setSelectionRange(p0 + tok.length, p0 + tok.length); } catch (e) {}
+            }
+            return;
+          }
+          /* preview this row's template filled with a real recent order for the chosen account */
+          var pvb = tgt && tgt.closest ? tgt.closest('[data-am-preview]') : null;
+          if (pvb) {
+            var rowP = pvb.closest('[data-cd-amrow]');
+            var selA = $('cdAmAcc');
+            var out = rowP && rowP.querySelector('[data-am-pv]');
+            var tplV = rowP && rowP.querySelector('[data-am-tpl]');
+            if (!rowP || !out || !tplV || !selA) { return; }
+            out.style.display = 'block';
+            out.textContent = 'Loading a real order…';
+            var acct = selA.value;
+            var render = function (sample) {
+              out.textContent = cdFillPreview(tplV.value, sample) +
+                '\n\n— filled with ' + (sample.real ? 'a real ' + esc(acct) + ' order' : 'a sample') +
+                ': buyer ' + sample.buyer + ' · order ' + sample.order;
+            };
+            if (CD_PREVIEW_ORDER[acct]) { render(CD_PREVIEW_ORDER[acct]); return; }
+            api('ordersBoard', { account: acct, view: 'all' }).then(function (dd) {
+              var rows2 = (dd && dd.rows) || [];
+              var r0 = rows2.find(function (x) { return cdStr(x.buyer) && cdStr(x.title); }) || rows2[0];
+              var sample = r0 ? { real: true, order: cdStr(r0.order_id) || '00-00000-00000',
+                item: cdStr(r0.title) || 'your item', buyer: (cdStr(r0.buyer).split(' ')[0] || 'there') }
+                : { real: false, order: '25-12345-67890', item: 'Wireless Neck Fan', buyer: 'James' };
+              CD_PREVIEW_ORDER[acct] = sample;
+              render(sample);
+            }).catch(function () {
+              render({ real: false, order: '25-12345-67890', item: 'Wireless Neck Fan', buyer: 'James' });
+            });
+            return;
+          }
+          var b = tgt && tgt.closest ? tgt.closest('[data-am-save]') : null;
           if (!b) { return; }
           var tr = b.closest('[data-cd-amrow]');
           var sel = $('cdAmAcc');
@@ -8710,7 +8800,7 @@ function createMeeting() {
             trigger_kind: tr.getAttribute('data-cd-amrow'),
             enabled: tr.querySelector('[data-am-on]').checked,
             delay_min: tr.querySelector('[data-am-delay]').value,
-            template: tr.querySelector('[data-am-tpl]').value,
+            template: cdNormPlaceholders(tr.querySelector('[data-am-tpl]').value),
           }).then(function (res) {
             b.textContent = 'Save';
             toast('Saved — ' + (res.enabled ? 'ON' : 'OFF') + ' for ' + res.account + '.');
