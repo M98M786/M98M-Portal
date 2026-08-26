@@ -64,6 +64,24 @@
           }).join('') + '</tbody></table></div>';
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
+      /* 26 Aug (owner): "proper show all archive, concerned items, and proper item related data."
+         The archive of completed revisions, newest first — each with its item, account, who did it,
+         when, and the reason it was raised. */
+      var done = (d && d.revisions_done) || [];
+      if (done.length) {
+        html += '<div class="rv-sec">Archive — completed revisions · ' + done.length + '</div>' +
+          '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
+          '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Reason it was raised</th>' +
+          '<th style="text-align:left">By</th><th style="text-align:left">Done</th></tr></thead><tbody>' +
+          done.map(function (r) {
+            return '<tr><td style="text-align:left;max-width:240px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rvS(r.title)) + '</div>' +
+              '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(rvS(r.item_id) || rvS(r.task_id)) + '</span></td>' +
+              '<td style="text-align:left">' + esc(rvS(r.account)) + '</td>' +
+              '<td style="text-align:left;max-width:260px"><div style="white-space:normal;font-size:11.5px;color:var(--text-2)">' + esc(rvS(r.reason) || '—') + '</div></td>' +
+              '<td style="text-align:left">' + esc(rvS(r.assigned_to).split('@')[0]) + '</td>' +
+              '<td style="text-align:left;white-space:nowrap;color:var(--text-3)">' + esc(fmtPkt(r.decided_at, true) || '—') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
       setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
       setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');

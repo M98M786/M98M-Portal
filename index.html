@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260826-0126';
+var BUILD = '20260826-0221';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -20189,6 +20189,24 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           }).join('') + '</tbody></table></div>';
       };
       var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
+      /* 26 Aug (owner): "proper show all archive, concerned items, and proper item related data."
+         The archive of completed revisions, newest first — each with its item, account, who did it,
+         when, and the reason it was raised. */
+      var done = (d && d.revisions_done) || [];
+      if (done.length) {
+        html += '<div class="rv-sec">Archive — completed revisions · ' + done.length + '</div>' +
+          '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
+          '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Reason it was raised</th>' +
+          '<th style="text-align:left">By</th><th style="text-align:left">Done</th></tr></thead><tbody>' +
+          done.map(function (r) {
+            return '<tr><td style="text-align:left;max-width:240px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rvS(r.title)) + '</div>' +
+              '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(rvS(r.item_id) || rvS(r.task_id)) + '</span></td>' +
+              '<td style="text-align:left">' + esc(rvS(r.account)) + '</td>' +
+              '<td style="text-align:left;max-width:260px"><div style="white-space:normal;font-size:11.5px;color:var(--text-2)">' + esc(rvS(r.reason) || '—') + '</div></td>' +
+              '<td style="text-align:left">' + esc(rvS(r.assigned_to).split('@')[0]) + '</td>' +
+              '<td style="text-align:left;white-space:nowrap;color:var(--text-3)">' + esc(fmtPkt(r.decided_at, true) || '—') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
       setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
       setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
@@ -23378,6 +23396,7 @@ function saveSchedule() {
     var role = tkRole();
     var types = (role === 'Advertising Manager') ? ['listing_revision']               // §4.3: revisions only
       : tkPrivileged() ? TK_TYPES
+      : (role === 'CS' || role === 'Order Processor') ? ['listing_revision', 'general', 'query', 'supplier_add']  // 26 Aug: + revisions
       : ['general', 'query', 'supplier_add'];                                         // item 19: the open types
     var opts = types.map(function (t) { return '<option value="' + tkAttr(t) + '">' + esc(t) + '</option>'; }).join('');
     var accounts = tkStr(STATE.user && STATE.user.accounts);
@@ -23431,6 +23450,7 @@ function saveSchedule() {
       if (!payload.title) { toast('Give the task a title.'); return; }
       if (!payload.assigned_to) { toast('Choose who this task is for.'); return; }
       if (!payload.deadline_pkt) { toast('Set a deadline (Pakistan time).'); return; }
+      if (payload.type === 'listing_revision' && payload.details.length < 5) { toast('A revision needs an explanation — say what to change.'); $('tkNewDetails').focus(); return; }
       if (item && !/^\d{9,15}$/.test(item)) { toast('An Item ID is 9 to 15 digits.'); return; }
       if (item) { payload.item_id = item; }
       btn.disabled = true;

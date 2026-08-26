@@ -269,6 +269,7 @@ function actionListDesk_(payload, ctx) {
   const monthKey = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM');
   const perAssignee = {}, perAccount = {}, fam = { CPC: { listed_month: 0, pending: 0 }, 'General/Dynamic': { listed_month: 0, pending: 0 }, Unassigned: { listed_month: 0, pending: 0 } };
   const rows = [];
+  const revisionsDone = [];   // 26 Aug: the revision archive - completed revisions with their item data
   readTab_('TASKS').forEach(function (t) {
     const type = String(t.type || '');
     if (type !== 'listing_new' && type !== 'listing_revision') return;
@@ -278,6 +279,13 @@ function actionListDesk_(payload, ctx) {
     const family = type === 'listing_new' ? r8Family_(t.details) : 'Revision';
     if (status === TASK_STATUS_COMPLETED) {
       if (type === 'listing_new' && taskPktIso_(t.decided_at).slice(0, 7) === monthKey && fam[family]) fam[family].listed_month++;
+      if (type === 'listing_revision') {
+        revisionsDone.push({ task_id: String(t.task_id), account: String(t.account || ''),
+          title: String(t.title || '').slice(0, 90), item_id: String(t.item_id || ''),
+          assigned_to: assignee, decided_at: taskPktIso_(t.decided_at),
+          reason: String(t.details || '').replace(/\s+/g, ' ').slice(0, 160),
+          by: String(t.assigned_by || '') });
+      }
       return;
     }
     if ([TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED].indexOf(status) < 0) return;
@@ -321,7 +329,9 @@ function actionListDesk_(payload, ctx) {
   cpc.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
   return { mgmt: mgmt, per_assignee: Object.keys(perAssignee).map(function (k) { return perAssignee[k]; }).sort(function (a, b) { return b.open - a.open; }),
     per_account: perAccount, families: fam, rows: rows.slice(0, 300),
-    cpc_pipeline: cpc.slice(0, 200), cpc_counts: cpcCounts, as_of: now_() };
+    cpc_pipeline: cpc.slice(0, 200), cpc_counts: cpcCounts,
+    revisions_done: revisionsDone.sort(function (a, b) { return String(b.decided_at).localeCompare(String(a.decided_at)); }).slice(0, 100),
+    as_of: now_() };
 }
 
 /* ---------- lister reject-back with management approval (R8-3b) ---------- */

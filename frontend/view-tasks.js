@@ -217,6 +217,7 @@
     var role = tkRole();
     var types = (role === 'Advertising Manager') ? ['listing_revision']               // §4.3: revisions only
       : tkPrivileged() ? TK_TYPES
+      : (role === 'CS' || role === 'Order Processor') ? ['listing_revision', 'general', 'query', 'supplier_add']  // 26 Aug: + revisions
       : ['general', 'query', 'supplier_add'];                                         // item 19: the open types
     var opts = types.map(function (t) { return '<option value="' + tkAttr(t) + '">' + esc(t) + '</option>'; }).join('');
     var accounts = tkStr(STATE.user && STATE.user.accounts);
@@ -270,6 +271,7 @@
       if (!payload.title) { toast('Give the task a title.'); return; }
       if (!payload.assigned_to) { toast('Choose who this task is for.'); return; }
       if (!payload.deadline_pkt) { toast('Set a deadline (Pakistan time).'); return; }
+      if (payload.type === 'listing_revision' && payload.details.length < 5) { toast('A revision needs an explanation — say what to change.'); $('tkNewDetails').focus(); return; }
       if (item && !/^\d{9,15}$/.test(item)) { toast('An Item ID is 9 to 15 digits.'); return; }
       if (item) { payload.item_id = item; }
       btn.disabled = true;

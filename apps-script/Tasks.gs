@@ -25,6 +25,10 @@ function actionCreateTask_(payload, ctx) {
 
   const title = String(payload.title || '').trim();
   if (!title) throw new Error('title required');
+  /* A revision without a reason is not actionable - the lister needs to know WHAT to change. */
+  if (type === 'listing_revision' && String(payload.details || '').trim().length < 5) {
+    throw new Error(SAFE_ERROR_PREFIX + 'a revision needs an explanation of what to change');
+  }
   const deadline = taskPktIso_(payload.deadline_pkt);
   if (!deadline) throw new Error('deadline_pkt required');
   const itemId = taskItemId_(payload.item_id);
@@ -65,6 +69,9 @@ function taskCanCreate_(role, email, type) {
   if (isMgmt_(role, email)) return true;
   if (role === 'Team Lead') return true;
   if (role === 'Advertising Manager') return type === 'listing_revision';
+  /* 26 Aug (owner): "advertising, management, customer service, order processor can create a new
+     product listing revision." CS and Order Processor join Advertising on the revision type. */
+  if ((role === 'CS' || role === 'Order Processor') && type === 'listing_revision') return true;
   /* Hasib item 19: every approved staff member can hand a task or a lead to anyone. The open
      types only — the privileged types above keep their gates. */
   return type === 'general' || type === 'query' || type === 'supplier_add';
