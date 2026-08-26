@@ -80,9 +80,10 @@ only the second one counts here.
 
 ## 7. Signals & notifications
 
-- [ ] **TODO** — price-related and negative sales-analysis signals also go to the
-  **Advertising Manager**.
-- [ ] **TODO** — staff matters notify **management and the staff member**.
+- [x] **DONE (v58)** — the WENT NEGATIVE signal (loss/price) now routes to and is visible to the
+  Advertising Manager. Takes effect on the next signal run.
+- [x] **DONE (v58)** — when a weekly review is saved, the reviewed staff member gets a neutral bell
+  pointing them to Staff reviews (management already sees it). More staff-matter events can follow.
 - [ ] **TODO** — detect and route to **CS + Management**: transaction defect, new late
   shipment case, any service-metric movement, positive-feedback rating change.
 
