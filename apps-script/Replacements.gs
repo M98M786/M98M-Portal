@@ -183,7 +183,7 @@ function actionReplacementCreate_(payload, ctx) {
   const shadowed = !!(res && res.shadow);
   const msg = '🔁 Replacement order raised — ' + account + ' · order ' + orderNo +
     ' · ' + reasonText + (
-      shadowed ? '. Recorded (write shadow mode) — it will be written when sheet writes go live.'
+      shadowed ? '. Recorded on this desk ONLY — sheet writes are in shadow mode, so NO row was added to the order book. Raise it again once writes go live, or add it to the sheet by hand.'
       : sheetTab ? '. It is on the ' + sheetTab + ' tab, Pending — purchase it like any order.'
       : '. The sheet write did not land (' + sheetNote + ') — see the Replacement orders desk.');
   /* The sheet row is already appended; a letters hiccup (missing tab, quota) must not turn a

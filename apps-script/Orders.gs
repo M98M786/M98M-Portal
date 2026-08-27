@@ -764,9 +764,14 @@ function ordersComputeDashboard_(account, monthKey, today) {
     read.rows.forEach(function (r) {
       if (!ordersIsOrderRow_(r, map)) return;
       /* [ONE ORDER, ONE COUNT] A multi-variation eBay order is several sheet rows sharing one
-       * order number. Counting rows counted the same order twice everywhere on this screen. */
+       * order number. Counting rows counted the same order twice everywhere on this screen.
+       * EXCEPT a REPLACEMENT ORDER row (§R9): it deliberately repeats the original's number on a
+       * LATER tab with its own independent dispatch state — deduping it against the original
+       * (which is usually already Dispatched) made every replacement invisible to Awaiting/Due/
+       * OVERDUE and to the overdue sweep, exactly the safety net a re-ship needs most. */
+      const isReplacementRow = String(ordersCell_(r, map, 'Item title')).indexOf('REPLACEMENT ORDER') === 0;
       const ono = bridgeMatchKey_(ordersCell_(r, map, 'Order number'));
-      if (ono) {
+      if (ono && !isReplacementRow) {
         if (seenOrders[ono]) return;
         seenOrders[ono] = true;
       }

@@ -169,8 +169,10 @@
       '<th style="text-align:left">Reason</th><th style="text-align:left">Raised by</th>' +
       '<th style="text-align:left">Landed</th></tr></thead><tbody>' +
       rows.map(function (r) {
-        var landed = rpS(r.sheet_tab)
-          ? '<span class="rp-pill">' + esc(rpS(r.sheet_tab)) + (rpS(r.sheet_row) && r.sheet_row !== 'shadow' ? ' · row ' + esc(rpS(r.sheet_row)) : '') + '</span>'
+        var landed = rpS(r.sheet_row) === 'shadow'
+          ? '<span class="rp-pill" style="color:var(--warn);border-color:rgba(255,159,67,.5)">shadow — NOT on the sheet</span>'
+          : rpS(r.sheet_tab)
+          ? '<span class="rp-pill">' + esc(rpS(r.sheet_tab)) + (rpS(r.sheet_row) ? ' · row ' + esc(rpS(r.sheet_row)) : '') + '</span>'
           : '<span class="rp-pill" style="color:var(--warn)">' + esc(rpS(r.sheet_note) || 'portal only') + '</span>';
         return '<tr><td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' + esc(fmtPkt(r.ts, true) || rpS(r.ts)) + '</td>' +
           '<td style="text-align:left">' + esc(rpS(r.account)) + '</td>' +
