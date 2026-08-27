@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260827-1253';
+var BUILD = '20260827-1310';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14574,6 +14574,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       $('odTabRep').onclick = function () { if (OD_REPLACEMENT) { return; } OD_REPLACEMENT = true; odMarkTabs(); odLoad(); };
       $('odDate').onchange = function () { OD_DATE = odStr(this.value); };
       odMarkTabs();
+      if ($('odList')) { $('odList').addEventListener('click', odReplClick); }
       odLoadAccounts(function () {
         var sel = $('odAccount');
         if (!sel) { return; }
@@ -14747,7 +14748,6 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
     odWireChips();
     odApplyFilter();
-    odWireReplButtons();
   }
   function odChip(k, v, cls, filter) {
     /* Owner: "any numbering data will take you to that specific page." A chip with a filter key
@@ -14796,27 +14796,25 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   // ---------- one order row ----------
   /* The button's payload is the ROW the person is looking at: account, order number, title,
      quantity, variation and the AliExpress link, handed to the Replacement orders desk via
-     localStorage and opened there pre-filled. */
-  function odWireReplButtons() {
-    var list = $('odList');
-    if (!list) { return; }
-    list.querySelectorAll('[data-od-repl]').forEach(function (b) {
-      b.onclick = function () {
-        var row = this.getAttribute('data-od-repl');
-        var o = null;
-        (OD_DATA && OD_DATA.orders || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
-        var pre = {
-          account: OD_ACCOUNT,
-          order_number: o ? odStr(o[OD_H.orderNo]) : '',
-          item_title: o ? odStr(o[OD_H.title]) : '',
-          quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
-          variation: o ? odStr(o[OD_H.variation]) : '',
-          ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
-        };
-        try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
-        location.hash = 'replacements';
-      };
-    });
+     localStorage and opened there pre-filled. DELEGATED on the list container — the cards are
+     repainted wholesale on every load, and per-button wiring after the wrong paint was exactly
+     how the first version shipped dead buttons. */
+  function odReplClick(ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-repl]') : null;
+    if (!b) { return; }
+    var row = b.getAttribute('data-od-repl');
+    var o = null;
+    ((OD_DATA && OD_DATA.orders) || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
+    var pre = {
+      account: OD_ACCOUNT,
+      order_number: o ? odStr(o[OD_H.orderNo]) : '',
+      item_title: o ? odStr(o[OD_H.title]) : '',
+      quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
+      variation: o ? odStr(o[OD_H.variation]) : '',
+      ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
+    };
+    try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
+    location.hash = 'replacements';
   }
 
   function odCard(o) {
@@ -14834,7 +14832,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span class="od-name">' + esc(title) + '</span>' +
         '<span class="pill ' + odStatusPill(status) + (status ? '' : ' hidden') + '" data-pill="' + odAttr(row) + '">' +
           esc(status) + '</span>' +
-        '<span class="mono" style="color:var(--text-3)">' + esc(odStr(o[OD_H.orderNo])) + '</span>' +
+        /* proper links (owner): the order number opens eBay's own order-details page */
+        '<a class="mono" style="color:var(--text-3);text-decoration:underline dotted" target="_blank" rel="noopener noreferrer" ' +
+          'href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(odStr(o[OD_H.orderNo])) + '">' + esc(odStr(o[OD_H.orderNo])) + '</a>' +
         /* 26 Aug (owner): "create a replacement for this order" on every order row. Carries the
            row's own facts to the Replacement orders desk, pre-filled. */
         '<button class="minibtn" data-od-repl="' + odAttr(row) + '" title="Raise a replacement for this order">Create a replacement</button>' +
@@ -15754,16 +15754,23 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var maxA = byA.reduce(function (m, x) { return Math.max(m, Number(x.orders) || 0); }, 1);
     /* 26 Aug (owner): "any numbering data will take you to that specific page" — each account's
        today-count opens that account's Today's orders on today's tab; the Orders-today tile
-       opens the workspace itself. Buttons, not divs, so keyboards reach them too. */
-    var accts = byA.length ? '<div class="ob-gsub">Today by account · click to open that day</div><div class="ob-gacc">' + byA.map(function (a) {
+       opens the workspace itself. Buttons, not divs, so keyboards reach them too. Team Lead and
+       CS see this board but cannot open the processor workspace — they keep the plain rows
+       rather than buttons that would silently do nothing. */
+    var canJump = !!(window.VIEWS && VIEWS.orders && VIEWS.orders.roles.indexOf((STATE.user && STATE.user.role) || '') >= 0);
+    var accts = byA.length ? '<div class="ob-gsub">Today by account' + (canJump ? ' · click to open that day' : '') + '</div><div class="ob-gacc">' + byA.map(function (a) {
       var pct = Math.max(2, Math.round(((Number(a.orders) || 0) / maxA) * 100));
-      return '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' +
-        '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
+      var inner = '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
         '<span class="ob-ga-bar"><span style="width:' + pct + '%"></span></span>' +
-        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></button>';
+        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span>';
+      return canJump
+        ? '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' + inner + '</button>'
+        : '<div class="ob-ga">' + inner + '</div>';
     }).join('') + '</div>' : '';
     return '<div class="ob-graph"><div class="ob-gtiles">' +
-      '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>' +
+      (canJump
+        ? '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>'
+        : '<div class="ob-gtile gold"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></div>') +
       '<div class="ob-gtile"><span class="k">Revenue today</span><b>' + obGBP(t.revenue) + '</b></div>' +
       '</div><div class="ob-fnl">' + funnel + '</div>' + accts + '</div>';
   }
@@ -19878,18 +19885,20 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     } catch (e) { return null; }
   }
 
-  function rpLoad() {
+  function rpLoad(listOnly) {
     var seq = ++RP.seq;
     api('replacementList', {}).then(function (d) {
       if (seq !== RP.seq) { return; }
       RP.reasons = (d && d.reasons) || [];
       RP.canRaise = !!(d && d.can_raise);
-      rpPaintForm();
+      /* After a raise only the archive refreshes — repainting the form here would destroy the
+         confirmation (with the tab and row the raiser is reading) and reset their selections. */
+      if (!listOnly) { rpPaintForm(); }
       rpPaintList((d && d.rows) || []);
     }).catch(function (e) {
       if (seq !== RP.seq) { return; }
-      setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>');
-      setHTML('rpList', '');
+      if (!listOnly) { setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>'); }
+      setHTML('rpList', '<div class="rp-note" style="margin-top:0">The list could not refresh — press Refresh.</div>');
     });
   }
 
@@ -19927,6 +19936,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       sel.innerHTML = accs.length
         ? accs.map(function (a) { return '<option value="' + rpAttr(a) + '"' + (a === rpS(pre.account) ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('')
         : '<option value="">No account connected yet</option>';
+    }).done.catch(function () {
+      var sel = $('rpAcc');
+      if (sel && /Loading/.test(sel.innerHTML)) { sel.innerHTML = '<option value="">Could not load accounts — press Refresh</option>'; }
     });
 
     var reasonSel = $('rpReason');
@@ -19960,10 +19972,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           var oi = $('rpOrder'); if (oi) { oi.value = ''; }
           var ti = $('rpTitle'); if (ti) { ti.value = ''; }
           var xi = $('rpExp'); if (xi) { xi.value = ''; }
-          rpLoad();
+          rpLoad(true);
         } else {
           out.innerHTML = '<div class="rp-bad">The sheet write did not land: ' + esc((r && r.sheet_note) || 'unknown') + '. The request is recorded on this desk either way.</div>';
-          rpLoad();
+          rpLoad(true);
         }
       }).catch(function (e) {
         btn.disabled = false; btn.textContent = 'Raise the replacement';

@@ -412,6 +412,7 @@
       $('odTabRep').onclick = function () { if (OD_REPLACEMENT) { return; } OD_REPLACEMENT = true; odMarkTabs(); odLoad(); };
       $('odDate').onchange = function () { OD_DATE = odStr(this.value); };
       odMarkTabs();
+      if ($('odList')) { $('odList').addEventListener('click', odReplClick); }
       odLoadAccounts(function () {
         var sel = $('odAccount');
         if (!sel) { return; }
@@ -585,7 +586,6 @@
     sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
     odWireChips();
     odApplyFilter();
-    odWireReplButtons();
   }
   function odChip(k, v, cls, filter) {
     /* Owner: "any numbering data will take you to that specific page." A chip with a filter key
@@ -634,27 +634,25 @@
   // ---------- one order row ----------
   /* The button's payload is the ROW the person is looking at: account, order number, title,
      quantity, variation and the AliExpress link, handed to the Replacement orders desk via
-     localStorage and opened there pre-filled. */
-  function odWireReplButtons() {
-    var list = $('odList');
-    if (!list) { return; }
-    list.querySelectorAll('[data-od-repl]').forEach(function (b) {
-      b.onclick = function () {
-        var row = this.getAttribute('data-od-repl');
-        var o = null;
-        (OD_DATA && OD_DATA.orders || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
-        var pre = {
-          account: OD_ACCOUNT,
-          order_number: o ? odStr(o[OD_H.orderNo]) : '',
-          item_title: o ? odStr(o[OD_H.title]) : '',
-          quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
-          variation: o ? odStr(o[OD_H.variation]) : '',
-          ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
-        };
-        try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
-        location.hash = 'replacements';
-      };
-    });
+     localStorage and opened there pre-filled. DELEGATED on the list container — the cards are
+     repainted wholesale on every load, and per-button wiring after the wrong paint was exactly
+     how the first version shipped dead buttons. */
+  function odReplClick(ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('[data-od-repl]') : null;
+    if (!b) { return; }
+    var row = b.getAttribute('data-od-repl');
+    var o = null;
+    ((OD_DATA && OD_DATA.orders) || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
+    var pre = {
+      account: OD_ACCOUNT,
+      order_number: o ? odStr(o[OD_H.orderNo]) : '',
+      item_title: o ? odStr(o[OD_H.title]) : '',
+      quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
+      variation: o ? odStr(o[OD_H.variation]) : '',
+      ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
+    };
+    try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
+    location.hash = 'replacements';
   }
 
   function odCard(o) {

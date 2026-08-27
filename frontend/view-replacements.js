@@ -58,18 +58,20 @@
     } catch (e) { return null; }
   }
 
-  function rpLoad() {
+  function rpLoad(listOnly) {
     var seq = ++RP.seq;
     api('replacementList', {}).then(function (d) {
       if (seq !== RP.seq) { return; }
       RP.reasons = (d && d.reasons) || [];
       RP.canRaise = !!(d && d.can_raise);
-      rpPaintForm();
+      /* After a raise only the archive refreshes — repainting the form here would destroy the
+         confirmation (with the tab and row the raiser is reading) and reset their selections. */
+      if (!listOnly) { rpPaintForm(); }
       rpPaintList((d && d.rows) || []);
     }).catch(function (e) {
       if (seq !== RP.seq) { return; }
-      setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>');
-      setHTML('rpList', '');
+      if (!listOnly) { setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>'); }
+      setHTML('rpList', '<div class="rp-note" style="margin-top:0">The list could not refresh — press Refresh.</div>');
     });
   }
 
@@ -143,10 +145,10 @@
           var oi = $('rpOrder'); if (oi) { oi.value = ''; }
           var ti = $('rpTitle'); if (ti) { ti.value = ''; }
           var xi = $('rpExp'); if (xi) { xi.value = ''; }
-          rpLoad();
+          rpLoad(true);
         } else {
           out.innerHTML = '<div class="rp-bad">The sheet write did not land: ' + esc((r && r.sheet_note) || 'unknown') + '. The request is recorded on this desk either way.</div>';
-          rpLoad();
+          rpLoad(true);
         }
       }).catch(function (e) {
         btn.disabled = false; btn.textContent = 'Raise the replacement';

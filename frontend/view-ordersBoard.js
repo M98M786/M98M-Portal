@@ -136,16 +136,23 @@
     var maxA = byA.reduce(function (m, x) { return Math.max(m, Number(x.orders) || 0); }, 1);
     /* 26 Aug (owner): "any numbering data will take you to that specific page" — each account's
        today-count opens that account's Today's orders on today's tab; the Orders-today tile
-       opens the workspace itself. Buttons, not divs, so keyboards reach them too. */
-    var accts = byA.length ? '<div class="ob-gsub">Today by account · click to open that day</div><div class="ob-gacc">' + byA.map(function (a) {
+       opens the workspace itself. Buttons, not divs, so keyboards reach them too. Team Lead and
+       CS see this board but cannot open the processor workspace — they keep the plain rows
+       rather than buttons that would silently do nothing. */
+    var canJump = !!(window.VIEWS && VIEWS.orders && VIEWS.orders.roles.indexOf((STATE.user && STATE.user.role) || '') >= 0);
+    var accts = byA.length ? '<div class="ob-gsub">Today by account' + (canJump ? ' · click to open that day' : '') + '</div><div class="ob-gacc">' + byA.map(function (a) {
       var pct = Math.max(2, Math.round(((Number(a.orders) || 0) / maxA) * 100));
-      return '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' +
-        '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
+      var inner = '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
         '<span class="ob-ga-bar"><span style="width:' + pct + '%"></span></span>' +
-        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></button>';
+        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span>';
+      return canJump
+        ? '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' + inner + '</button>'
+        : '<div class="ob-ga">' + inner + '</div>';
     }).join('') + '</div>' : '';
     return '<div class="ob-graph"><div class="ob-gtiles">' +
-      '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>' +
+      (canJump
+        ? '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>'
+        : '<div class="ob-gtile gold"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></div>') +
       '<div class="ob-gtile"><span class="k">Revenue today</span><b>' + obGBP(t.revenue) + '</b></div>' +
       '</div><div class="ob-fnl">' + funnel + '</div>' + accts + '</div>';
   }

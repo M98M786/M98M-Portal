@@ -232,10 +232,13 @@ function purgeSelfTestTasks() {
   const data = sh.getRange(2, 1, last - 1, head.length).getValues();
   const hits = [];
   data.forEach(function (r, i) {
-    const probe = ['task_id', 'title', 'details', 'assigned_by'].map(function (k) {
-      return idx[k] === undefined ? '' : String(r[idx[k]] || '');
-    }).join(' ').toLowerCase();
-    if (probe.indexOf('selftest') >= 0 || probe.indexOf('self-test') >= 0) {
+    /* Only rows that ARE the synthetic artifact: id or title STARTING with the marker, or a
+       synthetic assigner. A real task that merely mentions "self-test" in its details (the
+       codebase's own vocabulary — bridgeSelfTest_, cpcSelfTest_) must never be deleted. */
+    const id = String(idx.task_id === undefined ? '' : r[idx.task_id] || '').toLowerCase();
+    const title = String(idx.title === undefined ? '' : r[idx.title] || '').toLowerCase();
+    const by = String(idx.assigned_by === undefined ? '' : r[idx.assigned_by] || '').toLowerCase();
+    if (/^self[- ]?test/.test(id) || /^self[- ]?test/.test(title) || /^self[- ]?test/.test(by)) {
       hits.push({ row: i + 2, id: String(r[idx.task_id] || ''), title: String(r[idx.title] || '').slice(0, 60) });
     }
   });
