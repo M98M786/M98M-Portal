@@ -3382,7 +3382,7 @@ const ROUTES = {
   deptPendingEngine: {
     auth: 'any', fn: async (p, ctx) => {
       const DEPT_OF_TYPE = { listing_new: 'Listing', listing_revision: 'Listing', campaign_set: 'Advertising',
-        cpc_research: 'Advertising', potential_cpc_review: 'Advertising', supplier_add: 'Orders',
+        cpc_research: 'Advertising', potential_cpc_review: 'Advertising', loss_review: 'Advertising', supplier_add: 'Orders',
         sourcing_link: 'Hunting', hunt_revision: 'Hunting', end_listing: 'Listing', query: 'CS', general: 'General' };
       const OPEN = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
       const rs = await ctx.env.DB.prepare(
