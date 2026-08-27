@@ -258,7 +258,7 @@ function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.ad
    times. So calls made in the same moment are gathered and sent as one, transparently: every
    caller still gets its own promise and its own error. Nothing in the views had to change. */
 var API_BATCH_WINDOW_MS = 20;
-var API_BATCH_MAX = 10;
+var API_BATCH_MAX = 6;   // 27 Aug: 10 actions serial in one doPost ran 20-40s; 6 halves the worst case
 var apiQueue = [];
 var apiTimer = null;
 
@@ -1085,12 +1085,24 @@ function warmUp(){
       });
     });
   }catch(e){}
+  /* 27 Aug ("portal is working very slowly"): firing every prefetch at once packed them into
+     one giant batch that ran 20-40s server-side — and the person's own first clicks queued
+     BEHIND it, which is exactly the slowness they feel at sign-in. The landing screen's own
+     fetches go first; the warm-up then trickles, three at a time with a breath between, so a
+     click always finds a free slot within a couple of seconds. */
   try{
+    var pf = [];
     viewList().forEach(function(v){
       var view = VIEWS[v.key];
-      if(!view || typeof view.prefetch !== 'function') return;
-      try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+      if(view && typeof view.prefetch === 'function') pf.push(view);
     });
+    var fire = function(){
+      pf.splice(0, 3).forEach(function(view){
+        try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+      });
+      if(pf.length) setTimeout(fire, 1500);
+    };
+    setTimeout(fire, 2500);
   }catch(e){}
 }
 function renderView(key){

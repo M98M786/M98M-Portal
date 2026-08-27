@@ -258,7 +258,7 @@ function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.ad
    times. So calls made in the same moment are gathered and sent as one, transparently: every
    caller still gets its own promise and its own error. Nothing in the views had to change. */
 var API_BATCH_WINDOW_MS = 20;
-var API_BATCH_MAX = 10;
+var API_BATCH_MAX = 6;   // 27 Aug: 10 actions serial in one doPost ran 20-40s; 6 halves the worst case
 var apiQueue = [];
 var apiTimer = null;
 
@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260827-1432';
+var BUILD = '20260827-1901';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25352,12 +25352,24 @@ function warmUp(){
       });
     });
   }catch(e){}
+  /* 27 Aug ("portal is working very slowly"): firing every prefetch at once packed them into
+     one giant batch that ran 20-40s server-side — and the person's own first clicks queued
+     BEHIND it, which is exactly the slowness they feel at sign-in. The landing screen's own
+     fetches go first; the warm-up then trickles, three at a time with a breath between, so a
+     click always finds a free slot within a couple of seconds. */
   try{
+    var pf = [];
     viewList().forEach(function(v){
       var view = VIEWS[v.key];
-      if(!view || typeof view.prefetch !== 'function') return;
-      try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+      if(view && typeof view.prefetch === 'function') pf.push(view);
     });
+    var fire = function(){
+      pf.splice(0, 3).forEach(function(view){
+        try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
+      });
+      if(pf.length) setTimeout(fire, 1500);
+    };
+    setTimeout(fire, 2500);
   }catch(e){}
 }
 function renderView(key){
