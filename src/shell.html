@@ -825,6 +825,9 @@ setInterval(function(){
   if(left > 0 && left < 5 * 60000){ showReauth(); }
   if(left <= 0){ showReauth(); }
 }, 60000);
+/* Shared by overview, traffic and the VAT breakdown — vatBreakdown died calling a copy that was
+   private to another file (ReferenceError swallowed by renderView = spinner forever). */
+function ukToday(){ return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
 function decodeJwt(t){ try{ return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return {}; } }
 
 function routeUser(user){
@@ -1007,7 +1010,7 @@ function enterApp(user){
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
-    { name:'Listings',    keys:['tasksListing','listDesk','goLive','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
+    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
     { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
   ];

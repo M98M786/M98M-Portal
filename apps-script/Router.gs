@@ -40,6 +40,7 @@ function mergeActions_() {
     typeof ACTIONS_ADVERTISING !== 'undefined' ? ACTIONS_ADVERTISING : null,
     typeof ACTIONS_ORDERS     !== 'undefined' ? ACTIONS_ORDERS     : null,
     typeof ACTIONS_REPLACEMENTS !== 'undefined' ? ACTIONS_REPLACEMENTS : null,
+    typeof ACTIONS_REVISIONAUTO !== 'undefined' ? ACTIONS_REVISIONAUTO : null,
     typeof ACTIONS_RECHECK    !== 'undefined' ? ACTIONS_RECHECK    : null,
     typeof ACTIONS_CS         !== 'undefined' ? ACTIONS_CS         : null,
     typeof ACTIONS_EMBEDS     !== 'undefined' ? ACTIONS_EMBEDS     : null,

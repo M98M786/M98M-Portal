@@ -248,3 +248,29 @@ function purgeSelfTestTasks() {
     hits.map(function (h) { return h.id + ' ' + h.title; }).join(' | ').slice(0, 300));
   return 'deleted ' + hits.length + ' row(s): ' + hits.map(function (h) { return h.id + ' "' + h.title + '"'; }).join(', ');
 }
+
+
+/** 28 Aug one-shot: the pipeline's Approved tray still carried a synthetic SELFTEST hunt
+ * (the TASKS purge could not reach HUNTING_DB). Deletes rows whose hunt_id or Title starts
+ * with the marker, bottom-up. Portal-owned rows only; the backup workbook keeps its history. */
+function purgeSelfTestHunts() {
+  const sh = getPortalDb_(false).getSheetByName('HUNTING_DB');
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const iId = head.indexOf('hunt_id'), iTitle = head.indexOf('Title');
+  const last = sh.getLastRow();
+  if (last < 2) return 'HUNTING_DB is empty';
+  const data = sh.getRange(2, 1, last - 1, head.length).getValues();
+  const hits = [];
+  data.forEach(function (r, i) {
+    const id = String(iId >= 0 ? r[iId] || '' : '').toLowerCase();
+    const title = String(iTitle >= 0 ? r[iTitle] || '' : '').toLowerCase();
+    if (/^self[- ]?test/.test(id) || /^self[- ]?test/.test(title)) {
+      hits.push({ row: i + 2, id: String(r[iId] || ''), title: String(r[iTitle] || '').slice(0, 50) });
+    }
+  });
+  if (!hits.length) return 'no SELFTEST hunts found';
+  hits.slice().reverse().forEach(function (h) { sh.deleteRow(h.row); });
+  logActivity_('system', 'SELFTEST_HUNT_PURGE', 'HUNTING_DB', '', String(hits.length) + ' row(s)',
+    hits.map(function (h) { return h.id + ' ' + h.title; }).join(' | ').slice(0, 300));
+  return 'deleted ' + hits.length + ' hunt row(s): ' + hits.map(function (h) { return h.id; }).join(', ');
+}

@@ -170,6 +170,7 @@ function pushEngineSync() {
   catch (e) { logActivity_('system', 'ENGINE_TASKS_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 160)); }
 
   try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
+  try { revisionQualify(); } catch (e) { logActivity_('system', 'REVQ_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
 
   logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
   return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs + ' · ' + mirrored;
@@ -233,6 +234,8 @@ const ENGINE_RUNNABLE = {
   setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },
   freeYousafEmail: function () { return typeof freeYousafEmail === 'function' ? String(freeYousafEmail()) : 'absent'; },
   purgeSelfTestTasks: function () { return typeof purgeSelfTestTasks === 'function' ? String(purgeSelfTestTasks()) : 'absent'; },
+  purgeSelfTestHunts: function () { return typeof purgeSelfTestHunts === 'function' ? String(purgeSelfTestHunts()) : 'absent'; },
+  revisionQualify: function () { return typeof revisionQualify === 'function' ? String(revisionQualify()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

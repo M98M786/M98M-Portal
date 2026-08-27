@@ -4874,10 +4874,14 @@ const ROUTES = {
       const d7 = shift(today, 6);
 
       const sd = await ctx.env.DB.prepare(
-        'SELECT account, date, sold, oe, cost, ads, profit, ads_rev FROM sales_daily WHERE date >= ?1'
+        'SELECT account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev FROM sales_daily WHERE date >= ?1'
       ).bind(shift(today, 8)).all();
       const days = sd.results || [];
-      const sum = rows => rows.reduce((t, r) => ({ sold: t.sold + (Number(r.sold) || 0), profit: t.profit + (Number(r.profit) || 0), ads: t.ads + (Number(r.ads) || 0), promoted: t.promoted + Math.min(Number(r.sold) || 0, Number(r.ads_rev) || 0) }), { sold: 0, profit: 0, ads: 0, promoted: 0 });
+      /* 28 Aug (Hasib: "fix profit number on business overview") — profit here is T, the 0.8 law
+         BEFORE ads. The sheet-brain's bottom line is actual = T − CPC ads − returns, verified to
+         the penny against the mirror (T 4046.43 − pri 2292.60 − 0 = 1753.83 stored). Both ride
+         out so the screen can show Actual as THE profit and T as its own labelled line. */
+      const sum = rows => rows.reduce((t, r) => ({ sold: t.sold + (Number(r.sold) || 0), profit: t.profit + (Number(r.profit) || 0), actual: t.actual + (Number(r.actual) || 0), ads: t.ads + (Number(r.ads) || 0), promoted: t.promoted + Math.min(Number(r.sold) || 0, Number(r.ads_rev) || 0) }), { sold: 0, profit: 0, actual: 0, ads: 0, promoted: 0 });
       const kToday = sum(days.filter(r => r.date === today));
       const kYday = sum(days.filter(r => r.date === yday));
       const k7 = sum(days.filter(r => r.date >= d7));
@@ -4936,8 +4940,8 @@ const ROUTES = {
         freshness_note: 'live orders are current to the minute; ad spend follows eBay’s own report build (typically 5–10 minutes behind)',
         kpis: {
           today: { revenue: round2(kToday.sold), orders: todayCount },
-          yesterday: { revenue: round2(kYday.sold), profit_est: round2(kYday.profit), ads: round2(kYday.ads) },
-          week: { revenue: round2(k7.sold), profit_est: round2(k7.profit), ads: round2(k7.ads),
+          yesterday: { revenue: round2(kYday.sold), profit_est: round2(kYday.profit), actual: round2(kYday.actual), t_law: round2(kYday.profit), ads: round2(kYday.ads) },
+          week: { revenue: round2(k7.sold), profit_est: round2(k7.profit), actual: round2(k7.actual), t_law: round2(k7.profit), ads: round2(k7.ads),
             live_today_included: k7LiveToday > 0, rollup_only: k7Rollup },
         },
         today_by_account: Object.values(todayAcct).sort((a, b) => b.revenue - a.revenue),

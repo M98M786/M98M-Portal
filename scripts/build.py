@@ -18,7 +18,7 @@ GS_ORDER = [
     'Tasks.gs', 'Schedules.gs', 'Reports.gs', 'Messaging.gs',
     'Agenda.gs', 'Meetings.gs', 'RulesAck.gs',
     'Hunting.gs', 'HuntBackup.gs', 'Listing.gs', 'CpcResearch.gs', 'PotentialCpc.gs',
-    'Advertising.gs', 'Orders.gs', 'Replacements.gs', 'Recheck.gs', 'CustomerService.gs', 'Embeds.gs',
+    'Advertising.gs', 'Orders.gs', 'Replacements.gs', 'RevisionAuto.gs', 'Recheck.gs', 'CustomerService.gs', 'Embeds.gs',
     'Dashboard.gs', 'Alerts.gs', 'Performance.gs', 'Signals.gs', 'StaffAdmin.gs', 'Attendance.gs',
     'Integrity.gs', 'AuditAgent.gs', 'Engine.gs', 'NightBackup.gs',
     'R8.gs',
