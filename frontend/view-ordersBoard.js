@@ -134,14 +134,18 @@
     }).join('');
     var byA = (t.by_account || []).slice().sort(function (a, b) { return (b.orders || 0) - (a.orders || 0); });
     var maxA = byA.reduce(function (m, x) { return Math.max(m, Number(x.orders) || 0); }, 1);
-    var accts = byA.length ? '<div class="ob-gsub">Today by account</div><div class="ob-gacc">' + byA.map(function (a) {
+    /* 26 Aug (owner): "any numbering data will take you to that specific page" — each account's
+       today-count opens that account's Today's orders on today's tab; the Orders-today tile
+       opens the workspace itself. Buttons, not divs, so keyboards reach them too. */
+    var accts = byA.length ? '<div class="ob-gsub">Today by account · click to open that day</div><div class="ob-gacc">' + byA.map(function (a) {
       var pct = Math.max(2, Math.round(((Number(a.orders) || 0) / maxA) * 100));
-      return '<div class="ob-ga"><span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
+      return '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' +
+        '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
         '<span class="ob-ga-bar"><span style="width:' + pct + '%"></span></span>' +
-        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></div>';
+        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></button>';
     }).join('') + '</div>' : '';
     return '<div class="ob-graph"><div class="ob-gtiles">' +
-      '<div class="ob-gtile gold"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></div>' +
+      '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>' +
       '<div class="ob-gtile"><span class="k">Revenue today</span><b>' + obGBP(t.revenue) + '</b></div>' +
       '</div><div class="ob-fnl">' + funnel + '</div>' + accts + '</div>';
   }
@@ -205,6 +209,15 @@
         h += '</tbody></table></div>';
       }
       box.innerHTML = h;
+      box.querySelectorAll('[data-ob-acc]').forEach(function (b) {
+        b.onclick = function () {
+          var acc = this.getAttribute('data-ob-acc') || '';
+          try {
+            localStorage.setItem('m98m:orders:open', JSON.stringify({ account: acc, date: '' }));
+          } catch (e) {}
+          location.hash = 'orders';
+        };
+      });
       box.querySelectorAll('[data-ob]').forEach(function (b) {
         b.onclick = function () { OB.bucket = this.getAttribute('data-ob'); obLoad(); };
       });

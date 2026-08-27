@@ -28,7 +28,9 @@ only the second one counts here.
 - [x] **DONE** — department boards refresh every **20s** (was 45s).
 - [x] **DONE** — all-departments overview restricted to Management/Ops Head/Team Lead;
   Orders board no longer shown to CS. Department members get their own board only.
-- [ ] **TODO** — remove the 2 `SELFTEST` rows polluting the Listing count.
+- [x] **BUILT (awaiting v64 run)** — `purgeSelfTestTasks` one-shot (Registry.gs, engine-
+  runnable): deletes TASKS rows carrying 'selftest' in id/title/details/assigned_by,
+  bottom-up, idempotent, returns what it removed.
 - [x] **AUDITED (all 13 desks respond + render, no errors)** — 26 Aug sweep:
   goLive (0 drafts - correct empty), listDesk (48 rows), priceDesk (23), mgmtDesk AS+engine (ok),
   staffReviews (ok), huntQueue (22), dispatch, recheck, returns/itemRisk, wrongAds, ordersBoard,
@@ -41,23 +43,35 @@ only the second one counts here.
 
 ## 2. Orders
 
-- [ ] **TODO** — proper links throughout orders.
+- [x] **DONE** — proper links throughout orders: board rows already linked (eBay order
+  details + item + Ali); Today's-orders cards now link the order number to eBay's own
+  order-details page too.
 - [x] **DONE (verified)** — today's orders shows the awaiting-tracking count (verified 30 on ABRT 25 Aug).
 - [x] **DONE (verified on screen)** — the count is a live button: clicking 'Awaiting tracking' shows only
   those 30 orders and scrolls to them; 'To purchase' → 2; 'Orders' → all 32. Note + highlight confirmed.
-- [ ] **TODO** — generalise: **every number on an orders page drills through** to the rows
-  behind it. No dead-end figures.
-- [ ] **TODO** — orders tab shows that specific day.
+- [x] **DONE (v64)** — every number drills through: the All-orders board's funnel and chips
+  were already clickable; the "Today by account" counts and the Orders-today tile are now
+  buttons that open that account's Today's orders on today's tab (localStorage handoff).
+- [x] **DONE** — orders tab shows that specific day: the day picker + "Open the day" +
+  find-an-order → "Open that day" all land on the exact day tab (was already live; board
+  drill-through now lands there too).
 
-## 3. Replacement orders  (new feature)
+## 3. Replacement orders  (BUILT 27 Aug — owner said "go for it"; in review → deploy v64)
 
-- [ ] **TODO** — a replacement-order desk. CS, Team Lead, Management and Order Processor
-  can raise one.
-- [ ] **TODO** — reason picker: preset reasons **plus** a custom option that *requires* an
-  explanation.
-- [ ] **TODO** — "Create a replacement for this order" button on today's order rows.
-- [ ] **TODO** — the replacement is written into **that day's order sheet**, clearly headed
-  as a Replacement Order.
+- [x] **BUILT** — Replacement orders desk (view-replacements.js + Replacements.gs). CS, Team
+  Lead, Management, Ops Head and Order Processor raise one; Sales Operations views.
+- [x] **BUILT** — reason picker: 6 preset reasons + Custom, which REQUIRES an explanation
+  (≥10 chars, enforced client- and server-side).
+- [x] **BUILT** — "Create a replacement" button on every Today's-orders row, pre-filling the
+  desk with the row's account/order/title/qty/variation/Ali link.
+- [x] **BUILT** — the replacement is APPENDED to today's day tab of that account's live order
+  book through the SheetBridge (header-addressed, REPL_APPEND_COLS whitelist, lock, shadow-
+  gated) with the original eBay order number and an Item-title cell that opens
+  "REPLACEMENT ORDER — … — Reason: …" (the owner's clear heading), Delivery Status Pending —
+  so the processor purchases it like any order. Falls back to the book's standing REPLACEMENT
+  tab when today's tab doesn't exist; recorded portal-side (REPLACEMENTS tab) even when the
+  sheet refuses, so nothing raised is ever lost. Letters Management + that account's
+  Order Processors. dry_run mode for verification without touching the live book.
 
 ## 4. Listing / hunting
 
@@ -165,7 +179,11 @@ only the second one counts here.
 
 ## Carried-over blockers
 
-- **ENGINE / Cloudflare WAF** — 8 changes queued behind a 403 on every POST from this
+- **ENGINE / Cloudflare WAF** — STILL 403 on POST/PUT (probed again 27 Aug); the raw-API
+  deploy PUT from the dash session was additionally blocked by the local permission
+  classifier, so the Worker deploy needs either the WAF to age out + permission, or Hasib
+  deploying from his own dash session. Arming AUTOMSG_LIVE (buyer messages) rides on the
+  same deploy. 8 changes queued behind a 403 on every POST from this
   machine's dash session: the task mirror (Phase 2), `computeHealth` 28→4 queries, the
   Business-overview week/split reconciliation, `darkAccountWatch`, the per-account 7-day
   window, the **400-character link truncation** (damaging 93.6% of stored links), and the

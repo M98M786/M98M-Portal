@@ -217,3 +217,31 @@ function connectionHealth() {
   return { perAccount: perAccount, globals: globals,
     globalsLinked: globals.filter(function(g){ return g.status === 'linked'; }).length, globalsOf: GLOBAL_KINDS.length };
 }
+
+/** 26 Aug one-shot: two synthetic SELFTEST rows sit in TASKS and pollute the Listing pending
+ * count on every board. Deletes rows — bottom-up so indexes hold — whose task_id, title, details
+ * or assigned_by carries 'selftest' (case-blind). Portal-owned data only; returns what it
+ * removed so the run is auditable. Idempotent: a second run finds nothing. */
+function purgeSelfTestTasks() {
+  const sh = getPortalDb_(false).getSheetByName('TASKS');
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const idx = {};
+  head.forEach(function (h, i) { idx[h] = i; });
+  const last = sh.getLastRow();
+  if (last < 2) return 'TASKS is empty';
+  const data = sh.getRange(2, 1, last - 1, head.length).getValues();
+  const hits = [];
+  data.forEach(function (r, i) {
+    const probe = ['task_id', 'title', 'details', 'assigned_by'].map(function (k) {
+      return idx[k] === undefined ? '' : String(r[idx[k]] || '');
+    }).join(' ').toLowerCase();
+    if (probe.indexOf('selftest') >= 0 || probe.indexOf('self-test') >= 0) {
+      hits.push({ row: i + 2, id: String(r[idx.task_id] || ''), title: String(r[idx.title] || '').slice(0, 60) });
+    }
+  });
+  if (!hits.length) return 'no SELFTEST rows found';
+  hits.slice().reverse().forEach(function (h) { sh.deleteRow(h.row); });
+  logActivity_('system', 'SELFTEST_PURGE', 'TASKS', '', String(hits.length) + ' row(s)',
+    hits.map(function (h) { return h.id + ' ' + h.title; }).join(' | ').slice(0, 300));
+  return 'deleted ' + hits.length + ' row(s): ' + hits.map(function (h) { return h.id + ' "' + h.title + '"'; }).join(', ');
+}

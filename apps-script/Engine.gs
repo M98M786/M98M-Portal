@@ -232,6 +232,7 @@ const ENGINE_RUNNABLE = {
   connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
   setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },
   freeYousafEmail: function () { return typeof freeYousafEmail === 'function' ? String(freeYousafEmail()) : 'absent'; },
+  purgeSelfTestTasks: function () { return typeof purgeSelfTestTasks === 'function' ? String(purgeSelfTestTasks()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

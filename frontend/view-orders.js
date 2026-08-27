@@ -300,6 +300,15 @@
     order: 3,
     badge: function () { return (STATE.counts && STATE.counts.orders) || 0; },
     render: function () {
+      /* A number clicked on the All-orders board hands its account here; today by default. */
+      try {
+        var jump = localStorage.getItem('m98m:orders:open');
+        if (jump) {
+          localStorage.removeItem('m98m:orders:open');
+          var j = JSON.parse(jump);
+          if (j && j.account !== undefined) { if (j.account) { OD_ACCOUNT = j.account; } OD_DATE = j.date || odTodayPkt(); OD_REPLACEMENT = false; }
+        }
+      } catch (e) {}
       OD_DATE = OD_DATE || odTodayPkt();
       return '<div class="hgroup enter d1"><h1>Today\'s orders</h1>' +
           '<span class="sub">Purchase on AliExpress · record Cost, the AliExpress order number and the purchasing account · tracking follows</span>' +
@@ -576,6 +585,7 @@
     sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
     odWireChips();
     odApplyFilter();
+    odWireReplButtons();
   }
   function odChip(k, v, cls, filter) {
     /* Owner: "any numbering data will take you to that specific page." A chip with a filter key
@@ -622,6 +632,31 @@
   }
 
   // ---------- one order row ----------
+  /* The button's payload is the ROW the person is looking at: account, order number, title,
+     quantity, variation and the AliExpress link, handed to the Replacement orders desk via
+     localStorage and opened there pre-filled. */
+  function odWireReplButtons() {
+    var list = $('odList');
+    if (!list) { return; }
+    list.querySelectorAll('[data-od-repl]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.getAttribute('data-od-repl');
+        var o = null;
+        (OD_DATA && OD_DATA.orders || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
+        var pre = {
+          account: OD_ACCOUNT,
+          order_number: o ? odStr(o[OD_H.orderNo]) : '',
+          item_title: o ? odStr(o[OD_H.title]) : '',
+          quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
+          variation: o ? odStr(o[OD_H.variation]) : '',
+          ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
+        };
+        try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
+        location.hash = 'replacements';
+      };
+    });
+  }
+
   function odCard(o) {
     var row = String(o._row);
     var title = odStr(o[OD_H.title]) || 'Order';
@@ -637,7 +672,12 @@
         '<span class="od-name">' + esc(title) + '</span>' +
         '<span class="pill ' + odStatusPill(status) + (status ? '' : ' hidden') + '" data-pill="' + odAttr(row) + '">' +
           esc(status) + '</span>' +
-        '<span class="mono" style="color:var(--text-3)">' + esc(odStr(o[OD_H.orderNo])) + '</span>' +
+        /* proper links (owner): the order number opens eBay's own order-details page */
+        '<a class="mono" style="color:var(--text-3);text-decoration:underline dotted" target="_blank" rel="noopener noreferrer" ' +
+          'href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(odStr(o[OD_H.orderNo])) + '">' + esc(odStr(o[OD_H.orderNo])) + '</a>' +
+        /* 26 Aug (owner): "create a replacement for this order" on every order row. Carries the
+           row's own facts to the Replacement orders desk, pre-filled. */
+        '<button class="minibtn" data-od-repl="' + odAttr(row) + '" title="Raise a replacement for this order">Create a replacement</button>' +
       '</div><div class="bd">' +
         odProduct(o, cols) +
         odAddress(o, cols) +

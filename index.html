@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260826-0509';
+var BUILD = '20260827-1253';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14462,6 +14462,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     order: 3,
     badge: function () { return (STATE.counts && STATE.counts.orders) || 0; },
     render: function () {
+      /* A number clicked on the All-orders board hands its account here; today by default. */
+      try {
+        var jump = localStorage.getItem('m98m:orders:open');
+        if (jump) {
+          localStorage.removeItem('m98m:orders:open');
+          var j = JSON.parse(jump);
+          if (j && j.account !== undefined) { if (j.account) { OD_ACCOUNT = j.account; } OD_DATE = j.date || odTodayPkt(); OD_REPLACEMENT = false; }
+        }
+      } catch (e) {}
       OD_DATE = OD_DATE || odTodayPkt();
       return '<div class="hgroup enter d1"><h1>Today\'s orders</h1>' +
           '<span class="sub">Purchase on AliExpress · record Cost, the AliExpress order number and the purchasing account · tracking follows</span>' +
@@ -14738,6 +14747,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
     odWireChips();
     odApplyFilter();
+    odWireReplButtons();
   }
   function odChip(k, v, cls, filter) {
     /* Owner: "any numbering data will take you to that specific page." A chip with a filter key
@@ -14784,6 +14794,31 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   // ---------- one order row ----------
+  /* The button's payload is the ROW the person is looking at: account, order number, title,
+     quantity, variation and the AliExpress link, handed to the Replacement orders desk via
+     localStorage and opened there pre-filled. */
+  function odWireReplButtons() {
+    var list = $('odList');
+    if (!list) { return; }
+    list.querySelectorAll('[data-od-repl]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.getAttribute('data-od-repl');
+        var o = null;
+        (OD_DATA && OD_DATA.orders || []).forEach(function (x) { if (String(x._row) === row) { o = x; } });
+        var pre = {
+          account: OD_ACCOUNT,
+          order_number: o ? odStr(o[OD_H.orderNo]) : '',
+          item_title: o ? odStr(o[OD_H.title]) : '',
+          quantity: o ? (odStr(o[OD_H.qty]) || '1') : '1',
+          variation: o ? odStr(o[OD_H.variation]) : '',
+          ali_link: o ? (odStr(o[OD_H.newAliLink]) || odStr(o[OD_H.aliLink])) : ''
+        };
+        try { localStorage.setItem('m98m:repl:prefill', JSON.stringify(pre)); } catch (e) {}
+        location.hash = 'replacements';
+      };
+    });
+  }
+
   function odCard(o) {
     var row = String(o._row);
     var title = odStr(o[OD_H.title]) || 'Order';
@@ -14800,6 +14835,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span class="pill ' + odStatusPill(status) + (status ? '' : ' hidden') + '" data-pill="' + odAttr(row) + '">' +
           esc(status) + '</span>' +
         '<span class="mono" style="color:var(--text-3)">' + esc(odStr(o[OD_H.orderNo])) + '</span>' +
+        /* 26 Aug (owner): "create a replacement for this order" on every order row. Carries the
+           row's own facts to the Replacement orders desk, pre-filled. */
+        '<button class="minibtn" data-od-repl="' + odAttr(row) + '" title="Raise a replacement for this order">Create a replacement</button>' +
       '</div><div class="bd">' +
         odProduct(o, cols) +
         odAddress(o, cols) +
@@ -15714,14 +15752,18 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }).join('');
     var byA = (t.by_account || []).slice().sort(function (a, b) { return (b.orders || 0) - (a.orders || 0); });
     var maxA = byA.reduce(function (m, x) { return Math.max(m, Number(x.orders) || 0); }, 1);
-    var accts = byA.length ? '<div class="ob-gsub">Today by account</div><div class="ob-gacc">' + byA.map(function (a) {
+    /* 26 Aug (owner): "any numbering data will take you to that specific page" — each account's
+       today-count opens that account's Today's orders on today's tab; the Orders-today tile
+       opens the workspace itself. Buttons, not divs, so keyboards reach them too. */
+    var accts = byA.length ? '<div class="ob-gsub">Today by account · click to open that day</div><div class="ob-gacc">' + byA.map(function (a) {
       var pct = Math.max(2, Math.round(((Number(a.orders) || 0) / maxA) * 100));
-      return '<div class="ob-ga"><span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
+      return '<button class="ob-ga" data-ob-acc="' + esc(obStr(a.account)).replace(/"/g, '&quot;') + '" style="cursor:pointer;text-align:left;width:100%">' +
+        '<span class="ob-ga-k">' + esc(obStr(a.account)) + '</span>' +
         '<span class="ob-ga-bar"><span style="width:' + pct + '%"></span></span>' +
-        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></div>';
+        '<b>' + (Number(a.orders) || 0) + '</b><span class="ob-ga-rev">' + obGBP(a.revenue) + '</span></button>';
     }).join('') + '</div>' : '';
     return '<div class="ob-graph"><div class="ob-gtiles">' +
-      '<div class="ob-gtile gold"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></div>' +
+      '<button class="ob-gtile gold" data-ob-acc="" style="cursor:pointer;text-align:left" title="Open today\'s orders"><span class="k">Orders today</span><b>' + (Number(t.orders) || 0) + '</b></button>' +
       '<div class="ob-gtile"><span class="k">Revenue today</span><b>' + obGBP(t.revenue) + '</b></div>' +
       '</div><div class="ob-fnl">' + funnel + '</div>' + accts + '</div>';
   }
@@ -15785,6 +15827,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         h += '</tbody></table></div>';
       }
       box.innerHTML = h;
+      box.querySelectorAll('[data-ob-acc]').forEach(function (b) {
+        b.onclick = function () {
+          var acc = this.getAttribute('data-ob-acc') || '';
+          try {
+            localStorage.setItem('m98m:orders:open', JSON.stringify({ account: acc, date: '' }));
+          } catch (e) {}
+          location.hash = 'orders';
+        };
+      });
       box.querySelectorAll('[data-ob]').forEach(function (b) {
         b.onclick = function () { OB.bucket = this.getAttribute('data-ob'); obLoad(); };
       });
@@ -19762,6 +19813,188 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function woWireCounters() {
     var sel = $('woMonth');
     if (sel) { sel.onchange = function () { WO_MONTH = rcStr(sel.value); woLoadCounters(); }; }
+  }
+
+})();
+
+/* ---------- view-replacements.js ---------- */
+/* view-replacements.js — the Replacement orders desk (26 Aug, owner). CS, Team Lead, Management
+ * and Order Processors raise a replacement for any order: preset reasons plus a custom option
+ * that REQUIRES an explanation. The backend appends the row to TODAY's day tab in that account's
+ * live order book, headed REPLACEMENT ORDER with the reason — so the processor buys it like any
+ * order — and archives every request here. Rows arrive pre-filled from the button on Today's
+ * orders. Backend: replacementCreate · replacementList. */
+(function () {
+  'use strict';
+
+  var RP_ROLES = ['CS', 'Team Lead', 'Management', 'Ops Head', 'Order Processor', 'Sales Operations'];
+
+  VIEW_CSS.push(
+    '.rp-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}' +
+    '.rp-in,.rp-sel,.rp-ta{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.rp-ta{min-height:74px;resize:vertical}' +
+    '.rp-lab{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px}' +
+    '.rp-req::after{content:" *";color:var(--bad)}' +
+    '.rp-note{font-size:12px;font-weight:600;color:var(--text-3);margin-top:8px}' +
+    '.rp-ok{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--ok-soft);border:1px solid rgba(63,207,142,.4);font-weight:700;font-size:13px;color:var(--ok)}' +
+    '.rp-bad{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--warn-soft);border:1px solid rgba(255,159,67,.45);font-weight:700;font-size:13px;color:var(--warn)}' +
+    '.rp-pill{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}'
+  );
+
+  function rpS(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
+  function rpAttr(v) { return esc(rpS(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+  var RP = { reasons: [], canRaise: false, seq: 0 };
+  var RP_PREFILL_KEY = 'm98m:repl:prefill';
+
+  VIEWS.replacements = {
+    label: 'Replacement orders',
+    icon: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+    roles: RP_ROLES,
+    order: 3.6,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Replacement <span class="goldtext">orders</span></h1>' +
+          '<span class="sub">raise one → it lands on today’s tab of that account’s order book, headed REPLACEMENT ORDER, Pending</span>' +
+          '<button class="minibtn" id="rpRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div class="card enter d1" id="rpFormCard"><div class="hd">Raise a replacement' +
+          '<span class="hint">the processor then purchases it like any order</span></div>' +
+          '<div class="bd" id="rpForm"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Every replacement raised' +
+          '<span class="hint">newest first · where each one landed</span></div>' +
+          '<div class="bd" id="rpList"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      $('rpRefresh').onclick = rpLoad;
+      rpLoad();
+    }
+  };
+
+  function rpPrefill() {
+    try {
+      var raw = localStorage.getItem(RP_PREFILL_KEY);
+      if (!raw) { return null; }
+      localStorage.removeItem(RP_PREFILL_KEY);
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+
+  function rpLoad() {
+    var seq = ++RP.seq;
+    api('replacementList', {}).then(function (d) {
+      if (seq !== RP.seq) { return; }
+      RP.reasons = (d && d.reasons) || [];
+      RP.canRaise = !!(d && d.can_raise);
+      rpPaintForm();
+      rpPaintList((d && d.rows) || []);
+    }).catch(function (e) {
+      if (seq !== RP.seq) { return; }
+      setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>');
+      setHTML('rpList', '');
+    });
+  }
+
+  function rpPaintForm() {
+    if (!$('rpForm')) { return; }
+    if (!RP.canRaise) {
+      setHTML('rpForm', '<div class="rp-note" style="margin-top:0">Your role can view this desk but not raise replacements — CS, Team Lead, Order Processor and Management raise them.</div>');
+      return;
+    }
+    var pre = rpPrefill() || {};
+    setHTML('rpForm',
+      '<div class="rp-grid">' +
+        '<div><label class="rp-lab rp-req">Account</label><select class="rp-sel" id="rpAcc"><option value="">Loading…</option></select></div>' +
+        '<div><label class="rp-lab rp-req">Original eBay order number</label><input class="rp-in" id="rpOrder" placeholder="e.g. 18-15052-74974" value="' + rpAttr(pre.order_number || '') + '"></div>' +
+        '<div><label class="rp-lab">Item title</label><input class="rp-in" id="rpTitle" placeholder="what the buyer ordered" value="' + rpAttr(pre.item_title || '') + '"></div>' +
+        '<div><label class="rp-lab">Quantity</label><input class="rp-in" id="rpQty" value="' + rpAttr(pre.quantity || '1') + '"></div>' +
+        '<div><label class="rp-lab">Variation</label><input class="rp-in" id="rpVar" placeholder="size / colour, if any" value="' + rpAttr(pre.variation || '') + '"></div>' +
+        '<div><label class="rp-lab">AliExpress link</label><input class="rp-in" id="rpAli" placeholder="https://… (helps the processor)" value="' + rpAttr(pre.ali_link || '') + '"></div>' +
+        '<div><label class="rp-lab rp-req">Reason</label><select class="rp-sel" id="rpReason">' +
+          RP.reasons.map(function (r) { return '<option value="' + rpAttr(r.key) + '">' + esc(r.label) + '</option>'; }).join('') +
+        '</select></div>' +
+      '</div>' +
+      '<div style="margin-top:12px"><label class="rp-lab" id="rpExpLab">Explanation <span style="text-transform:none;letter-spacing:0">(required for a custom reason)</span></label>' +
+        '<textarea class="rp-ta" id="rpExp" placeholder="what happened, in a sentence or two"></textarea></div>' +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
+        '<button class="btn-gold" id="rpSend">Raise the replacement</button>' +
+        '<span class="rp-note" style="margin-top:0">It is appended to today’s tab with the original order number — nothing on the original row is touched.</span>' +
+      '</div>' +
+      '<div id="rpOut"></div>');
+
+    cachedCall('accountList', {}, function (d) {
+      var sel = $('rpAcc');
+      if (!sel) { return; }
+      var accs = ((d && d.accounts) || []).map(function (a) { return rpS(a.account); }).filter(Boolean);
+      sel.innerHTML = accs.length
+        ? accs.map(function (a) { return '<option value="' + rpAttr(a) + '"' + (a === rpS(pre.account) ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('')
+        : '<option value="">No account connected yet</option>';
+    });
+
+    var reasonSel = $('rpReason');
+    var syncReq = function () {
+      var lab = $('rpExpLab');
+      if (lab) { lab.className = 'rp-lab' + (reasonSel.value === 'custom' ? ' rp-req' : ''); }
+    };
+    reasonSel.onchange = syncReq; syncReq();
+
+    $('rpSend').onclick = function () {
+      var out = $('rpOut');
+      var payload = {
+        account: rpS($('rpAcc').value), order_number: rpS($('rpOrder').value),
+        item_title: rpS($('rpTitle').value), quantity: rpS($('rpQty').value) || '1',
+        variation: rpS($('rpVar').value), ali_link: rpS($('rpAli').value),
+        reason_key: rpS(reasonSel.value), explanation: rpS($('rpExp').value),
+      };
+      if (!payload.account) { out.innerHTML = '<div class="rp-bad">Choose the account.</div>'; return; }
+      if (!payload.order_number) { out.innerHTML = '<div class="rp-bad">The original eBay order number is required.</div>'; return; }
+      if (payload.reason_key === 'custom' && payload.explanation.length < 10) {
+        out.innerHTML = '<div class="rp-bad">A custom reason needs an explanation — at least 10 characters.</div>'; return;
+      }
+      var btn = this; btn.disabled = true; btn.textContent = 'Raising…';
+      out.innerHTML = '';
+      api('replacementCreate', payload).then(function (r) {
+        btn.disabled = false; btn.textContent = 'Raise the replacement';
+        if (r && r.ok) {
+          out.innerHTML = '<div class="rp-ok">Raised — ' + esc(r.repl_id) + '. ' +
+            (r.sheet_tab ? 'On the <b>' + esc(r.sheet_tab) + '</b> tab' + (r.sheet_row && r.sheet_row !== 'shadow' ? ', row ' + esc(r.sheet_row) : '') + ', Pending.' : esc(r.sheet_note || '')) +
+            (r.shadow ? ' (shadow mode — recorded, not written)' : '') + '</div>';
+          var oi = $('rpOrder'); if (oi) { oi.value = ''; }
+          var ti = $('rpTitle'); if (ti) { ti.value = ''; }
+          var xi = $('rpExp'); if (xi) { xi.value = ''; }
+          rpLoad();
+        } else {
+          out.innerHTML = '<div class="rp-bad">The sheet write did not land: ' + esc((r && r.sheet_note) || 'unknown') + '. The request is recorded on this desk either way.</div>';
+          rpLoad();
+        }
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = 'Raise the replacement';
+        out.innerHTML = '<div class="rp-bad">' + esc(e.message) + '</div>';
+      });
+    };
+  }
+
+  function rpPaintList(rows) {
+    if (!$('rpList')) { return; }
+    if (!rows.length) {
+      setHTML('rpList', '<div class="rp-note" style="margin-top:0">No replacement has been raised yet.</div>');
+      return;
+    }
+    setHTML('rpList', '<div class="scroll"><table class="ir-tbl" style="min-width:860px"><thead><tr>' +
+      '<th style="text-align:left">When</th><th style="text-align:left">Account</th>' +
+      '<th style="text-align:left">Order</th><th style="text-align:left">Item</th>' +
+      '<th style="text-align:left">Reason</th><th style="text-align:left">Raised by</th>' +
+      '<th style="text-align:left">Landed</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var landed = rpS(r.sheet_tab)
+          ? '<span class="rp-pill">' + esc(rpS(r.sheet_tab)) + (rpS(r.sheet_row) && r.sheet_row !== 'shadow' ? ' · row ' + esc(rpS(r.sheet_row)) : '') + '</span>'
+          : '<span class="rp-pill" style="color:var(--warn)">' + esc(rpS(r.sheet_note) || 'portal only') + '</span>';
+        return '<tr><td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' + esc(fmtPkt(r.ts, true) || rpS(r.ts)) + '</td>' +
+          '<td style="text-align:left">' + esc(rpS(r.account)) + '</td>' +
+          '<td style="text-align:left" class="mono">' + esc(rpS(r.order_number)) + '</td>' +
+          '<td style="text-align:left;max-width:220px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + rpAttr(r.item_title) + '">' + esc(rpS(r.item_title) || '—') + '</div></td>' +
+          '<td style="text-align:left;max-width:240px;font-size:12px" title="' + rpAttr(r.reason_text) + '">' + esc(rpS(r.reason_text).slice(0, 90) || '—') + '</td>' +
+          '<td style="text-align:left">' + esc(rpS(r.raised_by).split('@')[0]) + '</td>' +
+          '<td style="text-align:left">' + landed + '</td></tr>';
+      }).join('') + '</tbody></table></div>');
   }
 
 })();
@@ -24987,7 +25220,7 @@ function enterApp(user){
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
-    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','dispatch','sourcing','recheck','returns','wrongOrders'] },
+    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
     { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
