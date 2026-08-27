@@ -15153,6 +15153,41 @@ function dashStale_(lastUpdated) {
 /** §13.1 + §13.4 — per-account cards, collective tiles, "last updated", discrepancy notes.
  * Reads DASH_CACHE and the connection list; never a business workbook, so a viewer pays no sheet
  * round trips at all. An account with no cached figures renders "not connected yet". */
+/* 27 Aug (owner: "validate numbers") — the month cards come from each account book's own
+   Monthly Sheet, and a stale book quietly understates the month. Validated today: the cards said
+   £34,371 for August while eBay's own order data said £39,855 — a £5.5k silence (Sir Hasib's dead
+   report agents; Azhar dark since 22 Jul). The engine's sales_daily is that eBay truth, already
+   mirrored daily; sum the same month there and hand the screen the gap and each account's last
+   fresh day, so a lagging book is a labelled fact instead of a smaller number nobody questions.
+   Best-effort by design: the engine being unreachable never breaks the dashboard. */
+function dashEngineMonthTruth_(curMonth) {
+  const perAccount = {}, lastDay = {};
+  let offset = 0, pages = 0, total = 0;
+  while (pages < 4) {                                    // sales_daily is ~500 rows; 4 pages = 10k cap
+    const d = enginePost_('backupDump', { table: 'sales_daily', offset: offset });
+    const head = (d && d.header) || [];
+    const iA = head.indexOf('account'), iD = head.indexOf('date'), iS = head.indexOf('sold');
+    if (iA < 0 || iD < 0 || iS < 0) return null;
+    (d.rows || []).forEach(function (r) {
+      const acct = String(r[iA]), day = String(r[iD]), sold = Number(r[iS]) || 0;
+      if (sold > 0 && day > (lastDay[acct] || '')) lastDay[acct] = day;
+      if (day.slice(0, 7) !== curMonth) return;
+      perAccount[acct] = (perAccount[acct] || 0) + sold;
+      total += sold;
+    });
+    offset += (d.rows || []).length;
+    pages++;
+    if (d.done || !(d.rows || []).length) break;
+  }
+  return {
+    month: curMonth,
+    sold: Math.round(total * 100) / 100,
+    per_account: Object.keys(perAccount).reduce(function (o, k) { o[k] = Math.round(perAccount[k] * 100) / 100; return o; }, {}),
+    last_fresh_day: lastDay,
+    as_of: now_(),
+  };
+}
+
 function actionDashboard_(payload, ctx) {
   dashAssertViewer_(ctx);
   const view = dashViewFor_(ctx);
@@ -15247,6 +15282,7 @@ function actionDashboard_(payload, ctx) {
       of: cards.length,
     },
     accounts: cards,
+    engine_truth: (function () { try { return dashEngineMonthTruth_(curMonth); } catch (e) { return null; } })(),
     discrepancies: notes,
     // The workbook's own vocabulary, so the screen never invents a label or an order of its own.
     metrics: { tiles: DASH_TILES.filter(function (m) { return wanted.indexOf(m) >= 0; }), all: wanted, ratios: DASH_RATIO_METRICS, day: dayWanted },
@@ -22893,8 +22929,58 @@ const ROUTER_MEMO = {
   staffDirectory: { sec: 30, scope: 'role' },
   listDesk:       { sec: 20, scope: 'user' },
   myHunts:        { sec: 20, scope: 'user' },
+  /* 27 Aug audit: the multi-panel pages (Management desk, Staff & accounts, Rules, Team
+     performance, Rota) fire 2-4 of these each and took 15-25s to finish painting — every panel
+     re-paying the same computation. Same memo, same scoping discipline. `dashboard` now also
+     reads the engine's sales_daily for its truth line, which the memo amortises. */
+  mgmtPendingAS:      { sec: 20, scope: 'user' },
+  huntDesk:           { sec: 20, scope: 'user' },
+  myTasks:            { sec: 15, scope: 'user' },
+  pendingApprovals:   { sec: 15, scope: 'user' },
+  teamPerformance:    { sec: 30, scope: 'role' },
+  myPerformance:      { sec: 30, scope: 'user' },
+  rotaGrid:           { sec: 30, scope: 'role' },
+  myTimetable:        { sec: 60, scope: 'user' },
+  myRules:            { sec: 60, scope: 'role' },
+  mySops:             { sec: 60, scope: 'role' },
+  staffReviewsPending:{ sec: 30, scope: 'role' },
+  evaluations:        { sec: 30, scope: 'role' },
+  ruleAckGrid:        { sec: 30, scope: 'role' },
+  dashboard:          { sec: 45, scope: 'user' },
 };
+/* A write must be visible to its own author IMMEDIATELY — "I pressed Start and the board still
+   says Pending" is exactly the complaint this week. Each write family clears the memo keys of
+   every read it changes: the actor's user-scoped keys plus that read's key for EVERY role (a
+   lister's submit changes Management's board too). removeAll of ~40 deterministic keys is one
+   cache round-trip — nothing next to the sheet write it rides behind. */
+const ROUTER_BUST = {
+  startTask: 1, submitTask: 1, approveTask: 1, returnTask: 1, createTask: 1, reassignTasks: 1,
+  decideHunt: 1, submitHunt: 1, reviseHunt: 1, listerRejectRequest: 1,
+  staffReviewSave: 1, saveEvaluation: 1, setSchedule: 1, replacementCreate: 1,
+};
+const ROUTER_BUST_READS = ['deptPending', 'myTasks', 'pendingApprovals', 'listDesk',
+  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending'];
+function routerBust_(ctx) {
+  try {
+    const keys = [];
+    const me = normalizeEmail(ctx.ident.email);
+    ROUTER_BUST_READS.forEach(function (name) {
+      const memo = ROUTER_MEMO[name];
+      if (!memo) return;
+      if (memo.scope === 'user') { keys.push(('memo:' + name + ':' + me).slice(0, 250)); return; }
+      ROLES.forEach(function (r) { keys.push(('memo:' + name + ':' + r).slice(0, 250)); });
+      keys.push(('memo:' + name + ':super').slice(0, 250));
+    });
+    CacheService.getScriptCache().removeAll(keys);
+  } catch (e) { /* stale-for-TTL is the worst case — never break the write */ }
+}
+
 function routerRun_(name, entry, payload, ctx) {
+  if (ROUTER_BUST[name]) {
+    const out = entry[0](payload || {}, ctx);
+    routerBust_(ctx);                        // after the write, so the next read recomputes
+    return out;
+  }
   const memo = ROUTER_MEMO[name];
   if (!memo || Object.keys(payload || {}).length) return entry[0](payload || {}, ctx);
   const who = memo.scope === 'user'

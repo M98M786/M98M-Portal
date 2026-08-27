@@ -97,7 +97,25 @@ function kpiStrip(d) {
     kpi('Margin', isFinite(margin) ? margin.toFixed(1) + '%' : '—',
         isFinite(ali) ? 'AliExpress ' + gbp(ali) : '', '') +
     kpi('Ads incl VAT', gbp(ads), isFinite(nt) ? 'N/T ' + nt.toFixed(2) : '', 'blue') +
-  '</div>' + excludedNote(d);
+  '</div>' + truthNote(d, sold) + excludedNote(d);
+}
+/* 27 Aug (owner: "validate numbers") — the tiles above are the account books' own cards; the
+   engine's sales_daily is eBay's own daily money. When the two part company by more than 2%,
+   say so in plain words and name the books that have gone quiet, with their last fresh day. */
+function truthNote(d, sheetSold) {
+  var t = d.engine_truth;
+  if (!t || !isFinite(t.sold) || !isFinite(sheetSold) || !sheetSold) { return ''; }
+  var gap = t.sold - sheetSold;
+  if (Math.abs(gap) < t.sold * 0.02) {
+    return '<div class="db-excl" style="border-color:rgba(63,207,142,.4);color:var(--ok)">✓ Checked against eBay\'s own order data: ' +
+      gbp(t.sold) + ' this month — the cards above agree within 2%.</div>';
+  }
+  var stale = Object.keys(t.last_fresh_day || {}).filter(function (a) {
+    return (Date.now() - Date.parse(t.last_fresh_day[a])) > 2 * 86400000;   // quiet for 2+ days
+  }).map(function (a) { return esc(a) + ' (last real sales day ' + esc(t.last_fresh_day[a]) + ')'; });
+  return '<div class="db-excl">⚠ eBay\'s own order data says this month is <b>' + gbp(t.sold) + '</b> — the account books\' cards above ' +
+    (gap > 0 ? 'UNDERSTATE' : 'overstate') + ' it by <b>' + gbp(Math.abs(gap)) + '</b>. The books, not eBay, are behind' +
+    (stale.length ? ' — quiet books: ' + stale.join(' · ') : '') + '. The money above is real either way; the cards need their sheets brought up to date.</div>';
 }
 /* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
    fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */

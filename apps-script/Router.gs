@@ -110,8 +110,58 @@ const ROUTER_MEMO = {
   staffDirectory: { sec: 30, scope: 'role' },
   listDesk:       { sec: 20, scope: 'user' },
   myHunts:        { sec: 20, scope: 'user' },
+  /* 27 Aug audit: the multi-panel pages (Management desk, Staff & accounts, Rules, Team
+     performance, Rota) fire 2-4 of these each and took 15-25s to finish painting — every panel
+     re-paying the same computation. Same memo, same scoping discipline. `dashboard` now also
+     reads the engine's sales_daily for its truth line, which the memo amortises. */
+  mgmtPendingAS:      { sec: 20, scope: 'user' },
+  huntDesk:           { sec: 20, scope: 'user' },
+  myTasks:            { sec: 15, scope: 'user' },
+  pendingApprovals:   { sec: 15, scope: 'user' },
+  teamPerformance:    { sec: 30, scope: 'role' },
+  myPerformance:      { sec: 30, scope: 'user' },
+  rotaGrid:           { sec: 30, scope: 'role' },
+  myTimetable:        { sec: 60, scope: 'user' },
+  myRules:            { sec: 60, scope: 'role' },
+  mySops:             { sec: 60, scope: 'role' },
+  staffReviewsPending:{ sec: 30, scope: 'role' },
+  evaluations:        { sec: 30, scope: 'role' },
+  ruleAckGrid:        { sec: 30, scope: 'role' },
+  dashboard:          { sec: 45, scope: 'user' },
 };
+/* A write must be visible to its own author IMMEDIATELY — "I pressed Start and the board still
+   says Pending" is exactly the complaint this week. Each write family clears the memo keys of
+   every read it changes: the actor's user-scoped keys plus that read's key for EVERY role (a
+   lister's submit changes Management's board too). removeAll of ~40 deterministic keys is one
+   cache round-trip — nothing next to the sheet write it rides behind. */
+const ROUTER_BUST = {
+  startTask: 1, submitTask: 1, approveTask: 1, returnTask: 1, createTask: 1, reassignTasks: 1,
+  decideHunt: 1, submitHunt: 1, reviseHunt: 1, listerRejectRequest: 1,
+  staffReviewSave: 1, saveEvaluation: 1, setSchedule: 1, replacementCreate: 1,
+};
+const ROUTER_BUST_READS = ['deptPending', 'myTasks', 'pendingApprovals', 'listDesk',
+  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending'];
+function routerBust_(ctx) {
+  try {
+    const keys = [];
+    const me = normalizeEmail(ctx.ident.email);
+    ROUTER_BUST_READS.forEach(function (name) {
+      const memo = ROUTER_MEMO[name];
+      if (!memo) return;
+      if (memo.scope === 'user') { keys.push(('memo:' + name + ':' + me).slice(0, 250)); return; }
+      ROLES.forEach(function (r) { keys.push(('memo:' + name + ':' + r).slice(0, 250)); });
+      keys.push(('memo:' + name + ':super').slice(0, 250));
+    });
+    CacheService.getScriptCache().removeAll(keys);
+  } catch (e) { /* stale-for-TTL is the worst case — never break the write */ }
+}
+
 function routerRun_(name, entry, payload, ctx) {
+  if (ROUTER_BUST[name]) {
+    const out = entry[0](payload || {}, ctx);
+    routerBust_(ctx);                        // after the write, so the next read recomputes
+    return out;
+  }
   const memo = ROUTER_MEMO[name];
   if (!memo || Object.keys(payload || {}).length) return entry[0](payload || {}, ctx);
   const who = memo.scope === 'user'

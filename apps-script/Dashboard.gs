@@ -907,6 +907,41 @@ function dashStale_(lastUpdated) {
 /** §13.1 + §13.4 — per-account cards, collective tiles, "last updated", discrepancy notes.
  * Reads DASH_CACHE and the connection list; never a business workbook, so a viewer pays no sheet
  * round trips at all. An account with no cached figures renders "not connected yet". */
+/* 27 Aug (owner: "validate numbers") — the month cards come from each account book's own
+   Monthly Sheet, and a stale book quietly understates the month. Validated today: the cards said
+   £34,371 for August while eBay's own order data said £39,855 — a £5.5k silence (Sir Hasib's dead
+   report agents; Azhar dark since 22 Jul). The engine's sales_daily is that eBay truth, already
+   mirrored daily; sum the same month there and hand the screen the gap and each account's last
+   fresh day, so a lagging book is a labelled fact instead of a smaller number nobody questions.
+   Best-effort by design: the engine being unreachable never breaks the dashboard. */
+function dashEngineMonthTruth_(curMonth) {
+  const perAccount = {}, lastDay = {};
+  let offset = 0, pages = 0, total = 0;
+  while (pages < 4) {                                    // sales_daily is ~500 rows; 4 pages = 10k cap
+    const d = enginePost_('backupDump', { table: 'sales_daily', offset: offset });
+    const head = (d && d.header) || [];
+    const iA = head.indexOf('account'), iD = head.indexOf('date'), iS = head.indexOf('sold');
+    if (iA < 0 || iD < 0 || iS < 0) return null;
+    (d.rows || []).forEach(function (r) {
+      const acct = String(r[iA]), day = String(r[iD]), sold = Number(r[iS]) || 0;
+      if (sold > 0 && day > (lastDay[acct] || '')) lastDay[acct] = day;
+      if (day.slice(0, 7) !== curMonth) return;
+      perAccount[acct] = (perAccount[acct] || 0) + sold;
+      total += sold;
+    });
+    offset += (d.rows || []).length;
+    pages++;
+    if (d.done || !(d.rows || []).length) break;
+  }
+  return {
+    month: curMonth,
+    sold: Math.round(total * 100) / 100,
+    per_account: Object.keys(perAccount).reduce(function (o, k) { o[k] = Math.round(perAccount[k] * 100) / 100; return o; }, {}),
+    last_fresh_day: lastDay,
+    as_of: now_(),
+  };
+}
+
 function actionDashboard_(payload, ctx) {
   dashAssertViewer_(ctx);
   const view = dashViewFor_(ctx);
@@ -1001,6 +1036,7 @@ function actionDashboard_(payload, ctx) {
       of: cards.length,
     },
     accounts: cards,
+    engine_truth: (function () { try { return dashEngineMonthTruth_(curMonth); } catch (e) { return null; } })(),
     discrepancies: notes,
     // The workbook's own vocabulary, so the screen never invents a label or an order of its own.
     metrics: { tiles: DASH_TILES.filter(function (m) { return wanted.indexOf(m) >= 0; }), all: wanted, ratios: DASH_RATIO_METRICS, day: dayWanted },
