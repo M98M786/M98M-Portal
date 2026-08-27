@@ -28,9 +28,10 @@ only the second one counts here.
 - [x] **DONE** — department boards refresh every **20s** (was 45s).
 - [x] **DONE** — all-departments overview restricted to Management/Ops Head/Team Lead;
   Orders board no longer shown to CS. Department members get their own board only.
-- [x] **BUILT (awaiting v64 run)** — `purgeSelfTestTasks` one-shot (Registry.gs, engine-
-  runnable): deletes TASKS rows carrying 'selftest' in id/title/details/assigned_by,
-  bottom-up, idempotent, returns what it removed.
+- [x] **DONE (v64, ran 27 Aug)** — `purgeSelfTestTasks` one-shot: deleted exactly the 2
+  synthetic rows (T592b2b0b, T0395a972 — "SELFTEST — vacuum storage bags (safe to delete)").
+  Matcher anchored (prefix-only on id/title/assigned_by) so a real task mentioning
+  "self-test" can never be caught.
 - [x] **AUDITED (all 13 desks respond + render, no errors)** — 26 Aug sweep:
   goLive (0 drafts - correct empty), listDesk (48 rows), priceDesk (23), mgmtDesk AS+engine (ok),
   staffReviews (ok), huntQueue (22), dispatch, recheck, returns/itemRisk, wrongAds, ordersBoard,
@@ -56,7 +57,7 @@ only the second one counts here.
   find-an-order → "Open that day" all land on the exact day tab (was already live; board
   drill-through now lands there too).
 
-## 3. Replacement orders  (BUILT 27 Aug — owner said "go for it"; in review → deploy v64)
+## 3. Replacement orders  (DONE v64, 27 Aug — verified on screen end-to-end)
 
 - [x] **BUILT** — Replacement orders desk (view-replacements.js + Replacements.gs). CS, Team
   Lead, Management, Ops Head and Order Processor raise one; Sales Operations views.
@@ -72,6 +73,18 @@ only the second one counts here.
   tab when today's tab doesn't exist; recorded portal-side (REPLACEMENTS tab) even when the
   sheet refuses, so nothing raised is ever lost. Letters Management + that account's
   Order Processors. dry_run mode for verification without touching the live book.
+- **VERIFIED on screen (27 Aug, v64):** desk renders with all 7 reasons + all 6 accounts;
+  Custom-reason guard fires ("needs an explanation — at least 10 characters") before any API
+  call; ABRT's 27 August tab showed 11 real orders, ALL carrying the Create-a-replacement
+  button; clicking the BPA-Free Kids Water Bottles row (01-15102-99900) opened the desk
+  pre-filled (account/order/title/qty). dry_run against the live ABRT book resolved the real
+  "27 August" day tab and planned exactly Order number · Item title (REPLACEMENT ORDER — … —
+  Reason: …) · Quantity · Delivery Status=Pending, skipped_missing []. Adversarially reviewed
+  before deploy (25 agents, 4 lenses): 15 confirmed defects ALL fixed pre-ship, including two
+  blockers (containment-match wrong-tab append; dead buttons from pre-paint wiring) and the
+  dispatch-dashboard dedup that would have made every replacement invisible to the overdue
+  sweep. purgeSelfTestTasks ran: deleted exactly the 2 SELFTEST rows ("vacuum storage bags
+  (safe to delete)") — Listing pending count clean.
 
 ## 4. Listing / hunting
 
