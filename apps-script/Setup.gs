@@ -130,19 +130,35 @@ function huntEnsureDbCols_() {
   } catch (e) { logActivity_('system', 'ERROR:huntEnsureCols', '', '', '', String(e && e.message || e)); }
 }
 
+/* 28 Aug ("Exceeded maximum execution time" ×3, Google's failure mail): five riders shared one
+ * 6-minute run with no clock — on odd hours the dispatch recompute (~40s × 6 accounts) plus the
+ * Ali sweep outgrew the window and Apps Script KILLED the run mid-rider, silently, logging
+ * nothing. The sweep now carries a hard budget: the riders people wait on (checkpoint flags,
+ * the Ali order numbers) run FIRST, the heavy alternating dashboard rider runs only while at
+ * least two minutes remain, and anything skipped is LOGGED as skipped — a visible skip beats an
+ * invisible kill. The skipped rider simply runs on a later, quieter hour. */
 function runMissedCheckpointSweep() {
+  const t0 = Date.now();
+  const msLeft = function () { return 330000 - (Date.now() - t0); };   // 5.5 min of the 6 allowed
   huntEnsureDbCols_();
   if (typeof flagMissedCheckpoints === 'function') {
     try { flagMissedCheckpoints(); }
     catch (e) { logActivity_('trigger', 'ERROR:missedCheckpoints', '', '', '', String(e && e.stack || e)); }
   }
-  /* Two sweeps were written and never wired to anything: alertsRefresh (the Account-KPI cards —
-   * "Account KPI page all dead" was literally this) and dispatchOverdueSweep (the overdue bells
-   * and tiles). New triggers need the scriptapp scope this project deliberately avoids, so they
-   * ride this hourly trigger instead — alternating by hour, because each carries a 240-second
-   * budget of its own and two of those must never share one 6-minute run. */
+  /* R5: the Ali order-number sweep (day tabs → Engine) — the one the Order Processors wait on,
+   * so it outranks the dashboard refreshers. Carries the one-time first-backup bootstrap. */
+  if (typeof nightWatchHourlyRide === 'function') {
+    try { nightWatchHourlyRide(); }
+    catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
+  }
+  /* alertsRefresh (Account-KPI cards) and dispatchOverdueSweep (overdue bells) alternate by
+   * hour — new triggers need the scriptapp scope this project avoids, so they ride here. Each
+   * can eat minutes; neither starts unless two minutes remain. */
   const hour = new Date().getHours();
-  if (hour % 2 === 0) {
+  const rider = hour % 2 === 0 ? 'alertsRefresh' : 'dispatchOverdueSweep';
+  if (msLeft() < 120000) {
+    logActivity_('trigger', 'SWEEP_BUDGET_SKIP', rider, '', '', 'only ' + Math.round(msLeft() / 1000) + 's left — runs next cycle');
+  } else if (hour % 2 === 0) {
     if (typeof alertsRefresh === 'function') {
       try { alertsRefresh(); }
       catch (e) { logActivity_('trigger', 'ERROR:alertsRefresh', '', '', '', String(e && e.stack || e)); }
@@ -151,15 +167,12 @@ function runMissedCheckpointSweep() {
     try { dispatchOverdueSweep(); }
     catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e)); }
   }
-  /* R5: the Ali order-number sweep rides here too (day tabs → Engine, hourly), carrying the
-   * one-time first-backup bootstrap. Same defensive shape as the sweeps above. */
-  if (typeof nightWatchHourlyRide === 'function') {
-    try { nightWatchHourlyRide(); }
-    catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
+  /* The hunting backup workbook's dated Drive copy — day-gated by property, so the first hour
+   * of the Pakistan day with budget to spare takes it. */
+  if (msLeft() < 45000) {
+    logActivity_('trigger', 'SWEEP_BUDGET_SKIP', 'huntBackupDailyCopy', '', '', 'runs next cycle');
+    return;
   }
-  /* 26 Aug: the hunting backup workbook's dated Drive copy. It is day-gated by property, so the
-   * first hour of the Pakistan day to reach here takes it and the other 23 are no-ops — which
-   * also means it still happens on a day the nightly trigger missed. */
   if (typeof huntBackupDailyCopy_ === 'function') {
     try { huntBackupDailyCopy_(); }
     catch (e) { logActivity_('trigger', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
