@@ -81,6 +81,11 @@
     var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
       if (DT_SHOWING !== deptName) { return; }            // the user switched boards mid-fetch
+      /* The page may have re-rendered while the fetch was out — the `host` captured at call
+         time would then be a DETACHED node: the stamp updates (looked up fresh) while the
+         board paints into thin air and the visible spinner never clears. Paint into the
+         element that is on screen NOW. */
+      host = $('dtBody');
       if (cached) { var st0 = $('dtStamp'); if (st0) { st0.textContent = 'last answer · refreshing…'; } }
       var all = (d && d.departments) || [];
       var mine = null;
