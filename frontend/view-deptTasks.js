@@ -64,9 +64,16 @@
   var DT_REFRESH_MS = 20000;
   function dtStopTimer() { if (DT_TIMER) { clearInterval(DT_TIMER); DT_TIMER = null; } }
 
+  var DT_BUSY = false;                                   // one fetch in flight, ever
   function dtPaint(deptName) {
     var host = $('dtBody');
     if (!host) { dtStopTimer(); return; }                 // the user navigated away
+    /* 27 Aug ("everything is stuck"): with no guard, a 30-150s backend answer let the 20s timer
+       STACK requests — every open board multiplied the very load that made the backend slow.
+       One in flight at a time; a hidden tab does not poll at all (its owner is not looking). */
+    if (DT_BUSY) { return; }
+    if (document.hidden) { return; }
+    DT_BUSY = true;
     var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
       if (cached) { var st0 = $('dtStamp'); if (st0) { st0.textContent = 'last answer · refreshing…'; } }
@@ -116,6 +123,7 @@
     /* cachedCall answers {painted, done} — the promise lives on .done, and a refresh failure on
        an already-painted screen is a toast, not a wipe of good data. */
     if (!hc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
+    hc.done.then(function () { DT_BUSY = false; }, function () { DT_BUSY = false; });
     hc.done.catch(function (e) {
       if (hc.painted) { return; }
       if ($('dtBody')) { $('dtBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>'; }

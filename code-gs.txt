@@ -22860,7 +22860,7 @@ function doPost(e) {
     ctx.idToken = req.idToken;                              // batch re-authorises each inner call
     ctx.session = req.session;
     if (req.idem && seenIdem_(req.idem)) return out_({ ok: true, idempotent: true }, null, req);
-    const data = entry[0](req.payload || {}, ctx);
+    const data = routerRun_(req.action, entry, req.payload || {}, ctx);
     if (req.idem) markIdem_(req.idem);
     return out_({ ok: true, data: data }, null, req);
   } catch (err) {
@@ -22876,6 +22876,41 @@ function doPost(e) {
   }
 }
 function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: true, service: 'M98M Portal', ts: now_() })).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------- hot-read memo (27 Aug — "everything is stuck") ----------
+   Six staff screens poll the same heavy reads every 20s, all as the one web-app user; the
+   executions log showed five doPosts landing in the same second and runs starving each other
+   up to 157s — the portal looked dead. The answer to a parameter-less hot read is computed
+   ONCE per short window in CacheService and every other poller gets the cached JSON in
+   milliseconds. Keyed by role (org-wide answers the whole role shares) or by user (personal
+   views), so RL-4 stripping still matches the viewer. A call WITH a payload is a specific
+   question and always computes fresh. Writes stay uncached; a board is at most memo+poll
+   seconds stale, which the 45s-refresh design already accepted. */
+const ROUTER_MEMO = {
+  deptPending:    { sec: 15, scope: 'role' },
+  huntQueue:      { sec: 20, scope: 'role' },
+  mgmtPulse:      { sec: 20, scope: 'role' },
+  staffDirectory: { sec: 30, scope: 'role' },
+  listDesk:       { sec: 20, scope: 'user' },
+  myHunts:        { sec: 20, scope: 'user' },
+};
+function routerRun_(name, entry, payload, ctx) {
+  const memo = ROUTER_MEMO[name];
+  if (!memo || Object.keys(payload || {}).length) return entry[0](payload || {}, ctx);
+  const who = memo.scope === 'user'
+    ? normalizeEmail(ctx.ident.email)
+    : String((ctx.user && ctx.user.role) || 'super');
+  const key = ('memo:' + name + ':' + who).slice(0, 250);
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(key);
+  if (hit) { try { return JSON.parse(hit); } catch (e) { /* recompute */ } }
+  const data = entry[0](payload || {}, ctx);
+  try {
+    const packed = JSON.stringify(data);
+    if (packed.length < 95000) cache.put(key, packed, memo.sec);   // CacheService caps ~100KB
+  } catch (e) { /* uncacheable answers just stay uncached */ }
+  return data;
+}
 
 /** The ONE place an access level is enforced. Both a direct call and a batched one go through
  * here, so a batched action can never be checked more loosely than the same action called alone
@@ -22915,7 +22950,7 @@ function actionBatch_(payload, ctx) {
     if (!entry || name === 'batch') return { ok: false, error: 'unknown action' };
     try {
       const inner = authorizeFor_(entry[1], ctx.idToken, ctx.session);
-      return { ok: true, data: entry[0](call.payload || {}, inner) };
+      return { ok: true, data: routerRun_(name, entry, call.payload || {}, inner) };
     } catch (err) {
       logActivity_('router', 'ERROR:batch:' + name, name, '', '', String(err && err.stack || err));
       const raw = String(err && err.message || '');
