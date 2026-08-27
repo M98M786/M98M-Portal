@@ -44,7 +44,9 @@
           '<div class="bd" id="rpList"><div class="spinner"></div></div></div>';
     },
     init: function () {
-      $('rpRefresh').onclick = rpLoad;
+      /* NOT `onclick = rpLoad` — the click EVENT would arrive as rpLoad's listOnly parameter,
+         truthy, and Refresh would silently never repaint the form. */
+      $('rpRefresh').onclick = function () { rpLoad(); };
       rpLoad();
     }
   };
