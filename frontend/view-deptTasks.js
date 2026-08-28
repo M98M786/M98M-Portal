@@ -76,7 +76,6 @@
     var host = $('dtBody');
     if (!host) { dtStopTimer(); return; }                 // the user navigated away
     if (DT_BUSY[deptName]) { return; }
-    if (document.hidden) { return; }
     DT_BUSY[deptName] = true;
     var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
@@ -161,10 +160,17 @@
         $('dtRefresh').onclick = go;
         go();
         /* "getting updated timely" — the number in front of you is never more than 45s old */
+        /* The hidden-tab guard lives on the TICKS only — 28 Aug it sat inside dtPaint and
+           blocked even the FIRST paint of a background-opened tab, which then showed a spinner
+           until the next visible tick. First paint always runs; returning to the tab repaints. */
         DT_TIMER = setInterval(function () {
           if (!$('dtBody')) { dtStopTimer(); return; }
+          if (document.hidden) { return; }
           go();
         }, DT_REFRESH_MS);
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden && $('dtBody')) { go(); }
+        });
       }
     };
   });

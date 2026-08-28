@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260827-2345';
+var BUILD = '20260828-0013';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9716,7 +9716,6 @@ VIEWS.dashboard = {
     var host = $('dtBody');
     if (!host) { dtStopTimer(); return; }                 // the user navigated away
     if (DT_BUSY[deptName]) { return; }
-    if (document.hidden) { return; }
     DT_BUSY[deptName] = true;
     var hc = cachedCall('deptPending', {}, function (d, cached) {
       if (!$('dtBody')) { dtStopTimer(); return; }
@@ -9801,10 +9800,17 @@ VIEWS.dashboard = {
         $('dtRefresh').onclick = go;
         go();
         /* "getting updated timely" — the number in front of you is never more than 45s old */
+        /* The hidden-tab guard lives on the TICKS only — 28 Aug it sat inside dtPaint and
+           blocked even the FIRST paint of a background-opened tab, which then showed a spinner
+           until the next visible tick. First paint always runs; returning to the tab repaints. */
         DT_TIMER = setInterval(function () {
           if (!$('dtBody')) { dtStopTimer(); return; }
+          if (document.hidden) { return; }
           go();
         }, DT_REFRESH_MS);
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden && $('dtBody')) { go(); }
+        });
       }
     };
   });
