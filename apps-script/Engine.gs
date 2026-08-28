@@ -236,6 +236,8 @@ const ENGINE_RUNNABLE = {
   purgeSelfTestTasks: function () { return typeof purgeSelfTestTasks === 'function' ? String(purgeSelfTestTasks()) : 'absent'; },
   purgeSelfTestHunts: function () { return typeof purgeSelfTestHunts === 'function' ? String(purgeSelfTestHunts()) : 'absent'; },
   revisionQualify: function () { return typeof revisionQualify === 'function' ? String(revisionQualify()) : 'absent'; },
+  sheetWritesStatus: function () { return typeof sheetWritesStatus === 'function' ? String(sheetWritesStatus()) : 'absent'; },
+  enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

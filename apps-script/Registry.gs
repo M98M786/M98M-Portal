@@ -274,3 +274,27 @@ function purgeSelfTestHunts() {
     hits.map(function (h) { return h.id + ' ' + h.title; }).join(' | ').slice(0, 300));
   return 'deleted ' + hits.length + ' hunt row(s): ' + hits.map(function (h) { return h.id; }).join(', ');
 }
+
+/** 28 Aug (owner: "trackings & order cost from portal not automatically getting updated in
+ * sheets"). Two relay-runnable helpers: the STATUS one shows the write gate and the last
+ * recorded write attempts (shadow vs real), so the diagnosis is a fact, not a guess; the
+ * ENABLE one flips §16.10 live writing on with the full receipt setExternalWrites keeps. */
+function sheetWritesStatus() {
+  const flag = String(getConfig('pipeline_write_external') || '(unset)');
+  const rows = readTab_('ACTIVITY_LOG');
+  const recent = [];
+  for (let i = rows.length - 1; i >= 0 && recent.length < 12; i--) {
+    const a = String(rows[i].action || '');
+    if (a === 'SHADOW_WRITE' || a === 'SHEET_UPDATE' || a === 'SHEET_APPEND' ||
+        a.indexOf('RECORD_PURCHASE') === 0 || a.indexOf('RECORD_TRACKING') === 0) {
+      recent.push(String(rows[i].ts).slice(5, 16) + ' ' + a + ' ' + String(rows[i].target).slice(0, 40) +
+        ' = ' + String(rows[i].new_value).slice(0, 30) + ' by ' + String(rows[i].actor).split('@')[0]);
+    }
+  }
+  return 'pipeline_write_external=' + flag + ' | last write events (newest first): ' +
+    (recent.length ? recent.join(' ;; ') : 'none found');
+}
+
+function enableSheetWrites() {
+  return String(setExternalWrites(true, 'owner order 28 Aug — portal writes must land in sheets'));
+}
