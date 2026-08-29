@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260829-2238';
+var BUILD = '20260829-2245';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -16284,7 +16284,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
             return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
               '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
-              '<span class="v">' + oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '') + '</span></div>';
+              '<span class="v">' + (a.incomplete ? '<span style="color:var(--text-3)" title="engine still backfilling this account\u2019s history">building…</span>' : oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '')) + '</span></div>';
           }).join('') + '</div>' +
           '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
         : '<div class="empty" style="padding:14px 0">Loading…</div>') +
@@ -25499,7 +25499,7 @@ function saveSchedule() {
           return '<tr><td><b>' + esc(r.account) + '</b>' + (r.est_days ? ' \u23f3' : '') + '</td>' +
             '<td class="dr-num">' + vbGBP(r.sold) + '</td><td class="dr-num">' + vbGBP(r.fees_ex) + '</td>' +
             '<td class="dr-num">' + vbGBP(r.ali) + '</td><td class="dr-num">' + vbGBP(r.cpc_ex) + '</td>' +
-            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + vbGBP(r.vat_due) + '</td></tr>';
+            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + (r.incomplete ? '<span style="color:var(--text-3);font-weight:700" title="the engine is still backfilling this account\u2019s order history \u2014 a number now would be a lie">history incomplete</span>' : vbGBP(r.vat_due)) + '</td></tr>';
         }).join('') +
         '<tr style="background:var(--panel-2);font-weight:800"><td>ALL ACCOUNTS</td>' +
         '<td class="dr-num">' + vbGBP(t.sold) + '</td><td class="dr-num">' + vbGBP(t.fees_ex) + '</td>' +

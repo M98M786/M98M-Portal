@@ -5248,6 +5248,55 @@ const ROUTES = {
     },
   },
 
+  /* 30 Aug: Sir Hasib's feed connected weeks after the others, so his July/early-August orders
+     were never fetched (the rolling sync only walks 6 days) - his engine month read £5,355
+     while his book held £11,063. One-shot history walk: a date window, insert-only (existing
+     rows untouched - the live sync owns their status), capped pages per call so one invocation
+     never blows the subrequest budget; call again to continue further back. */
+  orderBackfill: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const acct = String(p.account || '').trim();
+      if (!acct) throw new Error('SAY: pass an account');
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? p.from + 'T00:00:00.000Z' : new Date(Date.now() - 89 * 86400000).toISOString();
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? p.to + 'T23:59:59.000Z' : new Date().toISOString();
+      const tok = await ebayAccessToken(ctx.env, acct);
+      let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
+        encodeURIComponent('creationdate:[' + from + '..' + to + ']');
+      const known = {};
+      const ko = await ctx.env.DB.prepare('SELECT order_id FROM orders WHERE account = ?1 AND created_at >= ?2 AND created_at <= ?3')
+        .bind(acct, from, to).all();
+      for (const r of (ko.results || [])) known[r.order_id] = 1;
+      let pages = 0, seen = 0, inserted = 0, total = null;
+      while (href && pages < 12) {
+        const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
+        if (!r.ok) throw new Error(acct + ' backfill ' + r.status);
+        const page = await r.json();
+        if (total === null) total = Number(page.total) || 0;
+        for (const o of (page.orders || [])) {
+          seen++;
+          const id = String(o.orderId);
+          if (known[id]) continue;
+          const line = (o.lineItems && o.lineItems[0]) || {};
+          let qty = 0;
+          for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
+          qty = Math.max(1, qty);
+          const cancelled = String(((o.cancelStatus || {}).cancelState) || '') === 'CANCELED';
+          const status = cancelled ? 'CANCELLED' : String(o.orderFulfillmentStatus || '');
+          const sold = Number(((o.pricingSummary || {}).total || {}).value) || 0;
+          await ctx.env.DB.prepare(
+            'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ' +
+            'ON CONFLICT(order_id) DO NOTHING'
+          ).bind(id, acct, String(line.legacyItemId || ''), sold, status,
+            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty).run();
+          inserted++;
+        }
+        href = String(page.next || '');
+        pages++;
+      }
+      return { account: acct, window: [from, to], total_in_window: total, pages, seen, inserted, more: !!href };
+    },
+  },
+
   /* 30 Aug (owner): "VAT I need to pay on everything ... for that specific account". The
      calculator's own HMRC line, per account, from the same day rows every other screen uses:
      VAT = 20% x (sold - eBay fees ex VAT - AliExpress - CPC ex VAT). Fees ex VAT come from
@@ -5272,15 +5321,20 @@ const ROUTES = {
         const feesIncl = b.sold - b.oe;
         const feesEx = feesIncl / 1.2;
         const vat = 0.2 * (b.sold - feesEx - b.cost - b.pri);
+        /* An account whose OE coverage is broken (engine still backfilling its history — Sir
+           Hasib's feed connected weeks late) would print a NEGATIVE VAT: a lie. Say "incomplete"
+           and keep it out of the total instead. */
+        const incomplete = b.sold > 500 && b.oe < b.sold * 0.5;
         return { account: a, sold: round2(b.sold), oe: round2(b.oe), fees_incl: round2(feesIncl),
           fees_ex: round2(feesEx), ali: round2(b.cost), cpc_ex: round2(b.pri), n_ads: round2(b.pri * 1.2),
-          returns: round2(b.returns), actual: round2(b.actual), vat_due: round2(vat),
-          days: b.days, est_days: b.est_days };
+          returns: round2(b.returns), actual: round2(b.actual), vat_due: incomplete ? null : round2(vat),
+          incomplete: incomplete ? 1 : 0, days: b.days, est_days: b.est_days };
       });
       const tot = accounts.reduce((t, a) => ({ sold: t.sold + a.sold, fees_ex: t.fees_ex + a.fees_ex,
-        ali: t.ali + a.ali, cpc_ex: t.cpc_ex + a.cpc_ex, vat_due: t.vat_due + a.vat_due,
+        ali: t.ali + a.ali, cpc_ex: t.cpc_ex + a.cpc_ex, vat_due: t.vat_due + (a.vat_due || 0),
         actual: t.actual + a.actual, est_days: t.est_days + a.est_days }),
         { sold: 0, fees_ex: 0, ali: 0, cpc_ex: 0, vat_due: 0, actual: 0, est_days: 0 });
+      tot.incomplete = accounts.filter((a) => a.incomplete).map((a) => a.account);
       for (const k of Object.keys(tot)) tot[k] = round2(tot[k]);
       return { month, accounts, total: tot,
         law: 'VAT to HMRC = 20% \u00d7 (sold \u2212 eBay fees ex VAT \u2212 AliExpress \u2212 CPC ex VAT) \u2014 the calculator\u2019s own line \u00b7 days flagged \u23f3 still ride an ad estimate' };

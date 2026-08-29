@@ -233,7 +233,7 @@
             var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
             return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
               '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
-              '<span class="v">' + oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '') + '</span></div>';
+              '<span class="v">' + (a.incomplete ? '<span style="color:var(--text-3)" title="engine still backfilling this account\u2019s history">building…</span>' : oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '')) + '</span></div>';
           }).join('') + '</div>' +
           '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
         : '<div class="empty" style="padding:14px 0">Loading…</div>') +

@@ -45,7 +45,7 @@
           return '<tr><td><b>' + esc(r.account) + '</b>' + (r.est_days ? ' \u23f3' : '') + '</td>' +
             '<td class="dr-num">' + vbGBP(r.sold) + '</td><td class="dr-num">' + vbGBP(r.fees_ex) + '</td>' +
             '<td class="dr-num">' + vbGBP(r.ali) + '</td><td class="dr-num">' + vbGBP(r.cpc_ex) + '</td>' +
-            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + vbGBP(r.vat_due) + '</td></tr>';
+            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + (r.incomplete ? '<span style="color:var(--text-3);font-weight:700" title="the engine is still backfilling this account\u2019s order history \u2014 a number now would be a lie">history incomplete</span>' : vbGBP(r.vat_due)) + '</td></tr>';
         }).join('') +
         '<tr style="background:var(--panel-2);font-weight:800"><td>ALL ACCOUNTS</td>' +
         '<td class="dr-num">' + vbGBP(t.sold) + '</td><td class="dr-num">' + vbGBP(t.fees_ex) + '</td>' +
