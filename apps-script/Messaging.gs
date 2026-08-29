@@ -135,12 +135,28 @@ function actionMarkThreadRead_(payload, ctx) {
 
 /** §24: THE shared ~45s poll — the bell, the DM badge and the inbox all ride on this one call,
  *  which is what keeps the portal inside Apps Script quotas. Three tab reads, no lookups in loops. */
+function notifTail_(n) {
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const start = Math.max(2, last - n + 1);
+  const vals = sh.getRange(start, 1, last - start + 1, head.length).getValues();
+  return vals.map(function (row) {
+    const o = {}; head.forEach(function (h, i) { o[h] = row[i]; }); return o;
+  });
+}
+
 function actionPoll_(payload, ctx) {
   const me = normalizeEmail(ctx.ident.email);
   const users = dmUsersByEmail_();
 
   const unread = [];
-  readTab_('NOTIFICATIONS').forEach(function (r) {
+  /* 30 Aug: the letters table holds ~25k rows (≈1,200 new/day) and this poll fires every ~45s
+     from every signed-in person — reading the WHOLE tab each time was a hidden tax on every
+     request slot. Letters append at the bottom; the last 4,000 rows cover well over two days of
+     the entire company's traffic, which is more than a bell ever needs. */
+  notifTail_(4000).forEach(function (r) {
     if (normalizeEmail(r.to) !== me) return;
     if (String(r.read_at === null || r.read_at === undefined ? '' : r.read_at).trim() !== '') return;
     unread.push({
