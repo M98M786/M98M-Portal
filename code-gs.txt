@@ -15343,6 +15343,16 @@ function dashStale_(lastUpdated) {
    fresh day, so a lagging book is a labelled fact instead of a smaller number nobody questions.
    Best-effort by design: the engine being unreachable never breaks the dashboard. */
 function dashEngineMonthTruth_(curMonth) {
+  /* 30 Aug: one engine query beats paging the whole table — and carries orders/units/actual so
+     the SCREEN TILES can show eBay's own month, not the lagging cards. Falls back below. */
+  try {
+    const t = enginePost_('monthTruth', {});
+    if (t && t.month === curMonth && t.sold) {
+      return { month: curMonth, sold: t.sold, orders: t.orders, units: t.units,
+        actual: t.actual, cpc_ads: t.cpc_ads, ads: t.ads,
+        per_account: {}, last_fresh_day: t.last_fresh_day || {}, as_of: now_() };
+    }
+  } catch (e) { /* fall through to the paging path */ }
   const perAccount = {}, lastDay = {};
   let offset = 0, pages = 0, total = 0;
   while (pages < 4) {                                    // sales_daily is ~500 rows; 4 pages = 10k cap

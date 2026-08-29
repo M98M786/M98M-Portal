@@ -5192,6 +5192,39 @@ const ROUTES = {
 
   /* Key-gated twin of runJobNow (which is session/mgmt-gated). The build session holds the sync
      key, not a portal session, so forcing a sync during a night repair had no lever at all. */
+  monthTruth: {
+    auth: 'sync', fn: async (p, ctx) => {
+      /* 30 Aug (owner, pointing at the Sales analysis tiles: "still same") — the month tiles
+         came from the account books' cards, which lag days behind. This is the same month from
+         eBay's own data, one query each, so the tiles can tell the truth directly. */
+      const ukNow = new Date(Date.now() + 3600000);       // Europe/London in BST
+      const month = ukNow.toISOString().slice(0, 7);
+      const o = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n, SUM(MAX(qty,1)) AS units, ROUND(SUM(sold),2) AS sold " +
+        "FROM orders WHERE substr(datetime(created_at,'+1 hour'),1,7) = ?1 AND (refunded IS NULL OR refunded <= 0)"
+      ).bind(month).first();
+      const s = await ctx.env.DB.prepare(
+        "SELECT ROUND(SUM(sold),2) AS sold, ROUND(SUM(actual),2) AS actual, ROUND(SUM(pri),2) AS pri, " +
+        "ROUND(SUM(ads),2) AS ads FROM sales_daily WHERE substr(date,1,7) = ?1"
+      ).bind(month).first();
+      const perA = await ctx.env.DB.prepare(
+        "SELECT account, MAX(date) AS last_day FROM sales_daily WHERE sold > 0 GROUP BY account"
+      ).all();
+      const lastDay = {};
+      for (const r of (perA.results || [])) lastDay[r.account] = r.last_day;
+      return {
+        month: month,
+        orders: Number(o && o.n) || 0, units: Number(o && o.units) || 0,
+        sold: Number(o && o.sold) || 0,
+        rollup_sold: Number(s && s.sold) || 0,
+        actual: Number(s && s.actual) || 0,
+        cpc_ads: Number(s && s.pri) || 0,
+        ads: Number(s && s.ads) || 0,
+        last_fresh_day: lastDay,
+      };
+    },
+  },
+
   priceWatchClear: {
     auth: 'sync', fn: async (p, ctx) => {
       /* 30 Aug one-shot: 66 of 67 open alerts were variation ghosts from the old blind detector

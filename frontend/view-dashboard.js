@@ -89,6 +89,23 @@ function kpiStrip(d) {
   var margin = isFinite(tile(m, T_MARGIN)) ? tile(m, T_MARGIN) * 100 : marginOf(sold, profit);
   var nt = (isFinite(ads) && isFinite(profit) && profit > 0) ? ads / profit : NaN;
 
+  /* 30 Aug (owner: "still same") — when the engine's month truth is present, THE TILES show
+     eBay's own live month (orders, units, sold, Actual by the law) and the books' card value
+     drops to the sub-line. The books' per-account cards below stay as they are. */
+  var t = d.engine_truth;
+  if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
+    var tSold = Number(t.sold), tActual = Number(t.actual);
+    var tMargin = tSold > 0 ? (tActual / tSold * 100) : NaN;
+    var tAds = Number(t.ads) > 0 ? Number(t.ads) : Number(t.cpc_ads) * 1.2;
+    return '<div class="db-kpis">' +
+      kpi('Orders', num(t.orders), d.period.current_label + ' · eBay live', '') +
+      kpi('Units sold', num(t.units), 'eBay live', '') +
+      kpi('Sold', gbp(tSold), 'eBay\'s own data' + (isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
+      kpi('Actual profit', gbp(tActual), '0.8×(OE−cost) − ads − returns', 'gold') +
+      kpi('Margin', isFinite(tMargin) ? tMargin.toFixed(1) + '%' : '—', 'actual ÷ sold', '') +
+      kpi('Ads incl VAT', gbp(tAds), isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '', 'blue') +
+    '</div>' + truthNote(d, sold) + excludedNote(d);
+  }
   return '<div class="db-kpis">' +
     kpi('Orders', num(orders), d.period.current_label, '') +
     kpi('Units sold', num(units), '', '') +
