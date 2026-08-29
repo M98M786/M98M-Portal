@@ -4258,7 +4258,27 @@ const ROUTES = {
         const oldC = prev ? Number(prev.ali_cost) || 0 : 0;
         const newC = Number(f.ali_cost) || 0;
         if (prev && oldC > 0 && newC - oldC > 0.30 && String(prev.status) === 'ACTIVE') {
-          risers.push({ id, oldC, newC, title: String(prev.title || ''), account: String(f.account || '') });
+          /* 30 Aug (owner: "cost increased for the OTHER variation and you show me a price
+             alert"). The sheet keeps ONE cost cell per item; multi-variation listings carry many
+             real costs (audit: 33 of 34 alerted items, some with 57 distinct paid costs). Before
+             crying "rise", ask the item's own recent orders: if the new cost matches ANY
+             variation's real per-unit paid cost (±15p), it is another variation's price, not a
+             rise — skip. Only a cost above everything the item has actually been bought for
+             alerts. One open alert per item, ever. */
+          const known = await ctx.env.DB.prepare(
+            "SELECT DISTINCT ROUND(cost / MAX(qty, 1), 2) AS c FROM orders " +
+            "WHERE item_id = ?1 AND cost > 0 AND created_at >= datetime('now', '-60 day')"
+          ).bind(id).all();
+          const costs = (known.results || []).map((r) => Number(r.c) || 0);
+          const isVariationCost = costs.some((c) => Math.abs(c - newC) <= 0.15);
+          const aboveAll = costs.length === 0 || newC > Math.max(...costs) + 0.30;
+          if (isVariationCost || (costs.length > 1 && !aboveAll)) continue;
+          const dup = await ctx.env.DB.prepare(
+            "SELECT 1 AS x FROM price_watch WHERE item_id = ?1 AND acked_at = '' LIMIT 1"
+          ).bind(id).first();
+          if (dup) continue;
+          risers.push({ id, oldC, newC, title: String(prev.title || ''), account: String(f.account || ''),
+            oe: Number(f.oe) || Number(prev.oe) || 0, multi: costs.length > 1 });
         }
       }
       const stmt = ctx.env.DB.prepare(
@@ -4287,10 +4307,12 @@ const ROUTES = {
         /* R8-7: the price desk keeps every rise as a row — the letter fades, the desk remembers. */
         const it = await ctx.env.DB.prepare('SELECT price FROM items_api WHERE item_id = ?1').bind(r.id).first();
         const sell = it ? Number(it.price) || 0 : 0;
+        /* Margin by the sheet's own law when OE is known — 0.8 × (OE − cost) — not sell−cost. */
+        const margin = r.oe > 0 ? round2(0.8 * (r.oe - r.newC)) : round2(sell - r.newC);
         await ctx.env.DB.prepare(
           "INSERT OR IGNORE INTO price_watch (item_id, account, old_cost, new_cost, sell_price, margin_after, alerted_at) " +
           "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))"
-        ).bind(r.id, r.account, r.oldC, r.newC, sell, round2(sell - r.newC)).run();
+        ).bind(r.id, r.account, r.oldC, r.newC, sell, margin).run();
       }
       } catch (e) { /* letters are best-effort — the cost write above already succeeded */ }
       return { synced: batch.length, risers: risers.length };
@@ -5170,6 +5192,19 @@ const ROUTES = {
 
   /* Key-gated twin of runJobNow (which is session/mgmt-gated). The build session holds the sync
      key, not a portal session, so forcing a sync during a night repair had no lever at all. */
+  priceWatchClear: {
+    auth: 'sync', fn: async (p, ctx) => {
+      /* 30 Aug one-shot: 66 of 67 open alerts were variation ghosts from the old blind detector
+         (one item was alerted six times). Close them with the reason on the row; the corrected
+         detector re-raises anything genuinely above every real variation cost. */
+      const r = await ctx.env.DB.prepare(
+        "UPDATE price_watch SET acked_by = 'system', acked_at = datetime('now'), " +
+        "note = 'auto-cleared 30 Aug — variation-blind detector replaced' WHERE acked_at = ''"
+      ).run();
+      return { cleared: r.meta ? r.meta.changes : null };
+    },
+  },
+
   runJobKey: {
     auth: 'sync', fn: async (p, ctx) => {
       const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll,
