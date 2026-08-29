@@ -347,7 +347,7 @@ function flushMirrorQueue() {
   let done = 0, failed = 0, pending = 0;
   for (let i = 0; i < data.length; i++) {
     if (String(data[i][iKind]) !== 'hunt_decision' || String(data[i][iStatus])) continue;
-    if (Date.now() - t0 > 200000) { pending++; continue; }        // 200s budget — the rest next run
+    if (Date.now() - t0 > 90000) { pending++; continue; }        // 90s budget (30 Aug: shorter slots under load) — the rest next run
     const row = i + 2;
     try {
       const p = JSON.parse(String(data[i][iPay] || '{}'));

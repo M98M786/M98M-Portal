@@ -115,9 +115,12 @@ function actionStartTask_(payload, ctx) {
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
     taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
-  engineTaskPush_(found.rec.task_id);
-    return { task_id: found.rec.task_id, status: TASK_STATUS_WORKING };
+    var startedId = found.rec.task_id;
   } finally { lock.releaseLock(); }
+  /* OUTSIDE the lock (30 Aug outage): a network call inside the global lock serialized every
+     task action portal-wide until the backend stopped answering. Push after release, always. */
+  engineTaskPush_(startedId);
+  return { task_id: startedId, status: TASK_STATUS_WORKING };
 }
 
 function actionSubmitTask_(payload, ctx) {
@@ -152,8 +155,8 @@ function actionSubmitTask_(payload, ctx) {
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
-  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
+  engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
 
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
     (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
@@ -252,8 +255,8 @@ function actionApproveTask_(payload, ctx) {
       try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rating }); } catch (e) {}
     }
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)) + (rating ? ' · rating ' + rating : ''));
-  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
+  engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
 
   taskChainNext_(rec, ctx);
 
@@ -284,8 +287,8 @@ function actionReturnTask_(payload, ctx) {
       status: TASK_STATUS_WORKING, submitted_at: '', decided_at: stamp, updated_at: stamp,
     });
     logActivity_(ctx.ident.email, 'RETURN_TASK', rec.task_id, old, TASK_STATUS_WORKING, comment.slice(0, 200));
-  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
+  engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
 
   notify_(rec.assigned_to, 'Task returned',
     '🟠 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
