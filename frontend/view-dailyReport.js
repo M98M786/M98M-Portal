@@ -75,7 +75,7 @@
       rows.forEach(function (r) {
         if (r.date >= from && r.date <= to) {
           t.sold += Number(r.sold) || 0; t.profit += Number(r.profit) || 0;
-          t.actual += Number(r.actual) || 0; t.ads += Number(r.ads) || 0; t.adsRev += Number(r.ads_rev) || 0;
+          t.actual += Number(r.actual) || 0; t.ads += (r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2); t.adsRev += Number(r.ads_rev) || 0;
         }
       });
       return t;
@@ -119,16 +119,20 @@
 
     var h = kpiHtml + '<div class="scroll"><table class="dr-tbl"><thead><tr>' +
       '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th>' +
-      '<th style="text-align:right">Ads</th><th style="text-align:right">Ad revenue</th><th style="text-align:right">ROAS</th>' +
+      '<th style="text-align:right" title="the sheet\u2019s N column: CPC ads incl VAT \u00b7 \u23f3 = eBay has not billed the day yet, an estimate from the account\u2019s own recent ratio stands in">Ads (N) incl VAT</th><th style="text-align:right">Ad revenue</th><th style="text-align:right">ROAS</th>' +
       '<th style="text-align:right" title="T = 0.8 × (OE − cost) — the sheet law, before ads">T</th>' +
       '<th style="text-align:right" title="Actual = T − CPC ads − returns — the sales-analysis brain, per day">Actual</th></tr></thead><tbody>';
     order.slice(0, 31).forEach(function (dte) {
       var list = byDay[dte];
       var isLive = dte === liveDay && list.some(function (r) { return r._live; });
-      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, adsRev: 0 };
-      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0; t.ads += Number(r.ads) || 0; t.profit += Number(r.profit) || 0; t.actual += Number(r.actual) || 0; t.adsRev += Number(r.ads_rev) || 0; });
+      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, adsRev: 0, est: 0 };
+      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0;
+        t.ads += r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2;   /* the sheet's N: CPC incl VAT (live overlay already reports intraday spend) */
+        t.profit += Number(r.profit) || 0; t.actual += Number(r.actual) || 0; t.adsRev += Number(r.ads_rev) || 0;
+        if (Number(r.pri_est)) { t.est = 1; } });
       var wait = '<span title="closes at the nightly rollup, once every fee has landed" style="color:var(--text-3)">tonight</span>';
-      h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + '</td>' +
+      var estMark = t.est ? ' <span title="the CPC bill for this day has not landed yet \u2014 ads ride the account\u2019s own recent ratio until eBay bills it (~2 days)" style="cursor:help">\u23f3</span>' : '';
+      h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + estMark + '</td>' +
         '<td class="dr-num">' + drGBP(t.sold) + '</td><td class="dr-num">' + drGBP(t.oe) + '</td>' +
         '<td class="dr-num">' + drGBP(t.cost) + '</td>' +
         '<td class="dr-num">' + (t.ads ? drGBP(t.ads) : '—') + '</td>' +
@@ -137,12 +141,13 @@
         '<td class="dr-num">' + (isLive ? wait : drGBP(t.profit)) + '</td>' +
         '<td class="dr-num ' + (t.actual < 0 ? 'dr-neg' : 'dr-pos') + '">' + (isLive ? wait : drGBP(t.actual)) + '</td></tr>';
       list.forEach(function (r) {
-        h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + '</td>' +
+        var rN = r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2;
+        h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + (Number(r.pri_est) ? ' \u23f3' : '') + '</td>' +
           '<td class="dr-num">' + drGBP(r.sold) + '</td><td class="dr-num">' + drGBP(r.oe) + '</td>' +
           '<td class="dr-num">' + drGBP(r.cost) + '</td>' +
-          '<td class="dr-num">' + (Number(r.ads) ? drGBP(r.ads) : '—') + '</td>' +
+          '<td class="dr-num">' + (rN ? drGBP(rN) : '—') + '</td>' +
           '<td class="dr-num">' + (Number(r.ads_rev) ? drGBP(r.ads_rev) : '—') + '</td>' +
-          '<td class="dr-num">' + drROAS(Number(r.ads_rev) || 0, Number(r.ads) || 0) + '</td>' +
+          '<td class="dr-num">' + drROAS(Number(r.ads_rev) || 0, rN) + '</td>' +
           '<td class="dr-num">' + (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.profit)) + '</td>' +
           '<td class="dr-num ' + (Number(r.actual) < 0 ? 'dr-neg' : '') + '">' +
             (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.actual)) + '</td></tr>';

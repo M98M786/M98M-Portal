@@ -675,13 +675,17 @@ function sirHasibMonthlyFill() {
     put('Sold (B)', sold);
     put('Earning (H)', oe);
     put('AliExpress (I)', b ? r2_(b.cost) : 0);
-    put('All Priority incl VAT (N)', b ? r2_(b.ads) : 0);
-    put('General fees', r2_(sold - oe));
-    put('Raw Profit (T)', b ? r2_(b.profit) : 0);
+    /* Sheet semantics proven against Saif's book 30 Aug: N = CPC x 1.2 (incl VAT), the sheet's
+       T already carries the CPC deduction (T = 0.8x(OE-Ali) - CPC ex VAT = engine 'actual'+ret),
+       Ratio column is literally named 'Ratio N/T'. General fees / Ad Waste are book-internal
+       columns the engine cannot honestly reproduce - left blank, never invented. */
+    var priEx = b ? Number(b.pri) || 0 : 0;
+    put('All Priority incl VAT (N)', r2_(priEx * 1.2));
+    var tSheet = b ? (Number(b.actual) || 0) + (Number(b.returns) || 0) : 0;
+    put('Raw Profit (T)', r2_(tSheet));
     put('Returns (U)', b ? r2_(b.returns) : 0);
     put('Actual Profit (V)', b ? r2_(b.actual) : 0);
-    var tt = b ? Number(b.profit) || 0 : 0, nn = b ? Number(b.ads) || 0 : 0;
-    put('Ratio', tt > 0 && nn > 0 ? r2_(nn / tt) : '');
+    put('Ratio N/T', tSheet > 0 && priEx > 0 ? r2_(priEx * 1.2 / tSheet) : '');
     out.push(row);
   }
   if (out.length) sh.getRange(lr + 1, 1, out.length, lc).setValues(out);

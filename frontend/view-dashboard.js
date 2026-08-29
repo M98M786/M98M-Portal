@@ -96,14 +96,17 @@ function kpiStrip(d) {
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
     var tSold = Number(t.sold), tActual = Number(t.actual);
     var tMargin = tSold > 0 ? (tActual / tSold * 100) : NaN;
-    var tAds = Number(t.ads) > 0 ? Number(t.ads) : Number(t.cpc_ads) * 1.2;
+    /* sheet parity proven 30 Aug: the books' N column is exactly CPC × 1.2. The billed
+       'ads' mix was neither family cleanly and never matched a book. */
+    var tAds = Number(t.n_ads) > 0 ? Number(t.n_ads) : Number(t.cpc_ads) * 1.2;
+    var tEst = Number(t.provisional_days) > 0;
     return '<div class="db-kpis">' +
       kpi('Orders', num(t.orders), d.period.current_label + ' · eBay live', '') +
       kpi('Units sold', num(t.units), 'eBay live', '') +
       kpi('Sold', gbp(tSold), 'eBay\'s own data' + (isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
       kpi('Actual profit', gbp(tActual), '0.8×(OE−cost) − ads − returns', 'gold') +
       kpi('Margin', isFinite(tMargin) ? tMargin.toFixed(1) + '%' : '—', 'actual ÷ sold', '') +
-      kpi('Ads incl VAT', gbp(tAds), isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '', 'blue') +
+      kpi('Ads (N) incl VAT', gbp(tAds), (isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '') + (tEst ? ' · ⏳ est. days inside' : ''), 'blue') +
     '</div>' + truthNote(d, sold) + excludedNote(d);
   }
   return '<div class="db-kpis">' +

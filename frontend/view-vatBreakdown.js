@@ -28,6 +28,36 @@
     return { from: shift(t, -6), to: t, label: 'Last 7 days' };
   }
 
+  function vbDueBoard() {
+    var host = $('vbDue');
+    if (!host) { return; }
+    api('vatBoard', {}).then(function (d) {
+      var rows = (d && d.accounts) || [];
+      if (!rows.length) { host.innerHTML = ''; return; }
+      var t = (d && d.total) || {};
+      var h = '<div class="hd">VAT to pay — ' + esc(String(d.month || '')) +
+        '<span class="hint">' + esc(String(d.law || '')) + '</span></div><div class="bd"><div class="scroll">' +
+        '<table class="dr-tbl" style="min-width:640px"><thead><tr><th>Account</th>' +
+        '<th style="text-align:right">Sold</th><th style="text-align:right">eBay fees ex VAT</th>' +
+        '<th style="text-align:right">AliExpress</th><th style="text-align:right">CPC ex VAT</th>' +
+        '<th style="text-align:right">VAT to pay</th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          return '<tr><td><b>' + esc(r.account) + '</b>' + (r.est_days ? ' \u23f3' : '') + '</td>' +
+            '<td class="dr-num">' + vbGBP(r.sold) + '</td><td class="dr-num">' + vbGBP(r.fees_ex) + '</td>' +
+            '<td class="dr-num">' + vbGBP(r.ali) + '</td><td class="dr-num">' + vbGBP(r.cpc_ex) + '</td>' +
+            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + vbGBP(r.vat_due) + '</td></tr>';
+        }).join('') +
+        '<tr style="background:var(--panel-2);font-weight:800"><td>ALL ACCOUNTS</td>' +
+        '<td class="dr-num">' + vbGBP(t.sold) + '</td><td class="dr-num">' + vbGBP(t.fees_ex) + '</td>' +
+        '<td class="dr-num">' + vbGBP(t.ali) + '</td><td class="dr-num">' + vbGBP(t.cpc_ex) + '</td>' +
+        '<td class="dr-num" style="color:var(--gold-a)">' + vbGBP(t.vat_due) + '</td></tr>' +
+        '</tbody></table></div>' +
+        (t.est_days ? '<p class="dr-note">\u23f3 some days still ride an ad estimate — the figure firms up as eBay bills the CPC family (~2 days behind).</p>' : '') +
+        '</div>';
+      host.innerHTML = h;
+    }).catch(function () { host.innerHTML = ''; });
+  }
+
   function vbLoad() {
     var box = $('vbBody');
     if (!box) { return; }
@@ -80,7 +110,8 @@
         '<select id="vbAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<input type="date" id="vbFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="vbTo" class="minibtn" style="padding:5px 6px">' +
         '<button class="minibtn" id="vbApply">Apply</button></span></div>' +
-        '<div class="card enter d2"><div class="bd" id="vbBody"><div class="spinner"></div></div></div>';
+        '<div class="card enter d2" id="vbDue" style="margin-bottom:16px"></div>' +
+        '<div class="card enter d2"><div class="hd">The whole law, line by line</div><div class="bd" id="vbBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
       document.querySelectorAll('[data-vb-m]').forEach(function (b) {
@@ -93,10 +124,16 @@
       });
       var sel = $('vbAcct');
       if (sel) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
+        /* the five names used to be typed here — and Sir Hasib silently never existed on this
+           screen. Accounts are data (§3): ask the backend, never a list in code. */
+        cachedCall('accountList', {}, function (d) {
+          (((d && d.accounts) || [])).forEach(function (a) {
+            var n = String(a.account || '').trim();
+            if (!n) { return; }
+            var o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+          });
+          sel.value = VB.acct || '';
         });
-        sel.value = VB.acct || '';
         sel.onchange = function () { VB.acct = sel.value; vbLoad(); };
       }
       var ap = $('vbApply');
@@ -108,6 +145,7 @@
         };
       }
       vbLoad();
+      vbDueBoard();
     }
   };
 })();

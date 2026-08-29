@@ -115,32 +115,13 @@
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
     if (AR.mode === 'engine') {
-      /* review 3: "account report is still showing wrong stats and in very boring way" — the
-         ENGINE books for this account, named columns, the same law numbers as every money
-         screen. Mgmt/Ops only (collective profit, §6). */
+      /* 30 Aug (owner): "no concept of its update, no presentation of data and graph — use the
+         brain of the account report sheet and develop your own brain." The ENGINE REPORT tab's
+         own shape, served live from D1 (accountReport2): 30-day summary tiles, the sheet-style
+         day-by-day graph, the leak bars, the top products, then the day table. Auto-refreshes
+         with a visible stamp. */
       h = '<div id="arEngine"><div class="spinner"></div></div>';
-      setTimeout(function () {
-        var slot = $('arEngine');
-        if (!slot) { return; }
-        api('dailyReport', {}).then(function (d) {
-          var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
-          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account).trim() === String(want).trim(); }).slice(0, 21);
-          if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
-          var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
-            ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
-          rows2.forEach(function (r0) {
-            function g(v) { return '£' + (Number(v) || 0).toFixed(2); }
-            var roas = Number(r0.ads) > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / Number(r0.ads)).toFixed(1) + '×' : '—';
-            hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + '</td>' +
-              '<td>' + g(r0.sold) + '</td><td>' + g(r0.oe) + '</td><td>' + g(r0.cost) + '</td>' +
-              '<td>' + (Number(r0.ads) ? g(r0.ads) : '—') + '</td><td>' + (Number(r0.ads_rev) ? g(r0.ads_rev) : '—') + '</td>' +
-              '<td>' + roas + '</td><td>' + g(r0.profit) + '</td>' +
-              '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + g(r0.returns) + '</td>' +
-              '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + g(r0.actual) + '</td></tr>';
-          });
-          slot.innerHTML = hh + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Engine books · T = 0.8 × (OE − cost) · Actual = T − CPC ads − returns · newest 21 days</p>';
-        }).catch(function (e) { slot.innerHTML = '<div class="empty">Engine books did not answer — ' + esc(e.message) + '</div>'; });
-      }, 0);
+      setTimeout(function () { arEngine2(); }, 0);
     }
     if (AR.mode === 'daily') {
       h = arDaily(r, heads, keys, rows, cell);
@@ -212,6 +193,112 @@
     });
   }
 
+  function arG(v) { return '\u00a3' + (Number(v) || 0).toFixed(2); }
+
+  /* Tiny dependency-free SVG line chart: sold (blue) vs actual (green), the sheet's own
+     "Sales vs Actual Profit \u2014 day by day". */
+  function arLineChart(days) {
+    var list = days.slice().reverse();                       // oldest first
+    if (list.length < 2) { return ''; }
+    var W = 720, H = 190, P = 34;
+    var max = 0;
+    list.forEach(function (r) { max = Math.max(max, Number(r.sold) || 0); });
+    if (!(max > 0)) { return ''; }
+    var x = function (i) { return P + (W - P - 8) * (i / (list.length - 1)); };
+    var y = function (v) { return H - 22 - (H - 40) * (v / max); };
+    var path = function (key) {
+      return list.map(function (r, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(Math.max(0, Number(r[key]) || 0)).toFixed(1); }).join(' ');
+    };
+    var grid = '';
+    for (var g = 1; g <= 3; g++) {
+      var gy = H - 22 - (H - 40) * (g / 4);
+      grid += '<line x1="' + P + '" y1="' + gy + '" x2="' + (W - 8) + '" y2="' + gy + '" stroke="var(--gold-line)" stroke-dasharray="3 5"/>' +
+        '<text x="' + (P - 4) + '" y="' + (gy + 3) + '" text-anchor="end" font-size="9" fill="var(--text-3)">' + Math.round(max * g / 4) + '</text>';
+    }
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:560px;width:100%;height:auto">' + grid +
+      '<path d="' + path('sold') + '" fill="none" stroke="var(--blue)" stroke-width="2"/>' +
+      '<path d="' + path('actual') + '" fill="none" stroke="var(--ok)" stroke-width="2"/>' +
+      '<text x="' + P + '" y="12" font-size="10" fill="var(--blue)" font-weight="800">\u25ac Sold</text>' +
+      '<text x="' + (P + 60) + '" y="12" font-size="10" fill="var(--ok)" font-weight="800">\u25ac Actual profit</text>' +
+      '</svg></div>';
+  }
+
+  /* "Where the money leaks" \u2014 per-day stacked bars: ads N (amber) + returns (red). */
+  function arLeakChart(days) {
+    var list = days.slice().reverse();
+    if (list.length < 2) { return ''; }
+    var W = 720, H = 150, P = 34;
+    var max = 0;
+    list.forEach(function (r) { max = Math.max(max, (Number(r.pri) || 0) * 1.2 + (Number(r.returns) || 0)); });
+    if (!(max > 0)) { return ''; }
+    var bw = Math.max(3, Math.floor((W - P - 10) / list.length) - 2);
+    var bars = list.map(function (r, i) {
+      var n = (Number(r.pri) || 0) * 1.2, ret = Number(r.returns) || 0;
+      var hN = (H - 34) * (n / max), hR = (H - 34) * (ret / max);
+      var bx = P + i * (bw + 2);
+      return '<rect x="' + bx + '" y="' + (H - 18 - hN) + '" width="' + bw + '" height="' + hN.toFixed(1) + '" fill="var(--gold-b)" opacity="0.85"' + (Number(r.pri_est) ? ' stroke="var(--text-3)" stroke-dasharray="2 2"' : '') + '/>' +
+             '<rect x="' + bx + '" y="' + (H - 18 - hN - hR) + '" width="' + bw + '" height="' + hR.toFixed(1) + '" fill="var(--bad)"/>';
+    }).join('');
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:560px;width:100%;height:auto">' + bars +
+      '<text x="' + P + '" y="12" font-size="10" fill="var(--gold-b)" font-weight="800">\u25a0 Ads (N) incl VAT</text>' +
+      '<text x="' + (P + 110) + '" y="12" font-size="10" fill="var(--bad)" font-weight="800">\u25a0 Returns</text>' +
+      '<text x="' + (W - 10) + '" y="12" font-size="9" fill="var(--text-3)" text-anchor="end">dashed = estimate day</text>' +
+      '</svg></div>';
+  }
+
+  function arEngine2() {
+    var slot = $('arEngine');
+    if (!slot) { return; }
+    var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
+    if (!want) { slot.innerHTML = '<div class="empty">Choose an account.</div>'; return; }
+    api('accountReport2', { account: want }).then(function (d) {
+      if (!$('arEngine')) { return; }
+      var days = (d && d.days) || [];
+      var sm = (d && d.summary) || {};
+      var tiles = [
+        ['Orders \u00b7 30d', String(Number(sm.n) || 0)],
+        ['Units \u00b7 30d', String(Number(sm.units) || 0)],
+        ['Revenue \u00b7 30d', arG(sm.revenue)],
+        ['eBay fees \u00b7 30d', arG(sm.ebay_fees)],
+        ['AliExpress \u00b7 30d', arG(sm.ali)],
+        ['Refunded \u00b7 30d', arG(sm.refunded)]
+      ].map(function (t2) {
+        return '<div class="dr-kpi"><div class="l">' + esc(t2[0]) + '</div><div class="v">' + esc(t2[1]) + '</div></div>';
+      }).join('');
+      var top = (d && d.top) || [];
+      var topH = top.length ? '<div class="hd" style="margin-top:14px">Top products \u00b7 30 days</div><div class="scroll"><table class="ar-tbl" style="min-width:560px"><thead><tr><th>Product</th><th style="text-align:right">Orders</th><th style="text-align:right">Units</th><th style="text-align:right">Revenue</th></tr></thead><tbody>' +
+        top.map(function (t3) {
+          return '<tr><td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(String(t3.title || '')) + '">' + esc(String(t3.title || t3.item_id)) + '</td>' +
+            '<td style="text-align:right">' + Number(t3.orders_n || 0) + '</td><td style="text-align:right">' + Number(t3.units || 0) + '</td>' +
+            '<td style="text-align:right;font-weight:800">' + arG(t3.revenue) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '';
+      var hh = '<div class="dr-kpis">' + tiles + '</div>' +
+        '<div class="hd">Sales vs Actual profit \u2014 day by day</div>' + arLineChart(days) +
+        '<div class="hd" style="margin-top:14px">Where the money leaks \u2014 ads and returns</div>' + arLeakChart(days) +
+        topH +
+        '<div class="hd" style="margin-top:14px">The day rows</div>' +
+        '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+        ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads (N) incl VAT', 'Ad revenue', 'ROAS', 'T \u00b7 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
+      days.slice(0, 21).forEach(function (r0) {
+        var n = (Number(r0.pri) || 0) * 1.2;
+        var roas = n > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / n).toFixed(1) + '\u00d7' : '\u2014';
+        hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + (Number(r0.pri_est) ? ' \u23f3' : '') + '</td>' +
+          '<td>' + arG(r0.sold) + '</td><td>' + arG(r0.oe) + '</td><td>' + arG(r0.cost) + '</td>' +
+          '<td>' + (n ? arG(n) : '\u2014') + '</td><td>' + (Number(r0.ads_rev) ? arG(r0.ads_rev) : '\u2014') + '</td>' +
+          '<td>' + roas + '</td><td>' + arG((Number(r0.actual) || 0) + (Number(r0.returns) || 0)) + '</td>' +
+          '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + arG(r0.returns) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + arG(r0.actual) + '</td></tr>';
+      });
+      hh += '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Live from the engine \u00b7 figures as at ' + esc(new Date().toLocaleTimeString()) + ' \u00b7 refreshes itself every 5 minutes \u00b7 \u23f3 = the CPC bill has not landed, an estimate stands in \u00b7 T = Actual + returns \u00b7 N = CPC \u00d7 1.2, the sheet\u2019s own column</p>';
+      slot.innerHTML = hh;
+      clearTimeout(AR.timer);
+      AR.timer = setTimeout(function () { if ($('arEngine') && AR.mode === 'engine') { arEngine2(); } }, 300000);
+    }).catch(function (e) {
+      if ($('arEngine')) { $('arEngine').innerHTML = '<div class="empty">Engine books did not answer \u2014 ' + esc(e.message) + '</div>'; }
+    });
+  }
+
   VIEWS.accountReport = {
     label: 'Account report',
     order: 9.5,
@@ -236,6 +323,9 @@
           var n = String(a.account || '').trim();
           return n ? '<option>' + esc(n) + '</option>' : '';
         }).join(''));
+        /* open on the first account at once — "choose an account" as a landing state read as
+           "page not loading" (owner, 29 Aug) */
+        if (!sel.value && sel.options.length > 1) { sel.selectedIndex = 1; arLoad(); }
       });
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }

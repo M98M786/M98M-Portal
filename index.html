@@ -338,7 +338,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -462,7 +462,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260829-2217';
+var BUILD = '20260829-2238';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1433,32 +1433,13 @@ VIEWS.home = {
     var cell = function (row, i) { var v = row[keys[i]]; return v == null ? '' : String(v); };
     var h;
     if (AR.mode === 'engine') {
-      /* review 3: "account report is still showing wrong stats and in very boring way" — the
-         ENGINE books for this account, named columns, the same law numbers as every money
-         screen. Mgmt/Ops only (collective profit, §6). */
+      /* 30 Aug (owner): "no concept of its update, no presentation of data and graph — use the
+         brain of the account report sheet and develop your own brain." The ENGINE REPORT tab's
+         own shape, served live from D1 (accountReport2): 30-day summary tiles, the sheet-style
+         day-by-day graph, the leak bars, the top products, then the day table. Auto-refreshes
+         with a visible stamp. */
       h = '<div id="arEngine"><div class="spinner"></div></div>';
-      setTimeout(function () {
-        var slot = $('arEngine');
-        if (!slot) { return; }
-        api('dailyReport', {}).then(function (d) {
-          var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
-          var rows2 = ((d && d.rows) || []).filter(function (x) { return String(x.account).trim() === String(want).trim(); }).slice(0, 21);
-          if (!rows2.length) { slot.innerHTML = '<div class="empty">No book rows for this account yet.</div>'; return; }
-          var hh = '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
-            ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads', 'Ad revenue', 'ROAS', 'T · 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
-          rows2.forEach(function (r0) {
-            function g(v) { return '£' + (Number(v) || 0).toFixed(2); }
-            var roas = Number(r0.ads) > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / Number(r0.ads)).toFixed(1) + '×' : '—';
-            hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + '</td>' +
-              '<td>' + g(r0.sold) + '</td><td>' + g(r0.oe) + '</td><td>' + g(r0.cost) + '</td>' +
-              '<td>' + (Number(r0.ads) ? g(r0.ads) : '—') + '</td><td>' + (Number(r0.ads_rev) ? g(r0.ads_rev) : '—') + '</td>' +
-              '<td>' + roas + '</td><td>' + g(r0.profit) + '</td>' +
-              '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + g(r0.returns) + '</td>' +
-              '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + g(r0.actual) + '</td></tr>';
-          });
-          slot.innerHTML = hh + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:4px">Engine books · T = 0.8 × (OE − cost) · Actual = T − CPC ads − returns · newest 21 days</p>';
-        }).catch(function (e) { slot.innerHTML = '<div class="empty">Engine books did not answer — ' + esc(e.message) + '</div>'; });
-      }, 0);
+      setTimeout(function () { arEngine2(); }, 0);
     }
     if (AR.mode === 'daily') {
       h = arDaily(r, heads, keys, rows, cell);
@@ -1530,6 +1511,112 @@ VIEWS.home = {
     });
   }
 
+  function arG(v) { return '\u00a3' + (Number(v) || 0).toFixed(2); }
+
+  /* Tiny dependency-free SVG line chart: sold (blue) vs actual (green), the sheet's own
+     "Sales vs Actual Profit \u2014 day by day". */
+  function arLineChart(days) {
+    var list = days.slice().reverse();                       // oldest first
+    if (list.length < 2) { return ''; }
+    var W = 720, H = 190, P = 34;
+    var max = 0;
+    list.forEach(function (r) { max = Math.max(max, Number(r.sold) || 0); });
+    if (!(max > 0)) { return ''; }
+    var x = function (i) { return P + (W - P - 8) * (i / (list.length - 1)); };
+    var y = function (v) { return H - 22 - (H - 40) * (v / max); };
+    var path = function (key) {
+      return list.map(function (r, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(Math.max(0, Number(r[key]) || 0)).toFixed(1); }).join(' ');
+    };
+    var grid = '';
+    for (var g = 1; g <= 3; g++) {
+      var gy = H - 22 - (H - 40) * (g / 4);
+      grid += '<line x1="' + P + '" y1="' + gy + '" x2="' + (W - 8) + '" y2="' + gy + '" stroke="var(--gold-line)" stroke-dasharray="3 5"/>' +
+        '<text x="' + (P - 4) + '" y="' + (gy + 3) + '" text-anchor="end" font-size="9" fill="var(--text-3)">' + Math.round(max * g / 4) + '</text>';
+    }
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:560px;width:100%;height:auto">' + grid +
+      '<path d="' + path('sold') + '" fill="none" stroke="var(--blue)" stroke-width="2"/>' +
+      '<path d="' + path('actual') + '" fill="none" stroke="var(--ok)" stroke-width="2"/>' +
+      '<text x="' + P + '" y="12" font-size="10" fill="var(--blue)" font-weight="800">\u25ac Sold</text>' +
+      '<text x="' + (P + 60) + '" y="12" font-size="10" fill="var(--ok)" font-weight="800">\u25ac Actual profit</text>' +
+      '</svg></div>';
+  }
+
+  /* "Where the money leaks" \u2014 per-day stacked bars: ads N (amber) + returns (red). */
+  function arLeakChart(days) {
+    var list = days.slice().reverse();
+    if (list.length < 2) { return ''; }
+    var W = 720, H = 150, P = 34;
+    var max = 0;
+    list.forEach(function (r) { max = Math.max(max, (Number(r.pri) || 0) * 1.2 + (Number(r.returns) || 0)); });
+    if (!(max > 0)) { return ''; }
+    var bw = Math.max(3, Math.floor((W - P - 10) / list.length) - 2);
+    var bars = list.map(function (r, i) {
+      var n = (Number(r.pri) || 0) * 1.2, ret = Number(r.returns) || 0;
+      var hN = (H - 34) * (n / max), hR = (H - 34) * (ret / max);
+      var bx = P + i * (bw + 2);
+      return '<rect x="' + bx + '" y="' + (H - 18 - hN) + '" width="' + bw + '" height="' + hN.toFixed(1) + '" fill="var(--gold-b)" opacity="0.85"' + (Number(r.pri_est) ? ' stroke="var(--text-3)" stroke-dasharray="2 2"' : '') + '/>' +
+             '<rect x="' + bx + '" y="' + (H - 18 - hN - hR) + '" width="' + bw + '" height="' + hR.toFixed(1) + '" fill="var(--bad)"/>';
+    }).join('');
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:560px;width:100%;height:auto">' + bars +
+      '<text x="' + P + '" y="12" font-size="10" fill="var(--gold-b)" font-weight="800">\u25a0 Ads (N) incl VAT</text>' +
+      '<text x="' + (P + 110) + '" y="12" font-size="10" fill="var(--bad)" font-weight="800">\u25a0 Returns</text>' +
+      '<text x="' + (W - 10) + '" y="12" font-size="9" fill="var(--text-3)" text-anchor="end">dashed = estimate day</text>' +
+      '</svg></div>';
+  }
+
+  function arEngine2() {
+    var slot = $('arEngine');
+    if (!slot) { return; }
+    var want = AR.acc || ($('arAcc') && $('arAcc').value) || '';
+    if (!want) { slot.innerHTML = '<div class="empty">Choose an account.</div>'; return; }
+    api('accountReport2', { account: want }).then(function (d) {
+      if (!$('arEngine')) { return; }
+      var days = (d && d.days) || [];
+      var sm = (d && d.summary) || {};
+      var tiles = [
+        ['Orders \u00b7 30d', String(Number(sm.n) || 0)],
+        ['Units \u00b7 30d', String(Number(sm.units) || 0)],
+        ['Revenue \u00b7 30d', arG(sm.revenue)],
+        ['eBay fees \u00b7 30d', arG(sm.ebay_fees)],
+        ['AliExpress \u00b7 30d', arG(sm.ali)],
+        ['Refunded \u00b7 30d', arG(sm.refunded)]
+      ].map(function (t2) {
+        return '<div class="dr-kpi"><div class="l">' + esc(t2[0]) + '</div><div class="v">' + esc(t2[1]) + '</div></div>';
+      }).join('');
+      var top = (d && d.top) || [];
+      var topH = top.length ? '<div class="hd" style="margin-top:14px">Top products \u00b7 30 days</div><div class="scroll"><table class="ar-tbl" style="min-width:560px"><thead><tr><th>Product</th><th style="text-align:right">Orders</th><th style="text-align:right">Units</th><th style="text-align:right">Revenue</th></tr></thead><tbody>' +
+        top.map(function (t3) {
+          return '<tr><td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(String(t3.title || '')) + '">' + esc(String(t3.title || t3.item_id)) + '</td>' +
+            '<td style="text-align:right">' + Number(t3.orders_n || 0) + '</td><td style="text-align:right">' + Number(t3.units || 0) + '</td>' +
+            '<td style="text-align:right;font-weight:800">' + arG(t3.revenue) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '';
+      var hh = '<div class="dr-kpis">' + tiles + '</div>' +
+        '<div class="hd">Sales vs Actual profit \u2014 day by day</div>' + arLineChart(days) +
+        '<div class="hd" style="margin-top:14px">Where the money leaks \u2014 ads and returns</div>' + arLeakChart(days) +
+        topH +
+        '<div class="hd" style="margin-top:14px">The day rows</div>' +
+        '<div class="scroll"><table class="ar-tbl"><thead><tr>' +
+        ['Day (UK)', 'Revenue', 'Order earning', 'Cost', 'Ads (N) incl VAT', 'Ad revenue', 'ROAS', 'T \u00b7 0.8 law', 'Returns', 'ACTUAL'].map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>';
+      days.slice(0, 21).forEach(function (r0) {
+        var n = (Number(r0.pri) || 0) * 1.2;
+        var roas = n > 0.005 && Number(r0.ads_rev) ? (Number(r0.ads_rev) / n).toFixed(1) + '\u00d7' : '\u2014';
+        hh += '<tr><td style="font-weight:800">' + esc(String(r0.date)) + (Number(r0.pri_est) ? ' \u23f3' : '') + '</td>' +
+          '<td>' + arG(r0.sold) + '</td><td>' + arG(r0.oe) + '</td><td>' + arG(r0.cost) + '</td>' +
+          '<td>' + (n ? arG(n) : '\u2014') + '</td><td>' + (Number(r0.ads_rev) ? arG(r0.ads_rev) : '\u2014') + '</td>' +
+          '<td>' + roas + '</td><td>' + arG((Number(r0.actual) || 0) + (Number(r0.returns) || 0)) + '</td>' +
+          '<td' + (Number(r0.returns) > 0 ? ' style="color:var(--bad)"' : '') + '>' + arG(r0.returns) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (Number(r0.actual) < 0 ? 'bad' : 'ok') + ')">' + arG(r0.actual) + '</td></tr>';
+      });
+      hh += '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">Live from the engine \u00b7 figures as at ' + esc(new Date().toLocaleTimeString()) + ' \u00b7 refreshes itself every 5 minutes \u00b7 \u23f3 = the CPC bill has not landed, an estimate stands in \u00b7 T = Actual + returns \u00b7 N = CPC \u00d7 1.2, the sheet\u2019s own column</p>';
+      slot.innerHTML = hh;
+      clearTimeout(AR.timer);
+      AR.timer = setTimeout(function () { if ($('arEngine') && AR.mode === 'engine') { arEngine2(); } }, 300000);
+    }).catch(function (e) {
+      if ($('arEngine')) { $('arEngine').innerHTML = '<div class="empty">Engine books did not answer \u2014 ' + esc(e.message) + '</div>'; }
+    });
+  }
+
   VIEWS.accountReport = {
     label: 'Account report',
     order: 9.5,
@@ -1554,6 +1641,9 @@ VIEWS.home = {
           var n = String(a.account || '').trim();
           return n ? '<option>' + esc(n) + '</option>' : '';
         }).join(''));
+        /* open on the first account at once — "choose an account" as a landing state read as
+           "page not loading" (owner, 29 Aug) */
+        if (!sel.value && sel.options.length > 1) { sel.selectedIndex = 1; arLoad(); }
       });
       var go = $('arGo');
       if (go) { go.onclick = arLoad; }
@@ -8912,7 +9002,7 @@ function createMeeting() {
       rows.forEach(function (r) {
         if (r.date >= from && r.date <= to) {
           t.sold += Number(r.sold) || 0; t.profit += Number(r.profit) || 0;
-          t.actual += Number(r.actual) || 0; t.ads += Number(r.ads) || 0; t.adsRev += Number(r.ads_rev) || 0;
+          t.actual += Number(r.actual) || 0; t.ads += (r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2); t.adsRev += Number(r.ads_rev) || 0;
         }
       });
       return t;
@@ -8956,16 +9046,20 @@ function createMeeting() {
 
     var h = kpiHtml + '<div class="scroll"><table class="dr-tbl"><thead><tr>' +
       '<th>Day (UK)</th><th style="text-align:right">Revenue</th><th style="text-align:right">Order earning</th><th style="text-align:right">Cost</th>' +
-      '<th style="text-align:right">Ads</th><th style="text-align:right">Ad revenue</th><th style="text-align:right">ROAS</th>' +
+      '<th style="text-align:right" title="the sheet\u2019s N column: CPC ads incl VAT \u00b7 \u23f3 = eBay has not billed the day yet, an estimate from the account\u2019s own recent ratio stands in">Ads (N) incl VAT</th><th style="text-align:right">Ad revenue</th><th style="text-align:right">ROAS</th>' +
       '<th style="text-align:right" title="T = 0.8 × (OE − cost) — the sheet law, before ads">T</th>' +
       '<th style="text-align:right" title="Actual = T − CPC ads − returns — the sales-analysis brain, per day">Actual</th></tr></thead><tbody>';
     order.slice(0, 31).forEach(function (dte) {
       var list = byDay[dte];
       var isLive = dte === liveDay && list.some(function (r) { return r._live; });
-      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, adsRev: 0 };
-      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0; t.ads += Number(r.ads) || 0; t.profit += Number(r.profit) || 0; t.actual += Number(r.actual) || 0; t.adsRev += Number(r.ads_rev) || 0; });
+      var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, adsRev: 0, est: 0 };
+      list.forEach(function (r) { t.sold += Number(r.sold) || 0; t.oe += Number(r.oe) || 0; t.cost += Number(r.cost) || 0;
+        t.ads += r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2;   /* the sheet's N: CPC incl VAT (live overlay already reports intraday spend) */
+        t.profit += Number(r.profit) || 0; t.actual += Number(r.actual) || 0; t.adsRev += Number(r.ads_rev) || 0;
+        if (Number(r.pri_est)) { t.est = 1; } });
       var wait = '<span title="closes at the nightly rollup, once every fee has landed" style="color:var(--text-3)">tonight</span>';
-      h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + '</td>' +
+      var estMark = t.est ? ' <span title="the CPC bill for this day has not landed yet \u2014 ads ride the account\u2019s own recent ratio until eBay bills it (~2 days)" style="cursor:help">\u23f3</span>' : '';
+      h += '<tr class="dr-day"><td>' + esc(dte) + (isLive ? ' <span style="color:var(--gold);font-size:10px;font-weight:800">LIVE</span>' : '') + estMark + '</td>' +
         '<td class="dr-num">' + drGBP(t.sold) + '</td><td class="dr-num">' + drGBP(t.oe) + '</td>' +
         '<td class="dr-num">' + drGBP(t.cost) + '</td>' +
         '<td class="dr-num">' + (t.ads ? drGBP(t.ads) : '—') + '</td>' +
@@ -8974,12 +9068,13 @@ function createMeeting() {
         '<td class="dr-num">' + (isLive ? wait : drGBP(t.profit)) + '</td>' +
         '<td class="dr-num ' + (t.actual < 0 ? 'dr-neg' : 'dr-pos') + '">' + (isLive ? wait : drGBP(t.actual)) + '</td></tr>';
       list.forEach(function (r) {
-        h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + '</td>' +
+        var rN = r._live ? (Number(r.ads) || 0) : (Number(r.pri) || 0) * 1.2;
+        h += '<tr class="dr-acct"><td>' + esc(String(r.account || '')) + (Number(r.pri_est) ? ' \u23f3' : '') + '</td>' +
           '<td class="dr-num">' + drGBP(r.sold) + '</td><td class="dr-num">' + drGBP(r.oe) + '</td>' +
           '<td class="dr-num">' + drGBP(r.cost) + '</td>' +
-          '<td class="dr-num">' + (Number(r.ads) ? drGBP(r.ads) : '—') + '</td>' +
+          '<td class="dr-num">' + (rN ? drGBP(rN) : '—') + '</td>' +
           '<td class="dr-num">' + (Number(r.ads_rev) ? drGBP(r.ads_rev) : '—') + '</td>' +
-          '<td class="dr-num">' + drROAS(Number(r.ads_rev) || 0, Number(r.ads) || 0) + '</td>' +
+          '<td class="dr-num">' + drROAS(Number(r.ads_rev) || 0, rN) + '</td>' +
           '<td class="dr-num">' + (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.profit)) + '</td>' +
           '<td class="dr-num ' + (Number(r.actual) < 0 ? 'dr-neg' : '') + '">' +
             (r._live ? '<span style="color:var(--text-3)">—</span>' : drGBP(r.actual)) + '</td></tr>';
@@ -9116,14 +9211,17 @@ function kpiStrip(d) {
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
     var tSold = Number(t.sold), tActual = Number(t.actual);
     var tMargin = tSold > 0 ? (tActual / tSold * 100) : NaN;
-    var tAds = Number(t.ads) > 0 ? Number(t.ads) : Number(t.cpc_ads) * 1.2;
+    /* sheet parity proven 30 Aug: the books' N column is exactly CPC × 1.2. The billed
+       'ads' mix was neither family cleanly and never matched a book. */
+    var tAds = Number(t.n_ads) > 0 ? Number(t.n_ads) : Number(t.cpc_ads) * 1.2;
+    var tEst = Number(t.provisional_days) > 0;
     return '<div class="db-kpis">' +
       kpi('Orders', num(t.orders), d.period.current_label + ' · eBay live', '') +
       kpi('Units sold', num(t.units), 'eBay live', '') +
       kpi('Sold', gbp(tSold), 'eBay\'s own data' + (isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
       kpi('Actual profit', gbp(tActual), '0.8×(OE−cost) − ads − returns', 'gold') +
       kpi('Margin', isFinite(tMargin) ? tMargin.toFixed(1) + '%' : '—', 'actual ÷ sold', '') +
-      kpi('Ads incl VAT', gbp(tAds), isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '', 'blue') +
+      kpi('Ads (N) incl VAT', gbp(tAds), (isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '') + (tEst ? ' · ⏳ est. days inside' : ''), 'blue') +
     '</div>' + truthNote(d, sold) + excludedNote(d);
   }
   return '<div class="db-kpis">' +
@@ -16142,10 +16240,56 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
+    api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
+      .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
+    api('vatBoard', {}).then(function (d) { O.vat = d || {}; oPaintMoney(); })
+      .catch(function () { O.vat = { accounts: [] }; oPaintMoney(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
     });
+  }
+
+  /* 30 Aug (owner): "show the amount currently in the account — your funds" + "VAT I need to
+     pay ... for that specific account". Two cards: eBay's own seller funds per account, and the
+     calculator's VAT-to-HMRC line per account, month to date. */
+  function oPaintMoney() {
+    var box = $('o2Money');
+    if (!box) { return; }
+    var f = O.funds, v = O.vat;
+    if (!f && !v) { return; }
+    var h = '';
+    var fa = (f && f.accounts) || [];
+    var okF = fa.filter(function (a) { return !a.error; });
+    var tAvail = 0, tHold = 0, tProc = 0, tTot = 0;
+    okF.forEach(function (a) { tAvail += oN(a.available); tHold += oN(a.on_hold); tProc += oN(a.processing); tTot += oN(a.total); });
+    h += '<div class="o-card"><div class="card-t">Your funds — live from eBay</div>' +
+      (okF.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(tTot) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">available ' + oGBP0(tAvail) + ' · processing ' + oGBP0(tProc) + ' · on hold ' + oGBP0(tHold) + '</div>' +
+          '<div class="mini-rows">' + fa.map(function (a) {
+            return '<div class="mini-row"><span class="n">' + esc(oS(a.account)) + '</span>' +
+              '<span class="b"><i style="width:' + (tTot ? Math.round(oN(a.total) / tTot * 100) : 0) + '%"></i></span>' +
+              '<span class="v">' + (a.error ? '<span style="color:var(--text-3)" title="' + esc(oS(a.error)) + '">—</span>' : oGBP0(a.total)) + '</span></div>';
+          }).join('') + '</div>'
+        : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now — it retries on the next refresh.' : 'Loading…') + '</div>') +
+      '</div>';
+    var va = (v && v.accounts) || [];
+    var vt = (v && v.total) || {};
+    h += '<div class="o-card"><div class="card-t">VAT to pay — ' + esc(oS(v && v.month) || 'this month') + '</div>' +
+      (va.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vt.vat_due) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">20% × (sold − eBay fees ex VAT − AliExpress − CPC ex VAT)' + (vt.est_days ? ' · ⏳ ad estimates inside' : '') + '</div>' +
+          '<div class="mini-rows">' + va.map(function (a) {
+            var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
+            return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
+              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
+              '<span class="v">' + oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '') + '</span></div>';
+          }).join('') + '</div>' +
+          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
+        : '<div class="empty" style="padding:14px 0">Loading…</div>') +
+      '</div>';
+    box.innerHTML = h;
   }
 
   /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
@@ -16384,7 +16528,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var byDate = {};
     rows.forEach(function (r) {
       var b = (byDate[r.date] = byDate[r.date] || { sold: 0, profit: 0 });
-      b.sold += oN(r.sold); b.profit += oN(r.profit);
+      b.sold += oN(r.sold);
+      /* the green line is ACTUAL (T − ads − returns), the sheet graph's own line — the pre-ads
+         profit painted a rosier day than the books ever did. Live today has no actual yet:
+         fall back to its running oe − cost. */
+      b.profit += (r.actual !== undefined && r.actual !== null && !r._live) ? oN(r.actual) : oN(r.profit);
     });
     var W = 640, H = 190, P = 30;
     var mx = 1;
@@ -16412,7 +16560,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       '<path d="' + pRev + '" fill="none" stroke="var(--gold-a)" stroke-width="2"/>' +
       '<path d="' + pProf + '" fill="none" stroke="var(--ok)" stroke-width="2" stroke-dasharray="1 0"/>' +
       '</svg>' +
-      '<div class="legend"><span><i style="background:var(--gold-a)"></i>Revenue / day</span><span><i style="background:var(--ok)"></i>Profit est / day</span></div>';
+      '<div class="legend"><span><i style="background:var(--gold-a)"></i>Revenue / day</span><span><i style="background:var(--ok)"></i>Actual profit / day</span></div>';
   }
 
   function oPaintProfit(r) {
@@ -16584,6 +16732,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Profitability</h2><span class="hint">computed from the daily books over the chosen range</span>' +
@@ -16595,6 +16744,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '</div>';
     },
     init: function () {
+      /* "graphs are not getting updated" (owner, 30 Aug): the screen fetched ONCE and then sat
+         still all day. It re-pulls every feed every 5 minutes while this view is on screen and
+         the tab is visible; navigation away stops it. */
+      clearInterval(O.tick);
+      O.tick = setInterval(function () {
+        if (!document.querySelector('.ov2') || document.hidden) { return; }
+        oFetchAll();
+      }, 300000);
       var root = document.querySelector('.ov2');
       if (root) {
         root.onclick = function (ev) {
@@ -25325,6 +25482,36 @@ function saveSchedule() {
     return { from: shift(t, -6), to: t, label: 'Last 7 days' };
   }
 
+  function vbDueBoard() {
+    var host = $('vbDue');
+    if (!host) { return; }
+    api('vatBoard', {}).then(function (d) {
+      var rows = (d && d.accounts) || [];
+      if (!rows.length) { host.innerHTML = ''; return; }
+      var t = (d && d.total) || {};
+      var h = '<div class="hd">VAT to pay — ' + esc(String(d.month || '')) +
+        '<span class="hint">' + esc(String(d.law || '')) + '</span></div><div class="bd"><div class="scroll">' +
+        '<table class="dr-tbl" style="min-width:640px"><thead><tr><th>Account</th>' +
+        '<th style="text-align:right">Sold</th><th style="text-align:right">eBay fees ex VAT</th>' +
+        '<th style="text-align:right">AliExpress</th><th style="text-align:right">CPC ex VAT</th>' +
+        '<th style="text-align:right">VAT to pay</th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          return '<tr><td><b>' + esc(r.account) + '</b>' + (r.est_days ? ' \u23f3' : '') + '</td>' +
+            '<td class="dr-num">' + vbGBP(r.sold) + '</td><td class="dr-num">' + vbGBP(r.fees_ex) + '</td>' +
+            '<td class="dr-num">' + vbGBP(r.ali) + '</td><td class="dr-num">' + vbGBP(r.cpc_ex) + '</td>' +
+            '<td class="dr-num" style="color:var(--gold-a);font-weight:800">' + vbGBP(r.vat_due) + '</td></tr>';
+        }).join('') +
+        '<tr style="background:var(--panel-2);font-weight:800"><td>ALL ACCOUNTS</td>' +
+        '<td class="dr-num">' + vbGBP(t.sold) + '</td><td class="dr-num">' + vbGBP(t.fees_ex) + '</td>' +
+        '<td class="dr-num">' + vbGBP(t.ali) + '</td><td class="dr-num">' + vbGBP(t.cpc_ex) + '</td>' +
+        '<td class="dr-num" style="color:var(--gold-a)">' + vbGBP(t.vat_due) + '</td></tr>' +
+        '</tbody></table></div>' +
+        (t.est_days ? '<p class="dr-note">\u23f3 some days still ride an ad estimate — the figure firms up as eBay bills the CPC family (~2 days behind).</p>' : '') +
+        '</div>';
+      host.innerHTML = h;
+    }).catch(function () { host.innerHTML = ''; });
+  }
+
   function vbLoad() {
     var box = $('vbBody');
     if (!box) { return; }
@@ -25377,7 +25564,8 @@ function saveSchedule() {
         '<select id="vbAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<input type="date" id="vbFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="vbTo" class="minibtn" style="padding:5px 6px">' +
         '<button class="minibtn" id="vbApply">Apply</button></span></div>' +
-        '<div class="card enter d2"><div class="bd" id="vbBody"><div class="spinner"></div></div></div>';
+        '<div class="card enter d2" id="vbDue" style="margin-bottom:16px"></div>' +
+        '<div class="card enter d2"><div class="hd">The whole law, line by line</div><div class="bd" id="vbBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
       document.querySelectorAll('[data-vb-m]').forEach(function (b) {
@@ -25390,10 +25578,16 @@ function saveSchedule() {
       });
       var sel = $('vbAcct');
       if (sel) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
+        /* the five names used to be typed here — and Sir Hasib silently never existed on this
+           screen. Accounts are data (§3): ask the backend, never a list in code. */
+        cachedCall('accountList', {}, function (d) {
+          (((d && d.accounts) || [])).forEach(function (a) {
+            var n = String(a.account || '').trim();
+            if (!n) { return; }
+            var o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+          });
+          sel.value = VB.acct || '';
         });
-        sel.value = VB.acct || '';
         sel.onchange = function () { VB.acct = sel.value; vbLoad(); };
       }
       var ap = $('vbApply');
@@ -25405,6 +25599,7 @@ function saveSchedule() {
         };
       }
       vbLoad();
+      vbDueBoard();
     }
   };
 })();

@@ -3048,17 +3048,38 @@ async function rollupsWindow(env, days) {
   ).bind(edgeDay).all();
   for (const r of (cpcRs.results || [])) extraByKey[r.account + '|' + r.date] = { pri: Number(r.pri) || 0, rev: Number(r.rev) || 0 };
 
+  /* 30 Aug (owner: "wrong numbers are dangerous") — CPC billing lands ~2 days late, and those
+     unbilled days used to ship with pri = 0: profit read near-DOUBLE on exactly the days staff
+     look at (28 Aug: £721 shown, ~£360 true). Estimate the unbilled tail from the account's own
+     billed pri/sold ratio inside this window, write it flagged pri_est = 1 so every screen can
+     say "ads still landing", and let real billing overwrite it on a later roll. */
+  try { await env.DB.prepare('SELECT pri_est FROM sales_daily LIMIT 1').first(); }
+  catch (e) { try { await env.DB.prepare('ALTER TABLE sales_daily ADD COLUMN pri_est INTEGER DEFAULT 0').run(); } catch (e2) { /* raced another isolate */ } }
+  const ratio = {};
+  for (const k of Object.keys(day)) {
+    const ex0 = extraByKey[k];
+    if (ex0 && ex0.pri > 0) {
+      const acct0 = k.slice(0, k.indexOf('|'));
+      const r0 = (ratio[acct0] = ratio[acct0] || { pri: 0, sold: 0 });
+      r0.pri += ex0.pri; r0.sold += day[k].sold;
+    }
+  }
   const stmts = [];
   for (const k of Object.keys(day)) {
     const cut = k.indexOf('|');
     const v = day[k];
     const ex = extraByKey[k] || { pri: 0, rev: 0 };
-    const actual = round2(v.profit - ex.pri - v.returns);
+    let pri = ex.pri, priEst = 0;
+    if (!(pri > 0) && v.sold > 0) {
+      const r = ratio[k.slice(0, cut)];
+      if (r && r.sold > 200 && r.pri > 0) { pri = round2(v.sold * r.pri / r.sold); priEst = 1; }
+    }
+    const actual = round2(v.profit - pri - v.returns);
     stmts.push(env.DB.prepare(
-      'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10) ' +
-      'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6, pri = ?7, returns = ?8, actual = ?9, ads_rev = ?10'
+      'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev, pri_est) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10, ?11) ' +
+      'ON CONFLICT(account, date) DO UPDATE SET sold = ?3, oe = ?4, cost = ?5, profit = ?6, pri = ?7, returns = ?8, actual = ?9, ads_rev = ?10, pri_est = ?11'
     ).bind(k.slice(0, cut), k.slice(cut + 1), round2(v.sold), round2(v.oe), round2(v.cost), round2(v.profit),
-      round2(ex.pri), round2(v.returns), actual, round2(ex.rev)));
+      round2(pri), round2(v.returns), actual, round2(ex.rev), priEst));
   }
   /* avg_profit_7d: zero ONLY the items that stopped selling, by explicit list — a blanket
      zero-then-set spans batches, and a failure between them would serve zeros all day. Every
@@ -5205,7 +5226,7 @@ const ROUTES = {
       ).bind(month).first();
       const s = await ctx.env.DB.prepare(
         "SELECT ROUND(SUM(sold),2) AS sold, ROUND(SUM(actual),2) AS actual, ROUND(SUM(pri),2) AS pri, " +
-        "ROUND(SUM(ads),2) AS ads FROM sales_daily WHERE substr(date,1,7) = ?1"
+        "ROUND(SUM(ads),2) AS ads, SUM(COALESCE(pri_est,0)) AS est_days FROM sales_daily WHERE substr(date,1,7) = ?1"
       ).bind(month).first();
       const perA = await ctx.env.DB.prepare(
         "SELECT account, MAX(date) AS last_day FROM sales_daily WHERE sold > 0 GROUP BY account"
@@ -5219,9 +5240,78 @@ const ROUTES = {
         rollup_sold: Number(s && s.sold) || 0,
         actual: Number(s && s.actual) || 0,
         cpc_ads: Number(s && s.pri) || 0,
+        n_ads: Math.round((Number(s && s.pri) || 0) * 1.2 * 100) / 100,   // the sheet's own N: CPC incl VAT
+        provisional_days: Number(s && s.est_days) || 0,
         ads: Number(s && s.ads) || 0,
         last_fresh_day: lastDay,
       };
+    },
+  },
+
+  /* 30 Aug (owner): "VAT I need to pay on everything ... for that specific account". The
+     calculator's own HMRC line, per account, from the same day rows every other screen uses:
+     VAT = 20% x (sold - eBay fees ex VAT - AliExpress - CPC ex VAT). Fees ex VAT come from
+     (sold - OE)/1.2 because OE already carries the fee stack incl VAT. */
+  vatBoard: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const ukNow = new Date(Date.now() + 3600000);
+      const month = /^\d{4}-\d{2}$/.test(String(p.month || '')) ? String(p.month) : ukNow.toISOString().slice(0, 7);
+      const rs = await ctx.env.DB.prepare(
+        'SELECT account, date, sold, oe, cost, pri, COALESCE(pri_est,0) AS pri_est, returns, actual FROM sales_daily ' +
+        'WHERE substr(date,1,7) = ?1 ORDER BY date'
+      ).bind(month).all();
+      const by = {};
+      for (const r of (rs.results || [])) {
+        const b = (by[r.account] = by[r.account] || { sold: 0, oe: 0, cost: 0, pri: 0, returns: 0, actual: 0, days: 0, est_days: 0 });
+        b.sold += Number(r.sold) || 0; b.oe += Number(r.oe) || 0; b.cost += Number(r.cost) || 0;
+        b.pri += Number(r.pri) || 0; b.returns += Number(r.returns) || 0; b.actual += Number(r.actual) || 0;
+        b.days++; b.est_days += Number(r.pri_est) || 0;
+      }
+      const accounts = Object.keys(by).sort().map((a) => {
+        const b = by[a];
+        const feesIncl = b.sold - b.oe;
+        const feesEx = feesIncl / 1.2;
+        const vat = 0.2 * (b.sold - feesEx - b.cost - b.pri);
+        return { account: a, sold: round2(b.sold), oe: round2(b.oe), fees_incl: round2(feesIncl),
+          fees_ex: round2(feesEx), ali: round2(b.cost), cpc_ex: round2(b.pri), n_ads: round2(b.pri * 1.2),
+          returns: round2(b.returns), actual: round2(b.actual), vat_due: round2(vat),
+          days: b.days, est_days: b.est_days };
+      });
+      const tot = accounts.reduce((t, a) => ({ sold: t.sold + a.sold, fees_ex: t.fees_ex + a.fees_ex,
+        ali: t.ali + a.ali, cpc_ex: t.cpc_ex + a.cpc_ex, vat_due: t.vat_due + a.vat_due,
+        actual: t.actual + a.actual, est_days: t.est_days + a.est_days }),
+        { sold: 0, fees_ex: 0, ali: 0, cpc_ex: 0, vat_due: 0, actual: 0, est_days: 0 });
+      for (const k of Object.keys(tot)) tot[k] = round2(tot[k]);
+      return { month, accounts, total: tot,
+        law: 'VAT to HMRC = 20% \u00d7 (sold \u2212 eBay fees ex VAT \u2212 AliExpress \u2212 CPC ex VAT) \u2014 the calculator\u2019s own line \u00b7 days flagged \u23f3 still ride an ad estimate' };
+    },
+  },
+
+  /* 30 Aug (owner): "Account report ... use the brain of the account report sheet and develop
+     your own brain" - the ENGINE REPORT tab's own shape, served live: a 30-day summary, the
+     day rows, and the account's top items, straight from the engine. No workbook required. */
+  accountReport2: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const acct = String(p.account || '').trim();
+      if (!acct) throw new Error('SAY: pick an account');
+      const days = await ctx.env.DB.prepare(
+        'SELECT date, sold, oe, cost, pri, COALESCE(pri_est,0) AS pri_est, returns, actual, ads_rev, profit ' +
+        "FROM sales_daily WHERE account = ?1 AND date >= date('now', '-45 day') ORDER BY date DESC"
+      ).bind(acct).all();
+      const s30 = await ctx.env.DB.prepare(
+        'SELECT COUNT(*) AS n, SUM(MAX(qty,1)) AS units, ROUND(SUM(sold),2) AS revenue, ' +
+        'ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END),2) AS ebay_fees, ' +
+        'ROUND(SUM(cost),2) AS ali, ROUND(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END),2) AS refunded ' +
+        "FROM orders WHERE account = ?1 AND created_at >= datetime('now', '-30 day')"
+      ).bind(acct).first();
+      const top = await ctx.env.DB.prepare(
+        'SELECT o.item_id, MAX(COALESCE(i.title, o.item_id)) AS title, COUNT(*) AS orders_n, ' +
+        'SUM(MAX(o.qty,1)) AS units, ROUND(SUM(o.sold),2) AS revenue ' +
+        "FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id " +
+        "WHERE o.account = ?1 AND o.created_at >= datetime('now', '-30 day') " +
+        'GROUP BY o.item_id ORDER BY revenue DESC LIMIT 12'
+      ).bind(acct).all();
+      return { account: acct, days: days.results || [], summary: s30 || {}, top: top.results || [] };
     },
   },
 
@@ -5783,7 +5873,7 @@ const ROUTES = {
   dailyReport: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const rs = await ctx.env.DB.prepare(
-        "SELECT account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
+        "SELECT account, date, sold, oe, cost, ads, profit, pri, returns, actual, ads_rev, COALESCE(pri_est,0) AS pri_est FROM sales_daily WHERE date >= date('now', '-62 day') ORDER BY date DESC, account"
       ).all();
       /* Hasib's night list: "Business overview is still showing wrong stats" — the wrongest one
          was TODAY, because the books are rolled nightly and intraday ad spend lives in

@@ -189,10 +189,56 @@
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
+    api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
+      .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
+    api('vatBoard', {}).then(function (d) { O.vat = d || {}; oPaintMoney(); })
+      .catch(function () { O.vat = { accounts: [] }; oPaintMoney(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
     });
+  }
+
+  /* 30 Aug (owner): "show the amount currently in the account — your funds" + "VAT I need to
+     pay ... for that specific account". Two cards: eBay's own seller funds per account, and the
+     calculator's VAT-to-HMRC line per account, month to date. */
+  function oPaintMoney() {
+    var box = $('o2Money');
+    if (!box) { return; }
+    var f = O.funds, v = O.vat;
+    if (!f && !v) { return; }
+    var h = '';
+    var fa = (f && f.accounts) || [];
+    var okF = fa.filter(function (a) { return !a.error; });
+    var tAvail = 0, tHold = 0, tProc = 0, tTot = 0;
+    okF.forEach(function (a) { tAvail += oN(a.available); tHold += oN(a.on_hold); tProc += oN(a.processing); tTot += oN(a.total); });
+    h += '<div class="o-card"><div class="card-t">Your funds — live from eBay</div>' +
+      (okF.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(tTot) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">available ' + oGBP0(tAvail) + ' · processing ' + oGBP0(tProc) + ' · on hold ' + oGBP0(tHold) + '</div>' +
+          '<div class="mini-rows">' + fa.map(function (a) {
+            return '<div class="mini-row"><span class="n">' + esc(oS(a.account)) + '</span>' +
+              '<span class="b"><i style="width:' + (tTot ? Math.round(oN(a.total) / tTot * 100) : 0) + '%"></i></span>' +
+              '<span class="v">' + (a.error ? '<span style="color:var(--text-3)" title="' + esc(oS(a.error)) + '">—</span>' : oGBP0(a.total)) + '</span></div>';
+          }).join('') + '</div>'
+        : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now — it retries on the next refresh.' : 'Loading…') + '</div>') +
+      '</div>';
+    var va = (v && v.accounts) || [];
+    var vt = (v && v.total) || {};
+    h += '<div class="o-card"><div class="card-t">VAT to pay — ' + esc(oS(v && v.month) || 'this month') + '</div>' +
+      (va.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vt.vat_due) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">20% × (sold − eBay fees ex VAT − AliExpress − CPC ex VAT)' + (vt.est_days ? ' · ⏳ ad estimates inside' : '') + '</div>' +
+          '<div class="mini-rows">' + va.map(function (a) {
+            var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
+            return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
+              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
+              '<span class="v">' + oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '') + '</span></div>';
+          }).join('') + '</div>' +
+          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
+        : '<div class="empty" style="padding:14px 0">Loading…</div>') +
+      '</div>';
+    box.innerHTML = h;
   }
 
   /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
@@ -431,7 +477,11 @@
     var byDate = {};
     rows.forEach(function (r) {
       var b = (byDate[r.date] = byDate[r.date] || { sold: 0, profit: 0 });
-      b.sold += oN(r.sold); b.profit += oN(r.profit);
+      b.sold += oN(r.sold);
+      /* the green line is ACTUAL (T − ads − returns), the sheet graph's own line — the pre-ads
+         profit painted a rosier day than the books ever did. Live today has no actual yet:
+         fall back to its running oe − cost. */
+      b.profit += (r.actual !== undefined && r.actual !== null && !r._live) ? oN(r.actual) : oN(r.profit);
     });
     var W = 640, H = 190, P = 30;
     var mx = 1;
@@ -459,7 +509,7 @@
       '<path d="' + pRev + '" fill="none" stroke="var(--gold-a)" stroke-width="2"/>' +
       '<path d="' + pProf + '" fill="none" stroke="var(--ok)" stroke-width="2" stroke-dasharray="1 0"/>' +
       '</svg>' +
-      '<div class="legend"><span><i style="background:var(--gold-a)"></i>Revenue / day</span><span><i style="background:var(--ok)"></i>Profit est / day</span></div>';
+      '<div class="legend"><span><i style="background:var(--gold-a)"></i>Revenue / day</span><span><i style="background:var(--ok)"></i>Actual profit / day</span></div>';
   }
 
   function oPaintProfit(r) {
@@ -631,6 +681,7 @@
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Profitability</h2><span class="hint">computed from the daily books over the chosen range</span>' +
@@ -642,6 +693,14 @@
         '</div>';
     },
     init: function () {
+      /* "graphs are not getting updated" (owner, 30 Aug): the screen fetched ONCE and then sat
+         still all day. It re-pulls every feed every 5 minutes while this view is on screen and
+         the tab is visible; navigation away stops it. */
+      clearInterval(O.tick);
+      O.tick = setInterval(function () {
+        if (!document.querySelector('.ov2') || document.hidden) { return; }
+        oFetchAll();
+      }, 300000);
       var root = document.querySelector('.ov2');
       if (root) {
         root.onclick = function (ev) {
