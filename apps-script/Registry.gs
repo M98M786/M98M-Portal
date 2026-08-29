@@ -505,3 +505,36 @@ function updateSirHasibAnalysis() {
     'analysis: ' + n1 + '+' + n2 + ' day rows · order book: ' + n3);
   return 'written: Sir Hasib ' + n1 + ' day(s), all-accounts ' + n2 + ' day(s), order-book ' + n3 + ' day(s)';
 }
+
+/** 30 Aug — the letters table had grown into the thousands (2,668 unread alone) and EVERY
+ * ~45-second poll from every signed-in person reads the whole tab. The pruner keeps each
+ * person's letters for 30 days (never touching unread ones younger than 90 days), rewrites the
+ * tab once under the lock, and runs nightly. Read letters older than a month are history the
+ * ACTIVITY_LOG already keeps in spirit; unread ones get a longer grace because unread is a
+ * signal someone may still need. */
+function notifPrune() {
+  const lock = LockService.getScriptLock();
+  const cut30 = Date.now() - 30 * 86400000;
+  const cut90 = Date.now() - 90 * 86400000;
+  let kept = 0, dropped = 0;
+  try {
+    lock.waitLock(15000);
+    const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+    const vals = sh.getDataRange().getValues();
+    if (vals.length < 2) return 'empty';
+    const head = vals[0];
+    const keep = [head];
+    for (let i = 1; i < vals.length; i++) {
+      const ts = new Date(String(vals[i][6]));                    // created_at
+      const readAt = String(vals[i][7] === null || vals[i][7] === undefined ? '' : vals[i][7]).trim();
+      const ageOk = isNaN(ts) ? true : (readAt ? ts.getTime() > cut30 : ts.getTime() > cut90);
+      if (ageOk) { keep.push(vals[i]); kept++; } else { dropped++; }
+    }
+    if (dropped) {
+      sh.clearContents();
+      sh.getRange(1, 1, keep.length, head.length).setValues(keep);
+    }
+  } finally { lock.releaseLock(); }
+  logActivity_('system', 'NOTIF_PRUNE', 'NOTIFICATIONS', '', String(dropped), 'kept ' + kept + ', dropped ' + dropped);
+  return 'kept ' + kept + ' letter(s), dropped ' + dropped + ' old one(s)';
+}
