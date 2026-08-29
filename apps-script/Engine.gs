@@ -171,6 +171,14 @@ function pushEngineSync() {
 
   try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
   try { revisionQualify(); } catch (e) { logActivity_('system', 'REVQ_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
+  try {
+    const psDay = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty('PORTAL_STATS_DAY') !== psDay) {
+      updateSirHasibAnalysis();
+      props.setProperty('PORTAL_STATS_DAY', psDay);
+    }
+  } catch (e) { logActivity_('system', 'PORTAL_STATS_FAIL', '', '', '', String(e && e.message || e).slice(0, 140)); }
 
   logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
   return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs + ' · ' + mirrored;
@@ -240,6 +248,7 @@ const ENGINE_RUNNABLE = {
   enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
   flushMirrorQueue: function () { return typeof flushMirrorQueue === 'function' ? String(flushMirrorQueue()) : 'absent'; },
   replayShadowOrders: function () { return typeof replayShadowOrders === 'function' ? String(replayShadowOrders()) : 'absent'; },
+  updateSirHasibAnalysis: function () { return typeof updateSirHasibAnalysis === 'function' ? String(updateSirHasibAnalysis()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

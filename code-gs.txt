@@ -21239,6 +21239,14 @@ function pushEngineSync() {
 
   try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
   try { revisionQualify(); } catch (e) { logActivity_('system', 'REVQ_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
+  try {
+    const psDay = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty('PORTAL_STATS_DAY') !== psDay) {
+      updateSirHasibAnalysis();
+      props.setProperty('PORTAL_STATS_DAY', psDay);
+    }
+  } catch (e) { logActivity_('system', 'PORTAL_STATS_FAIL', '', '', '', String(e && e.message || e).slice(0, 140)); }
 
   logActivity_('system', 'ENGINE_SYNC', 'users+accounts+facts+costs', '', users.length + 'u/' + accounts.length + 'a/' + facts + 'f', costs);
   return 'engine sync: ' + su.synced + ' users, ' + sa.synced + ' accounts, ' + facts + ' item facts · ' + costs + ' · ' + mirrored;
@@ -21308,6 +21316,7 @@ const ENGINE_RUNNABLE = {
   enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
   flushMirrorQueue: function () { return typeof flushMirrorQueue === 'function' ? String(flushMirrorQueue()) : 'absent'; },
   replayShadowOrders: function () { return typeof replayShadowOrders === 'function' ? String(replayShadowOrders()) : 'absent'; },
+  updateSirHasibAnalysis: function () { return typeof updateSirHasibAnalysis === 'function' ? String(updateSirHasibAnalysis()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -23766,4 +23775,80 @@ function replayShadowOrders() {
     skippedHasValue + ' already had values (kept); ' + errors + ' error(s) · per account: ' + JSON.stringify(perAccount);
   logActivity_('system', 'SHADOW_REPLAY', 'order books 3d', '', String(filled), summary.slice(0, 250));
   return summary;
+}
+
+/* ---------- 30 Aug (owner): "update Sir Hasib's order sheet and sales analysis sheet with the
+   portal — sales analysis of overall portal — update stats." His book's own report agents died
+   in July; the tabs stop there. The portal now writes its OWN clearly-marked stats tabs into
+   both books from the engine's penny-verified daily rows — never touching the book's original
+   tabs — and refreshes them on the nightly ride. Columns follow the daily-report brain:
+   Revenue · OE · Cost · CPC ads · Ad revenue · ROAS · T (0.8 law) · Returns · ACTUAL. */
+const SH_ANALYSIS_BOOK = '1RQwuTJElRd-v7BKaK_DjFn8SjeKk_PRxa5XzGavSzSA';
+const SH_ORDER_BOOK = '1MJK7wt3r3w-7JCCZjaSGxU23ZftbqerS7LlKAk-qwmQ';
+const PORTAL_STATS_DAYS = 45;
+
+function portalStatsRows_() {
+  const out = [];
+  let offset = 0;
+  for (let page = 0; page < 6; page++) {
+    const d = enginePost_('backupDump', { table: 'sales_daily', offset: offset });
+    const head = (d && d.header) || [];
+    (d.rows || []).forEach(function (r) {
+      const o = {}; head.forEach(function (c, i) { o[c] = r[i]; });
+      out.push(o);
+    });
+    offset += (d.rows || []).length;
+    if (d.done || !(d.rows || []).length) break;
+  }
+  return out;
+}
+
+function portalStatsWrite_(bookId, tabName, rows, label) {
+  const ss = SpreadsheetApp.openById(bookId);
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) { sh = ss.insertSheet(tabName, 0); }
+  sh.clearContents();
+  const header = ['Date (UK)', 'Revenue', 'Order Earning', 'Cost', 'CPC Ads', 'Ad Revenue', 'ROAS',
+    'T = 0.8×(OE−Cost)', 'Returns', 'ACTUAL PROFIT'];
+  const byDay = {};
+  rows.forEach(function (r) {
+    const k = String(r.date);
+    const b = (byDay[k] = byDay[k] || { sold: 0, oe: 0, cost: 0, pri: 0, ads_rev: 0, profit: 0, returns: 0, actual: 0 });
+    ['sold', 'oe', 'cost', 'pri', 'ads_rev', 'profit', 'returns', 'actual'].forEach(function (c) {
+      b[c] += Number(r[c]) || 0;
+    });
+  });
+  const days = Object.keys(byDay).sort().reverse().slice(0, PORTAL_STATS_DAYS);
+  const cut7 = days.slice(0, 7);
+  const month = days.length ? String(days[0]).slice(0, 7) : '';
+  let t7 = 0, a7 = 0, rMtd = 0, aMtd = 0;
+  const grid = days.map(function (k) {
+    const b = byDay[k];
+    if (cut7.indexOf(k) >= 0) { t7 += b.sold; a7 += b.actual; }
+    if (k.slice(0, 7) === month) { rMtd += b.sold; aMtd += b.actual; }
+    const roas = b.pri > 0 ? Math.round(b.ads_rev / b.pri * 10) / 10 : '';
+    return [k, r2_(b.sold), r2_(b.oe), r2_(b.cost), r2_(b.pri), r2_(b.ads_rev), roas,
+      r2_(b.profit), r2_(b.returns), r2_(b.actual)];
+  });
+  const stamp = 'Updated by the portal · ' + Utilities.formatDate(new Date(), 'Asia/Karachi', 'd MMM, hh:mm a') + ' PKT · ' + label;
+  const summary = ['REVENUE · 7 DAYS £' + r2_(t7) + '   ACTUAL · 7 DAYS £' + r2_(a7) +
+    '   REVENUE · MTD £' + r2_(rMtd) + '   ACTUAL · MTD £' + r2_(aMtd)];
+  sh.getRange(1, 1).setValue(stamp).setFontWeight('bold');
+  sh.getRange(2, 1).setValue(summary[0]).setFontWeight('bold');
+  sh.getRange(4, 1, 1, header.length).setValues([header]).setFontWeight('bold');
+  if (grid.length) sh.getRange(5, 1, grid.length, header.length).setValues(grid);
+  sh.setFrozenRows(4);
+  return grid.length;
+}
+function r2_(v) { return Math.round((Number(v) || 0) * 100) / 100; }
+
+function updateSirHasibAnalysis() {
+  const all = portalStatsRows_();
+  const mine = all.filter(function (r) { return String(r.account) === 'Sir Hasib'; });
+  const n1 = portalStatsWrite_(SH_ANALYSIS_BOOK, 'PORTAL STATS — Sir Hasib (auto)', mine, 'Sir Hasib');
+  const n2 = portalStatsWrite_(SH_ANALYSIS_BOOK, 'PORTAL STATS — ALL ACCOUNTS (auto)', all, 'every account combined');
+  const n3 = portalStatsWrite_(SH_ORDER_BOOK, 'PORTAL STATS (auto)', mine, 'Sir Hasib');
+  logActivity_('system', 'PORTAL_STATS_WRITE', 'Sir Hasib books', '', String(n1 + n2 + n3),
+    'analysis: ' + n1 + '+' + n2 + ' day rows · order book: ' + n3);
+  return 'written: Sir Hasib ' + n1 + ' day(s), all-accounts ' + n2 + ' day(s), order-book ' + n3 + ' day(s)';
 }
