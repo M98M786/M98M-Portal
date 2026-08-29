@@ -235,6 +235,38 @@ function ibSettle() { IB.busy = false; IB.lastAt = ibNowMs(); }
 
 function ibApplyPoll(d) {
   if (!STATE.counts) STATE.counts = {};
+  /* 30 Aug (owner): "no proper message or pop up ... like you show on phone." First poll is the
+     baseline; after that, a letter or thread the poll has never shown before slides in as a
+     phone-style card. Nothing pops for history. */
+  try {
+    if (typeof notifPop === 'function') {
+      if (!IB.popSeen) {
+        IB.popSeen = {};
+        (d.notifications || []).forEach(function (n) { IB.popSeen['n' + (n.notif_id || n.id || n.ts)] = 1; });
+        (d.threads || []).forEach(function (t) { IB.popSeen['t' + (t.thread_id || t.id) + ':' + (t.last_ts || t.updated_at || '')] = 1; });
+      } else {
+        (d.notifications || []).slice(0, 6).forEach(function (n) {
+          var k = 'n' + (n.notif_id || n.id || n.ts);
+          if (IB.popSeen[k]) { return; }
+          IB.popSeen[k] = 1;
+          var read = String(n.read_at || n.read || '').trim();
+          if (read) { return; }
+          notifPop({ icon: '🔔', title: String(n.type || 'New letter').replace(/_/g, ' '),
+            body: String(n.message || n.body || '').slice(0, 140),
+            onopen: function () { ibGoInbox('nt'); } });
+        });
+        (d.threads || []).slice(0, 4).forEach(function (t) {
+          var k = 't' + (t.thread_id || t.id) + ':' + (t.last_ts || t.updated_at || '');
+          if (IB.popSeen[k]) { return; }
+          IB.popSeen[k] = 1;
+          if (!(Number(t.unread) > 0)) { return; }
+          notifPop({ icon: '💬', title: String(t.with_name || t.title || 'New message'),
+            body: String(t.last_text || t.snippet || 'sent you a message').slice(0, 140),
+            onopen: function () { ibGoInbox('dm'); } });
+        });
+      }
+    }
+  } catch (e) {}
   STATE.counts.notifications = d.unreadNotif || 0;
   STATE.counts.inbox = d.unreadDm || 0;
   if (typeof refreshBadges === 'function') refreshBadges();

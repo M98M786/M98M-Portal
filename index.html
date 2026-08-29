@@ -96,6 +96,31 @@ input,select{font:inherit}
 .nav a.on{background:linear-gradient(90deg,rgba(233,169,60,.14),rgba(233,169,60,.02)); color:#F6D989}
 .nav a.on::before{content:""; position:absolute; left:-12px; top:9px; bottom:9px; width:3px; border-radius:3px; background:linear-gradient(180deg,var(--gold-a),var(--gold-c)); box-shadow:0 0 10px rgba(233,169,60,.6)}
 .nav .badge{margin-left:auto; background:linear-gradient(135deg,var(--blue-2),var(--blue-deep)); color:#fff; font-size:11px; font-weight:800; padding:1px 8px; border-radius:99px}
+.side{overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(233,169,60,.25) transparent}
+.side::-webkit-scrollbar{width:5px}
+.side::-webkit-scrollbar-thumb{background:rgba(233,169,60,.22);border-radius:99px}
+.side::-webkit-scrollbar-track{background:transparent}
+/* 30 Aug (owner): "only one side bar, like professional websites" — one compact rail: every
+   department folds, the open one remembers itself, and the rail no longer scrolls for miles. */
+.nav-dept{cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between}
+.nav-dept::after{content:"›"; font-size:12px; transform:rotate(90deg); transition:transform .18s ease; color:#6b7687}
+.nav-dept.closed::after{transform:rotate(0deg)}
+.nav-sec{display:flex; flex-direction:column; gap:3px; overflow:hidden}
+.nav-sec.closed{display:none}
+.nav-dept .nd-n{margin-left:8px;background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));color:#fff;font-size:9.5px;font-weight:800;padding:0 7px;border-radius:99px}
+/* phone-style pop messages (owner: "pop up message like you show on phone") */
+.pop-stack{position:fixed; top:70px; right:16px; z-index:340; display:flex; flex-direction:column; gap:10px; width:min(360px,86vw); pointer-events:none}
+.pop-card{pointer-events:auto; background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--gold-line-hi);
+  border-radius:14px; padding:12px 14px 10px; box-shadow:0 14px 40px rgba(0,0,0,.5); cursor:pointer; position:relative; overflow:hidden;
+  transform:translateX(420px); opacity:0; transition:transform .3s cubic-bezier(.2,.9,.3,1.2), opacity .3s}
+.pop-card.in{transform:translateX(0); opacity:1}
+.pop-card.out{transform:translateX(420px); opacity:0}
+.pop-card .pc-t{font-weight:800; font-size:12.5px; display:flex; align-items:center; gap:8px}
+.pop-card .pc-t .ico{width:26px;height:26px;border-radius:8px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,var(--gold-a),var(--gold-c));color:#1a1204;font-size:13px}
+.pop-card .pc-b{font-size:12px; color:var(--text-2); font-weight:600; margin-top:5px; max-height:54px; overflow:hidden}
+.pop-card .pc-x{position:absolute; top:6px; right:9px; color:var(--text-3); font-weight:800; font-size:14px; padding:2px 6px}
+.pop-card .pc-bar{position:absolute; left:0; bottom:0; height:2px; background:linear-gradient(90deg,var(--gold-a),var(--gold-c)); width:100%; transform-origin:left; animation:popbar 7s linear forwards}
+@keyframes popbar{to{transform:scaleX(0)}}
 .side .foot{margin-top:auto; padding:12px 8px 4px; border-top:1px solid var(--gold-line); font-size:11.5px; color:var(--text-3)}
 .side .foot b{color:#C9D3DC}
 .top{grid-area:top; display:flex; align-items:center; gap:12px; padding:0 20px; background:rgba(16,20,31,.55); backdrop-filter:blur(10px); border-bottom:1px solid var(--gold-line)}
@@ -251,6 +276,29 @@ function setHTML(id, html){ var el = $(id); if(!el){ return false; } el.innerHTM
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
+/* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
+   7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
+function notifPop(o){
+  o = o || {};
+  var stack = $('popStack');
+  if(!stack){ stack = document.createElement('div'); stack.id='popStack'; stack.className='pop-stack'; document.body.appendChild(stack); }
+  while (stack.children.length >= 3) { stack.removeChild(stack.firstChild); }
+  var c = document.createElement('div');
+  c.className = 'pop-card';
+  c.innerHTML = '<div class="pc-t"><span class="ico">' + (o.icon || '✉') + '</span><span>' + esc(String(o.title||'New message')) + '</span></div>' +
+    (o.body ? '<div class="pc-b">' + esc(String(o.body)) + '</div>' : '') +
+    '<span class="pc-x">×</span><div class="pc-bar"></div>';
+  c.onclick = function(ev){
+    if (ev.target && ev.target.className === 'pc-x') { kill(); ev.stopPropagation(); return; }
+    kill();
+    try { if (o.onopen) { o.onopen(); } } catch(e){}
+  };
+  function kill(){ c.classList.add('out'); setTimeout(function(){ if(c.parentNode){ c.parentNode.removeChild(c); } }, 320); }
+  stack.appendChild(c);
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ c.classList.add('in'); }); });
+  setTimeout(kill, 7000);
+  return c;
+}
 
 /* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ----
    Google spends roughly 2.5 seconds loading the backend before any of our code runs, and that
@@ -462,7 +510,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260829-2245';
+var BUILD = '20260829-2301';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -12090,6 +12138,38 @@ function ibSettle() { IB.busy = false; IB.lastAt = ibNowMs(); }
 
 function ibApplyPoll(d) {
   if (!STATE.counts) STATE.counts = {};
+  /* 30 Aug (owner): "no proper message or pop up ... like you show on phone." First poll is the
+     baseline; after that, a letter or thread the poll has never shown before slides in as a
+     phone-style card. Nothing pops for history. */
+  try {
+    if (typeof notifPop === 'function') {
+      if (!IB.popSeen) {
+        IB.popSeen = {};
+        (d.notifications || []).forEach(function (n) { IB.popSeen['n' + (n.notif_id || n.id || n.ts)] = 1; });
+        (d.threads || []).forEach(function (t) { IB.popSeen['t' + (t.thread_id || t.id) + ':' + (t.last_ts || t.updated_at || '')] = 1; });
+      } else {
+        (d.notifications || []).slice(0, 6).forEach(function (n) {
+          var k = 'n' + (n.notif_id || n.id || n.ts);
+          if (IB.popSeen[k]) { return; }
+          IB.popSeen[k] = 1;
+          var read = String(n.read_at || n.read || '').trim();
+          if (read) { return; }
+          notifPop({ icon: '🔔', title: String(n.type || 'New letter').replace(/_/g, ' '),
+            body: String(n.message || n.body || '').slice(0, 140),
+            onopen: function () { ibGoInbox('nt'); } });
+        });
+        (d.threads || []).slice(0, 4).forEach(function (t) {
+          var k = 't' + (t.thread_id || t.id) + ':' + (t.last_ts || t.updated_at || '');
+          if (IB.popSeen[k]) { return; }
+          IB.popSeen[k] = 1;
+          if (!(Number(t.unread) > 0)) { return; }
+          notifPop({ icon: '💬', title: String(t.with_name || t.title || 'New message'),
+            body: String(t.last_text || t.snippet || 'sent you a message').slice(0, 140),
+            onopen: function () { ibGoInbox('dm'); } });
+        });
+      }
+    }
+  } catch (e) {}
   STATE.counts.notifications = d.unreadNotif || 0;
   STATE.counts.inbox = d.unreadDm || 0;
   if (typeof refreshBadges === 'function') refreshBadges();
@@ -22426,8 +22506,23 @@ function saveSchedule() {
     action = s.can_clock_out ? 'clockOut' : 'clockIn';
     if (action === 'clockIn' && !s.can_clock_in) { return; }
     SG.clockBusy = true;
-    var btn = document.getElementById('clockChip');
-    if (btn) { btn.disabled = true; }
+    /* 30 Aug (owner): "my team is facing issues pressing Start office working — it takes a lot
+       of time." The tap now paints its result IMMEDIATELY (the sheet write continues behind);
+       if the backend later refuses, the button rolls straight back and says why. */
+    var before = JSON.parse(JSON.stringify(SG.att || {}));
+    var now = new Date();
+    var hm = now.getHours() * 100 + now.getMinutes();
+    if (action === 'clockIn') {
+      SG.att.session = { can_clock_in: false, can_clock_out: true, today: s.today || {},
+        open_session: { clock_in: hm, date: SG.att.date } };
+      toast('Recorded — office working started.');
+    } else {
+      var t0 = (s.open_session && s.open_session.clock_in) || 0;
+      SG.att.session = { can_clock_in: false, can_clock_out: false,
+        today: { clock_in: t0, clock_out: hm, hours_label: '…', late_flag: '', early_flag: '' } };
+      toast('Recorded — working concluded.');
+    }
+    sgClockPaint();
     api(action, { days: 1 }).then(function (d) {
       SG.clockBusy = false;
       SG.att = d || {};
@@ -22436,8 +22531,9 @@ function saveSchedule() {
       if (sgStr(SG.att.message)) { toast(sgStr(SG.att.message)); }
     })['catch'](function (e) {
       SG.clockBusy = false;
+      SG.att = before;                          // honest rollback — the tap did NOT land
       sgClockPaint();
-      toast('Not recorded: ' + e.message);
+      toast('NOT recorded — ' + e.message + ' · tap it again.');
     });
   }
 
@@ -24623,9 +24719,24 @@ function saveSchedule() {
     }
     if (act === 'cancel') { if (form) { form.classList.add('hidden'); } return; }
     if (act === 'start') {
+      /* 30 Aug (owner): buttons must answer in milliseconds. The card flips to WORKING at once;
+         the write finishes behind; a refusal flips it straight back with the reason. */
       btn.disabled = true;
-      api('startTask', { task_id: id }).then(function () { toast('Started — the clock is running.'); tkLoadTasks(); })
-        .catch(function (e) { btn.disabled = false; toast('Could not start: ' + e.message); });
+      var card0 = btn.closest ? btn.closest('.tk-card,[data-task]') : null;
+      var undo0 = card0 ? card0.innerHTML : null;
+      if (card0) {
+        var st = card0.querySelector('.pill, .tk-status');
+        if (st) { st.textContent = 'WORKING'; st.className = (st.className || '') + ' hu-ok'; }
+        btn.textContent = 'Started ✓';
+      }
+      toast('Started — the clock is running.');
+      api('startTask', { task_id: id }).then(function () { tkLoadTasks(); })
+        .catch(function (e) {
+          if (card0 && undo0 != null) { card0.innerHTML = undo0; }
+          else { btn.disabled = false; }
+          toast('NOT started — ' + e.message);
+          tkLoadTasks();
+        });
       return;
     }
     if (act === 'send') {
@@ -24639,8 +24750,15 @@ function saveSchedule() {
         if (v) { payload.item_id = v; }
       }
       btn.disabled = true;
-      api('submitTask', payload).then(function () { toast('Sent for approval.'); tkLoadTasks(); })
-        .catch(function (e) { btn.disabled = false; toast('Not submitted: ' + e.message); });
+      btn.textContent = 'Sent ✓';
+      if (form) { form.classList.add('hidden'); }
+      toast('Sent for approval.');
+      api('submitTask', payload).then(function () { tkLoadTasks(); })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = 'Send for approval';
+          if (form) { form.classList.remove('hidden'); }
+          toast('NOT submitted — ' + e.message);
+        });
     }
   }
 
@@ -25679,21 +25797,50 @@ function enterApp(user){
   }
   var visible = viewList();
   var byKey = {}; visible.forEach(function(v){ byKey[v.key] = v; });
-  NAV_DEPTS.forEach(function(dept){
-    var members = dept.keys.filter(function(k){ return byKey[k]; });
-    if(!members.length) return;
+  /* 30 Aug (owner): one professional sidebar. Groups FOLD: the group holding the current
+     screen opens, the rest sit closed; every toggle is remembered per person. */
+  var navOpen = {};
+  try { navOpen = JSON.parse(localStorage.getItem('m98m:navOpen') || '{}') || {}; } catch(e){}
+  function navSaveOpen(){ try { localStorage.setItem('m98m:navOpen', JSON.stringify(navOpen)); } catch(e){} }
+  var groupOf = {};
+  function buildGroup(name, members){
     var h = document.createElement('div');
     h.className = 'nav-dept';
-    h.textContent = dept.name;
+    var label = document.createElement('span'); label.textContent = name; h.appendChild(label);
+    var sec = document.createElement('div');
+    sec.className = 'nav-sec';
+    sec.dataset.dept = name;
+    var hasCurrent = members.some(function(v){ return v.key === landing; });
+    var open = (name in navOpen) ? !!navOpen[name] : (hasCurrent || name === 'My desk');
+    if (hasCurrent) { open = true; }                     // the group you are in never hides itself
+    if (!open) { h.classList.add('closed'); sec.classList.add('closed'); }
+    h.onclick = function(){
+      var closed = sec.classList.toggle('closed');
+      h.classList.toggle('closed', closed);
+      navOpen[name] = !closed;
+      navSaveOpen();
+    };
     nav.appendChild(h);
-    members.forEach(function(k){ placed[k]=1; nav.appendChild(navLink(byKey[k])); });
+    nav.appendChild(sec);
+    members.forEach(function(v){ placed[v.key]=1; groupOf[v.key]=name; sec.appendChild(navLink(v)); });
+  }
+  NAV_DEPTS.forEach(function(dept){
+    var members = dept.keys.filter(function(k){ return byKey[k]; }).map(function(k){ return byKey[k]; });
+    if(members.length) buildGroup(dept.name, members);
   });
   var rest = visible.filter(function(v){ return !placed[v.key]; });
-  if(rest.length){
-    var h2 = document.createElement('div'); h2.className='nav-dept'; h2.textContent='More';
-    nav.appendChild(h2);
-    rest.forEach(function(v){ nav.appendChild(navLink(v)); });
-  }
+  if(rest.length){ buildGroup('More', rest); }
+  /* navigating into a closed group opens it (hash nav, in-page links) */
+  window.__navReveal = function(key){
+    var name = groupOf[key];
+    if (!name) return;
+    var sec = nav.querySelector('.nav-sec[data-dept="' + name + '"]');
+    if (sec && sec.classList.contains('closed')) {
+      sec.classList.remove('closed');
+      var hd = sec.previousSibling; if (hd) hd.classList.remove('closed');
+      navOpen[name] = true; navSaveOpen();
+    }
+  };
   /* A #view hash wins over the default landing: a reload lands where you were, and a link
      opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
   var fromHash = (location.hash || '').replace(/^#/, '');
@@ -25702,6 +25849,7 @@ function enterApp(user){
   var navTo = function(key){
     var links = document.querySelectorAll('.nav a');
     for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
+    if (window.__navReveal) { window.__navReveal(key); }
     renderView(key);
   };
   window.addEventListener('hashchange', function(){

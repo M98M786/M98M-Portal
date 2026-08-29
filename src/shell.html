@@ -96,6 +96,31 @@ input,select{font:inherit}
 .nav a.on{background:linear-gradient(90deg,rgba(233,169,60,.14),rgba(233,169,60,.02)); color:#F6D989}
 .nav a.on::before{content:""; position:absolute; left:-12px; top:9px; bottom:9px; width:3px; border-radius:3px; background:linear-gradient(180deg,var(--gold-a),var(--gold-c)); box-shadow:0 0 10px rgba(233,169,60,.6)}
 .nav .badge{margin-left:auto; background:linear-gradient(135deg,var(--blue-2),var(--blue-deep)); color:#fff; font-size:11px; font-weight:800; padding:1px 8px; border-radius:99px}
+.side{overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(233,169,60,.25) transparent}
+.side::-webkit-scrollbar{width:5px}
+.side::-webkit-scrollbar-thumb{background:rgba(233,169,60,.22);border-radius:99px}
+.side::-webkit-scrollbar-track{background:transparent}
+/* 30 Aug (owner): "only one side bar, like professional websites" — one compact rail: every
+   department folds, the open one remembers itself, and the rail no longer scrolls for miles. */
+.nav-dept{cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between}
+.nav-dept::after{content:"›"; font-size:12px; transform:rotate(90deg); transition:transform .18s ease; color:#6b7687}
+.nav-dept.closed::after{transform:rotate(0deg)}
+.nav-sec{display:flex; flex-direction:column; gap:3px; overflow:hidden}
+.nav-sec.closed{display:none}
+.nav-dept .nd-n{margin-left:8px;background:linear-gradient(135deg,var(--blue-2),var(--blue-deep));color:#fff;font-size:9.5px;font-weight:800;padding:0 7px;border-radius:99px}
+/* phone-style pop messages (owner: "pop up message like you show on phone") */
+.pop-stack{position:fixed; top:70px; right:16px; z-index:340; display:flex; flex-direction:column; gap:10px; width:min(360px,86vw); pointer-events:none}
+.pop-card{pointer-events:auto; background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--gold-line-hi);
+  border-radius:14px; padding:12px 14px 10px; box-shadow:0 14px 40px rgba(0,0,0,.5); cursor:pointer; position:relative; overflow:hidden;
+  transform:translateX(420px); opacity:0; transition:transform .3s cubic-bezier(.2,.9,.3,1.2), opacity .3s}
+.pop-card.in{transform:translateX(0); opacity:1}
+.pop-card.out{transform:translateX(420px); opacity:0}
+.pop-card .pc-t{font-weight:800; font-size:12.5px; display:flex; align-items:center; gap:8px}
+.pop-card .pc-t .ico{width:26px;height:26px;border-radius:8px;flex:none;display:grid;place-items:center;background:linear-gradient(135deg,var(--gold-a),var(--gold-c));color:#1a1204;font-size:13px}
+.pop-card .pc-b{font-size:12px; color:var(--text-2); font-weight:600; margin-top:5px; max-height:54px; overflow:hidden}
+.pop-card .pc-x{position:absolute; top:6px; right:9px; color:var(--text-3); font-weight:800; font-size:14px; padding:2px 6px}
+.pop-card .pc-bar{position:absolute; left:0; bottom:0; height:2px; background:linear-gradient(90deg,var(--gold-a),var(--gold-c)); width:100%; transform-origin:left; animation:popbar 7s linear forwards}
+@keyframes popbar{to{transform:scaleX(0)}}
 .side .foot{margin-top:auto; padding:12px 8px 4px; border-top:1px solid var(--gold-line); font-size:11.5px; color:var(--text-3)}
 .side .foot b{color:#C9D3DC}
 .top{grid-area:top; display:flex; align-items:center; gap:12px; padding:0 20px; background:rgba(16,20,31,.55); backdrop-filter:blur(10px); border-bottom:1px solid var(--gold-line)}
@@ -251,6 +276,29 @@ function setHTML(id, html){ var el = $(id); if(!el){ return false; } el.innerHTM
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
+/* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
+   7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
+function notifPop(o){
+  o = o || {};
+  var stack = $('popStack');
+  if(!stack){ stack = document.createElement('div'); stack.id='popStack'; stack.className='pop-stack'; document.body.appendChild(stack); }
+  while (stack.children.length >= 3) { stack.removeChild(stack.firstChild); }
+  var c = document.createElement('div');
+  c.className = 'pop-card';
+  c.innerHTML = '<div class="pc-t"><span class="ico">' + (o.icon || '✉') + '</span><span>' + esc(String(o.title||'New message')) + '</span></div>' +
+    (o.body ? '<div class="pc-b">' + esc(String(o.body)) + '</div>' : '') +
+    '<span class="pc-x">×</span><div class="pc-bar"></div>';
+  c.onclick = function(ev){
+    if (ev.target && ev.target.className === 'pc-x') { kill(); ev.stopPropagation(); return; }
+    kill();
+    try { if (o.onopen) { o.onopen(); } } catch(e){}
+  };
+  function kill(){ c.classList.add('out'); setTimeout(function(){ if(c.parentNode){ c.parentNode.removeChild(c); } }, 320); }
+  stack.appendChild(c);
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ c.classList.add('in'); }); });
+  setTimeout(kill, 7000);
+  return c;
+}
 
 /* ---- backend POST (text/plain avoids CORS preflight; idToken on every call, RL-1) ----
    Google spends roughly 2.5 seconds loading the backend before any of our code runs, and that
@@ -1024,21 +1072,50 @@ function enterApp(user){
   }
   var visible = viewList();
   var byKey = {}; visible.forEach(function(v){ byKey[v.key] = v; });
-  NAV_DEPTS.forEach(function(dept){
-    var members = dept.keys.filter(function(k){ return byKey[k]; });
-    if(!members.length) return;
+  /* 30 Aug (owner): one professional sidebar. Groups FOLD: the group holding the current
+     screen opens, the rest sit closed; every toggle is remembered per person. */
+  var navOpen = {};
+  try { navOpen = JSON.parse(localStorage.getItem('m98m:navOpen') || '{}') || {}; } catch(e){}
+  function navSaveOpen(){ try { localStorage.setItem('m98m:navOpen', JSON.stringify(navOpen)); } catch(e){} }
+  var groupOf = {};
+  function buildGroup(name, members){
     var h = document.createElement('div');
     h.className = 'nav-dept';
-    h.textContent = dept.name;
+    var label = document.createElement('span'); label.textContent = name; h.appendChild(label);
+    var sec = document.createElement('div');
+    sec.className = 'nav-sec';
+    sec.dataset.dept = name;
+    var hasCurrent = members.some(function(v){ return v.key === landing; });
+    var open = (name in navOpen) ? !!navOpen[name] : (hasCurrent || name === 'My desk');
+    if (hasCurrent) { open = true; }                     // the group you are in never hides itself
+    if (!open) { h.classList.add('closed'); sec.classList.add('closed'); }
+    h.onclick = function(){
+      var closed = sec.classList.toggle('closed');
+      h.classList.toggle('closed', closed);
+      navOpen[name] = !closed;
+      navSaveOpen();
+    };
     nav.appendChild(h);
-    members.forEach(function(k){ placed[k]=1; nav.appendChild(navLink(byKey[k])); });
+    nav.appendChild(sec);
+    members.forEach(function(v){ placed[v.key]=1; groupOf[v.key]=name; sec.appendChild(navLink(v)); });
+  }
+  NAV_DEPTS.forEach(function(dept){
+    var members = dept.keys.filter(function(k){ return byKey[k]; }).map(function(k){ return byKey[k]; });
+    if(members.length) buildGroup(dept.name, members);
   });
   var rest = visible.filter(function(v){ return !placed[v.key]; });
-  if(rest.length){
-    var h2 = document.createElement('div'); h2.className='nav-dept'; h2.textContent='More';
-    nav.appendChild(h2);
-    rest.forEach(function(v){ nav.appendChild(navLink(v)); });
-  }
+  if(rest.length){ buildGroup('More', rest); }
+  /* navigating into a closed group opens it (hash nav, in-page links) */
+  window.__navReveal = function(key){
+    var name = groupOf[key];
+    if (!name) return;
+    var sec = nav.querySelector('.nav-sec[data-dept="' + name + '"]');
+    if (sec && sec.classList.contains('closed')) {
+      sec.classList.remove('closed');
+      var hd = sec.previousSibling; if (hd) hd.classList.remove('closed');
+      navOpen[name] = true; navSaveOpen();
+    }
+  };
   /* A #view hash wins over the default landing: a reload lands where you were, and a link
      opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
   var fromHash = (location.hash || '').replace(/^#/, '');
@@ -1047,6 +1124,7 @@ function enterApp(user){
   var navTo = function(key){
     var links = document.querySelectorAll('.nav a');
     for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
+    if (window.__navReveal) { window.__navReveal(key); }
     renderView(key);
   };
   window.addEventListener('hashchange', function(){

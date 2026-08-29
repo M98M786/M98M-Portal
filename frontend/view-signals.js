@@ -725,8 +725,23 @@
     action = s.can_clock_out ? 'clockOut' : 'clockIn';
     if (action === 'clockIn' && !s.can_clock_in) { return; }
     SG.clockBusy = true;
-    var btn = document.getElementById('clockChip');
-    if (btn) { btn.disabled = true; }
+    /* 30 Aug (owner): "my team is facing issues pressing Start office working — it takes a lot
+       of time." The tap now paints its result IMMEDIATELY (the sheet write continues behind);
+       if the backend later refuses, the button rolls straight back and says why. */
+    var before = JSON.parse(JSON.stringify(SG.att || {}));
+    var now = new Date();
+    var hm = now.getHours() * 100 + now.getMinutes();
+    if (action === 'clockIn') {
+      SG.att.session = { can_clock_in: false, can_clock_out: true, today: s.today || {},
+        open_session: { clock_in: hm, date: SG.att.date } };
+      toast('Recorded — office working started.');
+    } else {
+      var t0 = (s.open_session && s.open_session.clock_in) || 0;
+      SG.att.session = { can_clock_in: false, can_clock_out: false,
+        today: { clock_in: t0, clock_out: hm, hours_label: '…', late_flag: '', early_flag: '' } };
+      toast('Recorded — working concluded.');
+    }
+    sgClockPaint();
     api(action, { days: 1 }).then(function (d) {
       SG.clockBusy = false;
       SG.att = d || {};
@@ -735,8 +750,9 @@
       if (sgStr(SG.att.message)) { toast(sgStr(SG.att.message)); }
     })['catch'](function (e) {
       SG.clockBusy = false;
+      SG.att = before;                          // honest rollback — the tap did NOT land
       sgClockPaint();
-      toast('Not recorded: ' + e.message);
+      toast('NOT recorded — ' + e.message + ' · tap it again.');
     });
   }
 

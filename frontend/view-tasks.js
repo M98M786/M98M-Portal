@@ -573,9 +573,24 @@
     }
     if (act === 'cancel') { if (form) { form.classList.add('hidden'); } return; }
     if (act === 'start') {
+      /* 30 Aug (owner): buttons must answer in milliseconds. The card flips to WORKING at once;
+         the write finishes behind; a refusal flips it straight back with the reason. */
       btn.disabled = true;
-      api('startTask', { task_id: id }).then(function () { toast('Started — the clock is running.'); tkLoadTasks(); })
-        .catch(function (e) { btn.disabled = false; toast('Could not start: ' + e.message); });
+      var card0 = btn.closest ? btn.closest('.tk-card,[data-task]') : null;
+      var undo0 = card0 ? card0.innerHTML : null;
+      if (card0) {
+        var st = card0.querySelector('.pill, .tk-status');
+        if (st) { st.textContent = 'WORKING'; st.className = (st.className || '') + ' hu-ok'; }
+        btn.textContent = 'Started ✓';
+      }
+      toast('Started — the clock is running.');
+      api('startTask', { task_id: id }).then(function () { tkLoadTasks(); })
+        .catch(function (e) {
+          if (card0 && undo0 != null) { card0.innerHTML = undo0; }
+          else { btn.disabled = false; }
+          toast('NOT started — ' + e.message);
+          tkLoadTasks();
+        });
       return;
     }
     if (act === 'send') {
@@ -589,8 +604,15 @@
         if (v) { payload.item_id = v; }
       }
       btn.disabled = true;
-      api('submitTask', payload).then(function () { toast('Sent for approval.'); tkLoadTasks(); })
-        .catch(function (e) { btn.disabled = false; toast('Not submitted: ' + e.message); });
+      btn.textContent = 'Sent ✓';
+      if (form) { form.classList.add('hidden'); }
+      toast('Sent for approval.');
+      api('submitTask', payload).then(function () { tkLoadTasks(); })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = 'Send for approval';
+          if (form) { form.classList.remove('hidden'); }
+          toast('NOT submitted — ' + e.message);
+        });
     }
   }
 
