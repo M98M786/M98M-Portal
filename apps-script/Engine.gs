@@ -239,6 +239,7 @@ const ENGINE_RUNNABLE = {
   sheetWritesStatus: function () { return typeof sheetWritesStatus === 'function' ? String(sheetWritesStatus()) : 'absent'; },
   enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
   flushMirrorQueue: function () { return typeof flushMirrorQueue === 'function' ? String(flushMirrorQueue()) : 'absent'; },
+  replayShadowOrders: function () { return typeof replayShadowOrders === 'function' ? String(replayShadowOrders()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

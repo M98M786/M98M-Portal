@@ -21304,6 +21304,7 @@ const ENGINE_RUNNABLE = {
   sheetWritesStatus: function () { return typeof sheetWritesStatus === 'function' ? String(sheetWritesStatus()) : 'absent'; },
   enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
   flushMirrorQueue: function () { return typeof flushMirrorQueue === 'function' ? String(flushMirrorQueue()) : 'absent'; },
+  replayShadowOrders: function () { return typeof replayShadowOrders === 'function' ? String(replayShadowOrders()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -23703,4 +23704,63 @@ function flushMirrorQueue() {
   const msg = 'mirrors flushed: ' + done + ' done, ' + failed + ' failed, ' + pending + ' left for next run';
   if (done || failed) logActivity_('system', 'MIRROR_FLUSH', 'hunt_decision', '', String(done), msg);
   return msg;
+}
+
+/** 29 Aug one-shot: replay the shadow-era order writes. Before live writing was switched on,
+ * every Cost / Ali order number / tracking the processors typed was logged as SHADOW_WRITE and
+ * never reached the day tabs. This walks those log rows (order books only, last 3 days),
+ * and fills each captured value into its exact cell ONLY IF that cell is still blank — a value
+ * someone has since re-entered, or that changed, is never touched. Idempotent; returns counts. */
+function replayShadowOrders() {
+  const cutoff = new Date(Date.now() - 3 * 86400000);
+  const books = {};
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind) === 'order_processing' && String(c.status || '').toLowerCase() !== 'off') {
+      books[String(c.spreadsheet_id)] = String(c.account_name);
+    }
+  });
+  const t0 = Date.now();
+  let filled = 0, skippedHasValue = 0, rowsSeen = 0, errors = 0;
+  const opened = {};
+  const perAccount = {};
+  readTab_('ACTIVITY_LOG').forEach(function (r) {
+    if (String(r.action) !== 'SHADOW_WRITE') return;
+    const ts = new Date(String(r.ts));
+    if (isNaN(ts) || ts < cutoff) return;
+    const target = String(r.target || '');
+    const parts = target.split('!');
+    if (parts.length !== 3) return;
+    const bookId = parts[0], tabName = parts[1], rowLabel = parts[2];
+    if (!books[bookId]) return;                          // order books only
+    const rowNum = Number(rowLabel);
+    if (!rowNum || rowNum < 2) return;                   // updates only, never appends
+    if (Date.now() - t0 > 250000) return;                // budget — rerun for the rest
+    let values;
+    try { values = JSON.parse(String(r.new_value || '{}')); } catch (e) { return; }
+    rowsSeen++;
+    try {
+      const key = bookId + '|' + tabName;
+      if (!(key in opened)) {
+        opened[key] = bridgeOpenTab_(bookId, [tabName], ORDERS_EXPECT_DAY);
+      }
+      const open = opened[key];
+      if (!open) { errors++; return; }
+      Object.keys(values).forEach(function (h) {
+        if (ORDERS_WRITABLE_COLS.indexOf(h) < 0) return; // §10.1 whitelist, exactly
+        const col = bridgeColumnFor_(open, h);
+        if (!col || col === -1) return;
+        const cell = open.sheet.getRange(rowNum, col);
+        const cur = String(cell.getValue() === null || cell.getValue() === undefined ? '' : cell.getValue()).trim();
+        if (cur) { skippedHasValue++; return; }          // someone re-entered / it changed — keep theirs
+        cell.setValue(bridgeCellIn_(values[h]));
+        filled++;
+        perAccount[books[bookId]] = (perAccount[books[bookId]] || 0) + 1;
+      });
+    } catch (e) { errors++; }
+  });
+  SpreadsheetApp.flush();
+  const summary = 'replayed ' + filled + ' blank cell(s) from ' + rowsSeen + ' shadow write(s); ' +
+    skippedHasValue + ' already had values (kept); ' + errors + ' error(s) · per account: ' + JSON.stringify(perAccount);
+  logActivity_('system', 'SHADOW_REPLAY', 'order books 3d', '', String(filled), summary.slice(0, 250));
+  return summary;
 }
