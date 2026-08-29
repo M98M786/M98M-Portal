@@ -21511,6 +21511,10 @@ const COST_CURSOR_KEY = 'COST_SYNC_CURSOR';
  * rest of the order code does. */
 const COST_COL_ORDER = 'Order number';        // eBay's, col B — never the AliExpress one at col M
 const COST_COL_COST = 'Cost';
+/* 30 Aug: the day tabs also carry per-order 'Order Earning' — the calculator's own OE, typed at
+   processing time. It rides the same walk: where eBay's Finances API never reached an order
+   (Sir Hasib's backfilled history), fees = sold − this OE, from the business's own books. */
+const COST_COL_EARN = 'Order Earning';
 
 function costAccounts_() {
   return (connectionHealth().perAccount || []).filter(function (a) {
@@ -21552,13 +21556,27 @@ function pushEngineCosts() {
         continue;
       }
       const byOrder = {};
+      const earnBy = {};
+      const hasEarn = !!map[COST_COL_EARN];
       read.rows.forEach(function (r) {
         const id = costOrderId_(ordersCell_(r, map, COST_COL_ORDER));
+        if (!id) return;
         const c = costNumber_(ordersCell_(r, map, COST_COL_COST));
-        if (!id || !(c > 0)) return;
-        byOrder[id] = (byOrder[id] || 0) + c;
+        if (c > 0) byOrder[id] = (byOrder[id] || 0) + c;
+        if (hasEarn) {
+          const e2 = costNumber_(ordersCell_(r, map, COST_COL_EARN));
+          if (e2 > 0) earnBy[id] = (earnBy[id] || 0) + e2;
+        }
       });
-      const costs = Object.keys(byOrder).map(function (id) { return { order_id: id, cost: Math.round(byOrder[id] * 100) / 100 }; });
+      const ids = {};
+      Object.keys(byOrder).forEach(function (id) { ids[id] = 1; });
+      Object.keys(earnBy).forEach(function (id) { ids[id] = 1; });
+      const costs = Object.keys(ids).map(function (id) {
+        const row = { order_id: id };
+        if (byOrder[id]) row.cost = Math.round(byOrder[id] * 100) / 100;
+        if (earnBy[id]) row.earn = Math.round(earnBy[id] * 100) / 100;
+        return row;
+      });
       if (costs.length) {
         for (let i = 0; i < costs.length; i += 200) {
           try {

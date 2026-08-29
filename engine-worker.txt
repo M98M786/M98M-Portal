@@ -3031,7 +3031,12 @@ async function rollupsWindow(env, days) {
     const row = (day[k] = day[k] || { sold: 0, oe: 0, cost: 0, profit: 0, returns: 0, real: 0, n: 0 });
     row.sold += Number(o.sold) || 0;                  // order total is already all units
     row.returns += Number(o.refunded) > 0 ? Number(o.refunded) : 0;  // Finances refund £, by order day — the brain's basis
-    const oe = (Number(f.oe) || 0) * q;
+    /* OE for the day row: the Main Sheet fact first; where no fact exists, real fees (Finances
+       or the day tab's own OE via syncCosts) give sold − fees. An order with neither
+       contributes no OE — never a flattering guess. */
+    const oe0 = (Number(f.oe) || 0) * q;
+    const fees0 = Number(o.ebay_fees) || 0;
+    const oe = oe0 > 0 ? oe0 : (fees0 > 0 ? Math.max(0, (Number(o.sold) || 0) - fees0) : 0);
     row.oe += oe;
     row.n++;
 
@@ -4268,11 +4273,22 @@ const ROUTES = {
      and every item. Apps Script walks the day tabs on a cursor and posts them here. */
   syncCosts: {
     auth: 'sync', fn: async (p, ctx) => {
-      const rows = (p.costs || []).filter((c) => String(c.order_id || '').trim() && Number(c.cost) > 0);
-      if (!rows.length) return { updated: 0, matched: 0 };
+      const all = (p.costs || []).filter((c) => String(c.order_id || '').trim());
+      const rows = all.filter((c) => Number(c.cost) > 0);
+      if (!all.length) return { updated: 0, matched: 0 };
       const stmt = ctx.env.DB.prepare('UPDATE orders SET cost = ?2 WHERE order_id = ?1 AND cost != ?2');
       let matched = 0;
       const batch = rows.map((c) => stmt.bind(String(c.order_id).trim(), Number(c.cost)));
+      /* 30 Aug: the day tab's own Order Earning fills fees where Finances never reached the
+         order — fees = sold − OE, only into blanks (a real Finances fee always wins), only when
+         the OE is sane against the order's sold. */
+      const eStmt = ctx.env.DB.prepare(
+        'UPDATE orders SET ebay_fees = ROUND(sold - ?2, 2) WHERE order_id = ?1 ' +
+        'AND (ebay_fees IS NULL OR ebay_fees <= 0) AND sold > 0 AND ?2 > sold * 0.5 AND ?2 < sold'
+      );
+      for (const c of all) {
+        if (Number(c.earn) > 0) batch.push(eStmt.bind(String(c.order_id).trim(), Number(c.earn)));
+      }
       for (let i = 0; i < batch.length; i += 50) {
         const res = await ctx.env.DB.batch(batch.slice(i, i + 50));
         for (const r of res) matched += (r.meta && r.meta.changes) || 0;
