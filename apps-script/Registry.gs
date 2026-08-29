@@ -514,8 +514,11 @@ function updateSirHasibAnalysis() {
  * signal someone may still need. */
 function notifPrune() {
   const lock = LockService.getScriptLock();
-  const cut30 = Date.now() - 30 * 86400000;
-  const cut90 = Date.now() - 90 * 86400000;
+  /* First run found 25,623 letters — the polls read this whole tab every ~45s per person.
+     Letters are pings, not records (ACTIVITY_LOG keeps the record): read ones live 7 days,
+     unread 21 — a three-week-old unread bell is noise nobody will ever open. */
+  const cut30 = Date.now() - 7 * 86400000;
+  const cut90 = Date.now() - 21 * 86400000;
   let kept = 0, dropped = 0;
   try {
     lock.waitLock(15000);
