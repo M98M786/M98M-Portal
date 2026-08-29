@@ -386,7 +386,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -510,7 +510,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260829-2301';
+var BUILD = '20260829-2317';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1742,7 +1742,41 @@ VIEWS.home = {
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [], q: '' };
+  var ALX = { account: '', rows: [], q: '', tab: 'all' };
+
+  /* 30 Aug (owner): "in active listings ... 'New listings' (listed in last 7 days), 'No sales
+     in 7 days', 'Top items' (sales history of more than 30 units)". One fleet, four lenses. */
+  var ALX_TABS = [
+    { key: 'all', label: 'All listings' },
+    { key: 'new7', label: 'New listings · 7d' },
+    { key: 'nosale7', label: 'No sales in 7 days' },
+    { key: 'top', label: 'Top items · 30+ sold' }
+  ];
+  function alxBornMs(r) { var t = Date.parse(axStr(r.born)); return isFinite(t) ? t : 0; }
+  function alxTabFilter(rows, tab) {
+    var now = Date.now(), wk = 7 * 86400000;
+    if (tab === 'new7') {
+      return rows.filter(function (r) { var b = alxBornMs(r); return b && (now - b) <= wk; })
+        .sort(function (a, b) { return alxBornMs(b) - alxBornMs(a); });
+    }
+    if (tab === 'nosale7') {
+      /* a listing younger than 7 days belongs to New, not here — it never had 7 days to sell */
+      return rows.filter(function (r) { var b = alxBornMs(r); return !(Number(r.sold_7d) > 0) && (!b || (now - b) > wk); });
+    }
+    if (tab === 'top') {
+      return rows.filter(function (r) { return (Number(r.sold_qty) || 0) >= 30; })
+        .sort(function (a, b) { return (Number(b.sold_qty) || 0) - (Number(a.sold_qty) || 0); });
+    }
+    return rows;
+  }
+  function alxDate(r) {
+    var t = alxBornMs(r);
+    if (!t) { return '—'; }
+    var d = new Date(t);
+    var days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate() +
+      '<div style="font-size:10px;color:var(--text-3)">' + (days === 0 ? 'today' : days + 'd live') + '</div>';
+  }
 
   function alxFetch() {
     var payload = {};
@@ -1778,7 +1812,18 @@ VIEWS.home = {
     var box = $('alxBody');
     if (!box) { return; }
     if (d) { ALX.rows = d.rows || []; }
-    var all = ALX.rows;
+    var chips = $('alxTabs');
+    if (chips) {
+      chips.innerHTML = ALX_TABS.map(function (t) {
+        var n = alxTabFilter(ALX.rows, t.key).length;
+        return '<button class="minibtn' + (ALX.tab === t.key ? ' on' : '') + '" data-alx-tab="' + t.key + '">' +
+          esc(t.label) + ' <span style="opacity:.7">' + n + '</span></button>';
+      }).join('');
+      Array.prototype.forEach.call(chips.querySelectorAll('[data-alx-tab]'), function (b) {
+        b.onclick = function () { ALX.tab = this.getAttribute('data-alx-tab'); alxPaint(); };
+      });
+    }
+    var all = alxTabFilter(ALX.rows, ALX.tab);
     var q = axStr(ALX.q).toLowerCase();
     if (q) {
       all = all.filter(function (r) {
@@ -1786,7 +1831,7 @@ VIEWS.home = {
       });
     }
     var cnt = $('alxCount');
-    if (cnt) { cnt.textContent = all.length + (q ? ' of ' + ALX.rows.length : '') + ' listing(s)' + (ALX.rows.length >= 500 ? ' · newest 500 synced' : ''); }
+    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' ? ' of ' + ALX.rows.length : '') + ' listing(s)'; }
     if (!all.length) {
       box.innerHTML = q
         ? '<div class="alx-empty">No listing matches “' + esc(ALX.q) + '”.<span>Item numbers, titles and campaign names are all searched, across every account you can see.</span></div>'
@@ -1800,13 +1845,13 @@ VIEWS.home = {
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>Sold 30d</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>7d</th><th>14d</th><th>30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
       '<th>Suppliers</th><th>Source</th></tr></thead><tbody>';
-    ALX.rows.forEach(function (r) {
+    all.forEach(function (r) {
       var img = axStr(r.image);
       /* The chip answers "where did this ROW come from": a row eBay itself synced is API, even
        * though its sheet facts ride along. Only a row with no API sync at all is SHEET (Sir
@@ -1816,10 +1861,13 @@ VIEWS.home = {
         '<td>' + (img && safeUrl(img) ? '<img class="alx-img" loading="lazy" src="' + esc(safeUrl(img)) + '" alt="">' : '<div class="alx-img"></div>') + '</td>' +
         '<td><a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" title="Open on eBay">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + '</div></td>' +
         '<td>' + esc(axStr(r.account)) + '</td>' +
+        '<td style="white-space:nowrap;font-size:11.5px;font-weight:700">' + alxDate(r) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
-        '<td class="alx-num">' + (Number(r.sold_30d) || 0) + '</td>' +
+        '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
+        '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
+        '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
@@ -1856,6 +1904,7 @@ VIEWS.home = {
       return '<div class="hgroup enter d1"><h1>Active <span class="goldtext">listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
+          '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
           '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
           '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Search item number, title or campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
@@ -1900,7 +1949,7 @@ VIEWS.home = {
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'price', 'qty', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';
@@ -10223,6 +10272,8 @@ VIEWS.dashboard = {
           '<div class="gl-2">' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">eBay Item ID (once published)</label>' +
               '<input class="gl-in mono" inputmode="numeric" placeholder="123456789012" data-gl-item="' + esc(id) + '"></div>' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Final eBay title (saved for ever)</label>' +
+              '<input class="gl-in" data-gl-title="' + esc(id) + '" maxlength="160" placeholder="the title exactly as published"></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Note (optional)</label>' +
               '<input class="gl-in" data-gl-note="' + esc(id) + '" placeholder="anything the approver should know"></div>' +
           '</div>' +
@@ -10237,14 +10288,17 @@ VIEWS.dashboard = {
           var id = this.getAttribute('data-gl-live');
           var inp = box.querySelector('[data-gl-item="' + id.replace(/"/g, '') + '"]');
           var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
+          var ttl = box.querySelector('[data-gl-title="' + id.replace(/"/g, '') + '"]');
           var v = inp ? glS(inp.value) : '';
           if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
           var btn = this; btn.disabled = true;
-          api('enterItemId', { task_id: id, item_id: v, note: note ? glS(note.value) : 'Published from the go-live desk.' })
+          btn.textContent = 'Live ✓';
+          toast('Live · the campaign, supplier and 72-hour tasks are being created.');
+          api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
+            note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
-              toast('Live · the campaign, supplier and 72-hour tasks are created.');
               glLoad();
-            }).catch(function (e) { btn.disabled = false; toast('Not entered: ' + e.message); });
+            }).catch(function (e) { btn.disabled = false; btn.textContent = 'Make live — enter Item ID'; toast('NOT entered — ' + e.message); });
         };
       });
       box.querySelectorAll('[data-gl-back]').forEach(function (b) {
@@ -13157,18 +13211,19 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   // ============================== VIEW ==============================
   VIEWS.listing = {
-    label: 'My listings',
+    label: 'Assigned listings',
     icon: '<path d="M11.6 3H5a2 2 0 0 0-2 2v6.6a2 2 0 0 0 .6 1.4l7.4 7.4a2 2 0 0 0 2.8 0l6.6-6.6a2 2 0 0 0 0-2.8L13 3.6A2 2 0 0 0 11.6 3z"/><path d="M7.5 7.5h.01"/>',
     roles: LS_VIEW_ROLES,
     order: 17,
     prefetch: function () { return lsFetch(); },
     badge: function () { return (STATE.counts && STATE.counts.listing) || 0; },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>My listings</h1>' +
+      return '<div class="hgroup enter d1"><h1>Assigned <span class="goldtext">listings</span></h1>' +
           '<span class="sub">Day 0 dummy → 72-hour revision → campaign · UK windows, Pakistan time</span>' +
           '<button class="minibtn" id="lsDone" style="margin-left:auto">Show completed</button>' +
           '<button class="minibtn" id="lsRefresh">Refresh</button>' +
         '</div>' +
+        '<div class="dr-kpis enter d1" id="lsTiles"></div>' +
         '<div class="card enter d1"><div class="hd">The listing clock ' +
           '<span class="hint">§8.0 — fixed UK windows, shown in your time too</span></div>' +
           '<div class="bd" id="lsClock">' + lsTimeline(null) + '</div>' +
@@ -13244,7 +13299,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       the "show done" toggle never paints the wrong list. Item-ID entry and revision actions are
       re-validated by the server, so a briefly stale card cannot cause a wrong write. */
   function lsFetch() {
-    var payload = LS_SHOW_DONE ? { include_completed: 'true' } : {};
+    /* 30 Aug: completed rows always ride along — the tiles (done yesterday, drafts, archive
+       counts) need them; the Show-completed button only changes what the job list DISPLAYS. */
+    var payload = { include_completed: 'true' };
     return api('myListingWork', payload).then(function (d) {
       if (typeof cacheWrite === 'function') { cacheWrite('myListingWork', payload, d); }
       return d;
@@ -13254,7 +13311,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function lsLoad() {
     var jobs = $('lsJobs'), revs = $('lsRevs');
     if (!jobs || !revs) { return; }
-    var had = (typeof cacheRead === 'function') ? cacheRead('myListingWork', LS_SHOW_DONE ? { include_completed: 'true' } : {}) : null;
+    var had = (typeof cacheRead === 'function') ? cacheRead('myListingWork', { include_completed: 'true' }) : null;
     if (had) { try { lsPaint(had); } catch (e) { had = null; } }
     if (!had) {
       jobs.innerHTML = '<div class="spinner"></div>';
@@ -13269,7 +13326,54 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     });
   }
 
+  function lsPktDay(iso, shift) {
+    /* task stamps arrive as PKT ISO — compare by PKT calendar day */
+    var t = Date.parse(lsStr(iso));
+    if (!isFinite(t)) { return ''; }
+    return new Date(t + (shift || 0) * 86400000).toISOString().slice(0, 10);
+  }
+  function lsTiles(d) {
+    var host = $('lsTiles');
+    if (!host) { return; }
+    var all = [].concat(d.listings || [], d.revisions || []);
+    var today = lsPktDay(new Date().toISOString(), 0);
+    var yday = lsPktDay(new Date().toISOString(), -1);
+    var assignedToday = 0, pending = 0, doneYday = 0, drafts = 0, awaiting = 0, doneAll = 0;
+    all.forEach(function (j) {
+      var st = lsStr(j.status);
+      if (lsPktDay(j.created_at, 0) === today) { assignedToday++; }
+      if (LS_OPEN.indexOf(st) >= 0) {
+        pending++;
+        var f = lsFlag(j);
+        if (f && f.flag === 'draft') { drafts++; }
+      }
+      if (st === LS_SUBMITTED) { awaiting++; }
+      if (st === LS_COMPLETED) {
+        doneAll++;
+        if (lsPktDay(j.submitted_at, 0) === yday) { doneYday++; }
+      }
+    });
+    function tile(label, n, tone, hint) {
+      return '<div class="dr-kpi" title="' + esc(hint || '') + '"><div class="l">' + esc(label) + '</div>' +
+        '<div class="v" style="' + (tone ? 'color:var(--' + tone + ')' : '') + '">' + n + '</div></div>';
+    }
+    host.innerHTML =
+      tile('Assigned today', assignedToday, '', 'jobs that landed on you today') +
+      tile('Pending', pending, pending ? 'warn' : '', 'assigned · working · updated — still yours to finish') +
+      tile('Left in draft', drafts, drafts ? 'bad' : '', 'flagged as draft — the go-live desk is waiting') +
+      tile('Awaiting approval', awaiting, '', 'submitted, with the approver') +
+      tile('Done yesterday', doneYday, doneYday ? 'ok' : '', 'completed on yesterday\u2019s date') +
+      tile('Done all-time', doneAll, 'ok', 'your archive — the full history lives on My archive');
+  }
+
   function lsPaint(d) {
+    lsTiles(d || {});
+    /* the job/revision lists hide completed unless the button asks for them */
+    if (d && !LS_SHOW_DONE) {
+      d = { listings: (d.listings || []).filter(function (j) { return lsStr(j.status) !== LS_COMPLETED; }),
+        revisions: (d.revisions || []).filter(function (j) { return lsStr(j.status) !== LS_COMPLETED; }),
+        columns: d.columns, timing: d.timing };
+    }
     var jobs = $('lsJobs'), revs = $('lsRevs');
     if (!jobs || !revs) { return; }
     LS_COPY = {};
@@ -13910,6 +14014,128 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }).catch(function (e) { btn.disabled = false; toast('Not recorded: ' + e.message); });
   }
 
+})();
+
+/* ---------- view-listingArchive.js ---------- */
+/* view-listingArchive.js — 30 Aug (owner): "history of listings they have done with a proper
+ * separate page of their archive." Every completed listing job and revision of the signed-in
+ * lister, newest first, searchable, grouped by month. Managers see their own archive the same
+ * way (the dept boards remain the place to read other people's work). Data: myListingWork
+ * include_completed — the same §8 payload the Assigned listings desk uses, nothing new to leak. */
+(function () {
+  'use strict';
+
+  var LA = { rows: null, q: '' };
+
+  VIEW_CSS.push(
+    '.la-month{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold-a);padding:14px 2px 6px}' +
+    '.la-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}' +
+    '.la-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:8px 11px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.la-tbl td{padding:8px 11px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
+    '.la-tbl tbody tr:hover{background:var(--blue-soft)}' +
+    '.la-kind{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:99px;background:var(--panel-2);border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}' +
+    '.la-kind.rev{color:var(--blue-2);border-color:var(--blue)}'
+  );
+
+  function laStr(v) { return String(v == null ? '' : v).trim(); }
+
+  function laFetch() {
+    return api('myListingWork', { include_completed: 'true' }).then(function (d) {
+      var all = [].concat((d && d.listings) || [], (d && d.revisions) || []);
+      return all.filter(function (j) { return laStr(j.status) === 'Completed'; });
+    });
+  }
+
+  function laPaint() {
+    var box = $('laBody');
+    if (!box) { return; }
+    var rows = LA.rows || [];
+    var q = laStr(LA.q).toLowerCase();
+    if (q) {
+      rows = rows.filter(function (r) {
+        return (laStr(r.title) + ' ' + laStr(r.item_id) + ' ' + laStr(r.account) + ' ' + laStr(r.task_id)).toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    var cnt = $('laCount');
+    if (cnt) { cnt.textContent = rows.length + (q ? ' of ' + (LA.rows || []).length : '') + ' completed'; }
+    if (!rows.length) {
+      box.innerHTML = '<div class="alx-empty">' + (q ? 'Nothing in your archive matches that.' :
+        'Nothing completed yet — finished listings and revisions land here on their own.') + '</div>';
+      return;
+    }
+    rows = rows.slice().sort(function (a, b) {
+      return String(laStr(b.submitted_at) || laStr(b.created_at)) < String(laStr(a.submitted_at) || laStr(a.created_at)) ? -1 : 1;
+    });
+    var h = '', month = '';
+    var open = false;
+    rows.forEach(function (r) {
+      var when = laStr(r.submitted_at) || laStr(r.created_at);
+      var m = when.slice(0, 7);
+      if (m !== month) {
+        if (open) { h += '</tbody></table></div>'; }
+        month = m;
+        var t = Date.parse(m + '-01T00:00:00');
+        var label = isFinite(t)
+          ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][new Date(t).getMonth()] + ' ' + m.slice(0, 4)
+          : (m || 'Undated');
+        h += '<div class="la-month">' + esc(label) + '</div>' +
+          '<div class="scroll"><table class="la-tbl"><thead><tr>' +
+          '<th>Done</th><th>Type</th><th>Product</th><th>Account</th><th>Item ID</th></tr></thead><tbody>';
+        open = true;
+      }
+      var isRev = laStr(r.type) === 'listing_revision';
+      var id = laStr(r.item_id);
+      h += '<tr>' +
+        '<td style="white-space:nowrap;font-weight:700;font-size:11.5px">' + esc(fmtPkt(when, true) || when || '—') + '</td>' +
+        '<td><span class="la-kind' + (isRev ? ' rev' : '') + '">' + (isRev ? 'Revision' : 'New listing') + '</span></td>' +
+        '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(laStr(r.title)) + '">' + esc(laStr(r.title) || laStr(r.task_id)) + '</td>' +
+        '<td>' + esc(laStr(r.account) || '—') + '</td>' +
+        '<td>' + (id ? '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer" class="mono" style="font-size:11.5px">' + esc(id) + '</a>' : '<span style="color:var(--text-3)">—</span>') + '</td>' +
+        '</tr>';
+    });
+    if (open) { h += '</tbody></table></div>'; }
+    box.innerHTML = h;
+  }
+
+  VIEWS.listingArchive = {
+    label: 'My archive',
+    icon: '<path d="M4 8h16M4 8l1.5-4h13L20 8M4 8v12h16V8"/><path d="M9 12h6"/>',
+    roles: ['Item Lister', 'Listing Manager', 'Management'],
+    order: 17.5,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>My <span class="goldtext">archive</span></h1>' +
+          '<span class="sub">every listing and revision you have completed — the record stays yours</span>' +
+          '<span class="alx-count" id="laCount" style="margin-left:auto"></span>' +
+          '<button class="minibtn" id="laRefresh">Refresh</button></div>' +
+        '<div class="card enter d2"><div class="bd">' +
+          '<input class="alx-sel alx-q" id="laQ" type="search" autocomplete="off" placeholder="Search title, item number or account…" style="margin-bottom:12px;width:min(380px,100%)">' +
+          '<div id="laBody"><div class="spinner"></div></div>' +
+        '</div></div>';
+    },
+    init: function () {
+      var rf = $('laRefresh');
+      if (rf) { rf.onclick = function () { LA.rows = null; laLoad(); }; }
+      var qb = $('laQ');
+      if (qb) {
+        qb.value = LA.q;
+        qb.oninput = function () { LA.q = this.value; laPaint(); };
+      }
+      laLoad();
+    }
+  };
+
+  function laLoad() {
+    var box = $('laBody');
+    if (!box) { return; }
+    if (LA.rows) { laPaint(); return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    laFetch().then(function (rows) {
+      LA.rows = rows;
+      laPaint();
+    }).catch(function (e) {
+      box.innerHTML = '<div class="alx-empty">Could not load your archive.<span>' + esc(e.message) + '</span></div>';
+    });
+  }
 })();
 
 /* ---------- view-listingDecisions.js ---------- */
@@ -16053,7 +16279,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           } else if (obStr(r.ali_link)) {
             aliCell = '<a href="' + esc(obStr(r.ali_link)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;font-size:11.5px">Ali link</a>';
           } else if (r.status === 'NOT_STARTED') {
-            aliCell = '<span class="ob-late" title="No AliExpress order recorded — sheet or portal">not processed</span>';
+            /* 30 Aug (owner): a fresh order hands the processor the BUYING link at once —
+               the Main Sheet's supplier column, or the go-live desk's own record for a brand-new
+               item whose sheet row nobody has filled yet. */
+            var buy = obStr(r.sup_link) && (typeof safeUrl === 'function' ? safeUrl(obStr(r.sup_link)) : obStr(r.sup_link));
+            aliCell = '<span class="ob-late" title="No AliExpress order recorded — sheet or portal">not processed</span>' +
+              (buy ? ' <a class="minibtn" style="padding:2px 9px;font-size:10.5px" href="' + esc(buy) + '" target="_blank" rel="noopener noreferrer" title="' + esc(obStr(r.current_sup) || 'the supplier the portal has on record') + '">Buy ↗</a>' : '') +
+              ' <button class="minibtn" style="padding:2px 8px;font-size:10px;color:var(--bad)" data-ob-oos="' + esc(obStr(r.item_id)) + '" title="The supplier (or one variation) is out of stock — one click tells Husnain, Management and Advertising">OOS</button>';
           } else {
             aliCell = '<span style="color:var(--text-3)">—</span>';
           }
@@ -16089,6 +16321,20 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       });
       box.querySelectorAll('[data-ali]').forEach(function (b) {
         b.onclick = function () { obCopy(this, this.getAttribute('data-ali')); };
+      });
+      box.querySelectorAll('[data-ob-oos]').forEach(function (b) {
+        b.onclick = function () {
+          var id = this.getAttribute('data-ob-oos');
+          var what = prompt('Which variation is out of stock? (leave empty if the whole item is)') || '';
+          if (what === null) { return; }
+          var btn = this;
+          btn.disabled = true; btn.textContent = 'Told ✓';
+          toast('Husnain, Management and Advertising have been told.');
+          api('oosReport', { item_id: id, variation: what }).catch(function (e) {
+            btn.disabled = false; btn.textContent = 'OOS';
+            toast('NOT sent — ' + e.message);
+          });
+        };
       });
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
@@ -25176,11 +25422,16 @@ function saveSchedule() {
     tkWireBar(stage);
     tkReveal(stage);
 
-    api('toolHtml', { tool: kind }).then(function (res) {
+    Promise.all([
+      api('toolHtml', { tool: kind }),
+      api('toolStateLoad', { tool: kind }).catch(function () { return { state: {} }; })
+    ]).then(function (both) {
+      var res = both[0];
       if (!res || res.ok !== true) {
         tkCalmStage(kind, tkStr(res && res.reason), tkStr(res && res.note));
         return;
       }
+      res._seed = (both[1] && both[1].state) || {};
       tkMount(kind, res);
     }).catch(function (e) {
       tkFailStage(kind, e.message);
@@ -25220,12 +25471,20 @@ function saveSchedule() {
     frame.setAttribute('sandbox', 'allow-scripts allow-forms');
     frame.setAttribute('title', tkStr(res.title) || tkTitleOf(kind));
     frame.setAttribute('referrerpolicy', 'no-referrer');   // the portal's URL is not the tool's business
-    frame.srcdoc = String(res.html == null ? '' : res.html);
+    /* the storage shim (30 Aug): the sandbox stays exactly as tight — the tool still cannot see
+       the portal — but its localStorage now rides postMessage into the engine, per person, so a
+       case added here is there tomorrow, on any machine. */
+    tkFlushState();
+    TK_SYNC.tool = kind;
+    var html0 = String(res.html == null ? '' : res.html);
+    var shim0 = tkShim(res._seed || {});
+    var at0 = html0.search(/<head[^>]*>/i);
+    frame.srcdoc = at0 >= 0 ? html0.replace(/<head[^>]*>/i, function (m) { return m + shim0; }) : shim0 + html0;
     stage.appendChild(frame);
 
     stage.insertAdjacentHTML('beforeend',
-      '<div class="tk-note">This tool is running <b>sealed off from the portal</b> — it cannot reach your sign-in or your data, ' +
-      'and it cannot save anything in this browser. Copy out what you need before you close it. This open was logged at <b>' +
+      '<div class="tk-note">This tool runs <b>sealed off from the portal</b> — it cannot reach your sign-in or your data. ' +
+      'What it saves (cases, logs, templates) now lands <b>in the portal itself</b>, under your name, and follows you to any machine. This open was logged at <b>' +
       esc(tkNow()) + ' PKT</b>.</div>');
 
     tkWireBar(stage);
@@ -25341,27 +25600,76 @@ function saveSchedule() {
      in that dashboard, in the SAME opaque-origin sandbox as the Tools screen (allow-scripts
      allow-forms only; no same-origin, no popups, no top-navigation — RL-3's reasoning applies
      unchanged). One dock per host; a second call replaces the first. */
+  /* 30 Aug (owner): "he adds a new case there and it doesn't get updated because it is just an
+     html tool ... html tools demand backups." Inside the sandbox (opaque origin) localStorage
+     THROWS, so every tool's own persistence was dead. The dock now: ① loads the person's saved
+     state from the engine, ② injects a localStorage shim seeded with it before the tool's own
+     scripts run, ③ streams every write back (debounced) via postMessage → toolStateSave. Cases
+     survive reloads, devices and the sandbox — the Backup/Restore buttons are now optional. */
+  var TK_SYNC = { timer: null, queue: {}, tool: '' };
+  function tkFlushState() {
+    var tool = TK_SYNC.tool;
+    var entries = Object.keys(TK_SYNC.queue).map(function (k) { return { key: k, value: TK_SYNC.queue[k] }; });
+    TK_SYNC.queue = {};
+    if (!tool || !entries.length) { return; }
+    api('toolStateSave', { tool: tool, entries: entries }).catch(function () {
+      toast('The tool could not save to the portal just now — it retries on your next change.');
+      entries.forEach(function (e) { if (!(e.key in TK_SYNC.queue)) { TK_SYNC.queue[e.key] = e.value; } });
+    });
+  }
+  window.addEventListener('message', function (ev) {
+    var d = ev && ev.data && ev.data.m98mToolStore;
+    if (!d || typeof d.key !== 'string') { return; }
+    TK_SYNC.queue[d.key.slice(0, 120)] = d.value === null ? null : String(d.value);
+    if (TK_SYNC.timer) { clearTimeout(TK_SYNC.timer); }
+    TK_SYNC.timer = setTimeout(tkFlushState, 1200);
+  });
+  function tkShim(state) {
+    return '<script>(function(){try{' +
+      'var MEM=' + JSON.stringify(state || {}).replace(/</g, '\\u003c') + ';' +
+      'var fake={getItem:function(k){return Object.prototype.hasOwnProperty.call(MEM,k)?MEM[k]:null;},' +
+      'setItem:function(k,v){MEM[k]=String(v);try{parent.postMessage({m98mToolStore:{key:k,value:String(v)}},"*");}catch(e){}},' +
+      'removeItem:function(k){delete MEM[k];try{parent.postMessage({m98mToolStore:{key:k,value:null}},"*");}catch(e){}},' +
+      'clear:function(){for(var k in MEM){try{parent.postMessage({m98mToolStore:{key:k,value:null}},"*");}catch(e){}}MEM={};},' +
+      'key:function(i){return Object.keys(MEM)[i]||null;}};' +
+      'try{Object.defineProperty(fake,"length",{get:function(){return Object.keys(MEM).length;}});}catch(e){}' +
+      'try{Object.defineProperty(window,"localStorage",{value:fake,configurable:true});}catch(e){}' +
+      'try{Object.defineProperty(window,"sessionStorage",{value:fake,configurable:true});}catch(e){}' +
+      '}catch(e){}})();<\/script>';
+  }
   window.toolDock = function (host, kind, title) {
     if (!host) { return; }
     host.innerHTML = '<div class="tk-load" style="padding:14px"><div class="spinner"></div>' +
       '<div class="tk-sub">Opening ' + esc(String(title || kind)) + '\u2026</div></div>';
-    api('toolHtml', { tool: kind }).then(function (res) {
+    Promise.all([
+      api('toolHtml', { tool: kind }),
+      api('toolStateLoad', { tool: kind }).catch(function () { return { state: {} }; })
+    ]).then(function (both) {
+      var res = both[0];
+      var seed = (both[1] && both[1].state) || {};
       if (!res || res.ok !== true) {
         host.innerHTML = '<div class="empty">' + esc(String((res && (res.reason || res.note)) || 'The tool is not ready.')) + '</div>';
         return;
       }
+      tkFlushState();                      // anything queued for the previous tool goes first
+      TK_SYNC.tool = kind;
       host.innerHTML = '';
       var bar = document.createElement('div');
       bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--gold-line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--panel-2);font-weight:800;font-size:12px';
-      bar.textContent = String(title || kind);
+      bar.textContent = String(title || kind) + ' · saves to the portal';
       var x = document.createElement('button');
       x.className = 'minibtn'; x.textContent = 'Close';
-      x.onclick = function () { host.innerHTML = ''; };
+      x.onclick = function () { tkFlushState(); host.innerHTML = ''; };
       bar.appendChild(x);
       var fr = document.createElement('iframe');
       fr.setAttribute('sandbox', 'allow-scripts allow-forms');
       fr.style.cssText = 'width:100%;height:640px;border:1px solid var(--gold-line);border-radius:0 0 12px 12px;background:#fff';
-      fr.srcdoc = String(res.html || '');
+      var html = String(res.html || '');
+      var shim = tkShim(seed);
+      var at = html.search(/<head[^>]*>/i);
+      fr.srcdoc = at >= 0
+        ? html.slice(0, at) + html.slice(at).replace(/<head[^>]*>/i, function (m) { return m + shim; })
+        : shim + html;
       host.appendChild(bar);
       host.appendChild(fr);
       try { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
@@ -25783,7 +26091,7 @@ function enterApp(user){
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
-    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','pipeline','calculator'] },
+    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
     { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
   ];

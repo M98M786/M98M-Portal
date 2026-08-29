@@ -36,7 +36,41 @@
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [], q: '' };
+  var ALX = { account: '', rows: [], q: '', tab: 'all' };
+
+  /* 30 Aug (owner): "in active listings ... 'New listings' (listed in last 7 days), 'No sales
+     in 7 days', 'Top items' (sales history of more than 30 units)". One fleet, four lenses. */
+  var ALX_TABS = [
+    { key: 'all', label: 'All listings' },
+    { key: 'new7', label: 'New listings · 7d' },
+    { key: 'nosale7', label: 'No sales in 7 days' },
+    { key: 'top', label: 'Top items · 30+ sold' }
+  ];
+  function alxBornMs(r) { var t = Date.parse(axStr(r.born)); return isFinite(t) ? t : 0; }
+  function alxTabFilter(rows, tab) {
+    var now = Date.now(), wk = 7 * 86400000;
+    if (tab === 'new7') {
+      return rows.filter(function (r) { var b = alxBornMs(r); return b && (now - b) <= wk; })
+        .sort(function (a, b) { return alxBornMs(b) - alxBornMs(a); });
+    }
+    if (tab === 'nosale7') {
+      /* a listing younger than 7 days belongs to New, not here — it never had 7 days to sell */
+      return rows.filter(function (r) { var b = alxBornMs(r); return !(Number(r.sold_7d) > 0) && (!b || (now - b) > wk); });
+    }
+    if (tab === 'top') {
+      return rows.filter(function (r) { return (Number(r.sold_qty) || 0) >= 30; })
+        .sort(function (a, b) { return (Number(b.sold_qty) || 0) - (Number(a.sold_qty) || 0); });
+    }
+    return rows;
+  }
+  function alxDate(r) {
+    var t = alxBornMs(r);
+    if (!t) { return '—'; }
+    var d = new Date(t);
+    var days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate() +
+      '<div style="font-size:10px;color:var(--text-3)">' + (days === 0 ? 'today' : days + 'd live') + '</div>';
+  }
 
   function alxFetch() {
     var payload = {};
@@ -72,7 +106,18 @@
     var box = $('alxBody');
     if (!box) { return; }
     if (d) { ALX.rows = d.rows || []; }
-    var all = ALX.rows;
+    var chips = $('alxTabs');
+    if (chips) {
+      chips.innerHTML = ALX_TABS.map(function (t) {
+        var n = alxTabFilter(ALX.rows, t.key).length;
+        return '<button class="minibtn' + (ALX.tab === t.key ? ' on' : '') + '" data-alx-tab="' + t.key + '">' +
+          esc(t.label) + ' <span style="opacity:.7">' + n + '</span></button>';
+      }).join('');
+      Array.prototype.forEach.call(chips.querySelectorAll('[data-alx-tab]'), function (b) {
+        b.onclick = function () { ALX.tab = this.getAttribute('data-alx-tab'); alxPaint(); };
+      });
+    }
+    var all = alxTabFilter(ALX.rows, ALX.tab);
     var q = axStr(ALX.q).toLowerCase();
     if (q) {
       all = all.filter(function (r) {
@@ -80,7 +125,7 @@
       });
     }
     var cnt = $('alxCount');
-    if (cnt) { cnt.textContent = all.length + (q ? ' of ' + ALX.rows.length : '') + ' listing(s)' + (ALX.rows.length >= 500 ? ' · newest 500 synced' : ''); }
+    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' ? ' of ' + ALX.rows.length : '') + ' listing(s)'; }
     if (!all.length) {
       box.innerHTML = q
         ? '<div class="alx-empty">No listing matches “' + esc(ALX.q) + '”.<span>Item numbers, titles and campaign names are all searched, across every account you can see.</span></div>'
@@ -94,13 +139,13 @@
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>Sold 30d</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>7d</th><th>14d</th><th>30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
       '<th>Suppliers</th><th>Source</th></tr></thead><tbody>';
-    ALX.rows.forEach(function (r) {
+    all.forEach(function (r) {
       var img = axStr(r.image);
       /* The chip answers "where did this ROW come from": a row eBay itself synced is API, even
        * though its sheet facts ride along. Only a row with no API sync at all is SHEET (Sir
@@ -110,10 +155,13 @@
         '<td>' + (img && safeUrl(img) ? '<img class="alx-img" loading="lazy" src="' + esc(safeUrl(img)) + '" alt="">' : '<div class="alx-img"></div>') + '</td>' +
         '<td><a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" title="Open on eBay">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + '</div></td>' +
         '<td>' + esc(axStr(r.account)) + '</td>' +
+        '<td style="white-space:nowrap;font-size:11.5px;font-weight:700">' + alxDate(r) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
-        '<td class="alx-num">' + (Number(r.sold_30d) || 0) + '</td>' +
+        '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
+        '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
+        '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
@@ -150,6 +198,7 @@
       return '<div class="hgroup enter d1"><h1>Active <span class="goldtext">listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
+          '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
           '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
           '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Search item number, title or campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
@@ -194,7 +243,7 @@
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'price', 'qty', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';

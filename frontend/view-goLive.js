@@ -87,6 +87,8 @@
           '<div class="gl-2">' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">eBay Item ID (once published)</label>' +
               '<input class="gl-in mono" inputmode="numeric" placeholder="123456789012" data-gl-item="' + esc(id) + '"></div>' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Final eBay title (saved for ever)</label>' +
+              '<input class="gl-in" data-gl-title="' + esc(id) + '" maxlength="160" placeholder="the title exactly as published"></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Note (optional)</label>' +
               '<input class="gl-in" data-gl-note="' + esc(id) + '" placeholder="anything the approver should know"></div>' +
           '</div>' +
@@ -101,14 +103,17 @@
           var id = this.getAttribute('data-gl-live');
           var inp = box.querySelector('[data-gl-item="' + id.replace(/"/g, '') + '"]');
           var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
+          var ttl = box.querySelector('[data-gl-title="' + id.replace(/"/g, '') + '"]');
           var v = inp ? glS(inp.value) : '';
           if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
           var btn = this; btn.disabled = true;
-          api('enterItemId', { task_id: id, item_id: v, note: note ? glS(note.value) : 'Published from the go-live desk.' })
+          btn.textContent = 'Live ✓';
+          toast('Live · the campaign, supplier and 72-hour tasks are being created.');
+          api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
+            note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
-              toast('Live · the campaign, supplier and 72-hour tasks are created.');
               glLoad();
-            }).catch(function (e) { btn.disabled = false; toast('Not entered: ' + e.message); });
+            }).catch(function (e) { btn.disabled = false; btn.textContent = 'Make live — enter Item ID'; toast('NOT entered — ' + e.message); });
         };
       });
       box.querySelectorAll('[data-gl-back]').forEach(function (b) {

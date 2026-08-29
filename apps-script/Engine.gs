@@ -177,6 +177,8 @@ function pushEngineSync() {
     if (props.getProperty('PORTAL_STATS_DAY') !== psDay) {
       updateSirHasibAnalysis();
       try { notifPrune(); } catch (e2) { logActivity_('system', 'NOTIF_PRUNE_FAIL', '', '', '', String(e2 && e2.message || e2).slice(0, 120)); }
+      try { sirHasibMonthlyFill(); } catch (e4) { logActivity_('system', 'SH_MONTHLY_FAIL', '', '', '', String(e4 && e4.message || e4).slice(0, 120)); }
+      try { truthCheck(); } catch (e3) { logActivity_('system', 'TRUTH_CHECK_FAIL', '', '', '', String(e3 && e3.message || e3).slice(0, 140)); }
       props.setProperty('PORTAL_STATS_DAY', psDay);
     }
   } catch (e) { logActivity_('system', 'PORTAL_STATS_FAIL', '', '', '', String(e && e.message || e).slice(0, 140)); }
@@ -254,6 +256,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
+  truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

@@ -108,7 +108,7 @@ export default {
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill],
-      '0 * * * *': [financeSync, csSync, autoMsgScan],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -939,6 +939,28 @@ async function uncampaignedDigest(env) {
    about ITEMS inside a campaign; none asked whether the account had a running campaign at all.
    An account with listings but no running campaign is a switched-off shop, and Management hears
    about it the same day. Once per day per account, so it cannot flood the way the ack alerts did. */
+/* 30 Aug (owner): "if any item got out of stock, even a variation — signal Husnain as Team
+   Lead to update the stock, and signal Management and Advertising too." The engine can SEE
+   eBay-side emptiness (out-of-stock control keeps a listing ACTIVE at qty 0); a single dead
+   VARIATION is invisible in the aggregate qty, so the processors report those with one click
+   (oosReport below). One letter per item per day. */
+async function stockWatch(env) {
+  const today = ukDate('');
+  const rs = await env.DB.prepare(
+    "SELECT item_id, account, title FROM items_api WHERE status = 'ACTIVE' AND qty <= 0 LIMIT 40"
+  ).all();
+  for (const r of (rs.results || [])) {
+    const key = 'engine:oos:' + r.item_id + ':' + today;
+    const msg = r.account + ' · "' + String(r.title || '').slice(0, 90) + '" (' + r.item_id +
+      ') shows ZERO stock on eBay while still ACTIVE - buyers see "out of stock". Update the ' +
+      'quantity (or end it) now; every hour empty is sales handed to a competitor.';
+    await notifyRole(env, 'Team Lead', 'OUT OF STOCK: ' + String(r.title || r.item_id).slice(0, 60), msg, key);
+    await notifyRole(env, 'Management', 'Out of stock on eBay: ' + r.account, msg, key + ':m');
+    await notifyRole(env, 'Advertising Manager', 'Out of stock - pause its ads: ' + r.account,
+      r.account + ' · ' + r.item_id + ' is at zero stock; ad clicks on an empty listing are pure waste.', key + ':a');
+  }
+}
+
 async function darkAccountWatch(env) {
   const today = ukDate('');
   const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'darkAccountWatch' AND account = ''").first();
@@ -3715,14 +3737,29 @@ const ROUTES = {
 
       const sel = B[bucket] ? bucket : 'awaiting';
       const listQ = bindFor(
-        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, o.ali_order, o.ali_link, i.title ' +
-        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE ' + B[sel] + acctSql +
+        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.qty, o.status, o.created_at, o.ship_by, o.ali_order, o.ali_link, i.title, ' +
+        /* 30 Aug (owner): a fresh order must hand the processor a BUYING link at once - the
+           Central Main Sheet columns first, the go-live desk's own record when the sheet row
+           has not been filled yet. Cost-role gated below like every supplier column. */
+        "COALESCE(NULLIF(f.sup1_link,''), NULLIF(g.ali_link,'')) AS sup_link, f.current_sup " +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+        'LEFT JOIN items_facts f ON f.item_id = o.item_id LEFT JOIN golive g ON g.item_id = o.item_id WHERE ' + B[sel] + acctSql +
         " ORDER BY CASE WHEN o.ship_by != '' THEN o.ship_by ELSE o.created_at END " +
         (sel === 'dispatched' || sel === 'all' ? 'DESC' : 'ASC') + ' LIMIT 150');
-      const rs = await ctx.env.DB.prepare(listQ.s).bind(...listQ.bind).all();
+      let rs;
+      try { rs = await ctx.env.DB.prepare(listQ.s).bind(...listQ.bind).all(); }
+      catch (e) {
+        if (/no such table: golive/.test(String(e && e.message || e))) {
+          await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS golive (item_id TEXT PRIMARY KEY, account TEXT, title TEXT, ali_link TEXT, lister TEXT, published_by TEXT, live_at TEXT)').run();
+          rs = await ctx.env.DB.prepare(listQ.s).bind(...listQ.bind).all();
+        } else { throw e; }
+      }
+      const seesCost = ITEM_COST_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const rows = (rs.results || []).map(r => {
-        if (!seesPII) { const c = { ...r }; delete c.buyer; return c; }
-        return r;
+        const c = { ...r };
+        if (!seesPII) { delete c.buyer; }
+        if (!seesCost) { delete c.sup_link; delete c.current_sup; }
+        return c;
       });
       return { bucket: sel, counts, rows, as_of: nowIso, today,
         note: sel === 'archived' ? 'Orders eBay holds no dispatch record for — dispatched and delivered in the real world, but tracking never reached eBay. They are history, not workload.' : '' };
@@ -4386,6 +4423,7 @@ const ROUTES = {
       }
       const rs = await ctx.env.DB.prepare(
         'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, a.sold_qty, a.sold_30d, ' +
+        '       a.start_time, a.first_seen, ' +
         '       f.ali_cost, f.sup1, f.sup2, f.sup3, f.sup1_link, f.sup2_link, f.sup3_link, ' +
         '       f.current_sup, f.category, f.oe, f.profit, f.roi, f.margin, ' +
         '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ' +
@@ -4394,6 +4432,28 @@ const ROUTES = {
         'ORDER BY a.api_synced_at DESC LIMIT 1500'
       ).bind(...bind).all();
       const rows = (rs.results || []).map(r => stripItem(r, ctx.user));
+      /* 30 Aug (owner): "listing start date ... proper breakdown of sold in last 7 / 14 / 30
+         days". Start date rides from eBay's own start_time (first_seen when eBay withheld it);
+         the sold windows come fresh from the orders table, cancelled and refunded excluded. */
+      {
+        const sw = await ctx.env.DB.prepare(
+          "SELECT item_id, " +
+          "SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN MAX(qty,1) ELSE 0 END) AS u7, " +
+          "SUM(CASE WHEN created_at >= datetime('now','-14 day') THEN MAX(qty,1) ELSE 0 END) AS u14, " +
+          "SUM(MAX(qty,1)) AS u30 " +
+          "FROM orders WHERE created_at >= datetime('now','-30 day') AND (refunded IS NULL OR refunded <= 0) AND status != 'CANCELLED' " +
+          'GROUP BY item_id'
+        ).all();
+        const soldBy = {};
+        for (const r of (sw.results || [])) soldBy[r.item_id] = r;
+        for (const r of rows) {
+          const sx = soldBy[r.item_id];
+          r.sold_7d = sx ? Number(sx.u7) || 0 : 0;
+          r.sold_14d = sx ? Number(sx.u14) || 0 : 0;
+          r.sold_30d_live = sx ? Number(sx.u30) || 0 : 0;
+          r.born = String(r.start_time || r.first_seen || '');
+        }
+      }
       /* Req 33 / Q9: Team Lead (and the other campaign roles) see PER-ITEM ad spend — never
          account totals. The 14-day per-item spend rides along only for those roles; the strip
          law stays the single gate. */
@@ -5245,6 +5305,102 @@ const ROUTES = {
         ads: Number(s && s.ads) || 0,
         last_fresh_day: lastDay,
       };
+    },
+  },
+
+  /* 30 Aug (owner): "html tools demand backups - he adds a new case and it doesn't get
+     updated." The docked tools run in an opaque-origin sandbox where localStorage THROWS -
+     every case died with the frame. The dock now shims localStorage and rides it here: state
+     lives per (tool, person) in D1, seeds the frame on open, saves on every write. */
+  toolStateLoad: {
+    auth: 'any', fn: async (p, ctx) => {
+      const tool = String(p.tool || '').slice(0, 40);
+      if (!tool) throw new Error('SAY: which tool?');
+      try { await ctx.env.DB.prepare('SELECT k FROM tool_state LIMIT 1').first(); }
+      catch (e) { try { await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS tool_state (tool TEXT, email TEXT, k TEXT, v TEXT, updated_at TEXT, PRIMARY KEY (tool, email, k))').run(); } catch (e2) {} }
+      const rs = await ctx.env.DB.prepare('SELECT k, v FROM tool_state WHERE tool = ?1 AND email = ?2')
+        .bind(tool, ctx.user.email).all();
+      const state = {};
+      for (const r of (rs.results || [])) state[r.k] = r.v;
+      return { tool, state };
+    },
+  },
+  toolStateSave: {
+    auth: 'any', fn: async (p, ctx) => {
+      const tool = String(p.tool || '').slice(0, 40);
+      if (!tool) throw new Error('SAY: which tool?');
+      const entries = Array.isArray(p.entries) ? p.entries.slice(0, 24) : [];
+      try { await ctx.env.DB.prepare('SELECT k FROM tool_state LIMIT 1').first(); }
+      catch (e) { try { await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS tool_state (tool TEXT, email TEXT, k TEXT, v TEXT, updated_at TEXT, PRIMARY KEY (tool, email, k))').run(); } catch (e2) {} }
+      let n = 0;
+      for (const e2 of entries) {
+        const k = String((e2 && e2.key) || '').slice(0, 120);
+        if (!k) continue;
+        if (e2.value === null || e2.value === undefined) {
+          await ctx.env.DB.prepare('DELETE FROM tool_state WHERE tool = ?1 AND email = ?2 AND k = ?3')
+            .bind(tool, ctx.user.email, k).run();
+        } else {
+          const v = String(e2.value).slice(0, 400000);
+          await ctx.env.DB.prepare(
+            "INSERT INTO tool_state (tool, email, k, v, updated_at) VALUES (?1, ?2, ?3, ?4, datetime('now')) " +
+            "ON CONFLICT(tool, email, k) DO UPDATE SET v = ?4, updated_at = datetime('now')"
+          ).bind(tool, ctx.user.email, k, v).run();
+        }
+        n++;
+      }
+      return { ok: true, saved: n };
+    },
+  },
+
+  /* 30 Aug (owner): variation-level out-of-stock is invisible to the API aggregate - the
+     person who FINDS the dead variation (usually the processor buying it) reports it in one
+     click, and Husnain (Team Lead) + Management + Advertising hear at once. */
+  oosReport: {
+    auth: 'any', fn: async (p, ctx) => {
+      const id = String(p.item_id || '').replace(/\D/g, '');
+      if (!/^\d{9,15}$/.test(id)) throw new Error('SAY: item id looks wrong');
+      const what = String(p.variation || '').trim().slice(0, 120);
+      const note = String(p.note || '').trim().slice(0, 300);
+      const it = await ctx.env.DB.prepare('SELECT account, title FROM items_api WHERE item_id = ?1').bind(id).first();
+      const acct = (it && it.account) || String(p.account || '');
+      const title = (it && it.title) || id;
+      const key = 'oosr:' + id + ':' + ukDate('');
+      const msg = acct + ' · "' + String(title).slice(0, 90) + '" (' + id + ')' +
+        (what ? ' - variation "' + what + '"' : '') + ' reported OUT OF STOCK at the supplier by ' +
+        ctx.user.name + (note ? '. Note: ' + note : '') +
+        '. Update the stock / switch supplier; orders on this listing cannot be fulfilled as-is.';
+      await notifyRole(ctx.env, 'Team Lead', 'SUPPLIER OUT OF STOCK: ' + String(title).slice(0, 60), msg, key);
+      await notifyRole(ctx.env, 'Management', 'Supplier out of stock: ' + acct, msg, key + ':m');
+      await notifyRole(ctx.env, 'Advertising Manager', 'Out of stock - check its ads: ' + acct,
+        acct + ' · ' + id + (what ? ' (variation ' + what + ')' : '') + ' cannot be bought right now - ad spend on it is waste until the stock is fixed.', key + ':a');
+      await flushNotifyQueue(ctx.env);
+      return { ok: true, told: ['Team Lead', 'Management', 'Advertising Manager'] };
+    },
+  },
+
+  /* 30 Aug (owner): the go-live desk "will save that data in its database". A permanent record
+     the moment an Item ID goes live - title, the hunt's AliExpress link, who listed and who
+     published - so order screens can hand the processor a buying link BEFORE the Central Main
+     Sheet row is filled. Insert-or-refresh by item. */
+  goliveRecord: {
+    auth: 'sync', fn: async (p, ctx) => {
+      try { await ctx.env.DB.prepare('SELECT item_id FROM golive LIMIT 1').first(); }
+      catch (e) {
+        try {
+          await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS golive (item_id TEXT PRIMARY KEY, account TEXT, title TEXT, ali_link TEXT, lister TEXT, published_by TEXT, live_at TEXT)').run();
+        } catch (e2) { /* raced */ }
+      }
+      const id = String(p.item_id || '').replace(/\D/g, '');
+      if (!/^\d{9,15}$/.test(id)) throw new Error('SAY: item id looks wrong');
+      await ctx.env.DB.prepare(
+        'INSERT INTO golive (item_id, account, title, ali_link, lister, published_by, live_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+        "ON CONFLICT(item_id) DO UPDATE SET account = ?2, title = CASE WHEN ?3 != '' THEN ?3 ELSE title END, " +
+        "ali_link = CASE WHEN ?4 != '' THEN ?4 ELSE ali_link END, lister = CASE WHEN ?5 != '' THEN ?5 ELSE lister END, " +
+        'published_by = ?6, live_at = ?7'
+      ).bind(id, String(p.account || ''), String(p.title || '').slice(0, 160),
+        String(p.ali_link || '').slice(0, 500), String(p.lister || ''), String(p.by || ''),
+        String(p.at || new Date().toISOString())).run();
+      return { ok: true, item_id: id };
     },
   },
 

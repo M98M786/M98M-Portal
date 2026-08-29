@@ -276,6 +276,10 @@ function listingParseDetails_(details) {
 function actionEnterItemId_(payload, ctx) {
   const itemId = taskItemId_(payload.item_id);
   if (!itemId) throw new Error('item_id required');
+  /* 30 Aug (owner, go-live desk): the publisher types the FINAL eBay title beside the Item ID;
+     it lands on the task and in the engine's permanent go-live record. Optional — an empty
+     title keeps the hunt's own product name. */
+  const finalTitle = String(payload.title || '').trim().slice(0, 160);
   const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT) || ('Item ID ' + itemId + ' entered — the listing is live.');
 
   const sh = tasksSheet_();
@@ -375,14 +379,29 @@ function actionEnterItemId_(payload, ctx) {
 
     if (!idempotent) {
       const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
-      taskWrite_(sh, found, {
+      const patch = {
         item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
         submission_note: note, updated_at: stamp, time_taken_min: total,
         comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
-      });
+      };
+      if (finalTitle) { patch.title = finalTitle; }
+      taskWrite_(sh, found, patch);
       approver = String(rec.assigned_by || '').trim();
     }
   } finally { lock.releaseLock(); }
+
+  /* The permanent record (30 Aug): item → title + the hunt's AliExpress link, in the engine's
+     own database, so the order screens can hand the processor a buying link the moment the
+     first order lands — before anyone has filled the Central Main Sheet row. Best-effort. */
+  try {
+    const lim2 = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
+    enginePost_('goliveRecord', {
+      item_id: itemId, account: String(rec.account || ''),
+      title: finalTitle || String(lim2['Title'] || rec.title || ''),
+      ali_link: String(lim2['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
+      lister: String(rec.assigned_to || ''), by: ctx.ident.email, at: now_(),
+    });
+  } catch (e) { /* the sheet chain still stands; the record fills on the next go-live touch */ }
 
   // A repeat entry re-reports the same tasks, but a downstream task that was never created
   // (a half-finished first attempt) is still created, notified and logged here.

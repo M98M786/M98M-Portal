@@ -692,3 +692,64 @@ function sirHasibMonthlyFill() {
   return 'appended ' + out.length + ' day row(s), ' + Object.keys(have).length + ' already present';
 }
 
+/* ==================================================================================== 30 Aug —
+ * the accountability the owner asked for by name ("you are not doing your own accountability,
+ * not verifying stats"): every night the portal reads each account book's own Monthly Sheet and
+ * compares three CLOSED days (T-2..T-4, both sides final) against its own engine day rows.
+ * Sold drift past £1-and-2% or Actual drift past £2-and-5% goes to Management as one letter
+ * naming the account, the day and both figures. Silence = the books and the portal agree. */
+function truthCheck() {
+  const eng = {};
+  portalStatsRows_().forEach(function (r) { eng[String(r.account) + '|' + String(r.date)] = r; });
+  const days = [];
+  for (let k = 2; k <= 4; k++) {
+    days.push(Utilities.formatDate(new Date(Date.now() + 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd'));
+  }
+  const drifts = [];
+  let booksRead = 0;
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind).trim() !== 'sales_analysis') return;
+    if (String(c.status || '').trim().toLowerCase() !== 'linked') return;
+    const account = String(c.account_name || '').trim();
+    let read = null;
+    try {
+      read = bridgeReadRows_({ scope: 'account', account: account, kind: 'sales_analysis',
+        tab: DASH_MONTHLY_TAB, expect: DASH_MONTHLY_HEADERS, limit: DASH_MONTHLY_LIMIT });
+    } catch (e) { return; }
+    if (!read || read.ok === false) return;
+    booksRead++;
+    const sheetByDay = {};
+    (read.rows || []).forEach(function (row) {
+      shDateCellDays_(row[DASH_COL_DATE]).forEach(function (k) {
+        sheetByDay[k] = { sold: Number(row[DASH_COL_SOLD]) || 0, actual: Number(row[DASH_COL_ACTUAL]) || 0, span: 1 };
+      });
+    });
+    days.forEach(function (k) {
+      const sh = sheetByDay[k];
+      const en = eng[account + '|' + k];
+      if (!sh || !en) return;                                  // a missing side is its own story, not a drift
+      const dSold = Math.abs(sh.sold - (Number(en.sold) || 0));
+      const dAct = Math.abs(sh.actual - (Number(en.actual) || 0));
+      if (dSold > 1 && dSold > 0.02 * Math.max(sh.sold, Number(en.sold) || 0, 1)) {
+        drifts.push(account + ' · ' + k + ' · Sold: book £' + r2_(sh.sold) + ' vs portal £' + r2_(en.sold));
+      } else if (dAct > 2 && dAct > 0.05 * Math.max(Math.abs(sh.actual), Math.abs(Number(en.actual) || 0), 1)) {
+        drifts.push(account + ' · ' + k + ' · Actual: book £' + r2_(sh.actual) + ' vs portal £' + r2_(en.actual));
+      }
+    });
+  });
+  if (drifts.length) {
+    const body = 'The nightly truth check compared each account book\'s Monthly Sheet against the ' +
+      'portal\'s own day rows (days ' + days.join(', ') + ') and found ' + drifts.length + ' figure(s) apart:\n\n' +
+      drifts.slice(0, 12).join('\n') +
+      (drifts.length > 12 ? '\n…and ' + (drifts.length - 12) + ' more.' : '') +
+      '\n\nOne of the two is wrong — usually a book missing a late refund or an ad bill. The portal side is on the Daily report.';
+    readTab_('USERS').forEach(function (u) {
+      if (String(u.role) !== 'Management' || String(u.status || '').toLowerCase() === 'off') return;
+      notify_(String(u.email), 'Truth check: books vs portal', body, 'truthcheck:' + days[0]);
+    });
+  }
+  logActivity_('system', 'TRUTH_CHECK', '', '', String(drifts.length), booksRead + ' book(s) read · days ' + days.join(','));
+  return 'checked ' + booksRead + ' book(s) over ' + days.join(', ') + ' — ' + drifts.length + ' drift(s)' +
+    (drifts.length ? ': ' + drifts.slice(0, 3).join(' | ') : '');
+}
+

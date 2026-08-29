@@ -194,7 +194,13 @@
           } else if (obStr(r.ali_link)) {
             aliCell = '<a href="' + esc(obStr(r.ali_link)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;font-size:11.5px">Ali link</a>';
           } else if (r.status === 'NOT_STARTED') {
-            aliCell = '<span class="ob-late" title="No AliExpress order recorded — sheet or portal">not processed</span>';
+            /* 30 Aug (owner): a fresh order hands the processor the BUYING link at once —
+               the Main Sheet's supplier column, or the go-live desk's own record for a brand-new
+               item whose sheet row nobody has filled yet. */
+            var buy = obStr(r.sup_link) && (typeof safeUrl === 'function' ? safeUrl(obStr(r.sup_link)) : obStr(r.sup_link));
+            aliCell = '<span class="ob-late" title="No AliExpress order recorded — sheet or portal">not processed</span>' +
+              (buy ? ' <a class="minibtn" style="padding:2px 9px;font-size:10.5px" href="' + esc(buy) + '" target="_blank" rel="noopener noreferrer" title="' + esc(obStr(r.current_sup) || 'the supplier the portal has on record') + '">Buy ↗</a>' : '') +
+              ' <button class="minibtn" style="padding:2px 8px;font-size:10px;color:var(--bad)" data-ob-oos="' + esc(obStr(r.item_id)) + '" title="The supplier (or one variation) is out of stock — one click tells Husnain, Management and Advertising">OOS</button>';
           } else {
             aliCell = '<span style="color:var(--text-3)">—</span>';
           }
@@ -230,6 +236,20 @@
       });
       box.querySelectorAll('[data-ali]').forEach(function (b) {
         b.onclick = function () { obCopy(this, this.getAttribute('data-ali')); };
+      });
+      box.querySelectorAll('[data-ob-oos]').forEach(function (b) {
+        b.onclick = function () {
+          var id = this.getAttribute('data-ob-oos');
+          var what = prompt('Which variation is out of stock? (leave empty if the whole item is)') || '';
+          if (what === null) { return; }
+          var btn = this;
+          btn.disabled = true; btn.textContent = 'Told ✓';
+          toast('Husnain, Management and Advertising have been told.');
+          api('oosReport', { item_id: id, variation: what }).catch(function (e) {
+            btn.disabled = false; btn.textContent = 'OOS';
+            toast('NOT sent — ' + e.message);
+          });
+        };
       });
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:14px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';

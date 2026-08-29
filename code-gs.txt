@@ -7188,6 +7188,10 @@ function listingParseDetails_(details) {
 function actionEnterItemId_(payload, ctx) {
   const itemId = taskItemId_(payload.item_id);
   if (!itemId) throw new Error('item_id required');
+  /* 30 Aug (owner, go-live desk): the publisher types the FINAL eBay title beside the Item ID;
+     it lands on the task and in the engine's permanent go-live record. Optional — an empty
+     title keeps the hunt's own product name. */
+  const finalTitle = String(payload.title || '').trim().slice(0, 160);
   const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT) || ('Item ID ' + itemId + ' entered — the listing is live.');
 
   const sh = tasksSheet_();
@@ -7287,14 +7291,29 @@ function actionEnterItemId_(payload, ctx) {
 
     if (!idempotent) {
       const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
-      taskWrite_(sh, found, {
+      const patch = {
         item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
         submission_note: note, updated_at: stamp, time_taken_min: total,
         comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
-      });
+      };
+      if (finalTitle) { patch.title = finalTitle; }
+      taskWrite_(sh, found, patch);
       approver = String(rec.assigned_by || '').trim();
     }
   } finally { lock.releaseLock(); }
+
+  /* The permanent record (30 Aug): item → title + the hunt's AliExpress link, in the engine's
+     own database, so the order screens can hand the processor a buying link the moment the
+     first order lands — before anyone has filled the Central Main Sheet row. Best-effort. */
+  try {
+    const lim2 = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
+    enginePost_('goliveRecord', {
+      item_id: itemId, account: String(rec.account || ''),
+      title: finalTitle || String(lim2['Title'] || rec.title || ''),
+      ali_link: String(lim2['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
+      lister: String(rec.assigned_to || ''), by: ctx.ident.email, at: now_(),
+    });
+  } catch (e) { /* the sheet chain still stands; the record fills on the next go-live touch */ }
 
   // A repeat entry re-reports the same tasks, but a downstream task that was never created
   // (a half-finished first attempt) is still created, notified and logged here.
@@ -21271,6 +21290,8 @@ function pushEngineSync() {
     if (props.getProperty('PORTAL_STATS_DAY') !== psDay) {
       updateSirHasibAnalysis();
       try { notifPrune(); } catch (e2) { logActivity_('system', 'NOTIF_PRUNE_FAIL', '', '', '', String(e2 && e2.message || e2).slice(0, 120)); }
+      try { sirHasibMonthlyFill(); } catch (e4) { logActivity_('system', 'SH_MONTHLY_FAIL', '', '', '', String(e4 && e4.message || e4).slice(0, 120)); }
+      try { truthCheck(); } catch (e3) { logActivity_('system', 'TRUTH_CHECK_FAIL', '', '', '', String(e3 && e3.message || e3).slice(0, 140)); }
       props.setProperty('PORTAL_STATS_DAY', psDay);
     }
   } catch (e) { logActivity_('system', 'PORTAL_STATS_FAIL', '', '', '', String(e && e.message || e).slice(0, 140)); }
@@ -21348,6 +21369,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
+  truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -24068,5 +24090,66 @@ function sirHasibMonthlyFill() {
   }
   if (out.length) sh.getRange(lr + 1, 1, out.length, lc).setValues(out);
   return 'appended ' + out.length + ' day row(s), ' + Object.keys(have).length + ' already present';
+}
+
+/* ==================================================================================== 30 Aug —
+ * the accountability the owner asked for by name ("you are not doing your own accountability,
+ * not verifying stats"): every night the portal reads each account book's own Monthly Sheet and
+ * compares three CLOSED days (T-2..T-4, both sides final) against its own engine day rows.
+ * Sold drift past £1-and-2% or Actual drift past £2-and-5% goes to Management as one letter
+ * naming the account, the day and both figures. Silence = the books and the portal agree. */
+function truthCheck() {
+  const eng = {};
+  portalStatsRows_().forEach(function (r) { eng[String(r.account) + '|' + String(r.date)] = r; });
+  const days = [];
+  for (let k = 2; k <= 4; k++) {
+    days.push(Utilities.formatDate(new Date(Date.now() + 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd'));
+  }
+  const drifts = [];
+  let booksRead = 0;
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind).trim() !== 'sales_analysis') return;
+    if (String(c.status || '').trim().toLowerCase() !== 'linked') return;
+    const account = String(c.account_name || '').trim();
+    let read = null;
+    try {
+      read = bridgeReadRows_({ scope: 'account', account: account, kind: 'sales_analysis',
+        tab: DASH_MONTHLY_TAB, expect: DASH_MONTHLY_HEADERS, limit: DASH_MONTHLY_LIMIT });
+    } catch (e) { return; }
+    if (!read || read.ok === false) return;
+    booksRead++;
+    const sheetByDay = {};
+    (read.rows || []).forEach(function (row) {
+      shDateCellDays_(row[DASH_COL_DATE]).forEach(function (k) {
+        sheetByDay[k] = { sold: Number(row[DASH_COL_SOLD]) || 0, actual: Number(row[DASH_COL_ACTUAL]) || 0, span: 1 };
+      });
+    });
+    days.forEach(function (k) {
+      const sh = sheetByDay[k];
+      const en = eng[account + '|' + k];
+      if (!sh || !en) return;                                  // a missing side is its own story, not a drift
+      const dSold = Math.abs(sh.sold - (Number(en.sold) || 0));
+      const dAct = Math.abs(sh.actual - (Number(en.actual) || 0));
+      if (dSold > 1 && dSold > 0.02 * Math.max(sh.sold, Number(en.sold) || 0, 1)) {
+        drifts.push(account + ' · ' + k + ' · Sold: book £' + r2_(sh.sold) + ' vs portal £' + r2_(en.sold));
+      } else if (dAct > 2 && dAct > 0.05 * Math.max(Math.abs(sh.actual), Math.abs(Number(en.actual) || 0), 1)) {
+        drifts.push(account + ' · ' + k + ' · Actual: book £' + r2_(sh.actual) + ' vs portal £' + r2_(en.actual));
+      }
+    });
+  });
+  if (drifts.length) {
+    const body = 'The nightly truth check compared each account book\'s Monthly Sheet against the ' +
+      'portal\'s own day rows (days ' + days.join(', ') + ') and found ' + drifts.length + ' figure(s) apart:\n\n' +
+      drifts.slice(0, 12).join('\n') +
+      (drifts.length > 12 ? '\n…and ' + (drifts.length - 12) + ' more.' : '') +
+      '\n\nOne of the two is wrong — usually a book missing a late refund or an ad bill. The portal side is on the Daily report.';
+    readTab_('USERS').forEach(function (u) {
+      if (String(u.role) !== 'Management' || String(u.status || '').toLowerCase() === 'off') return;
+      notify_(String(u.email), 'Truth check: books vs portal', body, 'truthcheck:' + days[0]);
+    });
+  }
+  logActivity_('system', 'TRUTH_CHECK', '', '', String(drifts.length), booksRead + ' book(s) read · days ' + days.join(','));
+  return 'checked ' + booksRead + ' book(s) over ' + days.join(', ') + ' — ' + drifts.length + ' drift(s)' +
+    (drifts.length ? ': ' + drifts.slice(0, 3).join(' | ') : '');
 }
 

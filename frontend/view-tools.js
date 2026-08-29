@@ -248,11 +248,16 @@
     tkWireBar(stage);
     tkReveal(stage);
 
-    api('toolHtml', { tool: kind }).then(function (res) {
+    Promise.all([
+      api('toolHtml', { tool: kind }),
+      api('toolStateLoad', { tool: kind }).catch(function () { return { state: {} }; })
+    ]).then(function (both) {
+      var res = both[0];
       if (!res || res.ok !== true) {
         tkCalmStage(kind, tkStr(res && res.reason), tkStr(res && res.note));
         return;
       }
+      res._seed = (both[1] && both[1].state) || {};
       tkMount(kind, res);
     }).catch(function (e) {
       tkFailStage(kind, e.message);
@@ -292,12 +297,20 @@
     frame.setAttribute('sandbox', 'allow-scripts allow-forms');
     frame.setAttribute('title', tkStr(res.title) || tkTitleOf(kind));
     frame.setAttribute('referrerpolicy', 'no-referrer');   // the portal's URL is not the tool's business
-    frame.srcdoc = String(res.html == null ? '' : res.html);
+    /* the storage shim (30 Aug): the sandbox stays exactly as tight — the tool still cannot see
+       the portal — but its localStorage now rides postMessage into the engine, per person, so a
+       case added here is there tomorrow, on any machine. */
+    tkFlushState();
+    TK_SYNC.tool = kind;
+    var html0 = String(res.html == null ? '' : res.html);
+    var shim0 = tkShim(res._seed || {});
+    var at0 = html0.search(/<head[^>]*>/i);
+    frame.srcdoc = at0 >= 0 ? html0.replace(/<head[^>]*>/i, function (m) { return m + shim0; }) : shim0 + html0;
     stage.appendChild(frame);
 
     stage.insertAdjacentHTML('beforeend',
-      '<div class="tk-note">This tool is running <b>sealed off from the portal</b> — it cannot reach your sign-in or your data, ' +
-      'and it cannot save anything in this browser. Copy out what you need before you close it. This open was logged at <b>' +
+      '<div class="tk-note">This tool runs <b>sealed off from the portal</b> — it cannot reach your sign-in or your data. ' +
+      'What it saves (cases, logs, templates) now lands <b>in the portal itself</b>, under your name, and follows you to any machine. This open was logged at <b>' +
       esc(tkNow()) + ' PKT</b>.</div>');
 
     tkWireBar(stage);
@@ -413,27 +426,76 @@
      in that dashboard, in the SAME opaque-origin sandbox as the Tools screen (allow-scripts
      allow-forms only; no same-origin, no popups, no top-navigation — RL-3's reasoning applies
      unchanged). One dock per host; a second call replaces the first. */
+  /* 30 Aug (owner): "he adds a new case there and it doesn't get updated because it is just an
+     html tool ... html tools demand backups." Inside the sandbox (opaque origin) localStorage
+     THROWS, so every tool's own persistence was dead. The dock now: ① loads the person's saved
+     state from the engine, ② injects a localStorage shim seeded with it before the tool's own
+     scripts run, ③ streams every write back (debounced) via postMessage → toolStateSave. Cases
+     survive reloads, devices and the sandbox — the Backup/Restore buttons are now optional. */
+  var TK_SYNC = { timer: null, queue: {}, tool: '' };
+  function tkFlushState() {
+    var tool = TK_SYNC.tool;
+    var entries = Object.keys(TK_SYNC.queue).map(function (k) { return { key: k, value: TK_SYNC.queue[k] }; });
+    TK_SYNC.queue = {};
+    if (!tool || !entries.length) { return; }
+    api('toolStateSave', { tool: tool, entries: entries }).catch(function () {
+      toast('The tool could not save to the portal just now — it retries on your next change.');
+      entries.forEach(function (e) { if (!(e.key in TK_SYNC.queue)) { TK_SYNC.queue[e.key] = e.value; } });
+    });
+  }
+  window.addEventListener('message', function (ev) {
+    var d = ev && ev.data && ev.data.m98mToolStore;
+    if (!d || typeof d.key !== 'string') { return; }
+    TK_SYNC.queue[d.key.slice(0, 120)] = d.value === null ? null : String(d.value);
+    if (TK_SYNC.timer) { clearTimeout(TK_SYNC.timer); }
+    TK_SYNC.timer = setTimeout(tkFlushState, 1200);
+  });
+  function tkShim(state) {
+    return '<script>(function(){try{' +
+      'var MEM=' + JSON.stringify(state || {}).replace(/</g, '\\u003c') + ';' +
+      'var fake={getItem:function(k){return Object.prototype.hasOwnProperty.call(MEM,k)?MEM[k]:null;},' +
+      'setItem:function(k,v){MEM[k]=String(v);try{parent.postMessage({m98mToolStore:{key:k,value:String(v)}},"*");}catch(e){}},' +
+      'removeItem:function(k){delete MEM[k];try{parent.postMessage({m98mToolStore:{key:k,value:null}},"*");}catch(e){}},' +
+      'clear:function(){for(var k in MEM){try{parent.postMessage({m98mToolStore:{key:k,value:null}},"*");}catch(e){}}MEM={};},' +
+      'key:function(i){return Object.keys(MEM)[i]||null;}};' +
+      'try{Object.defineProperty(fake,"length",{get:function(){return Object.keys(MEM).length;}});}catch(e){}' +
+      'try{Object.defineProperty(window,"localStorage",{value:fake,configurable:true});}catch(e){}' +
+      'try{Object.defineProperty(window,"sessionStorage",{value:fake,configurable:true});}catch(e){}' +
+      '}catch(e){}})();<\/script>';
+  }
   window.toolDock = function (host, kind, title) {
     if (!host) { return; }
     host.innerHTML = '<div class="tk-load" style="padding:14px"><div class="spinner"></div>' +
       '<div class="tk-sub">Opening ' + esc(String(title || kind)) + '\u2026</div></div>';
-    api('toolHtml', { tool: kind }).then(function (res) {
+    Promise.all([
+      api('toolHtml', { tool: kind }),
+      api('toolStateLoad', { tool: kind }).catch(function () { return { state: {} }; })
+    ]).then(function (both) {
+      var res = both[0];
+      var seed = (both[1] && both[1].state) || {};
       if (!res || res.ok !== true) {
         host.innerHTML = '<div class="empty">' + esc(String((res && (res.reason || res.note)) || 'The tool is not ready.')) + '</div>';
         return;
       }
+      tkFlushState();                      // anything queued for the previous tool goes first
+      TK_SYNC.tool = kind;
       host.innerHTML = '';
       var bar = document.createElement('div');
       bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--gold-line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--panel-2);font-weight:800;font-size:12px';
-      bar.textContent = String(title || kind);
+      bar.textContent = String(title || kind) + ' · saves to the portal';
       var x = document.createElement('button');
       x.className = 'minibtn'; x.textContent = 'Close';
-      x.onclick = function () { host.innerHTML = ''; };
+      x.onclick = function () { tkFlushState(); host.innerHTML = ''; };
       bar.appendChild(x);
       var fr = document.createElement('iframe');
       fr.setAttribute('sandbox', 'allow-scripts allow-forms');
       fr.style.cssText = 'width:100%;height:640px;border:1px solid var(--gold-line);border-radius:0 0 12px 12px;background:#fff';
-      fr.srcdoc = String(res.html || '');
+      var html = String(res.html || '');
+      var shim = tkShim(seed);
+      var at = html.search(/<head[^>]*>/i);
+      fr.srcdoc = at >= 0
+        ? html.slice(0, at) + html.slice(at).replace(/<head[^>]*>/i, function (m) { return m + shim; })
+        : shim + html;
       host.appendChild(bar);
       host.appendChild(fr);
       try { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}

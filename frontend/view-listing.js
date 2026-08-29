@@ -283,18 +283,19 @@
 
   // ============================== VIEW ==============================
   VIEWS.listing = {
-    label: 'My listings',
+    label: 'Assigned listings',
     icon: '<path d="M11.6 3H5a2 2 0 0 0-2 2v6.6a2 2 0 0 0 .6 1.4l7.4 7.4a2 2 0 0 0 2.8 0l6.6-6.6a2 2 0 0 0 0-2.8L13 3.6A2 2 0 0 0 11.6 3z"/><path d="M7.5 7.5h.01"/>',
     roles: LS_VIEW_ROLES,
     order: 17,
     prefetch: function () { return lsFetch(); },
     badge: function () { return (STATE.counts && STATE.counts.listing) || 0; },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>My listings</h1>' +
+      return '<div class="hgroup enter d1"><h1>Assigned <span class="goldtext">listings</span></h1>' +
           '<span class="sub">Day 0 dummy → 72-hour revision → campaign · UK windows, Pakistan time</span>' +
           '<button class="minibtn" id="lsDone" style="margin-left:auto">Show completed</button>' +
           '<button class="minibtn" id="lsRefresh">Refresh</button>' +
         '</div>' +
+        '<div class="dr-kpis enter d1" id="lsTiles"></div>' +
         '<div class="card enter d1"><div class="hd">The listing clock ' +
           '<span class="hint">§8.0 — fixed UK windows, shown in your time too</span></div>' +
           '<div class="bd" id="lsClock">' + lsTimeline(null) + '</div>' +
@@ -370,7 +371,9 @@
       the "show done" toggle never paints the wrong list. Item-ID entry and revision actions are
       re-validated by the server, so a briefly stale card cannot cause a wrong write. */
   function lsFetch() {
-    var payload = LS_SHOW_DONE ? { include_completed: 'true' } : {};
+    /* 30 Aug: completed rows always ride along — the tiles (done yesterday, drafts, archive
+       counts) need them; the Show-completed button only changes what the job list DISPLAYS. */
+    var payload = { include_completed: 'true' };
     return api('myListingWork', payload).then(function (d) {
       if (typeof cacheWrite === 'function') { cacheWrite('myListingWork', payload, d); }
       return d;
@@ -380,7 +383,7 @@
   function lsLoad() {
     var jobs = $('lsJobs'), revs = $('lsRevs');
     if (!jobs || !revs) { return; }
-    var had = (typeof cacheRead === 'function') ? cacheRead('myListingWork', LS_SHOW_DONE ? { include_completed: 'true' } : {}) : null;
+    var had = (typeof cacheRead === 'function') ? cacheRead('myListingWork', { include_completed: 'true' }) : null;
     if (had) { try { lsPaint(had); } catch (e) { had = null; } }
     if (!had) {
       jobs.innerHTML = '<div class="spinner"></div>';
@@ -395,7 +398,54 @@
     });
   }
 
+  function lsPktDay(iso, shift) {
+    /* task stamps arrive as PKT ISO — compare by PKT calendar day */
+    var t = Date.parse(lsStr(iso));
+    if (!isFinite(t)) { return ''; }
+    return new Date(t + (shift || 0) * 86400000).toISOString().slice(0, 10);
+  }
+  function lsTiles(d) {
+    var host = $('lsTiles');
+    if (!host) { return; }
+    var all = [].concat(d.listings || [], d.revisions || []);
+    var today = lsPktDay(new Date().toISOString(), 0);
+    var yday = lsPktDay(new Date().toISOString(), -1);
+    var assignedToday = 0, pending = 0, doneYday = 0, drafts = 0, awaiting = 0, doneAll = 0;
+    all.forEach(function (j) {
+      var st = lsStr(j.status);
+      if (lsPktDay(j.created_at, 0) === today) { assignedToday++; }
+      if (LS_OPEN.indexOf(st) >= 0) {
+        pending++;
+        var f = lsFlag(j);
+        if (f && f.flag === 'draft') { drafts++; }
+      }
+      if (st === LS_SUBMITTED) { awaiting++; }
+      if (st === LS_COMPLETED) {
+        doneAll++;
+        if (lsPktDay(j.submitted_at, 0) === yday) { doneYday++; }
+      }
+    });
+    function tile(label, n, tone, hint) {
+      return '<div class="dr-kpi" title="' + esc(hint || '') + '"><div class="l">' + esc(label) + '</div>' +
+        '<div class="v" style="' + (tone ? 'color:var(--' + tone + ')' : '') + '">' + n + '</div></div>';
+    }
+    host.innerHTML =
+      tile('Assigned today', assignedToday, '', 'jobs that landed on you today') +
+      tile('Pending', pending, pending ? 'warn' : '', 'assigned · working · updated — still yours to finish') +
+      tile('Left in draft', drafts, drafts ? 'bad' : '', 'flagged as draft — the go-live desk is waiting') +
+      tile('Awaiting approval', awaiting, '', 'submitted, with the approver') +
+      tile('Done yesterday', doneYday, doneYday ? 'ok' : '', 'completed on yesterday\u2019s date') +
+      tile('Done all-time', doneAll, 'ok', 'your archive — the full history lives on My archive');
+  }
+
   function lsPaint(d) {
+    lsTiles(d || {});
+    /* the job/revision lists hide completed unless the button asks for them */
+    if (d && !LS_SHOW_DONE) {
+      d = { listings: (d.listings || []).filter(function (j) { return lsStr(j.status) !== LS_COMPLETED; }),
+        revisions: (d.revisions || []).filter(function (j) { return lsStr(j.status) !== LS_COMPLETED; }),
+        columns: d.columns, timing: d.timing };
+    }
     var jobs = $('lsJobs'), revs = $('lsRevs');
     if (!jobs || !revs) { return; }
     LS_COPY = {};
