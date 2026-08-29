@@ -897,3 +897,36 @@ function bookFix(args) {
     (lines.length ? ' :: ' + lines.slice(0, 3).join(' | ') : '');
 }
 
+/* 30 Aug — the ads history the engine lost (billing ages out of eBay's report after ~2 weeks)
+ * exists in the account books: the N column, recorded when the billing was live. This reads
+ * every linked book's Monthly Sheet and hands N/1.2 to the engine for the days that currently
+ * ride an ESTIMATE - real recorded spend replaces the guess, day by day. */
+function adsFromBooks() {
+  const out = [];
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind).trim() !== 'sales_analysis') return;
+    if (String(c.status || '').trim().toLowerCase() !== 'linked') return;
+    const account = String(c.account_name || '').trim();
+    let read = null;
+    try {
+      read = bridgeReadRows_({ scope: 'account', account: account, kind: 'sales_analysis',
+        tab: DASH_MONTHLY_TAB, expect: DASH_MONTHLY_HEADERS, limit: DASH_MONTHLY_LIMIT });
+    } catch (e) { return; }
+    if (!read || read.ok === false) return;
+    (read.rows || []).forEach(function (row) {
+      const days = shDateCellDays_(row[DASH_COL_DATE]);
+      if (days.length !== 1) return;
+      const n = Number(row[DASH_COL_PRIORITY]);
+      if (!isFinite(n) || n < 0) return;
+      out.push({ account: account, date: days[0], pri: Math.round(n / 1.2 * 100) / 100 });
+    });
+  });
+  let updated = 0;
+  for (let i = 0; i < out.length; i += 300) {
+    const res = enginePost_('priFromBooks', { rows: out.slice(i, i + 300) });
+    updated += Number(res && res.updated) || 0;
+  }
+  logActivity_('system', 'ADS_FROM_BOOKS', '', '', String(updated), out.length + ' book day(s) offered');
+  return out.length + ' book day(s) offered, ' + updated + ' estimated day(s) replaced with the books\' real N';
+}
+

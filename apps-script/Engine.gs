@@ -259,6 +259,7 @@ const ENGINE_RUNNABLE = {
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
   bookFix: function (args) { return typeof bookFix === 'function' ? String(bookFix(args)) : 'absent'; },
+  adsFromBooks: function () { return typeof adsFromBooks === 'function' ? String(adsFromBooks()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

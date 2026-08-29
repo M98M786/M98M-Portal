@@ -3091,15 +3091,29 @@ async function rollupsWindow(env, days) {
       r0.pri += ex0.pri; r0.sold += day[k].sold;
     }
   }
+  /* Billing history ages out of ads_daily after ~2 weeks, and this rebuild used to write pri = 0
+     over days whose REAL ad spend an earlier roll had already recorded — that silent wipe is how
+     Aug 1-12 lost ~£5k of ads and the month's profit read £9.8k when the books said £5.9k. A
+     stored pri that came from real billing (pri_est = 0) now survives every rebuild. */
+  const prevRs = await env.DB.prepare(
+    "SELECT account, date, pri, COALESCE(pri_est, 0) AS pri_est FROM sales_daily WHERE date > ?1"
+  ).bind(edgeDay).all();
+  const prevBy = {};
+  for (const r of (prevRs.results || [])) prevBy[r.account + '|' + r.date] = r;
   const stmts = [];
   for (const k of Object.keys(day)) {
     const cut = k.indexOf('|');
     const v = day[k];
     const ex = extraByKey[k] || { pri: 0, rev: 0 };
     let pri = ex.pri, priEst = 0;
-    if (!(pri > 0) && v.sold > 0) {
-      const r = ratio[k.slice(0, cut)];
-      if (r && r.sold > 200 && r.pri > 0) { pri = round2(v.sold * r.pri / r.sold); priEst = 1; }
+    if (!(pri > 0)) {
+      const prev = prevBy[k];
+      if (prev && Number(prev.pri) > 0 && !Number(prev.pri_est)) {
+        pri = Number(prev.pri);                          // real billing an earlier roll recorded
+      } else if (v.sold > 0) {
+        const r = ratio[k.slice(0, cut)];
+        if (r && r.sold > 200 && r.pri > 0) { pri = round2(v.sold * r.pri / r.sold); priEst = 1; }
+      }
     }
     const actual = round2(v.profit - pri - v.returns);
     stmts.push(env.DB.prepare(
@@ -5321,6 +5335,32 @@ const ROUTES = {
         ads: Number(s && s.ads) || 0,
         last_fresh_day: lastDay,
       };
+    },
+  },
+
+  /* 30 Aug: where billing history has aged out and a day rides an ESTIMATE, the account books
+     hold the REAL recorded N (CPC incl VAT) for that day. This lands book truth into those days
+     only - a day with real billing (pri_est = 0) is never touched - and recomputes actual. */
+  priFromBooks: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 400);
+      let updated = 0;
+      const stmts = [];
+      for (const r of rows) {
+        const acct = String(r.account || '').trim();
+        const date = String(r.date || '').trim();
+        const pri = Math.round((Number(r.pri) || 0) * 100) / 100;
+        if (!acct || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !(pri >= 0)) continue;
+        stmts.push(ctx.env.DB.prepare(
+          'UPDATE sales_daily SET pri = ?3, pri_est = 0, actual = ROUND(profit - ?3 - returns, 2) ' +
+          'WHERE account = ?1 AND date = ?2 AND COALESCE(pri_est, 0) = 1'
+        ).bind(acct, date, pri));
+      }
+      for (let i = 0; i < stmts.length; i += 50) {
+        const res = await ctx.env.DB.batch(stmts.slice(i, i + 50));
+        for (const x of (res || [])) updated += (x && x.meta && x.meta.changes) || 0;
+      }
+      return { seen: rows.length, updated };
     },
   },
 
