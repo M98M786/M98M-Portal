@@ -5225,6 +5225,52 @@ const ROUTES = {
     },
   },
 
+  /* 30 Aug (owner): "show the amount currently in the account — your funds". eBay's own
+     seller_funds_summary, per account, signed like every finances call. Cached ten minutes in
+     HOT so the overview never hammers eBay; force:true refetches. */
+  fundsSummary: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      if (!p.force) {
+        const hit = await ctx.env.HOT.get('funds:summary', 'json');
+        if (hit && Date.now() - hit.at < 600000) return hit;
+      }
+      const out = { at: Date.now(), accounts: [] };
+      for (const acct of await apiAccounts(ctx.env)) {
+        try {
+          const tok = await ebayAccessToken(ctx.env, acct);
+          const r = await ebaySignedFetch(ctx.env, 'https://apiz.ebay.com/sell/finances/v1/seller_funds_summary', tok, {});
+          if (!r.ok) { out.accounts.push({ account: acct, error: 'HTTP ' + r.status }); continue; }
+          const j = await r.json();
+          const g = (x) => (x && x.value != null ? Math.round(Number(x.value) * 100) / 100 : 0);
+          out.accounts.push({
+            account: acct,
+            currency: (j.availableFunds && j.availableFunds.currency) || (j.totalFunds && j.totalFunds.currency) || 'GBP',
+            available: g(j.availableFunds), processing: g(j.processingFunds),
+            on_hold: g(j.fundsOnHold), total: g(j.totalFunds),
+          });
+        } catch (e) { out.accounts.push({ account: acct, error: String(e && e.message || e).slice(0, 120) }); }
+      }
+      await ctx.env.HOT.put('funds:summary', JSON.stringify(out), { expirationTtl: 3600 });
+      return out;
+    },
+  },
+
+  /* Per-day order/unit counts straight from the orders table (UK days, refunds excluded) — the
+     sheet-filling jobs need day rows, not month totals. */
+  dayCounts: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? String(p.from)
+        : new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+      const r = await ctx.env.DB.prepare(
+        "SELECT account, substr(datetime(created_at,'+1 hour'),1,10) AS d, COUNT(*) AS n, " +
+        "SUM(MAX(qty,1)) AS units FROM orders " +
+        "WHERE substr(datetime(created_at,'+1 hour'),1,10) >= ?1 AND (refunded IS NULL OR refunded <= 0) " +
+        "GROUP BY account, d ORDER BY d"
+      ).bind(from).all();
+      return { from: from, rows: r.results || [] };
+    },
+  },
+
   priceWatchClear: {
     auth: 'sync', fn: async (p, ctx) => {
       /* 30 Aug one-shot: 66 of 67 open alerts were variation ghosts from the old blind detector
@@ -5262,7 +5308,7 @@ const ROUTES = {
       const key = await secret(ctx.env, 'SYNC_KEY');
       const r = await fetch(ctx.env.AS_URL, {
         method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, redirect: 'follow',
-        body: JSON.stringify({ action: 'engineRunJob', payload: { key, job: String(p.job || '') } }),
+        body: JSON.stringify({ action: 'engineRunJob', payload: { key, job: String(p.job || ''), args: p.args || null } }),
       });
       const text = await r.text();
       try { return JSON.parse(text); } catch (e) { return { ok: false, status: r.status, raw: text.slice(0, 300) }; }

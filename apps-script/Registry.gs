@@ -541,3 +541,150 @@ function notifPrune() {
   logActivity_('system', 'NOTIF_PRUNE', 'NOTIFICATIONS', '', String(dropped), 'kept ' + kept + ', dropped ' + dropped);
   return 'kept ' + kept + ' letter(s), dropped ' + dropped + ' old one(s)';
 }
+
+/* ==================================================================================== 30 Aug —
+ * the owner's "wrong numbers are dangerous" batch. Three tools:
+ * wbInspect        — read-only recon of any connected workbook (tabs, headers, sample rows), so
+ *                    sheet questions get answered server-side instead of by eyeballing panes.
+ * connectSirHasib  — the missing CONNECTIONS row: his Sales Analysis book existed, fed nothing.
+ * sirHasibMonthlyFill — his report agents died in July; the portal now writes his Monthly Sheet
+ *                    day rows itself from engine truth (append-only, never touches a filled row).
+ */
+function wbInspect(args) {
+  args = args || {};
+  var id = String(args.id || '');
+  if (!id && args.account && args.kind) {
+    readTab_('CONNECTIONS').forEach(function (c) {
+      if (!id && String(c.account_name).trim() === String(args.account).trim() &&
+          String(c.sheet_kind).trim() === String(args.kind).trim()) { id = String(c.spreadsheet_id || '').trim(); }
+    });
+  }
+  if (!id) return JSON.stringify({ ok: false, why: 'no id — pass {id} or {account,kind}' });
+  var ss = SpreadsheetApp.openById(id);
+  if (!args.tab) {
+    return JSON.stringify({ ok: true, title: ss.getName(),
+      tabs: ss.getSheets().map(function (sh) { return sh.getName() + ' [' + sh.getLastRow() + 'r x ' + sh.getLastColumn() + 'c]'; }) });
+  }
+  var sh = ss.getSheetByName(String(args.tab));
+  if (!sh) return JSON.stringify({ ok: false, why: 'no tab called ' + args.tab });
+  var lr = sh.getLastRow(), lc = Math.min(sh.getLastColumn(), 30);
+  if (!lr) return JSON.stringify({ ok: true, rows: 0 });
+  var top = sh.getRange(1, 1, Math.min(lr, Math.max(1, Number(args.rows || 6))), lc).getDisplayValues();
+  var tail = lr > 12 ? sh.getRange(Math.max(2, lr - 3), 1, 4, lc).getDisplayValues() : [];
+  return JSON.stringify({ ok: true, rows: lr, cols: sh.getLastColumn(), top: top, tail: tail });
+}
+
+function connectSirHasib() {
+  var sh = getPortalDb_(false).getSheetByName('CONNECTIONS');
+  var vals = sh.getDataRange().getValues();
+  var head = vals[0].map(function (h) { return String(h).trim(); });
+  var iRow = head.indexOf('row_id'), iSc = head.indexOf('scope'), iA = head.indexOf('account_name'),
+      iK = head.indexOf('sheet_kind'), iId = head.indexOf('spreadsheet_id'), iS = head.indexOf('status'),
+      iN = head.indexOf('notes');
+  var out = [];
+  for (var r = 1; r < vals.length; r++) {
+    if (String(vals[r][iA]).trim() === 'Sir Hasib' && String(vals[r][iK]).trim() === 'sales_analysis') {
+      sh.getRange(r + 1, iId + 1).setValue(SH_ANALYSIS_BOOK);
+      sh.getRange(r + 1, iS + 1).setValue('linked');
+      out.push('updated existing row ' + (r + 1));
+    }
+  }
+  if (!out.length) {
+    var row = [];
+    for (var c = 0; c < head.length; c++) { row.push(''); }
+    if (iRow >= 0) row[iRow] = 'conn_shsa_' + Date.now();
+    if (iSc >= 0) row[iSc] = 'account';
+    row[iA] = 'Sir Hasib'; row[iK] = 'sales_analysis'; row[iId] = SH_ANALYSIS_BOOK; row[iS] = 'linked';
+    if (iN >= 0) row[iN] = 'linked by the portal 30 Aug 2026 - owner: every number must include Sir Hasib';
+    sh.appendRow(row);
+    out.push('appended');
+  }
+  return out.join('; ');
+}
+
+function shMonths_() {
+  return ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+}
+function shYmdToOrd_(ymd) {
+  var p = String(ymd).split('-'); var day = Number(p[2]);
+  var sfx = (day % 10 === 1 && day !== 11) ? 'st' : (day % 10 === 2 && day !== 12) ? 'nd'
+    : (day % 10 === 3 && day !== 13) ? 'rd' : 'th';
+  return day + sfx + ' ' + shMonths_()[Number(p[1]) - 1] + ' ' + p[0];
+}
+/* One Date cell may cover a RANGE ("12-13 July 2026"); return every yyyy-mm-dd it covers. */
+function shDateCellDays_(v) {
+  if (v instanceof Date) {
+    return [Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd')];
+  }
+  var s = String(v == null ? '' : v).trim();
+  if (!s) return [];
+  var m = s.match(/^(\d{1,2})(?:st|nd|rd|th)?(?:\s*-\s*(\d{1,2})(?:st|nd|rd|th)?)?\s+([A-Za-z]+)\s+(\d{4})/);
+  if (!m) {
+    var t = Date.parse(s);
+    return isFinite(t) ? [Utilities.formatDate(new Date(t), 'Etc/GMT', 'yyyy-MM-dd')] : [];
+  }
+  var names = shMonths_().map(function (x) { return x.toLowerCase(); });
+  var mo = names.indexOf(m[3].toLowerCase()) + 1;
+  if (!mo) return [];
+  var lo = Number(m[1]), hi = m[2] ? Number(m[2]) : lo;
+  var out = [];
+  for (var d = lo; d <= hi && d <= 31; d++) {
+    out.push(m[4] + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2));
+  }
+  return out;
+}
+
+function sirHasibMonthlyFill() {
+  var ss = SpreadsheetApp.openById(SH_ANALYSIS_BOOK);
+  var sh = ss.getSheetByName('Monthly Sheet');
+  if (!sh) return 'no Monthly Sheet tab';
+  var lr = sh.getLastRow(), lc = sh.getLastColumn();
+  var head = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (h) { return String(h).trim(); });
+  var iDate = head.indexOf('Date');
+  if (iDate < 0) return 'no Date column';
+  var have = {};
+  if (lr > 1) {
+    sh.getRange(2, iDate + 1, lr - 1, 1).getValues().forEach(function (r) {
+      shDateCellDays_(r[0]).forEach(function (k) { have[k] = true; });
+    });
+  }
+  var mine = portalStatsRows_().filter(function (r) { return String(r.account) === 'Sir Hasib'; });
+  var byDay = {};
+  mine.forEach(function (r) { byDay[String(r.date)] = r; });
+  var counts = enginePost_('dayCounts', { from: '2026-08-01' });
+  var cByDay = {};
+  (((counts || {}).rows) || []).forEach(function (r) {
+    if (String(r.account) === 'Sir Hasib') cByDay[String(r.d)] = r;
+  });
+  var yest = new Date(Date.now() + 3600000 - 86400000);          // yesterday, UK clock
+  var end = Utilities.formatDate(yest, 'Etc/GMT', 'yyyy-MM-dd');
+  var out = [];
+  for (var t = Date.parse('2026-08-01T00:00:00Z'); ; t += 86400000) {
+    var k = Utilities.formatDate(new Date(t), 'Etc/GMT', 'yyyy-MM-dd');
+    if (k > end) break;
+    if (have[k]) continue;
+    var b = byDay[k], c = cByDay[k];
+    if (!b && !c) continue;                                      // engine knows nothing for the day
+    var row = [];
+    for (var i = 0; i < lc; i++) { row.push(''); }
+    var put = function (name, v) { var ix = head.indexOf(name); if (ix >= 0) row[ix] = v; };
+    var sold = b ? r2_(b.sold) : 0, oe = b ? r2_(b.oe) : 0;
+    put('Date', shYmdToOrd_(k));
+    put('Orders', c ? Number(c.n) || 0 : 0);
+    put('Units', c ? Number(c.units) || 0 : 0);
+    put('Sold (B)', sold);
+    put('Earning (H)', oe);
+    put('AliExpress (I)', b ? r2_(b.cost) : 0);
+    put('All Priority incl VAT (N)', b ? r2_(b.ads) : 0);
+    put('General fees', r2_(sold - oe));
+    put('Raw Profit (T)', b ? r2_(b.profit) : 0);
+    put('Returns (U)', b ? r2_(b.returns) : 0);
+    put('Actual Profit (V)', b ? r2_(b.actual) : 0);
+    var tt = b ? Number(b.profit) || 0 : 0, nn = b ? Number(b.ads) || 0 : 0;
+    put('Ratio', tt > 0 && nn > 0 ? r2_(nn / tt) : '');
+    out.push(row);
+  }
+  if (out.length) sh.getRange(lr + 1, 1, out.length, lc).setValues(out);
+  return 'appended ' + out.length + ' day row(s), ' + Object.keys(have).length + ' already present';
+}
+

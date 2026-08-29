@@ -251,6 +251,9 @@ const ENGINE_RUNNABLE = {
   replayShadowOrders: function () { return typeof replayShadowOrders === 'function' ? String(replayShadowOrders()) : 'absent'; },
   updateSirHasibAnalysis: function () { return typeof updateSirHasibAnalysis === 'function' ? String(updateSirHasibAnalysis()) : 'absent'; },
   notifPrune: function () { return typeof notifPrune === 'function' ? String(notifPrune()) : 'absent'; },
+  wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
+  connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
+  sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -353,7 +356,7 @@ function actionEngineRunJob_(payload) {
   if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(ENGINE_RUNNABLE).join(', '));
   const started = Date.now();
   let result = '', failed = '';
-  try { result = String(fn()); }
+  try { result = String(fn(payload.args || null)); }   // args ride only into runnables that read them
   catch (e) { failed = String(e && e.message || e).slice(0, 300); }
   logActivity_('system', 'ENGINE_RUN_JOB', name, '', String(Math.round((Date.now() - started) / 1000)) + 's', failed || result);
   if (failed) throw new Error('SAY: ' + name + ' failed — ' + failed);
