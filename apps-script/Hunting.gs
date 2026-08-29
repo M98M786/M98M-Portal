@@ -376,19 +376,17 @@ function actionDecideHunt_(payload, ctx) {
       : comment.slice(0, 200));
 
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
-  const mirror = huntMirrorDecision_(rec, decision, comment, approving ? account : '', advertising, ctx.ident.email);
-  /* 26 Aug: the backup workbook moves it out of the pending tray and into approved / not
-   * approved. rec already carries the account and advertising type set above. */
-  if (typeof huntBackupUpsert_ === 'function') {
-    rec[HC_APPROVAL] = decision;
-    if (comment) rec[HC_COMMENTS] = comment;
-    if (approving) rec[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
-    huntBackupUpsert_(rec);
-  }
-  let central = { ok: false, reason: 'not applicable' };
+  /* 29 Aug (owner: "products are not getting approved timely"): the three live-workbook mirrors
+   * (hunting sheet decision cell, backup workbook, central copy) ran INLINE here — 20-50s per
+   * approval once writes went live. They now queue; flushMirrorQueue lands them within the hour
+   * from HUNTING_DB's fresh truth. The decision itself is already safe in the portal DB. */
+  mirrorEnqueue_('hunt_decision', { hunt_id: rec.hunt_id, approving: approving,
+    limited: approving ? limited : null, actor: ctx.ident.email });
+  const mirror = { ok: true, queued: true };
+  let central = { ok: true, queued: approving };
+  if (taskId) engineTaskPush_(taskId);          // the lister's new task on the boards in seconds
 
   if (approving) {
-    central = huntCopyToCentral_(account, limited, ctx.ident.email);
     notify_(rec.hunter_email, 'Hunt approved',
       '🔵 Your hunt "' + title + '" · ' + account + ' — approved as ' + advertising + '. ' + lister.name +
       ' lists it next; you will see it move through the pipeline.', 'hunt:' + rec.hunt_id);

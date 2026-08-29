@@ -151,6 +151,12 @@ function runMissedCheckpointSweep() {
     try { nightWatchHourlyRide(); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
+  /* Queued hunt-decision mirrors (29 Aug) — land the workbooks' copies out of the interactive
+   * path. Runs before the alternating heavy rider; carries its own 200s internal budget. */
+  if (msLeft() > 150000 && typeof flushMirrorQueue === 'function') {
+    try { flushMirrorQueue(); }
+    catch (e) { logActivity_('trigger', 'ERROR:mirrorFlush', '', '', '', String(e && e.stack || e).slice(0, 200)); }
+  }
   /* alertsRefresh (Account-KPI cards) and dispatchOverdueSweep (overdue bells) alternate by
    * hour — new triggers need the scriptapp scope this project avoids, so they ride here. Each
    * can eat minutes; neither starts unless two minutes remain. */

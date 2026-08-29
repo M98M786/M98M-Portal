@@ -763,6 +763,12 @@ function runMissedCheckpointSweep() {
     try { nightWatchHourlyRide(); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
+  /* Queued hunt-decision mirrors (29 Aug) — land the workbooks' copies out of the interactive
+   * path. Runs before the alternating heavy rider; carries its own 200s internal budget. */
+  if (msLeft() > 150000 && typeof flushMirrorQueue === 'function') {
+    try { flushMirrorQueue(); }
+    catch (e) { logActivity_('trigger', 'ERROR:mirrorFlush', '', '', '', String(e && e.stack || e).slice(0, 200)); }
+  }
   /* alertsRefresh (Account-KPI cards) and dispatchOverdueSweep (overdue bells) alternate by
    * hour — new triggers need the scriptapp scope this project avoids, so they ride here. Each
    * can eat minutes; neither starts unless two minutes remain. */
@@ -2556,6 +2562,7 @@ function actionCreateTask_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   logActivity_(ctx.ident.email, 'CREATE_TASK', taskId, '', TASK_STATUS_PENDING, type + ' → ' + assignee.email + ' due ' + deadline);
+  engineTaskPush_(taskId);   // on the boards within a tick, not an hour
   notify_(assignee.email, 'Task assigned',
     '🔵 New ' + type.replace(/_/g, ' ') + ' task' + (payload.account ? ' · ' + payload.account : '') +
     (itemId ? ' · ' + itemId : '') + ' — "' + title + '" from ' + (ctx.ident.name || ctx.ident.email) +
@@ -2614,6 +2621,7 @@ function actionStartTask_(payload, ctx) {
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
     taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
+  engineTaskPush_(found.rec.task_id);
     return { task_id: found.rec.task_id, status: TASK_STATUS_WORKING };
   } finally { lock.releaseLock(); }
 }
@@ -2650,6 +2658,7 @@ function actionSubmitTask_(payload, ctx) {
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
@@ -2749,6 +2758,7 @@ function actionApproveTask_(payload, ctx) {
       try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rating }); } catch (e) {}
     }
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)) + (rating ? ' · rating ' + rating : ''));
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   taskChainNext_(rec, ctx);
@@ -2780,6 +2790,7 @@ function actionReturnTask_(payload, ctx) {
       status: TASK_STATUS_WORKING, submitted_at: '', decided_at: stamp, updated_at: stamp,
     });
     logActivity_(ctx.ident.email, 'RETURN_TASK', rec.task_id, old, TASK_STATUS_WORKING, comment.slice(0, 200));
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   notify_(rec.assigned_to, 'Task returned',
@@ -5991,19 +6002,17 @@ function actionDecideHunt_(payload, ctx) {
       : comment.slice(0, 200));
 
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
-  const mirror = huntMirrorDecision_(rec, decision, comment, approving ? account : '', advertising, ctx.ident.email);
-  /* 26 Aug: the backup workbook moves it out of the pending tray and into approved / not
-   * approved. rec already carries the account and advertising type set above. */
-  if (typeof huntBackupUpsert_ === 'function') {
-    rec[HC_APPROVAL] = decision;
-    if (comment) rec[HC_COMMENTS] = comment;
-    if (approving) rec[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
-    huntBackupUpsert_(rec);
-  }
-  let central = { ok: false, reason: 'not applicable' };
+  /* 29 Aug (owner: "products are not getting approved timely"): the three live-workbook mirrors
+   * (hunting sheet decision cell, backup workbook, central copy) ran INLINE here — 20-50s per
+   * approval once writes went live. They now queue; flushMirrorQueue lands them within the hour
+   * from HUNTING_DB's fresh truth. The decision itself is already safe in the portal DB. */
+  mirrorEnqueue_('hunt_decision', { hunt_id: rec.hunt_id, approving: approving,
+    limited: approving ? limited : null, actor: ctx.ident.email });
+  const mirror = { ok: true, queued: true };
+  let central = { ok: true, queued: approving };
+  if (taskId) engineTaskPush_(taskId);          // the lister's new task on the boards in seconds
 
   if (approving) {
-    central = huntCopyToCentral_(account, limited, ctx.ident.email);
     notify_(rec.hunter_email, 'Hunt approved',
       '🔵 Your hunt "' + title + '" · ' + account + ' — approved as ' + advertising + '. ' + lister.name +
       ' lists it next; you will see it move through the pipeline.', 'hunt:' + rec.hunt_id);
@@ -21294,6 +21303,7 @@ const ENGINE_RUNNABLE = {
   revisionQualify: function () { return typeof revisionQualify === 'function' ? String(revisionQualify()) : 'absent'; },
   sheetWritesStatus: function () { return typeof sheetWritesStatus === 'function' ? String(sheetWritesStatus()) : 'absent'; },
   enableSheetWrites: function () { return typeof enableSheetWrites === 'function' ? String(enableSheetWrites()) : 'absent'; },
+  flushMirrorQueue: function () { return typeof flushMirrorQueue === 'function' ? String(flushMirrorQueue()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -23621,4 +23631,76 @@ function sheetWritesStatus() {
 
 function enableSheetWrites() {
   return String(setExternalWrites(true, 'owner order 28 Aug — portal writes must land in sheets'));
+}
+
+/* ---------- 29 Aug: mirror queue + instant task push ----------
+   Owner: "products are not getting approved timely, and not updating tasks timely."
+   Two causes, one deploy:
+   1. A hunt decision carried THREE live-workbook round-trips inline (hunting sheet, backup
+      workbook, central sheet) since writes went live — 20-50s per approval at peak, eating
+      execution slots. Those mirrors now QUEUE (AGENT_QUEUE) and flush on the hourly ride or
+      the runnable — the decision itself returns in seconds, the workbooks catch up minutes
+      later, and a flush failure is a logged row, never a lost decision (HUNTING_DB is the
+      source of truth the flush re-reads).
+   2. Task boards read the engine mirror, which refreshed only hourly — so a new task or a
+      status change took up to an hour to appear. engineTaskPush_ sends THAT ONE ROW to the
+      engine (~300ms, fire-and-log) the moment it changes; boards see it on their next 20s tick. */
+
+function mirrorEnqueue_(kind, payload) {
+  try {
+    getPortalDb_(false).getSheetByName('AGENT_QUEUE').appendRow([
+      'Q' + Utilities.getUuid().slice(0, 8), kind, JSON.stringify(payload).slice(0, 4000),
+      '', now_(), '', '', '', '']);
+  } catch (e) {
+    logActivity_('system', 'MIRROR_ENQUEUE_FAIL', kind, '', '', String(e && e.message || e).slice(0, 140));
+  }
+}
+
+function engineTaskPush_(taskId) {
+  try {
+    const t = readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
+    if (!t) return;
+    enginePost_('syncTasks', { tasks: [t] });
+  } catch (e) {
+    logActivity_('system', 'ENGINE_TASK_PUSH_FAIL', String(taskId), '', '', String(e && e.message || e).slice(0, 120));
+  }
+}
+
+/** Flush queued hunt-decision mirrors, oldest first, inside a time budget. Each queue row only
+ * names the hunt — the values written come FRESH from HUNTING_DB, so a stale intent can never
+ * overwrite a newer state. One failure marks that row and moves on. */
+function flushMirrorQueue() {
+  const sh = getPortalDb_(false).getSheetByName('AGENT_QUEUE');
+  const last = sh.getLastRow();
+  if (last < 2) return 'queue empty';
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const iKind = head.indexOf('kind'), iPay = head.indexOf('payload'), iStatus = head.indexOf('status'),
+        iDone = head.indexOf('done_at'), iErr = head.indexOf('error');
+  const data = sh.getRange(2, 1, last - 1, head.length).getValues();
+  const t0 = Date.now();
+  let done = 0, failed = 0, pending = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][iKind]) !== 'hunt_decision' || String(data[i][iStatus])) continue;
+    if (Date.now() - t0 > 200000) { pending++; continue; }        // 200s budget — the rest next run
+    const row = i + 2;
+    try {
+      const p = JSON.parse(String(data[i][iPay] || '{}'));
+      const found = huntFind_(huntSheet_(), p.hunt_id);
+      const rec = huntRecord_(found.rec);
+      huntMirrorDecision_(rec, rec.approval_status, String(rec[HC_COMMENTS] || ''),
+        String(rec[HC_ACCOUNT] || ''), String(rec[HC_CPC] || ''), String(p.actor || 'queue'));
+      if (typeof huntBackupUpsert_ === 'function') huntBackupUpsert_(rec);
+      if (p.approving && p.limited) huntCopyToCentral_(String(rec[HC_ACCOUNT] || ''), p.limited, String(p.actor || 'queue'));
+      sh.getRange(row, iStatus + 1).setValue('done');
+      sh.getRange(row, iDone + 1).setValue(now_());
+      done++;
+    } catch (e) {
+      sh.getRange(row, iStatus + 1).setValue('error');
+      sh.getRange(row, iErr + 1).setValue(String(e && e.message || e).slice(0, 200));
+      failed++;
+    }
+  }
+  const msg = 'mirrors flushed: ' + done + ' done, ' + failed + ' failed, ' + pending + ' left for next run';
+  if (done || failed) logActivity_('system', 'MIRROR_FLUSH', 'hunt_decision', '', String(done), msg);
+  return msg;
 }

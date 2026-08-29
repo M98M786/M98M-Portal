@@ -56,6 +56,7 @@ function actionCreateTask_(payload, ctx) {
   } finally { lock.releaseLock(); }
 
   logActivity_(ctx.ident.email, 'CREATE_TASK', taskId, '', TASK_STATUS_PENDING, type + ' → ' + assignee.email + ' due ' + deadline);
+  engineTaskPush_(taskId);   // on the boards within a tick, not an hour
   notify_(assignee.email, 'Task assigned',
     '🔵 New ' + type.replace(/_/g, ' ') + ' task' + (payload.account ? ' · ' + payload.account : '') +
     (itemId ? ' · ' + itemId : '') + ' — "' + title + '" from ' + (ctx.ident.name || ctx.ident.email) +
@@ -114,6 +115,7 @@ function actionStartTask_(payload, ctx) {
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
     taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
+  engineTaskPush_(found.rec.task_id);
     return { task_id: found.rec.task_id, status: TASK_STATUS_WORKING };
   } finally { lock.releaseLock(); }
 }
@@ -150,6 +152,7 @@ function actionSubmitTask_(payload, ctx) {
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
@@ -249,6 +252,7 @@ function actionApproveTask_(payload, ctx) {
       try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rating }); } catch (e) {}
     }
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)) + (rating ? ' · rating ' + rating : ''));
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   taskChainNext_(rec, ctx);
@@ -280,6 +284,7 @@ function actionReturnTask_(payload, ctx) {
       status: TASK_STATUS_WORKING, submitted_at: '', decided_at: stamp, updated_at: stamp,
     });
     logActivity_(ctx.ident.email, 'RETURN_TASK', rec.task_id, old, TASK_STATUS_WORKING, comment.slice(0, 200));
+  engineTaskPush_(found.rec.task_id);
   } finally { lock.releaseLock(); }
 
   notify_(rec.assigned_to, 'Task returned',

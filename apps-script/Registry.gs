@@ -298,3 +298,75 @@ function sheetWritesStatus() {
 function enableSheetWrites() {
   return String(setExternalWrites(true, 'owner order 28 Aug — portal writes must land in sheets'));
 }
+
+/* ---------- 29 Aug: mirror queue + instant task push ----------
+   Owner: "products are not getting approved timely, and not updating tasks timely."
+   Two causes, one deploy:
+   1. A hunt decision carried THREE live-workbook round-trips inline (hunting sheet, backup
+      workbook, central sheet) since writes went live — 20-50s per approval at peak, eating
+      execution slots. Those mirrors now QUEUE (AGENT_QUEUE) and flush on the hourly ride or
+      the runnable — the decision itself returns in seconds, the workbooks catch up minutes
+      later, and a flush failure is a logged row, never a lost decision (HUNTING_DB is the
+      source of truth the flush re-reads).
+   2. Task boards read the engine mirror, which refreshed only hourly — so a new task or a
+      status change took up to an hour to appear. engineTaskPush_ sends THAT ONE ROW to the
+      engine (~300ms, fire-and-log) the moment it changes; boards see it on their next 20s tick. */
+
+function mirrorEnqueue_(kind, payload) {
+  try {
+    getPortalDb_(false).getSheetByName('AGENT_QUEUE').appendRow([
+      'Q' + Utilities.getUuid().slice(0, 8), kind, JSON.stringify(payload).slice(0, 4000),
+      '', now_(), '', '', '', '']);
+  } catch (e) {
+    logActivity_('system', 'MIRROR_ENQUEUE_FAIL', kind, '', '', String(e && e.message || e).slice(0, 140));
+  }
+}
+
+function engineTaskPush_(taskId) {
+  try {
+    const t = readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
+    if (!t) return;
+    enginePost_('syncTasks', { tasks: [t] });
+  } catch (e) {
+    logActivity_('system', 'ENGINE_TASK_PUSH_FAIL', String(taskId), '', '', String(e && e.message || e).slice(0, 120));
+  }
+}
+
+/** Flush queued hunt-decision mirrors, oldest first, inside a time budget. Each queue row only
+ * names the hunt — the values written come FRESH from HUNTING_DB, so a stale intent can never
+ * overwrite a newer state. One failure marks that row and moves on. */
+function flushMirrorQueue() {
+  const sh = getPortalDb_(false).getSheetByName('AGENT_QUEUE');
+  const last = sh.getLastRow();
+  if (last < 2) return 'queue empty';
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const iKind = head.indexOf('kind'), iPay = head.indexOf('payload'), iStatus = head.indexOf('status'),
+        iDone = head.indexOf('done_at'), iErr = head.indexOf('error');
+  const data = sh.getRange(2, 1, last - 1, head.length).getValues();
+  const t0 = Date.now();
+  let done = 0, failed = 0, pending = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][iKind]) !== 'hunt_decision' || String(data[i][iStatus])) continue;
+    if (Date.now() - t0 > 200000) { pending++; continue; }        // 200s budget — the rest next run
+    const row = i + 2;
+    try {
+      const p = JSON.parse(String(data[i][iPay] || '{}'));
+      const found = huntFind_(huntSheet_(), p.hunt_id);
+      const rec = huntRecord_(found.rec);
+      huntMirrorDecision_(rec, rec.approval_status, String(rec[HC_COMMENTS] || ''),
+        String(rec[HC_ACCOUNT] || ''), String(rec[HC_CPC] || ''), String(p.actor || 'queue'));
+      if (typeof huntBackupUpsert_ === 'function') huntBackupUpsert_(rec);
+      if (p.approving && p.limited) huntCopyToCentral_(String(rec[HC_ACCOUNT] || ''), p.limited, String(p.actor || 'queue'));
+      sh.getRange(row, iStatus + 1).setValue('done');
+      sh.getRange(row, iDone + 1).setValue(now_());
+      done++;
+    } catch (e) {
+      sh.getRange(row, iStatus + 1).setValue('error');
+      sh.getRange(row, iErr + 1).setValue(String(e && e.message || e).slice(0, 200));
+      failed++;
+    }
+  }
+  const msg = 'mirrors flushed: ' + done + ' done, ' + failed + ' failed, ' + pending + ' left for next run';
+  if (done || failed) logActivity_('system', 'MIRROR_FLUSH', 'hunt_decision', '', String(done), msg);
+  return msg;
+}
