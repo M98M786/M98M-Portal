@@ -21291,6 +21291,7 @@ function pushEngineSync() {
       updateSirHasibAnalysis();
       try { notifPrune(); } catch (e2) { logActivity_('system', 'NOTIF_PRUNE_FAIL', '', '', '', String(e2 && e2.message || e2).slice(0, 120)); }
       try { sirHasibMonthlyFill(); } catch (e4) { logActivity_('system', 'SH_MONTHLY_FAIL', '', '', '', String(e4 && e4.message || e4).slice(0, 120)); }
+      try { bookFix({}); } catch (e5) { logActivity_('system', 'BOOK_FIX_FAIL', '', '', '', String(e5 && e5.message || e5).slice(0, 140)); }
       try { truthCheck(); } catch (e3) { logActivity_('system', 'TRUTH_CHECK_FAIL', '', '', '', String(e3 && e3.message || e3).slice(0, 140)); }
       props.setProperty('PORTAL_STATS_DAY', psDay);
     }
@@ -21370,6 +21371,7 @@ const ENGINE_RUNNABLE = {
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
+  bookFix: function (args) { return typeof bookFix === 'function' ? String(bookFix(args)) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
@@ -24151,5 +24153,149 @@ function truthCheck() {
   logActivity_('system', 'TRUTH_CHECK', '', '', String(drifts.length), booksRead + ' book(s) read · days ' + days.join(','));
   return 'checked ' + booksRead + ' book(s) over ' + days.join(', ') + ' — ' + drifts.length + ' drift(s)' +
     (drifts.length ? ': ' + drifts.slice(0, 3).join(' | ') : '');
+}
+
+/* ==================================================================================== 30 Aug —
+ * "fix the drifts in books too" (owner). The corrector the truth check reports into: for every
+ * linked Sales Analysis book, closed days only (T-2 back to T-9 — the engine's own nightly
+ * window, ads billed or skipped), where the book and the portal disagree past the truth-check
+ * tolerance, the book row is corrected to the portal's figures.
+ *
+ * Safety, in order: the global write switch is honoured · a day still riding an ad ESTIMATE is
+ * never written · range rows ("12-13 July") are never touched · only VALUE cells are written —
+ * a formula cell recalculates itself from the inputs · the old values go into a note on the
+ * Date cell · the Month-to-date running column is rebuilt only when it is typed values (cumsum
+ * of Actual, proven against the books) · Management gets one letter naming every correction.
+ * args {dry:true} reports without writing. */
+function bookFix(args) {
+  args = args || {};
+  var dry = String(args.dry || '') === 'true' || args.dry === true;
+  if (!dry && !bridgeWriteEnabled_()) return 'sheet writes are OFF (§16.10) — run enableSheetWrites first';
+
+  var eng = {};
+  portalStatsRows_().forEach(function (r) { eng[String(r.account) + '|' + String(r.date)] = r; });
+  var winStart = Utilities.formatDate(new Date(Date.now() + 3600000 - 9 * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
+  var winEnd = Utilities.formatDate(new Date(Date.now() + 3600000 - 2 * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
+  var counts = enginePost_('dayCounts', { from: winStart });
+  var cBy = {};
+  (((counts || {}).rows) || []).forEach(function (r) { cBy[String(r.account) + '|' + String(r.d)] = r; });
+
+  /* header name → engine value for the day; only the proven columns, never General fees / Ad
+     Waste / Trend (book-internal). */
+  function targetsFor(en, cn) {
+    var pri = Number(en.pri) || 0;
+    var t = (Number(en.actual) || 0) + (Number(en.returns) || 0);
+    var out = {
+      'Sold (B)': r2_(en.sold), 'Earning (H)': r2_(en.oe), 'AliExpress (I)': r2_(en.cost),
+      'All Priority incl VAT (N)': r2_(pri * 1.2), 'Raw Profit (T)': r2_(t),
+      'Returns (U)': r2_(en.returns), 'Actual Profit (V)': r2_(en.actual),
+      'Ratio N/T': t > 0 && pri > 0 ? r2_(pri * 1.2 / t) : '',
+    };
+    if (cn) { out['Orders'] = Number(cn.n) || 0; out['Units'] = Number(cn.units) || 0; }
+    return out;
+  }
+
+  var fixedRows = 0, fixedCells = 0, skippedEst = 0, booksTouched = 0;
+  var lines = [];
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind).trim() !== 'sales_analysis') return;
+    if (String(c.status || '').trim().toLowerCase() !== 'linked') return;
+    var account = String(c.account_name || '').trim();
+    var ss;
+    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id || '').trim()); } catch (e) { return; }
+    var sh = null;
+    DASH_MONTHLY_TAB.forEach(function (nm) { if (!sh) sh = ss.getSheetByName(nm); });
+    if (!sh) return;
+    var lr = sh.getLastRow(), lc = sh.getLastColumn();
+    if (lr < 2) return;
+    var head = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (h) { return String(h).trim(); });
+    var col = {};
+    head.forEach(function (h, i) { if (h && !(h in col)) col[h] = i; });
+    if (!('Date' in col) || !('Sold (B)' in col) || !('Actual Profit (V)' in col)) return;
+
+    var vals = sh.getRange(2, 1, lr - 1, lc).getValues();
+    var fmls = sh.getRange(2, 1, lr - 1, lc).getFormulas();
+    var touched = false;
+
+    for (var rI = 0; rI < vals.length; rI++) {
+      var days = shDateCellDays_(vals[rI][col['Date']]);
+      if (days.length !== 1) continue;                        // range rows are the book's own business
+      var k = days[0];
+      if (k < winStart || k > winEnd) continue;
+      var en = eng[account + '|' + k];
+      if (!en) continue;
+      if (Number(en.pri_est)) { skippedEst++; continue; }     // ads still an estimate — never write a book from a guess
+      var shSold = Number(vals[rI][col['Sold (B)']]) || 0;
+      var shAct = Number(vals[rI][col['Actual Profit (V)']]) || 0;
+      var dSold = Math.abs(shSold - (Number(en.sold) || 0));
+      var dAct = Math.abs(shAct - (Number(en.actual) || 0));
+      var soldDrifts = dSold > 1 && dSold > 0.02 * Math.max(shSold, Number(en.sold) || 0, 1);
+      var actDrifts = dAct > 2 && dAct > 0.05 * Math.max(Math.abs(shAct), Math.abs(Number(en.actual) || 0), 1);
+      if (!soldDrifts && !actDrifts) continue;
+
+      var want = targetsFor(en, cBy[account + '|' + k]);
+      var noteBits = [];
+      var rowFixed = 0;
+      Object.keys(want).forEach(function (name) {
+        if (!(name in col)) return;
+        var cI = col[name];
+        if (fmls[rI][cI]) return;                             // a formula recalculates itself from the fixed inputs
+        var oldV = vals[rI][cI];
+        var newV = want[name];
+        if (newV === '' && String(oldV) === '') return;
+        var oldN = Number(oldV), newN = Number(newV);
+        if (isFinite(oldN) && isFinite(newN) && Math.abs(oldN - newN) < 0.006) return;
+        if (!dry) sh.getRange(rI + 2, cI + 1).setValue(newV);
+        noteBits.push(name.replace(/ \(.\)$/, '') + ' ' + oldV + '→' + newV);
+        rowFixed++;
+      });
+      if (!rowFixed) continue;
+      fixedRows++; fixedCells += rowFixed; touched = true;
+      if (!dry) {
+        var cell = sh.getRange(rI + 2, col['Date'] + 1);
+        var note = String(cell.getNote() || '');
+        cell.setNote((note ? note + '\n' : '') +
+          ('Corrected by the portal ' + Utilities.formatDate(new Date(), 'Asia/Karachi', 'd MMM, hh:mm a') +
+           ' PKT (eBay truth): ' + noteBits.join(' · ')).slice(0, 900));
+      }
+      lines.push(account + ' · ' + k + ': ' + noteBits.slice(0, 4).join(' · ') + (noteBits.length > 4 ? ' · +' + (noteBits.length - 4) + ' more' : ''));
+    }
+
+    /* the running Month-to-date column: typed values in every book (proven cumsum of Actual);
+       rebuild it only when NO cell in it is a formula. */
+    if (touched && !dry && ('Month-to-date' in col) && ('Actual Profit (V)' in col)) {
+      SpreadsheetApp.flush();
+      var mI = col['Month-to-date'];
+      var mFml = sh.getRange(2, mI + 1, lr - 1, 1).getFormulas();
+      var anyFml = mFml.some(function (f) { return !!f[0]; });
+      if (!anyFml) {
+        var vNow = sh.getRange(2, 1, lr - 1, lc).getValues();
+        var run = 0;
+        var out = [];
+        for (var r2 = 0; r2 < vNow.length; r2++) {
+          var vv = Number(vNow[r2][col['Actual Profit (V)']]);
+          if (isFinite(vv) && String(vNow[r2][col['Date']]) !== '') { run += vv; }
+          out.push([String(vNow[r2][col['Date']]) !== '' ? r2_(run) : vNow[r2][mI]]);
+        }
+        sh.getRange(2, mI + 1, lr - 1, 1).setValues(out);
+      }
+    }
+    if (touched) booksTouched++;
+  });
+
+  if (!dry && lines.length) {
+    var body = 'The portal corrected ' + fixedCells + ' figure(s) on ' + fixedRows + ' day row(s) across ' +
+      booksTouched + ' book(s) to match eBay\'s own data (closed days ' + winStart + ' → ' + winEnd + '):\n\n' +
+      lines.slice(0, 14).join('\n') + (lines.length > 14 ? '\n…and ' + (lines.length - 14) + ' more.' : '') +
+      '\n\nEvery old value is preserved in a note on that row\'s Date cell. Days whose ad bill has not landed were left alone.';
+    readTab_('USERS').forEach(function (u) {
+      if (String(u.role) !== 'Management' || String(u.status || '').toLowerCase() === 'off') return;
+      notify_(String(u.email), 'Books corrected to eBay truth', body, 'bookfix:' + winEnd);
+    });
+  }
+  logActivity_('system', dry ? 'BOOK_FIX_DRY' : 'BOOK_FIX', '', '', fixedCells + 'c/' + fixedRows + 'r', lines.slice(0, 3).join(' | ').slice(0, 240));
+  return (dry ? 'DRY RUN — would fix ' : 'fixed ') + fixedCells + ' cell(s) on ' + fixedRows + ' row(s) in ' +
+    booksTouched + ' book(s)' + (skippedEst ? ' · ' + skippedEst + ' day(s) skipped (ads still estimated)' : '') +
+    (lines.length ? ' :: ' + lines.slice(0, 3).join(' | ') : '');
 }
 
