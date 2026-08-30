@@ -135,6 +135,21 @@ function actionMarkThreadRead_(payload, ctx) {
 
 /** §24: THE shared ~45s poll — the bell, the DM badge and the inbox all ride on this one call,
  *  which is what keeps the portal inside Apps Script quotas. Three tab reads, no lookups in loops. */
+/* Same tail law for the DM store: the poll only previews threads (DM_POLL_THREAD_LIMIT of
+   them); 2,000 recent messages cover every live conversation. Opening a thread still reads it
+   in full through its own action. */
+function msgTail_(n) {
+  const sh = getPortalDb_(false).getSheetByName('MESSAGES');
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const start = Math.max(2, last - n + 1);
+  const vals = sh.getRange(start, 1, last - start + 1, head.length).getValues();
+  return vals.map(function (row) {
+    const o = {}; head.forEach(function (h, i) { o[h] = row[i]; }); return o;
+  });
+}
+
 function notifTail_(n) {
   const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
   const last = sh.getLastRow();
@@ -155,8 +170,9 @@ function actionPoll_(payload, ctx) {
   /* 30 Aug: the letters table holds ~25k rows (≈1,200 new/day) and this poll fires every ~45s
      from every signed-in person — reading the WHOLE tab each time was a hidden tax on every
      request slot. Letters append at the bottom; the last 4,000 rows cover well over two days of
-     the entire company's traffic, which is more than a bell ever needs. */
-  notifTail_(4000).forEach(function (r) {
+     the entire company's traffic, which is more than a bell ever needs.
+     9:12 AM peak: 20s polls as staff arrived - 1,500 rows (a full day) is still plenty. */
+  notifTail_(1500).forEach(function (r) {
     if (normalizeEmail(r.to) !== me) return;
     if (String(r.read_at === null || r.read_at === undefined ? '' : r.read_at).trim() !== '') return;
     unread.push({
@@ -173,7 +189,7 @@ function actionPoll_(payload, ctx) {
   const notifications = unread.slice(0, DM_POLL_NOTIF_LIMIT);
   notifications.forEach(function (n) { delete n._ms; });
 
-  const threads = dmBuildThreads_(readTab_('MESSAGES'), me, users);
+  const threads = dmBuildThreads_(msgTail_(2000), me, users);   // 9 AM peak: the full-tab read was the poll's other 10 seconds
   let unreadDm = 0;
   threads.forEach(function (t) { unreadDm += t.unread; });
 
