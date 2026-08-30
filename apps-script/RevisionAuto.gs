@@ -72,6 +72,37 @@ function revisionQualify() {
   const who = revqAssignee_();
   if (!who) return 'no assignable Listing Manager / Team Lead / Management';
 
+  /* 30 Aug (owner: "revision for items from product hunters is not getting updated and
+     revised") — 61 open, 0 done in 7 days: the feeder kept pouring 15 a night into a pile
+     nobody cleared. The tap now pauses above 25 open auto-revisions, and Management hears
+     ONCE A DAY exactly who is sitting on how many, with the overdue count — a system that
+     floods a silent desk is theatre, not automation. */
+  let openAuto = 0, overdueAuto = 0;
+  const nowIso2 = Utilities.formatDate(new Date(), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ss");
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type) !== 'listing_revision') return;
+    if (String(t.details || '').indexOf(REVQ_MARK) < 0) return;
+    if (String(t.status) === TASK_STATUS_COMPLETED) return;
+    openAuto++;
+    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < nowIso2) overdueAuto++;
+  });
+  if (openAuto >= 25) {
+    const props2 = PropertiesService.getScriptProperties();
+    const day2 = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+    if (props2.getProperty('REVQ_SAT_DAY') !== day2) {
+      props2.setProperty('REVQ_SAT_DAY', day2);
+      readTab_('USERS').forEach(function (u) {
+        if (String(u.role) !== 'Management' || String(u.status || '').toLowerCase() === 'off') return;
+        notify_(String(u.email), 'Revision desk is saturated',
+          openAuto + ' auto-revision task(s) sit open on ' + who.email + ' (' + overdueAuto +
+          ' past their 72-hour window). New ones are PAUSED until the pile drops under 25 — ' +
+          'the desk needs working, or more hands.', 'revq:sat:' + day2);
+      });
+      logActivity_('system', 'REVQ_SATURATED', '', '', String(openAuto), overdueAuto + ' overdue on ' + who.email);
+    }
+    return 'paused — ' + openAuto + ' auto-revision(s) already open (' + overdueAuto + ' overdue); Management told';
+  }
+
   const deadline = Utilities.formatDate(new Date(now + 72 * 3600000), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ss'+05:00'");
   let raised = 0;
   const titles = [];

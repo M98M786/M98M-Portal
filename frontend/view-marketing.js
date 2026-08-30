@@ -145,10 +145,7 @@
       if (rf) { rf.onclick = mkLoad; }
       var sa = $('mkAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = MK.acct; sa.onchange = function () { MK.acct = this.value; mkLoad(); };
+        fillAccountSelect(sa, MK.acct, function () { MK.acct = sa.value; mkLoad(); });
       }
       var ss = $('mkStatus');
       if (ss) { ss.value = MK.status; ss.onchange = function () { MK.status = this.value; mkLoad(); }; }

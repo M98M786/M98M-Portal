@@ -275,6 +275,21 @@ var $ = function(id){ return document.getElementById(id); };
 function setHTML(id, html){ var el = $(id); if(!el){ return false; } el.innerHTML = html; return true; }
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
+/* 30 Aug (owner: "Sir Hasib missing in a lot of things") — five screens had the original five
+   accounts TYPED into their account picker, so a sixth account could never exist on them.
+   One shared filler: accounts come from the backend, never from code (§3). */
+function fillAccountSelect(sel, current, onchange){
+  if (!sel) { return; }
+  cachedCall('accountList', {}, function (d) {
+    (((d && d.accounts) || [])).forEach(function (a) {
+      var n = String(a.account || '').trim();
+      if (!n) { return; }
+      var o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+    });
+    if (current) { sel.value = current; }
+  });
+  if (onchange) { sel.onchange = onchange; }
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -386,7 +401,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -926,6 +941,7 @@ VIEWS.home = {
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div id="hmBrief"></div>'+
+     '<div id="hmHealth"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -966,9 +982,9 @@ VIEWS.home = {
       var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
       var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
       api('dailyReport',{}).then(function(d){
-        var y=ukDay(1), t={sold:0,profit:0,ads:0};
-        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.profit+=Number(r.profit)||0; t.ads+=Number(r.ads)||0; } });
-        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.profit)+' profit · '+gbp(t.ads)+' ads', 'dailyReport', 'gold-a'); paint();
+        var y=ukDay(1), t={sold:0,actual:0,ads:0};
+        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.actual+=Number(r.actual)||0; t.ads+=(Number(r.pri)||0)*1.2; } });
+        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.actual)+' actual · '+gbp(t.ads)+' ads (N)', 'dailyReport', 'gold-a'); paint();
       }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
       api('dispatchLive',{}).then(function(d){
         var n=Number(d&&d.late_count)||0;
@@ -976,9 +992,46 @@ VIEWS.home = {
       }).catch(function(){ slots.late=tile('Late right now','—','the dispatch feed did not answer','dispatch',''); paint(); });
       api('csDesk',{}).then(function(d){
         var ours=0; ((d&&d.open)||[]).forEach(function(c){ if(c.our_move){ ours++; } });
-        slots.cs=tile('CS needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
-      }).catch(function(){ slots.cs=tile('CS needs our reply','—','the CS feed did not answer','csDesk',''); paint(); });
+        slots.cs=tile('Customer Service needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
+      }).catch(function(){ slots.cs=tile('Customer Service needs our reply','—','the feed did not answer','csDesk',''); paint(); });
       paint();
+
+      /* 30 Aug (owner): "account health on home page required — main stats of all accounts."
+         eBay's own seller-standards verdict per account, compact: rating pill + the three
+         metrics that decide it (transaction defect rate · late shipment · cases closed without
+         seller resolution), each carrying eBay's own level colour. Click-through to the full
+         Account health screen. */
+      api('accountHealth',{}).then(function(d){
+        var host=$('hmHealth');
+        if(!host){ return; }
+        var stds=(d&&d.standards)||[];
+        if(!stds.length){ return; }
+        var pill=function(lv){
+          lv=String(lv||'');
+          var good=/TOP_RATED|ABOVE/.test(lv), bad=/BELOW/.test(lv);
+          return '<span style="font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:99px;background:var(--'+(good?'ok':bad?'bad':'warn')+'-soft, var(--panel));color:var(--'+(good?'ok':bad?'bad':'warn')+')">'+esc(lv.replace(/_/g,' ')||'—')+'</span>';
+        };
+        var want=[[/defect/i,'Defects'],[/late/i,'Late ship'],[/without seller|resolution/i,'Cases w/o res.']];
+        var cards=stds.map(function(r){
+          var p=(r.profiles||[])[0]||{};
+          var mets=p.metrics||[];
+          var picks=want.map(function(w){
+            var m=null;
+            mets.some(function(x){ if(w[0].test(String(x.name||x.metricKey||''))){ m=x; return true; } return false; });
+            if(!m){ return ''; }
+            var v=(m.value&&(m.value.value!==undefined?m.value.value:m.value))||m.rate||'';
+            var bad=/BELOW/.test(String(m.level||''));
+            return '<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;padding:2px 0'+(bad?';color:var(--bad)':'')+'"><span style="color:var(--text-3)">'+w[1]+'</span><span class="num">'+esc(String(v))+'</span></div>';
+          }).join('');
+          return '<div class="card" data-hm-nav="accountHealth" style="cursor:pointer;flex:1;min-width:158px"><div class="bd" style="padding:11px 13px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+esc(String(r.account))+'</b>'+pill(p.standardsLevel)+'</div>'+
+            '<div style="margin-top:6px">'+picks+'</div>'+
+          '</div></div>';
+        }).join('');
+        host.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+cards+'</div>';
+        var tiles2=host.querySelectorAll('[data-hm-nav]');
+        for(var i=0;i<tiles2.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles2[i]); }
+      }).catch(function(){ /* staff without the grant simply keep the plain home */ });
     })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }
@@ -1060,7 +1113,7 @@ function enterApp(user){
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
-    { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
+    { name:'Customer Service', keys:['tasksCS','csDesk','cs','inbox','feedback'] }
   ];
   var placed = {};
   function navLink(v){

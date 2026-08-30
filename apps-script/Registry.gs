@@ -930,3 +930,48 @@ function adsFromBooks() {
   return out.length + ' book day(s) offered, ' + updated + ' estimated day(s) replaced with the books\' real N';
 }
 
+/* 30 Aug (owner): 24 hours after a CPC listing goes live, Zain gets the keyword-research task —
+ * pull eBay keyword research for the item and hand it to the lister so the CPC Main Potential
+ * Revision carries those keywords. Engine names candidates; dedupe by (type, item) here. */
+function cpcKeywordSweep() {
+  let cands = [];
+  try { cands = ((enginePost_('cpcKeywordCandidates', {}) || {}).items) || []; }
+  catch (e) { return 'engine unreachable: ' + String(e && e.message || e).slice(0, 100); }
+  if (!cands.length) return 'no CPC listings in the 24-96h window';
+  const sh = tasksSheet_();
+  const all = readTab_('TASKS');
+  const adv = listingPickForRole_('Advertising Manager', '', all, 'cpc_keywords');
+  if (!adv) return 'no Advertising Manager to assign';
+  const stamp = now_();
+  const deadline = Utilities.formatDate(new Date(Date.now() + 24 * 3600000), 'Asia/Karachi', "yyyy-MM-dd'T'HH:mm:ss'+05:00'");
+  let made = 0;
+  cands.forEach(function (c) {
+    const id = String(c.item_id || '');
+    if (!id) return;
+    if (listingFindTask_(all, 'cpc_keywords', id)) return;
+    const taskId = listingCreateTask_(sh, {
+      type: 'cpc_keywords', account: String(c.account || ''), item_id: id,
+      title: 'CPC keywords — Item ID ' + id,
+      details: listingLines_([
+        'Item ID: ' + id,
+        'Listing: ' + String(c.title || ''),
+        'Live since: ' + String(c.live_at || '').slice(0, 16) + ' — 24h in a CPC campaign.',
+        'Pull the eBay keyword research page for this item, pick the winning keywords, and send them to ' + String(c.lister || 'the lister') + '.',
+        'The CPC Main Potential Revision must carry these keywords — the lister updates title/keywords with what you send.',
+      ]),
+      assigned_by: 'system:cpc-24h', assigned_to: adv.email,
+      priority: 'High', deadline_pkt: deadline, stamp: stamp,
+    });
+    notify_(adv.email, 'CPC keywords task',
+      '🔎 24h in CPC: "' + String(c.title || id).slice(0, 90) + '" (' + id + ') — pull eBay keyword research and send it to ' +
+      String(c.lister || 'the lister') + ' for the CPC Main Potential Revision.', 'task:' + taskId);
+    if (c.lister) {
+      notify_(String(c.lister), 'CPC keywords coming',
+      '🔎 Zain is pulling eBay keyword research for "' + String(c.title || id).slice(0, 90) + '" — your CPC Main Potential Revision must carry those keywords once they arrive.', 'task:' + taskId + ':l');
+    }
+    logActivity_('system', 'CREATE_TASK', taskId, '', 'Pending', 'cpc_keywords → ' + adv.email + ' (item ' + id + ')');
+    made++;
+  });
+  return cands.length + ' candidate(s), ' + made + ' keyword task(s) raised';
+}
+

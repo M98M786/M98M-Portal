@@ -291,7 +291,7 @@
     badge: function () { return (STATE.counts && STATE.counts.listing) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Assigned <span class="goldtext">listings</span></h1>' +
-          '<span class="sub">Day 0 dummy → 72-hour revision → campaign · UK windows, Pakistan time</span>' +
+          '<span class="sub">Day 0 dummy → CPC Main Potential Revision → campaign · UK windows, Pakistan time</span>' +
           '<button class="minibtn" id="lsDone" style="margin-left:auto">Show completed</button>' +
           '<button class="minibtn" id="lsRefresh">Refresh</button>' +
         '</div>' +
@@ -306,7 +306,7 @@
           '<div class="bd" id="lsJobs"><div class="spinner"></div></div>' +
         '</div>' +
         '<div class="card enter d3" style="margin-top:16px"><div class="hd">Revisions ' +
-          '<span class="hint">72-hour revisit: Sold before · Sold After/72 Hrs · Observation · Next Step</span></div>' +
+          '<span class="hint">CPC Main Potential Revision revisit: Sold before · Sold After/72 Hrs · Observation · Next Step</span></div>' +
           '<div class="bd" id="lsRevs"><div class="spinner"></div></div>' +
         '</div>' +
         (lsCanCreate() ? lsComposer() : lsComposerNote());
@@ -352,8 +352,8 @@
     }
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
-      lsStepCard('Step 2 · +72 hours', 'The real revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
-      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the 72-hour revision is approved.', false) +
+      lsStepCard('Step 2 · +72 hours', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
+      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
   function lsStepCard(step, head, win, note, gold) {
@@ -462,7 +462,7 @@
       jobs.innerHTML = listings.length ? listings.map(lsJobCard).join('') :
         '<div class="ls-empty">No listing job on you right now.<span>Approved hunts arrive here with their full 21-column payload.</span></div>';
       revs.innerHTML = revisions.length ? revisions.map(lsRevisionCard).join('') :
-        '<div class="ls-empty">No revision on you right now.<span>The 72-hour revision is created automatically when you enter an Item ID.</span></div>';
+        '<div class="ls-empty">No revision on you right now.<span>The CPC Main Potential Revision is created automatically when you enter an Item ID.</span></div>';
       lsWire(jobs);
       lsWire(revs);
     })(d);
@@ -622,13 +622,13 @@
     var carried = lsStr(j.item_id);
     if (status === LS_SUBMITTED) {
       return '<div class="ls-id"><h3>Item ID ' + esc(carried) + ' is in</h3>' +
-        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your 72-hour revision were created the moment you confirmed.</div>' +
+        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
         '<div class="ls-btns"><span class="pill ls-p-awaiting">' + esc(LS_SUBMITTED) + '</span>' +
         '<span class="ls-sub2">Submitted ' + esc(lsWhen(j.submitted_at) || '—') + '</span></div></div>';
     }
     if (status === LS_COMPLETED) {
       return '<div class="ls-id"><h3>Approved · Item ID ' + esc(carried || '—') + '</h3>' +
-        '<div class="ls-sub">Listing Done. The 72-hour revision carries this listing from here.</div></div>';
+        '<div class="ls-sub">Listing Done. The CPC Main Potential Revision carries this listing from here.</div></div>';
     }
     if (status === LS_PENDING) {
       return '<div class="ls-id"><h3>Enter the eBay Item ID</h3>' +
@@ -744,10 +744,10 @@
     }
     return '<div class="ls-steps"><div class="k">When you confirm, four things happen at once</div>' +
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the 72-hour revision is approved.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
       '<div class="ls-what"><span class="ls-no">3</span><span><b>Order Processors get the supplier task.</b> supplier_add — Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3 on the Central Main Sheet.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">4</span><span><b>Your 72-hour revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
     '</div>';
   }
 

@@ -121,10 +121,7 @@
       });
       var sa = $('irAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = IR.acct; sa.onchange = function () { IR.acct = this.value; IR.data = null; irLoad(); };
+        fillAccountSelect(sa, IR.acct, function () { IR.acct = sa.value; IR.data = null; irLoad(); });
       }
       var rf = $('irRefresh');
       if (rf) { rf.onclick = irLoad; }

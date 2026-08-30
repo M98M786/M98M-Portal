@@ -22,7 +22,7 @@
     { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
       icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
       roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'CS', key: 'tasksCS', label: 'CS tasks',
+    { dept: 'CS', key: 'tasksCS', label: 'Customer Service tasks',
       icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
       roles: ['CS', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
   ];

@@ -849,8 +849,9 @@
       if (b) {
         h += tile('Order earning', gbp(b.oe));
         h += tile('Cost', gbp(b.cost));
-        h += tile('Ads', gbp(b.ads));
-        h += tile('ROAS', Number(b.ads) > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / Number(b.ads)).toFixed(1) + '\u00d7') : '\u2014');
+        var bN = (Number(b.pri) || 0) * 1.2;               // the sheet's N — the mixed billed column lied here
+        h += tile('Ads (N) incl VAT', gbp(bN));
+        h += tile('ROAS', bN > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / bN).toFixed(1) + '\u00d7') : '\u2014');
         h += tile('T \u00b7 0.8 law', gbp(b.profit));
         h += tile('Returns', gbp(b.returns), Number(b.returns) > 0 ? 'bad' : '');
         h += tile('ACTUAL', gbp(b.actual), Number(b.actual) < 0 ? 'bad' : 'ok');

@@ -18,12 +18,12 @@
   function rvS(v) { return String(v == null ? '' : v); }
 
   VIEWS.rev72 = {
-    label: '72-hour revisions',
+    label: 'CPC Main Potential Revisions',
     icon: '<path d="M12 8v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/>',
     roles: RV_ROLES,
     order: 17.7,
     render: function () {
-      return '<div class="hgroup enter d1"><h1>72-hour <span class="goldtext">revisions</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>CPC Main Potential <span class="goldtext">Revisions</span></h1>' +
           '<span class="sub">the day-3 revision on every listing — window 1:00–5:00 PM UK</span>' +
           '<button class="minibtn" id="rvRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="rvTiles" class="enter d1"><div class="spinner"></div></div>' +
@@ -82,7 +82,7 @@
               '<td style="text-align:left;white-space:nowrap;color:var(--text-3)">' + esc(fmtPkt(r.decided_at, true) || '—') + '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
-      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
+      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. A CPC Main Potential Revision opens 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
       setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
       setHTML('rvBody', '');

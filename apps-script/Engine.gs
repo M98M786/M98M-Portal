@@ -171,6 +171,7 @@ function pushEngineSync() {
 
   try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
   try { revisionQualify(); } catch (e) { logActivity_('system', 'REVQ_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
+  try { cpcKeywordSweep(); } catch (e) { logActivity_('system', 'CPC_KW_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
   try {
     const psDay = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
     const props = PropertiesService.getScriptProperties();
@@ -260,6 +261,7 @@ const ENGINE_RUNNABLE = {
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
   bookFix: function (args) { return typeof bookFix === 'function' ? String(bookFix(args)) : 'absent'; },
   adsFromBooks: function () { return typeof adsFromBooks === 'function' ? String(adsFromBooks()) : 'absent'; },
+  cpcKeywordSweep: function () { return typeof cpcKeywordSweep === 'function' ? String(cpcKeywordSweep()) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

@@ -138,10 +138,7 @@
     init: function () {
       var sa = $('fbAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = FB.acct; sa.onchange = function () { FB.acct = this.value; fbLoad(); };
+        fillAccountSelect(sa, FB.acct, function () { FB.acct = sa.value; fbLoad(); });
       }
       var rf = $('fbRefresh');
       if (rf) { rf.onclick = fbLoad; }

@@ -179,11 +179,7 @@
       if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
       var sel = $('acAcct');
       if (sel) {
-        (STATE.config && STATE.config.accounts || ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai']).forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
-        });
-        sel.value = AC.acct || '';
-        sel.onchange = function () { AC.acct = sel.value; acLoad(); };
+        fillAccountSelect(sel, AC.acct || '', function () { AC.acct = sel.value; acLoad(); });
       }
       var ap = $('acApply');
       if (ap) {

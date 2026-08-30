@@ -66,7 +66,23 @@
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {
           return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
-        }).join('') + '</div>');
+        }).join('') + '</div><div id="glPipe"></div>');
+      /* 30 Aug (owner): how many dummies went LIVE — today / 7d / 30d, split General · Dynamic ·
+         CPC — straight from the go-live records joined with each item's campaign family. */
+      api('listingPipeline', {}).then(function (p) {
+        var wnd = (p && p.windows) || {};
+        var host = $('glPipe');
+        if (!host) { return; }
+        var row = function (label, w) {
+          w = w || {};
+          return '<div class="gl-tile"><span class="k">Went live · ' + label + '</span><b>' + (w.total || 0) + '</b>' +
+            '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:3px">CPC ' + (w.cpc || 0) +
+            ' · General ' + (w.general || 0) + ' · Dynamic ' + (w.dynamic || 0) +
+            (w.unset ? ' · no campaign yet ' + w.unset : '') + '</div></div>';
+        };
+        host.innerHTML = '<div class="gl-tiles" style="margin-top:2px">' +
+          row('today', wnd.today) + row('7 days', wnd.d7) + row('30 days', wnd.d30) + '</div>';
+      }).catch(function () {});
 
       var box = $('glBody');
       if (!drafts.length) {

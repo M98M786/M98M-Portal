@@ -275,6 +275,21 @@ var $ = function(id){ return document.getElementById(id); };
 function setHTML(id, html){ var el = $(id); if(!el){ return false; } el.innerHTML = html; return true; }
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); } /* RL-3 — escapes quotes too, so attribute contexts are safe */
 function show(screen){ ['loginScreen','registerScreen','pendingScreen','appShell'].forEach(function(s){ $(s).classList.toggle('hidden', s!==screen); }); }
+/* 30 Aug (owner: "Sir Hasib missing in a lot of things") — five screens had the original five
+   accounts TYPED into their account picker, so a sixth account could never exist on them.
+   One shared filler: accounts come from the backend, never from code (§3). */
+function fillAccountSelect(sel, current, onchange){
+  if (!sel) { return; }
+  cachedCall('accountList', {}, function (d) {
+    (((d && d.accounts) || [])).forEach(function (a) {
+      var n = String(a.account || '').trim();
+      if (!n) { return; }
+      var o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+    });
+    if (current) { sel.value = current; }
+  });
+  if (onchange) { sel.onchange = onchange; }
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -386,7 +401,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -510,7 +525,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260829-2351';
+var BUILD = '20260830-0111';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -926,6 +941,7 @@ VIEWS.home = {
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div id="hmBrief"></div>'+
+     '<div id="hmHealth"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -966,9 +982,9 @@ VIEWS.home = {
       var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
       var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
       api('dailyReport',{}).then(function(d){
-        var y=ukDay(1), t={sold:0,profit:0,ads:0};
-        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.profit+=Number(r.profit)||0; t.ads+=Number(r.ads)||0; } });
-        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.profit)+' profit · '+gbp(t.ads)+' ads', 'dailyReport', 'gold-a'); paint();
+        var y=ukDay(1), t={sold:0,actual:0,ads:0};
+        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.actual+=Number(r.actual)||0; t.ads+=(Number(r.pri)||0)*1.2; } });
+        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.actual)+' actual · '+gbp(t.ads)+' ads (N)', 'dailyReport', 'gold-a'); paint();
       }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
       api('dispatchLive',{}).then(function(d){
         var n=Number(d&&d.late_count)||0;
@@ -976,9 +992,46 @@ VIEWS.home = {
       }).catch(function(){ slots.late=tile('Late right now','—','the dispatch feed did not answer','dispatch',''); paint(); });
       api('csDesk',{}).then(function(d){
         var ours=0; ((d&&d.open)||[]).forEach(function(c){ if(c.our_move){ ours++; } });
-        slots.cs=tile('CS needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
-      }).catch(function(){ slots.cs=tile('CS needs our reply','—','the CS feed did not answer','csDesk',''); paint(); });
+        slots.cs=tile('Customer Service needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
+      }).catch(function(){ slots.cs=tile('Customer Service needs our reply','—','the feed did not answer','csDesk',''); paint(); });
       paint();
+
+      /* 30 Aug (owner): "account health on home page required — main stats of all accounts."
+         eBay's own seller-standards verdict per account, compact: rating pill + the three
+         metrics that decide it (transaction defect rate · late shipment · cases closed without
+         seller resolution), each carrying eBay's own level colour. Click-through to the full
+         Account health screen. */
+      api('accountHealth',{}).then(function(d){
+        var host=$('hmHealth');
+        if(!host){ return; }
+        var stds=(d&&d.standards)||[];
+        if(!stds.length){ return; }
+        var pill=function(lv){
+          lv=String(lv||'');
+          var good=/TOP_RATED|ABOVE/.test(lv), bad=/BELOW/.test(lv);
+          return '<span style="font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:99px;background:var(--'+(good?'ok':bad?'bad':'warn')+'-soft, var(--panel));color:var(--'+(good?'ok':bad?'bad':'warn')+')">'+esc(lv.replace(/_/g,' ')||'—')+'</span>';
+        };
+        var want=[[/defect/i,'Defects'],[/late/i,'Late ship'],[/without seller|resolution/i,'Cases w/o res.']];
+        var cards=stds.map(function(r){
+          var p=(r.profiles||[])[0]||{};
+          var mets=p.metrics||[];
+          var picks=want.map(function(w){
+            var m=null;
+            mets.some(function(x){ if(w[0].test(String(x.name||x.metricKey||''))){ m=x; return true; } return false; });
+            if(!m){ return ''; }
+            var v=(m.value&&(m.value.value!==undefined?m.value.value:m.value))||m.rate||'';
+            var bad=/BELOW/.test(String(m.level||''));
+            return '<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;padding:2px 0'+(bad?';color:var(--bad)':'')+'"><span style="color:var(--text-3)">'+w[1]+'</span><span class="num">'+esc(String(v))+'</span></div>';
+          }).join('');
+          return '<div class="card" data-hm-nav="accountHealth" style="cursor:pointer;flex:1;min-width:158px"><div class="bd" style="padding:11px 13px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+esc(String(r.account))+'</b>'+pill(p.standardsLevel)+'</div>'+
+            '<div style="margin-top:6px">'+picks+'</div>'+
+          '</div></div>';
+        }).join('');
+        host.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+cards+'</div>';
+        var tiles2=host.querySelectorAll('[data-hm-nav]');
+        for(var i=0;i<tiles2.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles2[i]); }
+      }).catch(function(){ /* staff without the grant simply keep the plain home */ });
     })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }
@@ -2310,11 +2363,7 @@ VIEWS.home = {
       if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
       var sel = $('acAcct');
       if (sel) {
-        (STATE.config && STATE.config.accounts || ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai']).forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
-        });
-        sel.value = AC.acct || '';
-        sel.onchange = function () { AC.acct = sel.value; acLoad(); };
+        fillAccountSelect(sel, AC.acct || '', function () { AC.acct = sel.value; acLoad(); });
       }
       var ap = $('acApply');
       if (ap) {
@@ -3576,11 +3625,7 @@ VIEWS.home = {
       });
       var sel = $('amAcct');
       if (sel) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
-        });
-        sel.value = AM.acct || '';
-        sel.onchange = function () { AM.acct = sel.value; amLoad(); };
+        fillAccountSelect(sel, AM.acct || '', function () { AM.acct = sel.value; amLoad(); });
       }
       var ap = $('amApply');
       if (ap) {
@@ -5412,8 +5457,9 @@ function createMeeting() {
       if (b) {
         h += tile('Order earning', gbp(b.oe));
         h += tile('Cost', gbp(b.cost));
-        h += tile('Ads', gbp(b.ads));
-        h += tile('ROAS', Number(b.ads) > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / Number(b.ads)).toFixed(1) + '\u00d7') : '\u2014');
+        var bN = (Number(b.pri) || 0) * 1.2;               // the sheet's N — the mixed billed column lied here
+        h += tile('Ads (N) incl VAT', gbp(bN));
+        h += tile('ROAS', bN > 0.005 && Number(b.ads_rev) ? ((Number(b.ads_rev) / bN).toFixed(1) + '\u00d7') : '\u2014');
         h += tile('T \u00b7 0.8 law', gbp(b.profit));
         h += tile('Returns', gbp(b.returns), Number(b.returns) > 0 ? 'bad' : '');
         h += tile('ACTUAL', gbp(b.actual), Number(b.actual) < 0 ? 'bad' : 'ok');
@@ -9234,6 +9280,7 @@ var C_ACTUAL = 'Actual Profit (V)';
 var C_WASTE  = 'Ad Waste';
 
 var dbData = null;
+var DB_ACC = '';   /* '' = all accounts; chips on the tiles set this */
 
 VIEW_CSS.push(
   '.db-excl{border:1px solid rgba(240,96,90,.45);background:var(--bad-soft);border-radius:11px;' +
@@ -9306,20 +9353,32 @@ function kpiStrip(d) {
      drops to the sub-line. The books' per-account cards below stay as they are. */
   var t = d.engine_truth;
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
-    var tSold = Number(t.sold), tActual = Number(t.actual);
+    /* 30 Aug (owner): "give options in sales analysis for account to account data" — chips pick
+       one seller; the tiles, VAT and the note below all follow. */
+    var accs = t.accounts || [];
+    var pick = null;
+    if (DB_ACC) { accs.some(function (a) { if (a.account === DB_ACC) { pick = a; return true; } return false; }); }
+    var chips = accs.length ? '<div class="acct-chips" style="margin-bottom:12px">' +
+      '<button class="minibtn' + (!DB_ACC ? ' on' : '') + '" data-db-acc="">All accounts</button>' +
+      accs.map(function (a) {
+        return '<button class="minibtn' + (DB_ACC === a.account ? ' on' : '') + '" data-db-acc="' + esc(a.account).replace(/"/g, '&quot;') + '">' + esc(a.account) + '</button>';
+      }).join('') + '</div>' : '';
+    var src = pick || t;
+    var tSold = Number(pick ? pick.sold : t.sold), tActual = Number(pick ? pick.actual : t.actual);
     var tMargin = tSold > 0 ? (tActual / tSold * 100) : NaN;
-    /* sheet parity proven 30 Aug: the books' N column is exactly CPC × 1.2. The billed
-       'ads' mix was neither family cleanly and never matched a book. */
-    var tAds = Number(t.n_ads) > 0 ? Number(t.n_ads) : Number(t.cpc_ads) * 1.2;
-    var tEst = Number(t.provisional_days) > 0;
-    return '<div class="db-kpis">' +
-      kpi('Orders', num(t.orders), d.period.current_label + ' · eBay live', '') +
-      kpi('Units sold', num(t.units), 'eBay live', '') +
-      kpi('Sold', gbp(tSold), 'eBay\'s own data' + (isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
-      kpi('Actual profit', gbp(tActual), '0.8×(OE−cost) − ads − returns', 'gold') +
+    var tAds = Number(src.n_ads) > 0 ? Number(src.n_ads) : Number(t.cpc_ads || 0) * 1.2;
+    var tEst = Number(pick ? pick.est_days : t.provisional_days) > 0;
+    var tVat = pick ? pick.vat_due : t.vat_due;
+    var tOrders = Number(pick ? pick.orders : t.orders), tUnits = Number(pick ? pick.units : t.units);
+    return chips + '<div class="db-kpis">' +
+      kpi('Orders', num(tOrders), d.period.current_label + ' · eBay live' + (pick ? ' · ' + pick.account : ''), '') +
+      kpi('Units sold', num(tUnits), 'eBay live', '') +
+      kpi('Sold', gbp(tSold), 'eBay\'s own data' + (!pick && isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
+      kpi('Actual profit', gbp(tActual), 'T = 0.8×(OE−Ali) − CPC − returns · the sheet law', 'gold') +
       kpi('Margin', isFinite(tMargin) ? tMargin.toFixed(1) + '%' : '—', 'actual ÷ sold', '') +
       kpi('Ads (N) incl VAT', gbp(tAds), (isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '') + (tEst ? ' · ⏳ est. days inside' : ''), 'blue') +
-    '</div>' + truthNote(d, sold) + excludedNote(d);
+      kpi('VAT to pay · MTD', tVat == null ? '—' : gbp(tVat), tVat == null ? 'history still building' : 'the calculator\'s HMRC line', 'blue') +
+    '</div>' + (pick ? '' : truthNote(d, sold) + excludedNote(d));
   }
   return '<div class="db-kpis">' +
     kpi('Orders', num(orders), d.period.current_label, '') +
@@ -9342,12 +9401,20 @@ function truthNote(d, sheetSold) {
     return '<div class="db-excl" style="border-color:rgba(63,207,142,.4);color:var(--ok)">✓ Checked against eBay\'s own order data: ' +
       gbp(t.sold) + ' this month — the cards above agree within 2%.</div>';
   }
+  /* 30 Aug (owner: "pop ups and errors in sales analysis are wrong — remove") — a books-behind
+     gap smaller than ~a day's takings is just yesterday's rows not written up yet, and the
+     nightly corrector closes it on its own. Say that calmly instead of shouting. */
+  var dayish = t.sold / 26;                                     // a rough single day of the month
+  if (gap > 0 && gap < dayish * 1.8) {
+    return '<div class="db-excl" style="border-color:var(--gold-line-hi);color:var(--text-2)">ℹ The books are ' + gbp(gap) +
+      ' behind eBay — that is yesterday\'s rows not written up yet. The nightly corrector aligns every closed day; nothing is wrong.</div>';
+  }
   var stale = Object.keys(t.last_fresh_day || {}).filter(function (a) {
     return (Date.now() - Date.parse(t.last_fresh_day[a])) > 2 * 86400000;   // quiet for 2+ days
   }).map(function (a) { return esc(a) + ' (last real sales day ' + esc(t.last_fresh_day[a]) + ')'; });
   return '<div class="db-excl">⚠ eBay\'s own order data says this month is <b>' + gbp(t.sold) + '</b> — the account books\' cards above ' +
-    (gap > 0 ? 'UNDERSTATE' : 'overstate') + ' it by <b>' + gbp(Math.abs(gap)) + '</b>. The books, not eBay, are behind' +
-    (stale.length ? ' — quiet books: ' + stale.join(' · ') : '') + '. The money above is real either way; the cards need their sheets brought up to date.</div>';
+    (gap > 0 ? 'UNDERSTATE' : 'overstate') + ' it by <b>' + gbp(Math.abs(gap)) + '</b>' +
+    (stale.length ? ' — quiet books: ' + stale.join(' · ') : '') + '. The nightly corrector will close what it can; a gap this size deserves a look.</div>';
 }
 /* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
    fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */
@@ -9369,20 +9436,32 @@ function kpi(lab, val, note, cls) {
 /* Profit against ad spend, one pair of bars per account, with the N/T ratio as a line on its
    own right-hand scale and a dashed break-even mark at 1.00 — below it, profit outran the ads. */
 function chart(d) {
-  var rows = (d.accounts || []).map(function (a) {
-    var mo = (a.month && a.month.tiles) || {};
-    return {
-      name: a.account,
-      profit: tile(mo, T_PROFIT),
-      ads: tile(mo, T_ADS),
-      nt: (function () {
-        var r = tile(mo, C_RATIO);
-        if (isFinite(r)) return r;
-        var p = tile(mo, T_PROFIT), s = tile(mo, T_ADS);
-        return (isFinite(p) && p > 0 && isFinite(s)) ? s / p : NaN;
-      })()
-    };
-  }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  /* 30 Aug (owner: "Saif Bhai's ad-fee bar not getting updated · ad fees wrong") — the bars used
+     to read each BOOK's monthly card, which lags and sometimes lies. They now read the engine's
+     own month per account: profit = Actual by the law, ads = N (CPC × 1.2), live. */
+  var truth = d.engine_truth;
+  var rows;
+  if (truth && (truth.accounts || []).length) {
+    rows = truth.accounts.map(function (a) {
+      return { name: a.account, profit: Number(a.actual), ads: Number(a.n_ads),
+        nt: Number(a.actual) > 0 && Number(a.n_ads) > 0 ? Number(a.n_ads) / Number(a.actual) : NaN };
+    }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  } else {
+    rows = (d.accounts || []).map(function (a) {
+      var mo = (a.month && a.month.tiles) || {};
+      return {
+        name: a.account,
+        profit: tile(mo, T_PROFIT),
+        ads: tile(mo, T_ADS),
+        nt: (function () {
+          var r = tile(mo, C_RATIO);
+          if (isFinite(r)) return r;
+          var p = tile(mo, T_PROFIT), s = tile(mo, T_ADS);
+          return (isFinite(p) && p > 0 && isFinite(s)) ? s / p : NaN;
+        })()
+      };
+    }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  }
 
   if (!rows.length) {
     return '<div class="bd" style="color:var(--text-3);font-weight:600;padding:24px;text-align:center">' +
@@ -9524,6 +9603,12 @@ function paint() {
   if (!d) return;
   var host = $('dbBody');
   if (!host) return;
+  host.onclick = function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('[data-db-acc]') : null;
+    if (!b) { return; }
+    DB_ACC = b.getAttribute('data-db-acc') || '';
+    paint();
+  };
   var stamp = $('dbStamp');
   if (stamp) {
     stamp.textContent = d.last_updated ? 'figures as at ' + fmtPkt(d.last_updated, true) : 'not computed yet';
@@ -9707,6 +9792,37 @@ VIEWS.dashboard = {
           '<td class="pnl-g-ali">' + pnlGBP(r.returns) + '</td>' +
           '<td class="pnl-g-out' + (Number(r.actual_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.actual_profit) + '</td></tr>';
       }).join('');
+      /* 30 Aug (owner: "you didn't update the sales analysis tab according to my sales
+         analysis sheet") — the sheet dashboard's own four blocks, computed live from the same
+         P&L rows: Top earners · Losing products FIX THESE · High ad cost WATCH · Ad waste. */
+      var intel = (function () {
+        var acos = function (r) { var rev = Number(r.revenue) || 0; return rev > 0 ? (Number(r.pri_incl) || 0) / rev * 100 : 0; };
+        var by = rows.slice();
+        var earners = by.filter(function (r) { return Number(r.actual_profit) > 0; })
+          .sort(function (a, b) { return Number(b.actual_profit) - Number(a.actual_profit); }).slice(0, 6);
+        var losers = by.filter(function (r) { return Number(r.actual_profit) < -0.5; })
+          .sort(function (a, b) { return Number(a.actual_profit) - Number(b.actual_profit); }).slice(0, 6);
+        var watch = by.filter(function (r) { return Number(r.actual_profit) >= -0.5 && acos(r) >= 35 && Number(r.pri_incl) > 3; })
+          .sort(function (a, b) { return acos(b) - acos(a); }).slice(0, 6);
+        var waste = by.filter(function (r) { return !(Number(r.qty) > 0) && Number(r.pri_incl) > 1; })
+          .sort(function (a, b) { return Number(b.pri_incl) - Number(a.pri_incl); }).slice(0, 6);
+        var li = function (r, extra, tone) {
+          return '<div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--gold-line)">' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600" title="' + esc(String(r.title || r.item_id)) + '">' + esc(String(r.title || r.item_id).slice(0, 46)) + '</span>' +
+            '<span class="num" style="font-weight:800;color:var(--' + tone + ');white-space:nowrap">' + extra + '</span></div>';
+        };
+        var card = function (title, tone, items, mk, empty) {
+          return '<div style="border:1px solid var(--gold-line);border-radius:12px;padding:10px 13px;background:var(--panel-2)">' +
+            '<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--' + tone + ');margin-bottom:5px">' + title + '</div>' +
+            (items.length ? items.map(mk).join('') : '<div style="font-size:11.5px;color:var(--text-3);font-weight:600;padding:4px 0">' + empty + '</div>') + '</div>';
+        };
+        return '<div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-bottom:14px">' +
+          card('🏆 Top earners', 'ok', earners, function (r) { return li(r, pnlGBP(r.actual_profit) + ' · ' + (r.qty || 0) + 'u', 'ok'); }, 'no profitable item in this range yet') +
+          card('🔻 Losing — fix these', 'bad', losers, function (r) { return li(r, pnlGBP(r.actual_profit) + (Number(r.pri_incl) > Math.abs(Number(r.actual_profit)) ? ' · KILL ADS' : ' · TRIM'), 'bad'); }, 'no losing item — clean') +
+          card('⚠ High ad cost — watch', 'warn', watch, function (r) { return li(r, Math.round(acos(r)) + '% ACOS', 'warn'); }, 'nothing above 35% ACOS') +
+          card('🗑 Ad waste — paid, sold nothing', 'bad', waste, function (r) { return li(r, pnlGBP(r.pri_incl) + ' wasted', 'bad'); }, 'no waste in this range') +
+          '</div>';
+      })();
       var t = d.total || {};
       var totalRow = '<tr class="pnl-total"><td>GRAND TOTAL \u00b7 ' + rows.length + ' item(s)</td>' +
         '<td>' + pnlGBP(t.revenue) + '</td><td>' + (t.qty || 0) + '</td><td>' + pnlGBP(t.vat_out) + '</td>' +
@@ -9718,7 +9834,7 @@ VIEWS.dashboard = {
         '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td>' +
         '<td>' + pnlGBP(t.returns) + '</td>' +
         '<td class="' + (Number(t.actual_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.actual_profit) + '</td></tr>';
-      box.innerHTML = '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
+      box.innerHTML = intel + '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
         '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">True earning = order earning \u2212 AliExpress \u2212 Priority ads incl VAT \u00b7 Raw profit = true earning \u2212 VAT to HMRC \u00b7 General ad fees already sit inside the eBay fees.</p>';
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not compute the P&L.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
@@ -9874,7 +9990,7 @@ VIEWS.dashboard = {
     { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
       icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
       roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'CS', key: 'tasksCS', label: 'CS tasks',
+    { dept: 'CS', key: 'tasksCS', label: 'Customer Service tasks',
       icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
       roles: ['CS', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
   ];
@@ -10170,10 +10286,7 @@ VIEWS.dashboard = {
     init: function () {
       var sa = $('fbAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = FB.acct; sa.onchange = function () { FB.acct = this.value; fbLoad(); };
+        fillAccountSelect(sa, FB.acct, function () { FB.acct = sa.value; fbLoad(); });
       }
       var rf = $('fbRefresh');
       if (rf) { rf.onclick = fbLoad; }
@@ -10251,7 +10364,23 @@ VIEWS.dashboard = {
         '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
         Object.keys(byAcct).map(function (a) {
           return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
-        }).join('') + '</div>');
+        }).join('') + '</div><div id="glPipe"></div>');
+      /* 30 Aug (owner): how many dummies went LIVE — today / 7d / 30d, split General · Dynamic ·
+         CPC — straight from the go-live records joined with each item's campaign family. */
+      api('listingPipeline', {}).then(function (p) {
+        var wnd = (p && p.windows) || {};
+        var host = $('glPipe');
+        if (!host) { return; }
+        var row = function (label, w) {
+          w = w || {};
+          return '<div class="gl-tile"><span class="k">Went live · ' + label + '</span><b>' + (w.total || 0) + '</b>' +
+            '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:3px">CPC ' + (w.cpc || 0) +
+            ' · General ' + (w.general || 0) + ' · Dynamic ' + (w.dynamic || 0) +
+            (w.unset ? ' · no campaign yet ' + w.unset : '') + '</div></div>';
+        };
+        host.innerHTML = '<div class="gl-tiles" style="margin-top:2px">' +
+          row('today', wnd.today) + row('7 days', wnd.d7) + row('30 days', wnd.d30) + '</div>';
+      }).catch(function () {});
 
       var box = $('glBody');
       if (!drafts.length) {
@@ -11584,7 +11713,10 @@ VIEWS.dashboard = {
     if (counts.Unsorted) { tabDefs.push(['Unsorted', 'Unsorted']); }
     if (['all', 'Seasonal', 'Consistent', 'Unsorted'].indexOf(HU_QK) < 0) { HU_QK = 'all'; }
 
-    var tabs = '<div class="hu-qtabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+    var approvedChip = (d && d.approved_today !== undefined)
+      ? '<span class="pill hu-ok" style="margin-left:auto" title="listing tasks born from today\u2019s approvals">Approved today: ' + Number(d.approved_today) + '</span>'
+      : '';
+    var tabs = '<div class="hu-qtabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">' + approvedChip.replace('margin-left:auto', 'order:99;margin-left:auto') +
       tabDefs.map(function (t) {
         var n = counts[t[0]] || 0;
         return '<button class="hu-qtab' + (HU_QK === t[0] ? ' on' : '') + '" data-qk="' + huAttr(t[0]) + '"' +
@@ -12728,10 +12860,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       });
       var sa = $('irAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = IR.acct; sa.onchange = function () { IR.acct = this.value; IR.data = null; irLoad(); };
+        fillAccountSelect(sa, IR.acct, function () { IR.acct = sa.value; IR.data = null; irLoad(); });
       }
       var rf = $('irRefresh');
       if (rf) { rf.onclick = irLoad; }
@@ -13219,7 +13348,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     badge: function () { return (STATE.counts && STATE.counts.listing) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Assigned <span class="goldtext">listings</span></h1>' +
-          '<span class="sub">Day 0 dummy → 72-hour revision → campaign · UK windows, Pakistan time</span>' +
+          '<span class="sub">Day 0 dummy → CPC Main Potential Revision → campaign · UK windows, Pakistan time</span>' +
           '<button class="minibtn" id="lsDone" style="margin-left:auto">Show completed</button>' +
           '<button class="minibtn" id="lsRefresh">Refresh</button>' +
         '</div>' +
@@ -13234,7 +13363,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<div class="bd" id="lsJobs"><div class="spinner"></div></div>' +
         '</div>' +
         '<div class="card enter d3" style="margin-top:16px"><div class="hd">Revisions ' +
-          '<span class="hint">72-hour revisit: Sold before · Sold After/72 Hrs · Observation · Next Step</span></div>' +
+          '<span class="hint">CPC Main Potential Revision revisit: Sold before · Sold After/72 Hrs · Observation · Next Step</span></div>' +
           '<div class="bd" id="lsRevs"><div class="spinner"></div></div>' +
         '</div>' +
         (lsCanCreate() ? lsComposer() : lsComposerNote());
@@ -13280,8 +13409,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
-      lsStepCard('Step 2 · +72 hours', 'The real revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
-      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the 72-hour revision is approved.', false) +
+      lsStepCard('Step 2 · +72 hours', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
+      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
   function lsStepCard(step, head, win, note, gold) {
@@ -13390,7 +13519,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       jobs.innerHTML = listings.length ? listings.map(lsJobCard).join('') :
         '<div class="ls-empty">No listing job on you right now.<span>Approved hunts arrive here with their full 21-column payload.</span></div>';
       revs.innerHTML = revisions.length ? revisions.map(lsRevisionCard).join('') :
-        '<div class="ls-empty">No revision on you right now.<span>The 72-hour revision is created automatically when you enter an Item ID.</span></div>';
+        '<div class="ls-empty">No revision on you right now.<span>The CPC Main Potential Revision is created automatically when you enter an Item ID.</span></div>';
       lsWire(jobs);
       lsWire(revs);
     })(d);
@@ -13550,13 +13679,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var carried = lsStr(j.item_id);
     if (status === LS_SUBMITTED) {
       return '<div class="ls-id"><h3>Item ID ' + esc(carried) + ' is in</h3>' +
-        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your 72-hour revision were created the moment you confirmed.</div>' +
+        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
         '<div class="ls-btns"><span class="pill ls-p-awaiting">' + esc(LS_SUBMITTED) + '</span>' +
         '<span class="ls-sub2">Submitted ' + esc(lsWhen(j.submitted_at) || '—') + '</span></div></div>';
     }
     if (status === LS_COMPLETED) {
       return '<div class="ls-id"><h3>Approved · Item ID ' + esc(carried || '—') + '</h3>' +
-        '<div class="ls-sub">Listing Done. The 72-hour revision carries this listing from here.</div></div>';
+        '<div class="ls-sub">Listing Done. The CPC Main Potential Revision carries this listing from here.</div></div>';
     }
     if (status === LS_PENDING) {
       return '<div class="ls-id"><h3>Enter the eBay Item ID</h3>' +
@@ -13672,10 +13801,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     return '<div class="ls-steps"><div class="k">When you confirm, four things happen at once</div>' +
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the 72-hour revision is approved.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
       '<div class="ls-what"><span class="ls-no">3</span><span><b>Order Processors get the supplier task.</b> supplier_add — Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3 on the Central Main Sheet.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">4</span><span><b>Your 72-hour revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
     '</div>';
   }
 
@@ -14489,10 +14618,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (rf) { rf.onclick = mkLoad; }
       var sa = $('mkAcct');
       if (sa) {
-        ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai'].forEach(function (a) {
-          var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o);
-        });
-        sa.value = MK.acct; sa.onchange = function () { MK.acct = this.value; mkLoad(); };
+        fillAccountSelect(sa, MK.acct, function () { MK.acct = sa.value; mkLoad(); });
       }
       var ss = $('mkStatus');
       if (ss) { ss.value = MK.status; ss.onchange = function () { MK.status = this.value; mkLoad(); }; }
@@ -21170,12 +21296,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function rvS(v) { return String(v == null ? '' : v); }
 
   VIEWS.rev72 = {
-    label: '72-hour revisions',
+    label: 'CPC Main Potential Revisions',
     icon: '<path d="M12 8v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/>',
     roles: RV_ROLES,
     order: 17.7,
     render: function () {
-      return '<div class="hgroup enter d1"><h1>72-hour <span class="goldtext">revisions</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>CPC Main Potential <span class="goldtext">Revisions</span></h1>' +
           '<span class="sub">the day-3 revision on every listing — window 1:00–5:00 PM UK</span>' +
           '<button class="minibtn" id="rvRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="rvTiles" class="enter d1"><div class="spinner"></div></div>' +
@@ -21234,7 +21360,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
               '<td style="text-align:left;white-space:nowrap;color:var(--text-3)">' + esc(fmtPkt(r.decided_at, true) || '—') + '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
-      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. New ones appear 72 hours after each listing goes live.</div>');
+      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. A CPC Main Potential Revision opens 72 hours after each listing goes live.</div>');
     }).done.catch(function (e) {
       setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
       setHTML('rvBody', '');
@@ -26093,7 +26219,7 @@ function enterApp(user){
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
-    { name:'CS',          keys:['tasksCS','csDesk','cs','inbox','feedback'] }
+    { name:'Customer Service', keys:['tasksCS','csDesk','cs','inbox','feedback'] }
   ];
   var placed = {};
   function navLink(v){

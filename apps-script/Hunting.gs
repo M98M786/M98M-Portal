@@ -270,8 +270,17 @@ function actionHuntQueue_(payload, ctx) {
     rows.push(rec);
   });
   rows.sort(function (a, b) { return String(a.ts).localeCompare(String(b.ts)); });   // oldest waits longest
+  /* 30 Aug (owner): "number of daily approved listings in hunt approvals" — an approved hunt
+     creates its listing_new task in the same breath, so today's listing_new tasks ARE today's
+     approvals. */
+  let approvedToday = 0;
+  const todayPkt = Utilities.formatDate(new Date(), 'Asia/Karachi', 'yyyy-MM-dd');
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type) !== 'listing_new') return;
+    if (String(taskPktIso_(t.created_at)).slice(0, 10) === todayPkt) approvedToday++;
+  });
 
-  return {
+  return { approved_today: approvedToday,
     hunts: stripForRole_(rows, ctx.user.role, ctx.ident.email),
     count: rows.length,
     can_decide: isMgmt_(ctx.user.role, ctx.ident.email),

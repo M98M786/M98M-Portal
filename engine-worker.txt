@@ -108,7 +108,7 @@ export default {
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -944,6 +944,35 @@ async function uncampaignedDigest(env) {
    eBay-side emptiness (out-of-stock control keeps a listing ACTIVE at qty 0); a single dead
    VARIATION is invisible in the aggregate qty, so the processors report those with one click
    (oosReport below). One letter per item per day. */
+/* 30 Aug (owner): "order rechecking should be very precise ... if 10 days passed and the order
+   is still not delivered, show an alert." eBay's own promised window (est_delivery) is the
+   yardstick: an order 10+ days old whose promise expired 2+ days ago and was never cancelled is
+   a buyer staring at an empty letterbox. One summary letter per account per day. */
+async function lateDeliveryWatch(env) {
+  const today = ukDate('');
+  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'lateDeliveryWatch' AND account = ''").first();
+  if (st && String(st.cursor) === today) return;
+  const rs = await env.DB.prepare(
+    "SELECT account, order_id, item_id, est_delivery FROM orders " +
+    "WHERE status NOT IN ('CANCELLED', 'NOT_FOUND') " +
+    "AND created_at <= datetime('now', '-10 day') AND created_at >= datetime('now', '-30 day') " +
+    "AND est_delivery != '' AND est_delivery < datetime('now', '-2 day') " +
+    'ORDER BY account, est_delivery LIMIT 200'
+  ).all();
+  const by = {};
+  for (const r of (rs.results || [])) (by[r.account] = by[r.account] || []).push(r);
+  for (const acct of Object.keys(by)) {
+    const list = by[acct];
+    const sample = list.slice(0, 5).map((r) => r.order_id + ' (promised ' + String(r.est_delivery).slice(0, 10) + ')').join(' · ');
+    const msg = acct + ': ' + list.length + ' order(s) are 10+ days old and PAST eBay\u2019s own promised delivery date with no delivery confirmed - ' +
+      sample + (list.length > 5 ? ' \u2026and ' + (list.length - 5) + ' more' : '') +
+      '. Check the tracking on each, message the buyer FIRST, reship or refund before a case opens.';
+    await notifyRole(env, 'CS', 'Overdue deliveries: ' + acct, msg, 'latedeliv:' + acct + ':' + today);
+    await notifyRole(env, 'Management', 'Overdue deliveries: ' + acct, msg, 'latedeliv:m:' + acct + ':' + today);
+  }
+  await ctx_setSync(env, 'lateDeliveryWatch', '', today);
+}
+
 async function stockWatch(env) {
   const today = ukDate('');
   const rs = await env.DB.prepare(
@@ -5323,6 +5352,30 @@ const ROUTES = {
       ).all();
       const lastDay = {};
       for (const r of (perA.results || [])) lastDay[r.account] = r.last_day;
+      /* 30 Aug (owner): "give options in sales analysis for account to account data" — the same
+         month, per account, so the tiles and the ad-fee bars can speak per seller. */
+      const perAcct = await ctx.env.DB.prepare(
+        'SELECT account, ROUND(SUM(sold),2) AS sold, ROUND(SUM(actual),2) AS actual, ' +
+        'ROUND(SUM(pri),2) AS pri, ROUND(SUM(returns),2) AS returns, ROUND(SUM(cost),2) AS cost, ' +
+        'ROUND(SUM(oe),2) AS oe, SUM(COALESCE(pri_est,0)) AS est_days ' +
+        'FROM sales_daily WHERE substr(date,1,7) = ?1 GROUP BY account'
+      ).all().then(r => r.results || []).catch(() => []);
+      const oA = await ctx.env.DB.prepare(
+        "SELECT account, COUNT(*) AS n, SUM(MAX(qty,1)) AS units, ROUND(SUM(sold),2) AS sold " +
+        "FROM orders WHERE substr(datetime(created_at,'+1 hour'),1,7) = ?1 AND (refunded IS NULL OR refunded <= 0) GROUP BY account"
+      ).bind(month).all().then(r => r.results || []).catch(() => []);
+      const oBy = {};
+      for (const r of oA) oBy[r.account] = r;
+      const accounts = perAcct.map((r) => {
+        const o2 = oBy[r.account] || {};
+        const feesEx = (Number(r.sold) - Number(r.oe)) / 1.2;
+        const vat = 0.2 * (Number(r.sold) - feesEx - Number(r.cost) - Number(r.pri));
+        return { account: r.account, sold: Number(r.sold) || 0, actual: Number(r.actual) || 0,
+          n_ads: Math.round((Number(r.pri) || 0) * 1.2 * 100) / 100, returns: Number(r.returns) || 0,
+          orders: Number(o2.n) || 0, units: Number(o2.units) || 0,
+          vat_due: Number(r.oe) > Number(r.sold) * 0.5 ? Math.round(vat * 100) / 100 : null,
+          est_days: Number(r.est_days) || 0 };
+      });
       return {
         month: month,
         orders: Number(o && o.n) || 0, units: Number(o && o.units) || 0,
@@ -5333,6 +5386,8 @@ const ROUTES = {
         n_ads: Math.round((Number(s && s.pri) || 0) * 1.2 * 100) / 100,   // the sheet's own N: CPC incl VAT
         provisional_days: Number(s && s.est_days) || 0,
         ads: Number(s && s.ads) || 0,
+        vat_due: (() => { const t2 = accounts.reduce((a, b) => a + (b.vat_due || 0), 0); return Math.round(t2 * 100) / 100; })(),
+        accounts,
         last_fresh_day: lastDay,
       };
     },
@@ -5405,6 +5460,55 @@ const ROUTES = {
         n++;
       }
       return { ok: true, saved: n };
+    },
+  },
+
+  /* 30 Aug (owner): "show in listings main dashboard how many dummy listings got live - for
+     General, Dynamic and CPC, with different time windows." The go-live desk's own records
+     joined with each item's campaign family. */
+  listingPipeline: {
+    auth: 'any', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        'SELECT g.item_id, g.live_at, COALESCE(f.campaign_type, \'\') AS ct FROM golive g ' +
+        'LEFT JOIN items_facts f ON f.item_id = g.item_id'
+      ).all().catch(() => ({ results: [] }));
+      const bucket = (ct) => {
+        const s = String(ct || '').toLowerCase();
+        if (s.indexOf('cpc') >= 0) return 'cpc';
+        if (s.indexOf('dynamic') >= 0) return 'dynamic';
+        if (s.indexOf('general') >= 0) return 'general';
+        return 'unset';
+      };
+      const now = Date.now();
+      const windows = { today: 1, d7: 7, d30: 30 };
+      const out = { today: { cpc: 0, dynamic: 0, general: 0, unset: 0, total: 0 },
+        d7: { cpc: 0, dynamic: 0, general: 0, unset: 0, total: 0 },
+        d30: { cpc: 0, dynamic: 0, general: 0, unset: 0, total: 0 } };
+      for (const r of (rs.results || [])) {
+        const t = Date.parse(String(r.live_at || '').replace(' ', 'T'));
+        if (!isFinite(t)) continue;
+        const age = (now - t) / 86400000;
+        const b = bucket(r.ct);
+        for (const k of Object.keys(windows)) {
+          if (age <= windows[k]) { out[k][b]++; out[k].total++; }
+        }
+      }
+      return { windows: out, note: 'from the go-live desk\u2019s own records \u00b7 campaign family from the Main Sheet' };
+    },
+  },
+
+  /* 30 Aug (owner): "after 24 hours of a CPC listing getting live, create a task for Zain to add
+     CPC keyword research and send it to the lister with the CPC Main Potential Revision." The
+     engine names the candidates; Apps Script raises the tasks (dedup lives there). */
+  cpcKeywordCandidates: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        "SELECT g.item_id, g.account, g.title, g.lister, g.live_at FROM golive g " +
+        "WHERE g.live_at != '' AND g.live_at <= datetime('now', '-1 day') AND g.live_at >= datetime('now', '-4 day') " +
+        'AND EXISTS (SELECT 1 FROM campaign_ads ca JOIN campaigns c ON c.campaign_id = ca.campaign_id AND c.account = ca.account ' +
+        "WHERE ca.item_id = g.item_id AND (c.name LIKE '%CPC%' OR c.name LIKE '%cpc%')) LIMIT 30"
+      ).all().catch(() => ({ results: [] }));
+      return { items: rs.results || [] };
     },
   },
 

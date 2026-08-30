@@ -22,6 +22,7 @@ var C_ACTUAL = 'Actual Profit (V)';
 var C_WASTE  = 'Ad Waste';
 
 var dbData = null;
+var DB_ACC = '';   /* '' = all accounts; chips on the tiles set this */
 
 VIEW_CSS.push(
   '.db-excl{border:1px solid rgba(240,96,90,.45);background:var(--bad-soft);border-radius:11px;' +
@@ -94,20 +95,32 @@ function kpiStrip(d) {
      drops to the sub-line. The books' per-account cards below stay as they are. */
   var t = d.engine_truth;
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
-    var tSold = Number(t.sold), tActual = Number(t.actual);
+    /* 30 Aug (owner): "give options in sales analysis for account to account data" — chips pick
+       one seller; the tiles, VAT and the note below all follow. */
+    var accs = t.accounts || [];
+    var pick = null;
+    if (DB_ACC) { accs.some(function (a) { if (a.account === DB_ACC) { pick = a; return true; } return false; }); }
+    var chips = accs.length ? '<div class="acct-chips" style="margin-bottom:12px">' +
+      '<button class="minibtn' + (!DB_ACC ? ' on' : '') + '" data-db-acc="">All accounts</button>' +
+      accs.map(function (a) {
+        return '<button class="minibtn' + (DB_ACC === a.account ? ' on' : '') + '" data-db-acc="' + esc(a.account).replace(/"/g, '&quot;') + '">' + esc(a.account) + '</button>';
+      }).join('') + '</div>' : '';
+    var src = pick || t;
+    var tSold = Number(pick ? pick.sold : t.sold), tActual = Number(pick ? pick.actual : t.actual);
     var tMargin = tSold > 0 ? (tActual / tSold * 100) : NaN;
-    /* sheet parity proven 30 Aug: the books' N column is exactly CPC × 1.2. The billed
-       'ads' mix was neither family cleanly and never matched a book. */
-    var tAds = Number(t.n_ads) > 0 ? Number(t.n_ads) : Number(t.cpc_ads) * 1.2;
-    var tEst = Number(t.provisional_days) > 0;
-    return '<div class="db-kpis">' +
-      kpi('Orders', num(t.orders), d.period.current_label + ' · eBay live', '') +
-      kpi('Units sold', num(t.units), 'eBay live', '') +
-      kpi('Sold', gbp(tSold), 'eBay\'s own data' + (isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
-      kpi('Actual profit', gbp(tActual), '0.8×(OE−cost) − ads − returns', 'gold') +
+    var tAds = Number(src.n_ads) > 0 ? Number(src.n_ads) : Number(t.cpc_ads || 0) * 1.2;
+    var tEst = Number(pick ? pick.est_days : t.provisional_days) > 0;
+    var tVat = pick ? pick.vat_due : t.vat_due;
+    var tOrders = Number(pick ? pick.orders : t.orders), tUnits = Number(pick ? pick.units : t.units);
+    return chips + '<div class="db-kpis">' +
+      kpi('Orders', num(tOrders), d.period.current_label + ' · eBay live' + (pick ? ' · ' + pick.account : ''), '') +
+      kpi('Units sold', num(tUnits), 'eBay live', '') +
+      kpi('Sold', gbp(tSold), 'eBay\'s own data' + (!pick && isFinite(sold) && sold ? ' · cards say ' + gbp(sold) : ''), 'gold') +
+      kpi('Actual profit', gbp(tActual), 'T = 0.8×(OE−Ali) − CPC − returns · the sheet law', 'gold') +
       kpi('Margin', isFinite(tMargin) ? tMargin.toFixed(1) + '%' : '—', 'actual ÷ sold', '') +
       kpi('Ads (N) incl VAT', gbp(tAds), (isFinite(tActual) && tActual > 0 ? 'N/T ' + (tAds / tActual).toFixed(2) : '') + (tEst ? ' · ⏳ est. days inside' : ''), 'blue') +
-    '</div>' + truthNote(d, sold) + excludedNote(d);
+      kpi('VAT to pay · MTD', tVat == null ? '—' : gbp(tVat), tVat == null ? 'history still building' : 'the calculator\'s HMRC line', 'blue') +
+    '</div>' + (pick ? '' : truthNote(d, sold) + excludedNote(d));
   }
   return '<div class="db-kpis">' +
     kpi('Orders', num(orders), d.period.current_label, '') +
@@ -130,12 +143,20 @@ function truthNote(d, sheetSold) {
     return '<div class="db-excl" style="border-color:rgba(63,207,142,.4);color:var(--ok)">✓ Checked against eBay\'s own order data: ' +
       gbp(t.sold) + ' this month — the cards above agree within 2%.</div>';
   }
+  /* 30 Aug (owner: "pop ups and errors in sales analysis are wrong — remove") — a books-behind
+     gap smaller than ~a day's takings is just yesterday's rows not written up yet, and the
+     nightly corrector closes it on its own. Say that calmly instead of shouting. */
+  var dayish = t.sold / 26;                                     // a rough single day of the month
+  if (gap > 0 && gap < dayish * 1.8) {
+    return '<div class="db-excl" style="border-color:var(--gold-line-hi);color:var(--text-2)">ℹ The books are ' + gbp(gap) +
+      ' behind eBay — that is yesterday\'s rows not written up yet. The nightly corrector aligns every closed day; nothing is wrong.</div>';
+  }
   var stale = Object.keys(t.last_fresh_day || {}).filter(function (a) {
     return (Date.now() - Date.parse(t.last_fresh_day[a])) > 2 * 86400000;   // quiet for 2+ days
   }).map(function (a) { return esc(a) + ' (last real sales day ' + esc(t.last_fresh_day[a]) + ')'; });
   return '<div class="db-excl">⚠ eBay\'s own order data says this month is <b>' + gbp(t.sold) + '</b> — the account books\' cards above ' +
-    (gap > 0 ? 'UNDERSTATE' : 'overstate') + ' it by <b>' + gbp(Math.abs(gap)) + '</b>. The books, not eBay, are behind' +
-    (stale.length ? ' — quiet books: ' + stale.join(' · ') : '') + '. The money above is real either way; the cards need their sheets brought up to date.</div>';
+    (gap > 0 ? 'UNDERSTATE' : 'overstate') + ' it by <b>' + gbp(Math.abs(gap)) + '</b>' +
+    (stale.length ? ' — quiet books: ' + stale.join(' · ') : '') + '. The nightly corrector will close what it can; a gap this size deserves a look.</div>';
 }
 /* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
    fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */
@@ -157,20 +178,32 @@ function kpi(lab, val, note, cls) {
 /* Profit against ad spend, one pair of bars per account, with the N/T ratio as a line on its
    own right-hand scale and a dashed break-even mark at 1.00 — below it, profit outran the ads. */
 function chart(d) {
-  var rows = (d.accounts || []).map(function (a) {
-    var mo = (a.month && a.month.tiles) || {};
-    return {
-      name: a.account,
-      profit: tile(mo, T_PROFIT),
-      ads: tile(mo, T_ADS),
-      nt: (function () {
-        var r = tile(mo, C_RATIO);
-        if (isFinite(r)) return r;
-        var p = tile(mo, T_PROFIT), s = tile(mo, T_ADS);
-        return (isFinite(p) && p > 0 && isFinite(s)) ? s / p : NaN;
-      })()
-    };
-  }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  /* 30 Aug (owner: "Saif Bhai's ad-fee bar not getting updated · ad fees wrong") — the bars used
+     to read each BOOK's monthly card, which lags and sometimes lies. They now read the engine's
+     own month per account: profit = Actual by the law, ads = N (CPC × 1.2), live. */
+  var truth = d.engine_truth;
+  var rows;
+  if (truth && (truth.accounts || []).length) {
+    rows = truth.accounts.map(function (a) {
+      return { name: a.account, profit: Number(a.actual), ads: Number(a.n_ads),
+        nt: Number(a.actual) > 0 && Number(a.n_ads) > 0 ? Number(a.n_ads) / Number(a.actual) : NaN };
+    }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  } else {
+    rows = (d.accounts || []).map(function (a) {
+      var mo = (a.month && a.month.tiles) || {};
+      return {
+        name: a.account,
+        profit: tile(mo, T_PROFIT),
+        ads: tile(mo, T_ADS),
+        nt: (function () {
+          var r = tile(mo, C_RATIO);
+          if (isFinite(r)) return r;
+          var p = tile(mo, T_PROFIT), s = tile(mo, T_ADS);
+          return (isFinite(p) && p > 0 && isFinite(s)) ? s / p : NaN;
+        })()
+      };
+    }).filter(function (r) { return isFinite(r.profit) || isFinite(r.ads); });
+  }
 
   if (!rows.length) {
     return '<div class="bd" style="color:var(--text-3);font-weight:600;padding:24px;text-align:center">' +
@@ -312,6 +345,12 @@ function paint() {
   if (!d) return;
   var host = $('dbBody');
   if (!host) return;
+  host.onclick = function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('[data-db-acc]') : null;
+    if (!b) { return; }
+    DB_ACC = b.getAttribute('data-db-acc') || '';
+    paint();
+  };
   var stamp = $('dbStamp');
   if (stamp) {
     stamp.textContent = d.last_updated ? 'figures as at ' + fmtPkt(d.last_updated, true) : 'not computed yet';
@@ -495,6 +534,37 @@ VIEWS.dashboard = {
           '<td class="pnl-g-ali">' + pnlGBP(r.returns) + '</td>' +
           '<td class="pnl-g-out' + (Number(r.actual_profit) < 0 ? ' pnl-neg' : '') + '">' + pnlGBP(r.actual_profit) + '</td></tr>';
       }).join('');
+      /* 30 Aug (owner: "you didn't update the sales analysis tab according to my sales
+         analysis sheet") — the sheet dashboard's own four blocks, computed live from the same
+         P&L rows: Top earners · Losing products FIX THESE · High ad cost WATCH · Ad waste. */
+      var intel = (function () {
+        var acos = function (r) { var rev = Number(r.revenue) || 0; return rev > 0 ? (Number(r.pri_incl) || 0) / rev * 100 : 0; };
+        var by = rows.slice();
+        var earners = by.filter(function (r) { return Number(r.actual_profit) > 0; })
+          .sort(function (a, b) { return Number(b.actual_profit) - Number(a.actual_profit); }).slice(0, 6);
+        var losers = by.filter(function (r) { return Number(r.actual_profit) < -0.5; })
+          .sort(function (a, b) { return Number(a.actual_profit) - Number(b.actual_profit); }).slice(0, 6);
+        var watch = by.filter(function (r) { return Number(r.actual_profit) >= -0.5 && acos(r) >= 35 && Number(r.pri_incl) > 3; })
+          .sort(function (a, b) { return acos(b) - acos(a); }).slice(0, 6);
+        var waste = by.filter(function (r) { return !(Number(r.qty) > 0) && Number(r.pri_incl) > 1; })
+          .sort(function (a, b) { return Number(b.pri_incl) - Number(a.pri_incl); }).slice(0, 6);
+        var li = function (r, extra, tone) {
+          return '<div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--gold-line)">' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600" title="' + esc(String(r.title || r.item_id)) + '">' + esc(String(r.title || r.item_id).slice(0, 46)) + '</span>' +
+            '<span class="num" style="font-weight:800;color:var(--' + tone + ');white-space:nowrap">' + extra + '</span></div>';
+        };
+        var card = function (title, tone, items, mk, empty) {
+          return '<div style="border:1px solid var(--gold-line);border-radius:12px;padding:10px 13px;background:var(--panel-2)">' +
+            '<div style="font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--' + tone + ');margin-bottom:5px">' + title + '</div>' +
+            (items.length ? items.map(mk).join('') : '<div style="font-size:11.5px;color:var(--text-3);font-weight:600;padding:4px 0">' + empty + '</div>') + '</div>';
+        };
+        return '<div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-bottom:14px">' +
+          card('🏆 Top earners', 'ok', earners, function (r) { return li(r, pnlGBP(r.actual_profit) + ' · ' + (r.qty || 0) + 'u', 'ok'); }, 'no profitable item in this range yet') +
+          card('🔻 Losing — fix these', 'bad', losers, function (r) { return li(r, pnlGBP(r.actual_profit) + (Number(r.pri_incl) > Math.abs(Number(r.actual_profit)) ? ' · KILL ADS' : ' · TRIM'), 'bad'); }, 'no losing item — clean') +
+          card('⚠ High ad cost — watch', 'warn', watch, function (r) { return li(r, Math.round(acos(r)) + '% ACOS', 'warn'); }, 'nothing above 35% ACOS') +
+          card('🗑 Ad waste — paid, sold nothing', 'bad', waste, function (r) { return li(r, pnlGBP(r.pri_incl) + ' wasted', 'bad'); }, 'no waste in this range') +
+          '</div>';
+      })();
       var t = d.total || {};
       var totalRow = '<tr class="pnl-total"><td>GRAND TOTAL \u00b7 ' + rows.length + ' item(s)</td>' +
         '<td>' + pnlGBP(t.revenue) + '</td><td>' + (t.qty || 0) + '</td><td>' + pnlGBP(t.vat_out) + '</td>' +
@@ -506,7 +576,7 @@ VIEWS.dashboard = {
         '<td class="' + (Number(t.raw_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.raw_profit) + '</td>' +
         '<td>' + pnlGBP(t.returns) + '</td>' +
         '<td class="' + (Number(t.actual_profit) < 0 ? 'pnl-neg' : '') + '">' + pnlGBP(t.actual_profit) + '</td></tr>';
-      box.innerHTML = '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
+      box.innerHTML = intel + '<div class="scroll"><table class="pnl-tbl"><thead>' + head + '</thead><tbody>' + body + totalRow + '</tbody></table></div>' +
         '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">True earning = order earning \u2212 AliExpress \u2212 Priority ads incl VAT \u00b7 Raw profit = true earning \u2212 VAT to HMRC \u00b7 General ad fees already sit inside the eBay fees.</p>';
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not compute the P&L.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';

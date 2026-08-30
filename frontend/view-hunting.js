@@ -927,7 +927,10 @@
     if (counts.Unsorted) { tabDefs.push(['Unsorted', 'Unsorted']); }
     if (['all', 'Seasonal', 'Consistent', 'Unsorted'].indexOf(HU_QK) < 0) { HU_QK = 'all'; }
 
-    var tabs = '<div class="hu-qtabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+    var approvedChip = (d && d.approved_today !== undefined)
+      ? '<span class="pill hu-ok" style="margin-left:auto" title="listing tasks born from today\u2019s approvals">Approved today: ' + Number(d.approved_today) + '</span>'
+      : '';
+    var tabs = '<div class="hu-qtabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">' + approvedChip.replace('margin-left:auto', 'order:99;margin-left:auto') +
       tabDefs.map(function (t) {
         var n = counts[t[0]] || 0;
         return '<button class="hu-qtab' + (HU_QK === t[0] ? ' on' : '') + '" data-qk="' + huAttr(t[0]) + '"' +
