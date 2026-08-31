@@ -5675,6 +5675,7 @@ const ROUTES = {
       if (!acct) throw new Error('SAY: pass an account');
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? p.from + 'T00:00:00.000Z' : new Date(Date.now() - 89 * 86400000).toISOString();
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? p.to + 'T23:59:59.000Z' : new Date().toISOString();
+      await ensureTruthSchema(ctx.env);
       const tok = await ebayAccessToken(ctx.env, acct);
       let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
         encodeURIComponent('creationdate:[' + from + '..' + to + ']');
@@ -5691,7 +5692,7 @@ const ROUTES = {
         for (const o of (page.orders || [])) {
           seen++;
           const id = String(o.orderId);
-          if (known[id]) continue;
+          /* TRUTH v2: known rows are no longer skipped — the upsert refreshes their payment truth */
           const line = (o.lineItems && o.lineItems[0]) || {};
           let qty = 0;
           for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
@@ -5699,11 +5700,22 @@ const ROUTES = {
           const cancelled = String(((o.cancelStatus || {}).cancelState) || '') === 'CANCELED';
           const status = cancelled ? 'CANCELLED' : String(o.orderFulfillmentStatus || '');
           const sold = Number(((o.pricingSummary || {}).total || {}).value) || 0;
+          /* TRUTH v2: the walk now also carries the WO-07 fields, and updates them on rows the
+             rolling sync no longer visits — that is how history learns payment truth. */
+          const payS = String(o.orderPaymentStatus || '');
+          const canS = String(((o.cancelStatus || {}).cancelState) || '');
+          const fhN = Array.isArray(o.fulfillmentHrefs) ? o.fulfillmentHrefs.length : 0;
+          let sb = '';
+          for (const li of (o.lineItems || [])) {
+            const d2 = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
+            if (d2 && (!sb || d2 < sb)) sb = d2;
+          }
           await ctx.env.DB.prepare(
-            'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ' +
-            'ON CONFLICT(order_id) DO NOTHING'
+            'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ' +
+            'ON CONFLICT(order_id) DO UPDATE SET status = ?5, payment_status = ?10, cancel_state = ?11, fh_count = ?12, ' +
+            "ship_by = CASE WHEN ?9 != '' THEN ?9 ELSE ship_by END"
           ).bind(id, acct, String(line.legacyItemId || ''), sold, status,
-            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty).run();
+            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty, sb, payS, canS, fhN).run();
           inserted++;
         }
         href = String(page.next || '');
