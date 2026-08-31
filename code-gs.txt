@@ -21425,6 +21425,7 @@ const ENGINE_RUNNABLE = {
   updateSirHasibAnalysis: function () { return typeof updateSirHasibAnalysis === 'function' ? String(updateSirHasibAnalysis()) : 'absent'; },
   notifPrune: function () { return typeof notifPrune === 'function' ? String(notifPrune()) : 'absent'; },
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
+  phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
@@ -24452,5 +24453,56 @@ function cpcKeywordSweep() {
     made++;
   });
   return cands.length + ' candidate(s), ' + made + ' keyword task(s) raised';
+}
+
+/* ==================================================================================== 1 Sept —
+ * TRUTH UPDATE v2, Phase 0 recon (read-only): one call returns the CONNECTIONS registry and,
+ * per sales-analysis workbook, the header row of the newest day tab plus the FORMULAS of the
+ * True Order Earning / VAT to HMRC / Raw Profit cells on the first three data rows — the
+ * porting evidence §9.3 asks for. Touches nothing. */
+function phase0Dump(args) {
+  args = args || {};
+  const out = { connections: [], formulas: [] };
+  readTab_('CONNECTIONS').forEach(function (c) {
+    out.connections.push({ scope: String(c.scope || ''), account: String(c.account_name || ''),
+      kind: String(c.sheet_kind || ''), id: String(c.spreadsheet_id || ''), status: String(c.status || '') });
+  });
+  const wanted = ['True Order Earning', 'VAT to HMRC', 'Raw Profit'];
+  out.connections.forEach(function (c) {
+    if (c.kind !== 'sales_analysis' || c.status.toLowerCase() !== 'linked') return;
+    try {
+      const ss = SpreadsheetApp.openById(c.id);
+      /* newest day tab = highest sheet with a name like "28th August 2026" */
+      let best = null, bestT = 0;
+      ss.getSheets().forEach(function (sh) {
+        const m = String(sh.getName()).match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})$/);
+        if (!m) return;
+        const t = Date.parse(m[2] + ' ' + m[1] + ', ' + m[3]);
+        if (isFinite(t) && t > bestT) { bestT = t; best = sh; }
+      });
+      if (!best) { out.formulas.push({ account: c.account, why: 'no day tab' }); return; }
+      const lc = best.getLastColumn();
+      const head = best.getRange(1, 1, 1, lc).getValues()[0].map(function (h) { return String(h).trim(); });
+      const cols = {};
+      wanted.forEach(function (w) { cols[w] = head.indexOf(w); });
+      const rec = { account: c.account, tab: best.getName(), header_count: lc, cols: cols, rows: [] };
+      const lr = Math.min(best.getLastRow(), 4);
+      if (lr >= 2) {
+        const fml = best.getRange(2, 1, lr - 1, lc).getFormulas();
+        const val = best.getRange(2, 1, lr - 1, lc).getValues();
+        for (let r = 0; r < fml.length; r++) {
+          const row = {};
+          wanted.forEach(function (w) {
+            const i = cols[w];
+            if (i < 0) return;
+            row[w] = fml[r][i] ? fml[r][i] : ('MANUAL:' + val[r][i]);
+          });
+          rec.rows.push(row);
+        }
+      }
+      out.formulas.push(rec);
+    } catch (e) { out.formulas.push({ account: c.account, why: String(e && e.message || e).slice(0, 120) }); }
+  });
+  return JSON.stringify(out);
 }
 

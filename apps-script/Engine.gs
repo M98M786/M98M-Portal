@@ -256,6 +256,7 @@ const ENGINE_RUNNABLE = {
   updateSirHasibAnalysis: function () { return typeof updateSirHasibAnalysis === 'function' ? String(updateSirHasibAnalysis()) : 'absent'; },
   notifPrune: function () { return typeof notifPrune === 'function' ? String(notifPrune()) : 'absent'; },
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
+  phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },
