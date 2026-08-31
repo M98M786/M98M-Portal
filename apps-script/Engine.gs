@@ -181,6 +181,7 @@ function pushEngineSync() {
       try { sirHasibMonthlyFill(); } catch (e4) { logActivity_('system', 'SH_MONTHLY_FAIL', '', '', '', String(e4 && e4.message || e4).slice(0, 120)); }
       try { bookFix({}); } catch (e5) { logActivity_('system', 'BOOK_FIX_FAIL', '', '', '', String(e5 && e5.message || e5).slice(0, 140)); }
       try { truthCheck(); } catch (e3) { logActivity_('system', 'TRUTH_CHECK_FAIL', '', '', '', String(e3 && e3.message || e3).slice(0, 140)); }
+      try { pushSheetRowsCold(); } catch (e6) { logActivity_('system', 'SHEETMIRROR_COLD_FAIL', '', '', '', String(e6 && e6.message || e6).slice(0, 120)); }
       props.setProperty('PORTAL_STATS_DAY', psDay);
     }
   } catch (e) { logActivity_('system', 'PORTAL_STATS_FAIL', '', '', '', String(e && e.message || e).slice(0, 140)); }
@@ -257,6 +258,9 @@ const ENGINE_RUNNABLE = {
   notifPrune: function () { return typeof notifPrune === 'function' ? String(notifPrune()) : 'absent'; },
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
+  pushSheetRowsHot: function () { return typeof pushSheetRowsHot === 'function' ? String(pushSheetRowsHot()) : 'absent'; },
+  pushSheetRowsCold: function () { return typeof pushSheetRowsCold === 'function' ? String(pushSheetRowsCold()) : 'absent'; },
+  ensureTruthTriggers: function () { return typeof ensureTruthTriggers === 'function' ? String(ensureTruthTriggers()) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
   sirHasibMonthlyFill: function () { return typeof sirHasibMonthlyFill === 'function' ? String(sirHasibMonthlyFill()) : 'absent'; },
   truthCheck: function () { return typeof truthCheck === 'function' ? String(truthCheck()) : 'absent'; },

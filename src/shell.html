@@ -401,7 +401,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -941,7 +941,6 @@ VIEWS.home = {
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div id="hmBrief"></div>'+
-     '<div id="hmHealth"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -996,42 +995,7 @@ VIEWS.home = {
       }).catch(function(){ slots.cs=tile('Customer Service needs our reply','—','the feed did not answer','csDesk',''); paint(); });
       paint();
 
-      /* 30 Aug (owner): "account health on home page required — main stats of all accounts."
-         eBay's own seller-standards verdict per account, compact: rating pill + the three
-         metrics that decide it (transaction defect rate · late shipment · cases closed without
-         seller resolution), each carrying eBay's own level colour. Click-through to the full
-         Account health screen. */
-      api('accountHealth',{}).then(function(d){
-        var host=$('hmHealth');
-        if(!host){ return; }
-        var stds=(d&&d.standards)||[];
-        if(!stds.length){ return; }
-        var pill=function(lv){
-          lv=String(lv||'');
-          var good=/TOP_RATED|ABOVE/.test(lv), bad=/BELOW/.test(lv);
-          return '<span style="font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:99px;background:var(--'+(good?'ok':bad?'bad':'warn')+'-soft, var(--panel));color:var(--'+(good?'ok':bad?'bad':'warn')+')">'+esc(lv.replace(/_/g,' ')||'—')+'</span>';
-        };
-        var want=[[/defect/i,'Defects'],[/late/i,'Late ship'],[/without seller|resolution/i,'Cases w/o res.']];
-        var cards=stds.map(function(r){
-          var p=(r.profiles||[])[0]||{};
-          var mets=p.metrics||[];
-          var picks=want.map(function(w){
-            var m=null;
-            mets.some(function(x){ if(w[0].test(String(x.name||x.metricKey||''))){ m=x; return true; } return false; });
-            if(!m){ return ''; }
-            var v=(m.value&&(m.value.value!==undefined?m.value.value:m.value))||m.rate||'';
-            var bad=/BELOW/.test(String(m.level||''));
-            return '<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;padding:2px 0'+(bad?';color:var(--bad)':'')+'"><span style="color:var(--text-3)">'+w[1]+'</span><span class="num">'+esc(String(v))+'</span></div>';
-          }).join('');
-          return '<div class="card" data-hm-nav="accountHealth" style="cursor:pointer;flex:1;min-width:158px"><div class="bd" style="padding:11px 13px">'+
-            '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+esc(String(r.account))+'</b>'+pill(p.standardsLevel)+'</div>'+
-            '<div style="margin-top:6px">'+picks+'</div>'+
-          '</div></div>';
-        }).join('');
-        host.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+cards+'</div>';
-        var tiles2=host.querySelectorAll('[data-hm-nav]');
-        for(var i=0;i<tiles2.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles2[i]); }
-      }).catch(function(){ /* staff without the grant simply keep the plain home */ });
+      /* TRUTH v2 WO-01a: the health cards moved off Home; the rating strip lands on Business overview at the standards flip (WO-03 step 5). */
     })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }
@@ -1100,20 +1064,24 @@ function enterApp(user){
      the business/account screens, then signals/alerts, then the staff block); the scheduling and
      personal-report items - rota, my reports, team performance, meetings, daily agenda - are the
      "less important stuff in the end", kept together in one line at the bottom of the group. */
+  /* TRUTH v2 WO-06/WO-10: My desk slims to the person's own work; Tools and Rules & SOPs live
+     in a Library group at the bottom; Returns & INAD sits with Customer Service; Truth Check
+     joins Management. Old entries stay reachable until their modules flip (R9). */
   var NAV_DEPTS = [
-    { name:'My desk',     keys:['home','tasks','approvals','tools','rules'] },
+    { name:'My desk',     keys:['home','tasks','approvals'] },
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
         'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','priceDesk',
-        'signals','alerts',
+        'signals','alerts','truthCheck',
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
-    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
+    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
-    { name:'Customer Service', keys:['tasksCS','csDesk','cs','inbox','feedback'] }
+    { name:'Customer Service', keys:['tasksCS','csDesk','cs','returns','inbox','feedback'] },
+    { name:'Library',     keys:['tools','rules'] }
   ];
   var placed = {};
   function navLink(v){

@@ -767,7 +767,7 @@
       SG.epoch++;
       sgPrevRender(key);
       sgClockMount();
-      if (key === 'home' && SG.mountedEpoch !== SG.epoch) { window.renderSignalCards(); }
+      /* TRUTH v2 WO-01a: signal pins no longer render on Home — the Signals page keeps them. */
       sgAttLoad().then(sgClockPaint)['catch'](function () {
         // The two taps are not worth an error banner on someone else's screen; the chip simply
         // waits, and the next view they open asks again.

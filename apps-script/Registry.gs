@@ -1026,3 +1026,88 @@ function phase0Dump(args) {
   return JSON.stringify(out);
 }
 
+/* ==================================================================================== 1 Sept —
+ * TRUTH v2 Phase 1: the sheets mirror. Apps Script holds the Google credentials, so it reads
+ * the money day tabs and hands rows to the engine (syncSheetRows); pages and the verifier read
+ * D1 only (R8). Hot = today + yesterday every 15 minutes; cold = current + previous month,
+ * cursor-walked nightly. Read-only on the books, always. */
+function truthDayTabName_(pk) {
+  return shYmdToOrd_(pk);                       // '1st September 2026' — the books' own naming
+}
+function truthPushTab_(ss, wbId, account, tabName, dayPk) {
+  const sh = ss.getSheetByName(tabName);
+  if (!sh) return { tab: tabName, rows: 0, missing: true };
+  const lr = sh.getLastRow(), lc = Math.min(sh.getLastColumn(), 30);
+  if (lr < 1) return { tab: tabName, rows: 0 };
+  const head = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (h) { return String(h).trim(); });
+  const n = lr > 1 ? lr - 1 : 0;
+  const vals = n ? sh.getRange(2, 1, n, lc).getValues() : [];
+  let sent = 0;
+  for (let i = 0; i < vals.length; i += 200) {
+    const chunk = [];
+    for (let r = i; r < Math.min(i + 200, vals.length); r++) {
+      const o = {};
+      head.forEach(function (h, c) { if (h) o[h] = vals[r][c]; });
+      chunk.push({ row_no: r + 2, vals: o });
+    }
+    enginePost_('syncSheetRows', { workbook_id: wbId, account: account, tab: tabName, day_pk: dayPk,
+      headers: i === 0 ? head : null, rows: chunk, last_row: (i + 200 >= vals.length) ? lr : null });
+    sent += chunk.length;
+  }
+  return { tab: tabName, rows: sent };
+}
+function truthMoneyBooks_() {
+  const out = [];
+  readTab_('CONNECTIONS').forEach(function (c) {
+    if (String(c.sheet_kind).trim() !== 'sales_analysis') return;
+    if (String(c.status || '').trim().toLowerCase() !== 'linked') return;
+    out.push({ account: String(c.account_name || '').trim(), id: String(c.spreadsheet_id || '').trim() });
+  });
+  return out;
+}
+function pushSheetRowsHot() {
+  const days = [Utilities.formatDate(new Date(Date.now() + 5 * 3600000), 'Etc/GMT', 'yyyy-MM-dd'),
+                Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - 86400000), 'Etc/GMT', 'yyyy-MM-dd')];
+  let pushed = 0, tabs = 0;
+  truthMoneyBooks_().forEach(function (b) {
+    try {
+      const ss = SpreadsheetApp.openById(b.id);
+      days.forEach(function (pk) {
+        const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
+        if (!res.missing) { tabs++; pushed += res.rows; }
+      });
+    } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
+  });
+  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
+  return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (today + yesterday)';
+}
+function pushSheetRowsCold() {
+  /* cursor: {a: accountIndex, d: dayOffset} walking 0..62 days back per account, ~150s budget */
+  const props = PropertiesService.getScriptProperties();
+  let cur = {};
+  try { cur = JSON.parse(props.getProperty('SHEETMIRROR_COLD') || '{}'); } catch (e) {}
+  const books = truthMoneyBooks_();
+  let ai = Math.min(Number(cur.a) || 0, Math.max(0, books.length - 1));
+  let di = Number(cur.d) || 0;
+  const started = Date.now();
+  let pushed = 0, tabs = 0;
+  while (Date.now() - started < 150000 && books.length) {
+    const b = books[ai];
+    const pk = Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - di * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
+    try {
+      const ss = SpreadsheetApp.openById(b.id);
+      const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
+      if (!res.missing) { tabs++; pushed += res.rows; }
+    } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
+    di++;
+    if (di > 62) { di = 0; ai = (ai + 1) % books.length; if (ai === 0) break; }
+  }
+  props.setProperty('SHEETMIRROR_COLD', JSON.stringify({ a: ai, d: di }));
+  return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (cold cursor a=' + ai + ' d=' + di + ')';
+}
+function ensureTruthTriggers() {
+  const have = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'pushSheetRowsHot'; });
+  if (!have) { ScriptApp.newTrigger('pushSheetRowsHot').timeBased().everyMinutes(15).create(); }
+  return have ? 'hot mirror trigger already present' : 'hot mirror trigger created (every 15 min)';
+}
+

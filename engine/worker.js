@@ -107,8 +107,8 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch],
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -1241,14 +1241,14 @@ async function orderSync(env) {
         const id = String(o.orderId);
         if (knownO[id] === status + '|' + qty + '|' + est + '|' + shipBy) continue;   // unchanged → no write
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery, ship_by) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ' +
-          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10'
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery, ship_by, payment_status, cancel_state, fh_count) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ' +
+          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10, payment_status=?11, cancel_state=?12, fh_count=?13'
         ).bind(
           id, acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           status, String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), qty, est, shipBy
+          String(o.creationDate || ''), qty, est, shipBy, payStatus, cancelState, fhCount
         ).run();
       }
       n++; href = page.next || '';
@@ -5564,6 +5564,106 @@ const ROUTES = {
     },
   },
 
+  /* TRUTH v2 §3.3 sync-sheets: Apps Script reads the money day tabs (it holds the Google
+     credentials) and hands the rows here; D1 is what pages and the verifier read. */
+  syncSheetRows: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const wb = String(p.workbook_id || '').slice(0, 60);
+      const tab = String(p.tab || '').slice(0, 60);
+      const acct = String(p.account || '').slice(0, 40);
+      const dayPk = String(p.day_pk || '').slice(0, 10);
+      if (!wb || !tab) throw new Error('SAY: workbook_id and tab required');
+      const rows = Array.isArray(p.rows) ? p.rows.slice(0, 400) : [];
+      const stamp = new Date().toISOString();
+      if (p.headers) {
+        await ctx.env.DB.prepare(
+          'INSERT INTO sheet_tabs (workbook_id, tab, account, day_pk, header_row, headers, last_sync) VALUES (?1,?2,?3,?4,1,?5,?6) ' +
+          'ON CONFLICT(workbook_id, tab) DO UPDATE SET account=?3, day_pk=?4, headers=?5, last_sync=?6'
+        ).bind(wb, tab, acct, dayPk, JSON.stringify(p.headers).slice(0, 4000), stamp).run();
+      }
+      const stmts = [];
+      for (const r of rows) {
+        const no = Number(r.row_no) || 0;
+        if (no < 2) continue;
+        const vals = JSON.stringify(r.vals || {}).slice(0, 6000);
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO sheet_rows (workbook_id, tab, row_no, account, day_pk, vals, row_hash, synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ' +
+          'ON CONFLICT(workbook_id, tab, row_no) DO UPDATE SET account=?4, day_pk=?5, vals=?6, row_hash=?7, synced_at=?8'
+        ).bind(wb, tab, no, acct, dayPk, vals, String(r.hash || '').slice(0, 24), stamp));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      let trimmed = 0;
+      if (p.last_row) {
+        const r2 = await ctx.env.DB.prepare('DELETE FROM sheet_rows WHERE workbook_id = ?1 AND tab = ?2 AND row_no > ?3')
+          .bind(wb, tab, Number(p.last_row) || 0).run();
+        trimmed = (r2.meta && r2.meta.changes) || 0;
+      }
+      return { ok: true, rows: rows.length, trimmed };
+    },
+  },
+
+  /* TRUTH v2 §3.5 page API — metrics by ID, one call per page. Phase 1 serves the truth board
+     and shadow chips; pages re-wire to it module by module. */
+  pageMetrics: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const account = String(p.account || '') || undefined;
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? String(p.from) : pkToday(0).slice(0, 8) + '01';
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? String(p.to) : pkToday(0);
+      const D = await metricDispatch(ctx.env, account);
+      const M = await metricMoney(ctx.env, account, from, to);
+      const T = await metricTasks(ctx.env);
+      const verify = {};
+      const vr = await ctx.env.DB.prepare(
+        'SELECT metric_id, status, ran_at, delta FROM validation_runs WHERE id IN (SELECT MAX(id) FROM validation_runs GROUP BY metric_id)'
+      ).all().catch(() => ({ results: [] }));
+      for (const v of (vr.results || [])) verify[v.metric_id] = { status: v.status, checkedAt: v.ran_at, delta: v.delta };
+      const asOf = new Date().toISOString();
+      const wrap = (id, value, unit, source) => ({ value, unit, asOf, source, scope: { account: account || 'all', from, to }, verify: verify[id] || { status: 'UNVERIFIED' } });
+      return { asOf, metrics: {
+        LATE_NOW: wrap('LATE_NOW', { n: D.LATE_NOW.n, gbp: round2(D.LATE_NOW.pence / 100), rows: D.LATE_NOW.rows }, 'count+£', 'orders'),
+        DUE_3D: wrap('DUE_3D', D.DUE_3D.n, 'count', 'orders'),
+        AWAITING_ONLY: wrap('AWAITING_ONLY', D.AWAITING_ONLY.n, 'count', 'orders'),
+        AWAITING_DISPATCH: wrap('AWAITING_DISPATCH', D.AWAITING_DISPATCH.n, 'count', 'orders'),
+        REFUNDED_NEVER_SENT: wrap('REFUNDED_NEVER_SENT', { n: D.REFUNDED_NEVER_SENT.n, gbp: round2(D.REFUNDED_NEVER_SENT.pence / 100), rows: D.REFUNDED_NEVER_SENT.rows }, 'count+£', 'orders'),
+        SHIPPED_7D: wrap('SHIPPED_7D', D.SHIPPED_7D.n, 'count', 'orders'),
+        CANCELLED_30D: wrap('CANCELLED_30D', D.CANCELLED_30D.n, 'count', 'orders'),
+        PENDING_PAYMENT: wrap('PENDING_PAYMENT', { n: D.PENDING_PAYMENT.n, rows: D.PENDING_PAYMENT.rows }, 'count', 'orders'),
+        SOLD_SHEET: wrap('SOLD_SHEET', M.SOLD_SHEET, '£', 'sheet'),
+        TRUE_EARNING: wrap('TRUE_EARNING', M.TRUE_EARNING, '£', 'sheet'),
+        VAT_TO_HMRC: wrap('VAT_TO_HMRC', M.VAT_TO_HMRC, '£', 'sheet'),
+        ACTUAL_PROFIT: wrap('ACTUAL_PROFIT', M.ACTUAL_PROFIT, '£', 'sheet'),
+        ALI_COST: wrap('ALI_COST', M.ALI_COST, '£', 'sheet'),
+        MARGIN: wrap('MARGIN', M.MARGIN, '%', 'ratio'),
+        ROWS_COVERAGE: wrap('ROWS_COVERAGE', M.ROWS_COVERAGE, 'rows/orders', 'sheet+orders'),
+        WAITING_ON_ME: wrap('WAITING_ON_ME', T.WAITING_ON_ME, 'count', 'tasks'),
+        DEPT: wrap('DEPT_OPEN', T.DEPT, 'map', 'tasks'),
+      } };
+    },
+  },
+
+  /* TRUTH v2 §6.5 — the verifier's page. */
+  truthBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const latest = await ctx.env.DB.prepare(
+        'SELECT * FROM validation_runs WHERE id IN (SELECT MAX(id) FROM validation_runs GROUP BY metric_id, scope_key) ORDER BY metric_id, scope_key'
+      ).all().catch(() => ({ results: [] }));
+      const rows = latest.results || [];
+      const counts = { PASS: 0, FAIL: 0, STALE: 0, UNVERIFIED: 0 };
+      for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
+      const fails = rows.filter((r) => r.status === 'FAIL').slice(0, 40);
+      const sync = await ctx.env.DB.prepare('SELECT job, account, last_ok, last_error FROM sync_state ORDER BY job, account').all().catch(() => ({ results: [] }));
+      const sheets = await ctx.env.DB.prepare('SELECT account, day_pk, COUNT(*) AS rows FROM sheet_rows GROUP BY account, day_pk ORDER BY day_pk DESC LIMIT 30').all().catch(() => ({ results: [] }));
+      return { counts, latest: rows.slice(0, 400), fails, sync: sync.results || [], sheet_days: sheets.results || [], as_of: new Date().toISOString() };
+    },
+  },
+
   /* 30 Aug: Sir Hasib's feed connected weeks after the others, so his July/early-August orders
      were never fetched (the rolling sync only walks 6 days) - his engine month read £5,355
      while his book held £11,063. One-shot history walk: a date window, insert-only (existing
@@ -5759,6 +5859,295 @@ const ROUTES = {
       return { ran: String(p.job), state: st.results || [] };
     },
   },
+
+
+/* ================================================================================ TRUTH v2 ====
+   docs/TRUTH-UPDATE-v2.md — Phase 1. One metric per number (Path A), an independent verifier
+   (Path B) with separately written queries, and the schema both stand on. Pages adopt these
+   through pageMetrics module by module; until a module flips, old code keeps rendering and the
+   Truth Check's Shadow tab shows old vs new. */
+
+let TRUTH_SCHEMA_OK = false;
+async function ensureTruthSchema(env) {
+  if (TRUTH_SCHEMA_OK) return;
+  const ddl = [
+    "ALTER TABLE orders ADD COLUMN payment_status TEXT",
+    "ALTER TABLE orders ADD COLUMN cancel_state TEXT",
+    "ALTER TABLE orders ADD COLUMN fh_count INTEGER",
+    "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
+    "CREATE TABLE IF NOT EXISTS sheet_rows (workbook_id TEXT, tab TEXT, row_no INTEGER, account TEXT, day_pk TEXT, vals TEXT, row_hash TEXT, synced_at TEXT, PRIMARY KEY (workbook_id, tab, row_no))",
+    "CREATE INDEX IF NOT EXISTS ix_sheet_rows_day ON sheet_rows (account, day_pk)",
+    "CREATE TABLE IF NOT EXISTS metric_snapshots (metric_id TEXT, scope_key TEXT, value TEXT, unit TEXT, as_of TEXT, computed_at TEXT, provenance TEXT, PRIMARY KEY (metric_id, scope_key, as_of))",
+    "CREATE TABLE IF NOT EXISTS validation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, metric_id TEXT, scope_key TEXT, ran_at TEXT, shown TEXT, recomputed TEXT, delta TEXT, status TEXT, method TEXT, evidence TEXT, next_run_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS ix_validation_metric ON validation_runs (metric_id, ran_at)",
+  ];
+  for (const s of ddl) {
+    try { await env.DB.prepare(s).run(); } catch (e) { /* duplicate column / raced isolate */ }
+  }
+  TRUTH_SCHEMA_OK = true;
+}
+
+/* ---- time: Pakistan day (Asia/Karachi, UTC+5, no DST) ---- */
+function pkDay(iso) {
+  const t = Date.parse(iso);
+  if (!isFinite(t)) return '';
+  return new Date(t + 5 * 3600000).toISOString().slice(0, 10);
+}
+function pkToday(off) { return new Date(Date.now() + 5 * 3600000 + (off || 0) * 86400000).toISOString().slice(0, 10); }
+
+/* ---- WO-07: the order object alone decides the state; first match wins ---- */
+function dispatchStateV2(o, nowMs) {
+  const cs = String(o.cancel_state || '');
+  if (cs === 'CANCELED' || cs === 'IN_PROGRESS') return 'CANCELLED';
+  const hasDispatch = (Number(o.fh_count) || 0) > 0 || String(o.status) === 'FULFILLED';
+  const pay = String(o.payment_status || '');
+  if (pay === 'FULLY_REFUNDED' && !hasDispatch) return 'REFUNDED_NEVER_SENT';
+  if (hasDispatch) return 'SHIPPED';
+  const paid = pay === 'PAID' || pay === 'PARTIALLY_REFUNDED' || pay === '';  // '' = pre-backfill row: treat as paid, listed honestly
+  if (!paid) return 'PENDING_PAYMENT';
+  const shipBy = Date.parse(String(o.ship_by || ''));
+  if (isFinite(shipBy) && shipBy < nowMs) return 'LATE';
+  if (isFinite(shipBy) && shipBy <= nowMs + 72 * 3600000) return 'DUE';
+  return 'AWAITING';
+}
+
+/* ---- Path A: the Metric Engine ---- */
+const TRUTH_REGISTRY = {
+  LATE_NOW:            { label: 'Late right now', unit: 'count+£', source: 'orders', module: 'orders', tier: 1, method: 'API_RECOMPUTE' },
+  DUE_3D:              { label: 'Due within 3 days', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'API_RECOMPUTE' },
+  AWAITING_ONLY:       { label: 'Awaiting', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'API_RECOMPUTE' },
+  AWAITING_DISPATCH:   { label: 'Open orders', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'INVARIANT' },
+  REFUNDED_NEVER_SENT: { label: 'Refunded — never sent', unit: 'count+£', source: 'orders', module: 'orders', tier: 1, method: 'API_RECOMPUTE' },
+  SHIPPED_7D:          { label: 'Shipped · 7 days', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'D1_RECOMPUTE' },
+  CANCELLED_30D:       { label: 'Cancelled · 30 days', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'D1_RECOMPUTE' },
+  PENDING_PAYMENT:     { label: 'Pending payment', unit: 'count', source: 'orders', module: 'orders', tier: 1, method: 'D1_RECOMPUTE' },
+  ORDERS_TODAY:        { label: 'Orders today', unit: 'count+£', source: 'orders', module: 'orders', tier: 1, method: 'D1_RECOMPUTE' },
+  ACTUAL_PROFIT:       { label: 'Actual profit', unit: '£', source: 'sheet:Raw Profit', module: 'money', tier: 1, method: 'SHEET_RECOMPUTE' },
+  VAT_TO_HMRC:         { label: 'VAT to HMRC', unit: '£', source: 'sheet:VAT to HMRC', module: 'money', tier: 1, method: 'SHEET_RECOMPUTE' },
+  TRUE_EARNING:        { label: 'True order earning', unit: '£', source: 'sheet:True Order Earning', module: 'money', tier: 1, method: 'SHEET_RECOMPUTE' },
+  SOLD_SHEET:          { label: 'Sold (books)', unit: '£', source: 'sheet:Total Sales/Sold For', module: 'money', tier: 1, method: 'SHEET_RECOMPUTE' },
+  ALI_COST:            { label: 'AliExpress cost', unit: '£', source: 'sheet:Total AliExpress Cost incl VAT', module: 'money', tier: 1, method: 'SHEET_RECOMPUTE' },
+  MARGIN:              { label: 'Margin', unit: '%', source: 'ratio', module: 'money', tier: 1, method: 'INVARIANT' },
+  ROWS_COVERAGE:       { label: 'Rows written', unit: 'count/count', source: 'sheet+orders', module: 'money', tier: 1, method: 'INVARIANT' },
+  SOLD_API:            { label: 'Sold (eBay)', unit: '£', source: 'orders', module: 'money', tier: 1, method: 'D1_RECOMPUTE' },
+  RETURNS_API:         { label: 'Returns', unit: '£', source: 'orders.refunded', module: 'money', tier: 1, method: 'D1_RECOMPUTE' },
+  FUNDS:               { label: 'Your funds', unit: '£', source: 'finances', module: 'money', tier: 1, method: 'API_RECOMPUTE' },
+  WAITING_ON_ME:       { label: 'Waiting on you', unit: 'count', source: 'tasks', module: 'tasks', tier: 1, method: 'D1_RECOMPUTE' },
+  DEPT_OPEN:           { label: 'Open (dept)', unit: 'count', source: 'tasks', module: 'tasks', tier: 1, method: 'D1_RECOMPUTE' },
+  DEPT_OVERDUE:        { label: 'Overdue (dept)', unit: 'count', source: 'tasks', module: 'tasks', tier: 1, method: 'D1_RECOMPUTE' },
+};
+const TASK_NORM = {
+  'Pending': 'OPEN', 'Working': 'IN_PROGRESS', 'Updated': 'IN_PROGRESS',
+  'Submitted — awaiting approval': 'SUBMITTED', 'Completed': 'DONE',
+};
+function pktNowIso() { return new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 19) + '+05:00'; }
+
+async function truthOpenOrders(env, account) {
+  await ensureTruthSchema(env);
+  const bind = [];
+  let sql = "SELECT order_id, account, sold, status, ship_by, payment_status, cancel_state, fh_count, created_at, refunded FROM orders WHERE created_at >= datetime('now', '-120 day')";
+  if (account) { bind.push(account); sql += ' AND account = ?1'; }
+  const rs = await env.DB.prepare(sql).bind(...bind).all();
+  return rs.results || [];
+}
+
+async function metricDispatch(env, account) {
+  const now = Date.now();
+  const rows = await truthOpenOrders(env, account);
+  const out = { LATE_NOW: { n: 0, pence: 0, rows: [] }, DUE_3D: { n: 0, rows: [] }, AWAITING_ONLY: { n: 0, rows: [] },
+    REFUNDED_NEVER_SENT: { n: 0, pence: 0, rows: [] }, SHIPPED_7D: { n: 0 }, CANCELLED_30D: { n: 0 },
+    PENDING_PAYMENT: { n: 0, rows: [] } };
+  const cut7 = now - 7 * 86400000, cut30 = now - 30 * 86400000;
+  for (const o of rows) {
+    const st = dispatchStateV2(o, now);
+    const t = Date.parse(String(o.created_at || ''));
+    if (st === 'LATE') { out.LATE_NOW.n++; out.LATE_NOW.pence += Math.round((Number(o.sold) || 0) * 100); if (out.LATE_NOW.rows.length < 80) out.LATE_NOW.rows.push(o); }
+    else if (st === 'DUE') { out.DUE_3D.n++; if (out.DUE_3D.rows.length < 80) out.DUE_3D.rows.push(o); }
+    else if (st === 'AWAITING') { out.AWAITING_ONLY.n++; if (out.AWAITING_ONLY.rows.length < 80) out.AWAITING_ONLY.rows.push(o); }
+    else if (st === 'REFUNDED_NEVER_SENT') { out.REFUNDED_NEVER_SENT.n++; out.REFUNDED_NEVER_SENT.pence += Math.round((Number(o.refunded) > 0 ? Number(o.refunded) : Number(o.sold) || 0) * 100); if (out.REFUNDED_NEVER_SENT.rows.length < 80) out.REFUNDED_NEVER_SENT.rows.push(o); }
+    else if (st === 'SHIPPED') { if (isFinite(t) && t >= cut7) out.SHIPPED_7D.n++; }
+    else if (st === 'CANCELLED') { if (isFinite(t) && t >= cut30) out.CANCELLED_30D.n++; }
+    else if (st === 'PENDING_PAYMENT') { out.PENDING_PAYMENT.n++; if (out.PENDING_PAYMENT.rows.length < 40) out.PENDING_PAYMENT.rows.push(o); }
+  }
+  out.AWAITING_DISPATCH = { n: out.LATE_NOW.n + out.DUE_3D.n + out.AWAITING_ONLY.n };
+  return out;
+}
+
+function srVal(vals, header) {
+  const v = vals[header];
+  const n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+async function metricMoney(env, account, fromPk, toPk) {
+  await ensureTruthSchema(env);
+  const bind = [fromPk, toPk];
+  let sql = "SELECT account, day_pk, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2";
+  if (account) { bind.push(account); sql += ' AND account = ?3'; }
+  const rs = await env.DB.prepare(sql).bind(...bind).all();
+  const t = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
+  for (const row of (rs.results || [])) {
+    let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+    if (!String(vals['Item Title'] || '').trim()) continue;           // blank grid padding
+    t.rows++;
+    t.sold += srVal(vals, 'Total Sales/Sold For');
+    t.r += srVal(vals, 'True Order Earning');
+    t.s += srVal(vals, 'VAT to HMRC');
+    t.t += srVal(vals, 'Raw Profit');
+    t.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
+  }
+  const oBind = [fromPk, toPk];
+  let oSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2";
+  if (account) { oBind.push(account); oSql += ' AND account = ?3'; }
+  const oc = await env.DB.prepare(oSql).bind(...oBind).first().catch(() => ({ n: 0 }));
+  return {
+    SOLD_SHEET: round2(t.sold), TRUE_EARNING: round2(t.r), VAT_TO_HMRC: round2(t.s),
+    ACTUAL_PROFIT: round2(t.t), ALI_COST: round2(t.ali),
+    MARGIN: t.sold > 0 ? Math.round(t.t / t.sold * 1000) / 10 : null,
+    ROWS_COVERAGE: { rows: t.rows, orders: Number(oc && oc.n) || 0 },
+  };
+}
+
+async function metricTasks(env) {
+  const rows = (await env.DB.prepare('SELECT type, status, assigned_to, deadline_pkt, created_at, assigned_by, account FROM tasks').all()).results || [];
+  const nowPkt = pktNowIso();
+  const dept = {};
+  const deptOf = (t) => {
+    const ty = String(t.type || '');
+    if (/listing|revision/.test(ty)) return 'Listing';
+    if (/campaign|cpc|keyword|ads/.test(ty)) return 'Advertising';
+    if (/order|supplier|dispatch|recheck/.test(ty)) return 'Orders';
+    if (/hunt/.test(ty)) return 'Hunting';
+    if (/cs|reply|case/.test(ty)) return 'CS';
+    return 'General';
+  };
+  let submitted = 0;
+  for (const t of rows) {
+    const norm = TASK_NORM[String(t.status || '')] || 'OPEN';
+    if (norm === 'DONE') continue;
+    if (norm === 'SUBMITTED') submitted++;
+    const d = deptOf(t);
+    const b = (dept[d] = dept[d] || { open: 0, overdue: 0, oldest: '', by_system: 0, by_management: 0 });
+    b.open++;
+    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < nowPkt) b.overdue++;
+    const c = String(t.created_at || '');
+    if (c && (!b.oldest || c < b.oldest)) b.oldest = c;
+    if (/^system:/.test(String(t.assigned_by || ''))) b.by_system++; else b.by_management++;
+  }
+  return { WAITING_ON_ME: submitted, DEPT: dept };
+}
+
+/* ---- Path B: the Verifier — separately written logic, never imports Path A helpers ---- */
+function truthClassifyB(o, nowMs) {
+  // independent rewrite of WO-07 (kept apart from dispatchStateV2 on purpose)
+  if (o.cancel_state === 'CANCELED' || o.cancel_state === 'IN_PROGRESS') return 'CANCELLED';
+  const dispatched = (o.fh_count | 0) > 0 || o.status === 'FULFILLED';
+  if (!dispatched && o.payment_status === 'FULLY_REFUNDED') return 'REFUNDED_NEVER_SENT';
+  if (dispatched) return 'SHIPPED';
+  if (['PENDING', 'FAILED'].indexOf(String(o.payment_status)) >= 0) return 'PENDING_PAYMENT';
+  const sb = Date.parse(String(o.ship_by || ''));
+  if (!isFinite(sb)) return 'AWAITING';
+  if (sb < nowMs) return 'LATE';
+  return (sb - nowMs) <= 259200000 ? 'DUE' : 'AWAITING';
+}
+async function truthWrite(env, rows) {
+  for (const r of rows) {
+    await env.DB.prepare(
+      'INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)'
+    ).bind(r.metric_id, r.scope_key || 'all', new Date().toISOString(), String(r.shown), String(r.recomputed),
+      String(r.delta == null ? '' : r.delta), r.status, r.method, String(r.evidence || '').slice(0, 900), r.next_run_at || '').run();
+  }
+}
+
+async function truthTier1(env) {
+  await ensureTruthSchema(env);
+  const next = new Date(Date.now() + 15 * 60000).toISOString();
+  const out = [];
+  /* dispatch invariant + D1 recompute per account */
+  const accounts = await apiAccounts(env);
+  for (const acct of accounts.concat([''])) {
+    const A = await metricDispatch(env, acct || undefined);
+    // Path B: independent pass over the same rows with the second classifier
+    const raw = await truthOpenOrders(env, acct || undefined);
+    const nb = { LATE: 0, DUE: 0, AWAITING: 0 };
+    const nowMs = Date.now();
+    for (const o of raw) { const s = truthClassifyB(o, nowMs); if (nb[s] !== undefined) nb[s]++; }
+    const scope = acct || 'all';
+    out.push({ metric_id: 'LATE_NOW', scope_key: scope, shown: A.LATE_NOW.n, recomputed: nb.LATE, delta: A.LATE_NOW.n - nb.LATE, status: A.LATE_NOW.n === nb.LATE ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+    const sumOk = A.LATE_NOW.n + A.DUE_3D.n + A.AWAITING_ONLY.n === A.AWAITING_DISPATCH.n;
+    out.push({ metric_id: 'AWAITING_DISPATCH', scope_key: scope, shown: A.AWAITING_DISPATCH.n, recomputed: nb.LATE + nb.DUE + nb.AWAITING, delta: sumOk ? 0 : 1, status: sumOk && (A.AWAITING_DISPATCH.n === nb.LATE + nb.DUE + nb.AWAITING) ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
+  }
+  /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
+  const y = pkToday(-1);
+  for (const acct of accounts) {
+    const A = await metricMoney(env, acct, y, y);
+    const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, y).all();
+    let s2 = 0, t2 = 0, r2v = 0, bad = 0, checked = 0;
+    for (const row of (rs.results || [])) {
+      let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+      if (!String(v['Item Title'] || '').trim()) continue;
+      const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
+      const H = Number(v['eBay Order Earning']) || 0, I = Number(v['Total AliExpress Cost incl VAT']) || 0, N = Number(v['Total Priority incl VAT']) || 0;
+      const C = Number(v['Total Sale HMRC VAT']) || 0, G = Number(v['FVF & Reg VAT Paid']) || 0, J = Number(v['AliExpress VAT Paid']) || 0;
+      const M = Number(v['Add 20% On Priority VAT']) || 0, Q = Number(v['General Fees Minus 20% VAT']) || 0;
+      checked++;
+      if (Math.abs(T - (R - S)) > 0.011) bad++;
+      if (Math.abs(R - (H - I - N)) > 0.011) bad++;
+      if (Math.abs(S - (C - G - J - M - Q)) > 0.011) bad++;
+      r2v += R; s2 += S; t2 += T;
+    }
+    const dT = Math.abs(round2(t2) - A.ACTUAL_PROFIT);
+    out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + y, shown: A.ACTUAL_PROFIT, recomputed: round2(t2), delta: round2(dT), status: checked === 0 ? 'STALE' : (dT <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s), ' + bad + ' formula fail(s)', next_run_at: next });
+    out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + y, shown: A.VAT_TO_HMRC, recomputed: round2(s2), delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s)', next_run_at: next });
+  }
+  /* tasks: independent SQL vs metric */
+  const T2 = await metricTasks(env);
+  const q = await env.DB.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status = 'Submitted — awaiting approval'").first();
+  out.push({ metric_id: 'WAITING_ON_ME', scope_key: 'all', shown: T2.WAITING_ON_ME, recomputed: Number(q && q.n) || 0, delta: T2.WAITING_ON_ME - (Number(q && q.n) || 0), status: T2.WAITING_ON_ME === (Number(q && q.n) || 0) ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+  await truthWrite(env, out);
+  return out.length;
+}
+
+async function truthTier3Gate(env) {
+  const hourUtc = new Date().getUTCHours();
+  if (hourUtc !== 22) return;                                  // 03:00 PKT
+  const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'truthTier3' AND account = ''").first().catch(() => null);
+  const today = pkToday(0);
+  if (st && String(st.cursor) === today) return;
+  await truthTier3(env);
+  await ctx_setSync(env, 'truthTier3', '', today);
+}
+
+async function truthTier3(env) {
+  /* penny audit: every row of yesterday, every account (already inside tier1's per-row loop for
+     yesterday; tier3 extends to the last 7 closed days) */
+  await ensureTruthSchema(env);
+  const next = new Date(Date.now() + 86400000).toISOString();
+  const out = [];
+  const accounts = await apiAccounts(env);
+  for (let k = 2; k <= 7; k++) {
+    const day = pkToday(-k);
+    for (const acct of accounts) {
+      const A = await metricMoney(env, acct, day, day);
+      const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, day).all();
+      let t2 = 0, bad = 0, checked = 0;
+      for (const row of (rs.results || [])) {
+        let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+        if (!String(v['Item Title'] || '').trim()) continue;
+        checked++;
+        const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
+        if (Math.abs(T - (R - S)) > 0.011) bad++;
+        t2 += T;
+      }
+      out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + day, shown: A.ACTUAL_PROFIT, recomputed: round2(t2),
+        delta: round2(Math.abs(round2(t2) - A.ACTUAL_PROFIT)), status: checked === 0 ? 'STALE' : (Math.abs(round2(t2) - A.ACTUAL_PROFIT) <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'),
+        method: 'SHEET_RECOMPUTE', evidence: checked + ' rows, ' + bad + ' formula fails', next_run_at: next });
+    }
+  }
+  await truthWrite(env, out);
+  /* prune old runs */
+  await env.DB.prepare("DELETE FROM validation_runs WHERE ran_at < datetime('now', '-14 day')").run().catch(() => {});
+  return out.length;
+}
 
   /* Ops relay: run one whitelisted Apps Script job (engineRunJob) server-to-server — the AS /exec
      shows curl an HTML wall, and the editor's Run picker resists automation, so this is the only
@@ -6284,7 +6673,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3 };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

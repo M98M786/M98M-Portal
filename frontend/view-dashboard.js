@@ -136,6 +136,8 @@ function kpiStrip(d) {
    engine's sales_daily is eBay's own daily money. When the two part company by more than 2%,
    say so in plain words and name the books that have gone quiet, with their last fresh day. */
 function truthNote(d, sheetSold) {
+  return '';   /* TRUTH v2 WO-04: banner retired */
+
   var t = d.engine_truth;
   if (!t || !isFinite(t.sold) || !isFinite(sheetSold) || !sheetSold) { return ''; }
   var gap = t.sold - sheetSold;
@@ -161,6 +163,8 @@ function truthNote(d, sheetSold) {
 /* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
    fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */
 function excludedNote(d) {
+  return '';   /* TRUTH v2 WO-04: banner retired */
+
   var ex = (d.collective && d.collective.month && d.collective.month.excluded) || [];
   if (!ex.length) { return ''; }
   var who = {};
@@ -361,7 +365,7 @@ function paint() {
 
   host.innerHTML =
     kpiStrip(d) +
-    notes(d) +
+    /* TRUTH v2 WO-04: the reconciliation banners are deleted — ROWS_COVERAGE replaces them at the money flip */
     '<div class="card enter d2"><div class="hd">Profit against ad spend ' +
       '<span class="hint">gold is what the business kept · blue is what the ads took · below N/T 1.00 profit outran the ads</span></div>' +
       '<div class="bd">' + chart(d) + '</div></div>' +

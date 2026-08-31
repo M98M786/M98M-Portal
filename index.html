@@ -401,7 +401,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -525,7 +525,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260831-2313';
+var BUILD = '20260831-2346';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -941,7 +941,6 @@ VIEWS.home = {
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div id="hmBrief"></div>'+
-     '<div id="hmHealth"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -996,42 +995,7 @@ VIEWS.home = {
       }).catch(function(){ slots.cs=tile('Customer Service needs our reply','—','the feed did not answer','csDesk',''); paint(); });
       paint();
 
-      /* 30 Aug (owner): "account health on home page required — main stats of all accounts."
-         eBay's own seller-standards verdict per account, compact: rating pill + the three
-         metrics that decide it (transaction defect rate · late shipment · cases closed without
-         seller resolution), each carrying eBay's own level colour. Click-through to the full
-         Account health screen. */
-      api('accountHealth',{}).then(function(d){
-        var host=$('hmHealth');
-        if(!host){ return; }
-        var stds=(d&&d.standards)||[];
-        if(!stds.length){ return; }
-        var pill=function(lv){
-          lv=String(lv||'');
-          var good=/TOP_RATED|ABOVE/.test(lv), bad=/BELOW/.test(lv);
-          return '<span style="font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:99px;background:var(--'+(good?'ok':bad?'bad':'warn')+'-soft, var(--panel));color:var(--'+(good?'ok':bad?'bad':'warn')+')">'+esc(lv.replace(/_/g,' ')||'—')+'</span>';
-        };
-        var want=[[/defect/i,'Defects'],[/late/i,'Late ship'],[/without seller|resolution/i,'Cases w/o res.']];
-        var cards=stds.map(function(r){
-          var p=(r.profiles||[])[0]||{};
-          var mets=p.metrics||[];
-          var picks=want.map(function(w){
-            var m=null;
-            mets.some(function(x){ if(w[0].test(String(x.name||x.metricKey||''))){ m=x; return true; } return false; });
-            if(!m){ return ''; }
-            var v=(m.value&&(m.value.value!==undefined?m.value.value:m.value))||m.rate||'';
-            var bad=/BELOW/.test(String(m.level||''));
-            return '<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;padding:2px 0'+(bad?';color:var(--bad)':'')+'"><span style="color:var(--text-3)">'+w[1]+'</span><span class="num">'+esc(String(v))+'</span></div>';
-          }).join('');
-          return '<div class="card" data-hm-nav="accountHealth" style="cursor:pointer;flex:1;min-width:158px"><div class="bd" style="padding:11px 13px">'+
-            '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+esc(String(r.account))+'</b>'+pill(p.standardsLevel)+'</div>'+
-            '<div style="margin-top:6px">'+picks+'</div>'+
-          '</div></div>';
-        }).join('');
-        host.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+cards+'</div>';
-        var tiles2=host.querySelectorAll('[data-hm-nav]');
-        for(var i=0;i<tiles2.length;i++){ (function(el){ el.onclick=function(){ renderView(el.getAttribute('data-hm-nav')); }; })(tiles2[i]); }
-      }).catch(function(){ /* staff without the grant simply keep the plain home */ });
+      /* TRUTH v2 WO-01a: the health cards moved off Home; the rating strip lands on Business overview at the standards flip (WO-03 step 5). */
     })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }
@@ -9394,6 +9358,8 @@ function kpiStrip(d) {
    engine's sales_daily is eBay's own daily money. When the two part company by more than 2%,
    say so in plain words and name the books that have gone quiet, with their last fresh day. */
 function truthNote(d, sheetSold) {
+  return '';   /* TRUTH v2 WO-04: banner retired */
+
   var t = d.engine_truth;
   if (!t || !isFinite(t.sold) || !isFinite(sheetSold) || !sheetSold) { return ''; }
   var gap = t.sold - sheetSold;
@@ -9419,6 +9385,8 @@ function truthNote(d, sheetSold) {
 /* A broken workbook cell no longer poisons these tiles — but the reader must be TOLD, or the
    fleet total silently under-reports (Amna Baji's August Returns read -2.2 trillion). */
 function excludedNote(d) {
+  return '';   /* TRUTH v2 WO-04: banner retired */
+
   var ex = (d.collective && d.collective.month && d.collective.month.excluded) || [];
   if (!ex.length) { return ''; }
   var who = {};
@@ -9619,7 +9587,7 @@ function paint() {
 
   host.innerHTML =
     kpiStrip(d) +
-    notes(d) +
+    /* TRUTH v2 WO-04: the reconciliation banners are deleted — ROWS_COVERAGE replaces them at the money flip */
     '<div class="card enter d2"><div class="hd">Profit against ad spend ' +
       '<span class="hint">gold is what the business kept · blue is what the ads took · below N/T 1.00 profit outran the ads</span></div>' +
       '<div class="bd">' + chart(d) + '</div></div>' +
@@ -22920,7 +22888,7 @@ function saveSchedule() {
       SG.epoch++;
       sgPrevRender(key);
       sgClockMount();
-      if (key === 'home' && SG.mountedEpoch !== SG.epoch) { window.renderSignalCards(); }
+      /* TRUTH v2 WO-01a: signal pins no longer render on Home — the Signals page keeps them. */
       sgAttLoad().then(sgClockPaint)['catch'](function () {
         // The two taps are not worth an error banner on someone else's screen; the chip simply
         // waits, and the next view they open asks again.
@@ -26003,6 +25971,117 @@ function saveSchedule() {
   };
 })();
 
+/* ---------- view-truthCheck.js ---------- */
+/* view-truthCheck.js — TRUTH v2 §6.5: the independent verifier's page. Management only.
+ * Path A (what pages show) vs Path B (separately written recompute) for every registered
+ * metric, the penny audit, and sync health — evidence, not claims. */
+(function () {
+  'use strict';
+
+  VIEW_CSS.push(
+    '.tc-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}' +
+    '.tc-tile{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.tc-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.tc-tile b{display:block;font-size:24px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.tc-pass b{color:var(--ok)}.tc-fail b{color:var(--bad)}.tc-stale b{color:var(--warn)}' +
+    '.tc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:760px}' +
+    '.tc-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.tc-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);font-variant-numeric:tabular-nums}' +
+    '.tc-st{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px}' +
+    '.tc-st.PASS{background:var(--ok-soft,rgba(63,207,142,.12));color:var(--ok)}' +
+    '.tc-st.FAIL{background:var(--bad-soft,rgba(240,96,90,.12));color:var(--bad)}' +
+    '.tc-st.STALE{background:rgba(233,196,106,.12);color:var(--warn)}' +
+    '.tc-st.UNVERIFIED{background:var(--panel);color:var(--text-3)}'
+  );
+
+  function tcS(v) { return String(v == null ? '' : v); }
+
+  function tcPaint(d) {
+    var box = $('tcBody');
+    if (!box) { return; }
+    var c = d.counts || {};
+    var h = '<div class="tc-tiles">' +
+      '<div class="tc-tile tc-pass"><span class="k">Verified · PASS</span><b>' + (c.PASS || 0) + '</b></div>' +
+      '<div class="tc-tile tc-fail"><span class="k">Failing</span><b>' + (c.FAIL || 0) + '</b></div>' +
+      '<div class="tc-tile tc-stale"><span class="k">Stale (source lag)</span><b>' + (c.STALE || 0) + '</b></div>' +
+      '<div class="tc-tile"><span class="k">Unverified (Phase 1)</span><b>' + (c.UNVERIFIED || 0) + '</b></div>' +
+      '</div>';
+
+    if ((d.fails || []).length) {
+      h += '<div class="card"><div class="hd" style="color:var(--bad)">Failures — Path A vs Path B disagree</div><div class="bd"><div class="scroll"><table class="tc-tbl"><thead><tr>' +
+        '<th>Metric</th><th>Scope</th><th>Shown</th><th>Recomputed</th><th>Delta</th><th>Method</th><th>When</th><th>Evidence</th></tr></thead><tbody>' +
+        d.fails.map(function (r) {
+          return '<tr><td><b>' + esc(tcS(r.metric_id)) + '</b></td><td>' + esc(tcS(r.scope_key)) + '</td>' +
+            '<td>' + esc(tcS(r.shown)) + '</td><td>' + esc(tcS(r.recomputed)) + '</td>' +
+            '<td style="color:var(--bad);font-weight:800">' + esc(tcS(r.delta)) + '</td>' +
+            '<td>' + esc(tcS(r.method)) + '</td><td>' + esc(tcS(r.ran_at).slice(11, 16)) + '</td>' +
+            '<td style="max-width:260px;font-size:11px;color:var(--text-3)">' + esc(tcS(r.evidence)) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div></div>';
+    } else {
+      h += '<div class="card"><div class="bd" style="color:var(--ok);font-weight:700;padding:16px">No failures — every verified number agrees with its independent recompute.</div></div>';
+    }
+
+    h += '<div class="card" style="margin-top:14px"><div class="hd">Latest verification per metric <span class="hint">Path B runs every 15 min (tier 1) · nightly penny audit at 03:00 PKT</span></div><div class="bd"><div class="scroll"><table class="tc-tbl"><thead><tr>' +
+      '<th>Metric</th><th>Scope</th><th>Shown</th><th>Recomputed</th><th>Status</th><th>Method</th><th>Checked</th><th>Next</th></tr></thead><tbody>' +
+      (d.latest || []).slice(0, 120).map(function (r) {
+        return '<tr><td><b>' + esc(tcS(r.metric_id)) + '</b></td><td>' + esc(tcS(r.scope_key)) + '</td>' +
+          '<td>' + esc(tcS(r.shown)) + '</td><td>' + esc(tcS(r.recomputed)) + '</td>' +
+          '<td><span class="tc-st ' + esc(tcS(r.status)) + '">' + esc(tcS(r.status)) + '</span></td>' +
+          '<td>' + esc(tcS(r.method)) + '</td><td>' + esc(tcS(r.ran_at).slice(5, 16).replace('T', ' ')) + '</td>' +
+          '<td style="color:var(--text-3)">' + esc(tcS(r.next_run_at).slice(11, 16)) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div></div>';
+
+    h += '<div class="card" style="margin-top:14px"><div class="hd">Sheet mirror — money rows in D1 <span class="hint">the pages read these, never Google live (R8)</span></div><div class="bd"><div class="scroll"><table class="tc-tbl" style="min-width:420px"><thead><tr><th>Account</th><th>Pakistan day</th><th>Rows</th></tr></thead><tbody>' +
+      (d.sheet_days || []).map(function (r) {
+        return '<tr><td>' + esc(tcS(r.account)) + '</td><td>' + esc(tcS(r.day_pk)) + '</td><td>' + esc(tcS(r.rows)) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div></div>';
+
+    h += '<div class="card" style="margin-top:14px"><div class="hd">Sync health <span class="hint">every job, every account — a failing account never blanks another</span></div><div class="bd"><div class="scroll"><table class="tc-tbl"><thead><tr><th>Job</th><th>Account</th><th>Last OK</th><th>Error</th></tr></thead><tbody>' +
+      (d.sync || []).filter(function (r) { return tcS(r.account).indexOf('@lock') < 0; }).map(function (r) {
+        var err = tcS(r.last_error);
+        return '<tr' + (err ? ' style="color:var(--bad)"' : '') + '><td>' + esc(tcS(r.job)) + '</td><td>' + esc(tcS(r.account) || 'all') + '</td>' +
+          '<td>' + esc(tcS(r.last_ok).slice(5, 16)) + '</td><td style="max-width:280px;font-size:11px">' + esc(err || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div></div></div>';
+
+    box.innerHTML = h;
+    var st = $('tcStamp');
+    if (st) { st.textContent = 'as of ' + (fmtPkt(d.as_of, true) || d.as_of); }
+  }
+
+  VIEWS.truthCheck = {
+    label: 'Truth Check',
+    icon: '<path d="M12 3l7 4v5c0 4.5-3 8-7 9-4-1-7-4.5-7-9V7z"/><path d="m9 12 2 2 4-4"/>',
+    roles: ['Management', 'Ops Head'],
+    order: 10.5,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Truth <span class="goldtext">Check</span></h1>' +
+        '<span class="sub" id="tcStamp">two independent paths to every number — this page is where they meet</span>' +
+        '<button class="minibtn" id="tcRun" style="margin-left:auto">Recheck now</button>' +
+        '<button class="minibtn" id="tcRefresh">Refresh</button></div>' +
+        '<div id="tcBody"><div class="spinner"></div></div>';
+    },
+    init: function () {
+      var load = function () {
+        api('truthBoard', {}).then(tcPaint).catch(function (e) {
+          var b = $('tcBody');
+          if (b) { b.innerHTML = '<div class="alx-empty">The board did not answer — ' + esc(e.message) + '</div>'; }
+        });
+      };
+      var run = $('tcRun');
+      if (run) {
+        run.onclick = function () {
+          run.disabled = true; run.textContent = 'Rechecking…';
+          api('runJobNow', { job: 'truthTier1' }).then(function () { run.disabled = false; run.textContent = 'Recheck now'; load(); })
+            .catch(function (e) { run.disabled = false; run.textContent = 'Recheck now'; toast('Could not run — ' + e.message); });
+        };
+      }
+      var rf = $('tcRefresh');
+      if (rf) { rf.onclick = load; }
+      load();
+    }
+  };
+})();
+
 /* ---------- view-vatBreakdown.js ---------- */
 /* view-vatBreakdown.js — review 3: "no vat page mentioned here, i need proper breakdown of
  * calculations". The whole profit law as a visible waterfall, every line a live number from
@@ -26206,20 +26285,24 @@ function enterApp(user){
      the business/account screens, then signals/alerts, then the staff block); the scheduling and
      personal-report items - rota, my reports, team performance, meetings, daily agenda - are the
      "less important stuff in the end", kept together in one line at the bottom of the group. */
+  /* TRUTH v2 WO-06/WO-10: My desk slims to the person's own work; Tools and Rules & SOPs live
+     in a Library group at the bottom; Returns & INAD sits with Customer Service; Truth Check
+     joins Management. Old entries stay reachable until their modules flip (R9). */
   var NAV_DEPTS = [
-    { name:'My desk',     keys:['home','tasks','approvals','tools','rules'] },
+    { name:'My desk',     keys:['home','tasks','approvals'] },
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
         'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','priceDesk',
-        'signals','alerts',
+        'signals','alerts','truthCheck',
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
-    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','returns','wrongOrders'] },
+    { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRecords','ideaBox'] },
-    { name:'Customer Service', keys:['tasksCS','csDesk','cs','inbox','feedback'] }
+    { name:'Customer Service', keys:['tasksCS','csDesk','cs','returns','inbox','feedback'] },
+    { name:'Library',     keys:['tools','rules'] }
   ];
   var placed = {};
   function navLink(v){
