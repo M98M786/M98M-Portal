@@ -62,13 +62,20 @@
   /* ————— tab: Waiting on you ————— */
   function tdWaiting(box) {
     box.innerHTML = '<div class="spinner"></div>';
+    /* R3 applies to lists too: a feed that fails must SAY so — merging an empty answer would
+       paint "queue clear" over real waiting work (caught live on 1 Sept: 2 pending hunts,
+       silent huntQueue failure, empty tab). */
+    var FEED_FAIL = '\u0000FAIL';
     Promise.all([
-      api('pendingApprovals').catch(function () { return {}; }),
-      api('huntQueue').catch(function () { return {}; }),
+      api('pendingApprovals').catch(function () { return FEED_FAIL; }),
+      api('huntQueue').catch(function () { return FEED_FAIL; }),
       api('mgmtPendingAS', {}).catch(function () { return {}; }),
       api('listDesk', {}).catch(function () { return {}; }),
     ]).then(function (rs) {
       if (!$('tdBody') || TD.tab !== 'waiting') { return; }
+      var failed = [];
+      if (rs[0] === FEED_FAIL) { failed.push('task approvals'); rs[0] = {}; }
+      if (rs[1] === FEED_FAIL) { failed.push('hunt approvals'); rs[1] = {}; }
       var tasks = (rs[0] && rs[0].tasks) || [];
       var hunts = (rs[1] && rs[1].hunts) || [];
       var a = rs[2] || {};
@@ -78,7 +85,13 @@
       hunts.forEach(function (hu) { items.push({ kind: 'hunt', at: tdS(hu.ts || hu['Date Added'] || hu.created_at), o: hu }); });
       items.sort(function (x, y) { return tdS(x.at).localeCompare(tdS(y.at)); });   /* oldest first */
 
-      var h = '<p class="m" style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 10px">' +
+      var h = '';
+      if (failed.length) {
+        h += '<div class="td-ap" style="border-color:var(--warn)"><div class="h"><span class="td-kind" style="background:var(--warn-soft);color:var(--warn)">feed failed</span>' +
+          '<span class="t">The ' + esc(failed.join(' and ')) + ' feed did not answer — this list may be missing items.</span>' +
+          '<button class="minibtn" data-td-retry="1" style="margin-left:auto">Try again</button></div></div>';
+      }
+      h += '<p class="m" style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 10px">' +
         items.length + ' item(s) rendered = ' + items.length + ' item(s) counted — the count IS the list (TILE_EQUALS_LIST).</p>';
       if (!items.length && !(a.reject_requests || 0)) {
         h += '<div class="alx-empty">Nothing is waiting on you. The queue is clear.</div>';
@@ -118,6 +131,7 @@
       }
       box.innerHTML = h;
 
+      box.querySelectorAll('[data-td-retry]').forEach(function (b) { b.onclick = function () { tdWaiting(box); }; });
       box.querySelectorAll('[data-td-ap]').forEach(function (b) {
         b.onclick = function () {
           var id = this.getAttribute('data-td-ap'); var me = this; me.disabled = true;

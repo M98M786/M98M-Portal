@@ -158,7 +158,7 @@
       if (!$('ixThreads') || IX.pane !== 'nt') { return; }
       var ns = (d && d.notifications) || [];
       try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}
-      if (!ns.length) { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No letters. Every alert the portal sends you lands here.</div>'; return; }
+      if (!ns.length) { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No unread letters. New alerts land here the moment they are sent.</div>'; return; }
       box.innerHTML = '<div style="padding:8px 13px;border-bottom:1px solid var(--gold-line)"><button class="minibtn" id="ixNtAll">Mark all read</button></div>' +
         ns.map(function (n) {
           var unread = !ixS(n.read_at || n.read).trim();
