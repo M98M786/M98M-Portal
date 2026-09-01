@@ -3532,14 +3532,17 @@ async function truthOpenOrders(env, account) {
   return rs.results || [];
 }
 
-async function metricDispatch(env, account) {
+async function openStamps(env) {
+  const stamps = {};
+  const stRs = await env.DB.prepare("SELECT account, cursor FROM sync_state WHERE job = 'openStamp'").all().catch(() => ({ results: [] }));
+  for (const r of (stRs.results || [])) stamps[r.account] = r.cursor;
+  return stamps;
+}
+async function metricDispatch(env, account, stampOverride) {
   const now = Date.now();
   const all = await truthOpenOrders(env, account);
   /* the open buckets count only rows in each account's latest COMPLETE eBay open pull */
-  const stamps = {};
-  const accs = account ? [account] : await apiAccounts(env);
-  const stRs = await env.DB.prepare("SELECT account, cursor FROM sync_state WHERE job = 'openStamp'").all().catch(() => ({ results: [] }));
-  for (const r of (stRs.results || [])) stamps[r.account] = r.cursor;
+  const stamps = stampOverride || await openStamps(env);
   const rows = all.filter((o) => {
     const st = stamps[o.account];
     return st && o.open_seen_at === st;
@@ -3660,15 +3663,14 @@ async function truthTier1(env) {
   const out = [];
   /* dispatch invariant + D1 recompute per account */
   const accounts = await apiAccounts(env);
+  const runStamps = await openStamps(env);   // ONE snapshot for both paths — a mid-run re-stamp must not fake a FAIL
   for (const acct of accounts.concat([''])) {
-    const A = await metricDispatch(env, acct || undefined);
+    const A = await metricDispatch(env, acct || undefined, runStamps);
     // Path B: independent pass over the same rows with the second classifier
     const raw = await truthOpenOrders(env, acct || undefined);
     const nb = { LATE: 0, DUE: 0, AWAITING: 0 };
     const nowMs = Date.now();
-    const bStamps = {};
-    const bRs = await env.DB.prepare("SELECT account, cursor FROM sync_state WHERE job = 'openStamp'").all().catch(() => ({ results: [] }));
-    for (const r2 of (bRs.results || [])) bStamps[r2.account] = r2.cursor;
+    const bStamps = runStamps;
     for (const o of raw) {
       if (!bStamps[o.account] || o.open_seen_at !== bStamps[o.account]) continue;
       const s = truthClassifyB(o, nowMs); if (nb[s] !== undefined) nb[s]++;
