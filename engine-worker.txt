@@ -5973,6 +5973,7 @@ const ROUTES = {
         .bind(acct, from, to).all();
       for (const r of (ko.results || [])) known[r.order_id] = 1;
       let pages = 0, seen = 0, inserted = 0, total = null;
+      const stmts = [];
       while (href && pages < 12) {
         const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
         if (!r.ok) throw new Error(acct + ' backfill ' + r.status);
@@ -5999,17 +6000,18 @@ const ROUTES = {
             const d2 = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
             if (d2 && (!sb || d2 < sb)) sb = d2;
           }
-          await ctx.env.DB.prepare(
+          stmts.push(ctx.env.DB.prepare(
             'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ' +
             'ON CONFLICT(order_id) DO UPDATE SET status = ?5, payment_status = ?10, cancel_state = ?11, fh_count = ?12, ' +
             "ship_by = CASE WHEN ?9 != '' THEN ?9 ELSE ship_by END"
           ).bind(id, acct, String(line.legacyItemId || ''), sold, status,
-            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty, sb, payS, canS, fhN).run();
+            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty, sb, payS, canS, fhN));
           inserted++;
         }
         href = String(page.next || '');
         pages++;
       }
+      for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
       return { account: acct, window: [from, to], total_in_window: total, pages, seen, inserted, more: !!href };
     },
   },
