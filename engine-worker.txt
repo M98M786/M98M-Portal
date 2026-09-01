@@ -3685,17 +3685,22 @@ async function metricMoney(env, account, fromPk, toPk) {
 function liveMembershipRow(r) {
   if (!(String(r.c_status || '').indexOf('RUNNING') >= 0 || String(r.c_status) === 'ENDING_SOON')) return false;
   if (String(r.l_status) !== 'ACTIVE') return false;
-  if (String(r.funding_model) === 'COST_PER_CLICK') return String(r.ad_status) === 'ACTIVE';
-  return String(r.ad_status) !== 'ARCHIVED';
+  /* CPC: eBay's per-ad state decides — but a row not yet re-synced since the ad_status column
+     landed (NULL/'') keeps the pre-WO-08 meaning (membership = live) and converges as adsItems
+     stamps it. Matches dupSweep exactly, so Path A and the dup feed can never disagree. */
+  const st = r.ad_status == null ? '' : String(r.ad_status);
+  if (String(r.funding_model) === 'COST_PER_CLICK') return st === 'ACTIVE' || st === '';
+  return st !== 'ARCHIVED';
 }
 function memberChipStatus(r) {
   if (String(r.l_status) !== 'ACTIVE') return 'LISTING ENDED';
   const cs = String(r.c_status || '');
   if (!(cs.indexOf('RUNNING') >= 0 || cs === 'ENDING_SOON')) return cs === 'PAUSED' || cs === 'SYSTEM_PAUSED' ? 'CAMPAIGN PAUSED' : 'CAMPAIGN ' + (cs || 'ENDED');
   if (String(r.funding_model) === 'COST_PER_CLICK') {
-    if (String(r.ad_status) === 'PAUSED') return 'AD PAUSED';
-    if (String(r.ad_status) === 'ARCHIVED') return 'ARCHIVED';
-    return String(r.ad_status) === 'ACTIVE' ? 'LIVE' : 'AD ' + (String(r.ad_status) || 'UNKNOWN');
+    const st = r.ad_status == null ? '' : String(r.ad_status);
+    if (st === 'PAUSED') return 'AD PAUSED';
+    if (st === 'ARCHIVED') return 'ARCHIVED';
+    return (st === 'ACTIVE' || st === '') ? 'LIVE' : 'AD ' + st;
   }
   return String(r.ad_status) === 'ARCHIVED' ? 'ARCHIVED' : 'LIVE';
 }
