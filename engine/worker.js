@@ -88,6 +88,10 @@ export default {
         : String(e && e.message || e).startsWith('SAY: ') ? String(e.message).slice(5)
         : 'request failed';
       if (msg === 'request failed') console.log('ERR', action, String(e && e.stack || e).slice(0, 500));
+      /* the SYNC KEY holder (the build relay) may see the real error — a browser session never does */
+      if (msg === 'request failed' && route && route.auth === 'sync' && String(body.key || '') === (await secret(env, 'SYNC_KEY').catch(() => null))) {
+        return json({ ok: false, error: msg, debug: String(e && e.stack || e).slice(0, 400) }, 200, cors);
+      }
       return json({ ok: false, error: msg }, 200, cors);
     }
   },
