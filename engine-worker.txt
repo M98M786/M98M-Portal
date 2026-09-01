@@ -3554,7 +3554,6 @@ async function metricDispatch(env, account) {
     if (st === 'LATE') { out.LATE_NOW.n++; out.LATE_NOW.pence += Math.round((Number(o.sold) || 0) * 100); if (out.LATE_NOW.rows.length < 80) out.LATE_NOW.rows.push(o); }
     else if (st === 'DUE') { out.DUE_3D.n++; if (out.DUE_3D.rows.length < 80) out.DUE_3D.rows.push(o); }
     else if (st === 'AWAITING') { out.AWAITING_ONLY.n++; if (out.AWAITING_ONLY.rows.length < 80) out.AWAITING_ONLY.rows.push(o); }
-    else if (st === 'REFUNDED_NEVER_SENT') { out.REFUNDED_NEVER_SENT.n++; out.REFUNDED_NEVER_SENT.pence += Math.round((Number(o.refunded) > 0 ? Number(o.refunded) : Number(o.sold) || 0) * 100); if (out.REFUNDED_NEVER_SENT.rows.length < 80) out.REFUNDED_NEVER_SENT.rows.push(o); }
     else if (st === 'PENDING_PAYMENT') { out.PENDING_PAYMENT.n++; if (out.PENDING_PAYMENT.rows.length < 40) out.PENDING_PAYMENT.rows.push(o); }
   }
   for (const o of hist) {
@@ -3562,6 +3561,9 @@ async function metricDispatch(env, account) {
     const st = dispatchStateV2(o, now);
     if (st === 'SHIPPED') { if (isFinite(t) && t >= cut7) out.SHIPPED_7D.n++; }
     else if (st === 'CANCELLED') { if (isFinite(t) && t >= cut30) out.CANCELLED_30D.n++; }
+    /* refunded-never-sent is a LEDGER state over the 120-day window (WO-07): the order is
+       closed on eBay, so it never sits in the open pull — history carries it. */
+    else if (st === 'REFUNDED_NEVER_SENT') { out.REFUNDED_NEVER_SENT.n++; out.REFUNDED_NEVER_SENT.pence += Math.round((Number(o.refunded) > 0 ? Number(o.refunded) : Number(o.sold) || 0) * 100); if (out.REFUNDED_NEVER_SENT.rows.length < 80) out.REFUNDED_NEVER_SENT.rows.push(o); }
   }
   out.AWAITING_DISPATCH = { n: out.LATE_NOW.n + out.DUE_3D.n + out.AWAITING_ONLY.n };
   return out;
