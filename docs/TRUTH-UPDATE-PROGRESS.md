@@ -115,3 +115,36 @@ Nothing is done until ticked here with evidence (R13).
   the 15-min tiers keep scoring it. Deploys: worker 01:34 UTC 1 Sept; Apps Script **v88**
   ("Deployment successfully updated. Version 88 on Sep 1, 2026, 6:33 AM"), same /exec URL.
 - Backfill evidence (WO-11): `huntAliStats` — **408 links, 408 parsed, 0 failed (100 %)**.
+
+
+## 1 Sept evening — full click-through validation (owner-requested), fixes shipped same hour
+All 69 visible pages rendered twice (cold + warm) with zero JS exceptions; every safe control
+exercised (tabs, ranges, account filters, refreshes, lenses, pickers, the Ali checker live).
+Live-fire buttons (approve/return, CPC ✕ pause, refunds, sends) verified present, not pressed.
+Found and FIXED during the pass:
+- `deptPendingEngine` was never routed to the engine → the merged desk's Departments tab died
+  with "unknown action". One-line ENGINE_ACTIONS fix; tab now paints in ~2 s with real counts.
+- Engine-only reads detoured through Apps Script on a 2.5 s abort (engineApi fallback), costing
+  10–20 s of AS "unknown action" before the engine retry — the reason every truth page crawled
+  under load. Engine-only actions now get a patient 15 s first try + 20 s retry, never AS.
+- pageMetrics dropped the row lists for DUE_3D/AWAITING_ONLY → Dispatch tabs showed a count
+  over an empty list. Rows now flow; capped lists say "showing the first 80 of N".
+- Boot: public config now fetched engine-first (worker serves it unauthenticated); a corrupt
+  m98m:pident (literal "undefined", found in the wild) no longer kills session restore — the
+  token alone restores and sessionHello refetches identity. Both proven by the page
+  self-recovering mid-test.
+- The bell's LETTERS lost their reading surface at the inbox flip — restored as a Letters pane
+  on the D1 inbox (rides the global poller's last answer for instant paint; markNotifRead).
+- Desk Waiting tab: a silently failed hunts/approvals feed painted "queue clear" over 2 real
+  pending hunts — failures now surface as an amber feed-failed card with retry (R3 for lists).
+- Hunt cards on the desk read the workbook's own headers (titles were blank).
+- WO-13 backlog: one-time `truthAlertSweep` closed 448 old-generation price/campaign/CPC/waste
+  letters as "re-evaluated in Truth Update v2" (658 → 210 current, queues untouched).
+- WO-11 proven in production: real supplier link → DUPLICATE (supplier sheet + live listing
+  named); unknown id → New; garbage → "not an AliExpress item link".
+- Sidebar: Account report redirect hidden (one entry per page).
+Non-bugs confirmed: "Hasib" twice in staff pickers = his two real accounts; feedback-page
+"refused" = buyer comment text; staffOversight dossier ~26 s = old AS-heavy page (unchanged).
+Truth Check during the pass: **59 PASS · 0 FAIL · 15 STALE · 0 UNVERIFIED**; MULTI_RUNNING
+converged 391 → 25 → **3** as ad_status stamping completed. Deploys: worker 15:55 UTC,
+Pages builds -1532…-1604.
