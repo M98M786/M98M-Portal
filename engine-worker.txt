@@ -3745,6 +3745,44 @@ async function metricAds(env, account) {
   return { split, multiRows, noneRows };
 }
 
+/* WO-02 Path A: departments board from the D1 task mirror — ONE function feeds the merged desk
+   and deptPendingEngine, so a tile and its list cannot disagree (TILE_EQUALS_LIST by shape). */
+const DESK_DEPT_OF_TYPE = { listing_new: 'Listing', listing_revision: 'Listing', campaign_set: 'Advertising',
+  cpc_research: 'Advertising', potential_cpc_review: 'Advertising', loss_review: 'Advertising', supplier_add: 'Orders',
+  sourcing_link: 'Hunting', hunt_revision: 'Hunting', end_listing: 'Listing', query: 'CS', general: 'General' };
+const DESK_OPEN_STATUSES = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
+async function metricDeptTasks(env) {
+  const rs = await env.DB.prepare(
+    'SELECT task_id, type, status, assigned_to, assigned_by, deadline_pkt, created_at, decided_at, title FROM tasks'
+  ).all();
+  const nowMs = Date.now();
+  const depts = {}, history = [];
+  const isSystem = (e) => { const s = String(e || '').toLowerCase(); return !s || s.indexOf('@') < 0 || s === 'system' || s.indexOf('engine') === 0; };
+  for (const t of (rs.results || [])) {
+    const dept = DESK_DEPT_OF_TYPE[String(t.type || 'general')] || 'General';
+    const status = String(t.status || '');
+    const rec = depts[dept] = depts[dept] || { dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+    if (status === 'Completed') {
+      if (t.decided_at) history.push({ dept, type: String(t.type || ''), title: String(t.title || '').slice(0, 80),
+        assigned_to: String(t.assigned_to || ''), origin: isSystem(t.assigned_by) ? 'system' : 'management',
+        decided_at: String(t.decided_at) });
+      continue;
+    }
+    if (DESK_OPEN_STATUSES.indexOf(status) < 0) continue;
+    rec.open++;
+    if (isSystem(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
+    const who = String(t.assigned_to || '(unassigned)');
+    rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
+    const dl = Date.parse(String(t.deadline_pkt || ''));
+    if (!isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval') rec.overdue++;
+    const created = String(t.created_at || '');
+    if (created && (!rec.oldest || created < rec.oldest)) rec.oldest = created;
+  }
+  history.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
+  return { departments: Object.values(depts).sort((a, b) => b.open - a.open),
+    history: history.slice(0, 40), as_of: new Date().toISOString(), source: 'engine' };
+}
+
 async function metricTasks(env) {
   const rows = (await env.DB.prepare('SELECT type, status, assigned_to, deadline_pkt, created_at, assigned_by, account FROM tasks').all()).results || [];
   const nowPkt = pktNowIso();
@@ -3828,6 +3866,24 @@ async function truthTier1(env) {
     out.push({ metric_id: 'SPLIT_SUMS_TO_ACTIVE', scope_key: acct, shown: sum, recomputed: bN,
       delta: sum - bN, status: sum === bN ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
   }
+  /* WO-02: departments open counts — Path A (JS loop over the mirror) vs Path B (SQL GROUP BY,
+     independently written CASE mapping). Same D1 table, two computations. */
+  try {
+    const A2 = await metricDeptTasks(env);
+    const b2 = await env.DB.prepare(
+      "SELECT CASE type " +
+      "WHEN 'listing_new' THEN 'Listing' WHEN 'listing_revision' THEN 'Listing' WHEN 'end_listing' THEN 'Listing' " +
+      "WHEN 'campaign_set' THEN 'Advertising' WHEN 'cpc_research' THEN 'Advertising' WHEN 'potential_cpc_review' THEN 'Advertising' WHEN 'loss_review' THEN 'Advertising' " +
+      "WHEN 'supplier_add' THEN 'Orders' WHEN 'sourcing_link' THEN 'Hunting' WHEN 'hunt_revision' THEN 'Hunting' WHEN 'query' THEN 'CS' ELSE 'General' END AS dept, " +
+      "COUNT(*) AS n FROM tasks WHERE status IN ('Pending','Working','Updated','Submitted — awaiting approval') GROUP BY dept"
+    ).all();
+    const bMap = {};
+    for (const r of (b2.results || [])) bMap[r.dept] = Number(r.n) || 0;
+    for (const d2 of A2.departments) {
+      out.push({ metric_id: 'TASKS_OPEN_BY_DEPT', scope_key: d2.dept, shown: d2.open, recomputed: bMap[d2.dept] || 0,
+        delta: d2.open - (bMap[d2.dept] || 0), status: d2.open === (bMap[d2.dept] || 0) ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+    }
+  } catch (e) { /* tasks mirror may be empty on a fresh isolate — nothing to verify is not a FAIL */ }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
   for (const acct of accounts) {
@@ -3985,41 +4041,7 @@ const ROUTES = {
      (R8.gs actionDeptPending_/actionListDesk_) row for row — same department map, same open
      statuses, same overdue rule — or the fast page would quietly disagree with the slow one. */
   deptPendingEngine: {
-    auth: 'any', fn: async (p, ctx) => {
-      const DEPT_OF_TYPE = { listing_new: 'Listing', listing_revision: 'Listing', campaign_set: 'Advertising',
-        cpc_research: 'Advertising', potential_cpc_review: 'Advertising', loss_review: 'Advertising', supplier_add: 'Orders',
-        sourcing_link: 'Hunting', hunt_revision: 'Hunting', end_listing: 'Listing', query: 'CS', general: 'General' };
-      const OPEN = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
-      const rs = await ctx.env.DB.prepare(
-        'SELECT task_id, type, status, assigned_to, assigned_by, deadline_pkt, created_at, decided_at, title FROM tasks'
-      ).all();
-      const nowMs = Date.now();
-      const depts = {}, history = [];
-      const isSystem = (e) => { const s = String(e || '').toLowerCase(); return !s || s.indexOf('@') < 0 || s === 'system' || s.indexOf('engine') === 0; };
-      for (const t of (rs.results || [])) {
-        const dept = DEPT_OF_TYPE[String(t.type || 'general')] || 'General';
-        const status = String(t.status || '');
-        const rec = depts[dept] = depts[dept] || { dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
-        if (status === 'Completed') {
-          if (t.decided_at) history.push({ dept, type: String(t.type || ''), title: String(t.title || '').slice(0, 80),
-            assigned_to: String(t.assigned_to || ''), origin: isSystem(t.assigned_by) ? 'system' : 'management',
-            decided_at: String(t.decided_at) });
-          continue;
-        }
-        if (OPEN.indexOf(status) < 0) continue;
-        rec.open++;
-        if (isSystem(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
-        const who = String(t.assigned_to || '(unassigned)');
-        rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
-        const dl = Date.parse(String(t.deadline_pkt || ''));
-        if (!isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval') rec.overdue++;
-        const created = String(t.created_at || '');
-        if (created && (!rec.oldest || created < rec.oldest)) rec.oldest = created;
-      }
-      history.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
-      return { departments: Object.values(depts).sort((a, b) => b.open - a.open),
-        history: history.slice(0, 40), as_of: new Date().toISOString(), source: 'engine' };
-    },
+    auth: 'any', fn: async (p, ctx) => metricDeptTasks(ctx.env),
   },
 
   syncUsers: {

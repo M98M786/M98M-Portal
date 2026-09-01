@@ -1055,8 +1055,10 @@ function canSee(v){
   return v.roles.indexOf(STATE.user.role)>=0 || mods.indexOf(v.key)>=0;
 }
 function viewList(){
+  /* WO-02: a view may set hidden:true — still routable by hash (old links redirect), never in
+     the sidebar. One desk entry instead of three. */
   return Object.keys(VIEWS).map(function(k){ var v=VIEWS[k]; v.key=k; return v; })
-    .filter(canSee).sort(function(a,b){ return ordOf(a)-ordOf(b); });
+    .filter(canSee).filter(function(v){ return !v.hidden; }).sort(function(a,b){ return ordOf(a)-ordOf(b); });
 }
 function ordOf(v){ return typeof v.order==='number' ? v.order : 99; }   /* order 0 is Home, not "missing" */
 function enterApp(user){
