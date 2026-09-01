@@ -290,6 +290,31 @@ function fillAccountSelect(sel, current, onchange){
   });
   if (onchange) { sel.onchange = onchange; }
 }
+/* TRUTH v2 runtime: one fetcher for the metric page API + the provenance chip. Pages call
+   truthPage() and render metric values; the chip shows the verifier's latest verdict. */
+var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'old', catalogue: 'old', standards: 'live', tasks: 'old', inbox: 'old', hunting: 'old' };
+var TRUTH_CACHE = {};
+function truthPage(scope){
+  scope = scope || {};
+  var key = JSON.stringify(scope);
+  var hit = TRUTH_CACHE[key];
+  if (hit && Date.now() - hit.at < 45000) { return hit.p; }
+  var p = api('pageMetrics', scope);
+  TRUTH_CACHE[key] = { at: Date.now(), p: p };
+  p.catch(function(){ delete TRUTH_CACHE[key]; });
+  return p;
+}
+function mChip(m){
+  if (!m || !m.verify) { return ''; }
+  var v = m.verify;
+  var tone = v.status === 'PASS' ? 'ok' : v.status === 'FAIL' ? 'bad' : v.status === 'STALE' ? 'warn' : 'text-3';
+  var txt = v.status === 'PASS' ? ('✓ ' + String(v.checkedAt || '').slice(11, 16))
+    : v.status === 'FAIL' ? ('✗ Δ' + v.delta)
+    : v.status === 'STALE' ? '⏳ source lag' : '— unverified';
+  return '<span title="Truth Check: ' + esc(v.status) + (v.checkedAt ? ' at ' + esc(String(v.checkedAt).slice(11,19)) + ' UTC' : '') +
+    ' · click Truth Check in the sidebar for evidence" style="display:inline-block;margin-top:3px;font-size:9.5px;font-weight:800;letter-spacing:.04em;color:var(--' + tone + ');cursor:help">' + txt + '</span>';
+}
+function pkDayStr(off){ return new Date(Date.now() + 5*3600000 + (off||0)*86400000).toISOString().slice(0,10); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -980,11 +1005,15 @@ VIEWS.home = {
       };
       var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
       var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
-      api('dailyReport',{}).then(function(d){
-        var y=ukDay(1), t={sold:0,actual:0,ads:0};
-        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.actual+=Number(r.actual)||0; t.ads+=(Number(r.pri)||0)*1.2; } });
-        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.actual)+' actual · '+gbp(t.ads)+' ads (N)', 'dailyReport', 'gold-a'); paint();
-      }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
+      /* TRUTH v2 WO-01: Yesterday = SOLD_SHEET + ACTUAL_PROFIT for yesterday's Pakistan day
+         (the books' own R/S/T columns), with the rows-written coverage. */
+      truthPage({from: pkDayStr(-1), to: pkDayStr(-1)}).then(function(d){
+        var m=d.metrics;
+        var cov=m.ROWS_COVERAGE.value||{};
+        slots.money=tile('Yesterday', gbp(m.SOLD_SHEET.value),
+          gbp(m.ACTUAL_PROFIT.value)+' actual · VAT '+gbp(m.VAT_TO_HMRC.value)+' · rows '+(cov.rows||0)+' of '+(cov.orders||0)+' '+mChip(m.ACTUAL_PROFIT),
+          'dashboard', 'gold-a'); paint();
+      }).catch(function(){ slots.money=tile('Yesterday','—','the books mirror did not answer','dashboard',''); paint(); });
       api('dispatchLive',{}).then(function(d){
         var n=Number(d&&d.late_count)||0;
         slots.late=tile('Late right now', String(n), n?gbp(d.late_value)+' of orders past eBay\u2019s deadline':'nothing past its deadline', 'dispatch', n?'bad':'ok'); paint();

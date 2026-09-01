@@ -191,8 +191,9 @@
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
-    api('vatBoard', {}).then(function (d) { O.vat = d || {}; oPaintMoney(); })
-      .catch(function () { O.vat = { accounts: [] }; oPaintMoney(); });
+    truthPage({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) })
+      .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
+      .catch(function () { O.truth = null; oPaintMoney(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
@@ -223,22 +224,55 @@
           }).join('') + '</div>'
         : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now — it retries on the next refresh.' : 'Loading…') + '</div>') +
       '</div>';
-    var va = (v && v.accounts) || [];
-    var vt = (v && v.total) || {};
-    h += '<div class="o-card"><div class="card-t">VAT to pay — ' + esc(oS(v && v.month) || 'this month') + '</div>' +
-      (va.length
-        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vt.vat_due) + '</div>' +
-          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">20% × (sold − eBay fees ex VAT − AliExpress − CPC ex VAT)' + (vt.est_days ? ' · ⏳ ad estimates inside' : '') + '</div>' +
-          '<div class="mini-rows">' + va.map(function (a) {
-            var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
-            return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
-              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
-              '<span class="v">' + (a.incomplete ? '<span style="color:var(--text-3)" title="engine still backfilling this account\u2019s history">building…</span>' : oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '')) + '</span></div>';
+    /* TRUTH v2 WO-03 (money LIVE): VAT to pay = Σ the day tabs' own 'VAT to HMRC' column,
+       month to date, per account — the calculator writes it, the portal reads it. */
+    var vm = (O.truth && O.truth.metrics) || null;
+    var byA = vm ? (vm.MONEY_BY_ACCOUNT.value || {}) : {};
+    var vaNames = Object.keys(byA).sort();
+    var vatTotal = vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].vat); }, 0);
+    h += '<div class="o-card"><div class="card-t">VAT to pay — Σ VAT to HMRC · month to date</div>' +
+      (vaNames.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vatTotal) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">the money workbook\u2019s own column, row by row ' + (vm ? mChip(vm.VAT_TO_HMRC) : '') + '</div>' +
+          '<div class="mini-rows">' + vaNames.map(function (a) {
+            var mx = vaNames.reduce(function (m, x) { return Math.max(m, oN(byA[x].vat)); }, 1);
+            return '<div class="mini-row blue"><span class="n">' + esc(a) + '</span>' +
+              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(byA[a].vat) / mx * 100)) + '%"></i></span>' +
+              '<span class="v">' + oGBP0(byA[a].vat) + '</span></div>';
           }).join('') + '</div>' +
-          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
-        : '<div class="empty" style="padding:14px 0">Loading…</div>') +
+          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">rows written this month: ' + vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].rows); }, 0) + ' — a missing row is missing VAT, not zero VAT.</div>'
+        : '<div class="empty" style="padding:14px 0">The books mirror is filling…</div>') +
       '</div>';
     box.innerHTML = h;
+  }
+
+  /* TRUTH v2 WO-03 step 5: the rating strip — RATING per account from eBay's Analytics API. */
+  function oPaintRatings() {
+    var host = $('o2Ratings');
+    if (!host) { return; }
+    api('accountHealth', {}).then(function (d) {
+      var stds = (d && d.standards) || [];
+      if (!stds.length) { host.innerHTML = '<div class="empty">The standards sync has not landed yet.</div>'; return; }
+      host.innerHTML = stds.map(function (r) {
+        var p = (r.profiles || [])[0] || {};
+        var lv = String(p.standardsLevel || '');
+        var tone = /TOP_RATED|ABOVE/.test(lv) ? 'ok' : /BELOW/.test(lv) ? 'bad' : 'warn';
+        var mets = p.metrics || [];
+        var pick = function (re) {
+          var m = null;
+          mets.some(function (x) { if (re.test(String(x.name || x.metricKey || ''))) { m = x; return true; } return false; });
+          if (!m) { return '—'; }
+          var v = (m.value && (m.value.value !== undefined ? m.value.value : m.value));
+          return String(v == null ? '—' : v);
+        };
+        return '<div class="tile"><b>' + esc(oS(r.account)) + '</b>' +
+          '<span style="display:block;font-weight:800;color:var(--' + tone + ');font-size:12px;margin:3px 0">' + esc(lv.replace(/_/g, ' ') || '—') + '</span>' +
+          '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;line-height:1.7">defects ' + esc(pick(/defect/i)) +
+          ' · late ' + esc(pick(/late/i)) + ' · cases w/o res. ' + esc(pick(/without seller|resolution/i)) + '</div>' +
+          (p.cycle && p.cycle.evaluationDate ? '<div style="font-size:9.5px;color:var(--text-3);margin-top:3px">evaluated ' + esc(String(p.cycle.evaluationDate).slice(0, 10)) + '</div>' : '') +
+          '</div>';
+      }).join('');
+    }).catch(function () { host.innerHTML = '<div class="empty">Standards feed did not answer.</div>'; });
   }
 
   /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
@@ -303,10 +337,38 @@
   function oPaintKpis(r) {
     var box = $('o2Kpis');
     if (!box) { return; }
-    /* THE BRAIN RULE (Hasib, night review 2): these tiles compute with the organisation's own
-       calculator — the same penny-verified P&L the Sales analysis sheet runs (OE = revenue −
-       real eBay fees; True OE − VAT-to-HMRC = Raw profit; minus returns = Actual). The books
-       still draw the charts; the MONEY tiles come from the P&L engine. */
+    /* TRUTH v2 WO-03 (money LIVE): the money tiles read the register for the CHOSEN RANGE —
+       Σ Raw Profit, Σ VAT to HMRC, Σ True Order Earning, sheet Sold with the eBay sub-line and
+       rows coverage. Ads-family tiles keep the old path until the ads module flips (Phase 4). */
+    var tKey = 't:' + r.from + '|' + r.to;
+    if (O.truthRangeKey !== tKey) {
+      O.truthRangeKey = tKey; O.truthRange = null;
+      truthPage({ from: r.from, to: r.to }).then(function (d) {
+        if (O.truthRangeKey !== tKey) { return; }
+        O.truthRange = d;
+        oPaintKpis(r);
+      }).catch(function () {});
+    }
+    if (O.truthRange && O.truthRange.metrics) {
+      var M = O.truthRange.metrics;
+      var cov = M.ROWS_COVERAGE.value || {};
+      var sApi = (M.SOLD_API.value || {}).all;
+      var mkT = function (label, val, sub, tone) {
+        return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +
+          '<div class="kpi-v' + (tone === 'gold-b' ? ' gold' : '') + '">' + val + '</div>' +
+          '<div class="kpi-s">' + sub + '</div></div>';
+      };
+      box.innerHTML =
+        mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
+        mkT('ACTUAL PROFIT', oGBP0(M.ACTUAL_PROFIT.value), 'Σ Raw Profit — the day tabs\' own column ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
+        mkT('VAT TO HMRC', oGBP0(M.VAT_TO_HMRC.value), 'Σ VAT to HMRC · True Earning − VAT = Raw ' + mChip(M.VAT_TO_HMRC), 'blue') +
+        mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
+        mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
+        mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
+        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + M.DUE_3D.value + ' · awaiting ' + M.AWAITING_ONLY.value + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
+      return;
+    }
+    /* old path renders until the register answers */
     var key = r.from + '|' + r.to;
     if (O.pnlKey !== key) {
       O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
@@ -681,6 +743,7 @@
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +

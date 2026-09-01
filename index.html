@@ -290,6 +290,31 @@ function fillAccountSelect(sel, current, onchange){
   });
   if (onchange) { sel.onchange = onchange; }
 }
+/* TRUTH v2 runtime: one fetcher for the metric page API + the provenance chip. Pages call
+   truthPage() and render metric values; the chip shows the verifier's latest verdict. */
+var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'old', catalogue: 'old', standards: 'live', tasks: 'old', inbox: 'old', hunting: 'old' };
+var TRUTH_CACHE = {};
+function truthPage(scope){
+  scope = scope || {};
+  var key = JSON.stringify(scope);
+  var hit = TRUTH_CACHE[key];
+  if (hit && Date.now() - hit.at < 45000) { return hit.p; }
+  var p = api('pageMetrics', scope);
+  TRUTH_CACHE[key] = { at: Date.now(), p: p };
+  p.catch(function(){ delete TRUTH_CACHE[key]; });
+  return p;
+}
+function mChip(m){
+  if (!m || !m.verify) { return ''; }
+  var v = m.verify;
+  var tone = v.status === 'PASS' ? 'ok' : v.status === 'FAIL' ? 'bad' : v.status === 'STALE' ? 'warn' : 'text-3';
+  var txt = v.status === 'PASS' ? ('✓ ' + String(v.checkedAt || '').slice(11, 16))
+    : v.status === 'FAIL' ? ('✗ Δ' + v.delta)
+    : v.status === 'STALE' ? '⏳ source lag' : '— unverified';
+  return '<span title="Truth Check: ' + esc(v.status) + (v.checkedAt ? ' at ' + esc(String(v.checkedAt).slice(11,19)) + ' UTC' : '') +
+    ' · click Truth Check in the sidebar for evidence" style="display:inline-block;margin-top:3px;font-size:9.5px;font-weight:800;letter-spacing:.04em;color:var(--' + tone + ');cursor:help">' + txt + '</span>';
+}
+function pkDayStr(off){ return new Date(Date.now() + 5*3600000 + (off||0)*86400000).toISOString().slice(0,10); }
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -525,7 +550,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-0025';
+var BUILD = '20260901-0033';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -980,11 +1005,15 @@ VIEWS.home = {
       };
       var gbp=function(v){ return '£'+(Math.round(Number(v)*100)/100).toFixed(2); };
       var ukDay=function(offsetDays){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London'}).format(new Date(Date.now()-offsetDays*86400000)); };
-      api('dailyReport',{}).then(function(d){
-        var y=ukDay(1), t={sold:0,actual:0,ads:0};
-        ((d&&d.rows)||[]).forEach(function(r){ if(r.date===y){ t.sold+=Number(r.sold)||0; t.actual+=Number(r.actual)||0; t.ads+=(Number(r.pri)||0)*1.2; } });
-        slots.money=tile('Yesterday', gbp(t.sold), gbp(t.actual)+' actual · '+gbp(t.ads)+' ads (N)', 'dailyReport', 'gold-a'); paint();
-      }).catch(function(){ slots.money=tile('Yesterday','—','the daily book did not answer','dailyReport',''); paint(); });
+      /* TRUTH v2 WO-01: Yesterday = SOLD_SHEET + ACTUAL_PROFIT for yesterday's Pakistan day
+         (the books' own R/S/T columns), with the rows-written coverage. */
+      truthPage({from: pkDayStr(-1), to: pkDayStr(-1)}).then(function(d){
+        var m=d.metrics;
+        var cov=m.ROWS_COVERAGE.value||{};
+        slots.money=tile('Yesterday', gbp(m.SOLD_SHEET.value),
+          gbp(m.ACTUAL_PROFIT.value)+' actual · VAT '+gbp(m.VAT_TO_HMRC.value)+' · rows '+(cov.rows||0)+' of '+(cov.orders||0)+' '+mChip(m.ACTUAL_PROFIT),
+          'dashboard', 'gold-a'); paint();
+      }).catch(function(){ slots.money=tile('Yesterday','—','the books mirror did not answer','dashboard',''); paint(); });
       api('dispatchLive',{}).then(function(d){
         var n=Number(d&&d.late_count)||0;
         slots.late=tile('Late right now', String(n), n?gbp(d.late_value)+' of orders past eBay\u2019s deadline':'nothing past its deadline', 'dispatch', n?'bad':'ok'); paint();
@@ -9245,6 +9274,7 @@ var C_WASTE  = 'Ad Waste';
 
 var dbData = null;
 var DB_ACC = '';   /* '' = all accounts; chips on the tiles set this */
+var DB_TRUTH = null; /* TRUTH v2: pageMetrics for the month scope */
 
 VIEW_CSS.push(
   '.db-excl{border:1px solid rgba(240,96,90,.45);background:var(--bad-soft);border-radius:11px;' +
@@ -9315,6 +9345,38 @@ function kpiStrip(d) {
   /* 30 Aug (owner: "still same") — when the engine's month truth is present, THE TILES show
      eBay's own live month (orders, units, sold, Actual by the law) and the books' card value
      drops to the sub-line. The books' per-account cards below stay as they are. */
+  /* TRUTH v2 WO-04 (money module LIVE): the month tiles come from the register — SOLD_SHEET,
+     ACTUAL_PROFIT (Σ Raw Profit), VAT_TO_HMRC_MTD, MARGIN, ROWS_COVERAGE — with SOLD_API as the
+     eBay sub-line. The ads tile stays on the old path until the ads module flips (Phase 4). */
+  if (DB_TRUTH && DB_TRUTH.metrics) {
+    var M = DB_TRUTH.metrics;
+    var cov = M.ROWS_COVERAGE.value || {};
+    var soldApi = (M.SOLD_API.value || {}).all;
+    var t0 = d.engine_truth || {};
+    var adsOld = Number(t0.n_ads) > 0 ? Number(t0.n_ads) : NaN;
+    var accs2 = Object.keys((M.MONEY_BY_ACCOUNT.value) || {});
+    var chips2 = '<div class="acct-chips" style="margin-bottom:12px">' +
+      '<button class="minibtn' + (!DB_ACC ? ' on' : '') + '" data-db-acc="">All accounts</button>' +
+      accs2.map(function (a) { return '<button class="minibtn' + (DB_ACC === a ? ' on' : '') + '" data-db-acc="' + esc(a).replace(/"/g, '&quot;') + '">' + esc(a) + '</button>'; }).join('') + '</div>';
+    var pickM = DB_ACC ? (M.MONEY_BY_ACCOUNT.value || {})[DB_ACC] : null;
+    var vSold = pickM ? pickM.sold : M.SOLD_SHEET.value;
+    var vAct = pickM ? pickM.actual : M.ACTUAL_PROFIT.value;
+    var vVat = pickM ? pickM.vat : M.VAT_TO_HMRC.value;
+    var vAli = pickM ? pickM.ali : M.ALI_COST.value;
+    var vMargin = pickM ? pickM.margin : M.MARGIN.value;
+    var apiSub = DB_ACC ? (((M.SOLD_API.value || {}).by || {})[DB_ACC] || {}).sold : soldApi;
+    var rowsSub = DB_ACC ? (pickM ? pickM.rows : 0) : cov.rows;
+    var ordSub = DB_ACC ? (((M.SOLD_API.value || {}).by || {})[DB_ACC] || {}).orders : cov.orders;
+    return chips2 + '<div class="db-kpis">' +
+      kpi('Sold (books)', gbp(vSold), 'eBay: ' + gbp(apiSub || 0) + ' · rows ' + (rowsSub || 0) + ' of ' + (ordSub || 0), 'gold') + 
+      kpi('Actual profit', gbp(vAct), 'Σ Raw Profit — the day tabs\' own column', 'gold') +
+      kpi('VAT to HMRC', gbp(vVat), 'Σ VAT to HMRC — the calculator writes it, the portal reads it', 'blue') +
+      kpi('AliExpress cost', gbp(vAli), 'Σ Total AliExpress Cost incl VAT', '') +
+      kpi('Margin', vMargin == null ? '—' : (vMargin + '%'), 'actual ÷ sold (books)', '') +
+      kpi('Ads (N) incl VAT', isFinite(adsOld) ? gbp(adsOld) : '—', 'old path · flips with the ads module', '') +
+    '</div>' +
+    '<div class="db-note" style="border-color:var(--gold-line)"><b>i</b><div>rows written ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' orders this month · figures as at ' + esc(String(DB_TRUTH.asOf).slice(11, 16)) + ' UTC ' + mChip(M.ACTUAL_PROFIT) + '</div></div>';
+  }
   var t = d.engine_truth;
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
     /* 30 Aug (owner): "give options in sales analysis for account to account data" — chips pick
@@ -9615,7 +9677,16 @@ function paint() {
     (d.scoped ? '<div class="db-note" style="margin-top:12px"><b>i</b><div>Some accounts are hidden because your access is limited to certain accounts.</div></div>' : '');
 }
 
+function loadTruth() {
+  var from = pkDayStr(0).slice(0, 8) + '01';
+  truthPage({ from: from, to: pkDayStr(0) }).then(function (d) {
+    DB_TRUTH = d;
+    paint();
+  }).catch(function () { /* the old tiles still render */ });
+}
+
 function load(force) {
+  loadTruth();
   var host = $('dbBody');
   // Only show a spinner when there is genuinely nothing to look at. If this screen has been
   // opened before, it paints the previous figures at once and swaps in the fresh ones when the
@@ -12834,6 +12905,171 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (rf) { rf.onclick = irLoad; }
       irLoad();
     }
+  };
+})();
+
+/* ---------- view-kpis2.js ---------- */
+/* view-kpis2.js — TRUTH v2 WO-05: Account report + Account KPIs merged into ONE page on the
+ * register. Loads after view-alerts.js (build order is alphabetical), so these registrations
+ * replace the old ones; the old code paths go entirely at Phase 6 cleanup. Every number here is
+ * a register metric for the chosen account × range: SOLD_SHEET (with SOLD_API sub-line),
+ * ACTUAL_PROFIT (Σ Raw Profit), VAT_TO_HMRC, MARGIN, ALI_COST, ROWS_COVERAGE, LATE_NOW — plus
+ * the RATING block from eBay's standards. Chart: daily Sold bars + Actual line, Pakistan days;
+ * ads stays on its own old panel until the ads module flips. */
+(function () {
+  'use strict';
+
+  var K2 = { acct: '', days: 30 };
+
+  VIEW_CSS.push(
+    '.k2-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px}' +
+    '.k2-tile{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;background:var(--panel-2)}' +
+    '.k2-tile .l{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.k2-tile .v{font-size:20px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}' +
+    '.k2-tile .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-top:3px}' +
+    '.k2-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}' +
+    '.k2-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800}' +
+    '.k2-tbl th:first-child{text-align:left}' +
+    '.k2-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums}' +
+    '.k2-tbl td:first-child{text-align:left;font-weight:700}'
+  );
+
+  function k2GBP(v) { var n = Number(v) || 0; return (n < 0 ? '−£' + Math.abs(n).toFixed(2) : '£' + n.toFixed(2)); }
+
+  function k2Chart(days) {
+    if (!days || days.length < 2) { return '<div class="alx-empty">Not enough mirrored days yet for a chart.</div>'; }
+    var W = 860, H = 260, L = 56, R = 16, T = 18, B = 40;
+    var maxSold = 1;
+    days.forEach(function (d) { maxSold = Math.max(maxSold, Number(d.sold) || 0); });
+    var n = days.length;
+    var bw = Math.max(3, Math.floor((W - L - R) / n) - 3);
+    var X = function (i) { return L + i * (W - L - R) / n; };
+    var Y = function (v) { return T + (1 - v / maxSold) * (H - T - B); };
+    var bars = days.map(function (d, i) {
+      var h2 = (H - T - B) * ((Number(d.sold) || 0) / maxSold);
+      return '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - h2).toFixed(1) + '" width="' + bw + '" height="' + h2.toFixed(1) + '" fill="var(--blue)" opacity="0.55"><title>' + d.day + ' — sold ' + k2GBP(d.sold) + ' · actual ' + k2GBP(d.actual) + ' · VAT ' + k2GBP(d.vat) + ' · ' + d.rows + ' rows</title></rect>';
+    }).join('');
+    var line = days.map(function (d, i) {
+      return (i ? 'L' : 'M') + (X(i) + bw / 2).toFixed(1) + ',' + Y(Math.max(0, Number(d.actual) || 0)).toFixed(1);
+    }).join(' ');
+    var grid = '';
+    for (var g = 1; g <= 3; g++) {
+      var gy = T + (1 - g / 4) * (H - T - B);
+      grid += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="var(--gold-line)" stroke-dasharray="3 5"/>' +
+        '<text x="' + (L - 6) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text-3)">£' + Math.round(maxSold * g / 4) + '</text>';
+    }
+    var labels = '';
+    var step = Math.max(1, Math.floor(n / 8));
+    for (var i = 0; i < n; i += step) {
+      labels += '<text x="' + (X(i) + bw / 2).toFixed(1) + '" y="' + (H - 14) + '" text-anchor="middle" font-size="9.5" fill="var(--text-3)">' + days[i].day.slice(5) + '</text>';
+    }
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:620px;width:100%;height:auto">' + grid + labels + bars +
+      '<path d="' + line + '" fill="none" stroke="var(--ok)" stroke-width="2.2"/>' +
+      '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--blue)">▮ Sold / day (books)</text>' +
+      '<text x="' + (L + 140) + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">▬ Actual profit / day</text>' +
+      '</svg></div>';
+  }
+
+  function k2Load() {
+    var body = $('k2Body');
+    if (!body) { return; }
+    body.innerHTML = '<div class="spinner"></div>';
+    var from = pkDayStr(-(K2.days - 1));
+    var to = pkDayStr(0);
+    var scope = { from: from, to: to };
+    if (K2.acct) { scope.account = K2.acct; }
+    truthPage(scope).then(function (d) {
+      if (!$('k2Body')) { return; }
+      var M = d.metrics;
+      var byA = M.MONEY_BY_ACCOUNT.value || {};
+      var mine = K2.acct ? byA[K2.acct] : null;
+      var sold = mine ? mine.sold : M.SOLD_SHEET.value;
+      var act = mine ? mine.actual : M.ACTUAL_PROFIT.value;
+      var vat = mine ? mine.vat : M.VAT_TO_HMRC.value;
+      var ali = mine ? mine.ali : M.ALI_COST.value;
+      var margin = mine ? mine.margin : M.MARGIN.value;
+      var rowsN = mine ? mine.rows : (M.ROWS_COVERAGE.value || {}).rows;
+      var apiBy = (M.SOLD_API.value || {}).by || {};
+      var sApi = K2.acct ? (apiBy[K2.acct] || {}).sold : (M.SOLD_API.value || {}).all;
+      var oApi = K2.acct ? (apiBy[K2.acct] || {}).orders : (M.SOLD_API.value || {}).orders;
+      var tile = function (l, v, s2) {
+        return '<div class="k2-tile"><div class="l">' + l + '</div><div class="v">' + v + '</div><div class="s">' + s2 + '</div></div>';
+      };
+      var h = '<div class="k2-tiles">' +
+        tile('Sold (books)', k2GBP(sold), 'eBay: ' + k2GBP(sApi || 0) + ' · ' + (oApi || 0) + ' orders ' + mChip(M.SOLD_SHEET)) +
+        tile('Actual profit', k2GBP(act), 'Σ Raw Profit ' + mChip(M.ACTUAL_PROFIT)) +
+        tile('VAT to HMRC', k2GBP(vat), 'Σ VAT to HMRC ' + mChip(M.VAT_TO_HMRC)) +
+        tile('AliExpress', k2GBP(ali), 'incl VAT, from the rows') +
+        tile('Margin', margin == null ? '—' : margin + '%', 'actual ÷ sold') +
+        tile('Rows written', String(rowsN || 0), 'of ' + (oApi || 0) + ' orders in range') +
+        tile('Late now', String(M.LATE_NOW.value.n), 'from eBay’s open set ' + mChip(M.LATE_NOW)) +
+        '</div>';
+
+      /* daily chart + table: one account = its series; all accounts = summed across accounts */
+      var daysMap = {};
+      Object.keys(byA).forEach(function (a) {
+        if (K2.acct && a !== K2.acct) { return; }
+        (byA[a].days || []).forEach(function (r) {
+          var b = (daysMap[r.day] = daysMap[r.day] || { day: r.day, sold: 0, actual: 0, vat: 0, rows: 0 });
+          b.sold += Number(r.sold) || 0; b.actual += Number(r.actual) || 0; b.vat += Number(r.vat) || 0; b.rows += Number(r.rows) || 0;
+        });
+      });
+      var series = Object.keys(daysMap).sort().map(function (k) { return daysMap[k]; });
+      h += '<div class="card"><div class="hd">Sold vs Actual — Pakistan days</div><div class="bd">' + k2Chart(series) + '</div></div>';
+
+      h += '<div class="card" style="margin-top:14px"><div class="hd">Day by day</div><div class="bd"><div class="scroll"><table class="k2-tbl"><thead><tr>' +
+        '<th>Day</th><th>Sold</th><th>Actual</th><th>VAT</th><th>Rows</th></tr></thead><tbody>' +
+        series.slice().reverse().map(function (r) {
+          return '<tr><td>' + esc(r.day) + '</td><td>' + k2GBP(r.sold) + '</td><td style="color:var(--' + (r.actual < 0 ? 'bad' : 'ok') + ');font-weight:700">' + k2GBP(r.actual) + '</td><td>' + k2GBP(r.vat) + '</td><td>' + r.rows + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:6px">A missing day is a gap — rows not written yet, never an invented number. Figures as at ' + esc(String(d.asOf).slice(11, 16)) + ' UTC.</p></div></div>';
+      body.innerHTML = h;
+    }).catch(function (e) {
+      body.innerHTML = '<div class="alx-empty">The register did not answer — ' + esc(e.message) + '</div>';
+    });
+  }
+
+  VIEWS.kpis = {
+    label: 'Account KPIs',
+    icon: '<path d="M4 19V5M4 19h16"/><rect x="7" y="11" width="3" height="5"/><rect x="12" y="8" width="3" height="8"/><rect x="17" y="13" width="3" height="3"/>',
+    roles: ['Management', 'Ops Head'],
+    order: 8,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">KPIs</span></h1>' +
+        '<span class="sub">one page, one register — every account, every number with its verification chip</span>' +
+        '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
+        '<select class="alx-sel" id="k2Acct"><option value="">All accounts</option></select>' +
+        [[7, '7 days'], [30, '30 days'], [90, '90 days']].map(function (p) {
+          return '<button class="minibtn' + (K2.days === p[0] ? ' on' : '') + '" data-k2-d="' + p[0] + '">' + p[1] + '</button>';
+        }).join('') + '</span></div>' +
+        '<div id="k2Body"><div class="spinner"></div></div>';
+    },
+    init: function () {
+      fillAccountSelect($('k2Acct'), K2.acct, function () { K2.acct = $('k2Acct').value; k2Load(); });
+      document.querySelectorAll('[data-k2-d]').forEach(function (b) {
+        b.onclick = function () {
+          document.querySelectorAll('[data-k2-d]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          K2.days = Number(this.getAttribute('data-k2-d')) || 30;
+          k2Load();
+        };
+      });
+      k2Load();
+    }
+  };
+
+  /* WO-05: the old Account report route redirects into the merged page. */
+  VIEWS.accountReport = {
+    label: 'Account report',
+    icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/>',
+    roles: ['Management', 'Ops Head'],
+    order: 9.5,
+    render: function () {
+      setTimeout(function () { location.hash = 'kpis'; }, 30);
+      return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">report</span></h1>' +
+        '<span class="sub">merged into Account KPIs — taking you there…</span></div>';
+    },
+    init: function () {}
   };
 })();
 
@@ -16662,8 +16898,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
-    api('vatBoard', {}).then(function (d) { O.vat = d || {}; oPaintMoney(); })
-      .catch(function () { O.vat = { accounts: [] }; oPaintMoney(); });
+    truthPage({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) })
+      .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
+      .catch(function () { O.truth = null; oPaintMoney(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
@@ -16694,22 +16931,55 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           }).join('') + '</div>'
         : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now — it retries on the next refresh.' : 'Loading…') + '</div>') +
       '</div>';
-    var va = (v && v.accounts) || [];
-    var vt = (v && v.total) || {};
-    h += '<div class="o-card"><div class="card-t">VAT to pay — ' + esc(oS(v && v.month) || 'this month') + '</div>' +
-      (va.length
-        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vt.vat_due) + '</div>' +
-          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">20% × (sold − eBay fees ex VAT − AliExpress − CPC ex VAT)' + (vt.est_days ? ' · ⏳ ad estimates inside' : '') + '</div>' +
-          '<div class="mini-rows">' + va.map(function (a) {
-            var mx = va.reduce(function (m, x) { return Math.max(m, oN(x.vat_due)); }, 1);
-            return '<div class="mini-row blue"><span class="n">' + esc(oS(a.account)) + '</span>' +
-              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(a.vat_due) / mx * 100)) + '%"></i></span>' +
-              '<span class="v">' + (a.incomplete ? '<span style="color:var(--text-3)" title="engine still backfilling this account\u2019s history">building…</span>' : oGBP0(a.vat_due) + (a.est_days ? ' ⏳' : '')) + '</span></div>';
+    /* TRUTH v2 WO-03 (money LIVE): VAT to pay = Σ the day tabs' own 'VAT to HMRC' column,
+       month to date, per account — the calculator writes it, the portal reads it. */
+    var vm = (O.truth && O.truth.metrics) || null;
+    var byA = vm ? (vm.MONEY_BY_ACCOUNT.value || {}) : {};
+    var vaNames = Object.keys(byA).sort();
+    var vatTotal = vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].vat); }, 0);
+    h += '<div class="o-card"><div class="card-t">VAT to pay — Σ VAT to HMRC · month to date</div>' +
+      (vaNames.length
+        ? '<div style="font-size:24px;font-weight:800;margin-top:8px" class="kpi-v gold">' + oGBP0(vatTotal) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:2px">the money workbook\u2019s own column, row by row ' + (vm ? mChip(vm.VAT_TO_HMRC) : '') + '</div>' +
+          '<div class="mini-rows">' + vaNames.map(function (a) {
+            var mx = vaNames.reduce(function (m, x) { return Math.max(m, oN(byA[x].vat)); }, 1);
+            return '<div class="mini-row blue"><span class="n">' + esc(a) + '</span>' +
+              '<span class="b"><i style="width:' + Math.max(2, Math.round(oN(byA[a].vat) / mx * 100)) + '%"></i></span>' +
+              '<span class="v">' + oGBP0(byA[a].vat) + '</span></div>';
           }).join('') + '</div>' +
-          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">The VAT breakdown page shows every line of the law.</div>'
-        : '<div class="empty" style="padding:14px 0">Loading…</div>') +
+          '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">rows written this month: ' + vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].rows); }, 0) + ' — a missing row is missing VAT, not zero VAT.</div>'
+        : '<div class="empty" style="padding:14px 0">The books mirror is filling…</div>') +
       '</div>';
     box.innerHTML = h;
+  }
+
+  /* TRUTH v2 WO-03 step 5: the rating strip — RATING per account from eBay's Analytics API. */
+  function oPaintRatings() {
+    var host = $('o2Ratings');
+    if (!host) { return; }
+    api('accountHealth', {}).then(function (d) {
+      var stds = (d && d.standards) || [];
+      if (!stds.length) { host.innerHTML = '<div class="empty">The standards sync has not landed yet.</div>'; return; }
+      host.innerHTML = stds.map(function (r) {
+        var p = (r.profiles || [])[0] || {};
+        var lv = String(p.standardsLevel || '');
+        var tone = /TOP_RATED|ABOVE/.test(lv) ? 'ok' : /BELOW/.test(lv) ? 'bad' : 'warn';
+        var mets = p.metrics || [];
+        var pick = function (re) {
+          var m = null;
+          mets.some(function (x) { if (re.test(String(x.name || x.metricKey || ''))) { m = x; return true; } return false; });
+          if (!m) { return '—'; }
+          var v = (m.value && (m.value.value !== undefined ? m.value.value : m.value));
+          return String(v == null ? '—' : v);
+        };
+        return '<div class="tile"><b>' + esc(oS(r.account)) + '</b>' +
+          '<span style="display:block;font-weight:800;color:var(--' + tone + ');font-size:12px;margin:3px 0">' + esc(lv.replace(/_/g, ' ') || '—') + '</span>' +
+          '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;line-height:1.7">defects ' + esc(pick(/defect/i)) +
+          ' · late ' + esc(pick(/late/i)) + ' · cases w/o res. ' + esc(pick(/without seller|resolution/i)) + '</div>' +
+          (p.cycle && p.cycle.evaluationDate ? '<div style="font-size:9.5px;color:var(--text-3);margin-top:3px">evaluated ' + esc(String(p.cycle.evaluationDate).slice(0, 10)) + '</div>' : '') +
+          '</div>';
+      }).join('');
+    }).catch(function () { host.innerHTML = '<div class="empty">Standards feed did not answer.</div>'; });
   }
 
   /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
@@ -16774,10 +17044,38 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function oPaintKpis(r) {
     var box = $('o2Kpis');
     if (!box) { return; }
-    /* THE BRAIN RULE (Hasib, night review 2): these tiles compute with the organisation's own
-       calculator — the same penny-verified P&L the Sales analysis sheet runs (OE = revenue −
-       real eBay fees; True OE − VAT-to-HMRC = Raw profit; minus returns = Actual). The books
-       still draw the charts; the MONEY tiles come from the P&L engine. */
+    /* TRUTH v2 WO-03 (money LIVE): the money tiles read the register for the CHOSEN RANGE —
+       Σ Raw Profit, Σ VAT to HMRC, Σ True Order Earning, sheet Sold with the eBay sub-line and
+       rows coverage. Ads-family tiles keep the old path until the ads module flips (Phase 4). */
+    var tKey = 't:' + r.from + '|' + r.to;
+    if (O.truthRangeKey !== tKey) {
+      O.truthRangeKey = tKey; O.truthRange = null;
+      truthPage({ from: r.from, to: r.to }).then(function (d) {
+        if (O.truthRangeKey !== tKey) { return; }
+        O.truthRange = d;
+        oPaintKpis(r);
+      }).catch(function () {});
+    }
+    if (O.truthRange && O.truthRange.metrics) {
+      var M = O.truthRange.metrics;
+      var cov = M.ROWS_COVERAGE.value || {};
+      var sApi = (M.SOLD_API.value || {}).all;
+      var mkT = function (label, val, sub, tone) {
+        return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +
+          '<div class="kpi-v' + (tone === 'gold-b' ? ' gold' : '') + '">' + val + '</div>' +
+          '<div class="kpi-s">' + sub + '</div></div>';
+      };
+      box.innerHTML =
+        mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
+        mkT('ACTUAL PROFIT', oGBP0(M.ACTUAL_PROFIT.value), 'Σ Raw Profit — the day tabs\' own column ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
+        mkT('VAT TO HMRC', oGBP0(M.VAT_TO_HMRC.value), 'Σ VAT to HMRC · True Earning − VAT = Raw ' + mChip(M.VAT_TO_HMRC), 'blue') +
+        mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
+        mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
+        mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
+        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + M.DUE_3D.value + ' · awaiting ' + M.AWAITING_ONLY.value + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
+      return;
+    }
+    /* old path renders until the register answers */
     var key = r.from + '|' + r.to;
     if (O.pnlKey !== key) {
       O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
@@ -17152,6 +17450,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +

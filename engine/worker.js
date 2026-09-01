@@ -3577,6 +3577,38 @@ function srVal(vals, header) {
   const n = Number(v);
   return isFinite(n) ? n : 0;
 }
+async function metricMoneyByAccount(env, fromPk, toPk) {
+  await ensureTruthSchema(env);
+  const rs = await env.DB.prepare(
+    "SELECT account, day_pk, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2"
+  ).bind(fromPk, toPk).all();
+  const by = {};
+  for (const row of (rs.results || [])) {
+    let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+    if (!String(vals['Item Title'] || '').trim()) continue;
+    const b = (by[row.account] = by[row.account] || { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0, days: {} });
+    b.rows++;
+    b.sold += srVal(vals, 'Total Sales/Sold For');
+    b.r += srVal(vals, 'True Order Earning');
+    b.s += srVal(vals, 'VAT to HMRC');
+    b.t += srVal(vals, 'Raw Profit');
+    b.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
+    const d = (b.days[row.day_pk] = b.days[row.day_pk] || { sold: 0, t: 0, s: 0, rows: 0 });
+    d.sold += srVal(vals, 'Total Sales/Sold For');
+    d.t += srVal(vals, 'Raw Profit');
+    d.s += srVal(vals, 'VAT to HMRC');
+    d.rows++;
+  }
+  const out = {};
+  for (const a of Object.keys(by)) {
+    const b = by[a];
+    out[a] = { sold: round2(b.sold), true_earning: round2(b.r), vat: round2(b.s), actual: round2(b.t),
+      ali: round2(b.ali), rows: b.rows, margin: b.sold > 0 ? Math.round(b.t / b.sold * 1000) / 10 : null,
+      days: Object.keys(b.days).sort().map((k) => ({ day: k, sold: round2(b.days[k].sold), actual: round2(b.days[k].t), vat: round2(b.days[k].s), rows: b.days[k].rows })) };
+  }
+  return out;
+}
+
 async function metricMoney(env, account, fromPk, toPk) {
   await ensureTruthSchema(env);
   const bind = [fromPk, toPk];
@@ -6012,7 +6044,15 @@ const ROUTES = {
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? String(p.to) : pkToday(0);
       const D = await metricDispatch(ctx.env, account);
       const M = await metricMoney(ctx.env, account, from, to);
+      const MA = await metricMoneyByAccount(ctx.env, from, to);
       const T = await metricTasks(ctx.env);
+      const soldApi = await ctx.env.DB.prepare(
+        "SELECT account, ROUND(SUM(sold),2) AS sold, COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' " +
+        "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2 GROUP BY account"
+      ).bind(from, to).all().catch(() => ({ results: [] }));
+      const soldApiBy = {};
+      let soldApiAll = 0, ordersAll = 0;
+      for (const r of (soldApi.results || [])) { soldApiBy[r.account] = { sold: Number(r.sold) || 0, orders: Number(r.n) || 0 }; soldApiAll += Number(r.sold) || 0; ordersAll += Number(r.n) || 0; }
       const verify = {};
       const vr = await ctx.env.DB.prepare(
         'SELECT metric_id, status, ran_at, delta FROM validation_runs WHERE id IN (SELECT MAX(id) FROM validation_runs GROUP BY metric_id)'
@@ -6038,6 +6078,8 @@ const ROUTES = {
         ROWS_COVERAGE: wrap('ROWS_COVERAGE', M.ROWS_COVERAGE, 'rows/orders', 'sheet+orders'),
         WAITING_ON_ME: wrap('WAITING_ON_ME', T.WAITING_ON_ME, 'count', 'tasks'),
         DEPT: wrap('DEPT_OPEN', T.DEPT, 'map', 'tasks'),
+        MONEY_BY_ACCOUNT: wrap('ACTUAL_PROFIT', MA, 'map', 'sheet'),
+        SOLD_API: wrap('SOLD_API', { all: round2(soldApiAll), by: soldApiBy, orders: ordersAll }, '£', 'orders'),
       } };
     },
   },

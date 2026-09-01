@@ -23,6 +23,7 @@ var C_WASTE  = 'Ad Waste';
 
 var dbData = null;
 var DB_ACC = '';   /* '' = all accounts; chips on the tiles set this */
+var DB_TRUTH = null; /* TRUTH v2: pageMetrics for the month scope */
 
 VIEW_CSS.push(
   '.db-excl{border:1px solid rgba(240,96,90,.45);background:var(--bad-soft);border-radius:11px;' +
@@ -93,6 +94,38 @@ function kpiStrip(d) {
   /* 30 Aug (owner: "still same") — when the engine's month truth is present, THE TILES show
      eBay's own live month (orders, units, sold, Actual by the law) and the books' card value
      drops to the sub-line. The books' per-account cards below stay as they are. */
+  /* TRUTH v2 WO-04 (money module LIVE): the month tiles come from the register — SOLD_SHEET,
+     ACTUAL_PROFIT (Σ Raw Profit), VAT_TO_HMRC_MTD, MARGIN, ROWS_COVERAGE — with SOLD_API as the
+     eBay sub-line. The ads tile stays on the old path until the ads module flips (Phase 4). */
+  if (DB_TRUTH && DB_TRUTH.metrics) {
+    var M = DB_TRUTH.metrics;
+    var cov = M.ROWS_COVERAGE.value || {};
+    var soldApi = (M.SOLD_API.value || {}).all;
+    var t0 = d.engine_truth || {};
+    var adsOld = Number(t0.n_ads) > 0 ? Number(t0.n_ads) : NaN;
+    var accs2 = Object.keys((M.MONEY_BY_ACCOUNT.value) || {});
+    var chips2 = '<div class="acct-chips" style="margin-bottom:12px">' +
+      '<button class="minibtn' + (!DB_ACC ? ' on' : '') + '" data-db-acc="">All accounts</button>' +
+      accs2.map(function (a) { return '<button class="minibtn' + (DB_ACC === a ? ' on' : '') + '" data-db-acc="' + esc(a).replace(/"/g, '&quot;') + '">' + esc(a) + '</button>'; }).join('') + '</div>';
+    var pickM = DB_ACC ? (M.MONEY_BY_ACCOUNT.value || {})[DB_ACC] : null;
+    var vSold = pickM ? pickM.sold : M.SOLD_SHEET.value;
+    var vAct = pickM ? pickM.actual : M.ACTUAL_PROFIT.value;
+    var vVat = pickM ? pickM.vat : M.VAT_TO_HMRC.value;
+    var vAli = pickM ? pickM.ali : M.ALI_COST.value;
+    var vMargin = pickM ? pickM.margin : M.MARGIN.value;
+    var apiSub = DB_ACC ? (((M.SOLD_API.value || {}).by || {})[DB_ACC] || {}).sold : soldApi;
+    var rowsSub = DB_ACC ? (pickM ? pickM.rows : 0) : cov.rows;
+    var ordSub = DB_ACC ? (((M.SOLD_API.value || {}).by || {})[DB_ACC] || {}).orders : cov.orders;
+    return chips2 + '<div class="db-kpis">' +
+      kpi('Sold (books)', gbp(vSold), 'eBay: ' + gbp(apiSub || 0) + ' · rows ' + (rowsSub || 0) + ' of ' + (ordSub || 0), 'gold') + 
+      kpi('Actual profit', gbp(vAct), 'Σ Raw Profit — the day tabs\' own column', 'gold') +
+      kpi('VAT to HMRC', gbp(vVat), 'Σ VAT to HMRC — the calculator writes it, the portal reads it', 'blue') +
+      kpi('AliExpress cost', gbp(vAli), 'Σ Total AliExpress Cost incl VAT', '') +
+      kpi('Margin', vMargin == null ? '—' : (vMargin + '%'), 'actual ÷ sold (books)', '') +
+      kpi('Ads (N) incl VAT', isFinite(adsOld) ? gbp(adsOld) : '—', 'old path · flips with the ads module', '') +
+    '</div>' +
+    '<div class="db-note" style="border-color:var(--gold-line)"><b>i</b><div>rows written ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' orders this month · figures as at ' + esc(String(DB_TRUTH.asOf).slice(11, 16)) + ' UTC ' + mChip(M.ACTUAL_PROFIT) + '</div></div>';
+  }
   var t = d.engine_truth;
   if (t && isFinite(Number(t.sold)) && t.orders !== undefined) {
     /* 30 Aug (owner): "give options in sales analysis for account to account data" — chips pick
@@ -393,7 +426,16 @@ function paint() {
     (d.scoped ? '<div class="db-note" style="margin-top:12px"><b>i</b><div>Some accounts are hidden because your access is limited to certain accounts.</div></div>' : '');
 }
 
+function loadTruth() {
+  var from = pkDayStr(0).slice(0, 8) + '01';
+  truthPage({ from: from, to: pkDayStr(0) }).then(function (d) {
+    DB_TRUTH = d;
+    paint();
+  }).catch(function () { /* the old tiles still render */ });
+}
+
 function load(force) {
+  loadTruth();
   var host = $('dbBody');
   // Only show a spinner when there is genuinely nothing to look at. If this screen has been
   // opened before, it paints the previous figures at once and swaps in the fresh ones when the
