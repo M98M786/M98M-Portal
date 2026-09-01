@@ -132,3 +132,21 @@ when the `money` module flips (the Truth Check supersedes them).
   Trading GetUser.
 - CONNECTIONS registry captured in scratchpad/phase0-dump.json (39 rows: 6 accounts × up to 4
   kinds + 15 global sheets/tools). Azhar Bhai `order_processing` = not connected yet.
+
+## G. Advertising metrics (Phase 4, WO-08 — added 1 Sept)
+
+One definition of **live membership** (worker `liveMembershipRow`), used by every count:
+campaign status ∈ {RUNNING/ENDING_SOON} AND listing ACTIVE AND, for COST_PER_CLICK,
+`ad_status = 'ACTIVE'` (eBay's own per-ad state, synced verbatim by adsItems); for
+COST_PER_SALE, the ad exists and is not ARCHIVED (General ads carry no per-ad status).
+
+| metric_id | definition (Path A) | verifier (Path B) |
+|---|---|---|
+| ADS_SPLIT.cpc_only / general_only / both / none | partition of ACTIVE listings by live memberships | SPLIT_SUMS_TO_ACTIVE |
+| SPLIT_SUMS_TO_ACTIVE | cpc+gen+both+none per account | independent COUNT(items_api ACTIVE), truthTier1, 15 min |
+| MULTI_RUNNING | ACTIVE listing with ≥2 LIVE memberships (paused ads/campaigns excluded) | dupSweep (separately written, same exclusions) |
+| LEAKS_DAILY | ads_daily spend/day (both families) + orders.refunded shown on the order's sale day | tier-3 nightly vs books' N column |
+| CPC pause | `adsPauseListing` action — the ONLY portal→eBay write; user-click only, never from a cron (R10); confirmed by reading the ad back |
+
+Display chips per membership: LIVE · AD PAUSED · CAMPAIGN PAUSED · ARCHIVED · LISTING ENDED —
+worker `memberChipStatus`, mirrored on Campaign watch / Wrong advertising / Live listings.
