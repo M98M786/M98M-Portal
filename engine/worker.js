@@ -1008,6 +1008,36 @@ async function signalReeval(env) {
   return closed;
 }
 
+/* TRUTH v2 WO-13 (one-time, re-runnable): the old-generation alert backlog, re-evaluated under
+   the new definitions. Event letters (campaign items moved, CPC research, price-rise letters)
+   describe a moment; under the register the LIVE pages carry the current truth, so an unacked
+   event letter past its horizon closes with the reason on the row. Nothing is deleted; clearing
+   resolved_at brings any letter back. The real queues (price_watch, listing_decisions,
+   keyword_tasks, dup_state) are untouched — they are the truth, letters only mirror it. */
+async function truthAlertSweep(env) {
+  await ensureTruthSchema(env);
+  const nowIso = new Date().toISOString();
+  let closed = 0;
+  /* price letters: the live queue is price_watch (unacked); letters older than 2 days are
+     stale mirrors of rows long acked or re-issued */
+  const p = await env.DB.prepare(
+    "UPDATE alert_log SET resolved_at = ?1, resolved_by = 're-evaluated in Truth Update v2' " +
+    "WHERE resolved_at = '' AND type LIKE '%rice%' AND created_at < datetime('now', '-2 days')"
+  ).bind(nowIso).run().catch(() => null);
+  closed += (p && p.meta && p.meta.changes) || 0;
+  /* campaign/CPC/waste event letters past a 7-day horizon: the register pages (Campaign watch,
+     Wrong advertising, Keyword approvals) show the CURRENT state of all three families */
+  const c = await env.DB.prepare(
+    "UPDATE alert_log SET resolved_at = ?1, resolved_by = 're-evaluated in Truth Update v2' " +
+    "WHERE resolved_at = '' AND (type LIKE '%CPC%' OR type LIKE '%ampaign%' OR type LIKE '%aste%') AND created_at < datetime('now', '-7 days')"
+  ).bind(nowIso).run().catch(() => null);
+  closed += (c && c.meta && c.meta.changes) || 0;
+  const left = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND created_at >= '2026-08-23 04:00:00' AND (type LIKE '%rice%' OR type LIKE '%CPC%' OR type LIKE '%ampaign%' OR type LIKE '%aste%')"
+  ).first().catch(() => null);
+  return { closed, still_open: left ? Number(left.n) : null };
+}
+
 async function stockWatch(env) {
   const today = ukDate('');
   const rs = await env.DB.prepare(
@@ -6817,7 +6847,7 @@ const ROUTES = {
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
         trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
-        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval };
+        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -7352,7 +7382,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
