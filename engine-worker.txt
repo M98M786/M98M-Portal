@@ -5967,7 +5967,9 @@ const ROUTES = {
       const acct = String(p.account || '').trim();
       if (!acct) throw new Error('SAY: pass an account');
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? p.from + 'T00:00:00.000Z' : new Date(Date.now() - 89 * 86400000).toISOString();
-      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? p.to + 'T23:59:59.000Z' : new Date().toISOString();
+      /* eBay 400s a creationdate range that ends in the future — clamp to a minute ago */
+      const toRaw = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? Date.parse(p.to + 'T23:59:59.000Z') : Date.now();
+      const to = new Date(Math.min(toRaw, Date.now() - 60000)).toISOString();
       await ensureTruthSchema(ctx.env);
       const tok = await ebayAccessToken(ctx.env, acct);
       let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
