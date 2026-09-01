@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-1603';
+var BUILD = '20260901-1604';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10381,6 +10381,7 @@ function ibSettle() { IB.busy = false; IB.lastAt = ibNowMs(); }
 
 function ibApplyPoll(d) {
   if (!STATE.counts) STATE.counts = {};
+  try { window.__lastPoll = { at: Date.now(), d: d }; } catch (e) {}
   /* 30 Aug (owner): "no proper message or pop up ... like you show on phone." First poll is the
      baseline; after that, a letter or thread the poll has never shown before slides in as a
      phone-style card. Nothing pops for history. */
@@ -24834,7 +24835,11 @@ function saveSchedule() {
     var box = $('ixThreads');
     if (!box || IX.pane !== 'nt') { return; }
     box.innerHTML = '<div class="ix-skel"></div><div class="ix-skel" style="width:65%"></div>';
-    api('poll').then(function (d) {
+    /* the portal's global poller refreshes this every ~45 s — its last answer paints the pane
+       instantly; a fresh fetch replaces it only when the cache is old (peak-hour AS can take
+       20 s+, and a skeleton that long reads as broken) */
+    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
+    (cached ? Promise.resolve(cached) : api('poll')).then(function (d) {
       if (!$('ixThreads') || IX.pane !== 'nt') { return; }
       var ns = (d && d.notifications) || [];
       try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}

@@ -154,7 +154,11 @@
     var box = $('ixThreads');
     if (!box || IX.pane !== 'nt') { return; }
     box.innerHTML = '<div class="ix-skel"></div><div class="ix-skel" style="width:65%"></div>';
-    api('poll').then(function (d) {
+    /* the portal's global poller refreshes this every ~45 s — its last answer paints the pane
+       instantly; a fresh fetch replaces it only when the cache is old (peak-hour AS can take
+       20 s+, and a skeleton that long reads as broken) */
+    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
+    (cached ? Promise.resolve(cached) : api('poll')).then(function (d) {
       if (!$('ixThreads') || IX.pane !== 'nt') { return; }
       var ns = (d && d.notifications) || [];
       try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}

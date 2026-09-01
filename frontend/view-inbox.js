@@ -245,6 +245,7 @@ function ibSettle() { IB.busy = false; IB.lastAt = ibNowMs(); }
 
 function ibApplyPoll(d) {
   if (!STATE.counts) STATE.counts = {};
+  try { window.__lastPoll = { at: Date.now(), d: d }; } catch (e) {}
   /* 30 Aug (owner): "no proper message or pop up ... like you show on phone." First poll is the
      baseline; after that, a letter or thread the poll has never shown before slides in as a
      phone-style card. Nothing pops for history. */
