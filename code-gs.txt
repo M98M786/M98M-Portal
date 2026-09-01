@@ -21340,7 +21340,9 @@ function pushEngineSync() {
 
   try { metricsWatch(); } catch (e) { logActivity_('system', 'METRICS_WATCH_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
   try { revisionQualify(); } catch (e) { logActivity_('system', 'REVQ_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
-  try { cpcKeywordSweep(); } catch (e) { logActivity_('system', 'CPC_KW_FAIL', 'all', '', '', String(e && e.message || e).slice(0, 140)); }
+  /* TRUTH v2 WO-09: keyword-doc tasks now come from the engine's CPC_LIVE_EVENT flow
+     (72h after a listing goes live in a CPC campaign). The AS sweep is retired — running
+     both would hand Zain the same work twice. Deleted fully at Phase 6. */
   try {
     const psDay = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
     const props = PropertiesService.getScriptProperties();

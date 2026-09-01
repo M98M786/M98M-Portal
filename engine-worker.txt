@@ -1493,7 +1493,7 @@ const DUP_CONFIRM_MS = 90 * 60000;
 async function adsItems(env) {
   await perAccount(env, 'adsItems', async (acct) => {
     const camps = await env.DB.prepare(
-      "SELECT campaign_id, name FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id"
+      "SELECT campaign_id, name, funding_model FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id"
     ).bind(acct).all();
     const running = (camps.results || []);
     if (!running.length) return;
@@ -1505,6 +1505,7 @@ async function adsItems(env) {
     for (let k = 0; k < Math.min(ADS_ITEM_CAMPAIGNS_PER_TICK, running.length); k++) {
       const cid = running[idx].campaign_id;
       const nm = running[idx].name || cid;
+      const funding = String(running[idx].funding_model || '');
       idx = (idx + 1) % running.length;
 
       let ads = [];
@@ -1552,6 +1553,27 @@ async function adsItems(env) {
           "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
         ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
         await queueNotify(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
+      }
+
+      /* TRUTH v2 WO-09: a listing newly LIVE in a CPC campaign starts the 72-hour keyword-doc
+         clock for Zain. `first` (whole campaign never synced) is the baseline — memberships are
+         recorded, no events, no task flood. Dedupe: one event per listing per 30 days. */
+      if (funding === 'COST_PER_CLICK' && !first && added.length) {
+        for (const lid of added) {
+          const recent = await env.DB.prepare(
+            "SELECT 1 AS x FROM cpc_live_events WHERE listing_id = ?1 AND live_at > datetime('now', '-30 days') LIMIT 1"
+          ).bind(lid).first();
+          if (recent) continue;
+          const it = await env.DB.prepare('SELECT title FROM items_api WHERE item_id = ?1').bind(lid).first();
+          const t = await env.DB.prepare(
+            "INSERT INTO keyword_tasks (kind, account, listing_id, campaign_id, campaign_name, title, assignee, opens_at, due_at, live_at) " +
+            "VALUES ('KEYWORD_DOC', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now', '+72 hours'), datetime('now', '+96 hours'), datetime('now'))"
+          ).bind(acct, lid, cid, nm, 'Upload keywords doc — ' + String((it && it.title) || lid).slice(0, 120) + ' (' + acct + ')',
+            'm98mfour@gmail.com').run();
+          await env.DB.prepare(
+            "INSERT INTO cpc_live_events (account, listing_id, campaign_id, live_at, task_id) VALUES (?1, ?2, ?3, datetime('now'), ?4)"
+          ).bind(acct, lid, cid, Number(t.meta && t.meta.last_row_id) || 0).run();
+        }
       }
 
       const stmts = [];
@@ -3498,6 +3520,11 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
     "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
     "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
+    "CREATE TABLE IF NOT EXISTS cpc_live_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, listing_id TEXT, campaign_id TEXT, live_at TEXT, task_id INTEGER)",
+    "CREATE INDEX IF NOT EXISTS idx_cle_listing ON cpc_live_events(listing_id, live_at)",
+    "CREATE TABLE IF NOT EXISTS keyword_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT DEFAULT 'KEYWORD_DOC', account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, assignee TEXT, opens_at TEXT, due_at TEXT, status TEXT DEFAULT 'OPEN', outcome TEXT DEFAULT '', doc_link TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at TEXT DEFAULT '', follow_ups INTEGER DEFAULT 0, live_at TEXT DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_kt_status ON keyword_tasks(status, opens_at)",
+    "CREATE TABLE IF NOT EXISTS keyword_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, doc_link TEXT, outcome TEXT, decided_by TEXT, decided_at TEXT)",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
     "CREATE TABLE IF NOT EXISTS sheet_rows (workbook_id TEXT, tab TEXT, row_no INTEGER, account TEXT, day_pk TEXT, vals TEXT, row_hash TEXT, synced_at TEXT, PRIMARY KEY (workbook_id, tab, row_no))",
     "CREATE INDEX IF NOT EXISTS ix_sheet_rows_day ON sheet_rows (account, day_pk)",
@@ -3779,6 +3806,19 @@ async function metricDeptTasks(env) {
     if (created && (!rec.oldest || created < rec.oldest)) rec.oldest = created;
   }
   history.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
+  /* WO-09 §5: open keyword-doc tasks are Advertising work like any other — counted once open */
+  try {
+    const kw = await env.DB.prepare(
+      "SELECT COUNT(*) AS n, SUM(due_at < datetime('now')) AS ov FROM keyword_tasks WHERE status = 'OPEN' AND opens_at <= datetime('now')"
+    ).first();
+    if (kw && Number(kw.n)) {
+      const rec = depts['Advertising'] = depts['Advertising'] || { dept: 'Advertising', open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+      rec.open += Number(kw.n) || 0;
+      rec.overdue += Number(kw.ov) || 0;
+      rec.system_made += Number(kw.n) || 0;
+      rec.by_assignee['keyword docs (Zain)'] = (rec.by_assignee['keyword docs (Zain)'] || 0) + (Number(kw.n) || 0);
+    }
+  } catch (e) { /* table appears with the first truth-schema pass */ }
   return { departments: Object.values(depts).sort((a, b) => b.open - a.open),
     history: history.slice(0, 40), as_of: new Date().toISOString(), source: 'engine' };
 }
@@ -3879,6 +3919,12 @@ async function truthTier1(env) {
     ).all();
     const bMap = {};
     for (const r of (b2.results || [])) bMap[r.dept] = Number(r.n) || 0;
+    /* keyword-doc tasks count as Advertising in BOTH paths (WO-09 §5) — Path B counts them
+       with its own query, not Path A's */
+    const kwB = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM keyword_tasks WHERE status = 'OPEN' AND opens_at <= datetime('now')"
+    ).first().catch(() => null);
+    if (kwB && Number(kwB.n)) bMap['Advertising'] = (bMap['Advertising'] || 0) + Number(kwB.n);
     for (const d2 of A2.departments) {
       out.push({ metric_id: 'TASKS_OPEN_BY_DEPT', scope_key: d2.dept, shown: d2.open, recomputed: bMap[d2.dept] || 0,
         delta: d2.open - (bMap[d2.dept] || 0), status: d2.open === (bMap[d2.dept] || 0) ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
@@ -6128,6 +6174,72 @@ const ROUTES = {
         } catch (e) { /* next */ }
       }
       return { candidates: rows.length, fixed };
+    },
+  },
+
+  /* TRUTH v2 WO-09: the keyword-doc queue. Zain sees his own once opens_at passes; Management
+     sees everything including Scheduled. All timestamps UTC ISO from D1 itself. */
+  keywordBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const me = String(ctx.user.email || '').toLowerCase();
+      const rows = (await ctx.env.DB.prepare(
+        "SELECT *, (opens_at <= datetime('now')) AS is_open, (due_at < datetime('now')) AS is_over FROM keyword_tasks WHERE status = 'OPEN' ORDER BY due_at"
+      ).all()).results || [];
+      const visible = mgmt ? rows : rows.filter((r) => String(r.assignee).toLowerCase() === me && r.is_open);
+      const archive = mgmt || me === 'm98mfour@gmail.com'
+        ? (await ctx.env.DB.prepare('SELECT * FROM keyword_docs ORDER BY id DESC LIMIT 120').all()).results || []
+        : [];
+      return {
+        open: visible.filter((r) => r.is_open),
+        scheduled: mgmt ? visible.filter((r) => !r.is_open) : [],
+        archive,
+        now: new Date().toISOString(),
+        counts: { open: visible.filter((r) => r.is_open).length, scheduled: mgmt ? visible.filter((r) => !r.is_open).length : 0 },
+      };
+    },
+  },
+
+  keywordDecide: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const id = Number(p.id) || 0;
+      const t = await ctx.env.DB.prepare("SELECT * FROM keyword_tasks WHERE id = ?1 AND status = 'OPEN'").bind(id).first();
+      if (!t) throw new Error('task not found or already decided');
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const me = String(ctx.user.email || '').toLowerCase();
+      if (!mgmt && String(t.assignee).toLowerCase() !== me) throw new AuthError('auth');
+      const link = String(p.doc_link || '').trim();
+      const outcome = String(p.outcome || '');
+      const OUT = ['REVISE_NOW', 'NO_REVISION', 'REVISE_LATER', 'ARCHIVE'];
+      if (OUT.indexOf(outcome) < 0) throw new Error('outcome must be one of ' + OUT.join(', '));
+      if (!/^https:\/\/(docs|drive|sheets)\.google\.com\//.test(link)) throw new Error('the keywords doc link must be a Google Docs/Drive/Sheets URL');
+      const nowIso = new Date().toISOString();
+      await ctx.env.DB.prepare(
+        "UPDATE keyword_tasks SET status = 'DONE', outcome = ?2, doc_link = ?3, decided_by = ?4, decided_at = ?5 WHERE id = ?1"
+      ).bind(id, outcome, link, me, nowIso).run();
+      await ctx.env.DB.prepare(
+        'INSERT INTO keyword_docs (account, listing_id, campaign_id, campaign_name, title, doc_link, outcome, decided_by, decided_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)'
+      ).bind(t.account, t.listing_id, t.campaign_id, t.campaign_name, t.title, link, outcome, me, nowIso).run();
+      let followUp = null;
+      if (outcome === 'REVISE_NOW') {
+        await ctx.env.DB.prepare(
+          "INSERT INTO keyword_tasks (kind, account, listing_id, campaign_id, campaign_name, title, assignee, opens_at, due_at, doc_link, live_at) " +
+          "VALUES ('KEYWORD_REVISION_REQUEST', ?1, ?2, ?3, ?4, ?5, 'management', datetime('now'), datetime('now', '+24 hours'), ?6, ?7)"
+        ).bind(t.account, t.listing_id, t.campaign_id, t.campaign_name,
+          'Keyword revision requested — ' + String(t.title).replace('Upload keywords doc — ', '').slice(0, 120), link, String(t.live_at || '')).run();
+        await queueNotify(ctx.env, 'management', 'Keyword revision', '🟠 ' + (ctx.user.name || me) + ' requests a keyword revision — ' + String(t.title).slice(0, 100) + ' · doc: ' + link, 'engine:kwrev:' + id);
+      }
+      if (outcome === 'REVISE_LATER') {
+        if (Number(t.follow_ups) >= 3) throw new Error('this listing already had 3 follow-ups — it needs an explicit decision (Revise now or No revision)');
+        const f = await ctx.env.DB.prepare(
+          "INSERT INTO keyword_tasks (kind, account, listing_id, campaign_id, campaign_name, title, assignee, opens_at, due_at, follow_ups, live_at) " +
+          "VALUES ('KEYWORD_DOC', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now', '+72 hours'), datetime('now', '+96 hours'), ?7, ?8)"
+        ).bind(t.account, t.listing_id, t.campaign_id, t.campaign_name, t.title, t.assignee, Number(t.follow_ups) + 1, String(t.live_at || '')).run();
+        followUp = Number(f.meta && f.meta.last_row_id) || null;
+      }
+      return { ok: true, outcome, follow_up_id: followUp };
     },
   },
 
