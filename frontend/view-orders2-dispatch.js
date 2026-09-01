@@ -75,7 +75,10 @@
     } else if (!rows.length) {
       body = '<div class="alx-empty" style="color:var(--ok);font-weight:700">Nothing in this state — from eBay’s own open-order set, checked ' + esc(d2S((m.verify || {}).checkedAt).slice(11, 16)) + ' UTC.</div>';
     } else {
-      body = '<div class="scroll"><table class="d2-tbl"><thead><tr><th>Account</th><th>Order</th><th>Value</th><th>Ship by</th><th>State reason</th></tr></thead><tbody>' +
+      var capNote = '';
+      var totalN = (m.value && m.value.n !== undefined) ? m.value.n : rows.length;
+      if (rows.length < totalN) { capNote = '<p style="font-size:11px;color:var(--text-3);font-weight:700;margin:0 0 8px">Showing the first ' + rows.length + ' of ' + totalN + ' — in eBay\u2019s pull order; the count above is the full truth.</p>'; }
+      body = capNote + '<div class="scroll"><table class="d2-tbl"><thead><tr><th>Account</th><th>Order</th><th>Value</th><th>Ship by</th><th>State reason</th></tr></thead><tbody>' +
         rows.map(function (o) {
           return '<tr><td style="font-weight:700">' + esc(d2S(o.account)) + '</td>' +
             '<td class="mono" style="font-size:11.5px">' + esc(d2S(o.order_id)) + '</td>' +

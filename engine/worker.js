@@ -6572,8 +6572,8 @@ const ROUTES = {
       const wrap = (id, value, unit, source) => ({ value, unit, asOf, source, scope: { account: account || 'all', from, to }, verify: verify[id] || { status: 'UNVERIFIED' } });
       return { asOf, metrics: {
         LATE_NOW: wrap('LATE_NOW', { n: D.LATE_NOW.n, gbp: round2(D.LATE_NOW.pence / 100), rows: D.LATE_NOW.rows }, 'count+£', 'orders'),
-        DUE_3D: wrap('DUE_3D', D.DUE_3D.n, 'count', 'orders'),
-        AWAITING_ONLY: wrap('AWAITING_ONLY', D.AWAITING_ONLY.n, 'count', 'orders'),
+        DUE_3D: wrap('DUE_3D', { n: D.DUE_3D.n, rows: D.DUE_3D.rows }, 'count', 'orders'),
+        AWAITING_ONLY: wrap('AWAITING_ONLY', { n: D.AWAITING_ONLY.n, rows: D.AWAITING_ONLY.rows }, 'count', 'orders'),
         AWAITING_DISPATCH: wrap('AWAITING_DISPATCH', D.AWAITING_DISPATCH.n, 'count', 'orders'),
         REFUNDED_NEVER_SENT: wrap('REFUNDED_NEVER_SENT', { n: D.REFUNDED_NEVER_SENT.n, gbp: round2(D.REFUNDED_NEVER_SENT.pence / 100), rows: D.REFUNDED_NEVER_SENT.rows }, 'count+£', 'orders'),
         SHIPPED_7D: wrap('SHIPPED_7D', D.SHIPPED_7D.n, 'count', 'orders'),

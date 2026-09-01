@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-1545';
+var BUILD = '20260901-1547';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -13991,7 +13991,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     } else if (!rows.length) {
       body = '<div class="alx-empty" style="color:var(--ok);font-weight:700">Nothing in this state — from eBay’s own open-order set, checked ' + esc(d2S((m.verify || {}).checkedAt).slice(11, 16)) + ' UTC.</div>';
     } else {
-      body = '<div class="scroll"><table class="d2-tbl"><thead><tr><th>Account</th><th>Order</th><th>Value</th><th>Ship by</th><th>State reason</th></tr></thead><tbody>' +
+      var capNote = '';
+      var totalN = (m.value && m.value.n !== undefined) ? m.value.n : rows.length;
+      if (rows.length < totalN) { capNote = '<p style="font-size:11px;color:var(--text-3);font-weight:700;margin:0 0 8px">Showing the first ' + rows.length + ' of ' + totalN + ' — in eBay\u2019s pull order; the count above is the full truth.</p>'; }
+      body = capNote + '<div class="scroll"><table class="d2-tbl"><thead><tr><th>Account</th><th>Order</th><th>Value</th><th>Ship by</th><th>State reason</th></tr></thead><tbody>' +
         rows.map(function (o) {
           return '<tr><td style="font-weight:700">' + esc(d2S(o.account)) + '</td>' +
             '<td class="mono" style="font-size:11.5px">' + esc(d2S(o.order_id)) + '</td>' +
@@ -14712,7 +14715,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
         mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
         mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
-        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + M.DUE_3D.value + ' · awaiting ' + M.AWAITING_ONLY.value + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
+        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + (M.DUE_3D.value.n !== undefined ? M.DUE_3D.value.n : M.DUE_3D.value) + ' · awaiting ' + (M.AWAITING_ONLY.value.n !== undefined ? M.AWAITING_ONLY.value.n : M.AWAITING_ONLY.value) + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
       /* WO-03 steps 7–8: campaign gaps + the leaks strip, from the same register answer */
       var sp = M.ADS_SPLIT && M.ADS_SPLIT.value;
       if (sp) {

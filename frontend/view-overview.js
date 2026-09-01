@@ -365,7 +365,7 @@
         mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
         mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
         mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
-        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + M.DUE_3D.value + ' · awaiting ' + M.AWAITING_ONLY.value + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
+        mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + (M.DUE_3D.value.n !== undefined ? M.DUE_3D.value.n : M.DUE_3D.value) + ' · awaiting ' + (M.AWAITING_ONLY.value.n !== undefined ? M.AWAITING_ONLY.value.n : M.AWAITING_ONLY.value) + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
       /* WO-03 steps 7–8: campaign gaps + the leaks strip, from the same register answer */
       var sp = M.ADS_SPLIT && M.ADS_SPLIT.value;
       if (sp) {
