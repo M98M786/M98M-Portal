@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-1543';
+var BUILD = '20260901-1545';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -24342,7 +24342,7 @@ function saveSchedule() {
       var deskRows = (rs[3] && rs[3].rows) || [];
       var items = [];
       tasks.forEach(function (t) { items.push({ kind: 'task', at: tdS(t.submitted_at), o: t }); });
-      hunts.forEach(function (hu) { items.push({ kind: 'hunt', at: tdS(hu.created_at || hu.at), o: hu }); });
+      hunts.forEach(function (hu) { items.push({ kind: 'hunt', at: tdS(hu.ts || hu['Date Added'] || hu.created_at), o: hu }); });
       items.sort(function (x, y) { return tdS(x.at).localeCompare(tdS(y.at)); });   /* oldest first */
 
       var h = '<p class="m" style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 10px">' +
@@ -24362,9 +24362,10 @@ function saveSchedule() {
             '<button class="minibtn" data-td-rt="' + esc(id) + '">Return with comment</button></div></div>';
         }
         var hu = it.o;
+        /* huntQueue rows carry the workbook's own headers: Title / hunter_name / Date Added */
         return '<div class="td-ap"><div class="h"><span class="td-kind" style="background:var(--warn-soft);color:var(--warn)">hunt approval</span>' +
-          '<span class="t">' + esc(tdS(hu.title || hu.product || hu.name)) + '</span>' +
-          '<span class="m">' + esc(tdS(hu.hunter || hu.by || '').split('@')[0]) + '</span></div>' +
+          '<span class="t">' + esc(tdS(hu.Title || hu.title || hu['Product Title'] || hu.hunt_id)) + '</span>' +
+          '<span class="m">' + esc(tdS(hu.hunter_name || hu.hunter_email || '').split('@')[0]) + (tdS(hu['Date Added']) ? ' · ' + esc(tdS(hu['Date Added'])) : '') + '</span></div>' +
           '<div class="btns"><button class="minibtn" data-td-hunt="1">Decide on Hunt approvals →</button>' +
           '<span class="m">approval needs an account, a lister, an ad type and a deadline — the full form lives there</span></div></div>';
       }).join('');

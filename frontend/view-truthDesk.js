@@ -75,7 +75,7 @@
       var deskRows = (rs[3] && rs[3].rows) || [];
       var items = [];
       tasks.forEach(function (t) { items.push({ kind: 'task', at: tdS(t.submitted_at), o: t }); });
-      hunts.forEach(function (hu) { items.push({ kind: 'hunt', at: tdS(hu.created_at || hu.at), o: hu }); });
+      hunts.forEach(function (hu) { items.push({ kind: 'hunt', at: tdS(hu.ts || hu['Date Added'] || hu.created_at), o: hu }); });
       items.sort(function (x, y) { return tdS(x.at).localeCompare(tdS(y.at)); });   /* oldest first */
 
       var h = '<p class="m" style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 10px">' +
@@ -95,9 +95,10 @@
             '<button class="minibtn" data-td-rt="' + esc(id) + '">Return with comment</button></div></div>';
         }
         var hu = it.o;
+        /* huntQueue rows carry the workbook's own headers: Title / hunter_name / Date Added */
         return '<div class="td-ap"><div class="h"><span class="td-kind" style="background:var(--warn-soft);color:var(--warn)">hunt approval</span>' +
-          '<span class="t">' + esc(tdS(hu.title || hu.product || hu.name)) + '</span>' +
-          '<span class="m">' + esc(tdS(hu.hunter || hu.by || '').split('@')[0]) + '</span></div>' +
+          '<span class="t">' + esc(tdS(hu.Title || hu.title || hu['Product Title'] || hu.hunt_id)) + '</span>' +
+          '<span class="m">' + esc(tdS(hu.hunter_name || hu.hunter_email || '').split('@')[0]) + (tdS(hu['Date Added']) ? ' · ' + esc(tdS(hu['Date Added'])) : '') + '</span></div>' +
           '<div class="btns"><button class="minibtn" data-td-hunt="1">Decide on Hunt approvals →</button>' +
           '<span class="m">approval needs an account, a lister, an ad type and a deadline — the full form lives there</span></div></div>';
       }).join('');
