@@ -180,9 +180,10 @@ function pushEngineSync() {
     if (props.getProperty('PORTAL_STATS_DAY') !== psDay) {
       updateSirHasibAnalysis();
       try { notifPrune(); } catch (e2) { logActivity_('system', 'NOTIF_PRUNE_FAIL', '', '', '', String(e2 && e2.message || e2).slice(0, 120)); }
-      try { sirHasibMonthlyFill(); } catch (e4) { logActivity_('system', 'SH_MONTHLY_FAIL', '', '', '', String(e4 && e4.message || e4).slice(0, 120)); }
-      try { bookFix({}); } catch (e5) { logActivity_('system', 'BOOK_FIX_FAIL', '', '', '', String(e5 && e5.message || e5).slice(0, 140)); }
-      try { truthCheck(); } catch (e3) { logActivity_('system', 'TRUTH_CHECK_FAIL', '', '', '', String(e3 && e3.message || e3).slice(0, 140)); }
+      /* TRUTH v2 DECISIONS #11 (money module LIVE): the 30-Aug truth machinery retires — the
+         engine's Truth Check (tier 1 + nightly tier 3 penny audit) supersedes the letters,
+         the monthly filler and the drift corrector. All three stay callable by hand via
+         ENGINE_RUNNABLE for a deliberate one-off; none runs on its own any more. */
       try { pushSheetRowsCold(); } catch (e6) { logActivity_('system', 'SHEETMIRROR_COLD_FAIL', '', '', '', String(e6 && e6.message || e6).slice(0, 120)); }
       props.setProperty('PORTAL_STATS_DAY', psDay);
     }
