@@ -108,7 +108,7 @@ export default {
        rows-written/day), trafficSync moved off financeSync's slot, violationsSync off the
        5-minute treadmill. */
     const jobs = {
-      '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday],
+      '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1],
@@ -3398,6 +3398,55 @@ const ORDER_PII_ROLES = ['Management', 'Ops Head', 'CS', 'Order Processor'];
    through pageMetrics module by module; until a module flips, old code keeps rendering and the
    Truth Check's Shadow tab shows old vs new. */
 
+/* WO-07 source of record: eBay's own open-order set, pulled complete per account and stamped.
+   The dispatch metrics count ONLY rows carrying the account's latest complete stamp — a stale
+   D1 row that eBay no longer lists as open simply is not in the universe (it shipped or closed
+   long ago; history rows keep serving SHIPPED_7D/CANCELLED_30D). Run-success guard: a partial
+   pull changes nothing (§3.3). */
+async function openSync(env) {
+  await ensureTruthSchema(env);
+  await perAccount(env, 'openSync', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    let href = 'https://api.ebay.com/sell/fulfillment/v1/order?limit=100&filter=' +
+      encodeURIComponent('orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}');
+    const stamp = new Date().toISOString();
+    const stmts = [];
+    let pages = 0;
+    while (href && pages < 15) {
+      const r = await fetch(href, { headers: { authorization: 'Bearer ' + tok } });
+      if (!r.ok) throw new Error(acct + ' open pull ' + r.status);   // partial run: no stamp advances
+      const page = await r.json();
+      for (const o of (page.orders || [])) {
+        const line = (o.lineItems && o.lineItems[0]) || {};
+        let qty = 0;
+        for (const li of (o.lineItems || [])) qty += Number(li.quantity) || 0;
+        qty = Math.max(1, qty);
+        let sb = '';
+        for (const li of (o.lineItems || [])) {
+          const d2 = String(((li.lineItemFulfillmentInstructions || {}).shipByDate) || '');
+          if (d2 && (!sb || d2 < sb)) sb = d2;
+        }
+        stmts.push(env.DB.prepare(
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count, open_seen_at) ' +
+          'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ' +
+          'ON CONFLICT(order_id) DO UPDATE SET status=?5, ship_by=CASE WHEN ?9 != \'\' THEN ?9 ELSE ship_by END, ' +
+          'payment_status=?10, cancel_state=?11, fh_count=?12, open_seen_at=?13'
+        ).bind(String(o.orderId), acct, String(line.legacyItemId || ''),
+          Number(((o.pricingSummary || {}).total || {}).value) || 0,
+          String(o.orderFulfillmentStatus || ''), String((o.buyer || {}).username || ''),
+          String(o.creationDate || ''), qty, sb, String(o.orderPaymentStatus || ''),
+          String(((o.cancelStatus || {}).cancelState) || ''),
+          Array.isArray(o.fulfillmentHrefs) ? o.fulfillmentHrefs.length : 0, stamp));
+      }
+      href = String(page.next || '');
+      pages++;
+    }
+    if (href) throw new Error(acct + ' open pull page cap');          // incomplete: stamp must not land
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    await env.HOT.put('openstamp:' + acct, stamp, { expirationTtl: 86400 });
+  });
+}
+
 let TRUTH_SCHEMA_OK = false;
 async function ensureTruthSchema(env) {
   if (TRUTH_SCHEMA_OK) return;
@@ -3405,6 +3454,7 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE orders ADD COLUMN payment_status TEXT",
     "ALTER TABLE orders ADD COLUMN cancel_state TEXT",
     "ALTER TABLE orders ADD COLUMN fh_count INTEGER",
+    "ALTER TABLE orders ADD COLUMN open_seen_at TEXT",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
     "CREATE TABLE IF NOT EXISTS sheet_rows (workbook_id TEXT, tab TEXT, row_no INTEGER, account TEXT, day_pk TEXT, vals TEXT, row_hash TEXT, synced_at TEXT, PRIMARY KEY (workbook_id, tab, row_no))",
     "CREATE INDEX IF NOT EXISTS ix_sheet_rows_day ON sheet_rows (account, day_pk)",
@@ -3484,21 +3534,33 @@ async function truthOpenOrders(env, account) {
 
 async function metricDispatch(env, account) {
   const now = Date.now();
-  const rows = await truthOpenOrders(env, account);
+  const all = await truthOpenOrders(env, account);
+  /* the open buckets count only rows in each account's latest COMPLETE eBay open pull */
+  const stamps = {};
+  const accs = account ? [account] : await apiAccounts(env);
+  for (const a of accs) stamps[a] = await env.HOT.get('openstamp:' + a);
+  const rows = all.filter((o) => {
+    const st = stamps[o.account];
+    return st && o.open_seen_at === st;
+  });
+  const hist = all;
   const out = { LATE_NOW: { n: 0, pence: 0, rows: [] }, DUE_3D: { n: 0, rows: [] }, AWAITING_ONLY: { n: 0, rows: [] },
     REFUNDED_NEVER_SENT: { n: 0, pence: 0, rows: [] }, SHIPPED_7D: { n: 0 }, CANCELLED_30D: { n: 0 },
     PENDING_PAYMENT: { n: 0, rows: [] } };
   const cut7 = now - 7 * 86400000, cut30 = now - 30 * 86400000;
   for (const o of rows) {
     const st = dispatchStateV2(o, now);
-    const t = Date.parse(String(o.created_at || ''));
     if (st === 'LATE') { out.LATE_NOW.n++; out.LATE_NOW.pence += Math.round((Number(o.sold) || 0) * 100); if (out.LATE_NOW.rows.length < 80) out.LATE_NOW.rows.push(o); }
     else if (st === 'DUE') { out.DUE_3D.n++; if (out.DUE_3D.rows.length < 80) out.DUE_3D.rows.push(o); }
     else if (st === 'AWAITING') { out.AWAITING_ONLY.n++; if (out.AWAITING_ONLY.rows.length < 80) out.AWAITING_ONLY.rows.push(o); }
     else if (st === 'REFUNDED_NEVER_SENT') { out.REFUNDED_NEVER_SENT.n++; out.REFUNDED_NEVER_SENT.pence += Math.round((Number(o.refunded) > 0 ? Number(o.refunded) : Number(o.sold) || 0) * 100); if (out.REFUNDED_NEVER_SENT.rows.length < 80) out.REFUNDED_NEVER_SENT.rows.push(o); }
-    else if (st === 'SHIPPED') { if (isFinite(t) && t >= cut7) out.SHIPPED_7D.n++; }
-    else if (st === 'CANCELLED') { if (isFinite(t) && t >= cut30) out.CANCELLED_30D.n++; }
     else if (st === 'PENDING_PAYMENT') { out.PENDING_PAYMENT.n++; if (out.PENDING_PAYMENT.rows.length < 40) out.PENDING_PAYMENT.rows.push(o); }
+  }
+  for (const o of hist) {
+    const t = Date.parse(String(o.created_at || ''));
+    const st = dispatchStateV2(o, now);
+    if (st === 'SHIPPED') { if (isFinite(t) && t >= cut7) out.SHIPPED_7D.n++; }
+    else if (st === 'CANCELLED') { if (isFinite(t) && t >= cut30) out.CANCELLED_30D.n++; }
   }
   out.AWAITING_DISPATCH = { n: out.LATE_NOW.n + out.DUE_3D.n + out.AWAITING_ONLY.n };
   return out;
@@ -3601,7 +3663,12 @@ async function truthTier1(env) {
     const raw = await truthOpenOrders(env, acct || undefined);
     const nb = { LATE: 0, DUE: 0, AWAITING: 0 };
     const nowMs = Date.now();
-    for (const o of raw) { const s = truthClassifyB(o, nowMs); if (nb[s] !== undefined) nb[s]++; }
+    const bStamps = {};
+    for (const a2 of (acct ? [acct] : await apiAccounts(env))) bStamps[a2] = await env.HOT.get('openstamp:' + a2);
+    for (const o of raw) {
+      if (!bStamps[o.account] || o.open_seen_at !== bStamps[o.account]) continue;
+      const s = truthClassifyB(o, nowMs); if (nb[s] !== undefined) nb[s]++;
+    }
     const scope = acct || 'all';
     out.push({ metric_id: 'LATE_NOW', scope_key: scope, shown: A.LATE_NOW.n, recomputed: nb.LATE, delta: A.LATE_NOW.n - nb.LATE, status: A.LATE_NOW.n === nb.LATE ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
     const sumOk = A.LATE_NOW.n + A.DUE_3D.n + A.AWAITING_ONLY.n === A.AWAITING_DISPATCH.n;
@@ -6725,7 +6792,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3 };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
