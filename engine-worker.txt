@@ -65,12 +65,19 @@ export default {
          screen visit. These actions return IDENTICAL data to every permitted caller, so a
          short in-isolate cache answers repeat visits in milliseconds and cuts D1 work ~10x.
          Role-DEPENDENT actions (alertMail, csDesk, toolHtml…) are deliberately absent. */
+      /* 1 Sept perf triage: every truth page recomputed the whole register per viewer — at
+         evening peak that stacked heavy D1 scans until everything crawled. These reads are the
+         same answer for every viewer, so one computation serves the office for its TTL. The
+         caller's ROLE is part of the key: a cached management answer can never leak to a role
+         the gate would refuse (per-USER feeds — inbox, keyword board, my-tasks — stay uncached). */
       const ROUTE_CACHE_MS = { itemPnl: 90000, dailyReport: 45000, itemRisk: 120000,
         marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 20000, trafficBoard: 300000,
-        deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0 };
+        deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0,
+        pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000,
+        dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
       const data = rcTtl
-        ? await memo('rt:' + action + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2))
+        ? await memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2))
         : await route.fn(body.payload || {}, ctx2);
       console.log('t', action, Date.now() - t0, 'ms');       // §9: server time per action, in the CF log
       return json({ ok: true, data }, 200, cors);
@@ -165,7 +172,7 @@ async function memo(key, ttlMs, fn) {
   if (hit && Date.now() - hit.at < ttlMs) return hit.v;
   const v = await fn();
   HOTMEM.set(key, { v, at: Date.now() });
-  if (HOTMEM.size > 200) { HOTMEM.clear(); }               // crude bound; isolates recycle anyway
+  if (HOTMEM.size > 600) { HOTMEM.clear(); }               // crude bound; isolates recycle anyway
   return v;
 }
 function json(obj, status, extra) {
@@ -986,17 +993,28 @@ async function signalReeval(env) {
   const nowIso = new Date().toISOString();
   /* dup alerts: condition = the listing still sits duplicated in dup_state */
   const dupAlerts = await env.DB.prepare(
-    "SELECT id, ref FROM alert_log WHERE resolved_at = '' AND type LIKE '%uplicate%' LIMIT 200"
+    "SELECT id, ref FROM alert_log WHERE resolved_at = '' AND type LIKE '%uplicate%' LIMIT 500"
   ).all().catch(() => ({ results: [] }));
   let closed = 0;
-  for (const a of (dupAlerts.results || [])) {
-    const lid = String(a.ref || '').split(':').pop();
-    if (!lid) continue;
-    const still = await env.DB.prepare('SELECT 1 AS x FROM dup_state WHERE listing_id = ?1').bind(lid).first();
-    if (!still) {
-      await env.DB.prepare("UPDATE alert_log SET resolved_at = ?2, resolved_by = 'condition cleared' WHERE id = ?1")
-        .bind(a.id, nowIso).run().catch(() => {});
-      closed++;
+  const dupRows = dupAlerts.results || [];
+  if (dupRows.length) {
+    /* one grouped existence check + one batched close — was a query per alert (perf, 1 Sept) */
+    const lids = [...new Set(dupRows.map((a) => String(a.ref || '').split(':').pop()).filter(Boolean))];
+    const still = new Set();
+    for (let i = 0; i < lids.length; i += 80) {
+      const chunk = lids.slice(i, i + 80);
+      const rs = await env.DB.prepare(
+        'SELECT DISTINCT listing_id FROM dup_state WHERE listing_id IN (' + chunk.map(() => '?').join(',') + ')'
+      ).bind(...chunk).all().catch(() => ({ results: [] }));
+      for (const r of (rs.results || [])) still.add(String(r.listing_id));
+    }
+    const closeIds = dupRows.filter((a) => { const lid = String(a.ref || '').split(':').pop(); return lid && !still.has(lid); }).map((a) => a.id);
+    for (let i = 0; i < closeIds.length; i += 80) {
+      const chunk = closeIds.slice(i, i + 80);
+      await env.DB.prepare(
+        "UPDATE alert_log SET resolved_at = ?1, resolved_by = 'condition cleared' WHERE id IN (" + chunk.map(() => '?').join(',') + ')'
+      ).bind(nowIso, ...chunk).run().catch(() => {});
+      closed += chunk.length;
     }
   }
   /* wasting alerts older than the day they described */
@@ -3769,43 +3787,48 @@ function memberChipStatus(r) {
 }
 async function metricAds(env, account) {
   await ensureTruthSchema(env);
-  const bind = [];
-  let sql =
-    'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.bid_pct, c.name AS c_name, ' +
-    'c.status AS c_status, c.funding_model, ia.status AS l_status, ia.title, ia.price ' +
-    'FROM campaign_ads ca ' +
-    'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
-    'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id';
-  if (account) { bind.push(account); sql += ' WHERE ca.account = ?1'; }
-  const rs = await env.DB.prepare(sql).bind(...bind).all();
-  const rows = rs.results || [];
-  const byListing = {};
-  for (const r of rows) {
-    const b = (byListing[r.account + '|' + r.listing_id] = byListing[r.account + '|' + r.listing_id] || { account: r.account, listing_id: r.listing_id, title: r.title, memberships: [], liveCpc: 0, liveGen: 0 });
-    const live = liveMembershipRow(r);
-    b.memberships.push({ campaign_id: r.campaign_id, name: r.c_name, c_status: r.c_status,
-      funding: r.funding_model, ad_status: r.ad_status || '', bid: r.bid_pct, live: live, chip: memberChipStatus(r) });
-    if (live) { if (String(r.funding_model) === 'COST_PER_CLICK') b.liveCpc++; else b.liveGen++; }
-  }
-  const aBind = [];
-  let aSql = "SELECT account, item_id, title FROM items_api WHERE status = 'ACTIVE'";
-  if (account) { aBind.push(account); aSql += ' AND account = ?1'; }
-  const act = await env.DB.prepare(aSql).bind(...aBind).all();
-  const split = { cpc_only: 0, general_only: 0, both: 0, none: 0, active: 0, multi: 0 };
-  const multiRows = [], noneRows = [];
-  for (const l of (act.results || [])) {
-    split.active++;
-    const b = byListing[l.account + '|' + l.item_id];
-    const liveN = b ? b.memberships.filter((m) => m.live).length : 0;
-    const cpc = b ? b.liveCpc > 0 : false;
-    const gen = b ? b.liveGen > 0 : false;
-    if (cpc && gen) split.both++;
-    else if (cpc) split.cpc_only++;
-    else if (gen) split.general_only++;
-    else { split.none++; if (noneRows.length < 100) noneRows.push({ account: l.account, listing_id: l.item_id, title: l.title }); }
-    if (liveN >= 2) { split.multi++; if (multiRows.length < 120) multiRows.push({ account: l.account, listing_id: l.item_id, title: l.title, memberships: b.memberships }); }
-  }
-  return { split, multiRows, noneRows };
+  /* ONE fleet-wide pass, memoised per isolate (perf triage 1 Sept): the tier-1 invariant used
+     to call this once PER ACCOUNT — six full scans every 15 minutes on top of page traffic.
+     Computing every account's split in the same pass costs the same as one, so everything
+     (pages, verifier, per-account filters) reads this single result. */
+  const all = await memo('metricAds:v2', 30000, async () => {
+    const rs = await env.DB.prepare(
+      'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.bid_pct, c.name AS c_name, ' +
+      'c.status AS c_status, c.funding_model, ia.status AS l_status, ia.title, ia.price ' +
+      'FROM campaign_ads ca ' +
+      'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+      'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id'
+    ).all();
+    const byListing = {};
+    for (const r of (rs.results || [])) {
+      const b = (byListing[r.account + '|' + r.listing_id] = byListing[r.account + '|' + r.listing_id] || { account: r.account, listing_id: r.listing_id, title: r.title, memberships: [], liveCpc: 0, liveGen: 0 });
+      const live = liveMembershipRow(r);
+      b.memberships.push({ campaign_id: r.campaign_id, name: r.c_name, c_status: r.c_status,
+        funding: r.funding_model, ad_status: r.ad_status || '', bid: r.bid_pct, live: live, chip: memberChipStatus(r) });
+      if (live) { if (String(r.funding_model) === 'COST_PER_CLICK') b.liveCpc++; else b.liveGen++; }
+    }
+    const act = await env.DB.prepare("SELECT account, item_id, title FROM items_api WHERE status = 'ACTIVE'").all();
+    const mk = () => ({ split: { cpc_only: 0, general_only: 0, both: 0, none: 0, active: 0, multi: 0 }, multiRows: [], noneRows: [] });
+    const total = mk(), byAccount = {};
+    for (const l of (act.results || [])) {
+      const acc = (byAccount[l.account] = byAccount[l.account] || mk());
+      const b = byListing[l.account + '|' + l.item_id];
+      const liveN = b ? b.memberships.filter((m) => m.live).length : 0;
+      const cpc = b ? b.liveCpc > 0 : false;
+      const gen = b ? b.liveGen > 0 : false;
+      for (const t of [total, acc]) {
+        t.split.active++;
+        if (cpc && gen) t.split.both++;
+        else if (cpc) t.split.cpc_only++;
+        else if (gen) t.split.general_only++;
+        else { t.split.none++; if (t.noneRows.length < 100) t.noneRows.push({ account: l.account, listing_id: l.item_id, title: l.title }); }
+        if (liveN >= 2) { t.split.multi++; if (t.multiRows.length < 120) t.multiRows.push({ account: l.account, listing_id: l.item_id, title: l.title, memberships: b.memberships }); }
+      }
+    }
+    return { total, byAccount };
+  });
+  if (account) { return all.byAccount[account] || { split: { cpc_only: 0, general_only: 0, both: 0, none: 0, active: 0, multi: 0 }, multiRows: [], noneRows: [] }; }
+  return all.total;
 }
 
 /* WO-02 Path A: departments board from the D1 task mirror — ONE function feeds the merged desk
@@ -3933,14 +3956,20 @@ async function truthTier1(env) {
     const sumOk = A.LATE_NOW.n + A.DUE_3D.n + A.AWAITING_ONLY.n === A.AWAITING_DISPATCH.n;
     out.push({ metric_id: 'AWAITING_DISPATCH', scope_key: scope, shown: A.AWAITING_DISPATCH.n, recomputed: nb.LATE + nb.DUE + nb.AWAITING, delta: sumOk ? 0 : 1, status: sumOk && (A.AWAITING_DISPATCH.n === nb.LATE + nb.DUE + nb.AWAITING) ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
   }
-  /* WO-08 invariant: the four live-split buckets partition ACTIVE listings exactly, per account */
-  for (const acct of accounts) {
-    const S4 = await metricAds(env, acct);
-    const sum = S4.split.cpc_only + S4.split.general_only + S4.split.both + S4.split.none;
-    const actB = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' AND account = ?1").bind(acct).first();
-    const bN = Number(actB && actB.n) || 0;
-    out.push({ metric_id: 'SPLIT_SUMS_TO_ACTIVE', scope_key: acct, shown: sum, recomputed: bN,
-      delta: sum - bN, status: sum === bN ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
+  /* WO-08 invariant: the four live-split buckets partition ACTIVE listings exactly, per
+     account — Path B counts ACTIVE per account in ONE grouped query, Path A is the single
+     memoised fleet pass (was 6 full scans per run). */
+  {
+    const actB = await env.DB.prepare("SELECT account, COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' GROUP BY account").all();
+    const bMapA = {};
+    for (const r of (actB.results || [])) bMapA[r.account] = Number(r.n) || 0;
+    for (const acct of accounts) {
+      const S4 = await metricAds(env, acct);
+      const sum = S4.split.cpc_only + S4.split.general_only + S4.split.both + S4.split.none;
+      const bN = bMapA[acct] || 0;
+      out.push({ metric_id: 'SPLIT_SUMS_TO_ACTIVE', scope_key: acct, shown: sum, recomputed: bN,
+        delta: sum - bN, status: sum === bN ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
+    }
   }
   /* WO-02: departments open counts — Path A (JS loop over the mirror) vs Path B (SQL GROUP BY,
      independently written CASE mapping). Same D1 table, two computations. */
@@ -6567,8 +6596,25 @@ const ROUTES = {
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? String(p.from) : pkToday(0).slice(0, 8) + '01';
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? String(p.to) : pkToday(0);
       const D = await metricDispatch(ctx.env, account);
-      const M = await metricMoney(ctx.env, account, from, to);
+      /* one sheet_rows scan serves both the per-account card AND the totals — the second full
+         scan+parse of the same rows was half the money cost of every page (perf triage 1 Sept) */
       const MA = await metricMoneyByAccount(ctx.env, from, to);
+      const mSum = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
+      for (const a of Object.keys(MA)) {
+        if (account && a !== account) continue;
+        mSum.sold += MA[a].sold; mSum.r += MA[a].true_earning; mSum.s += MA[a].vat;
+        mSum.t += MA[a].actual; mSum.ali += MA[a].ali; mSum.rows += MA[a].rows;
+      }
+      const ocBind = [from, to];
+      let ocSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2";
+      if (account) { ocBind.push(account); ocSql += ' AND account = ?3'; }
+      const ocRow = await ctx.env.DB.prepare(ocSql).bind(...ocBind).first().catch(() => ({ n: 0 }));
+      const M = {
+        SOLD_SHEET: round2(mSum.sold), TRUE_EARNING: round2(mSum.r), VAT_TO_HMRC: round2(mSum.s),
+        ACTUAL_PROFIT: round2(mSum.t), ALI_COST: round2(mSum.ali),
+        MARGIN: mSum.sold > 0 ? Math.round(mSum.t / mSum.sold * 1000) / 10 : null,
+        ROWS_COVERAGE: { rows: mSum.rows, orders: Number(ocRow && ocRow.n) || 0 },
+      };
       const T = await metricTasks(ctx.env);
       const AD = await metricAds(ctx.env, account);
       /* WO-03 step 7 — the leaks series: ad spend per day (ads_daily, both families) and refunds,
