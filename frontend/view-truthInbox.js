@@ -8,7 +8,7 @@
 
   if (typeof TRUTH_FLAGS === 'undefined' || TRUTH_FLAGS.inbox !== 'live') { return; }
 
-  var IX = { peer: '', threads: [], cursor: '', lastSeen: '', pollT: null, names: {} };
+  var IX = { peer: '', threads: [], cursor: '', lastSeen: '', pollT: null, names: {}, pane: 'dm' };
 
   VIEW_CSS.push(
     '.ix-wrap{display:grid;grid-template-columns:280px 1fr;gap:14px;min-height:60vh}' +
@@ -30,6 +30,13 @@
     '.ix-send{display:flex;gap:8px;padding:10px;border-top:1px solid var(--gold-line)}' +
     '.ix-send textarea{flex:1;min-height:40px;max-height:120px;padding:9px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:12.5px;resize:vertical}' +
     '.ix-skel{height:14px;border-radius:7px;background:var(--panel);margin:10px 13px;animation:ixp 1.2s ease-in-out infinite alternate}' +
+    '.ix-tabs{display:flex;gap:6px;margin-bottom:10px}' +
+    '.ix-tab{flex:1;border:1px solid var(--gold-line);border-radius:10px;padding:7px 10px;background:var(--panel);font-size:11.5px;font-weight:800;cursor:pointer;color:var(--text-2);text-align:center}' +
+    '.ix-tab.on{border-color:var(--gold);color:var(--gold);background:var(--panel-2)}' +
+    '.ix-nt{padding:10px 13px;border-bottom:1px solid var(--gold-line);cursor:pointer}' +
+    '.ix-nt.unread{border-left:3px solid var(--gold)}' +
+    '.ix-nt .ty{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:var(--text-3)}' +
+    '.ix-nt .bd2{font-size:11.5px;font-weight:600;margin-top:3px;color:var(--text-2)}' +
     '@keyframes ixp{from{opacity:.35}to{opacity:.85}}'
   );
 
@@ -50,7 +57,7 @@
 
   function ixPaintThreads() {
     var box = $('ixThreads');
-    if (!box) { return; }
+    if (!box || IX.pane === 'nt') { return; }
     if (!IX.threads.length) {
       box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No conversations yet — pick a person below and say hello.</div>';
       return;
@@ -140,6 +147,56 @@
     });
   }
 
+  /* WO-12 follow-up (1 Sept click-through): the bell's LETTERS lost their reading surface when
+     the sheet inbox was replaced — they live here now, same page, second tab. Data: the same
+     poll the whole portal already uses; read = the existing markNotifRead action. */
+  function ixLetters() {
+    var box = $('ixThreads');
+    if (!box || IX.pane !== 'nt') { return; }
+    box.innerHTML = '<div class="ix-skel"></div><div class="ix-skel" style="width:65%"></div>';
+    api('poll').then(function (d) {
+      if (!$('ixThreads') || IX.pane !== 'nt') { return; }
+      var ns = (d && d.notifications) || [];
+      try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}
+      if (!ns.length) { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No letters. Every alert the portal sends you lands here.</div>'; return; }
+      box.innerHTML = '<div style="padding:8px 13px;border-bottom:1px solid var(--gold-line)"><button class="minibtn" id="ixNtAll">Mark all read</button></div>' +
+        ns.map(function (n) {
+          var unread = !ixS(n.read_at || n.read).trim();
+          return '<div class="ix-nt' + (unread ? ' unread' : '') + '" data-ix-nt="' + esc(ixS(n.notif_id || n.id)) + '">' +
+            '<div class="ty">' + esc(ixS(n.type || 'letter').replace(/_/g, ' ')) + ' · ' + esc(ixWhen(n.created_at || n.ts)) + '</div>' +
+            '<div class="bd2">' + esc(ixS(n.message || n.body).slice(0, 160)) + '</div></div>';
+        }).join('');
+      box.querySelectorAll('[data-ix-nt]').forEach(function (el) {
+        el.onclick = function () {
+          var me = this;
+          api('markNotifRead', { notifId: this.getAttribute('data-ix-nt') }).then(function () {
+            me.classList.remove('unread');
+            try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
+          }).catch(function () {});
+        };
+      });
+      var all = $('ixNtAll');
+      if (all) {
+        all.onclick = function () {
+          all.disabled = true;
+          api('markNotifRead', { all: true }).then(function () {
+            try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
+            ixLetters();
+          }).catch(function () { all.disabled = false; });
+        };
+      }
+    }).catch(function (e) {
+      if ($('ixThreads') && IX.pane === 'nt') { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--bad);font-weight:600">' + esc(e.message) + '</div>'; }
+    });
+  }
+
+  function ixPane(p) {
+    IX.pane = p;
+    document.querySelectorAll('.ix-tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-ix-pane') === p); });
+    if (p === 'nt') { ixLetters(); } else { ixPaintThreads(); }
+  }
+  window.ixShowLetters = function () { try { ixPane('nt'); } catch (e) {} };
+
   function ixThreadsRefresh() {
     return api('inboxThreads', {}).then(function (d) {
       IX.threads = (d && d.threads) || [];
@@ -180,7 +237,7 @@
       return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
         '<span class="sub">private between the two of you — nobody else, Management included, can read a thread</span></div>' +
         '<div class="ix-wrap enter d2">' +
-        '<div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
+        '<div><div class="ix-tabs"><button class="ix-tab on" data-ix-pane="dm">Conversations</button><button class="ix-tab" data-ix-pane="nt">Letters</button></div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
         '<select class="alx-sel" id="ixNew" style="width:100%;margin-top:10px"><option value="">New message to…</option></select></div>' +
         '<div class="ix-pane"><div style="padding:11px 14px;border-bottom:1px solid var(--gold-line);font-size:13px;font-weight:800" id="ixWith">Pick a conversation</div>' +
         '<div class="ix-msgs" id="ixMsgs"><div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">Messages load when you open a thread — 30 at a time, older on demand.</div></div>' +
@@ -206,6 +263,10 @@
         }).catch(function () {});
         sel.onchange = function () { if (this.value) { ixOpen(this.value); this.value = ''; } };
       }
+      document.querySelectorAll('.ix-tab').forEach(function (b) {
+        b.onclick = function () { ixPane(this.getAttribute('data-ix-pane')); };
+      });
+      if (window.__ixWantLetters) { window.__ixWantLetters = 0; ixPane('nt'); }
       var sb = $('ixSendBtn');
       if (sb) { sb.onclick = ixSend; }
       var ta = $('ixBody');

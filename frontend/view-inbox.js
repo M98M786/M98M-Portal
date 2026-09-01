@@ -199,7 +199,17 @@ function startPolling() {
     ibPollNow();
   });
   var bell = $('bellBtn');
-  if (bell) bell.onclick = function () { ibGoInbox('nt'); };
+  if (bell) bell.onclick = function () {
+    /* TRUTH v2: the D1 inbox reads letters on its own pane */
+    if (typeof TRUTH_FLAGS !== 'undefined' && TRUTH_FLAGS.inbox === 'live') {
+      window.__ixWantLetters = 1;
+      var a = document.querySelector('.nav a[data-key="inbox"]');
+      if (a) { a.click(); } else { location.hash = 'inbox'; renderView('inbox'); }
+      if (typeof window.ixShowLetters === 'function') { setTimeout(window.ixShowLetters, 400); }
+      return;
+    }
+    ibGoInbox('nt');
+  };
   ibPollNow();
 }
 
