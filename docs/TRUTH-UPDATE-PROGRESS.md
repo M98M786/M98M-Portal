@@ -79,9 +79,39 @@ Nothing is done until ticked here with evidence (R13).
   D1 `aliCheck`); the SAME id check blocks submitHunt on duplicates unless Management sends an
   override note (logged HUNT_DUP_OVERRIDE); backfill = parse-at-read across every stored link +
   `huntAliCheck {stats:true}` reports parsed/failed. tasks + hunting flags: LIVE.
-- [ ] WO-12: inbox rebuild (D1 threads/messages/recipients, 30/page cursor, optimistic send).
-  R2 probe (1 Sept): **NOT enabled** on the account (API 10042 "Please enable R2") — per spec,
-  attachments go to DECISIONS-NEEDED #3 with the Drive fallback; no public bucket shipped.
-- [ ] Home CS tile → CS_NEEDS_REPLY register metric.
+- [x] WO-12: inbox rebuilt on D1 (`inbox_messages`/`inbox_threads`, indexes per §3.2 —
+  unread badge is ONE indexed COUNT; thread list one query; 30-message cursor pages;
+  optimistic send with rollback; 30 s delta poll; participant-only reads enforced server-side,
+  Management included). The 24 sheet DMs mirrored in (`inboxDump` — rows 2–25 of 25, complete);
+  the sheet is now a frozen archive and its poll no longer writes the badge. New-message bells
+  still fire (inboxSend → queueNotify → the notifications feed). **R2 probe (1 Sept): NOT
+  enabled on the account (API 10042 "Please enable R2") — per spec, attachments wait on
+  DECISIONS #3 with the Drive fallback; no public bucket shipped.** inbox flag: LIVE.
+  Shape note (R11 default taken): DMs are two-party here, so recipient state lives on the
+  message row (to_email, read_at) instead of a separate message_recipients table — same
+  indexes, same query costs; a group-thread table split is a mechanical migration if group
+  chat is ever wanted.
+- [x] Home CS tile: reads csDesk's own `our_move` rule (tile = the list it opens by
+  construction) and the rule itself is now verified 15-min as CS_NEEDS_REPLY (JS regex path
+  vs an independently written SQL classification).
 
-## Phase 6 — Cleanup — NOT STARTED
+## Phase 6 — Cleanup (WO-14) — DONE 1 Sept 2026 (24 h-green gate left running)
+- [x] Replaced code paths deleted (~2,900 lines): view-accountReport.js, view-liveSplit.js,
+  view-mgmtDesk.js, view-deptBoard.js, view-advertising.js (advertising + wrongAds), the old
+  kpis section of view-alerts.js, the old dispatch section of view-orders.js. Desk CSS ported.
+  view-inbox.js stays for now: its module-level `api('poll')` machinery drives the phone-style
+  notification pops and the bell for the WHOLE portal — only its inbox-page body is dead;
+  extracting the poll into the shell is a separate mechanical change.
+- [x] 30-Aug truth machinery (bookFix / truthCheck letters / sirHasibMonthlyFill) removed from
+  the nightly chain per DECISIONS #11 (money live) — still hand-callable via ENGINE_RUNNABLE.
+  AS cpcKeywordSweep retired (WO-09 replaces it).
+- [x] Docs: SYNC.md (every job, cadence, re-run commands), TRUTH-CHECK.md (statuses, tiers,
+  what to do on FAIL), CHANGELOG.md, NUMBER_REGISTER.md §G advertising.
+- [x] Fake-number grep: `Math.random` appears only in the agenda confetti animation (visual,
+  no data); `placeholder` hits are input placeholders/comments; no sample/demo data paths
+  remain in the bundle.
+- [x] Sidebar build stamp auto-bumps per build (scripts/build.py, footer shows `build <stamp>`).
+- [ ] **GATE: Truth Check green for 24 h** — standing at 54+ PASS · 0 FAIL as of the flip;
+  the 15-min tiers keep scoring it. Deploys: worker 01:34 UTC 1 Sept; Apps Script **v88**
+  ("Deployment successfully updated. Version 88 on Sep 1, 2026, 6:33 AM"), same /exec URL.
+- Backfill evidence (WO-11): `huntAliStats` — **408 links, 408 parsed, 0 failed (100 %)**.

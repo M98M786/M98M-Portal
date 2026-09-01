@@ -268,10 +268,13 @@ function ibApplyPoll(d) {
     }
   } catch (e) {}
   STATE.counts.notifications = d.unreadNotif || 0;
-  STATE.counts.inbox = d.unreadDm || 0;
+  /* TRUTH v2 WO-12: with the D1 inbox live, the sheet is a frozen archive — its unread count
+     must not overwrite the engine's. The truth inbox page maintains STATE.counts.inbox itself. */
+  var ibSheetDm = (typeof TRUTH_FLAGS === 'undefined' || TRUTH_FLAGS.inbox !== 'live');
+  if (ibSheetDm) { STATE.counts.inbox = d.unreadDm || 0; }
   if (typeof refreshBadges === 'function') refreshBadges();
   ibBell(d.unreadNotif || 0);
-  ibDmChip(d.unreadDm || 0);
+  if (ibSheetDm) { ibDmChip(d.unreadDm || 0); }
   ibMergeThreads(d.threads || [], false);
   ibMergeNotifs(d.notifications || []);
   ibMeetingChip(d.meetings || null);

@@ -292,7 +292,7 @@ function fillAccountSelect(sel, current, onchange){
 }
 /* TRUTH v2 runtime: one fetcher for the metric page API + the provenance chip. Pages call
    truthPage() and render metric values; the chip shows the verifier's latest verdict. */
-var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'live', catalogue: 'live', standards: 'live', tasks: 'live', inbox: 'old', hunting: 'live' };
+var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'live', catalogue: 'live', standards: 'live', tasks: 'live', inbox: 'live', hunting: 'live' };
 var TRUTH_CACHE = {};
 function truthPage(scope){
   scope = scope || {};
