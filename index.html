@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-1542';
+var BUILD = '20260901-1543';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25411,12 +25411,17 @@ var PSESS_KEY = 'm98m:psess', PIDENT_KEY = 'm98m:pident';
 function psessSave(tok, user){ try{ localStorage.setItem(PSESS_KEY, tok); localStorage.setItem(PIDENT_KEY, JSON.stringify(user||{})); }catch(e){} }
 function psessClear(){ try{ localStorage.removeItem(PSESS_KEY); localStorage.removeItem(PIDENT_KEY); }catch(e){} }
 function psessLoad(){
+  var t = null;
   try{
-    var t = localStorage.getItem(PSESS_KEY);
+    t = localStorage.getItem(PSESS_KEY);
     if(!t || !/^[0-9a-f]{64}$/.test(t)){ return null; }
     var u = JSON.parse(localStorage.getItem(PIDENT_KEY) || 'null');
-    return (u && u.email) ? { token:t, user:u } : null;
-  }catch(e){ return null; }
+    if(u && u.email){ return { token:t, user:u }; }
+  }catch(e){}
+  /* the TOKEN is the session — a corrupt/missing identity blob (found as the literal string
+     "undefined" on 1 Sept) must not throw the person to the login screen; sessionHello
+     refetches who they are from the token alone */
+  return t ? { token:t, user:{ name:'', role:'', modules:'', tools:'', status:'approved' } } : null;
 }
 function mintPortalSession(){
   if(STATE.session || !(STATE.config && STATE.config.engine_url)){ return; }

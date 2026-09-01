@@ -1304,12 +1304,17 @@ var PSESS_KEY = 'm98m:psess', PIDENT_KEY = 'm98m:pident';
 function psessSave(tok, user){ try{ localStorage.setItem(PSESS_KEY, tok); localStorage.setItem(PIDENT_KEY, JSON.stringify(user||{})); }catch(e){} }
 function psessClear(){ try{ localStorage.removeItem(PSESS_KEY); localStorage.removeItem(PIDENT_KEY); }catch(e){} }
 function psessLoad(){
+  var t = null;
   try{
-    var t = localStorage.getItem(PSESS_KEY);
+    t = localStorage.getItem(PSESS_KEY);
     if(!t || !/^[0-9a-f]{64}$/.test(t)){ return null; }
     var u = JSON.parse(localStorage.getItem(PIDENT_KEY) || 'null');
-    return (u && u.email) ? { token:t, user:u } : null;
-  }catch(e){ return null; }
+    if(u && u.email){ return { token:t, user:u }; }
+  }catch(e){}
+  /* the TOKEN is the session — a corrupt/missing identity blob (found as the literal string
+     "undefined" on 1 Sept) must not throw the person to the login screen; sessionHello
+     refetches who they are from the token alone */
+  return t ? { token:t, user:{ name:'', role:'', modules:'', tools:'', status:'approved' } } : null;
 }
 function mintPortalSession(){
   if(STATE.session || !(STATE.config && STATE.config.engine_url)){ return; }
