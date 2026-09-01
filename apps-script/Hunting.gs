@@ -178,6 +178,36 @@ function actionSubmitHunt_(payload, ctx) {
   if (huntFirstNumber_(cols[HC_SOURCE_PRICE]) === null) throw new Error('a numeric price is required: ' + HC_SOURCE_PRICE);
   cols[HC_KIND] = huntKind_(cols[HC_KIND], true);   // Seasonal | Consistent — required at submit
 
+  /* TRUTH v2 WO-11 §4: the duplicate check runs AT SUBMIT on the ali item ids of every supplier
+     link. A duplicate blocks the hunt unless Management overrides with a note — logged. */
+  (function () {
+    var dupHit = null;
+    var mine = HUNT_DUP_SUPPLIER_COLS.map(function (c) { return huntAliItemId_(huntResolveShortLink_(cols[c])); })
+      .filter(Boolean);
+    if (mine.length) {
+      readTab_('HUNTING_DB').some(function (r) {
+        var rec = huntRecord_(r);
+        for (var i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
+          var id0 = huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]);
+          if (id0 && mine.indexOf(id0) >= 0) { dupHit = rec; return true; }
+        }
+        return false;
+      });
+    }
+    if (dupHit) {
+      var note = String(payload.override_note || '').trim();
+      var mgmt = isMgmt_(ctx.user.role, ctx.ident.email);
+      if (!(note && mgmt)) {
+        throw new Error(SAFE_ERROR_PREFIX + 'duplicate product — already hunted by ' +
+          String(dupHit.hunter_email || '').split('@')[0] + ' (' + (dupHit.approval_status || HUNT_PENDING) + ', ' +
+          (String(dupHit[HC_DATE_ADDED] || '') || 'earlier') + ', ' + String(dupHit.hunt_id || '') + '). ' +
+          'Management can override with a note.');
+      }
+      logActivity_(ctx.ident.email, 'HUNT_DUP_OVERRIDE', 'all', String(dupHit.hunt_id || ''), '',
+        ('override: ' + note).slice(0, 160));
+    }
+  })();
+
   const advertising = huntAdvertisingType_(cols[HC_CPC], false);
   cols[HC_CPC] = advertising;
   cols[HC_SELECTED_BY] = String(ctx.user.name || ctx.ident.email).slice(0, 200);
@@ -521,8 +551,78 @@ function huntNormKey_(s) {
    included, so the hunter sees the history before wasting time on a dead product. */
 const HUNT_DUP_SUPPLIER_COLS = [HC_SUPPLIER_1, 'Product Link 2', 'Product Link 3'];
 function huntAliItemId_(url) {
-  const m = String(url || '').match(/\/item\/(\d{6,})\.html/) || String(url || '').match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/);
+  const s = String(url || '');
+  const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) ||
+    s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/);
   return m ? m[1] : '';
+}
+
+/* TRUTH v2 WO-11: a.aliexpress.com/_… and s.click.aliexpress short links carry no item id —
+   follow the redirect chain (≤3 hops) server-side and parse the real URL. */
+function huntResolveShortLink_(url) {
+  var u = String(url || '').trim();
+  if (!/^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(u)) return u;
+  for (var hop = 0; hop < 3; hop++) {
+    try {
+      var r = UrlFetchApp.fetch(u, { followRedirects: false, muteHttpExceptions: true });
+      var loc = (r.getAllHeaders() || {})['Location'] || (r.getAllHeaders() || {})['location'] || '';
+      if (!loc) break;
+      u = String(loc);
+      if (huntAliItemId_(u)) break;
+    } catch (e) { break; }
+  }
+  return u;
+}
+
+/* WO-11 §2-3: many links at once, each normalised to an ali_item_id and looked up across every
+   hunt record (all statuses, all links). stats:true instead scans the whole DB and reports how
+   many stored links parse — the backfill report. */
+function actionHuntAliCheck_(payload, ctx) {
+  if (payload && payload.stats) {
+    var tot = 0, ok = 0, fails = [];
+    readTab_('HUNTING_DB').forEach(function (r) {
+      var rec = huntRecord_(r);
+      HUNT_DUP_SUPPLIER_COLS.forEach(function (c) {
+        var v = String(rec[c] || '').trim();
+        if (!v) return;
+        tot++;
+        if (huntAliItemId_(v)) ok++;
+        else if (fails.length < 25) fails.push({ hunt_id: String(rec.hunt_id || ''), col: c, link: v.slice(0, 120) });
+      });
+    });
+    return { stats: true, links: tot, parsed: ok, failed: tot - ok, failures: fails };
+  }
+  var raw = String(payload && (payload.links || payload.text) || '');
+  var inputs = raw.split(/[\n,\s]+/).map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 20);
+  if (!inputs.length) throw new Error('SAY: paste at least one AliExpress link or item id');
+  var names = {};
+  readTab_('USERS').forEach(function (u) { names[normalizeEmail(u.email)] = String(u.name || u.email); });
+  var db = readTab_('HUNTING_DB').map(huntRecord_);
+  var out = inputs.map(function (input) {
+    var resolved = huntResolveShortLink_(input);
+    var id = huntAliItemId_(resolved);
+    if (!id) return { input: input, ok: false, reason: 'not an AliExpress item link', matches: [] };
+    var matches = [];
+    db.forEach(function (rec) {
+      for (var i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
+        if (huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]) === id) {
+          matches.push({
+            hunt_id: String(rec.hunt_id || ''),
+            title: String(rec[HC_TITLE] || '').slice(0, 110),
+            status_label: rec.approval_status === HUNT_APPROVED ? 'approved'
+              : rec.approval_status === HUNT_NOT_APPROVED ? 'rejected'
+              : rec.approval_status === HUNT_REVISION ? 'sent back' : 'pending',
+            hunter: names[normalizeEmail(rec.hunter_email)] || String(rec.hunter_email || ''),
+            account: String(rec[HC_ACCOUNT] || ''),
+            date: String(rec[HC_DATE_ADDED] || '') || huntCellOut_(rec.ts),
+          });
+          return;
+        }
+      }
+    });
+    return { input: input, ok: true, ali_id: id, verdict: matches.length ? 'DUPLICATE' : 'NEW', matches: matches.slice(0, 6) };
+  });
+  return { results: out };
 }
 function huntTitleTokens_(title) {
   const k = huntNormKey_(title);
@@ -916,6 +1016,7 @@ function actionHuntRecords_(payload, ctx) {
 const ACTIONS_HUNTING = {
   submitHunt: [actionSubmitHunt_, 'any'],
   huntDuplicateCheck: [actionHuntDuplicateCheck_, 'any'],
+  huntAliCheck: [actionHuntAliCheck_, 'any'],
   myHunts:    [actionMyHunts_, 'any'],
   huntQueue:  [actionHuntQueue_, 'any'],   // reviewers gated inside
   huntRecords:[actionHuntRecords_, 'any'], // read-only archive, hunt roles gated inside

@@ -585,6 +585,9 @@
        product hunter when he adds the data there"). The draft keeper holds every keystroke
        until the server CONFIRMS; a refusal refills the whole form exactly as typed — and, on a
        revision, puts the form back into revise mode for the same hunt. */
+    /* WO-11 §4: Management's override note rides the submit; the server logs it. */
+    var ovEl = document.getElementById('huOvNote');
+    if (ovEl && String(ovEl.value).trim()) { payload.override_note = String(ovEl.value).trim(); }
     var revId = HU_REVISING, revTitle = HU_REV_TITLE;
     if (revId) { payload.hunt_id = revId; huSetRevise(null); }
     huResetForm();

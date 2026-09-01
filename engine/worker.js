@@ -6177,6 +6177,31 @@ const ROUTES = {
     },
   },
 
+  /* TRUTH v2 WO-11 §3: the D1 side of the AliExpress duplicate check — supplier-sheet mirror
+     (items_facts sup links), live/ended listings that went through Go-Live, and processed orders.
+     The hunt-records side answers live from Apps Script; the page merges both. */
+  aliCheck: {
+    auth: 'any', fn: async (p, ctx) => {
+      const ids = (Array.isArray(p.ids) ? p.ids : []).map((s) => String(s).replace(/\D/g, '')).filter((s) => s.length >= 6).slice(0, 20);
+      if (!ids.length) return { results: [] };
+      const out = [];
+      for (const id of ids) {
+        const like = '%' + id + '%';
+        const sup = await ctx.env.DB.prepare(
+          'SELECT f.item_id, f.account, i.title, i.status FROM items_facts f LEFT JOIN items_api i ON i.item_id = f.item_id ' +
+          'WHERE f.sup1_link LIKE ?1 OR f.sup2_link LIKE ?1 OR f.sup3_link LIKE ?1 LIMIT 6'
+        ).bind(like).all().catch(() => ({ results: [] }));
+        const gl = await ctx.env.DB.prepare(
+          'SELECT item_id, account, title, live_at FROM golive WHERE ali_link LIKE ?1 LIMIT 4'
+        ).bind(like).all().catch(() => ({ results: [] }));
+        out.push({ ali_id: id,
+          listings: (sup.results || []).map((r) => ({ item_id: r.item_id, account: r.account, title: String(r.title || '').slice(0, 110), status: r.status || '' })),
+          golive: (gl.results || []).map((r) => ({ item_id: r.item_id, account: r.account, title: String(r.title || '').slice(0, 110), live_at: r.live_at })) });
+      }
+      return { results: out };
+    },
+  },
+
   /* TRUTH v2 WO-09: the keyword-doc queue. Zain sees his own once opens_at passes; Management
      sees everything including Scheduled. All timestamps UTC ISO from D1 itself. */
   keywordBoard: {
