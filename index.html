@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-1537';
+var BUILD = '20260901-1542';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25451,9 +25451,21 @@ function boot(){
     var cachedCfg = JSON.parse(localStorage.getItem('m98m:cfg') || 'null');
     if(cachedCfg && cachedCfg.engine_url && !STATE.config){ STATE.config = cachedCfg; }
   }catch(e){}
-  api('getPublicConfig').then(function(cfg){
+  /* Engine first for the public config: the worker is stable infrastructure and answers it
+     without auth; the sheet front door is the fallback. (1 Sept: an AS burst-throttle here
+     dead-ended boots at "Backend not reachable" while a valid portal session sat in storage.) */
+  engineCall('getPublicConfig', {}, 6000).catch(function(){ return api('getPublicConfig'); }).then(function(cfg){
     STATE.config=cfg;
     try{ localStorage.setItem('m98m:cfg', JSON.stringify(cfg)); }catch(e){}
+    bootSignIn(cfg);
+  }).catch(function(){
+    /* Config fetch failed everywhere — with a cached copy the app must still restore the
+       portal session; the dead-end text is only for a truly blank first visit. */
+    if(STATE.config && STATE.config.oauth_client_id){ bootSignIn(STATE.config); return; }
+    $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.';
+  });
+}
+function bootSignIn(cfg){
     if(!cfg.oauth_client_id){ $('loginStatus').className='auth-status info'; $('loginStatus').textContent='Sign-in is being switched on by setup — almost there.'; return; }
     initGsi();
     /* Portal session first: instant app on every reload and every new tab. The Engine re-checks
@@ -25502,12 +25514,6 @@ function boot(){
          no do they see the sign-in button. */
       trySilentSignIn();
     }
-  }).catch(function(e){
-    /* Config fetch failed everywhere — if a cached copy exists, sign-in must still work: the
-       Engine answers whoami/sessionMint on its own now. Dead-end text only with NO config at all. */
-    if(STATE.config && STATE.config.oauth_client_id){ initGsi(); trySilentSignIn(); return; }
-    $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.';
-  });
 }
 window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };
 </script>
