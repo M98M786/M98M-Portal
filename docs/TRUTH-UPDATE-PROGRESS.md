@@ -148,3 +148,21 @@ Non-bugs confirmed: "Hasib" twice in staff pickers = his two real accounts; feed
 Truth Check during the pass: **59 PASS · 0 FAIL · 15 STALE · 0 UNVERIFIED**; MULTI_RUNNING
 converged 391 → 25 → **3** as ad_status stamping completed. Deploys: worker 15:55 UTC,
 Pages builds -1532…-1604.
+## 1 Sept ~21:30 UTC — evening-peak slowness (owner report) — root-caused and fixed
+The register was recomputed from scratch for EVERY viewer of every page (no server cache on the
+new truth reads), tier-1 ran the fleet ads pass six times per cycle, pageMetrics scanned the
+money mirror twice, and the evening's stream of ~10 builds force-reloaded every signed-in staff
+member repeatedly (typing-guarded, but disruptive — "the portal keeps restarting").
+Fixes (worker deploy 21:32 UTC, one final frontend build):
+- Route-level response cache for the shared truth reads (30–45 s, ROLE-keyed so a cached answer
+  can never cross a role gate; per-user feeds stay uncached).
+- metricAds: one memoised fleet pass with per-account splits (tier-1 reuses it).
+- pageMetrics: one sheet_rows scan (totals derived from the per-account pass).
+- signalReeval: 3 batched queries instead of 200 sequential.
+Measured on the live portal at peak: pageMetrics 3.7 s → 1.45 s cold → 0.19 s cached;
+adsTruth 3.0 s → 0.16 s; overview paints in 0.3 s, dispatch/kpis 1.5 s, Live listings 0.6 s.
+Truth Check after the refactor: 59 PASS · 0 FAIL. Standing rule added: batch changes, push
+once, prefer worker-only deploys during office hours (no version.txt bump = no forced reload).
+Known remaining: Management desk "Waiting on you" ~11 s at peak — the four Apps Script feeds
+(approvals, hunts, counts, desk rows) are the sheet backend's latency, not the engine's;
+candidate improvement queued: paint each feed as it lands.
