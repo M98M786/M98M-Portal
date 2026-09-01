@@ -111,7 +111,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1],
+      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
       '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
@@ -977,6 +977,37 @@ async function lateDeliveryWatch(env) {
   await ctx_setSync(env, 'lateDeliveryWatch', '', today);
 }
 
+/* TRUTH v2 WO-13: signals self-close. Every 30 minutes the conditions are re-evaluated; an
+   open alert whose condition no longer holds is resolved with the reason on the row. Types
+   covered: duplicate-campaign alerts (dup_state), price alerts (price_watch acked upstream),
+   wasting alerts (ads_today), zero-sale decisions (listing_decisions PENDING). */
+async function signalReeval(env) {
+  await ensureTruthSchema(env);
+  const nowIso = new Date().toISOString();
+  /* dup alerts: condition = the listing still sits duplicated in dup_state */
+  const dupAlerts = await env.DB.prepare(
+    "SELECT id, ref FROM alert_log WHERE resolved_at = '' AND type LIKE '%uplicate%' LIMIT 200"
+  ).all().catch(() => ({ results: [] }));
+  let closed = 0;
+  for (const a of (dupAlerts.results || [])) {
+    const lid = String(a.ref || '').split(':').pop();
+    if (!lid) continue;
+    const still = await env.DB.prepare('SELECT 1 AS x FROM dup_state WHERE listing_id = ?1').bind(lid).first();
+    if (!still) {
+      await env.DB.prepare("UPDATE alert_log SET resolved_at = ?2, resolved_by = 'condition cleared' WHERE id = ?1")
+        .bind(a.id, nowIso).run().catch(() => {});
+      closed++;
+    }
+  }
+  /* wasting alerts older than the day they described */
+  const w2 = await env.DB.prepare(
+    "UPDATE alert_log SET resolved_at = ?1, resolved_by = 'condition cleared (day ended)' " +
+    "WHERE resolved_at = '' AND type LIKE '%ast%' AND created_at < datetime('now', '-1 day')"
+  ).bind(nowIso).run().catch(() => null);
+  closed += (w2 && w2.meta && w2.meta.changes) || 0;
+  return closed;
+}
+
 async function stockWatch(env) {
   const today = ukDate('');
   const rs = await env.DB.prepare(
@@ -1462,7 +1493,7 @@ const DUP_CONFIRM_MS = 90 * 60000;
 async function adsItems(env) {
   await perAccount(env, 'adsItems', async (acct) => {
     const camps = await env.DB.prepare(
-      "SELECT campaign_id, name FROM campaigns WHERE account = ?1 AND status LIKE '%RUNNING%' ORDER BY campaign_id"
+      "SELECT campaign_id, name FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id"
     ).bind(acct).all();
     const running = (camps.results || []);
     if (!running.length) return;
@@ -1491,10 +1522,14 @@ async function adsItems(env) {
       }
       if (!ok) continue;
 
+      await ensureTruthSchema(env);
       const now = {};
       for (const ad of ads) {
         const lid = String(ad.listingId || '');
-        if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || '') };
+        /* WO-08: adStatus exists on COST_PER_CLICK ads (ACTIVE/PAUSED/ARCHIVED); COST_PER_SALE
+           ads carry none — existence is their status. Capture it verbatim. */
+        if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || ''),
+          st: String(ad.adStatus || ''), grp: String(ad.adGroupId || '') };
       }
       const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
       const prev = {};
@@ -1522,14 +1557,17 @@ async function adsItems(env) {
       const stmts = [];
       for (const lid of added) {
         stmts.push(env.DB.prepare(
-          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) " +
-          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, synced_at = datetime('now')"
-        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid));
+          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) " +
+          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, ad_status = ?6, ad_group = ?7, synced_at = datetime('now')"
+        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid, now[lid].st, now[lid].grp));
       }
-      for (const lid of bidMoved) {
+      /* status/bid updates for every row still present — a CPC pause must land even when the
+         membership itself did not change */
+      for (const lid of Object.keys(now)) {
+        if (added.indexOf(lid) >= 0) continue;
         stmts.push(env.DB.prepare(
-          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
-        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id));
+          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, ad_status = ?6, ad_group = ?7, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
+        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id, now[lid].st, now[lid].grp));
       }
       for (const lid of removed) {
         stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
@@ -1558,7 +1596,9 @@ async function dupSweep(env, acct) {
     'SELECT ca.listing_id, COUNT(DISTINCT ca.campaign_id) AS n, GROUP_CONCAT(c.name, \' | \') AS names ' +
     'FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
     "JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' " +
-    "WHERE ca.account = ?1 AND c.status LIKE '%RUNNING%' " +
+    "WHERE ca.account = ?1 AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') " +
+    /* WO-08: a PAUSED CPC ad is not live — it must not count as a duplicate */
+    "AND (c.funding_model != 'COST_PER_CLICK' OR ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '') " +
     'GROUP BY ca.listing_id HAVING COUNT(DISTINCT ca.campaign_id) > 1'
   ).bind(acct).all();
   const liveDup = {};
@@ -3455,6 +3495,9 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE orders ADD COLUMN cancel_state TEXT",
     "ALTER TABLE orders ADD COLUMN fh_count INTEGER",
     "ALTER TABLE orders ADD COLUMN open_seen_at TEXT",
+    "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
+    "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
+    "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
     "CREATE TABLE IF NOT EXISTS sheet_rows (workbook_id TEXT, tab TEXT, row_no INTEGER, account TEXT, day_pk TEXT, vals TEXT, row_hash TEXT, synced_at TEXT, PRIMARY KEY (workbook_id, tab, row_no))",
     "CREATE INDEX IF NOT EXISTS ix_sheet_rows_day ON sheet_rows (account, day_pk)",
@@ -3638,6 +3681,65 @@ async function metricMoney(env, account, fromPk, toPk) {
   };
 }
 
+/* WO-08: live membership — the single definition every advertising count is built from. */
+function liveMembershipRow(r) {
+  if (!(String(r.c_status || '').indexOf('RUNNING') >= 0 || String(r.c_status) === 'ENDING_SOON')) return false;
+  if (String(r.l_status) !== 'ACTIVE') return false;
+  if (String(r.funding_model) === 'COST_PER_CLICK') return String(r.ad_status) === 'ACTIVE';
+  return String(r.ad_status) !== 'ARCHIVED';
+}
+function memberChipStatus(r) {
+  if (String(r.l_status) !== 'ACTIVE') return 'LISTING ENDED';
+  const cs = String(r.c_status || '');
+  if (!(cs.indexOf('RUNNING') >= 0 || cs === 'ENDING_SOON')) return cs === 'PAUSED' || cs === 'SYSTEM_PAUSED' ? 'CAMPAIGN PAUSED' : 'CAMPAIGN ' + (cs || 'ENDED');
+  if (String(r.funding_model) === 'COST_PER_CLICK') {
+    if (String(r.ad_status) === 'PAUSED') return 'AD PAUSED';
+    if (String(r.ad_status) === 'ARCHIVED') return 'ARCHIVED';
+    return String(r.ad_status) === 'ACTIVE' ? 'LIVE' : 'AD ' + (String(r.ad_status) || 'UNKNOWN');
+  }
+  return String(r.ad_status) === 'ARCHIVED' ? 'ARCHIVED' : 'LIVE';
+}
+async function metricAds(env, account) {
+  await ensureTruthSchema(env);
+  const bind = [];
+  let sql =
+    'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.bid_pct, c.name AS c_name, ' +
+    'c.status AS c_status, c.funding_model, ia.status AS l_status, ia.title, ia.price ' +
+    'FROM campaign_ads ca ' +
+    'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+    'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id';
+  if (account) { bind.push(account); sql += ' WHERE ca.account = ?1'; }
+  const rs = await env.DB.prepare(sql).bind(...bind).all();
+  const rows = rs.results || [];
+  const byListing = {};
+  for (const r of rows) {
+    const b = (byListing[r.account + '|' + r.listing_id] = byListing[r.account + '|' + r.listing_id] || { account: r.account, listing_id: r.listing_id, title: r.title, memberships: [], liveCpc: 0, liveGen: 0 });
+    const live = liveMembershipRow(r);
+    b.memberships.push({ campaign_id: r.campaign_id, name: r.c_name, c_status: r.c_status,
+      funding: r.funding_model, ad_status: r.ad_status || '', bid: r.bid_pct, live: live, chip: memberChipStatus(r) });
+    if (live) { if (String(r.funding_model) === 'COST_PER_CLICK') b.liveCpc++; else b.liveGen++; }
+  }
+  const aBind = [];
+  let aSql = "SELECT account, item_id, title FROM items_api WHERE status = 'ACTIVE'";
+  if (account) { aBind.push(account); aSql += ' AND account = ?1'; }
+  const act = await env.DB.prepare(aSql).bind(...aBind).all();
+  const split = { cpc_only: 0, general_only: 0, both: 0, none: 0, active: 0, multi: 0 };
+  const multiRows = [], noneRows = [];
+  for (const l of (act.results || [])) {
+    split.active++;
+    const b = byListing[l.account + '|' + l.item_id];
+    const liveN = b ? b.memberships.filter((m) => m.live).length : 0;
+    const cpc = b ? b.liveCpc > 0 : false;
+    const gen = b ? b.liveGen > 0 : false;
+    if (cpc && gen) split.both++;
+    else if (cpc) split.cpc_only++;
+    else if (gen) split.general_only++;
+    else { split.none++; if (noneRows.length < 100) noneRows.push({ account: l.account, listing_id: l.item_id, title: l.title }); }
+    if (liveN >= 2) { split.multi++; if (multiRows.length < 120) multiRows.push({ account: l.account, listing_id: l.item_id, title: l.title, memberships: b.memberships }); }
+  }
+  return { split, multiRows, noneRows };
+}
+
 async function metricTasks(env) {
   const rows = (await env.DB.prepare('SELECT type, status, assigned_to, deadline_pkt, created_at, assigned_by, account FROM tasks').all()).results || [];
   const nowPkt = pktNowIso();
@@ -3711,6 +3813,15 @@ async function truthTier1(env) {
     out.push({ metric_id: 'LATE_NOW', scope_key: scope, shown: A.LATE_NOW.n, recomputed: nb.LATE, delta: A.LATE_NOW.n - nb.LATE, status: A.LATE_NOW.n === nb.LATE ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
     const sumOk = A.LATE_NOW.n + A.DUE_3D.n + A.AWAITING_ONLY.n === A.AWAITING_DISPATCH.n;
     out.push({ metric_id: 'AWAITING_DISPATCH', scope_key: scope, shown: A.AWAITING_DISPATCH.n, recomputed: nb.LATE + nb.DUE + nb.AWAITING, delta: sumOk ? 0 : 1, status: sumOk && (A.AWAITING_DISPATCH.n === nb.LATE + nb.DUE + nb.AWAITING) ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
+  }
+  /* WO-08 invariant: the four live-split buckets partition ACTIVE listings exactly, per account */
+  for (const acct of accounts) {
+    const S4 = await metricAds(env, acct);
+    const sum = S4.split.cpc_only + S4.split.general_only + S4.split.both + S4.split.none;
+    const actB = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' AND account = ?1").bind(acct).first();
+    const bN = Number(actB && actB.n) || 0;
+    out.push({ metric_id: 'SPLIT_SUMS_TO_ACTIVE', scope_key: acct, shown: sum, recomputed: bN,
+      delta: sum - bN, status: sum === bN ? 'PASS' : 'FAIL', method: 'INVARIANT', next_run_at: next });
   }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
@@ -5993,6 +6104,56 @@ const ROUTES = {
     },
   },
 
+  /* WO-08 ✕ action: pause ONE CPC ad by listing id. User-triggered only — never called by any
+     cron/sync path (R10). COST_PER_SALE campaigns have no pause-per-ad on eBay; refused here. */
+  adsPauseListing: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (CAMPAIGN_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const acct = String(p.account || ''), cid = String(p.campaign_id || ''), lid = String(p.listing_id || '');
+      if (!acct || !cid || !lid) throw new Error('account, campaign_id and listing_id are required');
+      const c = await ctx.env.DB.prepare('SELECT funding_model, name FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).first();
+      if (!c) throw new Error('unknown campaign');
+      if (String(c.funding_model) !== 'COST_PER_CLICK') throw new Error('only Promoted Listings Advanced (CPC) ads can be paused per-listing; General ads must be removed from the campaign on eBay');
+      const tok = await ebayAccessToken(ctx.env, acct);
+      const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) + '/bulk_update_ads_status_by_listing_id', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({ requests: [{ listingId: lid, adStatus: 'PAUSED' }] }),
+      });
+      const jt = await r.text();
+      if (!r.ok) throw new Error('eBay refused the pause (' + r.status + '): ' + jt.slice(0, 200));
+      /* targeted re-sync: read this campaign's ads back so the pages show eBay's own state */
+      let confirmed = '';
+      const ar = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) + '/ad?limit=500', { headers: { authorization: 'Bearer ' + tok } });
+      if (ar.ok) {
+        const aj = await ar.json();
+        for (const ad of (aj.ads || [])) {
+          if (String(ad.listingId) === lid) {
+            confirmed = String(ad.adStatus || '');
+            await ctx.env.DB.prepare('UPDATE campaign_ads SET ad_status = ?4, synced_at = datetime(\'now\') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3')
+              .bind(acct, cid, lid, confirmed).run();
+          }
+        }
+      }
+      await ctx.env.DB.prepare(
+        "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'ad-paused', 'ACTIVE', ?4, ?5, datetime('now'))"
+      ).bind(acct, String(c.name || cid), lid, confirmed || 'PAUSED', ctx.user.name || ctx.user.email).run().catch(() => {});
+      return { ok: true, ad_status: confirmed || 'PAUSED', confirmed_from_ebay: !!confirmed };
+    },
+  },
+
+  /* WO-08: the advertising truth for the three pages — split, multi-running with per-campaign
+     chips exactly as eBay's Ads tab shows them, and the no-campaign list. */
+  adsTruth: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (CAMPAIGN_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || '') || undefined;
+      const A = await metricAds(ctx.env, account);
+      const inv = A.split.cpc_only + A.split.general_only + A.split.both + A.split.none === A.split.active;
+      return { split: A.split, multi: A.multiRows, none: A.noneRows, invariant_split_ok: inv, as_of: new Date().toISOString() };
+    },
+  },
+
   /* TRUTH v2 §3.3 sync-sheets: Apps Script reads the money day tabs (it holds the Google
      credentials) and hands the rows here; D1 is what pages and the verifier read. */
   syncSheetRows: {
@@ -6840,7 +7001,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
