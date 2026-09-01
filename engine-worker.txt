@@ -5857,6 +5857,37 @@ const ROUTES = {
     },
   },
 
+  /* TRUTH v2: per-order truth fetch for the stragglers the window walks miss — old open rows
+     with no payment truth. Five existed on 1 Sept; each gets one getOrder call. */
+  orderTruthSweep: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rs = await ctx.env.DB.prepare(
+        "SELECT order_id, account FROM orders WHERE status IN ('NOT_STARTED','IN_PROGRESS') " +
+        "AND (payment_status IS NULL OR payment_status = '') LIMIT 40"
+      ).all();
+      const rows = rs.results || [];
+      let fixed = 0;
+      const toks = {};
+      for (const r of rows) {
+        try {
+          toks[r.account] = toks[r.account] || await ebayAccessToken(ctx.env, r.account);
+          const resp = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(r.order_id),
+            { headers: { authorization: 'Bearer ' + toks[r.account] } });
+          if (!resp.ok) continue;
+          const o = await resp.json();
+          const fhN = Array.isArray(o.fulfillmentHrefs) ? o.fulfillmentHrefs.length : 0;
+          await ctx.env.DB.prepare(
+            'UPDATE orders SET payment_status = ?2, cancel_state = ?3, fh_count = ?4, status = ?5 WHERE order_id = ?1'
+          ).bind(r.order_id, String(o.orderPaymentStatus || ''), String(((o.cancelStatus || {}).cancelState) || ''),
+            fhN, String(((o.cancelStatus || {}).cancelState) === 'CANCELED') === 'true' ? 'CANCELLED' : String(o.orderFulfillmentStatus || '')).run();
+          fixed++;
+        } catch (e) { /* next */ }
+      }
+      return { candidates: rows.length, fixed };
+    },
+  },
+
   /* TRUTH v2 §3.3 sync-sheets: Apps Script reads the money day tabs (it holds the Google
      credentials) and hands the rows here; D1 is what pages and the verifier read. */
   syncSheetRows: {
