@@ -6207,6 +6207,22 @@ const ROUTES = {
       const M = await metricMoney(ctx.env, account, from, to);
       const MA = await metricMoneyByAccount(ctx.env, from, to);
       const T = await metricTasks(ctx.env);
+      const AD = await metricAds(ctx.env, account);
+      /* WO-03 step 7 — the leaks series: ad spend per day (ads_daily, both families) and refunds,
+         the refund shown on the ORDER'S SALE day (no refund date is stored — labeled on the page). */
+      const leakBind = [from, to]; let leakAcc = '';
+      if (account) { leakBind.push(account); leakAcc = ' AND account = ?3'; }
+      const adsD = await ctx.env.DB.prepare(
+        'SELECT date AS d, ROUND(SUM(spend + cpc_spend),2) AS sp FROM ads_daily WHERE date >= ?1 AND date <= ?2' + leakAcc + ' GROUP BY date'
+      ).bind(...leakBind).all().catch(() => ({ results: [] }));
+      const refD = await ctx.env.DB.prepare(
+        "SELECT substr(datetime(created_at, '+5 hours'),1,10) AS d, ROUND(SUM(refunded),2) AS rf FROM orders WHERE refunded > 0 " +
+        "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2" + leakAcc + ' GROUP BY d'
+      ).bind(...leakBind).all().catch(() => ({ results: [] }));
+      const leakMap = {};
+      for (const r of (adsD.results || [])) { (leakMap[r.d] = leakMap[r.d] || { day: r.d, ads: 0, refunds: 0 }).ads = Number(r.sp) || 0; }
+      for (const r of (refD.results || [])) { (leakMap[r.d] = leakMap[r.d] || { day: r.d, ads: 0, refunds: 0 }).refunds = Number(r.rf) || 0; }
+      const leaks = Object.keys(leakMap).sort().map((k) => leakMap[k]);
       const soldApi = await ctx.env.DB.prepare(
         "SELECT account, ROUND(SUM(sold),2) AS sold, COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' " +
         "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2 GROUP BY account"
@@ -6236,6 +6252,8 @@ const ROUTES = {
         ACTUAL_PROFIT: wrap('ACTUAL_PROFIT', M.ACTUAL_PROFIT, '£', 'sheet'),
         ALI_COST: wrap('ALI_COST', M.ALI_COST, '£', 'sheet'),
         MARGIN: wrap('MARGIN', M.MARGIN, '%', 'ratio'),
+        ADS_SPLIT: wrap('ADS_SPLIT', AD.split, 'counts', 'campaigns'),
+        LEAKS_DAILY: wrap('LEAKS_DAILY', leaks, '£/day', 'ads_daily+orders.refunded'),
         ROWS_COVERAGE: wrap('ROWS_COVERAGE', M.ROWS_COVERAGE, 'rows/orders', 'sheet+orders'),
         WAITING_ON_ME: wrap('WAITING_ON_ME', T.WAITING_ON_ME, 'count', 'tasks'),
         DEPT: wrap('DEPT_OPEN', T.DEPT, 'map', 'tasks'),

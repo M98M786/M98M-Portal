@@ -550,7 +550,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-0051';
+var BUILD = '20260901-0053';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -17212,6 +17212,25 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
         mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
         mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + M.DUE_3D.value + ' · awaiting ' + M.AWAITING_ONLY.value + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
+      /* WO-03 steps 7–8: campaign gaps + the leaks strip, from the same register answer */
+      var sp = M.ADS_SPLIT && M.ADS_SPLIT.value;
+      if (sp) {
+        box.innerHTML += mkT('CAMPAIGN GAPS', String(sp.none), 'no campaign · both-live ' + sp.both + ' · multi ' + sp.multi + ' — Wrong advertising has the rows', sp.none || sp.both || sp.multi ? 'warn' : 'ok');
+      }
+      var lk = (M.LEAKS_DAILY && M.LEAKS_DAILY.value) || [];
+      if (lk.length) {
+        var aSum = 0, rSum = 0, mx = 1;
+        lk.forEach(function (d2) { aSum += d2.ads; rSum += d2.refunds; mx = Math.max(mx, d2.ads + d2.refunds); });
+        var bars = lk.map(function (d2, i) {
+          var X = 8 + i * (804 / lk.length), bw2 = Math.max(2, 804 / lk.length - 2);
+          var hA = 54 * (d2.ads / mx), hR = 54 * (d2.refunds / mx);
+          return '<rect x="' + X.toFixed(1) + '" y="' + (62 - hA).toFixed(1) + '" width="' + bw2.toFixed(1) + '" height="' + hA.toFixed(1) + '" fill="var(--warn)" opacity=".75"><title>' + d2.day + ' — ads £' + d2.ads.toFixed(2) + '</title></rect>' +
+            '<rect x="' + X.toFixed(1) + '" y="' + (62 - hA - hR).toFixed(1) + '" width="' + bw2.toFixed(1) + '" height="' + hR.toFixed(1) + '" fill="var(--bad)" opacity=".8"><title>' + d2.day + ' — refunds £' + d2.refunds.toFixed(2) + '</title></rect>';
+        }).join('');
+        box.innerHTML += '<div class="kpi" style="grid-column:1/-1;--tone:var(--bad)"><div class="kpi-l">LEAKS — ADS SPEND + REFUNDS PER DAY</div>' +
+          '<svg viewBox="0 0 820 66" style="width:100%;height:52px;margin-top:6px">' + bars + '</svg>' +
+          '<div class="kpi-s">range: ads £' + aSum.toFixed(2) + ' (ads_daily, both families) · refunds £' + rSum.toFixed(2) + ' (shown on the order\u2019s sale day — eBay stores no refund date here)</div></div>';
+      }
       return;
     }
     /* old path renders until the register answers */
