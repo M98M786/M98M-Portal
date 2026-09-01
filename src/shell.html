@@ -1014,10 +1014,12 @@ VIEWS.home = {
           gbp(m.ACTUAL_PROFIT.value)+' actual · VAT '+gbp(m.VAT_TO_HMRC.value)+' · rows '+(cov.rows||0)+' of '+(cov.orders||0)+' '+mChip(m.ACTUAL_PROFIT),
           'dashboard', 'gold-a'); paint();
       }).catch(function(){ slots.money=tile('Yesterday','—','the books mirror did not answer','dashboard',''); paint(); });
-      api('dispatchLive',{}).then(function(d){
-        var n=Number(d&&d.late_count)||0;
-        slots.late=tile('Late right now', String(n), n?gbp(d.late_value)+' of orders past eBay\u2019s deadline':'nothing past its deadline', 'dispatch', n?'bad':'ok'); paint();
-      }).catch(function(){ slots.late=tile('Late right now','—','the dispatch feed did not answer','dispatch',''); paint(); });
+      /* TRUTH v2 WO-07: Late right now = LATE_NOW from eBay's own open set — the same metric
+         Dispatch and Business overview render (HOME_EQUALS_OVERVIEW). */
+      truthPage({}).then(function(d){
+        var L=d.metrics.LATE_NOW.value;
+        slots.late=tile('Late right now', String(L.n), (L.n?gbp(L.gbp)+' of orders past eBay\u2019s own ship-by':'nothing past its ship-by')+' '+mChip(d.metrics.LATE_NOW), 'dispatch', L.n?'bad':'ok'); paint();
+      }).catch(function(){ slots.late=tile('Late right now','—','the register did not answer','dispatch',''); paint(); });
       api('csDesk',{}).then(function(d){
         var ours=0; ((d&&d.open)||[]).forEach(function(c){ if(c.our_move){ ours++; } });
         slots.cs=tile('Customer Service needs our reply', String(ours), ((d&&d.open)||[]).length-ours+' more waiting on the buyer or the post', 'csDesk', ours?'warn':'ok'); paint();
