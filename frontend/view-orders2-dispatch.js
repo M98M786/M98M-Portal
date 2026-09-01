@@ -96,7 +96,9 @@
   function d2Load() {
     var box = $('d2Body');
     if (!box) { return; }
-    if (!D2.data) { box.innerHTML = '<div class="spinner"></div>'; }
+    /* re-entry: show what we already know THIS second, then refresh behind — an empty screen
+       while a refetch runs read as broken (found in the 1 Sept click-through) */
+    if (D2.data) { d2Paint(); } else { box.innerHTML = '<div class="spinner"></div>'; }
     truthPage({}).then(function (d) {
       D2.data = d;
       d2Paint();

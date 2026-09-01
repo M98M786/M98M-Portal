@@ -458,13 +458,23 @@ function engineCall(action, payload, timeoutMs){
     .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; },
           function(e){ clearTimeout(t); throw e; });
 }
-function engineApi(action, payload){
+function engineApi(action, payload, engineOnly){
   var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
-  return engineCall(action, payload, isWrite ? 15000 : 2500)
+  /* Engine-ONLY actions (the ENGINE_ACTIONS list) get a patient first try and NEVER detour
+     through Apps Script: AS cannot know them, and asking it costs 10–20 s of "unknown action"
+     before the engine got its real retry. That detour is what made the truth pages crawl. */
+  return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 15000 : 2500))
     .catch(function(e){
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
         throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
+      }
+      if(engineOnly){
+        return engineCall(action, payload, 20000).catch(function(e2){
+          throw new Error(e2 && e2.name === 'AbortError'
+            ? 'the Engine is taking long on this screen — wait a moment and press refresh'
+            : (e2 && e2.message) || 'request failed');
+        });
       }
       /* A slow read is NOT an unknown action: heavy screens (item P&L / VAT, health with cold
          caches) can pass 2.5s, and the AS fallback would answer 'unknown action' for an
@@ -493,7 +503,7 @@ function engineApi(action, payload){
 
 function api(action, payload){
   if((STATE.idToken || STATE.session) && ENGINE_ACTIONS.indexOf(action)>=0){
-    if(STATE.config && STATE.config.engine_url){ return engineApi(action, payload); }
+    if(STATE.config && STATE.config.engine_url){ return engineApi(action, payload, true); }
     /* R6c (Hasib's "unknown action" on the CS desk): an ENGINE action must NEVER fall through
        to the sheet backend — on a cold tab the config (which carries engine_url) can lag the
        first screen by a second, and the mis-routed call died with a nonsense error. Wait for
@@ -502,7 +512,7 @@ function api(action, payload){
       var tries = 0;
       var t = setInterval(function(){
         if(STATE.config && STATE.config.engine_url){
-          clearInterval(t); resolve(engineApi(action, payload));
+          clearInterval(t); resolve(engineApi(action, payload, true));
         } else if(++tries > 60){
           clearInterval(t); reject(new Error('the portal is still connecting — give it a second and press Refresh'));
         }
