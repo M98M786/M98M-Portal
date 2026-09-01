@@ -3443,7 +3443,7 @@ async function openSync(env) {
     }
     if (href) throw new Error(acct + ' open pull page cap');          // incomplete: stamp must not land
     for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-    await env.HOT.put('openstamp:' + acct, stamp, { expirationTtl: 86400 });
+    await ctx_setSync(env, 'openStamp', acct, stamp);   // D1, transactional with the rows — KV caches nulls for 60s and lied to the first read
   });
 }
 
@@ -3538,7 +3538,8 @@ async function metricDispatch(env, account) {
   /* the open buckets count only rows in each account's latest COMPLETE eBay open pull */
   const stamps = {};
   const accs = account ? [account] : await apiAccounts(env);
-  for (const a of accs) stamps[a] = await env.HOT.get('openstamp:' + a);
+  const stRs = await env.DB.prepare("SELECT account, cursor FROM sync_state WHERE job = 'openStamp'").all().catch(() => ({ results: [] }));
+  for (const r of (stRs.results || [])) stamps[r.account] = r.cursor;
   const rows = all.filter((o) => {
     const st = stamps[o.account];
     return st && o.open_seen_at === st;
@@ -3664,7 +3665,8 @@ async function truthTier1(env) {
     const nb = { LATE: 0, DUE: 0, AWAITING: 0 };
     const nowMs = Date.now();
     const bStamps = {};
-    for (const a2 of (acct ? [acct] : await apiAccounts(env))) bStamps[a2] = await env.HOT.get('openstamp:' + a2);
+    const bRs = await env.DB.prepare("SELECT account, cursor FROM sync_state WHERE job = 'openStamp'").all().catch(() => ({ results: [] }));
+    for (const r2 of (bRs.results || [])) bStamps[r2.account] = r2.cursor;
     for (const o of raw) {
       if (!bStamps[o.account] || o.open_seen_at !== bStamps[o.account]) continue;
       const s = truthClassifyB(o, nowMs); if (nb[s] !== undefined) nb[s]++;
