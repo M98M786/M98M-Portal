@@ -26,7 +26,11 @@ Nothing is done until ticked here with evidence (R13).
 - [x] WO-05: Account report + Account KPIs merged (view-kpis2) — all accounts incl Sir Hasib, 7/30/90d, tiles with chips, Sold-vs-Actual daily chart on Pakistan days, day table, old route redirects
 - [x] Home Yesterday = SOLD_SHEET/ACTUAL_PROFIT/VAT + rows coverage
 - **EVIDENCE: Truth Check 17 PASS · 0 FAIL after tier-3; merged KPIs page live (30d: books £101,465.78 · actual £15,409.21 · VAT £4,548.25 · 2,566 rows · chips ✓); Sept MTD renders £0.00 books / £789.36 eBay / rows 0 of 82 — coverage replaces every 'behind' banner. Penny audit runs nightly 03:00 PKT; per-row T=R−S checks pass on every mirrored day so far. money flag: LIVE (owner's standing order).**
-## Phase 3 — Orders — IN PROGRESS
-## Phase 4 — Advertising — NOT STARTED
+## Phase 3 — Orders ✅ COMPLETE 1 Sept 2026, 06:0x PKT
+- [x] WO-07: Dispatch rebuilt on the truth model (view-orders2-dispatch): 7 state tabs = the metrics' own rows, hero tiles, state reasons, eBay re-pull button, zero workbook references
+- [x] Home 'Late right now' + overview open-orders read LATE_NOW/AWAITING_DISPATCH — same function as Dispatch (HOME_EQUALS_OVERVIEW by construction)
+- [x] openSync every 5 min (complete-run guarded, D1-stamped); orderSync/orderBackfill carry payment truth; the 5 ghosts fetched per-order — eBay shows them closed, they left 'late' entirely
+- **EVIDENCE: Dispatch shows LATE 0 (£0.00) · DUE 1 · AWAITING 586 · OPEN 587 (0+1+586=587 invariant ✓); old page claimed 'late 5 · £155.13' for 39–93-day-old closed orders. Truth Check PASS on LATE_NOW/AWAITING_DISPATCH for every account. Screenshot taken. orders flag: LIVE.**
+## Phase 4 — Advertising — IN PROGRESS
 ## Phase 5 — Workflow & structure — NOT STARTED
 ## Phase 6 — Cleanup — NOT STARTED
