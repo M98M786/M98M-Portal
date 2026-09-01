@@ -23,7 +23,28 @@
     '.td-ap .m{font-size:11.5px;color:var(--text-3);font-weight:600}' +
     '.td-ap textarea{width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:12px;min-height:38px}' +
     '.td-ap .btns{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}' +
-    '.td-kind{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;padding:2px 8px;border-radius:8px;background:var(--blue-soft);color:var(--blue-2)}'
+    '.td-kind{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;padding:2px 8px;border-radius:8px;background:var(--blue-soft);color:var(--blue-2)}' +
+    /* ported from view-mgmtDesk.js / view-deptBoard.js at their WO-14 deletion */
+    '.md-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}' +
+    '.md-q{border:1px solid var(--gold-line);border-radius:13px;padding:14px 16px;background:var(--panel-2);cursor:pointer;transition:border-color .15s}' +
+    '.md-q:hover{border-color:var(--gold-line-hi)}' +
+    '.md-q .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.md-q b{display:block;font-size:26px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.md-q .s{font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:3px}' +
+    '.md-q.hot{border-color:rgba(240,96,90,.5)}.md-q.hot b{color:var(--bad)}' +
+    '.md-q.warm b{color:var(--warn)}.md-q.cool b{color:var(--ok)}' +
+    '.db-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}' +
+    '.db-card{border:1px solid var(--gold-line);border-radius:13px;padding:14px 16px;background:var(--panel-2)}' +
+    '.db-card h3{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:8px}' +
+    '.db-n{font-size:24px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums}' +
+    '.db-sub{font-size:11px;color:var(--text-3);font-weight:700;margin-top:2px}' +
+    '.db-bad{color:var(--bad)}' +
+    '.db-row{display:flex;gap:10px;align-items:baseline;font-size:12px;font-weight:700;padding:4px 0}' +
+    '.db-row .k{color:var(--text-3);min-width:96px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}' +
+    '.db-hist{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--gold-line);font-size:12.5px}' +
+    '.db-hist .o{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:8px}' +
+    '.db-hist .o.sys{background:var(--blue-soft);color:var(--blue-2)}' +
+    '.db-hist .o.mgm{background:var(--warn-soft);color:var(--warn)}'
   );
 
   function tdS(v) { return String(v == null ? '' : v); }
