@@ -292,7 +292,7 @@ function fillAccountSelect(sel, current, onchange){
 }
 /* TRUTH v2 runtime: one fetcher for the metric page API + the provenance chip. Pages call
    truthPage() and render metric values; the chip shows the verifier's latest verdict. */
-var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'old', catalogue: 'old', standards: 'live', tasks: 'old', inbox: 'old', hunting: 'old' };
+var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'live', catalogue: 'live', standards: 'live', tasks: 'live', inbox: 'old', hunting: 'live' };
 var TRUTH_CACHE = {};
 function truthPage(scope){
   scope = scope || {};
@@ -550,7 +550,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260901-0108';
+var BUILD = '20260901-0111';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
