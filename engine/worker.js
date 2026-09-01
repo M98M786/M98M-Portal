@@ -3525,6 +3525,12 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS keyword_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT DEFAULT 'KEYWORD_DOC', account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, assignee TEXT, opens_at TEXT, due_at TEXT, status TEXT DEFAULT 'OPEN', outcome TEXT DEFAULT '', doc_link TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at TEXT DEFAULT '', follow_ups INTEGER DEFAULT 0, live_at TEXT DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_kt_status ON keyword_tasks(status, opens_at)",
     "CREATE TABLE IF NOT EXISTS keyword_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, doc_link TEXT, outcome TEXT, decided_by TEXT, decided_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS inbox_messages (msg_id TEXT PRIMARY KEY, thread_id TEXT, from_email TEXT, to_email TEXT, body TEXT, sent_at TEXT, read_at TEXT DEFAULT '', hidden TEXT DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_im_thread ON inbox_messages(thread_id, sent_at)",
+    "CREATE INDEX IF NOT EXISTS idx_im_unread ON inbox_messages(to_email, read_at)",
+    "CREATE TABLE IF NOT EXISTS inbox_threads (thread_id TEXT PRIMARY KEY, a_email TEXT, b_email TEXT, last_at TEXT, last_from TEXT, last_preview TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
+    "CREATE INDEX IF NOT EXISTS idx_it_b ON inbox_threads(b_email, last_at)",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
     "CREATE TABLE IF NOT EXISTS sheet_rows (workbook_id TEXT, tab TEXT, row_no INTEGER, account TEXT, day_pk TEXT, vals TEXT, row_hash TEXT, synced_at TEXT, PRIMARY KEY (workbook_id, tab, row_no))",
     "CREATE INDEX IF NOT EXISTS ix_sheet_rows_day ON sheet_rows (account, day_pk)",
@@ -3930,6 +3936,24 @@ async function truthTier1(env) {
         delta: d2.open - (bMap[d2.dept] || 0), status: d2.open === (bMap[d2.dept] || 0) ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
     }
   } catch (e) { /* tasks mirror may be empty on a fresh isolate — nothing to verify is not a FAIL */ }
+  /* Home CS tile (WO-12 phase item): CS_NEEDS_REPLY — Path A re-runs csDesk's own regex rule
+     in JS; Path B is a separately written SQL classification. Both over `cases`. */
+  try {
+    const cs = await env.DB.prepare("SELECT status FROM cases WHERE status NOT LIKE '%CLOSED%'").all();
+    const OURS = /WAITING_SELLER|^OPEN$|DECLINED|ESCALAT|PAYMENT_DISPUTE|LESS_THAN_A_FULL_REFUND|SELLER_/i;
+    const THEIRS = /WAITING_BUYER|READY_TO_SHIP|ITEM_SHIPPED|ITEM_DELIVERED|AWAITING_/i;
+    let aN = 0;
+    for (const c of (cs.results || [])) { const s = String(c.status); if (OURS.test(s) || !THEIRS.test(s)) aN++; }
+    const bQ = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM cases WHERE status NOT LIKE '%CLOSED%') - " +
+      "(SELECT COUNT(*) FROM cases WHERE status NOT LIKE '%CLOSED%' " +
+      "AND (status LIKE '%WAITING_BUYER%' OR status LIKE '%READY_TO_SHIP%' OR status LIKE '%ITEM_SHIPPED%' OR status LIKE '%ITEM_DELIVERED%' OR status LIKE '%AWAITING%') " +
+      "AND NOT (status LIKE '%WAITING_SELLER%' OR status LIKE '%PAYMENT_DISPUTE%' OR status LIKE '%DECLINED%' OR status LIKE '%ESCALAT%' OR status LIKE '%LESS_THAN_A_FULL_REFUND%' OR status LIKE 'SELLER%' OR status = 'OPEN')) AS n"
+    ).first().catch(() => null);
+    const bN = bQ ? Number(bQ.n) || 0 : aN;
+    out.push({ metric_id: 'CS_NEEDS_REPLY', scope_key: 'all', shown: aN, recomputed: bN,
+      delta: aN - bN, status: aN === bN ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+  } catch (e) { /* cases table empty on a fresh isolate */ }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
   for (const acct of accounts) {
@@ -6174,6 +6198,151 @@ const ROUTES = {
         } catch (e) { /* next */ }
       }
       return { candidates: rows.length, fixed };
+    },
+  },
+
+  /* TRUTH v2 WO-12: the staff inbox on D1. Two-party DM threads (thread_id = the two emails
+     sorted + joined, same rule as the sheet); a message is readable ONLY by its two
+     participants — no role, Management included, reads someone else's thread (§24). The sheet
+     stays the frozen archive after the flip; syncInbox mirrors it in. */
+  inboxPeople: {
+    auth: 'any', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare(
+        "SELECT email, name, role FROM users WHERE status = 'approved' ORDER BY name"
+      ).all();
+      return { people: (rs.results || []).map((u) => ({ email: String(u.email).toLowerCase(), name: u.name || u.email, role: u.role || '' })) };
+    },
+  },
+
+  inboxThreads: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const th = await ctx.env.DB.prepare(
+        'SELECT thread_id, a_email, b_email, last_at, last_from, last_preview FROM inbox_threads WHERE a_email = ?1 OR b_email = ?1 ORDER BY last_at DESC LIMIT 80'
+      ).bind(me).all();
+      const un = await ctx.env.DB.prepare(
+        "SELECT thread_id, COUNT(*) AS n FROM inbox_messages WHERE to_email = ?1 AND read_at = '' AND hidden = '' GROUP BY thread_id"
+      ).bind(me).all();
+      const unread = {};
+      for (const r of (un.results || [])) unread[r.thread_id] = Number(r.n) || 0;
+      let total = 0;
+      Object.keys(unread).forEach((k) => { total += unread[k]; });
+      return {
+        threads: (th.results || []).map((t) => ({
+          thread_id: t.thread_id,
+          with: t.a_email === me ? t.b_email : t.a_email,
+          last_at: t.last_at, last_from: t.last_from, last_preview: t.last_preview,
+          unread: unread[t.thread_id] || 0,
+        })),
+        unread_total: total, now: new Date().toISOString(),
+      };
+    },
+  },
+
+  inboxThread: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const peer = String(p.with || '').toLowerCase().trim();
+      if (!peer) throw new Error('with (the other participant) is required');
+      const tid = [me, peer].sort().join('|');
+      const before = String(p.before || '');
+      const bind = [tid];
+      let cond = '';
+      if (before) { bind.push(before); cond = ' AND sent_at < ?2'; }
+      const rs = await ctx.env.DB.prepare(
+        "SELECT msg_id, from_email, to_email, body, sent_at, read_at FROM inbox_messages WHERE thread_id = ?1 AND hidden = ''" + cond +
+        ' ORDER BY sent_at DESC LIMIT 30'
+      ).bind(...bind).all();
+      const rows = (rs.results || []).reverse();
+      /* opening the page IS the read receipt — one indexed UPDATE, not a per-row loop */
+      await ctx.env.DB.prepare(
+        "UPDATE inbox_messages SET read_at = datetime('now') WHERE thread_id = ?1 AND to_email = ?2 AND read_at = ''"
+      ).bind(tid, me).run();
+      return { thread_id: tid, messages: rows,
+        more: rows.length === 30, cursor: rows.length ? rows[0].sent_at : '', now: new Date().toISOString() };
+    },
+  },
+
+  inboxSend: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const to = String(p.to || '').toLowerCase().trim();
+      const body = String(p.body == null ? '' : p.body).trim();
+      if (!to) throw new Error('no recipient');
+      if (!body) throw new Error('empty message');
+      if (body.length > 4000) throw new Error('message too long (4000 max)');
+      if (to === me) throw new Error('cannot message yourself');
+      const rec = await ctx.env.DB.prepare("SELECT email, name, status FROM users WHERE email = ?1").bind(to).first();
+      if (!rec || String(rec.status) !== 'approved') throw new Error('unknown or unapproved recipient');
+      const tid = [me, to].sort().join('|');
+      const msgId = 'M' + crypto.randomUUID().slice(0, 8);
+      const nowIso = new Date().toISOString();
+      await ctx.env.DB.prepare(
+        'INSERT INTO inbox_messages (msg_id, thread_id, from_email, to_email, body, sent_at) VALUES (?1,?2,?3,?4,?5,?6)'
+      ).bind(msgId, tid, me, to, body, nowIso).run();
+      const pair = [me, to].sort();
+      await ctx.env.DB.prepare(
+        'INSERT INTO inbox_threads (thread_id, a_email, b_email, last_at, last_from, last_preview) VALUES (?1,?2,?3,?4,?5,?6) ' +
+        'ON CONFLICT(thread_id) DO UPDATE SET last_at=?4, last_from=?5, last_preview=?6'
+      ).bind(tid, pair[0], pair[1], nowIso, me, body.slice(0, 120)).run();
+      await queueNotify(ctx.env, to, 'New message', (ctx.user.name || me) + ': ' + body.slice(0, 110), 'dm:' + tid + ':' + msgId);
+      return { ok: true, msg_id: msgId, thread_id: tid, sent_at: nowIso };
+    },
+  },
+
+  inboxPoll: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const since = String(p.since || '');
+      const bind = [me];
+      let cond = '';
+      if (since) { bind.push(since); cond = ' AND sent_at > ?2'; }
+      const rs = await ctx.env.DB.prepare(
+        "SELECT msg_id, thread_id, from_email, body, sent_at FROM inbox_messages WHERE to_email = ?1 AND hidden = ''" + cond +
+        ' ORDER BY sent_at DESC LIMIT 30'
+      ).bind(...bind).all();
+      const un = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM inbox_messages WHERE to_email = ?1 AND read_at = '' AND hidden = ''"
+      ).bind(me).first();
+      return { fresh: (rs.results || []).reverse(), unread_total: Number(un && un.n) || 0, now: new Date().toISOString() };
+    },
+  },
+
+  /* the one-time (re-runnable) migration: Apps Script pushes MESSAGES rows; msg_id upsert keeps
+     read/hidden state fresh, and the touched threads get their heads rebuilt. */
+  syncInbox: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.messages) ? p.messages : [];
+      const stmts = [];
+      const touched = {};
+      for (const m of rows) {
+        const tid = String(m.thread_id || '');
+        if (!String(m.msg_id || '') || !tid) continue;
+        touched[tid] = 1;
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO inbox_messages (msg_id, thread_id, from_email, to_email, body, sent_at, read_at, hidden) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ' +
+          'ON CONFLICT(msg_id) DO UPDATE SET read_at=?7, hidden=?8'
+        ).bind(String(m.msg_id), tid, String(m.from_email || '').toLowerCase(), String(m.to_email || '').toLowerCase(),
+          String(m.body || '').slice(0, 4000), String(m.sent_at || ''), String(m.read_at || ''), String(m.hidden || '')));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      for (const tid of Object.keys(touched)) {
+        const last = await ctx.env.DB.prepare(
+          "SELECT from_email, to_email, body, sent_at FROM inbox_messages WHERE thread_id = ?1 AND hidden = '' ORDER BY sent_at DESC LIMIT 1"
+        ).bind(tid).first();
+        if (!last) continue;
+        const pair = [String(last.from_email), String(last.to_email)].sort();
+        await ctx.env.DB.prepare(
+          'INSERT INTO inbox_threads (thread_id, a_email, b_email, last_at, last_from, last_preview) VALUES (?1,?2,?3,?4,?5,?6) ' +
+          'ON CONFLICT(thread_id) DO UPDATE SET last_at=?4, last_from=?5, last_preview=?6'
+        ).bind(tid, pair[0], pair[1], String(last.sent_at), String(last.from_email), String(last.body).slice(0, 120)).run();
+      }
+      return { synced: rows.length, threads: Object.keys(touched).length };
     },
   },
 

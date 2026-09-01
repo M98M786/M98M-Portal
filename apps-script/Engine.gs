@@ -269,6 +269,8 @@ const ENGINE_RUNNABLE = {
   bookFix: function (args) { return typeof bookFix === 'function' ? String(bookFix(args)) : 'absent'; },
   adsFromBooks: function () { return typeof adsFromBooks === 'function' ? String(adsFromBooks()) : 'absent'; },
   cpcKeywordSweep: function () { return typeof cpcKeywordSweep === 'function' ? String(cpcKeywordSweep()) : 'absent'; },
+  inboxDump: function (args) { return typeof inboxDump === 'function' ? String(inboxDump(args)) : 'absent'; },
+  huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },

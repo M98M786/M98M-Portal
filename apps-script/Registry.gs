@@ -1111,3 +1111,29 @@ function ensureTruthTriggers() {
   return have ? 'hot mirror trigger already present' : 'hot mirror trigger created (every 15 min)';
 }
 
+
+/* TRUTH v2 WO-12: mirror the MESSAGES tab into D1 (worker syncInbox). Re-runnable — msg_id
+ * upserts keep read/hidden fresh. args {from_row} continues a big tab across calls. */
+function inboxDump(args) {
+  const sh = getPortalDb_(false).getSheetByName('MESSAGES');
+  if (!sh) return 'no MESSAGES tab';
+  const lr = sh.getLastRow();
+  if (lr < 2) return '0 messages';
+  const start = Math.max(2, Number(args && args.from_row) || 2);
+  const n = Math.min(lr - start + 1, 4000);
+  if (n <= 0) return 'done at ' + lr;
+  const vals = sh.getRange(start, 1, n, 8).getValues();
+  let sent = 0;
+  for (let i = 0; i < vals.length; i += 400) {
+    const chunk = vals.slice(i, i + 400).map(function (r) {
+      return { msg_id: String(r[0] || ''), thread_id: String(r[1] || ''),
+        from_email: String(r[2] || ''), to_email: String(r[3] || ''), body: String(r[4] || ''),
+        sent_at: r[5] instanceof Date ? r[5].toISOString() : String(r[5] || ''),
+        read_at: r[6] instanceof Date ? r[6].toISOString() : String(r[6] || ''),
+        hidden: String(r[7] || '') };
+    }).filter(function (m) { return m.msg_id && m.thread_id; });
+    if (chunk.length) { enginePost_('syncInbox', { messages: chunk }); sent += chunk.length; }
+  }
+  return sent + ' message(s) mirrored (rows ' + start + '–' + (start + n - 1) + ' of ' + lr + ')' +
+    (start + n <= lr ? ' · continue with {from_row:' + (start + n) + '}' : ' · complete');
+}
