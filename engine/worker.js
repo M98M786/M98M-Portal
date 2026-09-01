@@ -3526,7 +3526,7 @@ function pktNowIso() { return new Date(Date.now() + 5 * 3600000).toISOString().s
 async function truthOpenOrders(env, account) {
   await ensureTruthSchema(env);
   const bind = [];
-  let sql = "SELECT order_id, account, sold, status, ship_by, payment_status, cancel_state, fh_count, created_at, refunded FROM orders WHERE created_at >= datetime('now', '-120 day')";
+  let sql = "SELECT order_id, account, sold, status, ship_by, payment_status, cancel_state, fh_count, created_at, refunded, open_seen_at FROM orders WHERE created_at >= datetime('now', '-120 day')";
   if (account) { bind.push(account); sql += ' AND account = ?1'; }
   const rs = await env.DB.prepare(sql).bind(...bind).all();
   return rs.results || [];
