@@ -19,8 +19,14 @@ Nothing is done until ticked here with evidence (R13).
 - [x] Truth Check (Path B): second classifier, per-row T=R−S + ported formula checks, independent SQL recomputes; tier 1 every 15 min, tier 3 nightly penny audit; validation_runs + #truthCheck page
 - [x] Safe removals: Home signal pins + health cards, Sales-analysis reconciliation banners, sidebar regroup (Library, Returns→Customer Service, Truth Check→Management)
 - **GATE EVIDENCE: Truth Check 15 PASS · 0 FAIL · 0 UNVERIFIED (12 STALE = unwritten day tabs, honest); dispatch truth from eBay's own open pull: LATE 0 · DUE 1 · AWAITING 585 · OPEN 586 (the old page said LATE 5 including 93-day-old closed orders — those five are not open on eBay at all); one mid-run stamp race found by the verifier itself and fixed (snapshot per run). Screenshot: Truth Check page green.**
-## Phase 2 — Money — IN PROGRESS (started 1 Sept 05:3x)
-## Phase 3 — Orders — NOT STARTED
+## Phase 2 — Money ✅ COMPLETE 1 Sept 2026, 05:5x PKT (soak compressed on owner's order)
+- [x] metricMoneyByAccount: per-account sums + daily series straight from the mirrored R/S/T rows
+- [x] WO-03: Business overview range tiles = register (Σ Raw Profit / Σ VAT to HMRC / Σ True Order Earning / sheet Sold + eBay sub-line + rows coverage / margin / open orders); VAT card per account from the rows; rating strip from eBay standards; invented formulas GONE from captions
+- [x] WO-04: Sales analysis month tiles = register with account chips + coverage note ("rows 0 of 82" on a fresh month — honest zero, labeled)
+- [x] WO-05: Account report + Account KPIs merged (view-kpis2) — all accounts incl Sir Hasib, 7/30/90d, tiles with chips, Sold-vs-Actual daily chart on Pakistan days, day table, old route redirects
+- [x] Home Yesterday = SOLD_SHEET/ACTUAL_PROFIT/VAT + rows coverage
+- **EVIDENCE: Truth Check 17 PASS · 0 FAIL after tier-3; merged KPIs page live (30d: books £101,465.78 · actual £15,409.21 · VAT £4,548.25 · 2,566 rows · chips ✓); Sept MTD renders £0.00 books / £789.36 eBay / rows 0 of 82 — coverage replaces every 'behind' banner. Penny audit runs nightly 03:00 PKT; per-row T=R−S checks pass on every mirrored day so far. money flag: LIVE (owner's standing order).**
+## Phase 3 — Orders — IN PROGRESS
 ## Phase 4 — Advertising — NOT STARTED
 ## Phase 5 — Workflow & structure — NOT STARTED
 ## Phase 6 — Cleanup — NOT STARTED
