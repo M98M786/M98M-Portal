@@ -188,7 +188,15 @@ function readTab_(name) {
   return out;
 }
 function notify_(toEmail, type, message, ref) {
-  getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow(['N' + Utilities.getUuid().slice(0, 8), toEmail, 'system', type, message, ref || '', now_(), '']);
+  const nid = 'N' + Utilities.getUuid().slice(0, 8);
+  const at = now_();
+  getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
+  /* 2 Sept: the bell lives on the Engine now — best-effort immediate push; the 15-min sweep
+     (notifSweep_, riding the hot-mirror trigger) catches anything this misses. Never fails
+     the action that raised the letter. */
+  try {
+    enginePost_('syncNotifs', { rows: [{ as_id: nid, to: String(toEmail), from: 'system', type: String(type), message: String(message), ref: String(ref || ''), created_at: at }] });
+  } catch (e) {}
 }
 function notifyManagement_(type, message, ref) {
   const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });

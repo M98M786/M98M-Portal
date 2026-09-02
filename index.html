@@ -433,7 +433,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -567,7 +567,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-1518';
+var BUILD = '20260902-1537';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10523,12 +10523,29 @@ function ibPollNow() {
   if (wait > 0) { ibClearTimer(); IB.timer = setTimeout(ibPollNow, wait); return; }
   IB.busy = true; IB.again = false;
   ibClearTimer();
-  api('poll').then(function (d) {
+  /* 2 Sept (owner: "migrate the poll off Google"): the bell polls the ENGINE every tick —
+     fast, D1-backed. Google's poll runs only every 10 minutes now, solely for the meetings
+     chip and the legacy sheet threads; its answer is cached and merged into each tick. At
+     ~14 staff this cuts the sheet backend's steady load ~85%. */
+  var wantAs = !IB.slowAt || (ibNowMs() - IB.slowAt) > 600000;
+  var pe = api('pollEngine').then(function (d) { return d || {}; })['catch'](function () { return null; });
+  var pa = wantAs ? api('poll').then(function (d) {
+    IB.slowAt = ibNowMs();
+    IB.slow = { meetings: (d && d.meetings) || null, threads: (d && d.threads) || [], unreadDm: (d && d.unreadDm) || 0, notifications: (d && d.notifications) || [] };
+    return true;
+  })['catch'](function () { IB.slowAt = ibNowMs(); return false; }) : Promise.resolve(false);
+  Promise.all([pe, pa]).then(function (rs) {
     ibSettle();
-    try { ibApplyPoll(d || {}); } catch (e) {}
-    ibSchedule();
-  })['catch'](function () {
-    ibSettle();
+    var d = rs[0];
+    if (d) {
+      var s = IB.slow || {};
+      try { ibApplyPoll({ notifications: d.notifications || [], unreadNotif: d.unreadNotif || 0,
+        meetings: s.meetings || null, threads: s.threads || [], unreadDm: s.unreadDm || 0 }); } catch (e) {}
+    } else if (rs[1] && IB.slow) {
+      /* engine unreachable this tick — the sheet answer still paints the chip and bell */
+      try { ibApplyPoll({ notifications: IB.slow.notifications || [], unreadNotif: 0,
+        meetings: IB.slow.meetings, threads: IB.slow.threads, unreadDm: IB.slow.unreadDm }); } catch (e) {}
+    }
     ibSchedule();
   });
 }
@@ -25838,7 +25855,7 @@ function saveSchedule() {
         var id = this.getAttribute('data-nf-read');
         var card = box.querySelector('[data-nf="' + id + '"]');
         var me = this; me.disabled = true;
-        api('markNotifRead', { notifId: id }).then(function () {
+        api('notifMarkRead', { id: id }).then(function () {
           if (card) { card.classList.remove('unread'); }
           me.remove();
           try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
@@ -25852,14 +25869,13 @@ function saveSchedule() {
   function nfLoad(fresh) {
     var box = $('nfBody');
     if (!box) { return; }
-    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
-    if (cached && !fresh) { nfPaint(cached); }
-    else { box.innerHTML = '<div class="spinner"></div>'; }
-    api('poll').then(function (d) {
+    box.innerHTML = fresh ? '<div class="spinner"></div>' : box.innerHTML || '<div class="spinner"></div>';
+    /* 2 Sept: letters come from the ENGINE now — Google is out of this loop entirely */
+    api('pollEngine').then(function (d) {
       try { window.__lastPoll = { at: Date.now(), d: d }; } catch (e) {}
       nfPaint(d);
     }).catch(function (e) {
-      if (!cached && $('nfBody')) { box.innerHTML = '<div class="alx-empty">The letters could not be read just now — ' + esc(e.message) + '</div>'; }
+      if ($('nfBody')) { box.innerHTML = '<div class="alx-empty">The letters could not be read just now — ' + esc(e.message) + '</div>'; }
     });
   }
 
@@ -25882,7 +25898,7 @@ function saveSchedule() {
       if (all) {
         all.onclick = function () {
           all.disabled = true;
-          api('markNotifRead', { all: true }).then(function () {
+          api('notifMarkRead', { all: true }).then(function () {
             try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
             all.disabled = false;
             nfLoad(true);

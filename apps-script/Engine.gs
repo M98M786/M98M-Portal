@@ -271,6 +271,8 @@ const ENGINE_RUNNABLE = {
   adsFromBooks: function () { return typeof adsFromBooks === 'function' ? String(adsFromBooks()) : 'absent'; },
   cpcKeywordSweep: function () { return typeof cpcKeywordSweep === 'function' ? String(cpcKeywordSweep()) : 'absent'; },
   inboxDump: function (args) { return typeof inboxDump === 'function' ? String(inboxDump(args)) : 'absent'; },
+  notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
+  notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
   alertsRefresh: function () { return alertsRefresh(); },

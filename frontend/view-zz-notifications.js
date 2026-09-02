@@ -59,7 +59,7 @@
         var id = this.getAttribute('data-nf-read');
         var card = box.querySelector('[data-nf="' + id + '"]');
         var me = this; me.disabled = true;
-        api('markNotifRead', { notifId: id }).then(function () {
+        api('notifMarkRead', { id: id }).then(function () {
           if (card) { card.classList.remove('unread'); }
           me.remove();
           try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
@@ -73,14 +73,13 @@
   function nfLoad(fresh) {
     var box = $('nfBody');
     if (!box) { return; }
-    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
-    if (cached && !fresh) { nfPaint(cached); }
-    else { box.innerHTML = '<div class="spinner"></div>'; }
-    api('poll').then(function (d) {
+    box.innerHTML = fresh ? '<div class="spinner"></div>' : box.innerHTML || '<div class="spinner"></div>';
+    /* 2 Sept: letters come from the ENGINE now — Google is out of this loop entirely */
+    api('pollEngine').then(function (d) {
       try { window.__lastPoll = { at: Date.now(), d: d }; } catch (e) {}
       nfPaint(d);
     }).catch(function (e) {
-      if (!cached && $('nfBody')) { box.innerHTML = '<div class="alx-empty">The letters could not be read just now — ' + esc(e.message) + '</div>'; }
+      if ($('nfBody')) { box.innerHTML = '<div class="alx-empty">The letters could not be read just now — ' + esc(e.message) + '</div>'; }
     });
   }
 
@@ -103,7 +102,7 @@
       if (all) {
         all.onclick = function () {
           all.disabled = true;
-          api('markNotifRead', { all: true }).then(function () {
+          api('notifMarkRead', { all: true }).then(function () {
             try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
             all.disabled = false;
             nfLoad(true);

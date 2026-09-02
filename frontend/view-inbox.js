@@ -221,12 +221,29 @@ function ibPollNow() {
   if (wait > 0) { ibClearTimer(); IB.timer = setTimeout(ibPollNow, wait); return; }
   IB.busy = true; IB.again = false;
   ibClearTimer();
-  api('poll').then(function (d) {
+  /* 2 Sept (owner: "migrate the poll off Google"): the bell polls the ENGINE every tick —
+     fast, D1-backed. Google's poll runs only every 10 minutes now, solely for the meetings
+     chip and the legacy sheet threads; its answer is cached and merged into each tick. At
+     ~14 staff this cuts the sheet backend's steady load ~85%. */
+  var wantAs = !IB.slowAt || (ibNowMs() - IB.slowAt) > 600000;
+  var pe = api('pollEngine').then(function (d) { return d || {}; })['catch'](function () { return null; });
+  var pa = wantAs ? api('poll').then(function (d) {
+    IB.slowAt = ibNowMs();
+    IB.slow = { meetings: (d && d.meetings) || null, threads: (d && d.threads) || [], unreadDm: (d && d.unreadDm) || 0, notifications: (d && d.notifications) || [] };
+    return true;
+  })['catch'](function () { IB.slowAt = ibNowMs(); return false; }) : Promise.resolve(false);
+  Promise.all([pe, pa]).then(function (rs) {
     ibSettle();
-    try { ibApplyPoll(d || {}); } catch (e) {}
-    ibSchedule();
-  })['catch'](function () {
-    ibSettle();
+    var d = rs[0];
+    if (d) {
+      var s = IB.slow || {};
+      try { ibApplyPoll({ notifications: d.notifications || [], unreadNotif: d.unreadNotif || 0,
+        meetings: s.meetings || null, threads: s.threads || [], unreadDm: s.unreadDm || 0 }); } catch (e) {}
+    } else if (rs[1] && IB.slow) {
+      /* engine unreachable this tick — the sheet answer still paints the chip and bell */
+      try { ibApplyPoll({ notifications: IB.slow.notifications || [], unreadNotif: 0,
+        meetings: IB.slow.meetings, threads: IB.slow.threads, unreadDm: IB.slow.unreadDm }); } catch (e) {}
+    }
     ibSchedule();
   });
 }

@@ -1082,6 +1082,7 @@ function pushSheetRowsHot() {
       });
     } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
   });
+  try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
@@ -1140,4 +1141,52 @@ function inboxDump(args) {
   }
   return sent + ' message(s) mirrored (rows ' + start + '–' + (start + n - 1) + ' of ' + lr + ')' +
     (start + n <= lr ? ' · continue with {from_row:' + (start + n) + '}' : ' · complete');
+}
+
+/* 2 Sept — the bell off Google: sweep + backfill for the Engine's notifications store. */
+function notifRowsOut_(startRow, n) {
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const lr = sh.getLastRow();
+  if (lr < 2 || startRow > lr) return { rows: [], last: lr };
+  const take = Math.min(n, lr - startRow + 1);
+  const vals = sh.getRange(startRow, 1, take, 8).getValues();
+  const rows = vals.map(function (r) {
+    return { as_id: String(r[0] || ''), to: String(r[1] || ''), from: String(r[2] || 'system'),
+      type: String(r[3] || ''), message: String(r[4] || ''), ref: String(r[5] || ''),
+      created_at: r[6] instanceof Date ? Utilities.formatDate(r[6], 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(r[6] || ''),
+      read_at: r[7] instanceof Date ? Utilities.formatDate(r[7], 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(r[7] || '') };
+  }).filter(function (r) { return r.as_id && r.to.indexOf('@') > 0; });
+  return { rows: rows, last: startRow + take - 1 };
+}
+/** the 15-min catch-up: pushes NOTIFICATIONS rows appended since the cursor (idempotent). */
+function notifSweep_() {
+  const props = PropertiesService.getScriptProperties();
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const lr = sh.getLastRow();
+  let cur = Number(props.getProperty('NOTIF_PUSH_ROW') || 0);
+  if (!cur) { cur = Math.max(1, lr - 5); }              // first run: only the newest few, backfill owns history
+  if (lr <= cur) return '0 pushed (at ' + lr + ')';
+  let pushed = 0, at = cur + 1;
+  while (at <= lr && pushed < 800) {
+    const batch = notifRowsOut_(at, 400);
+    if (batch.rows.length) { enginePost_('syncNotifs', { rows: batch.rows }); pushed += batch.rows.length; }
+    at = batch.last + 1;
+  }
+  props.setProperty('NOTIF_PUSH_ROW', String(at - 1));
+  return pushed + ' letter(s) pushed (cursor ' + (at - 1) + ' of ' + lr + ')';
+}
+/** one-time (re-runnable) backfill of the recent tail — args {from_row} to continue. */
+function notifDump(args) {
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const lr = sh.getLastRow();
+  const start = Math.max(2, Number(args && args.from_row) || Math.max(2, lr - 2999));
+  let at = start, pushed = 0;
+  const t0 = Date.now();
+  while (at <= lr && Date.now() - t0 < 220000) {
+    const batch = notifRowsOut_(at, 400);
+    if (batch.rows.length) { enginePost_('syncNotifs', { rows: batch.rows }); pushed += batch.rows.length; }
+    at = batch.last + 1;
+  }
+  PropertiesService.getScriptProperties().setProperty('NOTIF_PUSH_ROW', String(Math.max(at - 1, Number(PropertiesService.getScriptProperties().getProperty('NOTIF_PUSH_ROW') || 0))));
+  return pushed + ' letter(s) backfilled (rows ' + start + '–' + (at - 1) + ' of ' + lr + ')' + (at <= lr ? ' · continue with {from_row:' + at + '}' : ' · complete');
 }
