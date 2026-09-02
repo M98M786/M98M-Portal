@@ -74,6 +74,7 @@ export default {
         marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 20000, trafficBoard: 300000,
         deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0,
         pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000, sheetItems: 60000,
+        csPlaybook: 120000,
         dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
       const data = rcTtl
@@ -3573,6 +3574,11 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS keyword_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT DEFAULT 'KEYWORD_DOC', account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, assignee TEXT, opens_at TEXT, due_at TEXT, status TEXT DEFAULT 'OPEN', outcome TEXT DEFAULT '', doc_link TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at TEXT DEFAULT '', follow_ups INTEGER DEFAULT 0, live_at TEXT DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_kt_status ON keyword_tasks(status, opens_at)",
     "CREATE TABLE IF NOT EXISTS keyword_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, listing_id TEXT, campaign_id TEXT, campaign_name TEXT, title TEXT, doc_link TEXT, outcome TEXT, decided_by TEXT, decided_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS cs_playbook (tool TEXT, tid TEXT, cat TEXT, name TEXT, kw TEXT, flag TEXT, tip TEXT, type TEXT, next TEXT, reason TEXT, variants TEXT, sort INTEGER DEFAULT 0, active INTEGER DEFAULT 1, updated_by TEXT DEFAULT '', updated_at TEXT DEFAULT '', PRIMARY KEY (tool, tid))",
+    "CREATE TABLE IF NOT EXISTS cs_tool_log (id INTEGER PRIMARY KEY AUTOINCREMENT, tool TEXT, tid TEXT, variant_label TEXT, account TEXT, order_id TEXT, case_id TEXT, used_by TEXT, used_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_ctl_at ON cs_tool_log(used_at)",
+    "CREATE TABLE IF NOT EXISTS recovery_cases (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, order_id TEXT, ali_order TEXT, item_title TEXT, stage TEXT DEFAULT 'OPENED', status TEXT DEFAULT 'OPEN', amount REAL DEFAULT 0, recovered_amount REAL DEFAULT 0, note TEXT DEFAULT '', opened_by TEXT, opened_at TEXT, updated_at TEXT, closed_at TEXT DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_rc_status ON recovery_cases(status, account)",
     "CREATE TABLE IF NOT EXISTS inbox_messages (msg_id TEXT PRIMARY KEY, thread_id TEXT, from_email TEXT, to_email TEXT, body TEXT, sent_at TEXT, read_at TEXT DEFAULT '', hidden TEXT DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_im_thread ON inbox_messages(thread_id, sent_at)",
     "CREATE INDEX IF NOT EXISTS idx_im_unread ON inbox_messages(to_email, read_at)",
@@ -6511,6 +6517,186 @@ const ROUTES = {
       const order = String(p.order || 'losses');
       items.sort(order === 'best' ? (a, b) => b.actual - a.actual : (a, b) => a.actual - b.actual);
       return { from, to, account: account || 'all', n: items.length, items: items.slice(0, 200) };
+    },
+  },
+
+  /* ————— CS TOOLS AS LIVE DASHBOARDS (owner, 2 Sept) —————
+     Husnain's three agents (Reply v1.7 · Defense v1.8 · Recovery v1.2) move from sandboxed
+     HTML embeds to native desks. The playbooks live in D1 VERBATIM (seeded from the tools'
+     own DB arrays), are editable in the portal by Management/Ops Head/Team Lead, every use is
+     logged, and the Recovery desk gets a per-order tracker fed by the live order truth. */
+  csPlaybookImport: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const tool = String(p.tool || '');
+      if (['reply', 'defense', 'recovery'].indexOf(tool) < 0) throw new Error('tool must be reply|defense|recovery');
+      const entries = Array.isArray(p.entries) ? p.entries.slice(0, 40) : [];
+      const stmts = [];
+      let sort = Number(p.sort_base) || 0;
+      for (const e of entries) {
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO cs_playbook (tool, tid, cat, name, kw, flag, tip, type, next, reason, variants, sort, active, updated_by, updated_at) ' +
+          "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,datetime('now')) " +
+          'ON CONFLICT(tool, tid) DO UPDATE SET cat=?3, name=?4, kw=?5, flag=?6, tip=?7, type=?8, next=?9, reason=?10, variants=?11, sort=?12, updated_by=?13, updated_at=datetime(\'now\')'
+        ).bind(tool, String(e.id || '').slice(0, 80), String(e.cat || '').slice(0, 60), String(e.name || '').slice(0, 160),
+          JSON.stringify(e.kw || []).slice(0, 800), String(e.flag || '').slice(0, 40), String(e.tip || '').slice(0, 1200),
+          String(e.type || '').slice(0, 40), String(e.next || '').slice(0, 80), String(e.reason || '').slice(0, 200),
+          JSON.stringify(e.variants || []).slice(0, 24000), sort++, String(ctx.user.email || '')));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      return { imported: entries.length };
+    },
+  },
+
+  csPlaybook: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const tool = String(p.tool || '');
+      const ROLES_FOR = { reply: ['CS'], defense: ['CS'], recovery: ['CS', 'Order Processor'] };
+      const allow = ROLES_FOR[tool];
+      if (!allow) throw new Error('unknown tool');
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt && allow.indexOf(ctx.user.role) < 0) throw new AuthError('auth');
+      const rs = await ctx.env.DB.prepare(
+        'SELECT tid, cat, name, kw, flag, tip, type, next, reason, variants, sort, updated_by, updated_at FROM cs_playbook WHERE tool = ?1 AND active = 1 ORDER BY sort'
+      ).bind(tool).all();
+      return { tool, can_edit: mgmt, entries: rs.results || [] };
+    },
+  },
+
+  csPlaybookSave: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const tool = String(p.tool || ''), tid = String(p.tid || '');
+      if (!tool || !tid) throw new Error('tool and tid required');
+      if (p.deactivate) {
+        await ctx.env.DB.prepare("UPDATE cs_playbook SET active = 0, updated_by = ?3, updated_at = datetime('now') WHERE tool = ?1 AND tid = ?2")
+          .bind(tool, tid, String(ctx.user.email || '')).run();
+        return { ok: true, deactivated: true };
+      }
+      const variants = Array.isArray(p.variants) ? p.variants : null;
+      if (!variants || !variants.length) throw new Error('variants required — at least one message');
+      await ctx.env.DB.prepare(
+        'INSERT INTO cs_playbook (tool, tid, cat, name, kw, flag, tip, type, next, reason, variants, sort, active, updated_by, updated_at) ' +
+        "VALUES (?1,?2,?3,?4,?5,?6,?7,'','','',?8,?9,1,?10,datetime('now')) " +
+        "ON CONFLICT(tool, tid) DO UPDATE SET cat=?3, name=?4, kw=?5, flag=?6, tip=?7, variants=?8, updated_by=?10, updated_at=datetime('now'), active=1"
+      ).bind(tool, tid.slice(0, 80), String(p.cat || '').slice(0, 60), String(p.name || '').slice(0, 160),
+        JSON.stringify(p.kw || []).slice(0, 800), String(p.flag || '').slice(0, 40), String(p.tip || '').slice(0, 1200),
+        JSON.stringify(variants).slice(0, 24000), Number(p.sort) || 999, String(ctx.user.email || '')).run();
+      return { ok: true };
+    },
+  },
+
+  csToolLog: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      await ctx.env.DB.prepare(
+        "INSERT INTO cs_tool_log (tool, tid, variant_label, account, order_id, case_id, used_by, used_at) VALUES (?1,?2,?3,?4,?5,?6,?7,datetime('now'))"
+      ).bind(String(p.tool || '').slice(0, 20), String(p.tid || '').slice(0, 80), String(p.variant_label || '').slice(0, 120),
+        String(p.account || '').slice(0, 40), String(p.order_id || '').slice(0, 40), String(p.case_id || '').slice(0, 40),
+        String(ctx.user.email || '')).run();
+      return { ok: true };
+    },
+  },
+
+  csToolStats: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const tool = String(p.tool || '');
+      const days = Math.min(90, Number(p.days) || 7);
+      const since = "datetime('now', '-" + days + " days')";
+      const byWho = await ctx.env.DB.prepare(
+        'SELECT used_by, COUNT(*) AS n FROM cs_tool_log WHERE tool = ?1 AND used_at >= ' + since + ' GROUP BY used_by ORDER BY n DESC LIMIT 12'
+      ).bind(tool).all();
+      const byTpl = await ctx.env.DB.prepare(
+        'SELECT tid, COUNT(*) AS n FROM cs_tool_log WHERE tool = ?1 AND used_at >= ' + since + ' GROUP BY tid ORDER BY n DESC LIMIT 12'
+      ).bind(tool).all();
+      const total = await ctx.env.DB.prepare(
+        'SELECT COUNT(*) AS n FROM cs_tool_log WHERE tool = ?1 AND used_at >= ' + since
+      ).bind(tool).first();
+      return { days, total: Number(total && total.n) || 0, by_who: byWho.results || [], by_template: byTpl.results || [] };
+    },
+  },
+
+  /* the order picker + placeholder auto-fill: ONE order's context from the live truth */
+  csFillContext: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const q = String(p.order_id || p.q || '').trim();
+      if (q.length < 4) throw new Error('SAY: type at least 4 characters of the order id');
+      const o = await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.buyer, o.item_id, o.sold, o.qty, o.tracking, o.courier, o.created_at, o.ship_by, o.ali_order, o.ali_link, o.refunded, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE o.order_id LIKE ?1 ORDER BY o.created_at DESC LIMIT 5'
+      ).bind('%' + q + '%').all();
+      const rows = (o.results || []).map((r) => ({
+        order_id: r.order_id, account: r.account, buyer: r.buyer, item_title: String(r.title || '').slice(0, 140),
+        item_id: r.item_id, qty: r.qty, sold: r.sold, tracking: r.tracking || '', courier: r.courier || '',
+        order_date: String(r.created_at || '').slice(0, 10), ship_by: String(r.ship_by || '').slice(0, 10),
+        ali_order: r.ali_order || '', refunded: r.refunded || 0,
+      }));
+      return { rows };
+    },
+  },
+
+  recoveryBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt && ['CS', 'Order Processor'].indexOf(ctx.user.role) < 0) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      /* candidates: refunded orders with an AliExpress order id and no tracker yet — money paid
+         out on eBay that can be chased back on AliExpress (operational figures, not book P&L) */
+      const cand = await ctx.env.DB.prepare(
+        "SELECT o.order_id, o.account, o.buyer, o.refunded, o.sold, o.ali_order, o.created_at, i.title " +
+        "FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id " +
+        "WHERE o.refunded > 0 AND COALESCE(o.ali_order,'') != '' AND o.created_at >= datetime('now','-60 day') " +
+        "AND NOT EXISTS (SELECT 1 FROM recovery_cases rc WHERE rc.order_id = o.order_id) " +
+        "ORDER BY o.refunded DESC LIMIT 60"
+      ).all();
+      const open = await ctx.env.DB.prepare(
+        "SELECT * FROM recovery_cases WHERE status = 'OPEN' ORDER BY updated_at DESC LIMIT 100"
+      ).all();
+      const closed = await ctx.env.DB.prepare(
+        "SELECT status, COUNT(*) AS n, ROUND(SUM(recovered_amount),2) AS rec, ROUND(SUM(amount),2) AS amt FROM recovery_cases " +
+        "WHERE closed_at >= datetime('now','-30 day') OR status = 'OPEN' GROUP BY status"
+      ).all();
+      return { candidates: (cand.results || []).map((r) => ({ ...r, title: String(r.title || '').slice(0, 100) })),
+        open: open.results || [], totals: closed.results || [], as_of: new Date().toISOString() };
+    },
+  },
+
+  recoveryUpsert: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt && ['CS', 'Order Processor'].indexOf(ctx.user.role) < 0) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '');
+      if (p.id) {
+        const id = Number(p.id);
+        const cur = await ctx.env.DB.prepare('SELECT id FROM recovery_cases WHERE id = ?1').bind(id).first();
+        if (!cur) throw new Error('tracker not found');
+        const status = ['OPEN', 'RECOVERED', 'LOST'].indexOf(String(p.status || '')) >= 0 ? String(p.status) : null;
+        await ctx.env.DB.prepare(
+          "UPDATE recovery_cases SET stage = COALESCE(?2, stage), note = COALESCE(?3, note), " +
+          "recovered_amount = COALESCE(?4, recovered_amount), status = COALESCE(?5, status), " +
+          "closed_at = CASE WHEN ?5 IN ('RECOVERED','LOST') THEN datetime('now') ELSE closed_at END, updated_at = datetime('now') WHERE id = ?1"
+        ).bind(id, p.stage ? String(p.stage).slice(0, 60) : null, p.note != null ? String(p.note).slice(0, 500) : null,
+          p.recovered_amount != null ? Number(p.recovered_amount) : null, status).run();
+        return { ok: true, id };
+      }
+      const orderId = String(p.order_id || '').trim();
+      if (!orderId) throw new Error('order_id required');
+      const o = await ctx.env.DB.prepare(
+        'SELECT o.account, o.ali_order, o.refunded, i.title FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE o.order_id = ?1'
+      ).bind(orderId).first();
+      const r = await ctx.env.DB.prepare(
+        "INSERT INTO recovery_cases (account, order_id, ali_order, item_title, stage, amount, note, opened_by, opened_at, updated_at) " +
+        "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,datetime('now'),datetime('now'))"
+      ).bind(String((o && o.account) || p.account || ''), orderId, String((o && o.ali_order) || p.ali_order || ''),
+        String((o && o.title) || p.item_title || '').slice(0, 140), String(p.stage || 'OPENED').slice(0, 60),
+        Number(p.amount != null ? p.amount : (o && o.refunded) || 0), String(p.note || '').slice(0, 500), me).run();
+      return { ok: true, id: Number(r.meta && r.meta.last_row_id) || 0 };
     },
   },
 

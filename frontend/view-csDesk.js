@@ -85,10 +85,10 @@
           '<p style="font-size:10.5px;color:var(--text-3);font-weight:600;margin:0 0 12px">' + esc(String(dash.refund_note || '')) + '</p>';
       }
       h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px">' +
-        '<span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800">Tools \u00b7 live in this dashboard</span>' +
-        '<button class="minibtn" data-dock="tool_reply" data-dock-t="CS Reply Agent">CS Reply Agent</button>' +
-        '<button class="minibtn" data-dock="tool_recovery" data-dock-t="AliExpress Recovery Agent">AliExpress Recovery</button>' +
-        '<button class="minibtn" data-dock="tool_defense" data-dock-t="eBay Defense Agent">Defense Agent</button>' +
+        '<span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800">Tools \u00b7 now native live desks</span>' +
+        '<button class="minibtn" data-cdgo="csReplyDesk">CS Reply desk</button>' +
+        '<button class="minibtn" data-cdgo="csRecoveryDesk">AliExpress recovery</button>' +
+        '<button class="minibtn" data-cdgo="csDefenseDesk">Defense desk</button>' +
         '</div><div id="cdToolDock" style="margin-bottom:12px"></div>';
     }
 
@@ -178,6 +178,9 @@
     box.innerHTML = h;
     box.querySelectorAll('[data-dock]').forEach(function (b) {
       b.onclick = function () { window.toolDock($('cdToolDock'), this.getAttribute('data-dock'), this.getAttribute('data-dock-t')); };
+    });
+    document.querySelectorAll('[data-cdgo]').forEach(function (b) {
+      b.onclick = function () { var k = this.getAttribute('data-cdgo'); try { location.hash = k; renderView(k); } catch (e) {} };
     });
     cdAutoMsgs();
   }
