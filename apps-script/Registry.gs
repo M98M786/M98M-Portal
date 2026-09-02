@@ -1190,3 +1190,21 @@ function notifDump(args) {
   PropertiesService.getScriptProperties().setProperty('NOTIF_PUSH_ROW', String(Math.max(at - 1, Number(PropertiesService.getScriptProperties().getProperty('NOTIF_PUSH_ROW') || 0))));
   return pushed + ' letter(s) backfilled (rows ' + start + '–' + (at - 1) + ' of ' + lr + ')' + (at <= lr ? ' · continue with {from_row:' + at + '}' : ' · complete');
 }
+
+/* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
+function huntsDump(args) {
+  const rows = readTab_('HUNTING_DB');
+  const start = Math.max(0, Number(args && args.from_row) || 0);
+  let pushed = 0;
+  const t0 = Date.now();
+  for (let i = start; i < rows.length && Date.now() - t0 < 220000; i += 120) {
+    const batch = rows.slice(i, i + 120).map(function (r) {
+      const rec = huntRecord_(r);
+      const hv = {};
+      Object.keys(rec).forEach(function (k) { const x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
+      return { vals: hv };
+    }).filter(function (b) { return b.vals.hunt_id; });
+    if (batch.length) { enginePost_('syncHunts', { rows: batch }); pushed += batch.length; }
+  }
+  return pushed + ' hunt(s) mirrored of ' + rows.length;
+}

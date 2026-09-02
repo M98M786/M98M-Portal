@@ -442,7 +442,7 @@ var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard
    simply becomes fast the day the Worker lands - no second frontend release needed.
    Only 'unknown action' falls back. An auth failure or a real error must still surface, which is
    the R6c rule below: a mis-routed call must never be silently papered over. */
-var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine' };
+var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine', myTasks: 'myTasksEngine', pendingApprovals: 'pendingApprovalsEngine', huntQueue: 'huntQueueEngine', myHunts: 'myHuntsEngine' };
 /* Remember a miss. Without this the probe is paid on EVERY call — the department boards refresh
    themselves every 45 seconds, so a not-yet-deployed Engine action turned a 5.5s page into a 7.5s
    page instead of leaving it unchanged. One failed probe per tab is the most this may ever cost.
@@ -567,7 +567,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-1543';
+var BUILD = '20260902-1621';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives

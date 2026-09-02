@@ -272,6 +272,8 @@ const ENGINE_RUNNABLE = {
   cpcKeywordSweep: function () { return typeof cpcKeywordSweep === 'function' ? String(cpcKeywordSweep()) : 'absent'; },
   inboxDump: function (args) { return typeof inboxDump === 'function' ? String(inboxDump(args)) : 'absent'; },
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
+  huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
+  pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },
   buildDashboardCache: function () { return buildDashboardCache(); },
@@ -630,6 +632,7 @@ function pushEngineTasks() {
       created_at: taskPktIso_(t.created_at), updated_at: taskPktIso_(t.updated_at),
       submitted_at: taskPktIso_(t.submitted_at), approved_by: String(t.approved_by || ''),
       decided_at: taskPktIso_(t.decided_at),
+      submission_note: String(t.submission_note || ''), time_taken_min: String(t.time_taken_min || ''),
     };
   }).filter(function (t) { return t.task_id; });
 

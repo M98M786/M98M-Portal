@@ -3631,6 +3631,11 @@ async function ensureTruthSchema(env) {
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_nf_asid ON notif_live(as_id) WHERE as_id != ''",
     "CREATE INDEX IF NOT EXISTS idx_nf_me ON notif_live(to_email, read_at)",
     "CREATE INDEX IF NOT EXISTS idx_nf_at ON notif_live(created_at)",
+    "ALTER TABLE tasks ADD COLUMN submission_note TEXT",
+    "ALTER TABLE tasks ADD COLUMN time_taken_min TEXT",
+    "CREATE TABLE IF NOT EXISTS hunt_rows (hunt_id TEXT PRIMARY KEY, hunter_email TEXT, status TEXT, account TEXT, ts TEXT, vals TEXT, synced_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
+    "CREATE INDEX IF NOT EXISTS idx_hr_hunter ON hunt_rows(hunter_email)",
     "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
     "CREATE INDEX IF NOT EXISTS idx_it_b ON inbox_threads(b_email, last_at)",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
@@ -4281,17 +4286,18 @@ const ROUTES = {
       const stamp = String(p.stamp || '').slice(0, 40) || new Date().toISOString();
       const stmts = rows.map((t) => ctx.env.DB.prepare(
         'INSERT INTO tasks (task_id, type, account, item_id, title, details, comments, assigned_by, assigned_to, ' +
-        'priority, deadline_pkt, status, created_at, updated_at, submitted_at, approved_by, decided_at, synced_at) ' +
-        'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) ' +
+        'priority, deadline_pkt, status, created_at, updated_at, submitted_at, approved_by, decided_at, synced_at, submission_note, time_taken_min) ' +
+        'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20) ' +
         'ON CONFLICT(task_id) DO UPDATE SET type=?2, account=?3, item_id=?4, title=?5, details=?6, comments=?7, ' +
         'assigned_by=?8, assigned_to=?9, priority=?10, deadline_pkt=?11, status=?12, created_at=?13, updated_at=?14, ' +
-        'submitted_at=?15, approved_by=?16, decided_at=?17, synced_at=?18'
+        'submitted_at=?15, approved_by=?16, decided_at=?17, synced_at=?18, submission_note=?19, time_taken_min=?20'
       ).bind(
         String(t.task_id || ''), String(t.type || ''), String(t.account || ''), String(t.item_id || ''),
         String(t.title || '').slice(0, 400), String(t.details || '').slice(0, 8000), String(t.comments || '').slice(0, 2000),
         String(t.assigned_by || '').toLowerCase(), String(t.assigned_to || '').toLowerCase(), String(t.priority || ''),
         String(t.deadline_pkt || ''), String(t.status || ''), String(t.created_at || ''), String(t.updated_at || ''),
-        String(t.submitted_at || ''), String(t.approved_by || ''), String(t.decided_at || ''), stamp
+        String(t.submitted_at || ''), String(t.approved_by || ''), String(t.decided_at || ''), stamp,
+        String(t.submission_note || ''), String(t.time_taken_min || '')
       ));
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
       let retired = 0;
@@ -6403,6 +6409,129 @@ const ROUTES = {
      sorted + joined, same rule as the sheet); a message is readable ONLY by its two
      participants — no role, Management included, reads someone else's thread (§24). The sheet
      stays the frozen archive after the flip; syncInbox mirrors it in. */
+  /* ————— 2 Sept, "issues in every department": the heavy per-visit reads move to the
+     engine. Task boards read the FRESH D1 task mirror (every AS task mutation already
+     write-throughs a single row); the hunt queue reads a new hunts mirror. AS stays the
+     master for every WRITE. Shapes mirror the AS actions exactly — the shell's
+     ENGINE_PREFERRED map swaps them in with automatic sheet fallback. */
+  myTasksEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const want = String(p.status || '').trim();
+      const bind = [me];
+      let sql = 'SELECT * FROM tasks WHERE assigned_to = ?1';
+      if (want) { bind.push(want); sql += ' AND status = ?2'; }
+      const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
+      const nowMs = Date.now() + 5 * 3600000;                      // PKT clock, the boards' own
+      const rows = (rs.results || []).map((t) => {
+        const dl = Date.parse(String(t.deadline_pkt || ''));
+        const act = Date.parse(String(t.updated_at || ''));
+        return { rec: { task_id: t.task_id, type: t.type, account: t.account, item_id: t.item_id,
+          title: t.title, details: t.details, comments: t.comments, assigned_by: t.assigned_by,
+          assigned_to: t.assigned_to, priority: t.priority, deadline_pkt: t.deadline_pkt,
+          status: t.status, created_at: t.created_at, updated_at: t.updated_at,
+          submitted_at: t.submitted_at, submission_note: t.submission_note || '',
+          approved_by: t.approved_by, decided_at: t.decided_at, time_taken_min: t.time_taken_min || '',
+          overdue: isFinite(dl) && dl < nowMs && String(t.status) !== 'Completed' },
+          dl: isFinite(dl) ? dl : Infinity, act: isFinite(act) ? act : 0 };
+      });
+      rows.sort((a, b) => (a.dl !== b.dl ? a.dl - b.dl : b.act - a.act));
+      return { tasks: rows.map((r) => r.rec) };
+    },
+  },
+
+  pendingApprovalsEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const bind = [];
+      let sql = "SELECT * FROM tasks WHERE status = 'Submitted — awaiting approval'";
+      if (!mgmt) { bind.push(me); sql += ' AND assigned_by = ?1'; }
+      const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
+      const nowMs = Date.now() + 5 * 3600000;
+      const rows = (rs.results || []).map((t) => {
+        const sub = Date.parse(String(t.submitted_at || ''));
+        const dl = Date.parse(String(t.deadline_pkt || ''));
+        return { rec: { task_id: t.task_id, type: t.type, account: t.account, item_id: t.item_id,
+          title: t.title, details: t.details, comments: t.comments, assigned_by: t.assigned_by,
+          assigned_to: t.assigned_to, priority: t.priority, deadline_pkt: t.deadline_pkt,
+          status: t.status, created_at: t.created_at, submitted_at: t.submitted_at,
+          submission_note: t.submission_note || '', time_taken_min: t.time_taken_min || '',
+          approval_lag_min: isFinite(sub) ? Math.max(0, Math.round((nowMs - sub) / 60000)) : '',
+          overdue: isFinite(dl) && dl < nowMs },
+          sub: isFinite(sub) ? sub : Infinity };
+      });
+      rows.sort((a, b) => a.sub - b.sub);
+      return { tasks: rows.map((r) => r.rec) };
+    },
+  },
+
+  syncHunts: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.rows) ? p.rows.slice(0, 400) : [];
+      const stmts = [];
+      for (const r of rows) {
+        const v = r.vals || r;
+        const hid = String(v.hunt_id || '');
+        if (!hid) continue;
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO hunt_rows (hunt_id, hunter_email, status, account, ts, vals, synced_at) VALUES (?1,?2,?3,?4,?5,?6,datetime(\'now\')) ' +
+          'ON CONFLICT(hunt_id) DO UPDATE SET hunter_email=?2, status=?3, account=?4, ts=?5, vals=?6, synced_at=datetime(\'now\')'
+        ).bind(hid, String(v.hunter_email || '').toLowerCase(), String(v.approval_status || ''),
+          String(v['Account Name'] || v.account || ''), String(v.ts || ''), JSON.stringify(v).slice(0, 9000)));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      return { synced: stmts.length };
+    },
+  },
+
+  huntQueueEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt && ['Team Lead', 'Product Hunter'].indexOf(ctx.user.role) < 0) throw new AuthError('auth');
+      const MAP = { all: null, pending: '', approved: 'APPROVED', rejected: 'NOT APPROVED', 'not approved': 'NOT APPROVED', revision: 'REVISION REQUIRED' };
+      const want = p.status === undefined ? '' : (MAP[String(p.status).toLowerCase()] !== undefined ? MAP[String(p.status).toLowerCase()] : String(p.status));
+      const bind = [];
+      let sql = 'SELECT vals FROM hunt_rows';
+      if (want !== null) { bind.push(want); sql += ' WHERE status = ?1'; }
+      const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
+      const users = await ctx.env.DB.prepare('SELECT email, name FROM users').all();
+      const names = {};
+      for (const u of (users.results || [])) names[String(u.email).toLowerCase()] = u.name || u.email;
+      const hunts = (rs.results || []).map((r) => { try { return JSON.parse(r.vals); } catch (e) { return null; } }).filter(Boolean);
+      hunts.forEach((h) => { h.hunter_name = names[String(h.hunter_email || '').toLowerCase()] || String(h.hunter_email || ''); });
+      hunts.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+      /* approved-today = today's listing_new tasks (the AS rule verbatim), from the task mirror */
+      const todayPkt = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+      const at = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM tasks WHERE type = 'listing_new' AND substr(created_at, 1, 10) = ?1"
+      ).bind(todayPkt).first();
+      return { approved_today: Number(at && at.n) || 0, hunts, count: hunts.length, can_decide: mgmt,
+        advertising_types: ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN', '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'],
+        hunt_kinds: ['Seasonal', 'Consistent'] };
+    },
+  },
+
+  myHuntsEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const MAP = { all: null, pending: '', approved: 'APPROVED', rejected: 'NOT APPROVED', 'not approved': 'NOT APPROVED', revision: 'REVISION REQUIRED' };
+      const want = p.status === undefined ? null : (MAP[String(p.status).toLowerCase()] !== undefined ? MAP[String(p.status).toLowerCase()] : String(p.status));
+      const bind = [me];
+      let sql = 'SELECT vals FROM hunt_rows WHERE hunter_email = ?1';
+      if (want !== null) { bind.push(want); sql += ' AND status = ?2'; }
+      const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
+      const hunts = (rs.results || []).map((r) => { try { return JSON.parse(r.vals); } catch (e) { return null; } }).filter(Boolean);
+      hunts.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+      return { hunts, count: hunts.length };
+    },
+  },
+
   /* ————— the bell, served from the engine (2 Sept migration off Google) ————— */
   pollEngine: {
     auth: 'any', fn: async (p, ctx) => {

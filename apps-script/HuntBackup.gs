@@ -116,6 +116,14 @@ function huntBackupRecord_(huntId, hunterEmail, ts, cols) {
 /** The hot path: put ONE hunt where it belongs, and take it out of wherever it no longer belongs.
  * Never throws — a backup that could break a submission would be worse than no backup. */
 function huntBackupUpsert_(rec) {
+  /* 2 Sept: the hunt queue reads the ENGINE mirror now — every hunt mutation pushes its own
+     row across immediately (best-effort; huntsDump/the fingerprint sweep catch any miss). */
+  try {
+    var hv = {};
+    Object.keys(rec).forEach(function (k) { var x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
+    enginePost_('syncHunts', { rows: [{ vals: hv }] });
+  } catch (e) {}
+
   const id = rec ? String(rec.hunt_id || '').trim() : '';
   if (!id) return { ok: false, reason: 'no hunt_id' };
   try {
