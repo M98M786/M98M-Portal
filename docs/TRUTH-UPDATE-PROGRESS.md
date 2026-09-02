@@ -208,3 +208,26 @@ the last 4 PKT days (AS v89) — late-created tabs and ~2-day ad revisions stay 
 ## QUEUED NEXT (owner, 2 Sept): CS tools as live dashboards
 Husnain's CS tools (Reply / Recovery / Defense — today docked embeds on the CS desk) to become
 native portal pages with real backends. Not started.
+
+## 2 Sept ~01:20 UTC — CS tools as native live dashboards (owner request, DONE)
+Husnain's three sandboxed HTML embeds became native portal desks with real D1 backends.
+- Playbooks seeded VERBATIM from each tool's own DB array into `cs_playbook`: Reply 80/80,
+  Defense 69/69, Recovery 39/39 (188 total). Every field kept: cat, name, kw, flag, tip,
+  type, next, reason, and all variants with their labels.
+- `view-zz-csTools.js`: one template engine, three desks (#csReplyDesk / #csDefenseDesk /
+  #csRecoveryDesk). Scenario list grouped by category, keyword search (matches the old tool),
+  variant tabs (Defense's numbered appeal stages), Husnain's tips shown inline.
+- Placeholders auto-fill from the LIVE order (`csFillContext`): type an order id → buyer, item,
+  tracking, courier, dates, Ali order flow into every [Placeholder]; unfilled ones stay red.
+  Verified: 12-15102-49981 → buyer/item/Ali order filled, 3 placeholders auto-populated.
+- Every copy is logged (`cs_tool_log`); each desk shows a live usage dashboard (uses/7d, most
+  active agent, top scenario) via `csToolStats`.
+- Editable in-portal by Management/Ops Head/Team Lead (`csPlaybookSave`) — a saved variant is
+  live for every CS agent instantly; the old HTML files stay as untouched backup.
+- Recovery desk adds the operational tracker: candidates = refunded eBay orders with an Ali
+  order id and no tracker (5 live at ship), per-order trackers with stages
+  (OPENED→SUPPLIER_MESSAGED→DISPUTE→ESCALATED→FORMAL_APPEAL→AWAITING), recovered-£ totals.
+  Money here is labeled OPERATIONAL (eBay refunds / Ali recoveries), NOT book P&L (sheet law).
+- csDesk buttons now link to the native desks; sidebar entries under Customer Service. The old
+  embeds remain on the Tools page as backup. Worker 01:19 UTC, Pages -0118.
+- Verification tracker (id 1) closed as LOST with a note — board left clean (0 open).
