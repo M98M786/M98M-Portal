@@ -7528,6 +7528,9 @@ const ROUTES = {
         daily_health: 'SELECT * FROM daily_health',
         sync_state: 'SELECT job, account, cursor, last_ok, last_error FROM sync_state',
         alert_log: "SELECT * FROM alert_log WHERE created_at >= datetime('now','-90 day')",
+        tasks: 'SELECT * FROM tasks',
+        hunt_rows: 'SELECT hunt_id, hunter_email, status, account, ts, synced_at FROM hunt_rows',
+        notif_live: "SELECT * FROM notif_live WHERE created_at >= datetime('now','-30 day')",
         audit: "SELECT * FROM audit WHERE at >= datetime('now','-90 day')",
         /* Not a table — a REPRESENTABLE per-account summary computed from the engine's own
            truth (Hasib: the report books eBay-side agents stopped filling; this one always

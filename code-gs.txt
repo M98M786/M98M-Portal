@@ -24694,6 +24694,7 @@ function pushSheetRowsHot() {
     } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
   });
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
+  try { huntsSweep_(); } catch (e) {}
   logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
@@ -24803,6 +24804,21 @@ function notifDump(args) {
 }
 
 /* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
+/* Rides pushSheetRowsHot every 15 min: re-push the newest hunts so a swallowed write-through
+   can never leave a submitted hunt invisible to the engine queue (self-healing, 1 call). */
+function huntsSweep_() {
+  try {
+    const rows = readTab_('HUNTING_DB');
+    const recent = rows.slice(Math.max(0, rows.length - 40)).map(function (r) {
+      const rec = huntRecord_(r);
+      const hv = {};
+      Object.keys(rec).forEach(function (k) { const x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
+      return { vals: hv };
+    }).filter(function (b) { return b.vals.hunt_id; });
+    if (recent.length) enginePost_('syncHunts', { rows: recent });
+  } catch (e) {}
+}
+
 function huntsDump(args) {
   const rows = readTab_('HUNTING_DB');
   const start = Math.max(0, Number(args && args.from_row) || 0);
