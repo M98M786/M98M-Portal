@@ -567,7 +567,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-1649';
+var BUILD = '20260902-1652';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14901,7 +14901,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         ? ' <span class="pill" style="background:rgba(80,160,255,.14);color:var(--blue,#69b7ff);font-weight:800">LIVE · ' + lagN + ' day-book' + (lagN === 1 ? '' : 's') + ' filling</span>'
         : '';
       var lagSub = lagN > 0
-        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' (rows ' + (LAG.rows_filled || cov.rows || 0) + ' of ' + (LAG.orders_expected || cov.orders || 0) + ') + eBay API for unfilled days' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
+        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' + eBay API for ' + lagN + ' unfilled day-book' + (lagN === 1 ? '' : 's') + ' (' + (LAG.rows_filled || 0) + ' of ' + (LAG.orders_expected || 0) + ' rows filled there)' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
         : null;
       var mkT = function (label, val, sub, tone) {
         return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +

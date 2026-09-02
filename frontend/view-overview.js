@@ -366,7 +366,7 @@
         ? ' <span class="pill" style="background:rgba(80,160,255,.14);color:var(--blue,#69b7ff);font-weight:800">LIVE · ' + lagN + ' day-book' + (lagN === 1 ? '' : 's') + ' filling</span>'
         : '';
       var lagSub = lagN > 0
-        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' (rows ' + (LAG.rows_filled || cov.rows || 0) + ' of ' + (LAG.orders_expected || cov.orders || 0) + ') + eBay API for unfilled days' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
+        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' + eBay API for ' + lagN + ' unfilled day-book' + (lagN === 1 ? '' : 's') + ' (' + (LAG.rows_filled || 0) + ' of ' + (LAG.orders_expected || 0) + ' rows filled there)' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
         : null;
       var mkT = function (label, val, sub, tone) {
         return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +
