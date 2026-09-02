@@ -150,3 +150,15 @@ COST_PER_SALE, the ad exists and is not ARCHIVED (General ads carry no per-ad st
 
 Display chips per membership: LIVE · AD PAUSED · CAMPAIGN PAUSED · ARCHIVED · LISTING ENDED —
 worker `memberChipStatus`, mirrored on Campaign watch / Wrong advertising / Live listings.
+
+## UP-TO-DATE money (2 Sept, owner's law refinement)
+"Use the mind of sales analysis but take up to date from API." Business overview headlines
+`*_UPTODATE`: per ACCOUNT-DAY, the books stay the number when the day is filled (its own GRAND
+TOTAL row, or >=90% of that day's API orders present as item rows); an unfilled day-book
+headlines the eBay API pushed through the sheet's own chain — TE = Sold − fees − Ali;
+VAT = Sold/6 − fees/6 − Ali/6 − 20%·ads (S = C−G−J−M−Q); Raw = TE − VAT; Actual = Raw − refunds.
+Missing fee/cost orders are topped up from the fleet's own last-7-day ratios (`BOOKS_LAG.
+estimates_used`, ratios in the same value). The books ids (SOLD_SHEET, ACTUAL_*, VAT_TO_HMRC…)
+are UNTOUCHED — every existing truth check still verifies them against the sheet; BOOKS_LAG
+carries the lagging account-days for audit. When nothing lags the tiles are books-only,
+identical to before.
