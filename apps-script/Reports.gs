@@ -118,7 +118,7 @@ function actionSubmitReport_(payload, ctx) {
     if (repIndexRows_(readTab_('REPORTS_2H'))[normalizeEmail(email) + '|' + date + '|' + cp]) {
       throw new Error('report already exists for this date and checkpoint');
     }
-    repAppendReport_(sh, {
+    var repRow = {
       report_id: reportId, email: email, role: role, shift: ctx.user.shift, date: date, checkpoint: cp,
       work_summary: stored,
       count_1: counts.length > 0 ? counts[0] : '',
@@ -126,8 +126,12 @@ function actionSubmitReport_(payload, ctx) {
       count_3: counts.length > 2 ? counts[2] : '',
       count_4: counts.length > 3 ? counts[3] : '',
       submitted_at: now_(), flag: flag,
-    });
+    };
+    repAppendReport_(sh, repRow);
   } finally { lock.releaseLock(); }
+  /* 3 Sept: the grid and My-reports read the ENGINE mirror — each submission pushes its own
+     row across immediately (best-effort; reportsSweep_/reportsDump self-heal any miss). */
+  try { enginePost_('syncReports', { rows: [repRow] }); } catch (e) {}
 
   logActivity_(ctx.ident.email, 'SUBMIT_REPORT_2H', 'REPORTS_2H:' + date + ' ' + cp, '',
     flag + '|' + counts.join(','), isFinal ? 'Daily Productivity Report' : '');

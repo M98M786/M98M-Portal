@@ -3472,7 +3472,7 @@ function actionSubmitReport_(payload, ctx) {
     if (repIndexRows_(readTab_('REPORTS_2H'))[normalizeEmail(email) + '|' + date + '|' + cp]) {
       throw new Error('report already exists for this date and checkpoint');
     }
-    repAppendReport_(sh, {
+    var repRow = {
       report_id: reportId, email: email, role: role, shift: ctx.user.shift, date: date, checkpoint: cp,
       work_summary: stored,
       count_1: counts.length > 0 ? counts[0] : '',
@@ -3480,8 +3480,12 @@ function actionSubmitReport_(payload, ctx) {
       count_3: counts.length > 2 ? counts[2] : '',
       count_4: counts.length > 3 ? counts[3] : '',
       submitted_at: now_(), flag: flag,
-    });
+    };
+    repAppendReport_(sh, repRow);
   } finally { lock.releaseLock(); }
+  /* 3 Sept: the grid and My-reports read the ENGINE mirror — each submission pushes its own
+     row across immediately (best-effort; reportsSweep_/reportsDump self-heal any miss). */
+  try { enginePost_('syncReports', { rows: [repRow] }); } catch (e) {}
 
   logActivity_(ctx.ident.email, 'SUBMIT_REPORT_2H', 'REPORTS_2H:' + date + ' ' + cp, '',
     flag + '|' + counts.join(','), isFinal ? 'Daily Productivity Report' : '');
@@ -21417,8 +21421,17 @@ function metricsWatch() {
 
 function pushEngineSync() {
   const users = readTab_('USERS').map(function (u) {
+    /* 3 Sept: the reports pages read the ENGINE now — each user's derived §5 checkpoint list
+       and working days ride the same hourly push, so derivation stays in ONE place (here). */
+    let cps = '', wdays = '';
+    try {
+      const s = typeof getScheduleForUser_ === 'function' ? getScheduleForUser_(u.email) : null;
+      if (s) wdays = String(s.working_days || '');
+      cps = (typeof getCheckpointsForUser_ === 'function' ? (getCheckpointsForUser_(u.email) || []) : []).join(',');
+    } catch (e) {}
     return { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''),
       status: String(u.status || ''), modules: String(u.modules || ''), tools: String(u.tools || ''),
+      shift: String(u.shift || ''), checkpoints: cps, working_days: wdays,
       super: isSuperAdmin(u.email) };
   });
   const su = enginePost_('syncUsers', { users: users });
@@ -21559,6 +21572,7 @@ const ENGINE_RUNNABLE = {
   inboxDump: function (args) { return typeof inboxDump === 'function' ? String(inboxDump(args)) : 'absent'; },
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
+  reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },
@@ -24696,9 +24710,10 @@ function pushSheetRowsHot() {
   });
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
+  try { reportsSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
-    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons']
+    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2']
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
@@ -24813,6 +24828,39 @@ function notifDump(args) {
 /* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
 /* Rides pushSheetRowsHot every 15 min: re-push the newest hunts so a swallowed write-through
    can never leave a submitted hunt invisible to the engine queue (self-healing, 1 call). */
+/* 3 Sept — REPORTS_2H mirror for the Engine's reports pages. Newest rows re-pushed every
+   15 min (self-heal); reportsDump backfills history. Rows are small; 80 is a shift's worth. */
+function reportsSweep_() {
+  try {
+    const rows = readTab_('REPORTS_2H');
+    const recent = rows.slice(Math.max(0, rows.length - 80)).map(repRowOut_).filter(function (r) { return r.report_id; });
+    if (recent.length) enginePost_('syncReports', { rows: recent });
+  } catch (e) {}
+}
+
+function repRowOut_(r) {
+  const o = {};
+  ['report_id', 'email', 'role', 'shift', 'work_summary', 'count_1', 'count_2', 'count_3', 'count_4', 'flag'].forEach(function (c) {
+    o[c] = String(r[c] == null ? '' : r[c]);
+  });
+  o.date = (typeof schedDateStr_ === 'function') ? schedDateStr_(r.date) : String(r.date || '');
+  o.checkpoint = (typeof schedHm_ === 'function') ? schedHm_(r.checkpoint) : String(r.checkpoint || '');
+  o.submitted_at = (r.submitted_at instanceof Date) ? taskPktIso_(r.submitted_at) : String(r.submitted_at || '');
+  return o;
+}
+
+function reportsDump(args) {
+  const rows = readTab_('REPORTS_2H');
+  const start = Math.max(0, Number(args && args.from_row) || Math.max(0, rows.length - 1500));
+  let pushed = 0;
+  const t0 = Date.now();
+  for (let i = start; i < rows.length && Date.now() - t0 < 220000; i += 200) {
+    const batch = rows.slice(i, i + 200).map(repRowOut_).filter(function (b) { return b.report_id; });
+    if (batch.length) { enginePost_('syncReports', { rows: batch }); pushed += batch.length; }
+  }
+  return pushed + ' report row(s) mirrored of ' + rows.length;
+}
+
 function huntsSweep_() {
   try {
     const rows = readTab_('HUNTING_DB');

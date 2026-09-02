@@ -131,8 +131,17 @@ function metricsWatch() {
 
 function pushEngineSync() {
   const users = readTab_('USERS').map(function (u) {
+    /* 3 Sept: the reports pages read the ENGINE now — each user's derived §5 checkpoint list
+       and working days ride the same hourly push, so derivation stays in ONE place (here). */
+    let cps = '', wdays = '';
+    try {
+      const s = typeof getScheduleForUser_ === 'function' ? getScheduleForUser_(u.email) : null;
+      if (s) wdays = String(s.working_days || '');
+      cps = (typeof getCheckpointsForUser_ === 'function' ? (getCheckpointsForUser_(u.email) || []) : []).join(',');
+    } catch (e) {}
     return { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''),
       status: String(u.status || ''), modules: String(u.modules || ''), tools: String(u.tools || ''),
+      shift: String(u.shift || ''), checkpoints: cps, working_days: wdays,
       super: isSuperAdmin(u.email) };
   });
   const su = enginePost_('syncUsers', { users: users });
@@ -273,6 +282,7 @@ const ENGINE_RUNNABLE = {
   inboxDump: function (args) { return typeof inboxDump === 'function' ? String(inboxDump(args)) : 'absent'; },
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
+  reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },

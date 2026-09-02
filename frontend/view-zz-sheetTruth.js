@@ -105,9 +105,28 @@
     return Object.keys(m).sort().map(function (k) { return m[k]; });
   }
 
+  /* 3 Sept (owner: "graphs of sales analysis all fucked up") — the charts used to draw only
+     BOOK-WRITTEN days, so the newest days collapsed to nothing while the tiles showed live
+     figures. This merges the register's blended per-day series instead: filled days are the
+     books; unfilled days carry the eBay-API figure through the books' own ratios and are drawn
+     hatched, labeled live. */
+  function sxMergeDaysUp(metrics, acct) {
+    var series = metrics && metrics.DAYS_UPTODATE && metrics.DAYS_UPTODATE.value;
+    if (!series || !series.length) { return sxMergeDays((metrics.MONEY_BY_ACCOUNT || {}).value || {}, acct); }
+    var m = {};
+    series.forEach(function (r) {
+      if (acct && r.account !== acct) { return; }
+      var b = (m[r.day] = m[r.day] || { day: r.day, sold: 0, ap: 0, actual: 0, vat: 0, ads: 0, ret: 0, ali: 0, rows: 0, live: false });
+      b.sold += (r.sold || 0); b.ap += (r.actual || 0); b.actual += (r.actual || 0); b.vat += (r.vat || 0);
+      b.ads += (r.ads || 0); b.ret += (r.returns || 0); b.ali += (r.ali || 0); b.rows += (r.rows || 0);
+      if (r.src === 'live') { b.live = true; }
+    });
+    return Object.keys(m).sort().map(function (k) { return m[k]; });
+  }
+
   /* two small SVG charts, the report sheet's own pair */
   function sxChartSoldActual(days) {
-    if (!days || days.length < 2) { return '<div class="alx-empty">Not enough written days in this range for a chart — a missing day means its tab has no rows yet.</div>'; }
+    if (!days || !days.length) { return '<div class="alx-empty">No days with any data in this range yet.</div>'; }
     var W = 860, H = 240, L = 54, R = 14, T = 16, B = 36;
     var mx = 1;
     days.forEach(function (d) { mx = Math.max(mx, d.sold); });
@@ -116,19 +135,30 @@
     var Y = function (v) { return T + (1 - v / mx) * (H - T - B); };
     var bars = days.map(function (d, i) {
       var h2 = (H - T - B) * (d.sold / mx);
-      return '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - h2).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, h2).toFixed(1) + '" fill="var(--blue)" opacity=".55"><title>' + d.day + ' — sold ' + sxGBP(d.sold) + ' · actual ' + sxGBP(d.ap || d.actual) + '</title></rect>';
+      var live = !!d.live;
+      return '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - h2).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, h2).toFixed(1) + '"' +
+        (live ? ' fill="var(--blue)" opacity=".28" stroke="var(--blue)" stroke-width="1.4" stroke-dasharray="4 3"' : ' fill="var(--blue)" opacity=".55"') +
+        '><title>' + d.day + ' — sold ' + sxGBP(d.sold) + ' · actual ' + sxGBP(d.ap || d.actual) + (live ? ' (LIVE · book not written yet)' : '') + '</title></rect>';
+    }).join('');
+    var gridLines = [0.5, 1].map(function (f) {
+      var y = (T + (1 - f) * (H - T - B)).toFixed(1);
+      return '<line x1="' + L + '" y1="' + y + '" x2="' + (W - R) + '" y2="' + y + '" stroke="rgba(120,132,152,.18)" stroke-width="1"/>' +
+        '<text x="' + (L - 6) + '" y="' + (Number(y) + 3.5) + '" text-anchor="end" font-size="9" fill="var(--text-3)">' + sxGBP(mx * f) + '</text>';
     }).join('');
     var line = days.map(function (d, i) { return (i ? 'L' : 'M') + (X(i) + bw / 2).toFixed(1) + ',' + Y(Math.max(0, d.ap || d.actual)).toFixed(1); }).join(' ');
     var labels = '';
     var step = Math.max(1, Math.floor(n / 9));
     for (var i = 0; i < n; i += step) { labels += '<text x="' + (X(i) + bw / 2).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="9.5" fill="var(--text-3)">' + days[i].day.slice(5) + '</text>'; }
-    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:620px;width:100%;height:auto">' + bars + labels +
+    var liveAny = days.some(function (d) { return d.live; });
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:620px;width:100%;height:auto">' + gridLines + bars + labels +
       '<path d="' + line + '" fill="none" stroke="var(--ok)" stroke-width="2.2"/>' +
       '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--blue)">▮ Sold / day</text>' +
-      '<text x="' + (L + 110) + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">▬ Actual profit / day</text></svg></div>';
+      '<text x="' + (L + 110) + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">▬ Actual profit / day</text>' +
+      (liveAny ? '<text x="' + (W - R) + '" y="12" text-anchor="end" font-size="10" font-weight="800" fill="var(--blue)" opacity=".7">▯ dashed = live from eBay API (book not written yet)</text>' : '') +
+      '</svg></div>';
   }
   function sxChartLeaks(days) {
-    if (!days || days.length < 2) { return '<div class="alx-empty">Not enough written days in this range.</div>'; }
+    if (!days || !days.length) { return '<div class="alx-empty">No days with any data in this range yet.</div>'; }
     var W = 860, H = 190, L = 54, R = 14, T = 14, B = 34;
     var mx = 1;
     days.forEach(function (d) { mx = Math.max(mx, d.ads + d.ret); });
@@ -136,8 +166,9 @@
     var X = function (i) { return L + i * (W - L - R) / n; };
     var bars = days.map(function (d, i) {
       var hA = (H - T - B) * (d.ads / mx), hR = (H - T - B) * (d.ret / mx);
-      return '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - hA).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, hA).toFixed(1) + '" fill="var(--warn)" opacity=".8"><title>' + d.day + ' — ads incl VAT ' + sxGBP(d.ads) + '</title></rect>' +
-        '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - hA - hR).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, hR).toFixed(1) + '" fill="var(--bad)" opacity=".85"><title>' + d.day + ' — returns ' + sxGBP(d.ret) + '</title></rect>';
+      var lv = d.live ? ' stroke-dasharray="4 3" stroke-width="1.2"' : '';
+      return '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - hA).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, hA).toFixed(1) + '" fill="var(--warn)" opacity="' + (d.live ? '.4' : '.8') + '" stroke="var(--warn)"' + lv + '><title>' + d.day + ' — ads incl VAT ' + sxGBP(d.ads) + (d.live ? ' (live)' : '') + '</title></rect>' +
+        '<rect x="' + X(i).toFixed(1) + '" y="' + (H - B - hA - hR).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, hR).toFixed(1) + '" fill="var(--bad)" opacity="' + (d.live ? '.45' : '.85') + '" stroke="var(--bad)"' + lv + '><title>' + d.day + ' — returns ' + sxGBP(d.ret) + (d.live ? ' (live)' : '') + '</title></rect>';
     }).join('');
     var labels = '';
     var step = Math.max(1, Math.floor(n / 9));
@@ -149,7 +180,7 @@
 
   function sxCoverageNote(d, from, to) {
     var cov = (d.metrics.ROWS_COVERAGE.value || {});
-    var days = sxMergeDays(d.metrics.MONEY_BY_ACCOUNT.value, SX.acct);
+    var days = sxMergeDaysUp(d.metrics, SX.acct);
     var span = Math.round((new Date(to + 'T12:00:00Z') - new Date(from + 'T12:00:00Z')) / 86400000) + 1;
     return '<p class="sx-note">' + days.length + ' of ' + span + ' day(s) in this range have book rows (' + (cov.rows || 0) + ' rows · ' + (cov.orders || 0) + ' eBay orders in the same window). ' +
       'A missing day means its tab has no rows yet — staff write the day tabs during shifts; nothing is invented. ' + mChip(d.metrics.SOLD_SHEET) + '</p>';
@@ -201,7 +232,26 @@
       var margin = sold > 0 ? Math.round(ap / sold * 1000) / 10 : null;
       var tile = function (l, val, s2) { return '<div class="sx-tile"><span class="l">' + l + '</span><div class="v">' + val + '</div><span class="s">' + s2 + '</span></div>'; };
 
-      var h = '<div class="sx-tiles">' +
+      /* the owner's law (2 Sept): headline UP TO DATE — books for filled days, the API through
+         the books' own ratios for days staff have not written yet. Account filter honoured via
+         the per-day blended series. */
+      var upDays = sxMergeDaysUp(M, SX.acct);
+      var liveDays = upDays.filter(function (x) { return x.live; }).length;
+      if (liveDays > 0) {
+        var uS = 0, uA = 0, uV = 0, uL = 0, uAds = 0, uR = 0;
+        upDays.forEach(function (x) { uS += x.sold; uA += x.ap; uV += x.vat; uL += x.ali; uAds += x.ads; uR += x.ret; });
+        var upPill = ' <span class="pill" style="background:rgba(80,160,255,.14);color:var(--blue-2);font-weight:800">LIVE · ' + liveDays + ' day' + (liveDays === 1 ? '' : 's') + ' filling</span>';
+        var h = '<div class="sx-tiles">' +
+          tile('Sold — up to date', sxGBP(uS), 'books ' + sxGBP(sold) + ' + eBay API for unwritten days' + upPill) +
+          tile('Actual profit — up to date', sxGBP(uA), 'books ' + sxGBP(ap) + " · unwritten days via the books' own ratios") +
+          tile('VAT to HMRC — up to date', sxGBP(uV), 'books ' + sxGBP(vat) + mChip(M.VAT_TO_HMRC)) +
+          tile('AliExpress', sxGBP(uL), 'books ' + sxGBP(ali)) +
+          tile('Ads incl VAT', sxGBP(uAds), 'books ' + sxGBP(ads) + ' · live days from the ads feed') +
+          tile('Returns', sxGBP(uR), 'books ' + sxGBP(ret) + ' · live days = API refunds') +
+          tile('Margin', uS > 0 ? (Math.round(uA / uS * 1000) / 10) + '%' : '—', 'actual ÷ sold, up to date') +
+          '</div>';
+      } else {
+        var h = '<div class="sx-tiles">' +
         tile('Sold', sxGBP(sold), "'Total Sales/Sold For' " + mChip(M.SOLD_SHEET)) +
         tile('Actual profit', sxGBP(ap), "'Actual Profit' — raw " + sxGBP(raw) + ' − returns ' + sxGBP(ret)) +
         tile('VAT to HMRC', sxGBP(vat), "'VAT to HMRC' " + mChip(M.VAT_TO_HMRC)) +
@@ -210,9 +260,10 @@
         tile('Returns', sxGBP(ret), "'Returns'") +
         tile('Margin', margin == null ? '—' : margin + '%', 'actual ÷ sold') +
         '</div>';
+      }
       h += sxCoverageNote(d, SX.from, SX.to);
 
-      var days = sxMergeDays(byA, SX.acct);
+      var days = upDays;
       h += '<div class="card" style="margin-top:12px"><div class="hd">Sales vs Actual Profit — day by day <span class="hint">the report sheet’s own chart, from the day tabs</span></div><div class="bd">' + sxChartSoldActual(days) + '</div></div>';
       h += '<div class="card" style="margin-top:14px"><div class="hd">Where the money leaks — ads &amp; returns <span class="hint">‘Total Priority incl VAT’ + ‘General Fees incl VAT’ · ‘Returns’</span></div><div class="bd">' + sxChartLeaks(days) + '</div></div>';
 
@@ -376,7 +427,7 @@
       /* 14-day actual-profit trend ending on the chosen day */
       truthPage({ from: sxShift(DX.day, -13), to: DX.day }).then(function (d2) {
         if (!$('dxBody')) { return; }
-        var days = sxMergeDays(d2.metrics.MONEY_BY_ACCOUNT.value, '');
+        var days = sxMergeDaysUp(d2.metrics, '');
         var trend = '<div class="card" style="margin-top:14px"><div class="hd">Actual profit — 14 days to ' + esc(DX.day) + '</div><div class="bd">' + sxChartSoldActual(days) + '</div></div>';
         body.innerHTML = h + trend;
       }).catch(function () { body.innerHTML = h; });

@@ -1084,9 +1084,10 @@ function pushSheetRowsHot() {
   });
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
+  try { reportsSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
-    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons']
+    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2']
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
@@ -1201,6 +1202,39 @@ function notifDump(args) {
 /* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
 /* Rides pushSheetRowsHot every 15 min: re-push the newest hunts so a swallowed write-through
    can never leave a submitted hunt invisible to the engine queue (self-healing, 1 call). */
+/* 3 Sept — REPORTS_2H mirror for the Engine's reports pages. Newest rows re-pushed every
+   15 min (self-heal); reportsDump backfills history. Rows are small; 80 is a shift's worth. */
+function reportsSweep_() {
+  try {
+    const rows = readTab_('REPORTS_2H');
+    const recent = rows.slice(Math.max(0, rows.length - 80)).map(repRowOut_).filter(function (r) { return r.report_id; });
+    if (recent.length) enginePost_('syncReports', { rows: recent });
+  } catch (e) {}
+}
+
+function repRowOut_(r) {
+  const o = {};
+  ['report_id', 'email', 'role', 'shift', 'work_summary', 'count_1', 'count_2', 'count_3', 'count_4', 'flag'].forEach(function (c) {
+    o[c] = String(r[c] == null ? '' : r[c]);
+  });
+  o.date = (typeof schedDateStr_ === 'function') ? schedDateStr_(r.date) : String(r.date || '');
+  o.checkpoint = (typeof schedHm_ === 'function') ? schedHm_(r.checkpoint) : String(r.checkpoint || '');
+  o.submitted_at = (r.submitted_at instanceof Date) ? taskPktIso_(r.submitted_at) : String(r.submitted_at || '');
+  return o;
+}
+
+function reportsDump(args) {
+  const rows = readTab_('REPORTS_2H');
+  const start = Math.max(0, Number(args && args.from_row) || Math.max(0, rows.length - 1500));
+  let pushed = 0;
+  const t0 = Date.now();
+  for (let i = start; i < rows.length && Date.now() - t0 < 220000; i += 200) {
+    const batch = rows.slice(i, i + 200).map(repRowOut_).filter(function (b) { return b.report_id; });
+    if (batch.length) { enginePost_('syncReports', { rows: batch }); pushed += batch.length; }
+  }
+  return pushed + ' report row(s) mirrored of ' + rows.length;
+}
+
 function huntsSweep_() {
   try {
     const rows = readTab_('HUNTING_DB');

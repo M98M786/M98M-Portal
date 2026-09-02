@@ -3636,6 +3636,12 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE tasks ADD COLUMN time_taken_min TEXT",
     "CREATE TABLE IF NOT EXISTS hunt_rows (hunt_id TEXT PRIMARY KEY, hunter_email TEXT, status TEXT, account TEXT, ts TEXT, vals TEXT, synced_at TEXT)",
     "CREATE TABLE IF NOT EXISTS portal_config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS reports_2h (report_id TEXT PRIMARY KEY, email TEXT, role TEXT, shift TEXT, date TEXT, checkpoint TEXT, work_summary TEXT, count_1 TEXT, count_2 TEXT, count_3 TEXT, count_4 TEXT, submitted_at TEXT, flag TEXT, synced_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_r2h_email_date ON reports_2h(email, date)",
+    "CREATE INDEX IF NOT EXISTS idx_r2h_date ON reports_2h(date)",
+    "ALTER TABLE users ADD COLUMN shift TEXT",
+    "ALTER TABLE users ADD COLUMN checkpoints TEXT",
+    "ALTER TABLE users ADD COLUMN working_days TEXT",
     "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
     "CREATE INDEX IF NOT EXISTS idx_hr_hunter ON hunt_rows(hunter_email)",
     "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
@@ -3786,6 +3792,79 @@ function srDayPick(totals, items) {
    carries ads and more), while API fees+ali left ~45%. So: per account, over the last 14 days'
    COMPLETE books days (their own GRAND TOTAL row), the ratios te/sold, vat/sold, actual/sold,
    ali/sold — fleet aggregate as fallback. Sold itself always stays the API's exact number. */
+/* ————— §5 reporting helpers (Reports.gs replicas — timing math only; checkpoint DERIVATION
+   stays on Apps Script, which pushes each user's list with the hourly users sync) ————— */
+const REP_COUNT_FIELDS = {
+  'Item Lister': ['listings done', 'revisions done'],
+  'Listing Manager': ['listings done', 'revisions done'],
+  'CS': ['buyer replies', 'cases handled'],
+  'Order Processor': ['orders processed', 'tracking added', 'orders rechecked', 'wrong orders found'],
+  'Product Hunter': ['products added'],
+  'Advertising Manager': ['campaigns updated', 'items reviewed'],
+  'Management': [], 'Ops Head': [], 'Team Lead': [], 'Pricing': [],
+};
+const REP_DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+function repHm(v) {
+  const m = String(v == null ? '' : v).trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return '';
+  return (h < 10 ? '0' : '') + h + ':' + m[2];
+}
+function repMin(v) { const k = repHm(v); return k ? Number(k.slice(0, 2)) * 60 + Number(k.slice(3, 5)) : 0; }
+function repPktNow() { const d = new Date(Date.now() + 5 * 3600000); return { day: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
+function repAddDays(dateStr, n) { return new Date(Date.parse(dateStr + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
+function repDayDiff(a, b) { return Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000); }
+function repShiftDateJs(cps) {
+  const now = repPktNow();
+  if (!cps.length) return now.day;
+  const first = repMin(cps[0]), last = repMin(cps[cps.length - 1]);
+  if (last <= first && now.min < first) return repAddDays(now.day, -1);
+  return now.day;
+}
+function repTimingJs(cps, shiftDate) {
+  const abs = [];
+  let day = 0;
+  for (let i = 0; i < cps.length; i++) {
+    if (i > 0 && repMin(cps[i]) <= repMin(cps[i - 1])) day++;
+    abs.push(day * 1440 + repMin(cps[i]));
+  }
+  let gap = abs.length >= 2 ? (abs[abs.length - 1] - abs[abs.length - 2]) : 120;
+  if (!(gap > 0)) gap = 120;
+  const deadlines = abs.map((a, i) => (i < abs.length - 1 ? abs[i + 1] : a + gap));
+  const now = repPktNow();
+  return { abs, deadlines, nowAbs: repDayDiff(now.day, shiftDate) * 1440 + now.min };
+}
+function repIsWorkingDayJs(pattern, dateStr) {
+  const p = String(pattern || '').trim().toUpperCase();
+  if (!p) return true;
+  const want = new Date(Date.parse(dateStr + 'T00:00:00Z')).getUTCDay();
+  let matched = false, understood = false;
+  for (let tok of p.split(/[,;/|]+/)) {
+    tok = tok.trim();
+    if (!tok) continue;
+    const range = tok.split('-');
+    if (range.length === 2) {
+      const a = REP_DAYS.indexOf(range[0].trim().slice(0, 3));
+      const b = REP_DAYS.indexOf(range[1].trim().slice(0, 3));
+      if (a < 0 || b < 0) continue;
+      understood = true;
+      for (let d = a; ; d = (d + 1) % 7) { if (d === want) { matched = true; } if (d === b) break; }
+    } else {
+      const d = REP_DAYS.indexOf(tok.slice(0, 3));
+      if (d < 0) continue;
+      understood = true;
+      if (d === want) matched = true;
+    }
+  }
+  return understood ? matched : true;
+}
+async function repLateThresholdJs(env) {
+  const r = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'late_threshold_min'").first().catch(() => null);
+  const v = Number(r && r.value);
+  return (isFinite(v) && v >= 0) ? v : 20;
+}
+
 /* ————— listing-department helpers (Listing.gs §8 replicas) ————— */
 const LST_LIMITED_MAP = [
   { to: 'Listing Update', from: ['Listing Update', 'Listing Status'], def: 'Pending ' },
@@ -4449,11 +4528,12 @@ const ROUTES = {
       const users = p.users || [];
       for (const u of users) {
         await ctx.env.DB.prepare(
-          'INSERT INTO users (email, name, role, status, modules, tools, super) VALUES (?1,?2,?3,?4,?5,?6,?7) ' +
-          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7'
+          'INSERT INTO users (email, name, role, status, modules, tools, super, shift, checkpoints, working_days) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ' +
+          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7, shift=?8, checkpoints=?9, working_days=?10'
         ).bind(
           String(u.email || '').toLowerCase(), String(u.name || ''), String(u.role || ''),
-          String(u.status || ''), String(u.modules || ''), String(u.tools || ''), u.super ? 1 : 0
+          String(u.status || ''), String(u.modules || ''), String(u.tools || ''), u.super ? 1 : 0,
+          String(u.shift || ''), String(u.checkpoints || ''), String(u.working_days || '')
         ).run();
       }
       return { synced: users.length };
@@ -6658,6 +6738,116 @@ const ROUTES = {
     },
   },
 
+  /* ————— §5 reporting, served from the engine (3 Sept: "my report is not coming for some
+     staff" — every Shift-1 checkpoint sits inside Google's evening capacity collapse, so the
+     My-reports page and the grid timed out exactly when reports were due). Reads come from the
+     reports_2h + users mirrors; SUBMITTING stays on Apps Script (the sheet is master) and each
+     submission write-throughs its own row. */
+  myCheckpointsEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints FROM users WHERE email = ?1').bind(me).first().catch(() => null);
+      const role = String((u && u.role) || ctx.user.role || '');
+      const labels = REP_COUNT_FIELDS[role] || [];
+      const cps = String((u && u.checkpoints) || '').split(',').map(repHm).filter(Boolean);
+      const base = {
+        role, shift: String((u && u.shift) || ''),
+        countFields: labels,
+        lateThresholdMin: await repLateThresholdJs(ctx.env),
+        valueAdditionLabel: 'Value addition today',
+        valueAdditionPrompt: 'Value addition today: what value did I add to my department?',
+      };
+      if (!cps.length) { base.date = repPktNow().day; base.checkpoints = []; return base; }
+      const date = repShiftDateJs(cps);
+      const t = repTimingJs(cps, date);
+      const rs = await ctx.env.DB.prepare('SELECT checkpoint, flag, submitted_at FROM reports_2h WHERE email = ?1 AND date = ?2')
+        .bind(me, date).all().catch(() => ({ results: [] }));
+      const idx = {};
+      for (const r of (rs.results || [])) idx[repHm(r.checkpoint)] = r;
+      base.date = date;
+      base.checkpoints = cps.map((cp, i) => {
+        const r = idx[cp];
+        let state;
+        if (r) state = String(r.flag) === 'missed' ? 'missed' : 'submitted';
+        else if (t.nowAbs >= t.deadlines[i]) state = 'missed';
+        else if (t.nowAbs >= t.abs[i]) state = 'due now';
+        else state = 'upcoming';
+        return { checkpoint: cp, state, flag: r ? String(r.flag || '') : '',
+          submitted_at: r ? String(r.submitted_at || '') : '',
+          minutes_until: t.abs[i] - t.nowAbs, is_final: i === cps.length - 1 };
+      });
+      return base;
+    },
+  },
+
+  reportsGridEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('not management');
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? String(p.date) : repPktNow().day;
+      const us = await ctx.env.DB.prepare("SELECT email, name, role, shift, checkpoints, working_days FROM users WHERE status = 'approved'").all().catch(() => ({ results: [] }));
+      const rr = await ctx.env.DB.prepare('SELECT * FROM reports_2h WHERE date = ?1').bind(date).all().catch(() => ({ results: [] }));
+      const idx = {};
+      for (const r of (rr.results || [])) idx[String(r.email).toLowerCase() + '|' + repHm(r.checkpoint)] = r;
+      const CELL = { ontime: 'green', late: 'amber', missed: 'red' };
+      const totalsByRole = {};
+      const rows = [];
+      for (const u of (us.results || [])) {
+        const cps = String(u.checkpoints || '').split(',').map(repHm).filter(Boolean);
+        if (!cps.length) continue;
+        if (!repIsWorkingDayJs(u.working_days, date)) continue;
+        const t = repTimingJs(cps, date);
+        const labels = REP_COUNT_FIELDS[String(u.role)] || [];
+        const sums = labels.map(() => 0);
+        const key = String(u.email).toLowerCase() + '|';
+        const cells = cps.map((cp, i) => {
+          const r = idx[key + cp];
+          if (!r) return { checkpoint: cp, state: t.nowAbs >= t.deadlines[i] ? 'red' : 'empty', flag: '' };
+          const flag = String(r.flag || '');
+          labels.forEach((label, n) => { const v = Number(r['count_' + (n + 1)]); if (isFinite(v)) sums[n] += v; });
+          return { checkpoint: cp, state: CELL[flag] || 'empty', flag };
+        });
+        if (labels.length) {
+          if (!totalsByRole[u.role]) totalsByRole[u.role] = labels.map((label) => ({ label, total: 0 }));
+          labels.forEach((label, n) => { totalsByRole[u.role][n].total += sums[n]; });
+        }
+        const finalRow = idx[key + cps[cps.length - 1]];
+        rows.push({ email: u.email, name: u.name, role: u.role, shift: String(u.shift || ''),
+          checkpoints: cps, cells,
+          counts: labels.map((label, n) => ({ label, value: sums[n] })),
+          daily_productivity_report: finalRow ? String(finalRow.work_summary || '') : '' });
+      }
+      return { date, legend: { green: 'ontime', amber: 'late', red: 'missed' },
+        roleCountFields: REP_COUNT_FIELDS, rows, totalsByRole };
+    },
+  },
+
+  syncReports: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.rows) ? p.rows.slice(0, 400) : [];
+      const stmts = [];
+      for (const r of rows) {
+        const id = String(r.report_id || '');
+        if (!id) continue;
+        stmts.push(ctx.env.DB.prepare(
+          'INSERT INTO reports_2h (report_id, email, role, shift, date, checkpoint, work_summary, count_1, count_2, count_3, count_4, submitted_at, flag, synced_at) ' +
+          "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,datetime('now')) " +
+          'ON CONFLICT(report_id) DO UPDATE SET email=?2, role=?3, shift=?4, date=?5, checkpoint=?6, work_summary=?7, ' +
+          "count_1=?8, count_2=?9, count_3=?10, count_4=?11, submitted_at=?12, flag=?13, synced_at=datetime('now')"
+        ).bind(id, String(r.email || '').toLowerCase(), String(r.role || ''), String(r.shift || ''),
+          String(r.date || ''), repHm(r.checkpoint), String(r.work_summary || '').slice(0, 4000),
+          String(r.count_1 == null ? '' : r.count_1), String(r.count_2 == null ? '' : r.count_2),
+          String(r.count_3 == null ? '' : r.count_3), String(r.count_4 == null ? '' : r.count_4),
+          String(r.submitted_at || ''), String(r.flag || '')));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      return { synced: stmts.length };
+    },
+  },
+
   /* ————— the listing department, served from the engine (2 Sept: "listing department and all
      submissions, approvals, drafts doing issues") — reads only; every write stays on Apps
      Script. Same shapes as Listing.gs/R8.gs, same status walls, same §8.2 whitelist law. */
@@ -7492,6 +7682,12 @@ const ROUTES = {
       for (const r of (apiDayRs.results || [])) apiDay[r.account + '|' + r.d] = r;
       const RB = await liveBooksRatios(ctx.env);
       const ratioFor = (a) => RB.per[a] || RB.fleet;
+      const adsAcct = await ctx.env.DB.prepare(
+        'SELECT account, date AS d, ROUND(SUM(spend + cpc_spend),2) AS sp FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, date'
+      ).bind(from, to).all().catch(() => ({ results: [] }));
+      const adsAcctMap = {};
+      for (const r of (adsAcct.results || [])) adsAcctMap[r.account + '|' + r.d] = Number(r.sp) || 0;
+      const daysUp = [];
       const bk = { sold: 0, te: 0, vat: 0, ap: 0, ali: 0 };
       const lv = { sold: 0, te: 0, vat: 0, actual: 0, ali: 0, refunds: 0 };
       const lagDays = [];
@@ -7504,11 +7700,19 @@ const ROUTES = {
           seenAcctDay[key] = 1;
           const ap = apiDay[key];
           const complete = d.src === 'T' || !ap || !Number(ap.n) || d.rows >= 0.9 * Number(ap.n);
-          if (complete) { bk.sold += d.sold; bk.te += (d.te || 0); bk.vat += d.vat; bk.ap += d.actual_after_returns; bk.ali += d.ali; continue; }
+          if (complete) {
+            bk.sold += d.sold; bk.te += (d.te || 0); bk.vat += d.vat; bk.ap += d.actual_after_returns; bk.ali += d.ali;
+            daysUp.push({ day: d.day, account: a, src: 'books', sold: d.sold, actual: d.actual_after_returns,
+              vat: d.vat, ali: d.ali, ads: d.ads || 0, returns: d.returns || 0, rows: d.rows });
+            continue;
+          }
           const sold = Number(ap.sold) || 0;
           const R = ratioFor(a); estUsed = true;
           const te = sold * R.te, vat = sold * R.vat, actual = sold * R.ap, ali = sold * R.ali;
           lv.sold += sold; lv.te += te; lv.vat += vat; lv.actual += actual; lv.ali += ali; lv.refunds += Number(ap.refunds) || 0;
+          daysUp.push({ day: d.day, account: a, src: 'live', sold: round2(sold), actual: round2(actual),
+            vat: round2(vat), ali: round2(ali), ads: round2((adsAcctMap[key] || 0) * 1.2),
+            returns: round2(Number(ap.refunds) || 0), rows: d.rows, orders: Number(ap.n) });
           lagDays.push({ day: d.day, account: a, rows: d.rows, orders: Number(ap.n), sold_books: d.sold, sold_live: sold });
           lagRowsFilled += d.rows; lagOrders += Number(ap.n);
         }
@@ -7522,6 +7726,9 @@ const ROUTES = {
         const R = ratioFor(key.split('|')[0]); estUsed = true;
         lv.sold += sold; lv.te += sold * R.te; lv.vat += sold * R.vat; lv.actual += sold * R.ap;
         lv.ali += sold * R.ali; lv.refunds += Number(ap.refunds) || 0;
+        daysUp.push({ day: key.split('|')[1], account: key.split('|')[0], src: 'live', sold: round2(sold),
+          actual: round2(sold * R.ap), vat: round2(sold * R.vat), ali: round2(sold * R.ali),
+          ads: round2((adsAcctMap[key] || 0) * 1.2), returns: round2(Number(ap.refunds) || 0), rows: 0, orders: Number(ap.n) });
         lagDays.push({ day: key.split('|')[1], account: key.split('|')[0], rows: 0, orders: Number(ap.n), sold_books: 0, sold_live: sold });
         lagOrders += Number(ap.n);
       }
@@ -7571,6 +7778,7 @@ const ROUTES = {
         ALI_UPTODATE: wrap('ALI_UPTODATE', UP.ali, '£', 'sheet(filled)+api law'),
         MARGIN_UPTODATE: wrap('MARGIN_UPTODATE', UP.margin, '%', 'ratio'),
         UPTODATE_PARTS: wrap('UPTODATE_PARTS', UP, '£', 'sheet+api'),
+        DAYS_UPTODATE: wrap('DAYS_UPTODATE', daysUp, '£/day', 'sheet(filled)+api law(unfilled)'),
         BOOKS_LAG: wrap('BOOKS_LAG', { account_days: lagDays.slice(0, 60), lagging_account_days: lagDays.length,
           rows_filled: lagRowsFilled, orders_expected: lagOrders, estimates_used: estUsed,
           ratio_window: RB.window, actual_ratio_fleet: Math.round(RB.fleet.ap * 1000) / 10 }, 'lag', 'sheet vs orders'),
