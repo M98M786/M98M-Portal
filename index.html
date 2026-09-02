@@ -382,9 +382,16 @@ function apiFinished(){
 function apiSend(action, payload){
   var body = JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} });
   apiStarted();
-  return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow' })
+  /* 2 Sept peak collapse: Apps Script answered in 36–83 s under load. The browser allows ~6
+     connections per origin — without a timeout a handful of zombie requests wedged EVERY later
+     sheet call behind them and the whole portal read as "loading". 25 s releases the socket:
+     a slow answer becomes a fast, retryable failure instead of a queue-blocker. */
+  var ac = new AbortController();
+  var t = setTimeout(function(){ ac.abort(); }, 25000);
+  return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow', signal: ac.signal })
     .then(function(r){ return r.json(); })
-    .then(function(j){ apiFinished(); return j; }, function(e){ apiFinished(); throw e; });
+    .then(function(j){ clearTimeout(t); apiFinished(); return j; },
+          function(e){ clearTimeout(t); apiFinished(); throw (e && e.name === 'AbortError' ? new Error('the sheet backend is overloaded right now — it will retry on the next refresh') : e); });
 }
 
 function apiFlush(){
@@ -560,7 +567,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-1501';
+var BUILD = '20260902-1510';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
