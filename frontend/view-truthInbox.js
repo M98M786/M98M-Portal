@@ -147,60 +147,8 @@
     });
   }
 
-  /* WO-12 follow-up (1 Sept click-through): the bell's LETTERS lost their reading surface when
-     the sheet inbox was replaced — they live here now, same page, second tab. Data: the same
-     poll the whole portal already uses; read = the existing markNotifRead action. */
-  function ixLetters() {
-    var box = $('ixThreads');
-    if (!box || IX.pane !== 'nt') { return; }
-    box.innerHTML = '<div class="ix-skel"></div><div class="ix-skel" style="width:65%"></div>';
-    /* the portal's global poller refreshes this every ~45 s — its last answer paints the pane
-       instantly; a fresh fetch replaces it only when the cache is old (peak-hour AS can take
-       20 s+, and a skeleton that long reads as broken) */
-    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
-    (cached ? Promise.resolve(cached) : api('poll')).then(function (d) {
-      if (!$('ixThreads') || IX.pane !== 'nt') { return; }
-      var ns = (d && d.notifications) || [];
-      try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}
-      if (!ns.length) { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No unread letters. New alerts land here the moment they are sent.</div>'; return; }
-      box.innerHTML = '<div style="padding:8px 13px;border-bottom:1px solid var(--gold-line)"><button class="minibtn" id="ixNtAll">Mark all read</button></div>' +
-        ns.map(function (n) {
-          var unread = !ixS(n.read_at || n.read).trim();
-          return '<div class="ix-nt' + (unread ? ' unread' : '') + '" data-ix-nt="' + esc(ixS(n.notif_id || n.id)) + '">' +
-            '<div class="ty">' + esc(ixS(n.type || 'letter').replace(/_/g, ' ')) + ' · ' + esc(ixWhen(n.created_at || n.ts)) + '</div>' +
-            '<div class="bd2">' + esc(ixS(n.message || n.body).slice(0, 160)) + '</div></div>';
-        }).join('');
-      box.querySelectorAll('[data-ix-nt]').forEach(function (el) {
-        el.onclick = function () {
-          var me = this;
-          api('markNotifRead', { notifId: this.getAttribute('data-ix-nt') }).then(function () {
-            me.classList.remove('unread');
-            try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
-          }).catch(function () {});
-        };
-      });
-      var all = $('ixNtAll');
-      if (all) {
-        all.onclick = function () {
-          all.disabled = true;
-          api('markNotifRead', { all: true }).then(function () {
-            try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
-            ixLetters();
-          }).catch(function () { all.disabled = false; });
-        };
-      }
-    }).catch(function (e) {
-      if ($('ixThreads') && IX.pane === 'nt') { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--bad);font-weight:600">' + esc(e.message) + '</div>'; }
-    });
-  }
-
-  function ixPane(p) {
-    IX.pane = p;
-    document.querySelectorAll('.ix-tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-ix-pane') === p); });
-    if (p === 'nt') { ixLetters(); } else { ixPaintThreads(); }
-  }
-  window.ixShowLetters = function () { try { ixPane('nt'); } catch (e) {} };
-
+  /* 2 Sept (owner): system notifications moved to their OWN page (#notifications, the bell
+     opens it). The Inbox is people's messages only. */
   function ixThreadsRefresh() {
     return api('inboxThreads', {}).then(function (d) {
       IX.threads = (d && d.threads) || [];
@@ -239,9 +187,9 @@
     badge: function () { return (STATE.counts && STATE.counts.inbox) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
-        '<span class="sub">private between the two of you — nobody else, Management included, can read a thread</span></div>' +
+        '<span class="sub">people’s messages only — system notifications live under the bell · a thread is private to its two people</span></div>' +
         '<div class="ix-wrap enter d2">' +
-        '<div><div class="ix-tabs"><button class="ix-tab on" data-ix-pane="dm">Conversations</button><button class="ix-tab" data-ix-pane="nt">Letters</button></div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
+        '<div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
         '<select class="alx-sel" id="ixNew" style="width:100%;margin-top:10px"><option value="">New message to…</option></select></div>' +
         '<div class="ix-pane"><div style="padding:11px 14px;border-bottom:1px solid var(--gold-line);font-size:13px;font-weight:800" id="ixWith">Pick a conversation</div>' +
         '<div class="ix-msgs" id="ixMsgs"><div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">Messages load when you open a thread — 30 at a time, older on demand.</div></div>' +
@@ -267,10 +215,6 @@
         }).catch(function () {});
         sel.onchange = function () { if (this.value) { ixOpen(this.value); this.value = ''; } };
       }
-      document.querySelectorAll('.ix-tab').forEach(function (b) {
-        b.onclick = function () { ixPane(this.getAttribute('data-ix-pane')); };
-      });
-      if (window.__ixWantLetters) { window.__ixWantLetters = 0; ixPane('nt'); }
       var sb = $('ixSendBtn');
       if (sb) { sb.onclick = ixSend; }
       var ta = $('ixBody');

@@ -255,7 +255,7 @@
   var AL = {
     account: AL_ALL, severity: AL_ALL, category: AL_ALL,
     limit: AL_LIMIT_DEFAULT, moneyOnly: false,
-    rows: [], data: null,
+    rows: [], data: null, junk: 0, staff: null,
     /* Account, severity and category pickers are built from what the payload carries — the account
        names come from CONNECTIONS through the server, never from a list in this public file, and
        the vocabularies are whatever the workbooks actually wrote. Filtering is done server-side, so
@@ -279,6 +279,25 @@
     return '';
   }
 
+  VIEW_CSS.push(
+    '.al-depts{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0 4px}' +
+    '.al-dept{border:1px solid var(--gold-line);border-radius:12px;padding:11px 14px;background:var(--panel-2);cursor:pointer;transition:border-color .15s}' +
+    '.al-dept:hover{border-color:var(--gold-line-hi)}' +
+    '.al-dept.on{border-color:var(--gold)}' +
+    '.al-dept.hot{border-color:rgba(240,96,90,.55)}' +
+    '.al-dept .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.al-dept b{display:block;font-size:24px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}' +
+    '.al-dept.hot b{color:var(--bad)}' +
+    '.al-dept .s{font-size:10px;color:var(--text-3);font-weight:700}' +
+    '.al-card.al-big{border-width:2px;border-color:rgba(240,96,90,.6);box-shadow:0 0 24px rgba(240,96,90,.10)}' +
+    '.al-card.al-big .al-msg{font-size:16.5px;font-weight:800;line-height:1.45}' +
+    '.al-task{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}' +
+    '.al-task select,.al-task input{padding:8px 10px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:11.5px;font-weight:600}' +
+    '.al-rolechips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}' +
+    '.al-rolechip{font-size:10px;font-weight:800;padding:3px 9px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel);cursor:pointer;color:var(--text-2)}' +
+    '.al-rolechip.on{border-color:var(--gold);color:var(--gold)}'
+  );
+
   VIEWS.alerts = {
     label: 'Alerts centre',
     icon: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
@@ -292,6 +311,7 @@
             (alMayRefresh() ? 'Recompute' : 'Reload') + '</button>' +
         '</div>' +
         '<div id="alHeads"></div>' +
+        '<div id="alDepts" class="enter d2"></div>' +
         '<div class="card enter d1" style="margin-top:16px"><div class="hd">The Engine&#39;s letters ' +
           '<span class="hint">every alarm the portal itself raised — waste, CPC rule, violations, zero-sale, digests — kept until handled</span></div>' +
           '<div class="bd" id="alMailBox"><div class="spinner"></div></div>' +
@@ -515,9 +535,14 @@
 
     var ac = cachedCall('alertsCentre', payload, function (d) {
       AL.data = d || null;
-      AL.rows = (d && d.alerts) || [];
+      var raw = (d && d.alerts) || [];
+      /* 2 Sept (owner): _ALERTS carries structural rows with no message — they are not alerts
+         and rendered as "carries no message" noise. They are skipped and counted honestly. */
+      AL.rows = raw.filter(function (r) { return alStr(r.message).trim() !== ''; });
+      AL.junk = raw.length - AL.rows.length;
       alRememberVocab(d);
       alRenderHeads(d);
+      alRenderDepts();
       alRenderPerAccount(d);
       alRenderNotConnected(d);
       alRenderList();
@@ -579,6 +604,40 @@
           'your version shows the advertising alerts and the wrong-advertising alarms' :
           'every account with a Daily Account Report connected') + '</span></div>' +
     '</div>';
+  }
+
+  /* 2 Sept (owner): open alerts BY DEPARTMENT — a tile per category; clicking one takes you
+     to exactly those alerts (it drives the same category filter the select uses). */
+  function alRenderDepts() {
+    var box = $('alDepts');
+    if (!box) { return; }
+    var by = {};
+    AL.rows.forEach(function (r) {
+      var c = alStr(r.category) || 'Uncategorised';
+      var b = (by[c] = by[c] || { n: 0, money: 0, high: 0 });
+      b.n++;
+      if (alIsMoney(r)) { b.money++; }
+      if (/high|critical/i.test(alStr(r.severity))) { b.high++; }
+    });
+    var cats = Object.keys(by).sort(function (a, b) { return by[b].n - by[a].n; });
+    if (!cats.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="al-depts">' + cats.map(function (c) {
+      var b = by[c];
+      return '<div class="al-dept' + (AL.category === c ? ' on' : '') + (b.high ? ' hot' : '') + '" data-al-dept="' + alAttr(c) + '">' +
+        '<span class="k">' + esc(c) + '</span><b>' + b.n + '</b>' +
+        '<span class="s">' + (b.high ? b.high + ' high · ' : '') + (b.money ? b.money + ' losing money' : 'open') + '</span></div>';
+    }).join('') +
+      (AL.category ? '<div class="al-dept" data-al-dept=""><span class="k">Clear filter</span><b>×</b><span class="s">show every department</span></div>' : '') +
+      '</div>' +
+      (AL.junk ? '<div class="al-note" style="margin-top:6px">' + esc(alInt(AL.junk) + ' structural row(s) without a message skipped — they are not alerts.') + '</div>' : '');
+    alBind(box, 'data-al-dept', function (c) {
+      AL.category = c;
+      var sel = $('alCategory');
+      if (sel) { sel.value = c; }
+      alLoadCentre(false);
+      var list = $('alList');
+      if (list && c) { try { list.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }
+    });
   }
 
   function alRenderPerAccount(d) {
@@ -653,6 +712,91 @@
     alBind(list, 'data-al-open', function (key) { alTogglePanel(key, true); });
     alBind(list, 'data-al-cancel', function (key) { alTogglePanel(key, false); });
     alBind(list, 'data-al-go', function (key, el) { alResolve(key, el); });
+    alBind(list, 'data-al-mktask', function (key) { alTaskPanel(key, true); });
+    alBind(list, 'data-al-taskcancel', function (key) { alTaskPanel(key, false); });
+    alBind(list, 'data-al-taskgo', function (key, el) { alTaskCreate(key, el); });
+  }
+
+  /* 2 Sept (owner): turn any alert into a TASK for a department’s person or an individual —
+     the same createTask the tasks screen uses, prefilled from the alert. */
+  var AL_DEPT_ROLES = { Advertising: ['Advertising Manager'], Listing: ['Listing Manager', 'Item Lister', 'Team Lead'],
+    Orders: ['Order Processor'], CS: ['CS'], Hunting: ['Product Hunter'], All: [] };
+  function alStaffLoad(cb) {
+    if (AL.staff) { cb(AL.staff); return; }
+    api('assignableStaff', {}).then(function (d) { AL.staff = (d && d.staff) || []; cb(AL.staff); })
+      .catch(function () { AL.staff = []; cb(AL.staff); });
+  }
+  function alTaskPanel(key, show) {
+    var list = $('alList');
+    if (!list) { return; }
+    var panel = null, els = list.querySelectorAll('[data-al-taskpanel]'), i;
+    for (i = 0; i < els.length; i++) { if (els[i].getAttribute('data-al-taskpanel') === key) { panel = els[i]; } else if (show) { els[i].classList.add('hidden'); } }
+    if (!panel) { return; }
+    panel.classList.toggle('hidden', !show);
+    if (!show) { return; }
+    var dl = panel.querySelector('[data-al-deadline]');
+    if (dl && !dl.value) {
+      var t = new Date(Date.now() + 24 * 3600000);
+      dl.value = t.toISOString().slice(0, 10) + 'T18:00';
+    }
+    alStaffLoad(function (staff) {
+      var sel = panel.querySelector('[data-al-assignee]');
+      var chips = panel.querySelector('[data-al-rolechips]');
+      var paint = function (roleFilter) {
+        var roles = AL_DEPT_ROLES[roleFilter] || [];
+        sel.innerHTML = '<option value="">Assign to…</option>' + staff
+          .filter(function (u) { return !roles.length || roles.indexOf(u.role) >= 0; })
+          .map(function (u) { return '<option value="' + alAttr(u.email) + '">' + esc(u.name + ' — ' + u.role) + '</option>'; }).join('');
+      };
+      if (chips && !chips.childNodes.length) {
+        chips.innerHTML = Object.keys(AL_DEPT_ROLES).map(function (dpt) {
+          return '<span class="al-rolechip' + (dpt === 'All' ? ' on' : '') + '" data-al-rc="' + alAttr(dpt) + '">' + esc(dpt) + '</span>';
+        }).join('');
+        chips.querySelectorAll('[data-al-rc]').forEach(function (c) {
+          c.onclick = function () {
+            chips.querySelectorAll('[data-al-rc]').forEach(function (x) { x.classList.remove('on'); });
+            this.classList.add('on');
+            paint(this.getAttribute('data-al-rc'));
+          };
+        });
+      }
+      paint('All');
+    });
+  }
+  function alTaskCreate(key, btn) {
+    var r = alRowAt(key);
+    var list = $('alList');
+    if (!r || !list) { return; }
+    var panel = null, els = list.querySelectorAll('[data-al-taskpanel]'), i;
+    for (i = 0; i < els.length; i++) { if (els[i].getAttribute('data-al-taskpanel') === key) { panel = els[i]; } }
+    if (!panel) { return; }
+    var who = (panel.querySelector('[data-al-assignee]') || {}).value || '';
+    var dl = (panel.querySelector('[data-al-deadline]') || {}).value || '';
+    if (!who) { toast('Pick who the task is for.'); return; }
+    if (!dl) { toast('Set the deadline.'); return; }
+    var msg = alStr(r.message);
+    var payload = {
+      type: 'general',
+      assigned_to: who,
+      title: ('[Alert] ' + alStr(r.account) + ' — ' + msg).slice(0, 140),
+      deadline_pkt: dl.replace('T', ' '),
+      account: alStr(r.account),
+      priority: /high|critical/i.test(alStr(r.severity)) ? 'High' : 'Normal',
+      details: 'From the Alerts centre (' + alStr(r.category) + ' · ' + alStr(r.severity) + ').\n\n' + msg +
+        (alStr(r.action) ? '\n\nDo this: ' + alStr(r.action) : '') +
+        (alStr(r.listing_title) ? '\n\nListing: ' + alStr(r.listing_title) : '') +
+        (alStr(r.item_id) ? '\nItem: ' + alStr(r.item_id) : '') +
+        '\n\nSource: ' + (alStr(r.source) || 'account report') + (r.row ? ' row ' + alInt(r.row) : ''),
+    };
+    btn.disabled = true;
+    api('createTask', payload).then(function (res) {
+      btn.disabled = false;
+      alTaskPanel(key, false);
+      toast('Task ' + ((res && res.task_id) || '') + ' created — it is on their board now.');
+    }).catch(function (e) {
+      btn.disabled = false;
+      toast('Not created — ' + e.message);
+    });
   }
 
   function alRowKey(r, i) { return String(i); }
@@ -674,7 +818,8 @@
     var from = 'from ' + (alStr(r.source) || 'the account report') +
       (r.row ? ' · row ' + alInt(r.row) : '');
 
-    return '<article class="al-card' + (money ? ' al-money' : '') + '">' +
+    var big = /high|critical/i.test(sev);
+    return '<article class="al-card' + (money ? ' al-money' : '') + (big ? ' al-big' : '') + '">' +
       '<div class="al-hd">' +
         '<span class="al-dot ' + alDotClass(r) + '"></span>' +
         '<span class="al-acct">' + esc(alStr(r.account)) + '</span>' +
@@ -704,6 +849,17 @@
           '<div class="al-note" style="margin-top:10px">Marked resolved in the portal — it stays here until the report agent’s next run rebuilds the sheet.</div>' : '') +
         '<div class="al-acts">' +
           '<button class="btn-gold" data-al-open="' + alAttr(key) + '">' + (pending ? 'Resolve again' : 'Resolve') + '</button>' +
+          '<button class="minibtn" data-al-mktask="' + alAttr(key) + '">Create task…</button>' +
+        '</div>' +
+        '<div class="al-res hidden" data-al-taskpanel="' + alAttr(key) + '">' +
+          '<div class="al-rolechips" data-al-rolechips="' + alAttr(key) + '"></div>' +
+          '<div class="al-task">' +
+            '<select data-al-assignee="' + alAttr(key) + '" style="min-width:220px"><option value="">Assign to…</option></select>' +
+            '<input type="datetime-local" data-al-deadline="' + alAttr(key) + '">' +
+            '<button class="btn-gold" data-al-taskgo="' + alAttr(key) + '">Create the task</button>' +
+            '<button class="minibtn" data-al-taskcancel="' + alAttr(key) + '">Cancel</button>' +
+          '</div>' +
+          '<div class="al-note" style="margin-top:6px">The task carries this alert’s message, its “do this” line and its source; pick a department chip to narrow the people list.</div>' +
         '</div>' +
         '<div class="al-res hidden" data-al-panel="' + alAttr(key) + '">' +
           '<input class="al-in al-wide" data-al-note="' + alAttr(key) + '" maxlength="500" placeholder="Note (optional) — kept in the portal’s own record">' +

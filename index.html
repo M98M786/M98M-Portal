@@ -560,7 +560,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-0041';
+var BUILD = '20260902-0046';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3424,7 +3424,7 @@ function createMeeting() {
   var AL = {
     account: AL_ALL, severity: AL_ALL, category: AL_ALL,
     limit: AL_LIMIT_DEFAULT, moneyOnly: false,
-    rows: [], data: null,
+    rows: [], data: null, junk: 0, staff: null,
     /* Account, severity and category pickers are built from what the payload carries — the account
        names come from CONNECTIONS through the server, never from a list in this public file, and
        the vocabularies are whatever the workbooks actually wrote. Filtering is done server-side, so
@@ -3448,6 +3448,25 @@ function createMeeting() {
     return '';
   }
 
+  VIEW_CSS.push(
+    '.al-depts{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0 4px}' +
+    '.al-dept{border:1px solid var(--gold-line);border-radius:12px;padding:11px 14px;background:var(--panel-2);cursor:pointer;transition:border-color .15s}' +
+    '.al-dept:hover{border-color:var(--gold-line-hi)}' +
+    '.al-dept.on{border-color:var(--gold)}' +
+    '.al-dept.hot{border-color:rgba(240,96,90,.55)}' +
+    '.al-dept .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.al-dept b{display:block;font-size:24px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}' +
+    '.al-dept.hot b{color:var(--bad)}' +
+    '.al-dept .s{font-size:10px;color:var(--text-3);font-weight:700}' +
+    '.al-card.al-big{border-width:2px;border-color:rgba(240,96,90,.6);box-shadow:0 0 24px rgba(240,96,90,.10)}' +
+    '.al-card.al-big .al-msg{font-size:16.5px;font-weight:800;line-height:1.45}' +
+    '.al-task{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}' +
+    '.al-task select,.al-task input{padding:8px 10px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:11.5px;font-weight:600}' +
+    '.al-rolechips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}' +
+    '.al-rolechip{font-size:10px;font-weight:800;padding:3px 9px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel);cursor:pointer;color:var(--text-2)}' +
+    '.al-rolechip.on{border-color:var(--gold);color:var(--gold)}'
+  );
+
   VIEWS.alerts = {
     label: 'Alerts centre',
     icon: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
@@ -3461,6 +3480,7 @@ function createMeeting() {
             (alMayRefresh() ? 'Recompute' : 'Reload') + '</button>' +
         '</div>' +
         '<div id="alHeads"></div>' +
+        '<div id="alDepts" class="enter d2"></div>' +
         '<div class="card enter d1" style="margin-top:16px"><div class="hd">The Engine&#39;s letters ' +
           '<span class="hint">every alarm the portal itself raised — waste, CPC rule, violations, zero-sale, digests — kept until handled</span></div>' +
           '<div class="bd" id="alMailBox"><div class="spinner"></div></div>' +
@@ -3684,9 +3704,14 @@ function createMeeting() {
 
     var ac = cachedCall('alertsCentre', payload, function (d) {
       AL.data = d || null;
-      AL.rows = (d && d.alerts) || [];
+      var raw = (d && d.alerts) || [];
+      /* 2 Sept (owner): _ALERTS carries structural rows with no message — they are not alerts
+         and rendered as "carries no message" noise. They are skipped and counted honestly. */
+      AL.rows = raw.filter(function (r) { return alStr(r.message).trim() !== ''; });
+      AL.junk = raw.length - AL.rows.length;
       alRememberVocab(d);
       alRenderHeads(d);
+      alRenderDepts();
       alRenderPerAccount(d);
       alRenderNotConnected(d);
       alRenderList();
@@ -3748,6 +3773,40 @@ function createMeeting() {
           'your version shows the advertising alerts and the wrong-advertising alarms' :
           'every account with a Daily Account Report connected') + '</span></div>' +
     '</div>';
+  }
+
+  /* 2 Sept (owner): open alerts BY DEPARTMENT — a tile per category; clicking one takes you
+     to exactly those alerts (it drives the same category filter the select uses). */
+  function alRenderDepts() {
+    var box = $('alDepts');
+    if (!box) { return; }
+    var by = {};
+    AL.rows.forEach(function (r) {
+      var c = alStr(r.category) || 'Uncategorised';
+      var b = (by[c] = by[c] || { n: 0, money: 0, high: 0 });
+      b.n++;
+      if (alIsMoney(r)) { b.money++; }
+      if (/high|critical/i.test(alStr(r.severity))) { b.high++; }
+    });
+    var cats = Object.keys(by).sort(function (a, b) { return by[b].n - by[a].n; });
+    if (!cats.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="al-depts">' + cats.map(function (c) {
+      var b = by[c];
+      return '<div class="al-dept' + (AL.category === c ? ' on' : '') + (b.high ? ' hot' : '') + '" data-al-dept="' + alAttr(c) + '">' +
+        '<span class="k">' + esc(c) + '</span><b>' + b.n + '</b>' +
+        '<span class="s">' + (b.high ? b.high + ' high · ' : '') + (b.money ? b.money + ' losing money' : 'open') + '</span></div>';
+    }).join('') +
+      (AL.category ? '<div class="al-dept" data-al-dept=""><span class="k">Clear filter</span><b>×</b><span class="s">show every department</span></div>' : '') +
+      '</div>' +
+      (AL.junk ? '<div class="al-note" style="margin-top:6px">' + esc(alInt(AL.junk) + ' structural row(s) without a message skipped — they are not alerts.') + '</div>' : '');
+    alBind(box, 'data-al-dept', function (c) {
+      AL.category = c;
+      var sel = $('alCategory');
+      if (sel) { sel.value = c; }
+      alLoadCentre(false);
+      var list = $('alList');
+      if (list && c) { try { list.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }
+    });
   }
 
   function alRenderPerAccount(d) {
@@ -3822,6 +3881,91 @@ function createMeeting() {
     alBind(list, 'data-al-open', function (key) { alTogglePanel(key, true); });
     alBind(list, 'data-al-cancel', function (key) { alTogglePanel(key, false); });
     alBind(list, 'data-al-go', function (key, el) { alResolve(key, el); });
+    alBind(list, 'data-al-mktask', function (key) { alTaskPanel(key, true); });
+    alBind(list, 'data-al-taskcancel', function (key) { alTaskPanel(key, false); });
+    alBind(list, 'data-al-taskgo', function (key, el) { alTaskCreate(key, el); });
+  }
+
+  /* 2 Sept (owner): turn any alert into a TASK for a department’s person or an individual —
+     the same createTask the tasks screen uses, prefilled from the alert. */
+  var AL_DEPT_ROLES = { Advertising: ['Advertising Manager'], Listing: ['Listing Manager', 'Item Lister', 'Team Lead'],
+    Orders: ['Order Processor'], CS: ['CS'], Hunting: ['Product Hunter'], All: [] };
+  function alStaffLoad(cb) {
+    if (AL.staff) { cb(AL.staff); return; }
+    api('assignableStaff', {}).then(function (d) { AL.staff = (d && d.staff) || []; cb(AL.staff); })
+      .catch(function () { AL.staff = []; cb(AL.staff); });
+  }
+  function alTaskPanel(key, show) {
+    var list = $('alList');
+    if (!list) { return; }
+    var panel = null, els = list.querySelectorAll('[data-al-taskpanel]'), i;
+    for (i = 0; i < els.length; i++) { if (els[i].getAttribute('data-al-taskpanel') === key) { panel = els[i]; } else if (show) { els[i].classList.add('hidden'); } }
+    if (!panel) { return; }
+    panel.classList.toggle('hidden', !show);
+    if (!show) { return; }
+    var dl = panel.querySelector('[data-al-deadline]');
+    if (dl && !dl.value) {
+      var t = new Date(Date.now() + 24 * 3600000);
+      dl.value = t.toISOString().slice(0, 10) + 'T18:00';
+    }
+    alStaffLoad(function (staff) {
+      var sel = panel.querySelector('[data-al-assignee]');
+      var chips = panel.querySelector('[data-al-rolechips]');
+      var paint = function (roleFilter) {
+        var roles = AL_DEPT_ROLES[roleFilter] || [];
+        sel.innerHTML = '<option value="">Assign to…</option>' + staff
+          .filter(function (u) { return !roles.length || roles.indexOf(u.role) >= 0; })
+          .map(function (u) { return '<option value="' + alAttr(u.email) + '">' + esc(u.name + ' — ' + u.role) + '</option>'; }).join('');
+      };
+      if (chips && !chips.childNodes.length) {
+        chips.innerHTML = Object.keys(AL_DEPT_ROLES).map(function (dpt) {
+          return '<span class="al-rolechip' + (dpt === 'All' ? ' on' : '') + '" data-al-rc="' + alAttr(dpt) + '">' + esc(dpt) + '</span>';
+        }).join('');
+        chips.querySelectorAll('[data-al-rc]').forEach(function (c) {
+          c.onclick = function () {
+            chips.querySelectorAll('[data-al-rc]').forEach(function (x) { x.classList.remove('on'); });
+            this.classList.add('on');
+            paint(this.getAttribute('data-al-rc'));
+          };
+        });
+      }
+      paint('All');
+    });
+  }
+  function alTaskCreate(key, btn) {
+    var r = alRowAt(key);
+    var list = $('alList');
+    if (!r || !list) { return; }
+    var panel = null, els = list.querySelectorAll('[data-al-taskpanel]'), i;
+    for (i = 0; i < els.length; i++) { if (els[i].getAttribute('data-al-taskpanel') === key) { panel = els[i]; } }
+    if (!panel) { return; }
+    var who = (panel.querySelector('[data-al-assignee]') || {}).value || '';
+    var dl = (panel.querySelector('[data-al-deadline]') || {}).value || '';
+    if (!who) { toast('Pick who the task is for.'); return; }
+    if (!dl) { toast('Set the deadline.'); return; }
+    var msg = alStr(r.message);
+    var payload = {
+      type: 'general',
+      assigned_to: who,
+      title: ('[Alert] ' + alStr(r.account) + ' — ' + msg).slice(0, 140),
+      deadline_pkt: dl.replace('T', ' '),
+      account: alStr(r.account),
+      priority: /high|critical/i.test(alStr(r.severity)) ? 'High' : 'Normal',
+      details: 'From the Alerts centre (' + alStr(r.category) + ' · ' + alStr(r.severity) + ').\n\n' + msg +
+        (alStr(r.action) ? '\n\nDo this: ' + alStr(r.action) : '') +
+        (alStr(r.listing_title) ? '\n\nListing: ' + alStr(r.listing_title) : '') +
+        (alStr(r.item_id) ? '\nItem: ' + alStr(r.item_id) : '') +
+        '\n\nSource: ' + (alStr(r.source) || 'account report') + (r.row ? ' row ' + alInt(r.row) : ''),
+    };
+    btn.disabled = true;
+    api('createTask', payload).then(function (res) {
+      btn.disabled = false;
+      alTaskPanel(key, false);
+      toast('Task ' + ((res && res.task_id) || '') + ' created — it is on their board now.');
+    }).catch(function (e) {
+      btn.disabled = false;
+      toast('Not created — ' + e.message);
+    });
   }
 
   function alRowKey(r, i) { return String(i); }
@@ -3843,7 +3987,8 @@ function createMeeting() {
     var from = 'from ' + (alStr(r.source) || 'the account report') +
       (r.row ? ' · row ' + alInt(r.row) : '');
 
-    return '<article class="al-card' + (money ? ' al-money' : '') + '">' +
+    var big = /high|critical/i.test(sev);
+    return '<article class="al-card' + (money ? ' al-money' : '') + (big ? ' al-big' : '') + '">' +
       '<div class="al-hd">' +
         '<span class="al-dot ' + alDotClass(r) + '"></span>' +
         '<span class="al-acct">' + esc(alStr(r.account)) + '</span>' +
@@ -3873,6 +4018,17 @@ function createMeeting() {
           '<div class="al-note" style="margin-top:10px">Marked resolved in the portal — it stays here until the report agent’s next run rebuilds the sheet.</div>' : '') +
         '<div class="al-acts">' +
           '<button class="btn-gold" data-al-open="' + alAttr(key) + '">' + (pending ? 'Resolve again' : 'Resolve') + '</button>' +
+          '<button class="minibtn" data-al-mktask="' + alAttr(key) + '">Create task…</button>' +
+        '</div>' +
+        '<div class="al-res hidden" data-al-taskpanel="' + alAttr(key) + '">' +
+          '<div class="al-rolechips" data-al-rolechips="' + alAttr(key) + '"></div>' +
+          '<div class="al-task">' +
+            '<select data-al-assignee="' + alAttr(key) + '" style="min-width:220px"><option value="">Assign to…</option></select>' +
+            '<input type="datetime-local" data-al-deadline="' + alAttr(key) + '">' +
+            '<button class="btn-gold" data-al-taskgo="' + alAttr(key) + '">Create the task</button>' +
+            '<button class="minibtn" data-al-taskcancel="' + alAttr(key) + '">Cancel</button>' +
+          '</div>' +
+          '<div class="al-note" style="margin-top:6px">The task carries this alert’s message, its “do this” line and its source; pick a department chip to narrow the people list.</div>' +
         '</div>' +
         '<div class="al-res hidden" data-al-panel="' + alAttr(key) + '">' +
           '<input class="al-in al-wide" data-al-note="' + alAttr(key) + '" maxlength="500" placeholder="Note (optional) — kept in the portal’s own record">' +
@@ -10335,17 +10491,7 @@ function startPolling() {
     ibPollNow();
   });
   var bell = $('bellBtn');
-  if (bell) bell.onclick = function () {
-    /* TRUTH v2: the D1 inbox reads letters on its own pane */
-    if (typeof TRUTH_FLAGS !== 'undefined' && TRUTH_FLAGS.inbox === 'live') {
-      window.__ixWantLetters = 1;
-      var a = document.querySelector('.nav a[data-key="inbox"]');
-      if (a) { a.click(); } else { location.hash = 'inbox'; renderView('inbox'); }
-      if (typeof window.ixShowLetters === 'function') { setTimeout(window.ixShowLetters, 400); }
-      return;
-    }
-    ibGoInbox('nt');
-  };
+  if (bell) bell.onclick = function () { ibGoInbox('nt'); };   /* overridden by view-zz-notifications.js */
   ibPollNow();
 }
 
@@ -24828,60 +24974,8 @@ function saveSchedule() {
     });
   }
 
-  /* WO-12 follow-up (1 Sept click-through): the bell's LETTERS lost their reading surface when
-     the sheet inbox was replaced — they live here now, same page, second tab. Data: the same
-     poll the whole portal already uses; read = the existing markNotifRead action. */
-  function ixLetters() {
-    var box = $('ixThreads');
-    if (!box || IX.pane !== 'nt') { return; }
-    box.innerHTML = '<div class="ix-skel"></div><div class="ix-skel" style="width:65%"></div>';
-    /* the portal's global poller refreshes this every ~45 s — its last answer paints the pane
-       instantly; a fresh fetch replaces it only when the cache is old (peak-hour AS can take
-       20 s+, and a skeleton that long reads as broken) */
-    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
-    (cached ? Promise.resolve(cached) : api('poll')).then(function (d) {
-      if (!$('ixThreads') || IX.pane !== 'nt') { return; }
-      var ns = (d && d.notifications) || [];
-      try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}
-      if (!ns.length) { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">No unread letters. New alerts land here the moment they are sent.</div>'; return; }
-      box.innerHTML = '<div style="padding:8px 13px;border-bottom:1px solid var(--gold-line)"><button class="minibtn" id="ixNtAll">Mark all read</button></div>' +
-        ns.map(function (n) {
-          var unread = !ixS(n.read_at || n.read).trim();
-          return '<div class="ix-nt' + (unread ? ' unread' : '') + '" data-ix-nt="' + esc(ixS(n.notif_id || n.id)) + '">' +
-            '<div class="ty">' + esc(ixS(n.type || 'letter').replace(/_/g, ' ')) + ' · ' + esc(ixWhen(n.created_at || n.ts)) + '</div>' +
-            '<div class="bd2">' + esc(ixS(n.message || n.body).slice(0, 160)) + '</div></div>';
-        }).join('');
-      box.querySelectorAll('[data-ix-nt]').forEach(function (el) {
-        el.onclick = function () {
-          var me = this;
-          api('markNotifRead', { notifId: this.getAttribute('data-ix-nt') }).then(function () {
-            me.classList.remove('unread');
-            try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
-          }).catch(function () {});
-        };
-      });
-      var all = $('ixNtAll');
-      if (all) {
-        all.onclick = function () {
-          all.disabled = true;
-          api('markNotifRead', { all: true }).then(function () {
-            try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
-            ixLetters();
-          }).catch(function () { all.disabled = false; });
-        };
-      }
-    }).catch(function (e) {
-      if ($('ixThreads') && IX.pane === 'nt') { box.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--bad);font-weight:600">' + esc(e.message) + '</div>'; }
-    });
-  }
-
-  function ixPane(p) {
-    IX.pane = p;
-    document.querySelectorAll('.ix-tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-ix-pane') === p); });
-    if (p === 'nt') { ixLetters(); } else { ixPaintThreads(); }
-  }
-  window.ixShowLetters = function () { try { ixPane('nt'); } catch (e) {} };
-
+  /* 2 Sept (owner): system notifications moved to their OWN page (#notifications, the bell
+     opens it). The Inbox is people's messages only. */
   function ixThreadsRefresh() {
     return api('inboxThreads', {}).then(function (d) {
       IX.threads = (d && d.threads) || [];
@@ -24920,9 +25014,9 @@ function saveSchedule() {
     badge: function () { return (STATE.counts && STATE.counts.inbox) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Inbox</h1>' +
-        '<span class="sub">private between the two of you — nobody else, Management included, can read a thread</span></div>' +
+        '<span class="sub">people’s messages only — system notifications live under the bell · a thread is private to its two people</span></div>' +
         '<div class="ix-wrap enter d2">' +
-        '<div><div class="ix-tabs"><button class="ix-tab on" data-ix-pane="dm">Conversations</button><button class="ix-tab" data-ix-pane="nt">Letters</button></div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
+        '<div><div class="ix-list" id="ixThreads"><div class="ix-skel"></div><div class="ix-skel" style="width:70%"></div><div class="ix-skel" style="width:55%"></div></div>' +
         '<select class="alx-sel" id="ixNew" style="width:100%;margin-top:10px"><option value="">New message to…</option></select></div>' +
         '<div class="ix-pane"><div style="padding:11px 14px;border-bottom:1px solid var(--gold-line);font-size:13px;font-weight:800" id="ixWith">Pick a conversation</div>' +
         '<div class="ix-msgs" id="ixMsgs"><div style="padding:16px;font-size:12px;color:var(--text-3);font-weight:600">Messages load when you open a thread — 30 at a time, older on demand.</div></div>' +
@@ -24948,10 +25042,6 @@ function saveSchedule() {
         }).catch(function () {});
         sel.onchange = function () { if (this.value) { ixOpen(this.value); this.value = ''; } };
       }
-      document.querySelectorAll('.ix-tab').forEach(function (b) {
-        b.onclick = function () { ixPane(this.getAttribute('data-ix-pane')); };
-      });
-      if (window.__ixWantLetters) { window.__ixWantLetters = 0; ixPane('nt'); }
       var sb = $('ixSendBtn');
       if (sb) { sb.onclick = ixSend; }
       var ta = $('ixBody');
@@ -25255,6 +25345,132 @@ function saveSchedule() {
       vbDueBoard();
     }
   };
+})();
+
+/* ---------- view-zz-notifications.js ---------- */
+/* view-zz-notifications.js — 2 Sept (owner): system notifications get their OWN surface, big
+ * and clear like the Signals cards; the Inbox stays for people's messages only. The bell opens
+ * this page for every role. Data: the same poll feed the whole portal already runs, letters
+ * marked read with the existing markNotifRead action. */
+(function () {
+  'use strict';
+
+  VIEW_CSS.push(
+    '.nf-card{border:1px solid var(--gold-line);border-radius:14px;padding:15px 18px;background:var(--panel-2);margin-bottom:12px;display:flex;gap:14px;align-items:flex-start}' +
+    '.nf-card.unread{border-color:var(--gold);box-shadow:0 0 22px rgba(233,169,60,.09)}' +
+    '.nf-ico{font-size:26px;line-height:1;margin-top:2px}' +
+    '.nf-ty{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-3)}' +
+    '.nf-msg{font-size:14.5px;font-weight:700;line-height:1.5;margin-top:4px}' +
+    '.nf-card.unread .nf-msg{font-size:16px;font-weight:800}' +
+    '.nf-when{font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:5px}' +
+    '.nf-acts{margin-left:auto;display:flex;gap:6px;flex-shrink:0}'
+  );
+
+  function nfS(v) { return String(v == null ? '' : v); }
+  function nfIcon(type) {
+    var t = nfS(type).toLowerCase();
+    if (t.indexOf('stock') >= 0) { return '📦'; }
+    if (t.indexOf('task') >= 0) { return '📋'; }
+    if (t.indexOf('price') >= 0) { return '💷'; }
+    if (t.indexOf('campaign') >= 0 || t.indexOf('cpc') >= 0 || t.indexOf('ad') === 0) { return '📣'; }
+    if (t.indexOf('late') >= 0 || t.indexOf('dispatch') >= 0 || t.indexOf('deliver') >= 0) { return '🚚'; }
+    if (t.indexOf('metric') >= 0 || t.indexOf('defect') >= 0) { return '📉'; }
+    if (t.indexOf('message') >= 0) { return '💬'; }
+    if (t.indexOf('meeting') >= 0) { return '⏰'; }
+    if (t.indexOf('decision') >= 0 || t.indexOf('keyword') >= 0) { return '🗳️'; }
+    return '🔔';
+  }
+
+  function nfPaint(d) {
+    var box = $('nfBody');
+    if (!box) { return; }
+    var ns = (d && d.notifications) || [];
+    try { STATE.counts.notifications = d.unreadNotif || 0; refreshBadges(); } catch (e) {}
+    var un = $('nfUnread');
+    if (un) { un.textContent = String(d.unreadNotif || 0); }
+    if (!ns.length) {
+      box.innerHTML = '<div class="alx-empty">No unread system notifications. New alerts land here the moment the portal sends them.</div>';
+      return;
+    }
+    box.innerHTML = ns.map(function (n) {
+      var unread = !nfS(n.read_at || n.read).trim();
+      return '<div class="nf-card' + (unread ? ' unread' : '') + '" data-nf="' + esc(nfS(n.notif_id || n.id)) + '">' +
+        '<div class="nf-ico">' + nfIcon(n.type) + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+        '<div class="nf-ty">' + esc(nfS(n.type || 'notification').replace(/_/g, ' ')) + '</div>' +
+        '<div class="nf-msg">' + esc(nfS(n.message || n.body)) + '</div>' +
+        '<div class="nf-when">' + esc(fmtPkt(n.created_at || n.ts, true) || nfS(n.created_at || n.ts)) + '</div>' +
+        '</div>' +
+        (unread ? '<div class="nf-acts"><button class="minibtn" data-nf-read="' + esc(nfS(n.notif_id || n.id)) + '">Mark read</button></div>' : '') +
+        '</div>';
+    }).join('');
+    box.querySelectorAll('[data-nf-read]').forEach(function (b) {
+      b.onclick = function () {
+        var id = this.getAttribute('data-nf-read');
+        var card = box.querySelector('[data-nf="' + id + '"]');
+        var me = this; me.disabled = true;
+        api('markNotifRead', { notifId: id }).then(function () {
+          if (card) { card.classList.remove('unread'); }
+          me.remove();
+          try { STATE.counts.notifications = Math.max(0, (STATE.counts.notifications || 1) - 1); refreshBadges(); } catch (e) {}
+          var un2 = $('nfUnread');
+          if (un2) { un2.textContent = String(STATE.counts.notifications || 0); }
+        }).catch(function () { me.disabled = false; });
+      };
+    });
+  }
+
+  function nfLoad(fresh) {
+    var box = $('nfBody');
+    if (!box) { return; }
+    var cached = (window.__lastPoll && Date.now() - window.__lastPoll.at < 90000) ? window.__lastPoll.d : null;
+    if (cached && !fresh) { nfPaint(cached); }
+    else { box.innerHTML = '<div class="spinner"></div>'; }
+    api('poll').then(function (d) {
+      try { window.__lastPoll = { at: Date.now(), d: d }; } catch (e) {}
+      nfPaint(d);
+    }).catch(function (e) {
+      if (!cached && $('nfBody')) { box.innerHTML = '<div class="alx-empty">The letters could not be read just now — ' + esc(e.message) + '</div>'; }
+    });
+  }
+
+  VIEWS.notifications = {
+    label: 'Notifications',
+    icon: '<path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    roles: '*',
+    order: 98,
+    hidden: true,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Notifications</h1>' +
+        '<span class="sub">everything the SYSTEM sends you — people’s messages stay in the Inbox</span>' +
+        '<span class="pill role" style="margin-left:auto">unread <b id="nfUnread" style="margin-left:4px">…</b></span>' +
+        '<button class="minibtn" id="nfAll">Mark all read</button>' +
+        '<button class="minibtn" id="nfRefresh">Refresh</button></div>' +
+        '<div id="nfBody" class="enter d2"><div class="spinner"></div></div>';
+    },
+    init: function () {
+      var all = $('nfAll');
+      if (all) {
+        all.onclick = function () {
+          all.disabled = true;
+          api('markNotifRead', { all: true }).then(function () {
+            try { STATE.counts.notifications = 0; refreshBadges(); } catch (e) {}
+            all.disabled = false;
+            nfLoad(true);
+          }).catch(function () { all.disabled = false; });
+        };
+      }
+      var rf = $('nfRefresh');
+      if (rf) { rf.onclick = function () { nfLoad(true); }; }
+      nfLoad(false);
+    }
+  };
+
+  /* the bell opens THIS page — for every role, every module state */
+  (function () {
+    var bell = $('bellBtn');
+    if (bell) { bell.onclick = function () { try { location.hash = 'notifications'; renderView('notifications'); } catch (e) {} }; }
+  })();
 })();
 
 /* ---------- view-zz-sheetTruth.js ---------- */
