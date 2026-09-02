@@ -231,3 +231,24 @@ Husnain's three sandboxed HTML embeds became native portal desks with real D1 ba
 - csDesk buttons now link to the native desks; sidebar entries under Customer Service. The old
   embeds remain on the Tools page as backup. Worker 01:19 UTC, Pages -0118.
 - Verification tracker (id 1) closed as LOST with a note — board left clean (0 open).
+
+## 2 Sept ~15:00–15:20 UTC — evening outage (owner report), root causes + fixes
+1. **orderSync had been CRASHING on every account since 31 Aug 23:55 UTC** — the Phase-1 edit
+   bound payment_status/cancel_state/fh_count to variables never declared in that function
+   ("payStatus is not defined" on every changed-order upsert). ~39 hours of frozen order and
+   tracking updates, masked by openSync/statusRefresh until staff noticed. Fixed (trio defined
+   exactly as openSync/orderBackfill define them), deployed 15:04 UTC, catch-up runs driven:
+   **all six accounts CLEAN by 15:13** (orderSync/openSync ok, zero errors), Truth Check 66
+   PASS · 0 FAIL. Lesson recorded: the sync-health table named the bug precisely — check it
+   FIRST on any "portal broken" report.
+2. **Apps Script at capacity at peak** — a bare GET ping answered in 42–83 s; the HTML error
+   wall (no CORS headers) is what browsers see. Every sheet-backed screen queues behind it.
+   Relief shipped: (a) 25 s abort on the sheet path — zombie 36–83 s requests were wedging the
+   browser's ~6-connections-per-origin queue, freezing even healthy screens ("loading,
+   loading"); (b) the engine's letter flush trickles 6/slot during 12:00–19:00 UTC so
+   engineNotify POSTs stop competing with staff screens for Google's concurrency pool.
+   **Durable cure queued: move the poll/notifications feed off Apps Script onto the engine**
+   (WO-12-style migration) — engine pages (overview/sales/dispatch/KPIs/VAT/daily/truth/
+   recovery) are already fast (0.3–4 s) because they never touch Google.
+3. Owner asked for screenshots of everything — 10 live page captures taken in-pane
+   (SVG-foreignObject render) after the fixes and delivered.
