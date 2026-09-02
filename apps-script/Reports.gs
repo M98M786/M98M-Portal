@@ -129,9 +129,8 @@ function actionSubmitReport_(payload, ctx) {
     };
     repAppendReport_(sh, repRow);
   } finally { lock.releaseLock(); }
-  /* 3 Sept: the grid and My-reports read the ENGINE mirror — each submission pushes its own
-     row across immediately (best-effort; reportsSweep_/reportsDump self-heal any miss). */
-  try { enginePost_('syncReports', { rows: [repRow] }); } catch (e) {}
+  /* 3 Sept hotfix: no inline engine push in a user action (see notify_) — reportsSweep_
+     (15-min) carries submissions to the engine grid. */
 
   logActivity_(ctx.ident.email, 'SUBMIT_REPORT_2H', 'REPORTS_2H:' + date + ' ' + cp, '',
     flag + '|' + counts.join(','), isFinal ? 'Daily Productivity Report' : '');

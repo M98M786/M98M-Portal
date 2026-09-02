@@ -1253,12 +1253,10 @@ function notify_(toEmail, type, message, ref) {
   const nid = 'N' + Utilities.getUuid().slice(0, 8);
   const at = now_();
   getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
-  /* 2 Sept: the bell lives on the Engine now — best-effort immediate push; the 15-min sweep
-     (notifSweep_, riding the hot-mirror trigger) catches anything this misses. Never fails
-     the action that raised the letter. */
-  try {
-    enginePost_('syncNotifs', { rows: [{ as_id: nid, to: String(toEmail), from: 'system', type: String(type), message: String(message), ref: String(ref || ''), created_at: at }] });
-  } catch (e) {}
+  /* 3 Sept HOTFIX (hunt submits dying "unsaved"): NO inline engine push here — a letter fired
+     inside a user action added a whole Google->engine round-trip PER RECIPIENT, and on a slow
+     night that alone pushed submits past the client's 25s abort. notifSweep_ (15-min, riding
+     the hot mirror) is the delivery path to the bell. */
 }
 function notifyManagement_(type, message, ref) {
   const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
@@ -3483,9 +3481,8 @@ function actionSubmitReport_(payload, ctx) {
     };
     repAppendReport_(sh, repRow);
   } finally { lock.releaseLock(); }
-  /* 3 Sept: the grid and My-reports read the ENGINE mirror — each submission pushes its own
-     row across immediately (best-effort; reportsSweep_/reportsDump self-heal any miss). */
-  try { enginePost_('syncReports', { rows: [repRow] }); } catch (e) {}
+  /* 3 Sept hotfix: no inline engine push in a user action (see notify_) — reportsSweep_
+     (15-min) carries submissions to the engine grid. */
 
   logActivity_(ctx.ident.email, 'SUBMIT_REPORT_2H', 'REPORTS_2H:' + date + ' ' + cp, '',
     flag + '|' + counts.join(','), isFinal ? 'Daily Productivity Report' : '');
@@ -6817,13 +6814,8 @@ function huntBackupRecord_(huntId, hunterEmail, ts, cols) {
 /** The hot path: put ONE hunt where it belongs, and take it out of wherever it no longer belongs.
  * Never throws — a backup that could break a submission would be worse than no backup. */
 function huntBackupUpsert_(rec) {
-  /* 2 Sept: the hunt queue reads the ENGINE mirror now — every hunt mutation pushes its own
-     row across immediately (best-effort; huntsDump/the fingerprint sweep catch any miss). */
-  try {
-    var hv = {};
-    Object.keys(rec).forEach(function (k) { var x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
-    enginePost_('syncHunts', { rows: [{ vals: hv }] });
-  } catch (e) {}
+  /* 3 Sept HOTFIX: no inline engine push in the submit/decide hot path (see notify_) —
+     huntsSweep_ (15-min) keeps the engine queue mirror current. */
 
   const id = rec ? String(rec.hunt_id || '').trim() : '';
   if (!id) return { ok: false, reason: 'no hunt_id' };
