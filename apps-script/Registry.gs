@@ -1066,8 +1066,12 @@ function truthMoneyBooks_() {
   return out;
 }
 function pushSheetRowsHot() {
-  const days = [Utilities.formatDate(new Date(Date.now() + 5 * 3600000), 'Etc/GMT', 'yyyy-MM-dd'),
-                Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - 86400000), 'Etc/GMT', 'yyyy-MM-dd')];
+  /* 2 Sept: FOUR days, not two — staff create a day's tab late (Sir Hasib's 31 Aug tab appeared
+     on 2 Sept) and the report agent revises the ad columns for ~2 days after. Two days of cover
+     left late tabs unmirrored and revised numbers stale until the nightly cold walk. */
+  const days = [0, 1, 2, 3].map(function (k) {
+    return Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
+  });
   let pushed = 0, tabs = 0;
   truthMoneyBooks_().forEach(function (b) {
     try {
@@ -1079,7 +1083,7 @@ function pushSheetRowsHot() {
     } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
   });
   logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
-  return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (today + yesterday)';
+  return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
 function pushSheetRowsCold() {
   /* cursor: {a: accountIndex, d: dayOffset} walking 0..62 days back per account, ~150s budget */
