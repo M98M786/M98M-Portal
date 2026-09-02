@@ -1387,6 +1387,13 @@ async function flushNotifyQueue(env) {
        (1000) the queue drains 5x faster. It had built an 813-letter, 11-hour backlog. */
     "WHERE claimed_at = '' OR claimed_at < datetime('now', '-60 second') ORDER BY id LIMIT 40"
   ).all();
+  /* 2 Sept peak collapse: Apps Script at this hour answers a bare ping in 40-80s — every
+     engineNotify POST the flush makes competes with the staff's own screens for Google's
+     concurrency pool. During the office peak (12:00–19:00 UTC ≈ 5pm–midnight PKT) the flush
+     trickles instead of firehosing; letters catch up the moment the peak passes. */
+  const hr = new Date().getUTCHours();
+  const peakCap = (hr >= 12 && hr < 19) ? 6 : 40;
+  if ((rs.results || []).length > peakCap) rs.results.length = peakCap;
   for (const row of (rs.results || [])) {
     const claim = await env.DB.prepare(
       "UPDATE notify_queue SET tries = tries + 1, claimed_at = datetime('now') " +
