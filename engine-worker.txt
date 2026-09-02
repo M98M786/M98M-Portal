@@ -73,7 +73,7 @@ export default {
       const ROUTE_CACHE_MS = { itemPnl: 90000, dailyReport: 45000, itemRisk: 120000,
         marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 20000, trafficBoard: 300000,
         deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0,
-        pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000,
+        pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000, sheetItems: 60000,
         dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
       const data = rcTtl
@@ -3701,6 +3701,14 @@ function srVal(vals, header) {
   const n = Number(v);
   return isFinite(n) ? n : 0;
 }
+/* The day tabs carry a GRAND TOTAL row (the sheet's own sum). Summing it doubled every book
+   figure — found 2 Sept from the owner's screenshot. ONE gate decides which rows are items;
+   every reader and BOTH verification paths use it. */
+function srIsItemRow(vals) {
+  const t = String(vals['Item Title'] == null ? '' : vals['Item Title']).trim();
+  if (!t) return false;
+  return !/^(grand\s*)?totals?$/i.test(t);
+}
 async function metricMoneyByAccount(env, fromPk, toPk) {
   await ensureTruthSchema(env);
   const rs = await env.DB.prepare(
@@ -3709,26 +3717,46 @@ async function metricMoneyByAccount(env, fromPk, toPk) {
   const by = {};
   for (const row of (rs.results || [])) {
     let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-    if (!String(vals['Item Title'] || '').trim()) continue;
-    const b = (by[row.account] = by[row.account] || { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0, days: {} });
+    if (!srIsItemRow(vals)) continue;               // blank padding AND the GRAND TOTAL row
+    const b = (by[row.account] = by[row.account] || { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0,
+      ap: 0, ret: 0, adsP: 0, adsG: 0, vC: 0, vG: 0, vJ: 0, vM: 0, vQ: 0, days: {} });
     b.rows++;
     b.sold += srVal(vals, 'Total Sales/Sold For');
     b.r += srVal(vals, 'True Order Earning');
     b.s += srVal(vals, 'VAT to HMRC');
     b.t += srVal(vals, 'Raw Profit');
     b.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
-    const d = (b.days[row.day_pk] = b.days[row.day_pk] || { sold: 0, t: 0, s: 0, rows: 0 });
+    /* the rest of the sheet's law, same columns the owner reads (2 Sept order) */
+    b.ap += srVal(vals, 'Actual Profit');
+    b.ret += srVal(vals, 'Returns');
+    b.adsP += srVal(vals, 'Total Priority incl VAT');
+    b.adsG += srVal(vals, 'General Fees incl VAT');
+    b.vC += srVal(vals, 'Total Sale HMRC VAT');
+    b.vG += srVal(vals, 'FVF & Reg VAT Paid');
+    b.vJ += srVal(vals, 'AliExpress VAT Paid');
+    b.vM += srVal(vals, 'Add 20% On Priority VAT');
+    b.vQ += srVal(vals, 'General Fees Minus 20% VAT');
+    const d = (b.days[row.day_pk] = b.days[row.day_pk] || { sold: 0, t: 0, s: 0, rows: 0, ap: 0, ret: 0, ads: 0, ali: 0 });
     d.sold += srVal(vals, 'Total Sales/Sold For');
     d.t += srVal(vals, 'Raw Profit');
     d.s += srVal(vals, 'VAT to HMRC');
+    d.ap += srVal(vals, 'Actual Profit');
+    d.ret += srVal(vals, 'Returns');
+    d.ads += srVal(vals, 'Total Priority incl VAT') + srVal(vals, 'General Fees incl VAT');
+    d.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
     d.rows++;
   }
   const out = {};
   for (const a of Object.keys(by)) {
     const b = by[a];
     out[a] = { sold: round2(b.sold), true_earning: round2(b.r), vat: round2(b.s), actual: round2(b.t),
+      actual_after_returns: round2(b.ap), returns: round2(b.ret),
+      ads_incl_vat: round2(b.adsP + b.adsG), ads_priority: round2(b.adsP), ads_general: round2(b.adsG),
+      vat_parts: { sale: round2(b.vC), fvf: round2(b.vG), ali: round2(b.vJ), pri20: round2(b.vM), gen20: round2(b.vQ) },
       ali: round2(b.ali), rows: b.rows, margin: b.sold > 0 ? Math.round(b.t / b.sold * 1000) / 10 : null,
-      days: Object.keys(b.days).sort().map((k) => ({ day: k, sold: round2(b.days[k].sold), actual: round2(b.days[k].t), vat: round2(b.days[k].s), rows: b.days[k].rows })) };
+      days: Object.keys(b.days).sort().map((k) => ({ day: k, sold: round2(b.days[k].sold), actual: round2(b.days[k].t),
+        actual_after_returns: round2(b.days[k].ap), vat: round2(b.days[k].s), returns: round2(b.days[k].ret),
+        ads: round2(b.days[k].ads), ali: round2(b.days[k].ali), rows: b.days[k].rows })) };
   }
   return out;
 }
@@ -3742,7 +3770,7 @@ async function metricMoney(env, account, fromPk, toPk) {
   const t = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
   for (const row of (rs.results || [])) {
     let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-    if (!String(vals['Item Title'] || '').trim()) continue;           // blank grid padding
+    if (!srIsItemRow(vals)) continue;               // blank padding AND the GRAND TOTAL row
     t.rows++;
     t.sold += srVal(vals, 'Total Sales/Sold For');
     t.r += srVal(vals, 'True Order Earning');
@@ -4021,7 +4049,7 @@ async function truthTier1(env) {
     let s2 = 0, t2 = 0, r2v = 0, bad = 0, checked = 0;
     for (const row of (rs.results || [])) {
       let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-      if (!String(v['Item Title'] || '').trim()) continue;
+      if (!srIsItemRow(v)) continue;
       const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
       const H = Number(v['eBay Order Earning']) || 0, I = Number(v['Total AliExpress Cost incl VAT']) || 0, N = Number(v['Total Priority incl VAT']) || 0;
       const C = Number(v['Total Sale HMRC VAT']) || 0, G = Number(v['FVF & Reg VAT Paid']) || 0, J = Number(v['AliExpress VAT Paid']) || 0;
@@ -4069,7 +4097,7 @@ async function truthTier3(env) {
       let t2 = 0, bad = 0, checked = 0;
       for (const row of (rs.results || [])) {
         let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-        if (!String(v['Item Title'] || '').trim()) continue;
+        if (!srIsItemRow(v)) continue;
         checked++;
         const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
         if (Math.abs(T - (R - S)) > 0.011) bad++;
@@ -6405,6 +6433,46 @@ const ROUTES = {
     },
   },
 
+  /* 2 Sept (owner's law): item-by-item P&L straight from the Sales Analysis day rows — the
+     sheet's own columns grouped by Item Title across the chosen range. No calculator, no API. */
+  sheetItems: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? String(p.from) : pkToday(-6);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? String(p.to) : pkToday(0);
+      const account = String(p.account || '');
+      const bind = [from, to];
+      let sql = 'SELECT account, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2';
+      if (account) { bind.push(account); sql += ' AND account = ?3'; }
+      const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
+      const by = {};
+      for (const row of (rs.results || [])) {
+        let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+        if (!srIsItemRow(v)) continue;
+        const key = String(v['Item Title']).trim().slice(0, 140);
+        const b = (by[key] = by[key] || { title: key, accounts: {}, qty: 0, sold: 0, ali: 0, ads: 0, ret: 0, raw: 0, actual: 0, vat: 0, rows: 0 });
+        b.accounts[row.account] = 1;
+        b.rows++;
+        b.qty += srVal(v, 'Qty Via Promoting') + srVal(v, 'Qty Sold Via General');
+        b.sold += srVal(v, 'Total Sales/Sold For');
+        b.ali += srVal(v, 'Total AliExpress Cost incl VAT');
+        b.ads += srVal(v, 'Total Priority incl VAT') + srVal(v, 'General Fees incl VAT');
+        b.ret += srVal(v, 'Returns');
+        b.raw += srVal(v, 'Raw Profit');
+        b.actual += srVal(v, 'Actual Profit');
+        b.vat += srVal(v, 'VAT to HMRC');
+      }
+      const items = Object.values(by).map((b) => ({ title: b.title, accounts: Object.keys(b.accounts).join(', '),
+        qty: b.qty, sold: round2(b.sold), ali: round2(b.ali), ads: round2(b.ads), returns: round2(b.ret),
+        raw: round2(b.raw), actual: round2(b.actual), vat: round2(b.vat), rows: b.rows }));
+      const order = String(p.order || 'losses');
+      items.sort(order === 'best' ? (a, b) => b.actual - a.actual : (a, b) => a.actual - b.actual);
+      return { from, to, account: account || 'all', n: items.length, items: items.slice(0, 200) };
+    },
+  },
+
   /* TRUTH v2 WO-11 §3: the D1 side of the AliExpress duplicate check — supplier-sheet mirror
      (items_facts sup links), live/ended listings that went through Go-Live, and processed orders.
      The hunt-records side answers live from Apps Script; the page merges both. */
@@ -6599,11 +6667,12 @@ const ROUTES = {
       /* one sheet_rows scan serves both the per-account card AND the totals — the second full
          scan+parse of the same rows was half the money cost of every page (perf triage 1 Sept) */
       const MA = await metricMoneyByAccount(ctx.env, from, to);
-      const mSum = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
+      const mSum = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0, ap: 0, ret: 0, ads: 0 };
       for (const a of Object.keys(MA)) {
         if (account && a !== account) continue;
         mSum.sold += MA[a].sold; mSum.r += MA[a].true_earning; mSum.s += MA[a].vat;
         mSum.t += MA[a].actual; mSum.ali += MA[a].ali; mSum.rows += MA[a].rows;
+        mSum.ap += MA[a].actual_after_returns; mSum.ret += MA[a].returns; mSum.ads += MA[a].ads_incl_vat;
       }
       const ocBind = [from, to];
       let ocSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2";
@@ -6661,6 +6730,9 @@ const ROUTES = {
         ACTUAL_PROFIT: wrap('ACTUAL_PROFIT', M.ACTUAL_PROFIT, '£', 'sheet'),
         ALI_COST: wrap('ALI_COST', M.ALI_COST, '£', 'sheet'),
         MARGIN: wrap('MARGIN', M.MARGIN, '%', 'ratio'),
+        ACTUAL_AFTER_RETURNS: wrap('ACTUAL_AFTER_RETURNS', round2(mSum.ap), '£', 'sheet'),
+        RETURNS_BOOKS: wrap('RETURNS_BOOKS', round2(mSum.ret), '£', 'sheet'),
+        ADS_INCL_VAT_BOOKS: wrap('ADS_INCL_VAT_BOOKS', round2(mSum.ads), '£', 'sheet'),
         ADS_SPLIT: wrap('ADS_SPLIT', AD.split, 'counts', 'campaigns'),
         LEAKS_DAILY: wrap('LEAKS_DAILY', leaks, '£/day', 'ads_daily+orders.refunded'),
         ROWS_COVERAGE: wrap('ROWS_COVERAGE', M.ROWS_COVERAGE, 'rows/orders', 'sheet+orders'),

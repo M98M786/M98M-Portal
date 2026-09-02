@@ -73,7 +73,7 @@
       var byA = M.MONEY_BY_ACCOUNT.value || {};
       var mine = K2.acct ? byA[K2.acct] : null;
       var sold = mine ? mine.sold : M.SOLD_SHEET.value;
-      var act = mine ? mine.actual : M.ACTUAL_PROFIT.value;
+      var act = mine ? (mine.actual_after_returns !== undefined ? mine.actual_after_returns : mine.actual) : (M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value;
       var vat = mine ? mine.vat : M.VAT_TO_HMRC.value;
       var ali = mine ? mine.ali : M.ALI_COST.value;
       var margin = mine ? mine.margin : M.MARGIN.value;
@@ -86,7 +86,7 @@
       };
       var h = '<div class="k2-tiles">' +
         tile('Sold (books)', k2GBP(sold), 'eBay: ' + k2GBP(sApi || 0) + ' · ' + (oApi || 0) + ' orders ' + mChip(M.SOLD_SHEET)) +
-        tile('Actual profit', k2GBP(act), 'Σ Raw Profit ' + mChip(M.ACTUAL_PROFIT)) +
+        tile('Actual profit', k2GBP(act), "Σ 'Actual Profit' (raw − returns) " + mChip(M.ACTUAL_PROFIT)) +
         tile('VAT to HMRC', k2GBP(vat), 'Σ VAT to HMRC ' + mChip(M.VAT_TO_HMRC)) +
         tile('AliExpress', k2GBP(ali), 'incl VAT, from the rows') +
         tile('Margin', margin == null ? '—' : margin + '%', 'actual ÷ sold') +

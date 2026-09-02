@@ -360,7 +360,7 @@
       };
       box.innerHTML =
         mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
-        mkT('ACTUAL PROFIT', oGBP0(M.ACTUAL_PROFIT.value), 'Σ Raw Profit — the day tabs\' own column ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
+        mkT('ACTUAL PROFIT', oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value), 'Σ Actual Profit — the sheet\'s own column (raw − returns) ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
         mkT('VAT TO HMRC', oGBP0(M.VAT_TO_HMRC.value), 'Σ VAT to HMRC · True Earning − VAT = Raw ' + mChip(M.VAT_TO_HMRC), 'blue') +
         mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
         mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
