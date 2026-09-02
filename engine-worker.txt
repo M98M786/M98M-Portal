@@ -3861,7 +3861,8 @@ function repIsWorkingDayJs(pattern, dateStr) {
 }
 async function repLateThresholdJs(env) {
   const r = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'late_threshold_min'").first().catch(() => null);
-  const v = Number(r && r.value);
+  if (!r || String(r.value || '').trim() === '') return 20;
+  const v = Number(r.value);
   return (isFinite(v) && v >= 0) ? v : 20;
 }
 
