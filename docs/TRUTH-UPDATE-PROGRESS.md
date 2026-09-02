@@ -166,3 +166,31 @@ once, prefer worker-only deploys during office hours (no version.txt bump = no f
 Known remaining: Management desk "Waiting on you" ~11 s at peak — the four Apps Script feeds
 (approvals, hunts, counts, desk rows) are the sheet backend's latency, not the engine's;
 candidate improvement queued: paint each feed as it lands.
+
+## 2 Sept ~00:40–01:00 UTC — THE SHEET LAW (owner's standing order) + alerts/notifications rebuild
+Owner (verbatim): "from now on … never show any data other than logic of sales analysis sheet."
+- **GRAND TOTAL bug (real number bug, owner's screenshot):** day tabs carry a GRAND TOTAL row;
+  every reader summed it, inflating August book figures — and BOTH truth paths read the same
+  raw rows, so they agreed while wrong. One gate (`srIsItemRow`) now feeds every reader AND
+  both verifier tiers: blank titles and /^(grand )?totals?$/i rows are never items.
+- Headline **Actual profit = the sheet's 'Actual Profit' column** (raw − returns); Raw kept as
+  the secondary figure. New law columns mirrored per account and per day: Returns,
+  'Total Priority incl VAT' + 'General Fees incl VAT' (ads), and the five VAT components
+  (S = C − G − J − M − Q) exposed as vat_parts.
+- **Sales analysis rebuilt**: today/yesterday/7/30/60/90 · this/last week · this/last month ·
+  custom dates; four always-on profit strips; the report sheet's two charts; per-account
+  ledger; item-by-item P&L grouped from the day rows (`sheetItems`, losses first).
+- **VAT breakdown rebuilt**: the sheet's five VAT columns per account with the equation printed;
+  per-day VAT table; full range control incl Last month.
+- **Daily report rebuilt**: any single day per account from that day's tabs + 14-day trend.
+- **Alerts centre**: `_ALERTS` rows without a message are structural, skipped and counted (the
+  "This alert carries no message." cards are gone); department tiles (DATA 47 · ROUTINE 20 ·
+  SALES 8 · ADS 4 · HEALTH 2 · SERVICE 2 at ship time) drive the category filter; HIGH alerts
+  render big (Signals style); **Create task…** on every alert (department chips → person,
+  prefilled title/details/account/priority, the tasks screen's own createTask).
+- **Notifications page** (#notifications, all roles): the bell's new home — system letters only,
+  big cards, mark read / mark all. The Inbox is people's messages only again.
+- September £0.00s were honest (no September day tabs existed in any book yet); found Sir Hasib
+  + Amna 31-Aug tabs were created after the mirror's last pass over that day — cold walk
+  re-run to backfill; verification anchor: Sir Hasib 31 Aug GRAND TOTAL (sold 724.39 · ali
+  273.96 · ads 202.46 · VAT 31.84 · raw 93.62 · actual 93.62 · 21 item rows).
