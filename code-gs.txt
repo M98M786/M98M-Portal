@@ -5896,6 +5896,7 @@ function actionSubmitHunt_(payload, ctx) {
 
   const huntId = 'H' + Utilities.getUuid().slice(0, 8);
   const stamp = now_();
+  let subRec = null;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
@@ -5908,22 +5909,34 @@ function actionSubmitHunt_(payload, ctx) {
       return Object.prototype.hasOwnProperty.call(cols, h) ? cols[h] : '';
     });
     sh.appendRow(row);
+    subRec = {}; head.forEach(function (h, i) { subRec[h] = row[i]; });
   } finally { lock.releaseLock(); }
+
+  const flags = huntCriteriaFlags_(cols);
+
+  /* 3 Sept (owner: "still not saving for Irfan"): the portal reads the D1 mirror, so push THIS
+     hunt across the instant it lands — a hunter MUST see their own submission at once. The
+     15-min sweep was too slow: a hunter who cannot see their save re-enters the same product and
+     hits the duplicate block, which reads as "it errors / won't save". ONE cheap call, mirror-
+     FIRST, before the slow human-facing sheets, so a slow tail can never hide the save. */
+  if (subRec) {
+    subRec.approval_status = HUNT_PENDING;
+    subRec.hunter_name = String(ctx.user.name || '');
+    subRec.criteria_flags = flags;
+    huntMirrorPush_(subRec);
+  }
 
   logActivity_(ctx.ident.email, 'SUBMIT_HUNT', huntId, '', String(cols[HC_TITLE]).slice(0, 200),
     'source ' + cols[HC_SOURCE_PRICE] + ' · price ' + cols[HC_CALC_PRICE] + ' · profit ' + cols[HC_PROFIT]);
 
-  const flags = huntCriteriaFlags_(cols);
   notifyManagement_('Hunt submitted',
     ctx.user.name + ' submitted "' + String(cols[HC_TITLE]).slice(0, 120) + '" for review' +
     (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
 
   const mirror = huntMirrorAppend_(cols, ctx.ident.email);
-  /* 26 Aug: and into the backup workbook's pending tray in the same breath, so a hunt exists in
-   * two books from the second it is submitted. HuntBackup swallows its own failures. */
-  if (typeof huntBackupUpsert_ === 'function') {
-    huntBackupUpsert_(huntBackupRecord_(huntId, ctx.ident.email, stamp, cols));
-  }
+  /* The backup-workbook copy is left to huntBackupSync (the 5-min reconciler, which rebuilds
+   * every tray from HUNTING_DB) — opening that second spreadsheet inline was a slow op in the
+   * submit path and bought nothing the reconciler does not already guarantee. */
   return {
     hunt_id: huntId,
     approval_status: HUNT_PENDING,
@@ -6016,9 +6029,11 @@ function actionDecideHunt_(payload, ctx) {
       rpatch[HC_COMMENTS] = comment;
       huntWrite_(rsh, rfound, rpatch);
     } finally { rlock.releaseLock(); }
+    rrec[HC_APPROVAL] = HUNT_REVISION;
+    rrec[HC_COMMENTS] = comment;
+    rrec.approval_status = HUNT_REVISION;
+    huntMirrorPush_(rrec);                         // hunter + reviewers see the revision at once
     if (typeof huntBackupUpsert_ === 'function') {
-      rrec[HC_APPROVAL] = HUNT_REVISION;
-      rrec[HC_COMMENTS] = comment;
       huntBackupUpsert_(rrec);                     // stays in the pending tray, carrying its reason
     }
     logActivity_(ctx.ident.email, 'HUNT_REVISION_REQUESTED', rrec.hunt_id, HUNT_PENDING, HUNT_REVISION, comment.slice(0, 200));
@@ -6079,6 +6094,11 @@ function actionDecideHunt_(payload, ctx) {
       });
     }
   } finally { lock.releaseLock(); }
+
+  /* 3 Sept: the decision reflects in the portal queue at once (approve removes it, reject moves
+     it, the count drops) — the 15-min sweep left reviewers staring at already-decided hunts. */
+  rec.approval_status = decision;
+  huntMirrorPush_(rec);
 
   logActivity_(ctx.ident.email, 'DECIDE_HUNT', rec.hunt_id, HUNT_PENDING, decision,
     approving ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId
@@ -6506,6 +6526,20 @@ function huntMirrorValues_(cols) {
     out[header] = v;
   });
   return out;
+}
+
+/* 3 Sept: the ONE cheap engine push that keeps the portal's hunt queue live. JSON-native so
+ * criteria_flags (an array) survives — String()-flattening it was what crashed the queue. Never
+ * throws; the 15-min huntsSweep_ is the backstop if this misses. */
+function huntMirrorPush_(rec) {
+  try {
+    const hv = {};
+    Object.keys(rec).forEach(function (k) {
+      const x = rec[k];
+      hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : (x == null ? '' : x);
+    });
+    enginePost_('syncHunts', { rows: [{ vals: hv }] });
+  } catch (e) {}
 }
 
 function huntMirrorAppend_(cols, actor) {
