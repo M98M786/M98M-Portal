@@ -353,18 +353,40 @@
       var M = O.truthRange.metrics;
       var cov = M.ROWS_COVERAGE.value || {};
       var sApi = (M.SOLD_API.value || {}).all;
+      /* 2 Sept (owner): headline UP-TO-DATE money — books where the sheet is filled, the eBay
+         API pushed through the sheet's own formula for the days staff have not filled yet. */
+      var LAG = (M.BOOKS_LAG && M.BOOKS_LAG.value) || {};
+      var lagN = LAG.lagging_account_days || 0;
+      var U = lagN > 0 ? {
+        sold: M.SOLD_UPTODATE && M.SOLD_UPTODATE.value, te: M.TE_UPTODATE && M.TE_UPTODATE.value,
+        vat: M.VAT_UPTODATE && M.VAT_UPTODATE.value, actual: M.ACTUAL_UPTODATE && M.ACTUAL_UPTODATE.value,
+        ali: M.ALI_UPTODATE && M.ALI_UPTODATE.value, margin: M.MARGIN_UPTODATE && M.MARGIN_UPTODATE.value
+      } : null;
+      var lagChip = lagN > 0
+        ? ' <span class="pill" style="background:rgba(80,160,255,.14);color:var(--blue,#69b7ff);font-weight:800">LIVE · ' + lagN + ' day-book' + (lagN === 1 ? '' : 's') + ' filling</span>'
+        : '';
+      var lagSub = lagN > 0
+        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' (rows ' + (LAG.rows_filled || cov.rows || 0) + ' of ' + (LAG.orders_expected || cov.orders || 0) + ') + eBay API for unfilled days' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
+        : null;
       var mkT = function (label, val, sub, tone) {
         return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +
           '<div class="kpi-v' + (tone === 'gold-b' ? ' gold' : '') + '">' + val + '</div>' +
           '<div class="kpi-s">' + sub + '</div></div>';
       };
       box.innerHTML =
-        mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
-        mkT('ACTUAL PROFIT', oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value), 'Σ Actual Profit — the sheet\'s own column (raw − returns) ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
-        mkT('VAT TO HMRC', oGBP0(M.VAT_TO_HMRC.value), 'Σ VAT to HMRC · True Earning − VAT = Raw ' + mChip(M.VAT_TO_HMRC), 'blue') +
-        mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
-        mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
-        mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok') +
+        (U
+          ? mkT('SOLD — UP TO DATE', oGBP0(U.sold), lagSub + lagChip + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
+            mkT('ACTUAL PROFIT — UP TO DATE', oGBP0(U.actual), 'sheet law on live eBay figures for unfilled days · books alone: ' + oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value) + lagChip, 'gold-b') +
+            mkT('VAT TO HMRC — UP TO DATE', oGBP0(U.vat), 'Sold/6 − fees/6 − Ali/6 − 20% ads (the sheet\'s own S column) · books: ' + oGBP0(M.VAT_TO_HMRC.value) + lagChip, 'blue') +
+            mkT('TRUE ORDER EARNING', oGBP0(U.te), 'Sold − eBay fees − Ali cost · books: ' + oGBP0(M.TRUE_EARNING.value) + lagChip, 'blue') +
+            mkT('ALIEXPRESS COST', oGBP0(U.ali), 'known order costs' + (LAG.estimates_used ? ' + last-7-day ratio for unmatched orders' : '') + ' · books: ' + oGBP0(M.ALI_COST.value), 'warn') +
+            mkT('MARGIN', U.margin == null ? '—' : U.margin + '%', 'actual ÷ sold, up to date', 'ok')
+          : mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
+            mkT('ACTUAL PROFIT', oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value), 'Σ Actual Profit — the sheet\'s own column (raw − returns) ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +
+            mkT('VAT TO HMRC', oGBP0(M.VAT_TO_HMRC.value), 'Σ VAT to HMRC · True Earning − VAT = Raw ' + mChip(M.VAT_TO_HMRC), 'blue') +
+            mkT('TRUE ORDER EARNING', oGBP0(M.TRUE_EARNING.value), 'Σ True Order Earning', 'blue') +
+            mkT('ALIEXPRESS COST', oGBP0(M.ALI_COST.value), 'Σ Total AliExpress Cost incl VAT', 'warn') +
+            mkT('MARGIN', M.MARGIN.value == null ? '—' : M.MARGIN.value + '%', 'actual ÷ sold (books)', 'ok')) +
         mkT('OPEN ORDERS', String(M.AWAITING_DISPATCH.value), 'late ' + M.LATE_NOW.value.n + ' · due ' + (M.DUE_3D.value.n !== undefined ? M.DUE_3D.value.n : M.DUE_3D.value) + ' · awaiting ' + (M.AWAITING_ONLY.value.n !== undefined ? M.AWAITING_ONLY.value.n : M.AWAITING_ONLY.value) + ' ' + mChip(M.AWAITING_DISPATCH), 'bad');
       /* WO-03 steps 7–8: campaign gaps + the leaks strip, from the same register answer */
       var sp = M.ADS_SPLIT && M.ADS_SPLIT.value;
