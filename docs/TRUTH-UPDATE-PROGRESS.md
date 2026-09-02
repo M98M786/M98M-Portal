@@ -252,3 +252,22 @@ Husnain's three sandboxed HTML embeds became native portal desks with real D1 ba
    recovery) are already fast (0.3–4 s) because they never touch Google.
 3. Owner asked for screenshots of everything — 10 live page captures taken in-pane
    (SVG-foreignObject render) after the fixes and delivered.
+
+## 2 Sept ~15:30–15:45 UTC — THE POLL OFF GOOGLE (owner order, shipped)
+The bell/notifications feed — the one high-frequency thing every staff browser asked Apps
+Script for — now lives on the engine.
+- D1 `notifications` (unique on the sheet's own notif id); worker letters (`queueNotify`)
+  resolve their channels in the worker (management = Management/Ops Head + supers;
+  advertising = module grant or Advertising Manager, minus '-advertising' — the AS rules,
+  copied exactly) and INSERT directly. The engine→AS letter relay is retired for new letters
+  (the queue drains its backlog and goes quiet) — those POSTs stop competing with staff
+  screens for Google's concurrency pool entirely.
+- AS letters (`notify_`): per-letter best-effort dual-push (`syncNotifs`) + a 15-min sweep
+  riding the hot-mirror trigger (cursor-based, idempotent) + a re-runnable 3,000-row backfill
+  (`notifDump`). The NOTIFICATIONS tab stays as archive, like MESSAGES.
+- Browser: `pollEngine` every 90 s (per-user indexed COUNT + 40 newest unread — milliseconds);
+  Google is asked only every 10 MINUTES per person, solely for the meetings chip and legacy
+  threads (~85% cut in steady sheet-backend load). Notifications page + mark-read moved to
+  engine actions (`notifMarkRead`).
+- Deploys: worker 15:39 UTC, Apps Script **v90** ("Version 90 on Sep 2, 2026, 8:40 PM"),
+  Pages -1537.
