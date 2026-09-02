@@ -357,6 +357,13 @@ var apiTimer = null;
 var SLOW_AFTER_MS = 6000;
 var apiInflight = 0, apiSlowTimer = null;
 function slowBanner(on){
+  /* 2 Sept: only warn when the person is actually LOOKING at something unpainted — a slow
+     background refresh behind a fully painted page kept announcing "still loading", which
+     reads as a broken portal (the owner's exact complaint). */
+  if(on){
+    var waiting = document.querySelector('#mainView .spinner');
+    if(!waiting){ return; }
+  }
   var el = $('slowNote');
   if(!el){
     if(!on) return;

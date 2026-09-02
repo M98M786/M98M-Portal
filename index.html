@@ -357,6 +357,13 @@ var apiTimer = null;
 var SLOW_AFTER_MS = 6000;
 var apiInflight = 0, apiSlowTimer = null;
 function slowBanner(on){
+  /* 2 Sept: only warn when the person is actually LOOKING at something unpainted — a slow
+     background refresh behind a fully painted page kept announcing "still loading", which
+     reads as a broken portal (the owner's exact complaint). */
+  if(on){
+    var waiting = document.querySelector('#mainView .spinner');
+    if(!waiting){ return; }
+  }
   var el = $('slowNote');
   if(!el){
     if(!on) return;
@@ -567,7 +574,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260902-1702';
+var BUILD = '20260902-1705';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
