@@ -366,7 +366,7 @@
         ? ' <span class="pill" style="background:rgba(80,160,255,.14);color:var(--blue,#69b7ff);font-weight:800">LIVE · ' + lagN + ' day-book' + (lagN === 1 ? '' : 's') + ' filling</span>'
         : '';
       var lagSub = lagN > 0
-        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' + eBay API for ' + lagN + ' unfilled day-book' + (lagN === 1 ? '' : 's') + ' (' + (LAG.rows_filled || 0) + ' of ' + (LAG.orders_expected || 0) + ' rows filled there)' + (LAG.estimates_used ? ' · fees/cost partly estimated from the last 7 days' : '')
+        ? 'books ' + oGBP0(M.SOLD_SHEET.value) + ' + eBay API for ' + lagN + ' unfilled day-book' + (lagN === 1 ? '' : 's') + ' (' + (LAG.rows_filled || 0) + ' of ' + (LAG.orders_expected || 0) + ' rows filled there)' + (LAG.estimates_used ? ' · profit family estimated from each account\'s own last-14-day books ratios' : '')
         : null;
       var mkT = function (label, val, sub, tone) {
         return '<div class="kpi" style="--tone:var(--' + (tone || 'gold-b') + ')"><div class="kpi-l">' + label + '</div>' +
@@ -376,10 +376,10 @@
       box.innerHTML =
         (U
           ? mkT('SOLD — UP TO DATE', oGBP0(U.sold), lagSub + lagChip + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
-            mkT('ACTUAL PROFIT — UP TO DATE', oGBP0(U.actual), 'sheet law on live eBay figures for unfilled days · books alone: ' + oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value) + lagChip, 'gold-b') +
-            mkT('VAT TO HMRC — UP TO DATE', oGBP0(U.vat), 'Sold/6 − fees/6 − Ali/6 − 20% ads (the sheet\'s own S column) · books: ' + oGBP0(M.VAT_TO_HMRC.value) + lagChip, 'blue') +
-            mkT('TRUE ORDER EARNING', oGBP0(U.te), 'Sold − eBay fees − Ali cost · books: ' + oGBP0(M.TRUE_EARNING.value) + lagChip, 'blue') +
-            mkT('ALIEXPRESS COST', oGBP0(U.ali), 'known order costs' + (LAG.estimates_used ? ' + last-7-day ratio for unmatched orders' : '') + ' · books: ' + oGBP0(M.ALI_COST.value), 'warn') +
+            mkT('ACTUAL PROFIT — UP TO DATE', oGBP0(U.actual), 'each account\'s own books ratio on live eBay sold · books alone: ' + oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value) + lagChip, 'gold-b') +
+            mkT('VAT TO HMRC — UP TO DATE', oGBP0(U.vat), 'books VAT ratio on live sold · books alone: ' + oGBP0(M.VAT_TO_HMRC.value) + lagChip, 'blue') +
+            mkT('TRUE ORDER EARNING', oGBP0(U.te), 'books TE ratio on live sold · books: ' + oGBP0(M.TRUE_EARNING.value) + lagChip, 'blue') +
+            mkT('ALIEXPRESS COST', oGBP0(U.ali), 'books Ali-cost ratio on live sold · books: ' + oGBP0(M.ALI_COST.value), 'warn') +
             mkT('MARGIN', U.margin == null ? '—' : U.margin + '%', 'actual ÷ sold, up to date', 'ok')
           : mkT('SOLD (BOOKS)', oGBP0(M.SOLD_SHEET.value), 'eBay: ' + oGBP0(sApi || 0) + ' · rows ' + (cov.rows || 0) + ' of ' + (cov.orders || 0) + ' ' + mChip(M.SOLD_SHEET), 'gold-b') +
             mkT('ACTUAL PROFIT', oGBP0((M.ACTUAL_AFTER_RETURNS || M.ACTUAL_PROFIT).value), 'Σ Actual Profit — the sheet\'s own column (raw − returns) ' + mChip(M.ACTUAL_PROFIT), 'gold-b') +

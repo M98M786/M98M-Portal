@@ -3779,6 +3779,32 @@ function srIsTotalRow(vals) {
 function srDayPick(totals, items) {
   return totals || items;
 }
+/* 2 Sept (owner's calibration): a live-estimated day must carry the BOOKS' own shape, not a
+   hand-derived fee chain — on complete days the sheet's TE runs 5-17% of sold (its fee column
+   carries ads and more), while API fees+ali left ~45%. So: per account, over the last 14 days'
+   COMPLETE books days (their own GRAND TOTAL row), the ratios te/sold, vat/sold, actual/sold,
+   ali/sold — fleet aggregate as fallback. Sold itself always stays the API's exact number. */
+async function liveBooksRatios(env) {
+  return memo('liveRatios:v2', 600000, async () => {
+    const to = pkToday(0), from = pkToday(-14);
+    const MA = await metricMoneyByAccount(env, from, to);
+    const per = {}, fleet = { sold: 0, te: 0, vat: 0, ap: 0, ali: 0 };
+    for (const a of Object.keys(MA)) {
+      const t = { sold: 0, te: 0, vat: 0, ap: 0, ali: 0 };
+      for (const d of MA[a].days) {
+        if (d.src !== 'T') continue;
+        t.sold += d.sold; t.te += (d.te || 0); t.vat += d.vat; t.ap += d.actual_after_returns; t.ali += d.ali;
+      }
+      fleet.sold += t.sold; fleet.te += t.te; fleet.vat += t.vat; fleet.ap += t.ap; fleet.ali += t.ali;
+      if (t.sold > 50) per[a] = { te: t.te / t.sold, vat: t.vat / t.sold, ap: t.ap / t.sold, ali: t.ali / t.sold };
+    }
+    const fb = fleet.sold > 0
+      ? { te: fleet.te / fleet.sold, vat: fleet.vat / fleet.sold, ap: fleet.ap / fleet.sold, ali: fleet.ali / fleet.sold }
+      : { te: 0.13, vat: 0.03, ap: 0.08, ali: 0.38 };
+    return { per, fleet: fb, window: from + '→' + to };
+  });
+}
+
 async function metricMoneyByAccount(env, fromPk, toPk) {
   await ensureTruthSchema(env);
   const rs = await env.DB.prepare(
@@ -7205,18 +7231,8 @@ const ROUTES = {
       ).bind(...(account ? [from, to, account] : [from, to])).all().catch(() => ({ results: [] }));
       const apiDay = {};
       for (const r of (apiDayRs.results || [])) apiDay[r.account + '|' + r.d] = r;
-      const ratios = await ctx.env.DB.prepare(
-        "SELECT ROUND(SUM(CASE WHEN ebay_fees > 0 THEN sold ELSE 0 END),2) AS fs, ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END),2) AS f, " +
-        "ROUND(SUM(CASE WHEN cost > 0 THEN sold ELSE 0 END),2) AS als, ROUND(SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END),2) AS al " +
-        "FROM orders WHERE cancel_state != 'CANCELED' AND created_at >= datetime('now', '-7 day')"
-      ).first().catch(() => null);
-      const feeRatio = ratios && Number(ratios.fs) > 0 ? Number(ratios.f) / Number(ratios.fs) : 0.30;
-      const aliRatio = ratios && Number(ratios.als) > 0 ? Number(ratios.al) / Number(ratios.als) : (mSum.sold > 0 ? mSum.ali / mSum.sold : 0.40);
-      const adsDayAcct = await ctx.env.DB.prepare(
-        'SELECT account, date AS d, ROUND(SUM(spend + cpc_spend),2) AS sp FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, date'
-      ).bind(from, to).all().catch(() => ({ results: [] }));
-      const adsAcctMap = {};
-      for (const r of (adsDayAcct.results || [])) adsAcctMap[r.account + '|' + r.d] = Number(r.sp) || 0;
+      const RB = await liveBooksRatios(ctx.env);
+      const ratioFor = (a) => RB.per[a] || RB.fleet;
       const bk = { sold: 0, te: 0, vat: 0, ap: 0, ali: 0 };
       const lv = { sold: 0, te: 0, vat: 0, actual: 0, ali: 0, refunds: 0 };
       const lagDays = [];
@@ -7231,14 +7247,8 @@ const ROUTES = {
           const complete = d.src === 'T' || !ap || !Number(ap.n) || d.rows >= 0.9 * Number(ap.n);
           if (complete) { bk.sold += d.sold; bk.te += (d.te || 0); bk.vat += d.vat; bk.ap += d.actual_after_returns; bk.ali += d.ali; continue; }
           const sold = Number(ap.sold) || 0;
-          let fees = Number(ap.fees) || 0;
-          if (Number(ap.fees_n) < 0.8 * Number(ap.n)) { fees = Math.max(fees, round2(sold * feeRatio)); estUsed = true; }
-          let ali = Number(ap.ali) || 0;
-          if (Number(ap.ali_n) < 0.8 * Number(ap.n)) { ali = Math.max(ali, round2(sold * aliRatio)); estUsed = true; }
-          const adsEx = adsAcctMap[key] || 0;
-          const te = sold - fees - ali;
-          const vat = sold / 6 - fees / 6 - ali / 6 - adsEx * 0.2;
-          const actual = (te - vat) - (Number(ap.refunds) || 0);
+          const R = ratioFor(a); estUsed = true;
+          const te = sold * R.te, vat = sold * R.vat, actual = sold * R.ap, ali = sold * R.ali;
           lv.sold += sold; lv.te += te; lv.vat += vat; lv.actual += actual; lv.ali += ali; lv.refunds += Number(ap.refunds) || 0;
           lagDays.push({ day: d.day, account: a, rows: d.rows, orders: Number(ap.n), sold_books: d.sold, sold_live: sold });
           lagRowsFilled += d.rows; lagOrders += Number(ap.n);
@@ -7250,15 +7260,9 @@ const ROUTES = {
         const ap = apiDay[key];
         const sold = Number(ap.sold) || 0;
         if (!sold) continue;
-        let fees = Number(ap.fees) || 0;
-        if (Number(ap.fees_n) < 0.8 * Number(ap.n)) { fees = Math.max(fees, round2(sold * feeRatio)); estUsed = true; }
-        let ali = Number(ap.ali) || 0;
-        if (Number(ap.ali_n) < 0.8 * Number(ap.n)) { ali = Math.max(ali, round2(sold * aliRatio)); estUsed = true; }
-        const adsEx = adsAcctMap[key] || 0;
-        const te = sold - fees - ali;
-        const vat = sold / 6 - fees / 6 - ali / 6 - adsEx * 0.2;
-        lv.sold += sold; lv.te += te; lv.vat += vat; lv.actual += (te - vat) - (Number(ap.refunds) || 0);
-        lv.ali += ali; lv.refunds += Number(ap.refunds) || 0;
+        const R = ratioFor(key.split('|')[0]); estUsed = true;
+        lv.sold += sold; lv.te += sold * R.te; lv.vat += sold * R.vat; lv.actual += sold * R.ap;
+        lv.ali += sold * R.ali; lv.refunds += Number(ap.refunds) || 0;
         lagDays.push({ day: key.split('|')[1], account: key.split('|')[0], rows: 0, orders: Number(ap.n), sold_books: 0, sold_live: sold });
         lagOrders += Number(ap.n);
       }
@@ -7310,7 +7314,7 @@ const ROUTES = {
         UPTODATE_PARTS: wrap('UPTODATE_PARTS', UP, '£', 'sheet+api'),
         BOOKS_LAG: wrap('BOOKS_LAG', { account_days: lagDays.slice(0, 60), lagging_account_days: lagDays.length,
           rows_filled: lagRowsFilled, orders_expected: lagOrders, estimates_used: estUsed,
-          fee_ratio_7d: Math.round(feeRatio * 1000) / 10, ali_ratio_7d: Math.round(aliRatio * 1000) / 10 }, 'lag', 'sheet vs orders'),
+          ratio_window: RB.window, actual_ratio_fleet: Math.round(RB.fleet.ap * 1000) / 10 }, 'lag', 'sheet vs orders'),
       } };
     },
   },
