@@ -4069,6 +4069,22 @@ async function truthTier1(env) {
     out.push({ metric_id: 'CS_NEEDS_REPLY', scope_key: 'all', shown: aN, recomputed: bN,
       delta: aN - bN, status: aN === bN ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
   } catch (e) { /* cases table empty on a fresh isolate */ }
+  /* CS recovery desk (2 Sept): the chaseable-refunds tile, verified — Path A is the desk's own
+     EXISTS query, Path B an independently written LEFT JOIN over the same 60-day window. */
+  try {
+    const aQ = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM orders o WHERE o.refunded > 0 AND COALESCE(o.ali_order,'') != '' " +
+      "AND o.created_at >= datetime('now','-60 day') AND NOT EXISTS (SELECT 1 FROM recovery_cases rc WHERE rc.order_id = o.order_id)"
+    ).first();
+    const bQ = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM orders o LEFT JOIN recovery_cases rc ON rc.order_id = o.order_id " +
+      "WHERE o.refunded > 0 AND o.ali_order IS NOT NULL AND o.ali_order != '' " +
+      "AND o.created_at >= datetime('now','-60 day') AND rc.id IS NULL"
+    ).first();
+    const aN = Number(aQ && aQ.n) || 0, bN = Number(bQ && bQ.n) || 0;
+    out.push({ metric_id: 'RECOVERY_CANDIDATES', scope_key: 'all', shown: aN, recomputed: bN,
+      delta: aN - bN, status: aN === bN ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+  } catch (e) { /* recovery tables appear with the truth schema */ }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
   for (const acct of accounts) {
