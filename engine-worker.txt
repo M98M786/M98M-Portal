@@ -74,6 +74,7 @@ export default {
         marketingBoard: 120000, feedbackBoard: 90000, adsBoard: 20000, trafficBoard: 300000,
         deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0,
         pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000, sheetItems: 60000,
+        huntReasonsEngine: 300000,
         csPlaybook: 120000,
         dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
@@ -3634,6 +3635,7 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE tasks ADD COLUMN submission_note TEXT",
     "ALTER TABLE tasks ADD COLUMN time_taken_min TEXT",
     "CREATE TABLE IF NOT EXISTS hunt_rows (hunt_id TEXT PRIMARY KEY, hunter_email TEXT, status TEXT, account TEXT, ts TEXT, vals TEXT, synced_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS portal_config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
     "CREATE INDEX IF NOT EXISTS idx_hr_hunter ON hunt_rows(hunter_email)",
     "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
@@ -3784,6 +3786,103 @@ function srDayPick(totals, items) {
    carries ads and more), while API fees+ali left ~45%. So: per account, over the last 14 days'
    COMPLETE books days (their own GRAND TOTAL row), the ratios te/sold, vat/sold, actual/sold,
    ali/sold — fleet aggregate as fallback. Sold itself always stays the API's exact number. */
+/* ————— listing-department helpers (Listing.gs §8 replicas) ————— */
+const LST_LIMITED_MAP = [
+  { to: 'Listing Update', from: ['Listing Update', 'Listing Status'], def: 'Pending ' },
+  { to: 'Selected Date', from: ['Selected Date', 'Date Added'], def: '' },
+  { to: 'Seasonal', from: ['Seasonal'], def: '' },
+  { to: 'Main Keyword Terapeak link ', from: ['Main Keyword Terapeak link'], def: '' },
+  { to: 'Image Link of avg sold price ', from: ['Image Link of avg sold price'], def: '' },
+  { to: 'Image Link of Zik analytics', from: ['Image Link of Zik analytics'], def: '' },
+  { to: 'Terapeak overview', from: ['Terapeak overview'], def: '' },
+  { to: 'Temu Link', from: ['Temu Link'], def: '' },
+  { to: 'Product Link 1 Main supplier\n\n\nAdded in supplier sheet', from: ['Product Link 1 Main supplier\n\n\nAdded in supplier sheet', 'Product Link 1 Main supplier'], def: '' },
+  { to: 'Product Link 2\n\n', from: ['Product Link 2'], def: '' },
+  { to: 'Product Link 3', from: ['Product Link 3'], def: '' },
+  { to: 'Ebay Link ', from: ['Ebay Link'], def: '' },
+  { to: 'Title', from: ['Title'], def: '' },
+  { to: 'Image Link ', from: ['Image Link'], def: '' },
+  { to: 'IMAGE ', from: ['IMAGE'], def: '' },
+  { to: 'DESCRIPTION', from: ['DESCRIPTION'], def: '' },
+  { to: 'Category', from: ['Category'], def: '' },
+  { to: 'Source Price', from: ['Source Price'], def: '' },
+  { to: 'E-Bey Caluclator + £4', from: ['E-Bey Caluclator + £4'], def: '' },
+  { to: 'CPC Selling Chance', from: ['CPC Selling Chance'], def: '' },
+  { to: 'CPC Update For Zain', from: ['CPC Update For Zain'], def: '' },
+];
+const LST_FORBIDDEN = ['our profit', 'roi', 'profit', 'order earning', 'sell through', 'competitors',
+  'top three sales', 'raw profit', 'actual profit', 'margin', 'earning'];
+function lstNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+function lstParseDetails(details) {
+  const s = String(details || '').trim();
+  if (s.charAt(0) !== '{') return null;
+  let p = null; try { p = JSON.parse(s); } catch (e) { return null; }
+  if (!p || typeof p !== 'object') return null;
+  return (p.listing && typeof p.listing === 'object') ? p.listing : p;
+}
+function lstLimited(parsed) {
+  const index = {};
+  Object.keys(parsed || {}).forEach((k) => { index[lstNorm(k)] = parsed[k]; });
+  const out = {};
+  for (const col of LST_LIMITED_MAP) {
+    let v = '';
+    for (const f of col.from) {
+      const hit = index[lstNorm(f)];
+      if (hit !== undefined && hit !== null && String(hit) !== '') { v = hit; break; }
+    }
+    out[col.to] = v === '' ? col.def : v;
+  }
+  for (const k of Object.keys(out)) {                 // §8.2 belt-and-braces (whitelist already guards)
+    if (LST_FORBIDDEN.indexOf(lstNorm(k)) >= 0) delete out[k];
+  }
+  return out;
+}
+function lstFamily(details) {
+  const p = lstParseDetails(details);
+  const lim = (p && p.limited) || p || {};
+  const adv = String(lim['CPC Selling Chance'] || '');
+  if (!adv) return 'Unassigned';
+  return /CPC/i.test(adv) ? 'CPC' : 'General/Dynamic';
+}
+/* UK-wall-clock instants, DST-correct: try the two possible offsets and keep the one whose
+   London rendering matches the asked-for hour. */
+function ukHourAt(ms, tz) {
+  const f = new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'Europe/London', hour: 'numeric', hourCycle: 'h23' });
+  return Number(f.format(new Date(ms)));
+}
+function ukYmdAt(ms) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+}
+function ukInstant(ymd, hour) {
+  for (const off of [0, 3600000]) {
+    const cand = Date.parse(ymd + 'T' + String(hour).padStart(2, '0') + ':00:00Z') - off;
+    if (ukHourAt(cand) === hour && ukYmdAt(cand) === ymd) return cand;
+  }
+  return Date.parse(ymd + 'T' + String(hour).padStart(2, '0') + ':00:00Z');
+}
+function lstClock(ms, tz) {
+  const s = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(ms));
+  return s.replace(/ /g, ' ');
+}
+function lstShiftYmd(ymd, days) {
+  return new Date(Date.parse(ymd + 'T12:00:00Z') + days * 86400000).toISOString().slice(0, 10);
+}
+function lstTiming() {
+  const now = Date.now();
+  let ymd = ukYmdAt(now);
+  if (ukHourAt(now) < 7) ymd = lstShiftYmd(ymd, -1);            // §8 day-0 rollover at 7am UK
+  const goLive = ukInstant(ymd, 19);
+  const revYmd = lstShiftYmd(ymd, 3);
+  const win = (d, a, b) => {
+    const s = ukInstant(d, a), e = ukInstant(d, b);
+    return { uk: lstClock(s, 'Europe/London') + ' – ' + lstClock(e, 'Europe/London') + ' UK',
+      pkt: lstClock(s, 'Asia/Karachi') + ' – ' + lstClock(e, 'Asia/Karachi') + ' PKT' };
+  };
+  const rev = win(revYmd, 13, 17), camp = win(revYmd, 17, 22);
+  return { go_live_uk: lstClock(goLive, 'Europe/London') + ' UK',
+    revision_window_uk: rev.uk, revision_window_pkt: rev.pkt, campaign_window_uk: camp.uk };
+}
+
 async function liveBooksRatios(env) {
   return memo('liveRatios:v2', 600000, async () => {
     const to = pkToday(0), from = pkToday(-14);
@@ -6556,6 +6655,166 @@ const ROUTES = {
       const hunts = (rs.results || []).map((r) => { try { return JSON.parse(r.vals); } catch (e) { return null; } }).filter(Boolean);
       hunts.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
       return { hunts, count: hunts.length };
+    },
+  },
+
+  /* ————— the listing department, served from the engine (2 Sept: "listing department and all
+     submissions, approvals, drafts doing issues") — reads only; every write stays on Apps
+     Script. Same shapes as Listing.gs/R8.gs, same status walls, same §8.2 whitelist law. */
+  myListingWorkEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super;
+      if (['Item Lister', 'Listing Manager', 'Team Lead'].indexOf(role) < 0 && !mgmt) throw new AuthError('role has no listing workspace');
+      const me = String(ctx.user.email || '').toLowerCase();
+      const withCompleted = String(p.include_completed || '') === 'true';
+      const rs = await ctx.env.DB.prepare(
+        "SELECT * FROM tasks WHERE assigned_to = ?1 AND type IN ('listing_new','listing_revision')"
+      ).bind(me).all();
+      const listings = [], revisions = [];
+      for (const t of (rs.results || [])) {
+        const status = String(t.status || '');
+        if (!withCompleted && status === 'Completed') continue;
+        const rec = {
+          task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''),
+          item_id: String(t.item_id || ''), title: String(t.title || ''), status,
+          priority: String(t.priority || ''), deadline_pkt: String(t.deadline_pkt || ''),
+          comments: String(t.comments || ''), submission_note: String(t.submission_note || ''),
+          submitted_at: String(t.submitted_at || ''), created_at: String(t.created_at || ''),
+          details_text: String(t.details || ''), sort: Date.parse(String(t.deadline_pkt || '')),
+        };
+        if (t.type === 'listing_new') {
+          const parsed = lstParseDetails(t.details);
+          rec.listing = lstLimited(parsed || {});
+          if (parsed) rec.details_text = '';
+          listings.push(rec);
+        } else {
+          rec.is_72h = String(t.title || '').indexOf('listing_revision_72h') === 0;
+          revisions.push(rec);
+        }
+      }
+      const bySoonest = (a, b) => (isNaN(a.sort) ? Infinity : a.sort) - (isNaN(b.sort) ? Infinity : b.sort);
+      listings.sort(bySoonest); revisions.sort(bySoonest);
+      [listings, revisions].forEach((set) => set.forEach((r) => { delete r.sort; }));
+      return { listings, revisions,
+        columns: LST_LIMITED_MAP.map((c) => c.to),
+        timing: lstTiming() };
+    },
+  },
+
+  listDeskEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super || ['Listing Manager', 'Team Lead'].indexOf(role) >= 0;
+      const me = String(ctx.user.email || '').toLowerCase();
+      const nowMs = Date.now();
+      const monthKey = new Date(nowMs + 5 * 3600000).toISOString().slice(0, 7);
+      const OPEN = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
+      const rs = await ctx.env.DB.prepare('SELECT * FROM tasks').all();
+      const perAssignee = {}, perAccount = {};
+      const fam = { CPC: { listed_month: 0, pending: 0 }, 'General/Dynamic': { listed_month: 0, pending: 0 }, Unassigned: { listed_month: 0, pending: 0 } };
+      const rows = [], revisionsDone = [], cpc = [];
+      const cpcCounts = { cpc_research: 0, campaign_set: 0, potential_cpc_review: 0, overdue: 0 };
+      for (const t of (rs.results || [])) {
+        const type = String(t.type || '');
+        const status = String(t.status || '');
+        const assignee = String(t.assigned_to || '').toLowerCase();
+        const dl = Date.parse(String(t.deadline_pkt || ''));
+        if (type === 'listing_new' || type === 'listing_revision') {
+          if (!mgmt && assignee !== me) continue;
+          const family = type === 'listing_new' ? lstFamily(t.details) : 'Revision';
+          if (status === 'Completed') {
+            if (type === 'listing_new' && String(t.decided_at || '').slice(0, 7) === monthKey && fam[family]) fam[family].listed_month++;
+            if (type === 'listing_revision') {
+              revisionsDone.push({ task_id: String(t.task_id), account: String(t.account || ''),
+                title: String(t.title || '').slice(0, 90), item_id: String(t.item_id || ''),
+                assigned_to: assignee, decided_at: String(t.decided_at || ''),
+                reason: String(t.details || '').replace(/\s+/g, ' ').slice(0, 160),
+                by: String(t.assigned_by || '') });
+            }
+            continue;
+          }
+          if (OPEN.indexOf(status) < 0) continue;
+          const a = perAssignee[assignee] = perAssignee[assignee] || { assignee, open: 0, overdue: 0, due_today: 0, submitted: 0 };
+          a.open++;
+          const acct = String(t.account || '(none)');
+          perAccount[acct] = (perAccount[acct] || 0) + 1;
+          if (type === 'listing_new' && fam[family]) fam[family].pending++;
+          if (status === 'Submitted — awaiting approval') a.submitted++;
+          else if (!isNaN(dl)) {
+            if (dl < nowMs) a.overdue++;
+            else if (dl - nowMs < 86400000) a.due_today++;
+          }
+          rows.push({ task_id: String(t.task_id), type, family, account: acct,
+            title: String(t.title || '').slice(0, 90), assigned_to: assignee, status,
+            deadline_pkt: String(t.deadline_pkt || ''), overdue: !isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval',
+            item_id: String(t.item_id || '') });
+        } else if (['cpc_research', 'campaign_set', 'potential_cpc_review'].indexOf(type) >= 0) {
+          if (OPEN.indexOf(status) < 0) continue;
+          if (!mgmt && assignee !== me && role !== 'Advertising Manager') continue;
+          const late = !isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval';
+          if (cpcCounts[type] !== undefined) cpcCounts[type]++;
+          if (late) cpcCounts.overdue++;
+          cpc.push({ task_id: String(t.task_id), type, account: String(t.account || ''),
+            item_id: String(t.item_id || ''), title: String(t.title || '').slice(0, 90),
+            assigned_to: assignee, status, deadline_pkt: String(t.deadline_pkt || ''), overdue: late });
+        }
+      }
+      const byDl = (a, b) => String(a.deadline_pkt).localeCompare(String(b.deadline_pkt));
+      rows.sort(byDl); cpc.sort(byDl);
+      return { mgmt,
+        per_assignee: Object.keys(perAssignee).map((k) => perAssignee[k]).sort((a, b) => b.open - a.open),
+        per_account: perAccount, families: fam, rows: rows.slice(0, 300),
+        cpc_pipeline: cpc.slice(0, 200), cpc_counts: cpcCounts,
+        revisions_done: revisionsDone.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at))).slice(0, 100),
+        as_of: new Date().toISOString() };
+    },
+  },
+
+  huntReasonsEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const DEF = {
+        hunt_reject_reasons: ['Profit too thin after fees', 'Too many competitors', 'Sell-through too low',
+          'Branded item — VeRO risk', 'Outside the £8–30 price window', 'Supplier delivery too slow',
+          'Already listed / duplicate', 'Evidence links broken or missing', 'Seasonal window already passed'],
+        hunt_revise_needs: ['Better images required', 'Need 3 working supplier links', 'Re-check the source price',
+          'Selling price — margin too thin', 'Terapeak evidence missing', 'Competitor analysis incomplete',
+          'Title needs rework', 'Description too weak', 'Category breadcrumb missing', 'Confirm UK stock & delivery time'],
+        lister_reject_reasons: ['issues with data', 'no sale worth it', 'no data available'],
+      };
+      const rs = await ctx.env.DB.prepare(
+        "SELECT key, value FROM portal_config WHERE key IN ('hunt_reject_reasons','hunt_revise_needs','lister_reject_reasons')"
+      ).all().catch(() => ({ results: [] }));
+      const got = {};
+      for (const r of (rs.results || [])) {
+        try { const arr = JSON.parse(r.value); if (Array.isArray(arr) && arr.length) got[r.key] = arr.map(String); } catch (e) {}
+      }
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      return { reject: got.hunt_reject_reasons || DEF.hunt_reject_reasons,
+        revise: got.hunt_revise_needs || DEF.hunt_revise_needs,
+        lister_reject: got.lister_reject_reasons || DEF.lister_reject_reasons,
+        can_edit: mgmt };
+    },
+  },
+
+  syncConfig: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.rows) ? p.rows.slice(0, 100) : [];
+      const stmts = [];
+      for (const r of rows) {
+        const k = String(r.key || '').slice(0, 120);
+        if (!k) continue;
+        stmts.push(ctx.env.DB.prepare(
+          "INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) " +
+          "ON CONFLICT(key) DO UPDATE SET value=?2, updated_at=datetime('now')"
+        ).bind(k, String(r.value == null ? '' : r.value).slice(0, 8000)));
+      }
+      if (stmts.length) await ctx.env.DB.batch(stmts);
+      return { synced: stmts.length };
     },
   },
 

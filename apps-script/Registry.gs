@@ -1084,6 +1084,12 @@ function pushSheetRowsHot() {
   });
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
+  /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
+  try {
+    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons']
+      .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
+      .filter(function (r) { return r.value; }) });
+  } catch (e) {}
   logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }

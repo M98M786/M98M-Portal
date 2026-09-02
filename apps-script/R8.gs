@@ -49,6 +49,7 @@ function actionHuntReasonAdd_(payload, ctx) {
   if (list.some(function (r) { return r.toLowerCase() === reason.toLowerCase(); })) return { ok: true, list: list, note: 'already on the list' };
   list.push(reason);
   r8SetConfig_(keys[kind][0], JSON.stringify(list));
+  try { enginePost_('syncConfig', { rows: [{ key: keys[kind][0], value: JSON.stringify(list) }] }); } catch (e) {}
   logActivity_(ctx.ident.email, 'R8_REASON_ADD', kind, '', reason, '');
   return { ok: true, list: list };
 }
