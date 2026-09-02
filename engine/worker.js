@@ -1376,7 +1376,7 @@ async function notifRecipients(env, to) {
 }
 async function notifInsert(env, emails, from, type, message, ref, createdAt, asId) {
   const stmts = emails.map((e) => env.DB.prepare(
-    'INSERT OR IGNORE INTO notifications (as_id, to_email, from_email, type, message, ref, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)'
+    'INSERT OR IGNORE INTO notif_live (as_id, to_email, from_email, type, message, ref, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)'
   ).bind(asId ? String(asId) + (emails.length > 1 ? ':' + e : '') : '', e, String(from || 'system'),
     String(type).slice(0, 80), String(message).slice(0, 900), String(ref || ''),
     createdAt || new Date().toISOString().slice(0, 19).replace('T', ' ')));
@@ -3627,10 +3627,10 @@ async function ensureTruthSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_im_thread ON inbox_messages(thread_id, sent_at)",
     "CREATE INDEX IF NOT EXISTS idx_im_unread ON inbox_messages(to_email, read_at)",
     "CREATE TABLE IF NOT EXISTS inbox_threads (thread_id TEXT PRIMARY KEY, a_email TEXT, b_email TEXT, last_at TEXT, last_from TEXT, last_preview TEXT)",
-    "CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, as_id TEXT DEFAULT '', to_email TEXT, from_email TEXT DEFAULT 'system', type TEXT, message TEXT, ref TEXT DEFAULT '', created_at TEXT, read_at TEXT DEFAULT '')",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_nf_asid ON notifications(as_id) WHERE as_id != ''",
-    "CREATE INDEX IF NOT EXISTS idx_nf_me ON notifications(to_email, read_at)",
-    "CREATE INDEX IF NOT EXISTS idx_nf_at ON notifications(created_at)",
+    "CREATE TABLE IF NOT EXISTS notif_live (id INTEGER PRIMARY KEY AUTOINCREMENT, as_id TEXT DEFAULT '', to_email TEXT, from_email TEXT DEFAULT 'system', type TEXT, message TEXT, ref TEXT DEFAULT '', created_at TEXT, read_at TEXT DEFAULT '')",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_nf_asid ON notif_live(as_id) WHERE as_id != ''",
+    "CREATE INDEX IF NOT EXISTS idx_nf_me ON notif_live(to_email, read_at)",
+    "CREATE INDEX IF NOT EXISTS idx_nf_at ON notif_live(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
     "CREATE INDEX IF NOT EXISTS idx_it_b ON inbox_threads(b_email, last_at)",
     "CREATE TABLE IF NOT EXISTS sheet_tabs (workbook_id TEXT, tab TEXT, account TEXT, day_pk TEXT, header_row INTEGER, headers TEXT, last_sync TEXT, PRIMARY KEY (workbook_id, tab))",
@@ -6409,10 +6409,10 @@ const ROUTES = {
       await ensureTruthSchema(ctx.env);
       const me = String(ctx.user.email || '').toLowerCase();
       const un = await ctx.env.DB.prepare(
-        "SELECT COUNT(*) AS n FROM notifications WHERE to_email = ?1 AND read_at = ''"
+        "SELECT COUNT(*) AS n FROM notif_live WHERE to_email = ?1 AND read_at = ''"
       ).bind(me).first();
       const rs = await ctx.env.DB.prepare(
-        "SELECT id, from_email, type, message, ref, created_at FROM notifications WHERE to_email = ?1 AND read_at = '' ORDER BY id DESC LIMIT 40"
+        "SELECT id, from_email, type, message, ref, created_at FROM notif_live WHERE to_email = ?1 AND read_at = '' ORDER BY id DESC LIMIT 40"
       ).bind(me).all();
       return { notifications: rs.results || [], unreadNotif: Number(un && un.n) || 0, now: new Date().toISOString() };
     },
@@ -6423,13 +6423,13 @@ const ROUTES = {
       await ensureTruthSchema(ctx.env);
       const me = String(ctx.user.email || '').toLowerCase();
       if (p.all) {
-        await ctx.env.DB.prepare("UPDATE notifications SET read_at = datetime('now') WHERE to_email = ?1 AND read_at = ''").bind(me).run();
+        await ctx.env.DB.prepare("UPDATE notif_live SET read_at = datetime('now') WHERE to_email = ?1 AND read_at = ''").bind(me).run();
       } else {
         const id = Number(p.id || p.notifId) || 0;
         if (!id) throw new Error('id required');
-        await ctx.env.DB.prepare("UPDATE notifications SET read_at = datetime('now') WHERE id = ?1 AND to_email = ?2").bind(id, me).run();
+        await ctx.env.DB.prepare("UPDATE notif_live SET read_at = datetime('now') WHERE id = ?1 AND to_email = ?2").bind(id, me).run();
       }
-      const un = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM notifications WHERE to_email = ?1 AND read_at = ''").bind(me).first();
+      const un = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM notif_live WHERE to_email = ?1 AND read_at = ''").bind(me).first();
       return { ok: true, unreadNotif: Number(un && un.n) || 0 };
     },
   },
@@ -6446,7 +6446,7 @@ const ROUTES = {
         const to = String(r.to || '').toLowerCase();
         if (!asId || !to || to.indexOf('@') < 0) continue;
         stmts.push(ctx.env.DB.prepare(
-          'INSERT OR IGNORE INTO notifications (as_id, to_email, from_email, type, message, ref, created_at, read_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)'
+          'INSERT OR IGNORE INTO notif_live (as_id, to_email, from_email, type, message, ref, created_at, read_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)'
         ).bind(asId, to, String(r.from || 'system').slice(0, 60), String(r.type || '').slice(0, 80),
           String(r.message || '').slice(0, 900), String(r.ref || '').slice(0, 200),
           String(r.created_at || '').slice(0, 19), String(r.read_at || '').slice(0, 19)));
