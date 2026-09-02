@@ -1409,7 +1409,17 @@ function bootSignIn(cfg){
     if(kept){
       STATE.idToken = kept;
       $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Welcome back…';
-      api('whoami').then(routeUser).catch(function(){ sessClear(); STATE.idToken=null; trySilentSignIn(); });
+      api('whoami').then(routeUser).catch(function(e){
+        /* 2 Sept: an engine blip at boot (worker mid-deploy, slow patch) is NOT a refusal —
+           clearing the token here logged people out for nothing. Only 'auth' clears; anything
+           transient retries once, then leaves the token for the next reload. */
+        if(e && /auth|denied|not approved/i.test(String(e.message||''))){ sessClear(); STATE.idToken=null; trySilentSignIn(); return; }
+        $('loginStatus').className='auth-status info';
+        $('loginStatus').innerHTML='<div class="spinner"></div>The server hiccupped — retrying…';
+        setTimeout(function(){
+          api('whoami').then(routeUser).catch(function(){ $('loginStatus').textContent='Could not reach the portal — reload to try again. You are still signed in.'; });
+        }, 4000);
+      });
     } else if (localStorage.getItem('m98m:knows')) {
       $('loginStatus').className='auth-status info';
       $('loginStatus').textContent='One click brings you back — this sign-in sticks from now on (reloads and new tabs stay signed in).';
