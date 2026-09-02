@@ -1322,6 +1322,12 @@ async function orderSync(env) {
            bucket and joins its own pile. */
         const cancelled = String(((o.cancelStatus || {}).cancelState) || '') === 'CANCELED';
         const status = cancelled ? 'CANCELLED' : String(o.orderFulfillmentStatus || '');
+        /* the truth trio — same definitions as openSync/orderBackfill (2 Sept: these binds
+           referenced variables that were never declared here, killing every changed-order
+           upsert with "payStatus is not defined" and freezing order/tracking updates) */
+        const payStatus = String(o.orderPaymentStatus || '');
+        const cancelState = String(((o.cancelStatus || {}).cancelState) || '');
+        const fhCount = ((o.fulfillmentHrefs || []).length) || 0;
         const id = String(o.orderId);
         if (knownO[id] === status + '|' + qty + '|' + est + '|' + shipBy) continue;   // unchanged → no write
         await env.DB.prepare(
