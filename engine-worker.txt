@@ -6710,7 +6710,11 @@ const ROUTES = {
       const names = {};
       for (const u of (users.results || [])) names[String(u.email).toLowerCase()] = u.name || u.email;
       const hunts = (rs.results || []).map((r) => { try { return JSON.parse(r.vals); } catch (e) { return null; } }).filter(Boolean);
-      hunts.forEach((h) => { h.hunter_name = names[String(h.hunter_email || '').toLowerCase()] || String(h.hunter_email || ''); });
+      hunts.forEach((h) => {
+        h.hunter_name = names[String(h.hunter_email || '').toLowerCase()] || String(h.hunter_email || '');
+        /* early mirror rows flattened this array to a string — the queue must never crash on it */
+        if (!Array.isArray(h.criteria_flags)) h.criteria_flags = [];
+      });
       hunts.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
       /* approved-today = today's listing_new tasks (the AS rule verbatim), from the task mirror */
       const todayPkt = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
@@ -6734,6 +6738,7 @@ const ROUTES = {
       if (want !== null) { bind.push(want); sql += ' AND status = ?2'; }
       const rs = await ctx.env.DB.prepare(sql).bind(...bind).all();
       const hunts = (rs.results || []).map((r) => { try { return JSON.parse(r.vals); } catch (e) { return null; } }).filter(Boolean);
+      hunts.forEach((h) => { if (!Array.isArray(h.criteria_flags)) h.criteria_flags = []; });
       hunts.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
       return { hunts, count: hunts.length };
     },

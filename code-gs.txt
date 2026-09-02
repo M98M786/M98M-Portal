@@ -24856,14 +24856,21 @@ function reportsDump(args) {
 function huntsSweep_() {
   try {
     const rows = readTab_('HUNTING_DB');
-    const recent = rows.slice(Math.max(0, rows.length - 40)).map(function (r) {
-      const rec = huntRecord_(r);
-      const hv = {};
-      Object.keys(rec).forEach(function (k) { const x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
-      return { vals: hv };
-    }).filter(function (b) { return b.vals.hunt_id; });
+    const recent = rows.slice(Math.max(0, rows.length - 40)).map(huntValsOut_).filter(function (b) { return b.vals.hunt_id; });
     if (recent.length) enginePost_('syncHunts', { rows: recent });
   } catch (e) {}
+}
+
+/* JSON-native: arrays/objects (criteria_flags!) survive intact — String() flattened them and
+   crashed the queue's flags renderer. Only Dates need converting. */
+function huntValsOut_(r) {
+  const rec = huntRecord_(r);
+  const hv = {};
+  Object.keys(rec).forEach(function (k) {
+    const x = rec[k];
+    hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : (x == null ? '' : x);
+  });
+  return { vals: hv };
 }
 
 function huntsDump(args) {
@@ -24872,12 +24879,7 @@ function huntsDump(args) {
   let pushed = 0;
   const t0 = Date.now();
   for (let i = start; i < rows.length && Date.now() - t0 < 220000; i += 120) {
-    const batch = rows.slice(i, i + 120).map(function (r) {
-      const rec = huntRecord_(r);
-      const hv = {};
-      Object.keys(rec).forEach(function (k) { const x = rec[k]; hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : String(x == null ? '' : x); });
-      return { vals: hv };
-    }).filter(function (b) { return b.vals.hunt_id; });
+    const batch = rows.slice(i, i + 120).map(huntValsOut_).filter(function (b) { return b.vals.hunt_id; });
     if (batch.length) { enginePost_('syncHunts', { rows: batch }); pushed += batch.length; }
   }
   return pushed + ' hunt(s) mirrored of ' + rows.length;
