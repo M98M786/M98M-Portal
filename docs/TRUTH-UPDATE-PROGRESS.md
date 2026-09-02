@@ -194,3 +194,17 @@ Owner (verbatim): "from now on … never show any data other than logic of sales
   + Amna 31-Aug tabs were created after the mirror's last pass over that day — cold walk
   re-run to backfill; verification anchor: Sir Hasib 31 Aug GRAND TOTAL (sold 724.39 · ali
   273.96 · ads 202.46 · VAT 31.84 · raw 93.62 · actual 93.62 · 21 item rows).
+
+## 2 Sept ~01:10 UTC — the totals-row law, penny-verified
+A day tab's GRAND TOTAL row can disagree with the sum of its own item rows (Sir Hasib 31 Aug:
+items Σads 185.22 vs totals row 202.46 — hand-verified from the owner's screenshot AND the live
+tab). The owner reads the totals row, so where a day has one IT is the headline; item sums are
+the fallback; both verifier paths apply the rule independently; the disagreement is reported as
+TOTALS_VS_ITEMS (INFO) on Truth Check, never silently resolved. **Live penny check: portal
+Sir Hasib 31 Aug = Sold 724.39 · VAT 31.84 · Ads 202.46 · Actual 93.62 · TE 125.47 · Ali 273.96
+— identical to the sheet's totals row. Truth Check 59 PASS · 0 FAIL.** Hot mirror widened to
+the last 4 PKT days (AS v89) — late-created tabs and ~2-day ad revisions stay fresh.
+
+## QUEUED NEXT (owner, 2 Sept): CS tools as live dashboards
+Husnain's CS tools (Reply / Recovery / Defense — today docked embeds on the CS desk) to become
+native portal pages with real backends. Not started.
