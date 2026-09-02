@@ -3709,54 +3709,65 @@ function srIsItemRow(vals) {
   if (!t) return false;
   return !/^(grand\s*)?totals?$/i.test(t);
 }
+function srIsTotalRow(vals) {
+  const t = String(vals['Item Title'] == null ? '' : vals['Item Title']).trim();
+  return /^(grand\s*)?totals?$/i.test(t);
+}
+/* 2 Sept, proven on Sir Hasib 31 Aug: a tab's GRAND TOTAL row can disagree with the sum of its
+   own item rows (the report agent writes totals from its own dataset). The owner reads the
+   TOTALS row — so where a day has one, IT is the headline; item-sums are the fallback and the
+   disagreement is reported on Truth Check, never silently resolved. */
+function srDayPick(totals, items) {
+  return totals || items;
+}
 async function metricMoneyByAccount(env, fromPk, toPk) {
   await ensureTruthSchema(env);
   const rs = await env.DB.prepare(
     "SELECT account, day_pk, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2"
   ).bind(fromPk, toPk).all();
+  const F = ['sold', 'r', 's', 't', 'ap', 'ret', 'adsP', 'adsG', 'ali', 'vC', 'vG', 'vJ', 'vM', 'vQ'];
+  const HD = { sold: 'Total Sales/Sold For', r: 'True Order Earning', s: 'VAT to HMRC', t: 'Raw Profit',
+    ap: 'Actual Profit', ret: 'Returns', adsP: 'Total Priority incl VAT', adsG: 'General Fees incl VAT',
+    ali: 'Total AliExpress Cost incl VAT', vC: 'Total Sale HMRC VAT', vG: 'FVF & Reg VAT Paid',
+    vJ: 'AliExpress VAT Paid', vM: 'Add 20% On Priority VAT', vQ: 'General Fees Minus 20% VAT' };
+  const mk = () => { const o = { rows: 0 }; for (const f of F) o[f] = 0; return o; };
   const by = {};
   for (const row of (rs.results || [])) {
     let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-    if (!srIsItemRow(vals)) continue;               // blank padding AND the GRAND TOTAL row
-    const b = (by[row.account] = by[row.account] || { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0,
-      ap: 0, ret: 0, adsP: 0, adsG: 0, vC: 0, vG: 0, vJ: 0, vM: 0, vQ: 0, days: {} });
-    b.rows++;
-    b.sold += srVal(vals, 'Total Sales/Sold For');
-    b.r += srVal(vals, 'True Order Earning');
-    b.s += srVal(vals, 'VAT to HMRC');
-    b.t += srVal(vals, 'Raw Profit');
-    b.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
-    /* the rest of the sheet's law, same columns the owner reads (2 Sept order) */
-    b.ap += srVal(vals, 'Actual Profit');
-    b.ret += srVal(vals, 'Returns');
-    b.adsP += srVal(vals, 'Total Priority incl VAT');
-    b.adsG += srVal(vals, 'General Fees incl VAT');
-    b.vC += srVal(vals, 'Total Sale HMRC VAT');
-    b.vG += srVal(vals, 'FVF & Reg VAT Paid');
-    b.vJ += srVal(vals, 'AliExpress VAT Paid');
-    b.vM += srVal(vals, 'Add 20% On Priority VAT');
-    b.vQ += srVal(vals, 'General Fees Minus 20% VAT');
-    const d = (b.days[row.day_pk] = b.days[row.day_pk] || { sold: 0, t: 0, s: 0, rows: 0, ap: 0, ret: 0, ads: 0, ali: 0 });
-    d.sold += srVal(vals, 'Total Sales/Sold For');
-    d.t += srVal(vals, 'Raw Profit');
-    d.s += srVal(vals, 'VAT to HMRC');
-    d.ap += srVal(vals, 'Actual Profit');
-    d.ret += srVal(vals, 'Returns');
-    d.ads += srVal(vals, 'Total Priority incl VAT') + srVal(vals, 'General Fees incl VAT');
-    d.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
-    d.rows++;
+    const isItem = srIsItemRow(vals), isTotal = srIsTotalRow(vals);
+    if (!isItem && !isTotal) continue;              // blank grid padding
+    const b = (by[row.account] = by[row.account] || { days: {} });
+    const d = (b.days[row.day_pk] = b.days[row.day_pk] || { items: mk(), totals: null });
+    if (isTotal) {
+      /* the sheet's OWN totals row — the number the owner reads; one per tab */
+      const t = (d.totals = d.totals || mk());
+      for (const f of F) t[f] += srVal(vals, HD[f]);
+    } else {
+      d.items.rows++;
+      for (const f of F) d.items[f] += srVal(vals, HD[f]);
+    }
   }
   const out = {};
   for (const a of Object.keys(by)) {
-    const b = by[a];
-    out[a] = { sold: round2(b.sold), true_earning: round2(b.r), vat: round2(b.s), actual: round2(b.t),
-      actual_after_returns: round2(b.ap), returns: round2(b.ret),
-      ads_incl_vat: round2(b.adsP + b.adsG), ads_priority: round2(b.adsP), ads_general: round2(b.adsG),
-      vat_parts: { sale: round2(b.vC), fvf: round2(b.vG), ali: round2(b.vJ), pri20: round2(b.vM), gen20: round2(b.vQ) },
-      ali: round2(b.ali), rows: b.rows, margin: b.sold > 0 ? Math.round(b.t / b.sold * 1000) / 10 : null,
-      days: Object.keys(b.days).sort().map((k) => ({ day: k, sold: round2(b.days[k].sold), actual: round2(b.days[k].t),
-        actual_after_returns: round2(b.days[k].ap), vat: round2(b.days[k].s), returns: round2(b.days[k].ret),
-        ads: round2(b.days[k].ads), ali: round2(b.days[k].ali), rows: b.days[k].rows })) };
+    const agg = mk(); let itemRows = 0, totalsDays = 0, dayN = 0, deltaAp = 0;
+    const days = Object.keys(by[a].days).sort().map((k) => {
+      const d = by[a].days[k];
+      const pick = srDayPick(d.totals, d.items);     // totals row wins; items are the fallback
+      dayN++; itemRows += d.items.rows;
+      if (d.totals) { totalsDays++; deltaAp += (d.totals.ap - d.items.ap); }
+      for (const f of F) agg[f] += pick[f];
+      return { day: k, sold: round2(pick.sold), actual: round2(pick.t), actual_after_returns: round2(pick.ap),
+        vat: round2(pick.s), returns: round2(pick.ret), ads: round2(pick.adsP + pick.adsG), ali: round2(pick.ali),
+        rows: d.items.rows, src: d.totals ? 'T' : 'I',
+        items_actual: round2(d.items.ap), totals_delta: d.totals ? round2(d.totals.ap - d.items.ap) : 0 };
+    });
+    out[a] = { sold: round2(agg.sold), true_earning: round2(agg.r), vat: round2(agg.s), actual: round2(agg.t),
+      actual_after_returns: round2(agg.ap), returns: round2(agg.ret),
+      ads_incl_vat: round2(agg.adsP + agg.adsG), ads_priority: round2(agg.adsP), ads_general: round2(agg.adsG),
+      vat_parts: { sale: round2(agg.vC), fvf: round2(agg.vG), ali: round2(agg.vJ), pri20: round2(agg.vM), gen20: round2(agg.vQ) },
+      ali: round2(agg.ali), rows: itemRows, margin: agg.sold > 0 ? Math.round(agg.ap / agg.sold * 1000) / 10 : null,
+      totals_days: totalsDays, day_count: dayN, items_vs_totals_delta: round2(deltaAp),
+      days };
   }
   return out;
 }
@@ -3767,16 +3778,27 @@ async function metricMoney(env, account, fromPk, toPk) {
   let sql = "SELECT account, day_pk, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2";
   if (account) { bind.push(account); sql += ' AND account = ?3'; }
   const rs = await env.DB.prepare(sql).bind(...bind).all();
-  const t = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
+  /* same totals-preferred rule as metricMoneyByAccount — ONE definition across every path */
+  const byDay = {};
   for (const row of (rs.results || [])) {
     let vals; try { vals = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-    if (!srIsItemRow(vals)) continue;               // blank padding AND the GRAND TOTAL row
-    t.rows++;
-    t.sold += srVal(vals, 'Total Sales/Sold For');
-    t.r += srVal(vals, 'True Order Earning');
-    t.s += srVal(vals, 'VAT to HMRC');
-    t.t += srVal(vals, 'Raw Profit');
-    t.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
+    const isItem = srIsItemRow(vals), isTotal = srIsTotalRow(vals);
+    if (!isItem && !isTotal) continue;
+    const key = String(row.account) + '|' + String(row.day_pk);
+    const d = (byDay[key] = byDay[key] || { items: { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 }, totals: null });
+    const dst = isTotal ? (d.totals = d.totals || { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 }) : d.items;
+    if (isItem) dst.rows++;
+    dst.sold += srVal(vals, 'Total Sales/Sold For');
+    dst.r += srVal(vals, 'True Order Earning');
+    dst.s += srVal(vals, 'VAT to HMRC');
+    dst.t += srVal(vals, 'Raw Profit');
+    dst.ali += srVal(vals, 'Total AliExpress Cost incl VAT');
+  }
+  const t = { sold: 0, r: 0, s: 0, t: 0, ali: 0, rows: 0 };
+  for (const key of Object.keys(byDay)) {
+    const pick = srDayPick(byDay[key].totals, byDay[key].items);
+    t.sold += pick.sold; t.r += pick.r; t.s += pick.s; t.t += pick.t; t.ali += pick.ali;
+    t.rows += byDay[key].items.rows;
   }
   const oBind = [fromPk, toPk];
   let oSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2";
@@ -4047,8 +4069,15 @@ async function truthTier1(env) {
     const A = await metricMoney(env, acct, y, y);
     const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, y).all();
     let s2 = 0, t2 = 0, r2v = 0, bad = 0, checked = 0;
+    let ts2 = null, tt2 = null;                     // the tab's own totals row, read independently
+    let itemsAp = 0;
     for (const row of (rs.results || [])) {
       let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+      if (srIsTotalRow(v)) {
+        ts2 = (ts2 || 0) + (Number(v['VAT to HMRC']) || 0);
+        tt2 = (tt2 || 0) + (Number(v['Raw Profit']) || 0);
+        continue;
+      }
       if (!srIsItemRow(v)) continue;
       const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
       const H = Number(v['eBay Order Earning']) || 0, I = Number(v['Total AliExpress Cost incl VAT']) || 0, N = Number(v['Total Priority incl VAT']) || 0;
@@ -4059,10 +4088,20 @@ async function truthTier1(env) {
       if (Math.abs(R - (H - I - N)) > 0.011) bad++;
       if (Math.abs(S - (C - G - J - M - Q)) > 0.011) bad++;
       r2v += R; s2 += S; t2 += T;
+      itemsAp += Number(v['Actual Profit']) || 0;
     }
-    const dT = Math.abs(round2(t2) - A.ACTUAL_PROFIT);
-    out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + y, shown: A.ACTUAL_PROFIT, recomputed: round2(t2), delta: round2(dT), status: checked === 0 ? 'STALE' : (dT <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s), ' + bad + ' formula fail(s)', next_run_at: next });
-    out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + y, shown: A.VAT_TO_HMRC, recomputed: round2(s2), delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s)', next_run_at: next });
+    /* Path B honours the same law independently: the tab's totals row IS the number when present */
+    const bT = ts2 !== null ? tt2 : t2;
+    const bS = ts2 !== null ? ts2 : s2;
+    const dT = Math.abs(round2(bT) - A.ACTUAL_PROFIT);
+    out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + y, shown: A.ACTUAL_PROFIT, recomputed: round2(bT), delta: round2(dT), status: checked === 0 ? 'STALE' : (dT <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s), ' + bad + ' formula fail(s)' + (ts2 !== null ? ', totals row used' : ''), next_run_at: next });
+    out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + y, shown: A.VAT_TO_HMRC, recomputed: round2(bS), delta: round2(Math.abs(round2(bS) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(bS) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s)', next_run_at: next });
+    /* the sheet disagreeing with itself is REPORTED, never silently resolved (owner's 92 case) */
+    if (ts2 !== null && Math.abs(round2(tt2) - round2(t2)) > 0.05) {
+      out.push({ metric_id: 'TOTALS_VS_ITEMS', scope_key: acct + ':' + y, shown: round2(tt2), recomputed: round2(t2),
+        delta: round2(Math.abs(tt2 - t2)), status: 'INFO', method: 'SHEET_RECOMPUTE',
+        evidence: 'the tab\u2019s GRAND TOTAL row and the sum of its item rows disagree \u2014 the totals row is shown (the sheet\u2019s own number); the report agent owns the difference', next_run_at: next });
+    }
   }
   /* tasks: independent SQL vs metric */
   const T2 = await metricTasks(env);
@@ -4094,15 +4133,17 @@ async function truthTier3(env) {
     for (const acct of accounts) {
       const A = await metricMoney(env, acct, day, day);
       const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, day).all();
-      let t2 = 0, bad = 0, checked = 0;
+      let t2 = 0, bad = 0, checked = 0, tot = null;
       for (const row of (rs.results || [])) {
         let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+        if (srIsTotalRow(v)) { tot = (tot || 0) + (Number(v['Raw Profit']) || 0); continue; }
         if (!srIsItemRow(v)) continue;
         checked++;
         const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
         if (Math.abs(T - (R - S)) > 0.011) bad++;
         t2 += T;
       }
+      if (tot !== null) { t2 = tot; }               // the tab's own totals row is the number
       out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + day, shown: A.ACTUAL_PROFIT, recomputed: round2(t2),
         delta: round2(Math.abs(round2(t2) - A.ACTUAL_PROFIT)), status: checked === 0 ? 'STALE' : (Math.abs(round2(t2) - A.ACTUAL_PROFIT) <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'),
         method: 'SHEET_RECOMPUTE', evidence: checked + ' rows, ' + bad + ' formula fails', next_run_at: next });
