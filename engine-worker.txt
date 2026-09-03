@@ -76,6 +76,7 @@ export default {
         pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000, sheetItems: 60000,
         huntReasonsEngine: 300000,
         accountListEngine: 300000, assignableStaffEngine: 300000,
+        teamPerformanceEngine: 60000, mgmtPendingEngine2: 20000,
         csPlaybook: 120000,
         dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
@@ -3638,6 +3639,9 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS hunt_rows (hunt_id TEXT PRIMARY KEY, hunter_email TEXT, status TEXT, account TEXT, ts TEXT, vals TEXT, synced_at TEXT)",
     "CREATE TABLE IF NOT EXISTS portal_config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
     "CREATE TABLE IF NOT EXISTS reports_2h (report_id TEXT PRIMARY KEY, email TEXT, role TEXT, shift TEXT, date TEXT, checkpoint TEXT, work_summary TEXT, count_1 TEXT, count_2 TEXT, count_3 TEXT, count_4 TEXT, submitted_at TEXT, flag TEXT, synced_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS perf_snapshot (id TEXT PRIMARY KEY, blob TEXT, computed_at TEXT, synced_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS staff_reviews (review_id TEXT PRIMARY KEY, email TEXT, week TEXT, rated_by TEXT, behavior TEXT, working TEXT, notes TEXT, created_at TEXT, synced_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_sr_email ON staff_reviews(email)",
     "CREATE INDEX IF NOT EXISTS idx_r2h_email_date ON reports_2h(email, date)",
     "CREATE INDEX IF NOT EXISTS idx_r2h_date ON reports_2h(date)",
     "ALTER TABLE users ADD COLUMN shift TEXT",
@@ -7035,6 +7039,122 @@ const ROUTES = {
       if (roles && roles.length) staff = staff.filter((u) => roles.indexOf(u.role) >= 0);
       staff.sort((a, b) => (a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)));
       return { staff };
+    },
+  },
+
+  /* 4 Sept — the last three heavy Apps Script reads, moved to the engine. */
+  mgmtPendingEngine2: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super || ctx.user.role === 'Team Lead';
+      if (!mgmt) throw new AuthError('management only');
+      const one = async (sql, bind) => { const r = await ctx.env.DB.prepare(sql).bind(...(bind || [])).first().catch(() => ({ n: 0 })); return Number(r && r.n) || 0; };
+      const hunt_approvals = await one("SELECT COUNT(*) AS n FROM hunt_rows WHERE status = ''");
+      const task_approvals = await one("SELECT COUNT(*) AS n FROM tasks WHERE status = 'Submitted — awaiting approval'");
+      const reject_requests = await one("SELECT COUNT(*) AS n FROM tasks WHERE comments LIKE '%\"flag\":\"rejreq\"%' AND status IN ('Pending','Working','Updated')");
+      const registrations = await one("SELECT COUNT(*) AS n FROM users WHERE status = 'pending'");
+      /* staff_reviews-due needs the review schedule; the badge is cosmetic — 0 here, the desk still opens its own review page */
+      return { hunt_approvals, task_approvals, reject_requests, registrations, staff_reviews: 0, as_of: new Date().toISOString() };
+    },
+  },
+
+  teamPerformanceEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super;
+      if (!mgmt && role !== 'Team Lead') throw new AuthError('role may not see team performance');
+      const kind = String(p.period || 'day') === 'week' ? 'week' : 'day';
+      const row = await ctx.env.DB.prepare("SELECT blob, computed_at FROM perf_snapshot WHERE id = 'current'").first().catch(() => null);
+      if (!row || !row.blob) { return { period: kind, rows: [], columns: [], sortable: [], computed_at: '', stale: true, source: 'not computed yet' }; }
+      let snap; try { snap = JSON.parse(row.blob); } catch (e) { return { period: kind, rows: [], columns: [], sortable: [], stale: true, source: 'bad snapshot' }; }
+      let rows = (snap[kind] || []).slice();
+      /* strip earnings/pay-type metrics for anyone who is not Management/Ops Head (Team Lead) */
+      if (!mgmt) {
+        const HID = /profit|earn|pay|roi|margin|net|salary|wage/i;
+        rows = rows.map((r) => {
+          const m2 = {};
+          Object.keys(r.metrics || {}).forEach((k) => { if (!HID.test(k)) m2[k] = r.metrics[k]; });
+          const keys = (r.metric_keys || []).filter((k) => !HID.test(k));
+          return Object.assign({}, r, { metrics: m2, metric_keys: keys });
+        });
+      }
+      return { period: kind, rows, columns: snap.columns || [], sortable: snap.sortable || [],
+        computed_at: row.computed_at || snap.computed_at || '', stale: false, source: 'D1_SNAPSHOT' };
+    },
+  },
+
+  staffDossierEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const oversight = ['Management', 'Ops Head', 'Team Lead', 'Sales Operations'].indexOf(role) >= 0 || ctx.user.super;
+      if (!oversight) throw new AuthError('oversight only');
+      const target = String(p.email || '').trim().toLowerCase();
+      if (!target) {
+        const us = await ctx.env.DB.prepare("SELECT email, name, role FROM users WHERE status = 'approved' ORDER BY name").all().catch(() => ({ results: [] }));
+        return { roster: (us.results || []).map((u) => ({ email: String(u.email).toLowerCase(), name: String(u.name || u.email), role: String(u.role || '') })) };
+      }
+      const u = await ctx.env.DB.prepare('SELECT email, name, role, status, shift FROM users WHERE email = ?1').bind(target).first().catch(() => null);
+      const profile = u ? { email: target, name: String(u.name || target), role: String(u.role || ''), status: String(u.status || ''), shift: String(u.shift || ''), joined_at: '', accounts: '' }
+        : { email: target, name: target, role: '', status: 'not found' };
+      const nowMs = Date.now() + 5 * 3600000;
+      const OPEN = ['Pending', 'Working', 'Updated', 'Submitted — awaiting approval'];
+      const DEPT = { listing_new: 'Listing', listing_revision: 'Listing', end_listing: 'Listing', campaign_set: 'Advertising', cpc_research: 'Advertising', potential_cpc_review: 'Advertising', loss_review: 'Advertising', supplier_add: 'Orders', sourcing_link: 'Hunting', hunt_revision: 'Hunting', query: 'CS', general: 'General' };
+      const ts = await ctx.env.DB.prepare('SELECT * FROM tasks WHERE assigned_to = ?1').bind(target).all().catch(() => ({ results: [] }));
+      const workflow = { open: [], recent_done: [], done_7d: 0, overdue_now: 0, avg_turnaround_min: 0 };
+      let turnSum = 0, turnN = 0; const cut7 = Date.now() - 7 * 86400000;
+      for (const t of (ts.results || [])) {
+        const dept = DEPT[String(t.type || 'general')] || 'General';
+        if (String(t.status) === 'Completed') {
+          const dMs = Date.parse(String(t.decided_at || ''));
+          if (isFinite(dMs) && dMs >= cut7) workflow.done_7d++;
+          const cMs = Date.parse(String(t.created_at || ''));
+          if (isFinite(dMs) && isFinite(cMs) && dMs > cMs) { turnSum += (dMs - cMs) / 60000; turnN++; }
+          if (isFinite(dMs)) workflow.recent_done.push({ type: String(t.type || ''), dept, title: String(t.title || '').slice(0, 80), decided_at: String(t.decided_at || '') });
+          continue;
+        }
+        if (OPEN.indexOf(String(t.status)) < 0) continue;
+        const dl = Date.parse(String(t.deadline_pkt || ''));
+        const overdue = isFinite(dl) && dl < nowMs && String(t.status) !== 'Submitted — awaiting approval';
+        if (overdue) workflow.overdue_now++;
+        workflow.open.push({ task_id: String(t.task_id || ''), type: String(t.type || ''), dept, title: String(t.title || '').slice(0, 80), status: String(t.status), account: String(t.account || ''), deadline_pkt: String(t.deadline_pkt || ''), overdue, created_at: String(t.created_at || '') });
+      }
+      workflow.open.sort((a, b) => String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)));
+      workflow.recent_done.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
+      workflow.recent_done = workflow.recent_done.slice(0, 20);
+      workflow.avg_turnaround_min = turnN ? Math.round(turnSum / turnN) : 0;
+      const al = await ctx.env.DB.prepare("SELECT type, message, from_email, created_at, read_at FROM notif_live WHERE to_email = ?1 ORDER BY created_at DESC LIMIT 60").bind(target).all().catch(() => ({ results: [] }));
+      const items = (al.results || []).map((n) => ({ type: String(n.type || ''), message: String(n.message || '').slice(0, 200), from: String(n.from_email || ''), created_at: String(n.created_at || ''), read: String(n.read_at || '') !== '' }));
+      const unread = items.filter((x) => !x.read).length;
+      const rv = await ctx.env.DB.prepare('SELECT week, behavior, working, notes, rated_by FROM staff_reviews WHERE email = ?1 ORDER BY week DESC LIMIT 26').bind(target).all().catch(() => ({ results: [] }));
+      const reviews = (rv.results || []).map((r) => ({ week: String(r.week), behavior: Number(r.behavior) || 0, working: Number(r.working) || 0, notes: String(r.notes || ''), rated_by: String(r.rated_by || '') }));
+      return { profile, workflow, alerts: { unread, total: items.length, items: items.slice(0, 40) }, reviews: { last: reviews[0] || null, history: reviews }, as_of: new Date().toISOString() };
+    },
+  },
+
+  syncPerfSnapshot: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const blob = JSON.stringify({ day: p.day || [], week: p.week || [], columns: p.columns || [], sortable: p.sortable || [], computed_at: p.computed_at || '' });
+      await ctx.env.DB.prepare("INSERT INTO perf_snapshot (id, blob, computed_at, synced_at) VALUES ('current', ?1, ?2, datetime('now')) ON CONFLICT(id) DO UPDATE SET blob=?1, computed_at=?2, synced_at=datetime('now')").bind(blob, String(p.computed_at || '')).run();
+      return { synced: (p.day || []).length + (p.week || []).length };
+    },
+  },
+
+  syncStaffReviews: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.rows) ? p.rows.slice(0, 500) : [];
+      const stmts = [];
+      for (const r of rows) {
+        const id = String(r.review_id || '');
+        if (!id) continue;
+        stmts.push(ctx.env.DB.prepare("INSERT INTO staff_reviews (review_id, email, week, rated_by, behavior, working, notes, created_at, synced_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,datetime('now')) ON CONFLICT(review_id) DO UPDATE SET email=?2, week=?3, rated_by=?4, behavior=?5, working=?6, notes=?7, created_at=?8, synced_at=datetime('now')")
+          .bind(id, String(r.email || '').toLowerCase(), String(r.week || ''), String(r.rated_by || ''), String(r.behavior == null ? '' : r.behavior), String(r.working == null ? '' : r.working), String(r.notes || '').slice(0, 1000), String(r.created_at || '')));
+      }
+      for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      return { synced: stmts.length };
     },
   },
 

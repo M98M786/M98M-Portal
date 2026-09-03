@@ -319,6 +319,28 @@ function perfStripRows_(rows, ctx) {
  * lock; the lock is taken once, at the end, around the DASH_CACHE read-modify-write, and the rows
  * go in as contiguous blocks. A sweep that holds the portal-wide lock across its whole run turns
  * an audit convenience into a freeze on every staff member's save. */
+/* 4 Sept — materialised view: the finished day+week performance rows pushed to D1 after every
+   refresh, so teamPerformanceEngine serves them without Apps Script (the inline recompute was 15s). */
+function perfSnapshotPush_() {
+  var cache = perfCacheRead_();
+  var mk = function (kind) {
+    var rows = [];
+    perfUsers_().forEach(function (u) {
+      var view = perfPersonView_(normalizeEmail(u.email), cache, u);
+      var p = view.periods[kind];
+      rows.push({ email: view.email, name: view.name, role: view.role, department: view.department,
+        period: p.period, compare: p.compare, from: p.from, to: p.to,
+        metric_keys: p.metric_keys, metrics: p.metrics, notes: p.notes, has_data: p.has_data });
+    });
+    return rows;
+  };
+  enginePost_('syncPerfSnapshot', {
+    day: mk('day'), week: mk('week'), columns: PERF_METRICS,
+    sortable: PERF_SORT_EXTRA.concat(PERF_METRICS.map(function (m) { return m.key; })),
+    computed_at: cache.computed_at || now_(),
+  });
+}
+
 function performanceRefresh() {
   const started = Date.now();
   const snap = perfCompute_();
@@ -329,6 +351,7 @@ function performanceRefresh() {
     });
   });
   const written = perfCacheWrite_(rows);
+  try { perfSnapshotPush_(); } catch (e) {}   // 4 Sept: mirror the assembled result to D1 so teamPerformance serves fast from the engine
 
   if (snap.log_gap) {
     logActivity_('system', 'PERF_LOG_WINDOW_SHORT', 'ACTIVITY_LOG', snap.log_from, snap.earliest,

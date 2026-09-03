@@ -543,6 +543,16 @@ function r8ReviewRows_() {
   return out;
 }
 
+function reviewsDump() {
+  var rows = r8ReviewRows_().map(function (r) {
+    return { review_id: String(r.review_id), email: String(r.email || ''), week: String(r.week || ''),
+      rated_by: String(r.rated_by || ''), behavior: r.behavior, working: r.working,
+      notes: String(r.notes || ''), created_at: String(r.created_at || '') };
+  }).filter(function (r) { return r.review_id; });
+  for (var i = 0; i < rows.length; i += 200) enginePost_('syncStaffReviews', { rows: rows.slice(i, i + 200) });
+  return rows.length + ' review(s) mirrored';
+}
+
 function actionStaffReviewsPending_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('Management reviews staff');
   const week = r8WeekKey_();

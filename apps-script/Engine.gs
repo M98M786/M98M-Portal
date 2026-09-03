@@ -284,6 +284,8 @@ const ENGINE_RUNNABLE = {
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
   reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
   adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
+  perfSnapshotPush: function () { return typeof perfSnapshotPush_ === 'function' ? (perfSnapshotPush_(), 'ok') : 'absent'; },
+  reviewsDump: function () { return typeof reviewsDump === 'function' ? String(reviewsDump()) : 'absent'; },
   tasksSweep: function () { return typeof tasksSweep_ === 'function' ? (tasksSweep_(), 'ok') : 'absent'; },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
