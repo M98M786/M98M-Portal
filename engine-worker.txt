@@ -7291,6 +7291,84 @@ const ROUTES = {
     },
   },
 
+  /* 4 Sept (owner): the case scoreboard behind the service metrics — requests (returns),
+     disputes, item-not-received and item-not-as-described, per account, over four windows.
+     INAD = a RETURN whose reason is a seller-fault (damaged / defective / not-as-described). */
+  serviceCases: {
+    auth: 'any', fn: async (p, ctx) => {
+      const role = String(ctx.user.role || '');
+      const ok = ['Management', 'Ops Head', 'Team Lead', 'CS'].indexOf(role) >= 0 || ctx.user.super || String(ctx.user.modules || '').indexOf('accountHealth') >= 0;
+      if (!ok) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const rs = await ctx.env.DB.prepare('SELECT account, kind, reason, opened_at FROM cases').all().catch(() => ({ results: [] }));
+      const now = Date.now(), DAY = 86400000, d = new Date();
+      const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+      const lastMonthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1);
+      const INAD = /^(ARRIVED_DAMAGED|DEFECTIVE|NOT_AS_DESCRIBED|MISSING|WRONG_ITEM|DID_NOT_MATCH)/i;
+      const mk = () => ({ returns: 0, disputes: 0, inr: 0, inad: 0, total: 0 });
+      const mkW = () => ({ d30: mk(), d90: mk(), tm: mk(), lm: mk() });
+      const total = mkW(), byAcct = {};
+      for (const c of (rs.results || [])) {
+        const t = Date.parse(String(c.opened_at || '').replace(' ', 'T'));
+        if (!isFinite(t)) continue;
+        const kind = String(c.kind || ''), isInad = kind === 'RETURN' && INAD.test(String(c.reason || ''));
+        const wins = [];
+        if (t >= now - 30 * DAY) wins.push('d30');
+        if (t >= now - 90 * DAY) wins.push('d90');
+        if (t >= monthStart) wins.push('tm');
+        if (t >= lastMonthStart && t < monthStart) wins.push('lm');
+        if (!wins.length) continue;
+        const acc = (byAcct[c.account] = byAcct[c.account] || mkW());
+        const bump = (b) => { if (kind === 'RETURN') b.returns++; else if (kind === 'CASE') b.disputes++; else if (kind === 'INR') b.inr++; if (isInad) b.inad++; b.total++; };
+        for (const wk of wins) { bump(total[wk]); bump(acc[wk]); }
+      }
+      return { total, by_account: byAcct, as_of: new Date().toISOString() };
+    },
+  },
+
+  /* 4 Sept (owner): the numbers the Business overview was missing, in one call — traffic, the
+     advertised count, customer-service load, and returns this month vs last. */
+  bizExtras: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const d = new Date();
+      const mkey = (yr, mo) => yr + '-' + String(mo + 1).padStart(2, '0');
+      const tmKey = mkey(d.getUTCFullYear(), d.getUTCMonth());
+      const lmDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+      const lmKey = mkey(lmDate.getUTCFullYear(), lmDate.getUTCMonth());
+      const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      /* traffic: this month, last month, and last 30 days */
+      const tr = await ctx.env.DB.prepare('SELECT date, SUM(impressions) AS imp, SUM(views) AS vw FROM traffic_daily GROUP BY date').all().catch(() => ({ results: [] }));
+      const traffic = { tm: { imp: 0, views: 0 }, lm: { imp: 0, views: 0 }, d30: { imp: 0, views: 0 } };
+      for (const r of (tr.results || [])) {
+        const dt = String(r.date || ''), imp = Number(r.imp) || 0, vw = Number(r.vw) || 0;
+        if (dt.slice(0, 7) === tmKey) { traffic.tm.imp += imp; traffic.tm.views += vw; }
+        if (dt.slice(0, 7) === lmKey) { traffic.lm.imp += imp; traffic.lm.views += vw; }
+        if (dt >= d30) { traffic.d30.imp += imp; traffic.d30.views += vw; }
+      }
+      /* advertised listings, from the one memoised ads pass */
+      let ads = { advertised: 0, unadvertised: 0 };
+      try { const A = await metricAds(ctx.env); const s = (A && A.split) || {}; ads = { advertised: (Number(s.active) || 0), unadvertised: (Number(s.none) || 0) }; } catch (e) {}
+      /* customer service load + returns, from cases */
+      const cs = await ctx.env.DB.prepare('SELECT kind, status, opened_at, closed_at FROM cases').all().catch(() => ({ results: [] }));
+      let repliesRequired = 0, handledTm = 0;
+      const returns = { tm: { n: 0 }, lm: { n: 0 } };
+      const OPEN_DONE = ['CLOSED', 'CS_CLOSED'];
+      for (const c of (cs.results || [])) {
+        if (OPEN_DONE.indexOf(String(c.status)) < 0) repliesRequired++;
+        const cl = String(c.closed_at || '').slice(0, 7);
+        if (cl === tmKey) handledTm++;
+        if (String(c.kind) === 'RETURN') { const om = String(c.opened_at || '').slice(0, 7); if (om === tmKey) returns.tm.n++; if (om === lmKey) returns.lm.n++; }
+      }
+      /* refund £ by the order's month */
+      const rf = await ctx.env.DB.prepare("SELECT substr(created_at,1,7) AS m, ROUND(SUM(refunded),2) AS gbp FROM orders WHERE refunded > 0 GROUP BY m").all().catch(() => ({ results: [] }));
+      for (const r of (rf.results || [])) { if (String(r.m) === tmKey) returns.tm.gbp = Number(r.gbp) || 0; if (String(r.m) === lmKey) returns.lm.gbp = Number(r.gbp) || 0; }
+      return { traffic, ads, cs: { replies_required: repliesRequired, handled_this_month: handledTm }, returns, as_of: new Date().toISOString() };
+    },
+  },
+
   /* ————— the bell, served from the engine (2 Sept migration off Google) ————— */
   pollEngine: {
     auth: 'any', fn: async (p, ctx) => {
