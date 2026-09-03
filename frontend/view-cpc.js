@@ -195,6 +195,7 @@
     icon: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.7-3.7"/><path d="M8.5 11h5M11 8.5v5"/>',
     roles: CP_VIEW_ROLES,
     order: 18,
+    hidden: true,   /* 3 Sept (owner): removed from the portal — the CPC keyword flow runs through the Decision Engine now */
     badge: function () { return (STATE.counts && STATE.counts.cpc) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>CPC research</h1>' +

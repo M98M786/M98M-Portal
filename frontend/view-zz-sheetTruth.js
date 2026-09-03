@@ -30,7 +30,27 @@
     '.sx-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums}' +
     '.sx-tbl td:first-child{text-align:left;font-weight:700}' +
     '.sx-tbl tr.tot td{font-weight:800;border-top:2px solid var(--gold-line-hi)}' +
-    '.sx-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px}'
+    '.sx-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px}' +
+    '.sx-arow{display:grid;grid-template-columns:130px 1fr 92px 92px 84px;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--gold-line)}' +
+    '.sx-arow:last-child{border-bottom:0}' +
+    '.sx-ahdr span{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}' +
+    '.sx-arow.sx-ahdr{padding-bottom:6px}' +
+    '.sx-aname{font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.sx-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}' +
+    '.sx-track{position:relative;height:22px;border-radius:6px;background:var(--panel-2)}' +
+    '.sx-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;min-width:3px;opacity:.55}' +
+    '.sx-pl{position:absolute;top:-3px;bottom:-3px;width:2.5px;border-radius:2px;background:var(--ok);box-shadow:0 0 6px rgba(79,192,141,.5)}' +
+    '.sx-asold{text-align:right;font-weight:800;font-size:13px;font-variant-numeric:tabular-nums}' +
+    '.sx-aprof{text-align:right;font-weight:700;font-size:12.5px;font-variant-numeric:tabular-nums}' +
+    '.sx-avs{text-align:right}' +
+    '.sx-delta{font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px}' +
+    '.sx-delta.up{background:rgba(79,192,141,.14);color:#78d3a6}.sx-delta.dn{background:rgba(229,89,92,.14);color:#f08d8f}' +
+    '.sx-vsmut{color:var(--text-3);font-size:11px;font-weight:700}' +
+    '.sx-alegend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;font-weight:700;color:var(--text-3);margin-top:12px}' +
+    '.sx-alegend i{display:inline-block;width:12px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}.sx-alegend i.d{width:9px;height:9px;border-radius:50%}' +
+    '.sx-gtabs{display:flex;gap:4px;margin-left:auto}' +
+    '.sx-gtabs button{border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text-2);font:inherit;font-weight:700;font-size:11px;padding:5px 10px;border-radius:8px;cursor:pointer}' +
+    '.sx-gtabs button.on{border-color:var(--gold);color:var(--gold)}'
   );
 
   function sxGBP(v) { var n = Number(v) || 0; return (n < 0 ? '−£' + Math.abs(n).toFixed(2) : '£' + n.toFixed(2)); }
@@ -49,16 +69,16 @@
     var monthStart = today.slice(0, 8) + '01';
     var lastMonthEnd = sxShift(monthStart, -1);
     var lastMonthStart = lastMonthEnd.slice(0, 8) + '01';
+    /* 3 Sept (owner): NO "Today" in Sales Analysis — today's book is not written, so yesterday
+       is the newest day. Ranges end at yesterday, never today. */
+    var yday = sxD(-1);
     return {
-      today: { label: 'Today', from: today, to: today },
-      yday: { label: 'Yesterday', from: sxD(-1), to: sxD(-1) },
-      d7: { label: '7 days', from: sxD(-6), to: today },
-      d30: { label: '30 days', from: sxD(-29), to: today },
-      d60: { label: '60 days', from: sxD(-59), to: today },
-      d90: { label: '90 days', from: sxD(-89), to: today },
-      tw: { label: 'This week', from: thisMon, to: today },
+      yday: { label: 'Yesterday', from: yday, to: yday },
+      d7: { label: '7 days', from: sxD(-7), to: yday },
+      d30: { label: '30 days', from: sxD(-30), to: yday },
+      d60: { label: '60 days', from: sxD(-60), to: yday },
+      tw: { label: 'This week', from: thisMon, to: yday },
       lw: { label: 'Last week', from: sxShift(thisMon, -7), to: sxShift(thisMon, -1) },
-      tm: { label: 'This month', from: monthStart, to: today },
       lm: { label: 'Last month', from: lastMonthStart, to: lastMonthEnd },
     };
   }
@@ -178,6 +198,57 @@
       '<text x="' + (L + 100) + '" y="11" font-size="10.5" font-weight="800" fill="var(--bad)">▮ Returns</text></svg></div>';
   }
 
+  /* 3 Sept (owner) — account to account: total sold, actual profit, and ▲▼ vs last month. */
+  var SX_ACOL = ['#f0b64a', '#5aa9e6', '#4fc08d', '#b98ce6', '#e8765a', '#6fbecf', '#e0b0ff'];
+  function sxAcctBars(byA, byLast, acct, spanDays, lastDays) {
+    var names = Object.keys(byA).filter(function (a) { return !acct || a === acct; })
+      .sort(function (a, b) { return (byA[b].sold || 0) - (byA[a].sold || 0); });
+    if (!names.length) { return '<div class="alx-empty">No accounts with rows in this range.</div>'; }
+    var mx = 1; names.forEach(function (a) { mx = Math.max(mx, byA[a].sold || 0); });
+    var rows = names.map(function (a, i) {
+      var b = byA[a], sold = b.sold || 0, prof = (b.actual_after_returns != null ? b.actual_after_returns : b.actual) || 0;
+      var col = SX_ACOL[i % SX_ACOL.length];
+      var w = (sold / mx * 100), pw = (prof > 0 ? prof / mx * 100 : 0);
+      var vs = '';
+      var lb = byLast[a];
+      if (lb && (lb.sold || 0) > 0 && spanDays && lastDays) {
+        var curD = sold / spanDays, lastD = (lb.sold || 0) / lastDays;
+        var dl = lastD > 0 ? (curD - lastD) / lastD * 100 : 0;
+        vs = '<span class="sx-delta ' + (dl >= 0 ? 'up' : 'dn') + '">' + (dl >= 0 ? '▲' : '▼') + ' ' + Math.abs(dl).toFixed(0) + '%</span>';
+      } else { vs = '<span class="sx-vsmut">—</span>'; }
+      return '<div class="sx-arow">' +
+        '<div class="sx-aname"><span class="sx-dot" style="background:' + col + '"></span>' + esc(a) + '</div>' +
+        '<div class="sx-track"><div class="sx-fill" style="width:' + w.toFixed(1) + '%;background:' + col + '"></div>' +
+          (prof > 0 ? '<div class="sx-pl" style="left:' + pw.toFixed(1) + '%"></div>' : '') + '</div>' +
+        '<div class="sx-asold">' + sxGBP(sold) + '</div>' +
+        '<div class="sx-aprof" style="color:var(--' + (prof < 0 ? 'bad' : 'ok') + ')">' + sxGBP(prof) + '</div>' +
+        '<div class="sx-avs">' + vs + '</div></div>';
+    }).join('');
+    return '<div class="sx-arow sx-ahdr"><span>Account</span><span></span><span class="r">Sold</span><span class="r">Actual profit</span><span class="r">vs last month</span></div>' + rows +
+      '<div class="sx-alegend"><span><i style="background:var(--blue)"></i>Sold</span><span><i class="d" style="background:var(--ok)"></i>Actual profit</span><span>▲ up vs last month · ▼ down</span></div>';
+  }
+
+  /* 3 Sept (owner) — day by day: profit line vs total-cost line (ads + AliExpress), both over
+     the dates, so you can see where cost eats profit. Faint sold bars for context. */
+  function sxChartPvC(days) {
+    if (!days || !days.length) { return '<div class="alx-empty">No days with data in this range yet.</div>'; }
+    var W = 880, H = 260, L = 56, R = 16, T = 20, B = 34;
+    var sold = days.map(function (d) { return d.sold || 0; });
+    var cost = days.map(function (d) { return (d.ads || 0) + (d.ali || 0); });
+    var prof = days.map(function (d) { return (d.ap != null ? d.ap : d.actual) || 0; });
+    var mxV = 1; sold.forEach(function (v) { mxV = Math.max(mxV, v); }); cost.forEach(function (v) { mxV = Math.max(mxV, v); }); mxV *= 1.1;
+    var n = days.length, bw = Math.min(34, (W - L - R) / n - 12);
+    var Xc = function (i) { return L + i * (W - L - R) / n + (W - L - R) / n / 2; };
+    var Y = function (v) { return T + (1 - v / mxV) * (H - T - B); };
+    var grid = ''; [0.5, 1].forEach(function (f) { var y = (T + (1 - f) * (H - T - B)); grid += '<line x1="' + L + '" y1="' + y.toFixed(1) + '" x2="' + (W - R) + '" y2="' + y.toFixed(1) + '" stroke="rgba(140,150,170,.16)"/><text x="' + (L - 8) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end" font-size="9.5" fill="var(--text-3)">' + sxK(mxV * f) + '</text>'; });
+    var bars = days.map(function (d, i) { var h2 = (H - T - B) * (sold[i] / mxV); return '<rect x="' + (Xc(i) - bw / 2).toFixed(1) + '" y="' + Y(sold[i]).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0, h2).toFixed(1) + '" rx="3" fill="var(--blue)" opacity="' + (d.live ? '.26' : '.18') + '"' + (d.live ? ' stroke="var(--blue)" stroke-dasharray="3 2"' : '') + '><title>' + d.day + ' sold ' + sxGBP(sold[i]) + '</title></rect>'; }).join('');
+    var mkLine = function (arr, c) { return '<path d="M' + arr.map(function (v, i) { return Xc(i).toFixed(1) + ',' + Y(v).toFixed(1); }).join(' L') + '" fill="none" stroke="' + c + '" stroke-width="2.6"/>' + arr.map(function (v, i) { return '<circle cx="' + Xc(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="3" fill="' + c + '"><title>' + days[i].day + ' ' + sxGBP(v) + '</title></circle>'; }).join(''); };
+    var labels = days.map(function (d, i) { return '<text x="' + Xc(i).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="var(--text-3)">' + esc(String(d.day).slice(5)) + '</text>'; }).join('');
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:640px;width:100%;height:auto">' + grid + bars + mkLine(cost, 'var(--warn)') + mkLine(prof, 'var(--ok)') + labels +
+      '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">— Actual profit</text>' +
+      '<text x="' + (L + 110) + '" y="12" font-size="10.5" font-weight="800" fill="var(--warn)">— Total cost (ads + Ali)</text></svg></div>';
+  }
+
   function sxCoverageNote(d, from, to) {
     var cov = (d.metrics.ROWS_COVERAGE.value || {});
     var days = sxMergeDaysUp(d.metrics, SX.acct);
@@ -187,7 +258,7 @@
   }
 
   /* ————————————— SALES ANALYSIS ————————————— */
-  var SX = { key: 'd7', from: sxD(-6), to: sxD(0), acct: '' };
+  var SX = { key: 'yday', from: sxD(-1), to: sxD(-1), acct: '' };
 
   function sxStrip() {
     var R = sxRanges();
@@ -264,8 +335,9 @@
       h += sxCoverageNote(d, SX.from, SX.to);
 
       var days = upDays;
-      h += '<div class="card" style="margin-top:12px"><div class="hd">Sales vs Actual Profit — day by day <span class="hint">the report sheet’s own chart, from the day tabs</span></div><div class="bd">' + sxChartSoldActual(days) + '</div></div>';
-      h += '<div class="card" style="margin-top:14px"><div class="hd">Where the money leaks — ads &amp; returns <span class="hint">‘Total Priority incl VAT’ + ‘General Fees incl VAT’ · ‘Returns’</span></div><div class="bd">' + sxChartLeaks(days) + '</div></div>';
+      var spanDays = Math.round((new Date(SX.to + 'T12:00:00Z') - new Date(SX.from + 'T12:00:00Z')) / 86400000) + 1;
+      h += '<div class="card" style="margin-top:12px"><div class="hd">Account to account <span class="hint">total sold · actual profit · ▲▼ vs last month</span></div><div class="bd" id="sxAcctBox"><div class="spinner"></div></div></div>';
+      h += '<div class="card" style="margin-top:14px"><div class="hd">Day by day — profit vs cost <span class="hint">where the money goes · profit line + total-cost line (ads + AliExpress)</span></div><div class="bd">' + sxChartPvC(days) + '</div></div>';
 
       /* per-account ledger for the range */
       var accts = Object.keys(byA).sort();
@@ -285,6 +357,18 @@
         '<button class="minibtn" id="sxItemsBest" style="margin-left:auto">Best first</button><button class="minibtn" id="sxItemsLoss">Losses first</button></div>' +
         '<div class="bd" id="sxItems"><div class="spinner"></div></div></div>';
       body.innerHTML = h;
+      /* 3 Sept: account-to-account vs last month — fetch the previous calendar month per account. */
+      (function () {
+        var box = $('sxAcctBox');
+        if (!box) { return; }
+        var R = sxRanges().lm;
+        var lastDays = Math.round((new Date(R.to + 'T12:00:00Z') - new Date(R.from + 'T12:00:00Z')) / 86400000) + 1;
+        truthPage({ from: R.from, to: R.to }).then(function (dl) {
+          if (!$('sxAcctBox')) { return; }
+          var byLast = (dl.metrics.MONEY_BY_ACCOUNT.value) || {};
+          box.innerHTML = sxAcctBars(byA, byLast, SX.acct, spanDays, lastDays);
+        }).catch(function () { if ($('sxAcctBox')) { box.innerHTML = sxAcctBars(byA, {}, SX.acct, spanDays, 0); } });
+      })();
       var loadItems = function (order) {
         var box = $('sxItems');
         if (!box) { return; }
