@@ -1222,19 +1222,22 @@ function tasksSweep_() {
 function adminRenameUser(args) {
   var email = String(args && args.email || '').trim().toLowerCase();
   var name = String(args && args.name || '').trim();
-  if (!email || !name) return 'need {email,name}';
+  var role = String(args && args.role || '').trim();
+  if (!email || (!name && !role)) return 'need {email, name and/or role}';
+  if (role && typeof ROLES !== 'undefined' && ROLES.indexOf(role) < 0) return 'unknown role: ' + role + ' (one of ' + ROLES.join(', ') + ')';
   var sh = getPortalDb_(false).getSheetByName('USERS');
   var data = sh.getDataRange().getValues();
   var head = data[0].map(String);
-  var ei = head.indexOf('email'), ni = head.indexOf('name');
+  var ei = head.indexOf('email'), ni = head.indexOf('name'), ri = head.indexOf('role');
   if (ei < 0 || ni < 0) return 'USERS missing email/name column';
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][ei]).trim().toLowerCase() === email) {
-      var old = String(data[i][ni]);
-      sh.getRange(i + 1, ni + 1).setValue(name);
-      logActivity_('system', 'ADMIN_RENAME_USER', email, old, name, '');
+      var changed = [];
+      if (name) { var oldN = String(data[i][ni]); sh.getRange(i + 1, ni + 1).setValue(name); changed.push('name "' + oldN + '" -> "' + name + '"'); }
+      if (role && ri >= 0) { var oldR = String(data[i][ri]); sh.getRange(i + 1, ri + 1).setValue(role); changed.push('role "' + oldR + '" -> "' + role + '"'); }
+      logActivity_('system', 'ADMIN_SET_USER', email, '', changed.join(' · '), '');
       try { pushEngineSync(); } catch (e) {}
-      return 'renamed ' + email + ': "' + old + '" -> "' + name + '" (pushed to engine)';
+      return 'updated ' + email + ': ' + changed.join(' · ') + ' (pushed to engine)';
     }
   }
   return 'no USERS row for ' + email;

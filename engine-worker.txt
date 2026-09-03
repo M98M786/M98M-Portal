@@ -123,7 +123,7 @@ export default {
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -131,7 +131,7 @@ export default {
          and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
          accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
          fresh budget; watcher fan-outs are capped inside the watchers themselves. */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, nightlyCatchup],
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, nightlyCatchup, standardsSync],
       /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
          budget died with the upgrade. Each heavy family still keeps its own invocation. */
       '40 * * * *': [listingSync, trafficSync],
@@ -2397,10 +2397,32 @@ async function standardsSync(env) {
     if (!sr.ok) return;                                // scope-gap accounts simply stay absent
     const sd = await sr.json();
     const uk = (sd.standardsProfiles || []).filter(x => String(x.program || '').indexOf('UK') >= 0);
+    const nextProfiles = uk.length ? uk : (sd.standardsProfiles || []);
+    /* 4 Sept (owner): 30-min refresh + alert on any change to the HEALTH signals — the level and
+       the three rates. The running totals (days-on-site / transactions / GMV) grow every hour, so
+       alerting on those would spam every cycle; they still refresh, just don't trip the alert. */
+    const stdSig = (profiles) => {
+      const p = (profiles || [])[0] || {};
+      const rate = (k) => { const m = (p.metrics || []).filter((x) => String(x.metricKey) === k)[0]; const v = m && m.value; return v && typeof v === 'object' ? String(v.value) : String(v == null ? '' : v); };
+      return { level: String(p.standardsLevel || ''), defect: rate('DEFECTIVE_TRANSACTION_RATE'), shipping: rate('SHIPPING_MISS_RATE'), claims: rate('CLAIMS_SAF_RATE') };
+    };
+    try {
+      const oldRow = await env.DB.prepare('SELECT json FROM cs_standards WHERE account = ?1').bind(acct).first();
+      if (oldRow && oldRow.json) {
+        const was = stdSig(JSON.parse(oldRow.json)), now = stdSig(nextProfiles);
+        const NICE = { level: 'seller level', defect: 'defect rate', shipping: 'late-shipment rate', claims: 'cases without resolution' };
+        const changes = Object.keys(now).filter((k) => was[k] !== '' && was[k] !== now[k]).map((k) => NICE[k] + ' ' + was[k] + ' → ' + now[k] + (k === 'level' ? '' : '%'));
+        if (changes.length) {
+          const msg = '📉 ' + acct + ' — eBay account health moved: ' + changes.join(' · ') + '. Open Account health to see the full scoreboard.';
+          const ref = 'stdchange:' + acct + ':' + Date.now();
+          for (const role of ['Management', 'Ops Head', 'CS']) { try { await notifyRole(env, role, 'Account health changed', msg, ref); } catch (e) {} }
+        }
+      }
+    } catch (e) { /* a bad parse never blocks the sync */ }
     await env.DB.prepare(
       "INSERT INTO cs_standards (account, json, synced_at) VALUES (?1, ?2, datetime('now')) " +
       "ON CONFLICT(account) DO UPDATE SET json = ?2, synced_at = datetime('now')"
-    ).bind(acct, JSON.stringify(uk.length ? uk : (sd.standardsProfiles || [])).slice(0, 8000)).run();
+    ).bind(acct, JSON.stringify(nextProfiles).slice(0, 8000)).run();
 
     /* Hasib item 13: the Seller Hub service-metrics panel — your "item not as described" and
        "item not received" rates against eBay's peer benchmark. Same nightly cadence: eBay
