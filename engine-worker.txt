@@ -3640,6 +3640,8 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS portal_config (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
     "CREATE TABLE IF NOT EXISTS reports_2h (report_id TEXT PRIMARY KEY, email TEXT, role TEXT, shift TEXT, date TEXT, checkpoint TEXT, work_summary TEXT, count_1 TEXT, count_2 TEXT, count_3 TEXT, count_4 TEXT, submitted_at TEXT, flag TEXT, synced_at TEXT)",
     "CREATE TABLE IF NOT EXISTS perf_snapshot (id TEXT PRIMARY KEY, blob TEXT, computed_at TEXT, synced_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS hunt_shadow (hunt_id TEXT PRIMARY KEY, hunter_email TEXT, ts TEXT, real_status TEXT, shadow_accept INTEGER, reject_reason TEXT, req_missing TEXT, price_ok INTEGER, dup_of TEXT, divergent INTEGER, note TEXT, evaluated_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_hshadow_div ON hunt_shadow(divergent)",
     "CREATE TABLE IF NOT EXISTS staff_reviews (review_id TEXT PRIMARY KEY, email TEXT, week TEXT, rated_by TEXT, behavior TEXT, working TEXT, notes TEXT, created_at TEXT, synced_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_sr_email ON staff_reviews(email)",
     "CREATE INDEX IF NOT EXISTS idx_r2h_email_date ON reports_2h(email, date)",
@@ -3797,6 +3799,82 @@ function srDayPick(totals, items) {
    carries ads and more), while API fees+ali left ~45%. So: per account, over the last 14 days'
    COMPLETE books days (their own GRAND TOTAL row), the ratios te/sold, vat/sold, actual/sold,
    ali/sold — fleet aggregate as fallback. Sold itself always stays the API's exact number. */
+/* ————— D1-primary hunt-submit SHADOW (4 Sept, owner spec): re-run the exact validation and
+   dup-check the flip will use, against each real submission, and record would-decide vs actual.
+   Fires nothing, writes only hunt_shadow, changes nothing user-facing. The eval logic here is the
+   front half of the future huntSubmitEngine — proving it before we ever act on it. */
+const HS_REQUIRED = ['Title', 'Main Keyword Terapeak link', 'Product Link 1 Main supplier', 'Source Price', 'E-Bey Caluclator + £4'];
+const HS_CALC_PRICE = 'E-Bey Caluclator + £4';
+const HS_SOURCE_PRICE = 'Source Price';
+const HS_DUP_COLS = ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'];
+function hsAliId(url) {
+  const s = String(url || '');
+  const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/);
+  return m ? m[1] : '';
+}
+function hsFirstNumber(v) {
+  const m = String(v == null ? '' : v).replace(/[£$,]/g, '').match(/\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : null;
+}
+async function hsResolveShort(url) {
+  let u = String(url || '').trim();
+  if (!/^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(u)) return u;
+  for (let hop = 0; hop < 3; hop++) {
+    try {
+      const r = await fetch(u, { method: 'GET', redirect: 'manual' });
+      const loc = r.headers.get('location');
+      if (!loc) break;
+      u = loc;
+      if (hsAliId(u)) break;
+    } catch (e) { break; }
+  }
+  return u;
+}
+
+/* Scan newly-mirrored hunts (not yet in hunt_shadow), evaluate, record. Idempotent — a hunt is
+   shadowed exactly once (hunt_id PK). Cheap: existing hunts' links are regex-parsed (no fetch);
+   only the NEW hunt's own links are redirect-resolved, exactly as the Apps Script dup-check does. */
+async function huntShadowScan(env, limit) {
+  await ensureTruthSchema(env);
+  const rs = await env.DB.prepare('SELECT hunt_id, hunter_email, status, ts, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
+  const all = (rs.results || []).map((r) => { let v = {}; try { v = JSON.parse(r.vals || '{}'); } catch (e) {} return { hunt_id: String(r.hunt_id), hunter_email: String(r.hunter_email || ''), status: String(r.status || ''), ts: String(r.ts || ''), vals: v }; });
+  /* existing-hunt ali-id index (regex only, no fetch), keyed id -> owning hunt_id */
+  const idOwner = {};
+  for (const h of all) {
+    for (const c of HS_DUP_COLS) { const id = hsAliId(h.vals[c]); if (id && !idOwner[id]) idOwner[id] = h.hunt_id; }
+  }
+  const done = await env.DB.prepare('SELECT hunt_id FROM hunt_shadow').all().catch(() => ({ results: [] }));
+  const seen = {}; for (const r of (done.results || [])) seen[String(r.hunt_id)] = 1;
+  const todo = all.filter((h) => !seen[h.hunt_id]).sort((a, b) => String(b.ts).localeCompare(String(a.ts))).slice(0, limit || 50);
+  const stmts = [];
+  let evaluated = 0, divergent = 0;
+  for (const h of todo) {
+    const reqMissing = HS_REQUIRED.filter((c) => String(h.vals[c] == null ? '' : h.vals[c]).trim() === '');
+    const priceOk = hsFirstNumber(h.vals[HS_CALC_PRICE]) !== null && hsFirstNumber(h.vals[HS_SOURCE_PRICE]) !== null;
+    /* dup: resolve THIS hunt's supplier links, look each up against the index (excluding itself) */
+    let dupOf = '';
+    for (const c of HS_DUP_COLS) {
+      const resolved = await hsResolveShort(h.vals[c]);
+      const id = hsAliId(resolved);
+      if (id && idOwner[id] && idOwner[id] !== h.hunt_id) { dupOf = idOwner[id]; break; }
+    }
+    const accept = reqMissing.length === 0 && priceOk && !dupOf;
+    let reason = '';
+    if (reqMissing.length) reason = 'missing:' + reqMissing.join('|');
+    else if (!priceOk) reason = 'non-numeric price';
+    else if (dupOf) reason = 'dup of ' + dupOf;
+    /* the hunt IS in the DB, so Apps Script ACCEPTED it. A shadow REJECT is a divergence to review. */
+    const div = accept ? 0 : 1;
+    evaluated++; if (div) divergent++;
+    stmts.push(env.DB.prepare(
+      "INSERT INTO hunt_shadow (hunt_id, hunter_email, ts, real_status, shadow_accept, reject_reason, req_missing, price_ok, dup_of, divergent, note, evaluated_at) " +
+      "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,datetime('now')) ON CONFLICT(hunt_id) DO NOTHING"
+    ).bind(h.hunt_id, h.hunter_email, h.ts, h.status || '(pending)', accept ? 1 : 0, reason, reqMissing.join('|'), priceOk ? 1 : 0, dupOf, div, ''));
+  }
+  for (let i = 0; i < stmts.length; i += 40) await env.DB.batch(stmts.slice(i, i + 40));
+  return { evaluated, divergent, corpus: all.length };
+}
+
 /* ————— §5 reporting helpers (Reports.gs replicas — timing math only; checkpoint DERIVATION
    stays on Apps Script, which pushes each user's list with the hourly users sync) ————— */
 const REP_COUNT_FIELDS = {
@@ -7155,6 +7233,33 @@ const ROUTES = {
       }
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
       return { synced: stmts.length };
+    },
+  },
+
+  /* D1-primary hunt-submit SHADOW — scan + report (owner spec 4 Sept). Read-only shadow. */
+  huntShadowScan: {
+    auth: 'sync', fn: async (p, ctx) => huntShadowScan(ctx.env, Number(p.limit) || 50),
+  },
+  huntShadowReport: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('management only');
+      await ensureTruthSchema(ctx.env);
+      const from = /^\d{4}-\d{2}-\d{2}/.test(String(p.from || '')) ? String(p.from) : '';
+      const bind = []; let where = '';
+      if (from) { where = ' WHERE substr(ts,1,10) >= ?1'; bind.push(from); }
+      const rs = await ctx.env.DB.prepare('SELECT * FROM hunt_shadow' + where + ' ORDER BY ts DESC').bind(...bind).all().catch(() => ({ results: [] }));
+      const rows = rs.results || [];
+      const div = rows.filter((r) => Number(r.divergent) === 1);
+      const byReason = {};
+      for (const r of div) { const k = String(r.reject_reason || 'other').split(' of ')[0].split(':')[0]; byReason[k] = (byReason[k] || 0) + 1; }
+      return {
+        total: rows.length, divergent: div.length,
+        agreement_pct: rows.length ? Math.round((rows.length - div.length) / rows.length * 1000) / 10 : null,
+        by_reason: byReason,
+        divergences: div.slice(0, 100).map((r) => ({ hunt_id: r.hunt_id, hunter: String(r.hunter_email || '').split('@')[0], ts: r.ts, real_status: r.real_status, shadow_reject: r.reject_reason, dup_of: r.dup_of, req_missing: r.req_missing })),
+        window_from: from || '(all)', as_of: new Date().toISOString(),
+      };
     },
   },
 

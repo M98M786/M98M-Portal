@@ -1084,6 +1084,7 @@ function pushSheetRowsHot() {
   });
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
+  try { enginePost_('huntShadowScan', {}); } catch (e) {}   // 4 Sept: D1-primary shadow — read-only, records hunt_shadow only
   try { reportsSweep_(); } catch (e) {}
   try { tasksSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
