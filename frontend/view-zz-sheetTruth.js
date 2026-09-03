@@ -199,6 +199,27 @@
       '<text x="' + (L + 100) + '" y="11" font-size="10.5" font-weight="800" fill="var(--bad)">▮ Returns</text></svg></div>';
   }
 
+  /* Per-account totals on the up-to-date law: books where the day is written, live eBay where
+     not — aggregated from the blended DAYS_UPTODATE series so "yesterday" is never empty. */
+  function sxAcctAgg(M, acct) {
+    var out = {};
+    var series = M && M.DAYS_UPTODATE && M.DAYS_UPTODATE.value;
+    if (series && series.length) {
+      series.forEach(function (r) {
+        if (acct && r.account !== acct) { return; }
+        var b = (out[r.account] = out[r.account] || { sold: 0, actual_after_returns: 0, actual: 0 });
+        b.sold += (r.sold || 0); b.actual_after_returns += (r.actual || 0); b.actual += (r.actual || 0);
+      });
+      return out;
+    }
+    var byA = (M && M.MONEY_BY_ACCOUNT && M.MONEY_BY_ACCOUNT.value) || {};
+    Object.keys(byA).forEach(function (a) {
+      if (acct && a !== acct) { return; }
+      out[a] = { sold: byA[a].sold || 0, actual_after_returns: byA[a].actual_after_returns || 0, actual: byA[a].actual || 0 };
+    });
+    return out;
+  }
+
   /* 3 Sept (owner) — account to account: total sold, actual profit, and ▲▼ vs last month. */
   var SX_ACOL = ['#f0b64a', '#5aa9e6', '#4fc08d', '#b98ce6', '#e8765a', '#6fbecf', '#e0b0ff'];
   function sxAcctBars(byA, byLast, acct, spanDays, lastDays) {
@@ -364,11 +385,11 @@
         if (!box) { return; }
         var R = sxRanges().lm;
         var lastDays = Math.round((new Date(R.to + 'T12:00:00Z') - new Date(R.from + 'T12:00:00Z')) / 86400000) + 1;
+        var byAup = sxAcctAgg(M, SX.acct);
         truthPage({ from: R.from, to: R.to }).then(function (dl) {
           if (!$('sxAcctBox')) { return; }
-          var byLast = (dl.metrics.MONEY_BY_ACCOUNT.value) || {};
-          box.innerHTML = sxAcctBars(byA, byLast, SX.acct, spanDays, lastDays);
-        }).catch(function () { if ($('sxAcctBox')) { box.innerHTML = sxAcctBars(byA, {}, SX.acct, spanDays, 0); } });
+          box.innerHTML = sxAcctBars(byAup, sxAcctAgg(dl.metrics, SX.acct), SX.acct, spanDays, lastDays);
+        }).catch(function () { if ($('sxAcctBox')) { box.innerHTML = sxAcctBars(byAup, {}, SX.acct, spanDays, 0); } });
       })();
       var loadItems = function (order) {
         var box = $('sxItems');
