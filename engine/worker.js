@@ -5076,8 +5076,10 @@ const ROUTES = {
       const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const rs = await ctx.env.DB.prepare(
         'SELECT d.item_id, d.account, d.title, d.price, d.born, d.clock, d.flagged_at, d.status, d.decided_by, d.decided_at, d.assignee, d.note, ' +
-        'p.hunter_email, p.lister_email ' +
-        'FROM listing_decisions d LEFT JOIN provenance p ON p.item_id = d.item_id ' + (mgmt ? '' : 'WHERE d.assignee = ?1 ') +
+        'p.hunter_email, p.lister_email, ia.qty AS stock, ia.image, ia.sold_qty, ia.start_time, ' +
+        '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.listing_id = d.item_id) AS ad_n, ' +
+        '(SELECT c.funding_model FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = d.item_id LIMIT 1) AS ad_model ' +
+        'FROM listing_decisions d LEFT JOIN provenance p ON p.item_id = d.item_id LEFT JOIN items_api ia ON ia.item_id = d.item_id ' + (mgmt ? '' : 'WHERE d.assignee = ?1 ') +
         'ORDER BY CASE d.status WHEN \'PENDING\' THEN 0 ELSE 1 END, d.flagged_at DESC LIMIT 200'
       ).bind(...(mgmt ? [] : [ctx.user.email])).all();
       let listers = [];
