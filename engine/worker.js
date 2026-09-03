@@ -3834,14 +3834,19 @@ async function hsResolveShort(url) {
 /* Scan newly-mirrored hunts (not yet in hunt_shadow), evaluate, record. Idempotent — a hunt is
    shadowed exactly once (hunt_id PK). Cheap: existing hunts' links are regex-parsed (no fetch);
    only the NEW hunt's own links are redirect-resolved, exactly as the Apps Script dup-check does. */
-async function huntShadowScan(env, limit) {
+function hsTsN(t) { return String(t == null ? '' : t).replace('T', ' ').slice(0, 19); }
+async function huntShadowScan(env, limit, reset) {
   await ensureTruthSchema(env);
+  if (reset) await env.DB.prepare('DELETE FROM hunt_shadow').run().catch(() => {});
   const rs = await env.DB.prepare('SELECT hunt_id, hunter_email, status, ts, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
   const all = (rs.results || []).map((r) => { let v = {}; try { v = JSON.parse(r.vals || '{}'); } catch (e) {} return { hunt_id: String(r.hunt_id), hunter_email: String(r.hunter_email || ''), status: String(r.status || ''), ts: String(r.ts || ''), vals: v }; });
-  /* existing-hunt ali-id index (regex only, no fetch), keyed id -> owning hunt_id */
-  const idOwner = {};
+  /* EARLIEST owner per ali id (regex only, no fetch), respecting submit order — a hunt is a
+     duplicate only of a hunt submitted BEFORE it (exactly what the Apps Script check does at
+     submit time), so a dup PAIR flags only the later one, never the original. */
+  const idFirst = {};
   for (const h of all) {
-    for (const c of HS_DUP_COLS) { const id = hsAliId(h.vals[c]); if (id && !idOwner[id]) idOwner[id] = h.hunt_id; }
+    for (const c of HS_DUP_COLS) { const id = hsAliId(h.vals[c]); if (!id) continue; const tn = hsTsN(h.ts);
+      if (!idFirst[id] || tn < idFirst[id].ts) idFirst[id] = { hunt_id: h.hunt_id, ts: tn }; }
   }
   const done = await env.DB.prepare('SELECT hunt_id FROM hunt_shadow').all().catch(() => ({ results: [] }));
   const seen = {}; for (const r of (done.results || [])) seen[String(r.hunt_id)] = 1;
@@ -3853,10 +3858,11 @@ async function huntShadowScan(env, limit) {
     const priceOk = hsFirstNumber(h.vals[HS_CALC_PRICE]) !== null && hsFirstNumber(h.vals[HS_SOURCE_PRICE]) !== null;
     /* dup: resolve THIS hunt's supplier links, look each up against the index (excluding itself) */
     let dupOf = '';
+    const selfTs = hsTsN(h.ts);
     for (const c of HS_DUP_COLS) {
       const resolved = await hsResolveShort(h.vals[c]);
       const id = hsAliId(resolved);
-      if (id && idOwner[id] && idOwner[id] !== h.hunt_id) { dupOf = idOwner[id]; break; }
+      if (id && idFirst[id] && idFirst[id].hunt_id !== h.hunt_id && idFirst[id].ts < selfTs) { dupOf = idFirst[id].hunt_id; break; }
     }
     const accept = reqMissing.length === 0 && priceOk && !dupOf;
     let reason = '';
@@ -7238,7 +7244,7 @@ const ROUTES = {
 
   /* D1-primary hunt-submit SHADOW — scan + report (owner spec 4 Sept). Read-only shadow. */
   huntShadowScan: {
-    auth: 'sync', fn: async (p, ctx) => huntShadowScan(ctx.env, Number(p.limit) || 50),
+    auth: 'sync', fn: async (p, ctx) => huntShadowScan(ctx.env, Number(p.limit) || 50, !!p.reset),
   },
   huntShadowReport: {
     auth: 'any', fn: async (p, ctx) => {
