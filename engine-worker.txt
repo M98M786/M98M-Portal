@@ -75,6 +75,7 @@ export default {
         deliveryCheckpoints: 300000, accountDay: 60000, campaignWatch: 0, mgmtOverview: 0,
         pageMetrics: 30000, adsTruth: 45000, truthBoard: 30000, deptPendingEngine: 30000, sheetItems: 60000,
         huntReasonsEngine: 300000,
+        accountListEngine: 300000, assignableStaffEngine: 300000,
         csPlaybook: 120000,
         dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
@@ -7013,6 +7014,27 @@ const ROUTES = {
       }
       if (stmts.length) await ctx.env.DB.batch(stmts);
       return { synced: stmts.length };
+    },
+  },
+
+  /* 3 Sept — the two dropdowns loaded on almost every page (account picker, assign-to picker)
+     were the last high-traffic Apps Script READS; at PKT peak they took 30+ seconds and hung
+     every page that opened one. Served from D1 now (accounts + users are already mirrored). */
+  accountListEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare('SELECT name, api_enabled FROM accounts ORDER BY name').all().catch(() => ({ results: [] }));
+      const accounts = (rs.results || []).filter((a) => String(a.name || '').trim()).map((a) => ({ account: String(a.name), linked: a.api_enabled ? 1 : 0, of: 1 }));
+      return { accounts };
+    },
+  },
+  assignableStaffEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      const roles = Array.isArray(p.roles) ? p.roles : null;
+      const rs = await ctx.env.DB.prepare("SELECT email, name, role FROM users WHERE status = 'approved'").all().catch(() => ({ results: [] }));
+      let staff = (rs.results || []).map((u) => ({ email: String(u.email), name: String(u.name || u.email), role: String(u.role), accounts: '' }));
+      if (roles && roles.length) staff = staff.filter((u) => roles.indexOf(u.role) >= 0);
+      staff.sort((a, b) => (a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)));
+      return { staff };
     },
   },
 
