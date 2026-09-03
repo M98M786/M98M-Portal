@@ -24921,7 +24921,8 @@ function adminRenameUser(args) {
   var sh = getPortalDb_(false).getSheetByName('USERS');
   var data = sh.getDataRange().getValues();
   var head = data[0].map(String);
-  var ei = head.indexOf('email'), ni = head.indexOf('name'), ri = head.indexOf('role');
+  var colIx = function (want) { for (var k = 0; k < head.length; k++) { if (String(head[k]).trim().toLowerCase() === want) return k; } return -1; };
+  var ei = colIx('email'), ni = colIx('name'), ri = colIx('role');
   if (ei < 0 || ni < 0) return 'USERS missing email/name column';
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][ei]).trim().toLowerCase() === email) {
