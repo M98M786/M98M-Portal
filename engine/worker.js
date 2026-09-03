@@ -7629,8 +7629,14 @@ const ROUTES = {
         mSum.t += MA[a].actual; mSum.ali += MA[a].ali; mSum.rows += MA[a].rows;
         mSum.ap += MA[a].actual_after_returns; mSum.ret += MA[a].returns; mSum.ads += MA[a].ads_incl_vat;
       }
+      /* 3 Sept FIX (owner: collective read £1.7k not £1,131.58): count orders on the eBay/UK
+         trading day (Europe/London) — the SAME basis as the books' day tabs and mgmtOverview.
+         PKT (+5h) starts 4h early and swept ~60 extra UK-yesterday-evening orders into "today". */
+      const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
+      const ukOffH = ((_lonH - new Date().getUTCHours()) + 24) % 24;   // 0 = GMT, 1 = BST
+      const ukQ = "'+" + ukOffH + " hours'";
       const ocBind = [from, to];
-      let ocSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2";
+      let ocSql = "SELECT COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' AND substr(datetime(created_at, " + ukQ + "),1,10) >= ?1 AND substr(datetime(created_at, " + ukQ + "),1,10) <= ?2";
       if (account) { ocBind.push(account); ocSql += ' AND account = ?3'; }
       const ocRow = await ctx.env.DB.prepare(ocSql).bind(...ocBind).first().catch(() => ({ n: 0 }));
       const M = {
@@ -7649,8 +7655,8 @@ const ROUTES = {
         'SELECT date AS d, ROUND(SUM(spend + cpc_spend),2) AS sp FROM ads_daily WHERE date >= ?1 AND date <= ?2' + leakAcc + ' GROUP BY date'
       ).bind(...leakBind).all().catch(() => ({ results: [] }));
       const refD = await ctx.env.DB.prepare(
-        "SELECT substr(datetime(created_at, '+5 hours'),1,10) AS d, ROUND(SUM(refunded),2) AS rf FROM orders WHERE refunded > 0 " +
-        "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2" + leakAcc + ' GROUP BY d'
+        "SELECT substr(datetime(created_at, " + ukQ + "),1,10) AS d, ROUND(SUM(refunded),2) AS rf FROM orders WHERE refunded > 0 " +
+        "AND substr(datetime(created_at, " + ukQ + "),1,10) >= ?1 AND substr(datetime(created_at, " + ukQ + "),1,10) <= ?2" + leakAcc + ' GROUP BY d'
       ).bind(...leakBind).all().catch(() => ({ results: [] }));
       const leakMap = {};
       for (const r of (adsD.results || [])) { (leakMap[r.d] = leakMap[r.d] || { day: r.d, ads: 0, refunds: 0 }).ads = Number(r.sp) || 0; }
@@ -7658,7 +7664,7 @@ const ROUTES = {
       const leaks = Object.keys(leakMap).sort().map((k) => leakMap[k]);
       const soldApi = await ctx.env.DB.prepare(
         "SELECT account, ROUND(SUM(sold),2) AS sold, COUNT(*) AS n FROM orders WHERE cancel_state != 'CANCELED' " +
-        "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2 GROUP BY account"
+        "AND substr(datetime(created_at, " + ukQ + "),1,10) >= ?1 AND substr(datetime(created_at, " + ukQ + "),1,10) <= ?2 GROUP BY account"
       ).bind(from, to).all().catch(() => ({ results: [] }));
       const soldApiBy = {};
       let soldApiAll = 0, ordersAll = 0;
@@ -7674,14 +7680,14 @@ const ROUTES = {
          the fleet's OWN last-7-day ratios and flagged as estimated. Books figures stay in the
          register untouched — every truth check still verifies them against the sheet. */
       const apiDayRs = await ctx.env.DB.prepare(
-        "SELECT account, substr(datetime(created_at, '+5 hours'),1,10) AS d, ROUND(SUM(sold),2) AS sold, " +
+        "SELECT account, substr(datetime(created_at, " + ukQ + "),1,10) AS d, ROUND(SUM(sold),2) AS sold, " +
         "ROUND(SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END),2) AS fees, " +
         "SUM(CASE WHEN ebay_fees > 0 THEN 1 ELSE 0 END) AS fees_n, " +
         "ROUND(SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END),2) AS ali, " +
         "SUM(CASE WHEN cost > 0 THEN 1 ELSE 0 END) AS ali_n, " +
         "ROUND(SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END),2) AS refunds, COUNT(*) AS n " +
         "FROM orders WHERE cancel_state != 'CANCELED' AND status != 'NOT_FOUND' " +
-        "AND substr(datetime(created_at, '+5 hours'),1,10) >= ?1 AND substr(datetime(created_at, '+5 hours'),1,10) <= ?2 " +
+        "AND substr(datetime(created_at, " + ukQ + "),1,10) >= ?1 AND substr(datetime(created_at, " + ukQ + "),1,10) <= ?2 " +
         (account ? 'AND account = ?3 ' : '') + 'GROUP BY account, d'
       ).bind(...(account ? [from, to, account] : [from, to])).all().catch(() => ({ results: [] }));
       const apiDay = {};
