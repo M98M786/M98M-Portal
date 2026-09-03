@@ -79,6 +79,7 @@
       d60: { label: '60 days', from: sxD(-60), to: yday },
       tw: { label: 'This week', from: thisMon, to: yday },
       lw: { label: 'Last week', from: sxShift(thisMon, -7), to: sxShift(thisMon, -1) },
+      tm: { label: 'This month', from: (monthStart <= yday ? monthStart : yday), to: yday },
       lm: { label: 'Last month', from: lastMonthStart, to: lastMonthEnd },
     };
   }
