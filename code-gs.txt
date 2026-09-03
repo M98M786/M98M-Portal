@@ -7602,6 +7602,7 @@ function actionCreateRevision_(payload, ctx) {
       priority: String(payload.priority || '').slice(0, 40), deadline_pkt: win.end_pkt, stamp: stamp,
     });
   } finally { lock.releaseLock(); }
+  try { if (taskId) engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: revision on the lister's board at once
 
   logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + employee.email + ' · ' + changes.slice(0, 120));
   /* R8-0a (the Irfan bug): a Product Hunter has no My-listings screen — pointing a hunter at
@@ -21599,6 +21600,8 @@ const ENGINE_RUNNABLE = {
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
   reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
+  adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
+  tasksSweep: function () { return typeof tasksSweep_ === 'function' ? (tasksSweep_(), 'ok') : 'absent'; },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },
@@ -22840,6 +22843,7 @@ function actionDecisionAct_(payload, ctx) {
       (title ? ' · ' + title.slice(0, 50) : '') + ' — Management decided: end it on eBay, then submit the task.' +
       (note ? ' Note: ' + note : ''), 'task:' + taskId);
     logActivity_(ctx.ident.email, 'R8_DECISION_END', itemId, '', tl.email, note);
+    try { engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: on the Team Lead's board at once
     return { task_id: taskId, kind: 'end', assigned_to: tl.email };
   }
   if (kind === 'revise') {
@@ -22861,6 +22865,7 @@ function actionDecisionAct_(payload, ctx) {
     notify_(who.email, 'Task assigned', '🟠 Revision · ' + itemId + ' · ' + account +
       (title ? ' · ' + title.slice(0, 50) : '') + ' — 7 days without a sale. ' + (note || 'Revise title, image, price or campaign.'), 'task:' + taskId);
     logActivity_(ctx.ident.email, 'R8_DECISION_REVISE', itemId, '', who.email, note);
+    try { engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: the lister sees the revision at once (was invisible — never mirrored)
     return { task_id: taskId, kind: 'revise', assigned_to: who.email };
   }
   throw new Error('SAY: kind must be end or revise');
@@ -24737,6 +24742,7 @@ function pushSheetRowsHot() {
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
   try { reportsSweep_(); } catch (e) {}
+  try { tasksSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
     enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2']
@@ -24854,6 +24860,42 @@ function notifDump(args) {
 /* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
 /* Rides pushSheetRowsHot every 15 min: re-push the newest hunts so a swallowed write-through
    can never leave a submitted hunt invisible to the engine queue (self-healing, 1 call). */
+/* 3 Sept — safety net: re-push the newest tasks every 15 min so a task whose creation path
+   forgot the write-through (the revision creators did) still reaches the board within the cycle. */
+function tasksSweep_() {
+  try {
+    var COLS = ['task_id','type','account','item_id','title','details','comments','assigned_by','assigned_to','priority','deadline_pkt','status','created_at','updated_at','submitted_at','approved_by','decided_at','submission_note','time_taken_min'];
+    var rows = readTab_('TASKS');
+    var recent = rows.slice(Math.max(0, rows.length - 100)).map(function (t) {
+      var o = {}; COLS.forEach(function (k) { var v = t[k]; o[k] = (v instanceof Date) ? taskPktIso_(v) : String(v == null ? '' : v); });
+      return o;
+    }).filter(function (o) { return o.task_id; });
+    if (recent.length) enginePost_('syncTasks', { tasks: recent });
+  } catch (e) {}
+}
+
+/* 3 Sept (owner) — rename a staff member in the USERS master, then propagate to the engine. */
+function adminRenameUser(args) {
+  var email = String(args && args.email || '').trim().toLowerCase();
+  var name = String(args && args.name || '').trim();
+  if (!email || !name) return 'need {email,name}';
+  var sh = getPortalDb_(false).getSheetByName('USERS');
+  var data = sh.getDataRange().getValues();
+  var head = data[0].map(String);
+  var ei = head.indexOf('email'), ni = head.indexOf('name');
+  if (ei < 0 || ni < 0) return 'USERS missing email/name column';
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][ei]).trim().toLowerCase() === email) {
+      var old = String(data[i][ni]);
+      sh.getRange(i + 1, ni + 1).setValue(name);
+      logActivity_('system', 'ADMIN_RENAME_USER', email, old, name, '');
+      try { pushEngineSync(); } catch (e) {}
+      return 'renamed ' + email + ': "' + old + '" -> "' + name + '" (pushed to engine)';
+    }
+  }
+  return 'no USERS row for ' + email;
+}
+
 /* 3 Sept — REPORTS_2H mirror for the Engine's reports pages. Newest rows re-pushed every
    15 min (self-heal); reportsDump backfills history. Rows are small; 80 is a shift's worth. */
 function reportsSweep_() {

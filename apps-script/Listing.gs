@@ -518,6 +518,7 @@ function actionCreateRevision_(payload, ctx) {
       priority: String(payload.priority || '').slice(0, 40), deadline_pkt: win.end_pkt, stamp: stamp,
     });
   } finally { lock.releaseLock(); }
+  try { if (taskId) engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: revision on the lister's board at once
 
   logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + employee.email + ' · ' + changes.slice(0, 120));
   /* R8-0a (the Irfan bug): a Product Hunter has no My-listings screen — pointing a hunter at

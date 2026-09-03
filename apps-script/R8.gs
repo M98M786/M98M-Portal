@@ -451,6 +451,7 @@ function actionDecisionAct_(payload, ctx) {
       (title ? ' · ' + title.slice(0, 50) : '') + ' — Management decided: end it on eBay, then submit the task.' +
       (note ? ' Note: ' + note : ''), 'task:' + taskId);
     logActivity_(ctx.ident.email, 'R8_DECISION_END', itemId, '', tl.email, note);
+    try { engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: on the Team Lead's board at once
     return { task_id: taskId, kind: 'end', assigned_to: tl.email };
   }
   if (kind === 'revise') {
@@ -472,6 +473,7 @@ function actionDecisionAct_(payload, ctx) {
     notify_(who.email, 'Task assigned', '🟠 Revision · ' + itemId + ' · ' + account +
       (title ? ' · ' + title.slice(0, 50) : '') + ' — 7 days without a sale. ' + (note || 'Revise title, image, price or campaign.'), 'task:' + taskId);
     logActivity_(ctx.ident.email, 'R8_DECISION_REVISE', itemId, '', who.email, note);
+    try { engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: the lister sees the revision at once (was invisible — never mirrored)
     return { task_id: taskId, kind: 'revise', assigned_to: who.email };
   }
   throw new Error('SAY: kind must be end or revise');

@@ -283,6 +283,8 @@ const ENGINE_RUNNABLE = {
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
   reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
+  adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
+  tasksSweep: function () { return typeof tasksSweep_ === 'function' ? (tasksSweep_(), 'ok') : 'absent'; },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   notifSweep: function () { return typeof notifSweep_ === 'function' ? String(notifSweep_()) : 'absent'; },
   huntAliStats: function () { return typeof actionHuntAliCheck_ === 'function' ? JSON.stringify(actionHuntAliCheck_({ stats: true }, { user: { role: 'Management' }, ident: { email: 'engine' } })).slice(0, 400) : 'absent'; },

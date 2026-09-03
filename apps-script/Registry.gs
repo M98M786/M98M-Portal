@@ -1085,6 +1085,7 @@ function pushSheetRowsHot() {
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
   try { reportsSweep_(); } catch (e) {}
+  try { tasksSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
     enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2']
@@ -1202,6 +1203,42 @@ function notifDump(args) {
 /* 2 Sept — hunts mirror for the Engine's queue reads. Full dump, re-runnable; {from_row} to continue. */
 /* Rides pushSheetRowsHot every 15 min: re-push the newest hunts so a swallowed write-through
    can never leave a submitted hunt invisible to the engine queue (self-healing, 1 call). */
+/* 3 Sept — safety net: re-push the newest tasks every 15 min so a task whose creation path
+   forgot the write-through (the revision creators did) still reaches the board within the cycle. */
+function tasksSweep_() {
+  try {
+    var COLS = ['task_id','type','account','item_id','title','details','comments','assigned_by','assigned_to','priority','deadline_pkt','status','created_at','updated_at','submitted_at','approved_by','decided_at','submission_note','time_taken_min'];
+    var rows = readTab_('TASKS');
+    var recent = rows.slice(Math.max(0, rows.length - 100)).map(function (t) {
+      var o = {}; COLS.forEach(function (k) { var v = t[k]; o[k] = (v instanceof Date) ? taskPktIso_(v) : String(v == null ? '' : v); });
+      return o;
+    }).filter(function (o) { return o.task_id; });
+    if (recent.length) enginePost_('syncTasks', { tasks: recent });
+  } catch (e) {}
+}
+
+/* 3 Sept (owner) — rename a staff member in the USERS master, then propagate to the engine. */
+function adminRenameUser(args) {
+  var email = String(args && args.email || '').trim().toLowerCase();
+  var name = String(args && args.name || '').trim();
+  if (!email || !name) return 'need {email,name}';
+  var sh = getPortalDb_(false).getSheetByName('USERS');
+  var data = sh.getDataRange().getValues();
+  var head = data[0].map(String);
+  var ei = head.indexOf('email'), ni = head.indexOf('name');
+  if (ei < 0 || ni < 0) return 'USERS missing email/name column';
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][ei]).trim().toLowerCase() === email) {
+      var old = String(data[i][ni]);
+      sh.getRange(i + 1, ni + 1).setValue(name);
+      logActivity_('system', 'ADMIN_RENAME_USER', email, old, name, '');
+      try { pushEngineSync(); } catch (e) {}
+      return 'renamed ' + email + ': "' + old + '" -> "' + name + '" (pushed to engine)';
+    }
+  }
+  return 'no USERS row for ' + email;
+}
+
 /* 3 Sept — REPORTS_2H mirror for the Engine's reports pages. Newest rows re-pushed every
    15 min (self-heal); reportsDump backfills history. Rows are small; 80 is a shift's worth. */
 function reportsSweep_() {
