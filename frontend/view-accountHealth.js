@@ -85,18 +85,41 @@
     return '<span class="ah-lvl ' + cls + '">' + esc(l.replace(/_/g, ' ') || '—') + '</span>';
   }
 
+  /* relative "synced … ago" from a UTC 'YYYY-MM-DD HH:MM:SS' stamp */
+  function ahAgo(s) {
+    var t = Date.parse(String(s || '').replace(' ', 'T') + 'Z');
+    if (!isFinite(t)) { return ahStr(s).slice(0, 16); }
+    var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) { return 'just now'; }
+    if (m < 60) { return m + ' min ago'; }
+    var hr = Math.round(m / 60);
+    if (hr < 24) { return hr + 'h ago'; }
+    return Math.round(hr / 24) + 'd ago';
+  }
+
   function ahStandards(rows) {
     if (!rows.length) {
       return '<div class="ah-note">eBay\u2019s seller-standards report arrives with the nightly sync — nothing stored yet.</div>';
     }
     var h = '<div class="ah-stds">';
     rows.forEach(function (r) {
-      var p = (r.profiles || [])[0] || {};
+      /* 4 Sept (owner): show eBay's FRESHER cycle. eBay returns a CURRENT (last monthly
+         evaluation) and a PROJECTED (the running estimate for the next one, updated ~daily) —
+         prefer PROJECTED, else the latest evaluationDate, else the first. */
+      var profs = r.profiles || [];
+      var p = profs.filter(function (x) { return String((x.cycle || {}).cycleType || '').toUpperCase() === 'PROJECTED'; })[0]
+        || profs.slice().sort(function (a, b) { return String((b.cycle || {}).evaluationDate || '').localeCompare(String((a.cycle || {}).evaluationDate || '')); })[0]
+        || {};
       var cyc = p.cycle || {};
+      var live = String(cyc.cycleType || '').toUpperCase() === 'PROJECTED';
+      var cycMonth = ahStr(cyc.evaluationMonth);
+      var cycTxt = live ? ('current period' + (cycMonth ? ' · ' + cycMonth : '') + ' · live')
+        : (cycMonth ? ('evaluated ' + cycMonth) : '');
       h += '<div class="ah-std-card">' +
         '<div class="ah-std-head"><b>' + esc(ahStr(r.account)) + '</b>' + ahLevelPill(p.standardsLevel) +
           '<span class="ah-std-when">' + esc(ahStr(p.program).replace('PROGRAM_', '')) +
-          (cyc.evaluationMonth ? ' · evaluated ' + esc(ahStr(cyc.evaluationMonth)) : '') + '</span></div>';
+          (cycTxt ? ' · ' + esc(cycTxt) : '') +
+          (r.synced_at ? ' · synced ' + esc(ahAgo(r.synced_at)) : '') + '</span></div>';
       var mets = p.metrics || [];
       if (mets.length) {
         h += '<table class="ah-std-tbl"><tbody>';

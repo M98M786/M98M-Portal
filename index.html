@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260903-2013';
+var BUILD = '20260903-2122';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1156,18 +1156,41 @@ VIEWS.home = {
     return '<span class="ah-lvl ' + cls + '">' + esc(l.replace(/_/g, ' ') || '—') + '</span>';
   }
 
+  /* relative "synced … ago" from a UTC 'YYYY-MM-DD HH:MM:SS' stamp */
+  function ahAgo(s) {
+    var t = Date.parse(String(s || '').replace(' ', 'T') + 'Z');
+    if (!isFinite(t)) { return ahStr(s).slice(0, 16); }
+    var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) { return 'just now'; }
+    if (m < 60) { return m + ' min ago'; }
+    var hr = Math.round(m / 60);
+    if (hr < 24) { return hr + 'h ago'; }
+    return Math.round(hr / 24) + 'd ago';
+  }
+
   function ahStandards(rows) {
     if (!rows.length) {
       return '<div class="ah-note">eBay\u2019s seller-standards report arrives with the nightly sync — nothing stored yet.</div>';
     }
     var h = '<div class="ah-stds">';
     rows.forEach(function (r) {
-      var p = (r.profiles || [])[0] || {};
+      /* 4 Sept (owner): show eBay's FRESHER cycle. eBay returns a CURRENT (last monthly
+         evaluation) and a PROJECTED (the running estimate for the next one, updated ~daily) —
+         prefer PROJECTED, else the latest evaluationDate, else the first. */
+      var profs = r.profiles || [];
+      var p = profs.filter(function (x) { return String((x.cycle || {}).cycleType || '').toUpperCase() === 'PROJECTED'; })[0]
+        || profs.slice().sort(function (a, b) { return String((b.cycle || {}).evaluationDate || '').localeCompare(String((a.cycle || {}).evaluationDate || '')); })[0]
+        || {};
       var cyc = p.cycle || {};
+      var live = String(cyc.cycleType || '').toUpperCase() === 'PROJECTED';
+      var cycMonth = ahStr(cyc.evaluationMonth);
+      var cycTxt = live ? ('current period' + (cycMonth ? ' · ' + cycMonth : '') + ' · live')
+        : (cycMonth ? ('evaluated ' + cycMonth) : '');
       h += '<div class="ah-std-card">' +
         '<div class="ah-std-head"><b>' + esc(ahStr(r.account)) + '</b>' + ahLevelPill(p.standardsLevel) +
           '<span class="ah-std-when">' + esc(ahStr(p.program).replace('PROGRAM_', '')) +
-          (cyc.evaluationMonth ? ' · evaluated ' + esc(ahStr(cyc.evaluationMonth)) : '') + '</span></div>';
+          (cycTxt ? ' · ' + esc(cycTxt) : '') +
+          (r.synced_at ? ' · synced ' + esc(ahAgo(r.synced_at)) : '') + '</span></div>';
       var mets = p.metrics || [];
       if (mets.length) {
         h += '<table class="ah-std-tbl"><tbody>';
