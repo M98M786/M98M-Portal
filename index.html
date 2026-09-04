@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260904-2308';
+var BUILD = '20260904-2339';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -22969,8 +22969,42 @@ function saveSchedule() {
 
   /* scope: 'mine' (own open tasks) · 'everyone' (management — every open task, with manage controls)
      · 'archive' (completed — own, or everyone for management). Owner 5 Sept. */
-  var TKV = { scope: 'mine' };
+  var TKV = { scope: 'mine', sel: {} };
   function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+  function tkSelIds() { return Object.keys(TKV.sel).filter(function (k) { return TKV.sel[k]; }); }
+  function tkUpdateBulkBar() {
+    var bar = $('tkBulkBar'); if (!bar) { return; }
+    var ids = tkSelIds();
+    if (!ids.length) { bar.className = 'tk-bulk hidden'; bar.innerHTML = ''; return; }
+    bar.className = 'tk-bulk';
+    bar.innerHTML = '<b style="margin-right:auto">' + ids.length + ' selected</b>' +
+      '<button class="minibtn" data-bulk="end">End</button>' +
+      '<button class="minibtn" data-bulk="extend">Extend deadline…</button>' +
+      '<button class="minibtn" data-bulk="reassign">Reassign…</button>' +
+      '<button class="minibtn" data-bulk="delete" style="border-color:var(--bad);color:var(--bad)">Delete</button>' +
+      '<button class="minibtn" data-bulk="clear">Clear</button>';
+  }
+  /* Run one taskAdmin op across every selected task, in series, then reload once. */
+  function tkBulkOp(op) {
+    var ids = tkSelIds();
+    if (!ids.length) { return; }
+    var extra = {};
+    if (op === 'delete' && !window.confirm('Delete ' + ids.length + ' task(s) permanently? This cannot be undone.')) { return; }
+    if (op === 'extend') { var d = window.prompt('New deadline for ' + ids.length + ' task(s) — PKT, format 2026-09-12 21:00'); if (!d) { return; } extra.deadline_pkt = tkStr(d).trim().replace(' ', 'T'); op = 'edit'; }
+    if (op === 'reassign') { var em = window.prompt('Reassign ' + ids.length + ' task(s) to (email):'); if (!em) { return; } extra.assigned_to = tkStr(em).trim(); op = 'edit'; }
+    var bar = $('tkBulkBar'); if (bar) { bar.innerHTML = '<b>Working on ' + ids.length + '…</b>'; }
+    var done = 0, failed = 0;
+    (function next(i) {
+      if (i >= ids.length) {
+        toast(done + ' done' + (failed ? ', ' + failed + ' failed' : '') + '.');
+        TKV.sel = {}; tkLoadTasks();
+        return;
+      }
+      var payload = { op: op, task_id: ids[i] };
+      for (var k in extra) { payload[k] = extra[k]; }
+      api('taskAdmin', payload).then(function () { done++; }).catch(function () { failed++; }).then(function () { next(i + 1); });
+    })(0);
+  }
   function tkScopeBar() {
     var opts = tkIsMgmt() ? [['mine', 'My tasks'], ['everyone', 'All tasks — manage'], ['archive', 'Archive']]
       : [['mine', 'My tasks'], ['archive', 'Archive']];
@@ -22982,6 +23016,10 @@ function saveSchedule() {
   }
 
   VIEW_CSS.push(
+    '.tk-bulk{position:sticky;top:8px;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid var(--gold-a);border-radius:12px;background:var(--panel-2);box-shadow:0 6px 18px rgba(0,0,0,.25)}' +
+    '.tk-bulk.hidden{display:none}' +
+    '.tk-sel-cell{width:34px;text-align:center!important;padding-right:0!important}' +
+    '.tk-sel-cell input,.tk-selall{width:16px;height:16px;cursor:pointer}' +
     '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
     '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}' +
@@ -23165,6 +23203,7 @@ function saveSchedule() {
         '</div>' +
         (tkCanCreate() ? tkComposer() : '') +
         '<div id="tkScopeBar">' + tkScopeBar() + '</div>' +
+        (tkIsMgmt() ? '<div id="tkBulkBar" class="tk-bulk hidden"></div>' : '') +
         '<div class="card enter d2"><div class="hd" id="tkHd">Assigned to me ' +
           '<span class="hint">No task completes itself — every submission waits for approval</span></div>' +
           '<div class="bd" id="tkBody"><div class="spinner"></div></div>' +
@@ -23178,8 +23217,39 @@ function saveSchedule() {
           var b = ev.target && ev.target.closest ? ev.target.closest('[data-tk-scope]') : null;
           if (!b) { return; }
           TKV.scope = b.getAttribute('data-tk-scope');
+          TKV.sel = {};
           sb.innerHTML = tkScopeBar();
           tkLoadTasks();
+        };
+      }
+      /* bulk selection (management): checkbox per row + select-all, driving the sticky bulk bar */
+      var body = $('tkBody');
+      if (body) {
+        body.addEventListener('change', function (ev) {
+          var t = ev.target, i, boxes;
+          if (t && t.classList && t.classList.contains('tk-selall')) {
+            boxes = body.querySelectorAll('input[data-tk-sel]');
+            for (i = 0; i < boxes.length; i++) { boxes[i].checked = t.checked; TKV.sel[boxes[i].getAttribute('data-tk-sel')] = t.checked; }
+            tkUpdateBulkBar(); return;
+          }
+          if (t && t.getAttribute && t.getAttribute('data-tk-sel')) {
+            TKV.sel[t.getAttribute('data-tk-sel')] = t.checked; tkUpdateBulkBar();
+          }
+        });
+      }
+      var bulk = $('tkBulkBar');
+      if (bulk) {
+        bulk.onclick = function (ev) {
+          var b = ev.target && ev.target.closest ? ev.target.closest('[data-bulk]') : null;
+          if (!b) { return; }
+          var op = b.getAttribute('data-bulk');
+          if (op === 'clear') {
+            TKV.sel = {};
+            var boxes = document.querySelectorAll('input[data-tk-sel]'), i;
+            for (i = 0; i < boxes.length; i++) { boxes[i].checked = false; }
+            tkUpdateBulkBar(); return;
+          }
+          tkBulkOp(op);
         };
       }
       tkLoadTasks();
@@ -23297,10 +23367,13 @@ function saveSchedule() {
       return;
     }
     var showWho = TKV.scope !== 'mine';
+    var selectable = tkIsMgmt();
     box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
-      '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
-      '<tbody>' + tasks.map(function (t) { return tkRow(t, showWho); }).join('') + '</tbody></table></div>';
+      '<thead><tr>' + (selectable ? '<th class="tk-sel-cell"><input type="checkbox" class="tk-selall" title="Select all on this page"></th>' : '') +
+        '<th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
+      '<tbody>' + tasks.map(function (t) { return tkRow(t, showWho, selectable); }).join('') + '</tbody></table></div>';
     tkWireRows(box);
+    tkUpdateBulkBar();
   }
 
   function tkLoadTasks() {
@@ -23375,7 +23448,7 @@ function saveSchedule() {
     return h;
   }
 
-  function tkRow(t, showWho) {
+  function tkRow(t, showWho, selectable) {
     var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
     var ret = (status === TK_WORKING || status === TK_UPDATED) ? tkReturned(t.comments) : null;
     var details = tkStr(t.details);
@@ -23421,6 +23494,7 @@ function saveSchedule() {
     }
 
     return '<tr class="tk-r">' +
+        (selectable ? '<td class="tk-sel-cell"><input type="checkbox" data-tk-sel="' + tkAttr(id) + '"' + (TKV.sel[id] ? ' checked' : '') + '></td>' : '') +
         '<td data-k="Task"><div class="tk-title">' + esc(tkStr(t.title)) + '</div>' +
           '<div class="tk-meta">' + esc(type) + (priority ? ' · ' + esc(priority) : '') +
             (showWho && tkStr(t.assigned_to) ? ' · <b style="color:var(--text-2)">' + esc(tkStr(t.assigned_to).split('@')[0]) + '</b>' : '') + '</div></td>' +
@@ -23430,7 +23504,7 @@ function saveSchedule() {
         '<td data-k="Status"><span class="pill ' + tkPillClass(status) + '">' + esc(status) + '</span></td>' +
         '<td class="tk-act">' + act + '</td>' +
       '</tr>' +
-      (extra ? '<tr class="tk-x"><td colspan="6">' + extra + '</td></tr>' : '');
+      (extra ? '<tr class="tk-x"><td colspan="' + (selectable ? 7 : 6) + '">' + extra + '</td></tr>' : '');
   }
 
   function tkManagePanel(t, id) {
