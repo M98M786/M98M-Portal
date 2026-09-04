@@ -7353,19 +7353,21 @@ const ROUTES = {
       try { const A = await metricAds(ctx.env); const s = (A && A.split) || {}; ads = { advertised: (Number(s.active) || 0), unadvertised: (Number(s.none) || 0) }; } catch (e) {}
       /* customer service load + returns, from cases */
       const cs = await ctx.env.DB.prepare('SELECT kind, status, opened_at, closed_at FROM cases').all().catch(() => ({ results: [] }));
-      let repliesRequired = 0, handledTm = 0;
+      let repliesRequired = 0, handledTm = 0, resolved = 0, resolved30 = 0;
       const returns = { tm: { n: 0 }, lm: { n: 0 } };
       const OPEN_DONE = ['CLOSED', 'CS_CLOSED'];
       for (const c of (cs.results || [])) {
-        if (OPEN_DONE.indexOf(String(c.status)) < 0) repliesRequired++;
-        const cl = String(c.closed_at || '').slice(0, 7);
-        if (cl === tmKey) handledTm++;
+        const done = OPEN_DONE.indexOf(String(c.status)) >= 0;
+        if (!done) { repliesRequired++; } else { resolved++; }   // status-based: robust even when closed_at is sparse
+        const cl = String(c.closed_at || '');
+        if (cl.slice(0, 7) === tmKey) { handledTm++; }
+        if (done && cl.slice(0, 10) >= d30) { resolved30++; }
         if (String(c.kind) === 'RETURN') { const om = String(c.opened_at || '').slice(0, 7); if (om === tmKey) returns.tm.n++; if (om === lmKey) returns.lm.n++; }
       }
       /* refund £ by the order's month */
       const rf = await ctx.env.DB.prepare("SELECT substr(created_at,1,7) AS m, ROUND(SUM(refunded),2) AS gbp FROM orders WHERE refunded > 0 GROUP BY m").all().catch(() => ({ results: [] }));
       for (const r of (rf.results || [])) { if (String(r.m) === tmKey) returns.tm.gbp = Number(r.gbp) || 0; if (String(r.m) === lmKey) returns.lm.gbp = Number(r.gbp) || 0; }
-      return { traffic, ads, cs: { replies_required: repliesRequired, handled_this_month: handledTm }, returns, as_of: new Date().toISOString() };
+      return { traffic, ads, cs: { replies_required: repliesRequired, resolved: resolved, resolved_30d: resolved30, handled_this_month: handledTm }, returns, as_of: new Date().toISOString() };
     },
   },
 
