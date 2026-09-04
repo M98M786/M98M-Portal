@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260904-2050';
+var BUILD = '20260904-2203';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -19847,11 +19847,16 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     setHTML('rdForm',
       '<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">' +
-        '<div><label class="rd-lab">Account</label><input class="rd-in" id="rdAcc" placeholder="e.g. AZHAR ABRT"></div>' +
+        '<div><label class="rd-lab">Account</label><select class="rd-sel" id="rdAcc"><option value="">Loading…</option></select></div>' +
         '<div><label class="rd-lab">Item ID</label><input class="rd-in" id="rdItem" placeholder="eBay item number"></div>' +
         '<div><label class="rd-lab">Assign to</label><select class="rd-sel" id="rdWho"><option value="">Loading…</option></select></div>' +
       '</div>' +
       '<div style="margin-top:12px"><label class="rd-lab">Title / what needs revising</label><input class="rd-in" id="rdTitle" placeholder="the listing, in a line"></div>' +
+      '<div style="margin-top:12px"><label class="rd-lab">Things to change (tick all that apply)</label>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:5px">' +
+        ['Title', 'Photos', 'Price', 'Description', 'Item specifics'].map(function (c) {
+          return '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;cursor:pointer"><input type="checkbox" class="rd-thing" value="' + c + '"> ' + c + '</label>';
+        }).join('') + '</div></div>' +
       '<div style="margin-top:12px"><label class="rd-lab">Explanation (required)</label><textarea class="rd-ta" id="rdWhy" placeholder="why this listing needs a revision — price, photos, title, keywords…"></textarea></div>' +
       '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
         '<button class="btn-gold" id="rdSend">Raise the revision</button>' +
@@ -19869,22 +19874,34 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var sel = $('rdWho'); if (sel) { sel.innerHTML = '<option value="">Could not load staff</option>'; }
     });
 
+    api('accountList', {}).then(function (d) {
+      var sel = $('rdAcc'); if (!sel) { return; }
+      var accs = ((d && d.accounts) || []).map(function (a) { return a.account; }).filter(Boolean);
+      sel.innerHTML = '<option value="">Select account…</option>' +
+        accs.map(function (a) { return '<option value="' + rdAttr(a) + '">' + esc(a) + '</option>'; }).join('');
+    }).catch(function () {
+      var sel = $('rdAcc'); if (sel) { sel.innerHTML = '<option value="">Could not load accounts</option>'; }
+    });
+
     $('rdSend').onclick = function () {
       var out = $('rdOut');
       var why = rdS($('rdWhy').value);
+      var things = Array.prototype.map.call(document.querySelectorAll('.rd-thing:checked'), function (c) { return c.value; });
+      var details = (things.length ? 'Change: ' + things.join(', ') + '\n' : '') + why;
       var payload = {
         type: 'listing_revision', account: rdS($('rdAcc').value), item_id: rdS($('rdItem').value),
         title: 'Revise: ' + (rdS($('rdTitle').value) || rdS($('rdItem').value)),
-        details: why, assigned_to: rdS($('rdWho').value), priority: 'High',
+        details: details, assigned_to: rdS($('rdWho').value), priority: 'High',
       };
       if (!payload.assigned_to) { out.innerHTML = '<div class="rd-bad">Pick who it goes to.</div>'; return; }
-      if (why.length < 5) { out.innerHTML = '<div class="rd-bad">The explanation is required — say why.</div>'; return; }
+      if (!things.length && why.length < 5) { out.innerHTML = '<div class="rd-bad">Tick what to change, or explain why.</div>'; return; }
       var btn = this; btn.disabled = true; btn.textContent = 'Raising…';
       api('createTask', payload).then(function (r) {
         btn.disabled = false; btn.textContent = 'Raise the revision';
         out.innerHTML = '<div class="rd-ok">Raised — ' + esc((r && r.task_id) || 'done') + ', deadline ' + esc(fmtPkt(r && r.deadline_pkt, true) || '72h') + '.</div>';
         var w = $('rdWhy'); if (w) { w.value = ''; }
         var it = $('rdItem'); if (it) { it.value = ''; }
+        Array.prototype.forEach.call(document.querySelectorAll('.rd-thing:checked'), function (c) { c.checked = false; });
         rdLoad();
       }).catch(function (e) {
         btn.disabled = false; btn.textContent = 'Raise the revision';
@@ -23418,7 +23435,12 @@ function saveSchedule() {
   function tkSubmitForm(t, id, type) {
     var wantsItem = tkHas(TK_ITEM_TYPES, type);
     return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
-      '<div class="field"><label>Submission note</label>' +
+      (type === 'listing_revision' ? '<div class="field"><label>What did you change? (tick all that apply)</label>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px">' +
+        ['Title', 'Photos', 'Price', 'Description', 'Item specifics'].map(function (c) {
+          return '<label style="display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:12.5px;cursor:pointer"><input type="checkbox" data-chg="' + tkAttr(id) + '" value="' + c + '"> ' + c + '</label>';
+        }).join('') + '</div></div>' : '') +
+      '<div class="field"' + (type === 'listing_revision' ? ' style="margin-top:10px"' : '') + '><label>Submission note</label>' +
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
@@ -23503,6 +23525,11 @@ function saveSchedule() {
       item = tkPick(box, 'data-item', id);
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
       if (!payload.submission_note) { toast('Add a submission note — the approver needs it.'); if (note) { note.focus(); } return; }
+      // revision "what changed" ticks ride the note the approver reads
+      var chgSel = form ? form.querySelectorAll('input[data-chg]:checked') : [];
+      if (chgSel && chgSel.length) {
+        payload.submission_note = 'Changed: ' + Array.prototype.map.call(chgSel, function (c) { return c.value; }).join(', ') + '\n' + payload.submission_note;
+      }
       if (item) {
         var v = tkStr(item.value);
         if (v && !/^\d{9,15}$/.test(v)) { toast('An Item ID is 9 to 15 digits.'); item.focus(); return; }
@@ -24777,9 +24804,23 @@ function saveSchedule() {
 
   function tdS(v) { return String(v == null ? '' : v); }
 
+  /* Friendly names for the "which tasks are pending for what" breakdown (owner, 4 Sept). */
+  var TD_TYPE_LABEL = { listing_new: 'New listings', listing_revision: 'Revisions', campaign_set: 'Campaign set-ups',
+    supplier_add: 'Supplier adds', cpc_research: 'CPC research', potential_cpc_review: 'Potential CPC',
+    hunt_revision: 'Hunt revisions', sourcing_link: 'Sourcing links', end_listing: 'End listings',
+    query: 'Queries', keyword_task: 'Keyword docs', general: 'General', loss_review: 'Loss reviews' };
+  function tdTypeRows(byType) {
+    var t = byType || {}, keys = Object.keys(t).sort(function (a, b) { return t[b] - t[a]; });
+    if (!keys.length) { return '<div class="db-row"><span class="k">—</span><span>0</span></div>'; }
+    return keys.map(function (k) {
+      return '<div class="db-row"><span class="k">' + esc(TD_TYPE_LABEL[k] || k) + '</span><span>' + t[k] + '</span></div>';
+    }).join('');
+  }
+
   function tdBadgeFrom(a, e) {
     try {
       STATE.counts.mgmtDesk = (a.hunt_approvals || 0) + (a.task_approvals || 0) + (a.reject_requests || 0) +
+        (a.go_live_pending || 0) +
         (a.registrations || 0) + (e.listing_decisions_pending || 0) + (e.price_alerts_open || 0);
       if (typeof refreshBadges === 'function') { refreshBadges(); }
     } catch (e2) {}
@@ -24956,6 +24997,7 @@ function saveSchedule() {
       box.innerHTML = '<div class="md-grid">' +
         q('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         q('Task approvals', a.task_approvals || 0, 'submitted — decide on Waiting on you', 8, 'mgmtDesk') +
+        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish &amp; add the Item ID', 1, 'goLive') +
         q('Rejection requests', a.reject_requests || 0, 'decide on Waiting on you', 1, 'mgmtDesk') +
         q('Listing decisions', e.listing_decisions_pending || 0, '7 days, no sale — end or revise', 5, 'listingDecisions') +
         q('Price alerts open', e.price_alerts_open || 0, 'cost rose — revise or switch supplier', 1, 'alerts') +
@@ -24992,6 +25034,10 @@ function saveSchedule() {
           by.map(function (x) {
             return '<div class="db-row"><span class="k">' + esc(tdS(x.who).split('@')[0]) + '</span><span>' + x.n + ' open</span></div>';
           }).join('') +
+          '<div style="border-top:1px solid var(--gold-line);margin-top:7px;padding-top:6px">' +
+            '<div class="db-row" style="opacity:.65"><span class="k" style="letter-spacing:.05em;text-transform:uppercase;font-size:9.5px">What’s pending</span><span></span></div>' +
+            tdTypeRows(r.by_type) +
+          '</div>' +
           '</div></div>';
       }).join('') + '</div>' : '<div class="hu-hint">No open tasks anywhere — clean board.</div>';
       var hist = d.history || [];
@@ -25024,7 +25070,72 @@ function saveSchedule() {
     });
     if (TD.tab === 'waiting') { tdWaiting(box); }
     else if (TD.tab === 'queues') { tdQueues(box); }
+    else if (TD.tab === 'manage') { tdManage(box); }
     else { tdDepts(box); }
+  }
+
+  function tdIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+
+  /* Management authority (owner, 4 Sept): go to ANY task by its ID and end / withdraw / delete it,
+     or edit its details / push out its deadline — including tasks the system created. The backend
+     (taskAdmin) is management-gated; this is its face. */
+  function tdManage(box) {
+    if (!tdIsMgmt()) { box.innerHTML = '<div class="alx-empty">Only Management can manage tasks directly.</div>'; return; }
+    box.innerHTML =
+      '<div class="td-ap"><div class="h"><span class="td-kind">manage any task</span>' +
+        '<span class="t">End, withdraw, delete, edit or extend any task by its ID — including one the system created.</span></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">' +
+          '<input id="mtId" placeholder="Task ID (e.g. T1a2b3c4)" style="flex:1;min-width:180px;padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600">' +
+          '<button class="btn-gold" data-mt="end">End (mark complete)</button>' +
+          '<button class="minibtn" data-mt="withdraw">Withdraw</button>' +
+          '<button class="minibtn" data-mt="delete" style="border-color:var(--bad);color:var(--bad)">Delete</button>' +
+        '</div>' +
+        '<div style="border-top:1px solid var(--gold-line);margin-top:12px;padding-top:10px">' +
+          '<div class="m" style="margin-bottom:6px">Edit / extend — fill only what you want to change:</div>' +
+          '<div style="display:grid;gap:8px">' +
+            '<input id="mtTitle" placeholder="New title" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '<textarea id="mtDetails" placeholder="New details" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;min-height:64px"></textarea>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+              '<label class="m" style="min-width:120px">New deadline (PKT)</label>' +
+              '<input id="mtDeadline" type="datetime-local" style="padding:7px 10px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '</div>' +
+            '<input id="mtAssignee" placeholder="Reassign to (email — optional)" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '<div><button class="btn-gold" data-mt="edit">Save changes</button></div>' +
+          '</div>' +
+        '</div>' +
+        '<div id="mtOut" style="margin-top:10px"></div>' +
+      '</div>';
+    box.querySelectorAll('[data-mt]').forEach(function (b) {
+      b.onclick = function () {
+        var op = this.getAttribute('data-mt');
+        var id = tdS(($('mtId') || {}).value).trim();
+        var out = $('mtOut');
+        if (!id) { toast('Enter a task ID first.'); return; }
+        if (op === 'delete' && !window.confirm('Permanently delete task ' + id + '? This cannot be undone.')) { return; }
+        var payload = { op: op, task_id: id };
+        if (op === 'edit') {
+          payload.title = tdS(($('mtTitle') || {}).value).trim();
+          payload.details = tdS(($('mtDetails') || {}).value).trim();
+          payload.assigned_to = tdS(($('mtAssignee') || {}).value).trim();
+          var dl = tdS(($('mtDeadline') || {}).value).trim();     // 'YYYY-MM-DDTHH:MM' = a PKT wall-clock
+          if (dl) { payload.deadline_pkt = dl.length === 16 ? dl + ':00' : dl; }
+          if (!payload.title && !payload.details && !payload.assigned_to && !payload.deadline_pkt) { toast('Nothing to change — fill a field.'); return; }
+        }
+        var me = this; me.disabled = true;
+        api('taskAdmin', payload).then(function (r) {
+          me.disabled = false;
+          var msg = op === 'delete' ? 'Task deleted.' : op === 'end' ? 'Task ended (marked complete).' :
+            op === 'withdraw' ? 'Task withdrawn.' : op === 'edit' ? 'Changes saved' + (r && r.patched ? ' (' + r.patched.filter(function (k) { return k !== 'updated_at'; }).join(', ') + ')' : '') + '.' : 'Done.';
+          if (out) { out.innerHTML = '<div class="tl-row"><span class="k">✅ ' + esc(id) + '</span><span style="color:var(--text-3);font-weight:600">' + esc(msg) + '</span></div>'; }
+          toast(msg);
+          tdCounts();
+        }).catch(function (e) {
+          me.disabled = false;
+          if (out) { out.innerHTML = '<div class="tl-row"><span class="k">🔴 ' + esc(id) + '</span><span style="color:var(--bad);font-weight:700">' + esc(e.message || 'failed') + '</span></div>'; }
+          toast(e.message || 'Could not do that.');
+        });
+      };
+    });
   }
 
   VIEWS.mgmtDesk = {
@@ -25041,6 +25152,7 @@ function saveSchedule() {
         '<button class="td-tab" data-td-tab="waiting">Waiting on you</button>' +
         '<button class="td-tab" data-td-tab="queues">Queues</button>' +
         '<button class="td-tab" data-td-tab="departments">Departments</button>' +
+        (tdIsMgmt() ? '<button class="td-tab" data-td-tab="manage">Manage a task</button>' : '') +
         '</div>' +
         '<div id="tdBody" class="enter d2"><div class="spinner"></div></div>';
     },

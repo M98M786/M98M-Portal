@@ -88,11 +88,16 @@
     }
     setHTML('rdForm',
       '<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">' +
-        '<div><label class="rd-lab">Account</label><input class="rd-in" id="rdAcc" placeholder="e.g. AZHAR ABRT"></div>' +
+        '<div><label class="rd-lab">Account</label><select class="rd-sel" id="rdAcc"><option value="">Loading…</option></select></div>' +
         '<div><label class="rd-lab">Item ID</label><input class="rd-in" id="rdItem" placeholder="eBay item number"></div>' +
         '<div><label class="rd-lab">Assign to</label><select class="rd-sel" id="rdWho"><option value="">Loading…</option></select></div>' +
       '</div>' +
       '<div style="margin-top:12px"><label class="rd-lab">Title / what needs revising</label><input class="rd-in" id="rdTitle" placeholder="the listing, in a line"></div>' +
+      '<div style="margin-top:12px"><label class="rd-lab">Things to change (tick all that apply)</label>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:5px">' +
+        ['Title', 'Photos', 'Price', 'Description', 'Item specifics'].map(function (c) {
+          return '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;cursor:pointer"><input type="checkbox" class="rd-thing" value="' + c + '"> ' + c + '</label>';
+        }).join('') + '</div></div>' +
       '<div style="margin-top:12px"><label class="rd-lab">Explanation (required)</label><textarea class="rd-ta" id="rdWhy" placeholder="why this listing needs a revision — price, photos, title, keywords…"></textarea></div>' +
       '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
         '<button class="btn-gold" id="rdSend">Raise the revision</button>' +
@@ -110,22 +115,34 @@
       var sel = $('rdWho'); if (sel) { sel.innerHTML = '<option value="">Could not load staff</option>'; }
     });
 
+    api('accountList', {}).then(function (d) {
+      var sel = $('rdAcc'); if (!sel) { return; }
+      var accs = ((d && d.accounts) || []).map(function (a) { return a.account; }).filter(Boolean);
+      sel.innerHTML = '<option value="">Select account…</option>' +
+        accs.map(function (a) { return '<option value="' + rdAttr(a) + '">' + esc(a) + '</option>'; }).join('');
+    }).catch(function () {
+      var sel = $('rdAcc'); if (sel) { sel.innerHTML = '<option value="">Could not load accounts</option>'; }
+    });
+
     $('rdSend').onclick = function () {
       var out = $('rdOut');
       var why = rdS($('rdWhy').value);
+      var things = Array.prototype.map.call(document.querySelectorAll('.rd-thing:checked'), function (c) { return c.value; });
+      var details = (things.length ? 'Change: ' + things.join(', ') + '\n' : '') + why;
       var payload = {
         type: 'listing_revision', account: rdS($('rdAcc').value), item_id: rdS($('rdItem').value),
         title: 'Revise: ' + (rdS($('rdTitle').value) || rdS($('rdItem').value)),
-        details: why, assigned_to: rdS($('rdWho').value), priority: 'High',
+        details: details, assigned_to: rdS($('rdWho').value), priority: 'High',
       };
       if (!payload.assigned_to) { out.innerHTML = '<div class="rd-bad">Pick who it goes to.</div>'; return; }
-      if (why.length < 5) { out.innerHTML = '<div class="rd-bad">The explanation is required — say why.</div>'; return; }
+      if (!things.length && why.length < 5) { out.innerHTML = '<div class="rd-bad">Tick what to change, or explain why.</div>'; return; }
       var btn = this; btn.disabled = true; btn.textContent = 'Raising…';
       api('createTask', payload).then(function (r) {
         btn.disabled = false; btn.textContent = 'Raise the revision';
         out.innerHTML = '<div class="rd-ok">Raised — ' + esc((r && r.task_id) || 'done') + ', deadline ' + esc(fmtPkt(r && r.deadline_pkt, true) || '72h') + '.</div>';
         var w = $('rdWhy'); if (w) { w.value = ''; }
         var it = $('rdItem'); if (it) { it.value = ''; }
+        Array.prototype.forEach.call(document.querySelectorAll('.rd-thing:checked'), function (c) { c.checked = false; });
         rdLoad();
       }).catch(function (e) {
         btn.disabled = false; btn.textContent = 'Raise the revision';

@@ -49,9 +49,23 @@
 
   function tdS(v) { return String(v == null ? '' : v); }
 
+  /* Friendly names for the "which tasks are pending for what" breakdown (owner, 4 Sept). */
+  var TD_TYPE_LABEL = { listing_new: 'New listings', listing_revision: 'Revisions', campaign_set: 'Campaign set-ups',
+    supplier_add: 'Supplier adds', cpc_research: 'CPC research', potential_cpc_review: 'Potential CPC',
+    hunt_revision: 'Hunt revisions', sourcing_link: 'Sourcing links', end_listing: 'End listings',
+    query: 'Queries', keyword_task: 'Keyword docs', general: 'General', loss_review: 'Loss reviews' };
+  function tdTypeRows(byType) {
+    var t = byType || {}, keys = Object.keys(t).sort(function (a, b) { return t[b] - t[a]; });
+    if (!keys.length) { return '<div class="db-row"><span class="k">—</span><span>0</span></div>'; }
+    return keys.map(function (k) {
+      return '<div class="db-row"><span class="k">' + esc(TD_TYPE_LABEL[k] || k) + '</span><span>' + t[k] + '</span></div>';
+    }).join('');
+  }
+
   function tdBadgeFrom(a, e) {
     try {
       STATE.counts.mgmtDesk = (a.hunt_approvals || 0) + (a.task_approvals || 0) + (a.reject_requests || 0) +
+        (a.go_live_pending || 0) +
         (a.registrations || 0) + (e.listing_decisions_pending || 0) + (e.price_alerts_open || 0);
       if (typeof refreshBadges === 'function') { refreshBadges(); }
     } catch (e2) {}
@@ -228,6 +242,7 @@
       box.innerHTML = '<div class="md-grid">' +
         q('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         q('Task approvals', a.task_approvals || 0, 'submitted — decide on Waiting on you', 8, 'mgmtDesk') +
+        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish &amp; add the Item ID', 1, 'goLive') +
         q('Rejection requests', a.reject_requests || 0, 'decide on Waiting on you', 1, 'mgmtDesk') +
         q('Listing decisions', e.listing_decisions_pending || 0, '7 days, no sale — end or revise', 5, 'listingDecisions') +
         q('Price alerts open', e.price_alerts_open || 0, 'cost rose — revise or switch supplier', 1, 'alerts') +
@@ -264,6 +279,10 @@
           by.map(function (x) {
             return '<div class="db-row"><span class="k">' + esc(tdS(x.who).split('@')[0]) + '</span><span>' + x.n + ' open</span></div>';
           }).join('') +
+          '<div style="border-top:1px solid var(--gold-line);margin-top:7px;padding-top:6px">' +
+            '<div class="db-row" style="opacity:.65"><span class="k" style="letter-spacing:.05em;text-transform:uppercase;font-size:9.5px">What’s pending</span><span></span></div>' +
+            tdTypeRows(r.by_type) +
+          '</div>' +
           '</div></div>';
       }).join('') + '</div>' : '<div class="hu-hint">No open tasks anywhere — clean board.</div>';
       var hist = d.history || [];
@@ -296,7 +315,72 @@
     });
     if (TD.tab === 'waiting') { tdWaiting(box); }
     else if (TD.tab === 'queues') { tdQueues(box); }
+    else if (TD.tab === 'manage') { tdManage(box); }
     else { tdDepts(box); }
+  }
+
+  function tdIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+
+  /* Management authority (owner, 4 Sept): go to ANY task by its ID and end / withdraw / delete it,
+     or edit its details / push out its deadline — including tasks the system created. The backend
+     (taskAdmin) is management-gated; this is its face. */
+  function tdManage(box) {
+    if (!tdIsMgmt()) { box.innerHTML = '<div class="alx-empty">Only Management can manage tasks directly.</div>'; return; }
+    box.innerHTML =
+      '<div class="td-ap"><div class="h"><span class="td-kind">manage any task</span>' +
+        '<span class="t">End, withdraw, delete, edit or extend any task by its ID — including one the system created.</span></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">' +
+          '<input id="mtId" placeholder="Task ID (e.g. T1a2b3c4)" style="flex:1;min-width:180px;padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600">' +
+          '<button class="btn-gold" data-mt="end">End (mark complete)</button>' +
+          '<button class="minibtn" data-mt="withdraw">Withdraw</button>' +
+          '<button class="minibtn" data-mt="delete" style="border-color:var(--bad);color:var(--bad)">Delete</button>' +
+        '</div>' +
+        '<div style="border-top:1px solid var(--gold-line);margin-top:12px;padding-top:10px">' +
+          '<div class="m" style="margin-bottom:6px">Edit / extend — fill only what you want to change:</div>' +
+          '<div style="display:grid;gap:8px">' +
+            '<input id="mtTitle" placeholder="New title" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '<textarea id="mtDetails" placeholder="New details" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;min-height:64px"></textarea>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+              '<label class="m" style="min-width:120px">New deadline (PKT)</label>' +
+              '<input id="mtDeadline" type="datetime-local" style="padding:7px 10px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '</div>' +
+            '<input id="mtAssignee" placeholder="Reassign to (email — optional)" style="padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit">' +
+            '<div><button class="btn-gold" data-mt="edit">Save changes</button></div>' +
+          '</div>' +
+        '</div>' +
+        '<div id="mtOut" style="margin-top:10px"></div>' +
+      '</div>';
+    box.querySelectorAll('[data-mt]').forEach(function (b) {
+      b.onclick = function () {
+        var op = this.getAttribute('data-mt');
+        var id = tdS(($('mtId') || {}).value).trim();
+        var out = $('mtOut');
+        if (!id) { toast('Enter a task ID first.'); return; }
+        if (op === 'delete' && !window.confirm('Permanently delete task ' + id + '? This cannot be undone.')) { return; }
+        var payload = { op: op, task_id: id };
+        if (op === 'edit') {
+          payload.title = tdS(($('mtTitle') || {}).value).trim();
+          payload.details = tdS(($('mtDetails') || {}).value).trim();
+          payload.assigned_to = tdS(($('mtAssignee') || {}).value).trim();
+          var dl = tdS(($('mtDeadline') || {}).value).trim();     // 'YYYY-MM-DDTHH:MM' = a PKT wall-clock
+          if (dl) { payload.deadline_pkt = dl.length === 16 ? dl + ':00' : dl; }
+          if (!payload.title && !payload.details && !payload.assigned_to && !payload.deadline_pkt) { toast('Nothing to change — fill a field.'); return; }
+        }
+        var me = this; me.disabled = true;
+        api('taskAdmin', payload).then(function (r) {
+          me.disabled = false;
+          var msg = op === 'delete' ? 'Task deleted.' : op === 'end' ? 'Task ended (marked complete).' :
+            op === 'withdraw' ? 'Task withdrawn.' : op === 'edit' ? 'Changes saved' + (r && r.patched ? ' (' + r.patched.filter(function (k) { return k !== 'updated_at'; }).join(', ') + ')' : '') + '.' : 'Done.';
+          if (out) { out.innerHTML = '<div class="tl-row"><span class="k">✅ ' + esc(id) + '</span><span style="color:var(--text-3);font-weight:600">' + esc(msg) + '</span></div>'; }
+          toast(msg);
+          tdCounts();
+        }).catch(function (e) {
+          me.disabled = false;
+          if (out) { out.innerHTML = '<div class="tl-row"><span class="k">🔴 ' + esc(id) + '</span><span style="color:var(--bad);font-weight:700">' + esc(e.message || 'failed') + '</span></div>'; }
+          toast(e.message || 'Could not do that.');
+        });
+      };
+    });
   }
 
   VIEWS.mgmtDesk = {
@@ -313,6 +397,7 @@
         '<button class="td-tab" data-td-tab="waiting">Waiting on you</button>' +
         '<button class="td-tab" data-td-tab="queues">Queues</button>' +
         '<button class="td-tab" data-td-tab="departments">Departments</button>' +
+        (tdIsMgmt() ? '<button class="td-tab" data-td-tab="manage">Manage a task</button>' : '') +
         '</div>' +
         '<div id="tdBody" class="enter d2"><div class="spinner"></div></div>';
     },

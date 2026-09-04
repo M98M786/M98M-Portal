@@ -513,7 +513,12 @@
   function tkSubmitForm(t, id, type) {
     var wantsItem = tkHas(TK_ITEM_TYPES, type);
     return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
-      '<div class="field"><label>Submission note</label>' +
+      (type === 'listing_revision' ? '<div class="field"><label>What did you change? (tick all that apply)</label>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px">' +
+        ['Title', 'Photos', 'Price', 'Description', 'Item specifics'].map(function (c) {
+          return '<label style="display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:12.5px;cursor:pointer"><input type="checkbox" data-chg="' + tkAttr(id) + '" value="' + c + '"> ' + c + '</label>';
+        }).join('') + '</div></div>' : '') +
+      '<div class="field"' + (type === 'listing_revision' ? ' style="margin-top:10px"' : '') + '><label>Submission note</label>' +
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
@@ -598,6 +603,11 @@
       item = tkPick(box, 'data-item', id);
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
       if (!payload.submission_note) { toast('Add a submission note — the approver needs it.'); if (note) { note.focus(); } return; }
+      // revision "what changed" ticks ride the note the approver reads
+      var chgSel = form ? form.querySelectorAll('input[data-chg]:checked') : [];
+      if (chgSel && chgSel.length) {
+        payload.submission_note = 'Changed: ' + Array.prototype.map.call(chgSel, function (c) { return c.value; }).join(', ') + '\n' + payload.submission_note;
+      }
       if (item) {
         var v = tkStr(item.value);
         if (v && !/^\d{9,15}$/.test(v)) { toast('An Item ID is 9 to 15 digits.'); item.focus(); return; }
