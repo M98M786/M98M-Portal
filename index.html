@@ -441,7 +441,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead'];
+var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260903-2122';
+var BUILD = '20260904-0012';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1100,7 +1100,22 @@ VIEWS.home = {
     '.ah-err{font-size:12px;color:var(--bad);font-weight:700}' +
     '.ah-ok{font-size:12px;color:var(--ok);font-weight:700}' +
     '.ah-sync{margin-top:14px;font-size:12px}' +
-    '.ah-sync li{list-style:none;padding:5px 0;border-bottom:1px solid var(--gold-line)}'
+    '.ah-sync li{list-style:none;padding:5px 0;border-bottom:1px solid var(--gold-line)}' +
+    '.ah-ov{margin:6px 0 22px}' +
+    '.ah-ov-wins{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}' +
+    '.ah-ov-wins button{font:inherit;font-size:11.5px;font-weight:800;padding:6px 13px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text-2);cursor:pointer}' +
+    '.ah-ov-wins button.on{background:var(--blue);border-color:var(--blue);color:#fff}' +
+    '.ah-cat-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));margin-bottom:16px}' +
+    '.ah-cat{border:1px solid var(--gold-line);border-radius:12px;padding:14px;background:var(--panel-2)}' +
+    '.ah-cat.risk{border-color:var(--bad)}' +
+    '.ah-cat .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800}' +
+    '.ah-cat .v{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px}' +
+    '.ah-cat.risk .v{color:var(--bad)}' +
+    '.ah-cat .chint{font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px;min-height:28px}' +
+    '.ah-cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;margin-top:10px;padding-top:9px;border-top:1px solid var(--gold-line)}' +
+    '.ah-cat-grid div{font-size:11px;color:var(--text-3);font-weight:600;font-variant-numeric:tabular-nums}' +
+    '.ah-cat-grid b{color:var(--text-2);font-weight:800}' +
+    '.ah-cat-grid .on2,.ah-cat-grid .on2 b{color:var(--blue)}'
   );
 
   function ahStr(v) { return String(v == null ? '' : v).trim(); }
@@ -1257,6 +1272,73 @@ VIEWS.home = {
     return h + '</div>';
   }
 
+  /* 4 Sept (owner): the service-metrics OVERVIEW — the case scoreboard behind eBay's grade, said
+     in plain words. Four kinds of case (return requests, disputes & claims, item not received,
+     not-as-described) across four windows (30 days / 90 days / this month / last month): a fleet
+     headline up top and a per-account table below. ONE 'serviceCases' read carries all four
+     windows, so the window chips switch instantly with no refetch. INAD (not-as-described) is the
+     seller-fault slice of returns — the part that actually moves the service-metric rating — so it
+     rides its own red tile even though it is also counted inside returns. */
+  var AH_SC = null;
+  var AH_WIN = 'd30';
+  var AH_WINS = [['d30', 'Last 30 days'], ['d90', 'Last 90 days'], ['tm', 'This month'], ['lm', 'Last month']];
+  var AH_CATS = [
+    ['returns', 'Return requests', 'buyers asking to send something back', 0],
+    ['disputes', 'Disputes & claims', 'cases and payment disputes opened against you', 0],
+    ['inr', 'Item not received', 'buyer says the parcel never arrived', 0],
+    ['inad', 'Not as described', 'damaged, faulty or wrong — this is the part that hurts your rating', 1]
+  ];
+  function ahWinLabel(k) { for (var i = 0; i < AH_WINS.length; i++) { if (AH_WINS[i][0] === k) { return AH_WINS[i][1]; } } return k; }
+  function ahCasesOverview() {
+    var sc = AH_SC;
+    if (!sc) { return '<div class="ah-note">Service-metric case counts did not load.</div>'; }
+    var tot = sc.total || {};
+    var winSel = '<div class="ah-ov-wins">' + AH_WINS.map(function (w) {
+      return '<button data-ah-win="' + w[0] + '"' + (w[0] === AH_WIN ? ' class="on"' : '') + '>' + esc(w[1]) + '</button>';
+    }).join('') + '</div>';
+    var tiles = '<div class="ah-cat-tiles">' + AH_CATS.map(function (c) {
+      var key = c[0], active = (tot[AH_WIN] || {})[key] || 0;
+      var grid = AH_WINS.map(function (w) {
+        var lbl = w[1].replace('Last ', '').replace('This month', 'this month');
+        return '<div' + (w[0] === AH_WIN ? ' class="on2"' : '') + '>' + esc(lbl) + ' <b>' + (((tot[w[0]] || {})[key]) || 0) + '</b></div>';
+      }).join('');
+      return '<div class="ah-cat' + (c[3] ? ' risk' : '') + '"><div class="k">' + esc(c[1]) + '</div>' +
+        '<div class="v">' + active + '</div>' +
+        '<div class="chint">' + esc(c[2]) + '</div>' +
+        '<div class="ah-cat-grid">' + grid + '</div></div>';
+    }).join('') + '</div>';
+    var byA = sc.by_account || {};
+    var rows = Object.keys(byA).sort().map(function (a) {
+      var w = (byA[a] || {})[AH_WIN] || {};
+      return '<tr><td style="font-weight:700">' + esc(a) + '</td>' +
+        '<td class="ah-num">' + (w.returns || 0) + '</td>' +
+        '<td class="ah-num">' + (w.disputes || 0) + '</td>' +
+        '<td class="ah-num">' + (w.inr || 0) + '</td>' +
+        '<td class="ah-num' + ((w.inad || 0) > 0 ? ' ah-err' : '') + '">' + (w.inad || 0) + '</td>' +
+        '<td class="ah-num">' + (w.total || 0) + '</td></tr>';
+    }).join('');
+    var tw = tot[AH_WIN] || {};
+    var table = '<div class="scroll"><table class="ah-tbl" style="min-width:560px"><thead><tr>' +
+      '<th>Account</th><th>Return requests</th><th>Disputes</th><th>Not received</th><th>Not as described</th><th>All cases</th></tr></thead><tbody>' +
+      rows +
+      '<tr style="border-top:2px solid var(--gold-line)"><td style="font-weight:800">All accounts</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.returns || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.disputes || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.inr || 0) + '</td>' +
+      '<td class="ah-num' + ((tw.inad || 0) > 0 ? ' ah-err' : '') + '" style="font-weight:800">' + (tw.inad || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.total || 0) + '</td></tr>' +
+      '</tbody></table></div>';
+    return '<h3 style="margin:2px 0 4px;font-size:13px">Service metrics — overview ' +
+        '<span style="color:var(--text-3);font-weight:600">(' + esc(ahWinLabel(AH_WIN)) + ' · every case behind eBay’s grade)</span></h3>' +
+      winSel + tiles + table;
+  }
+  function ahFillCases() {
+    var box = $('ahCasesBox');
+    if (!box) { return; }
+    box.innerHTML = AH_SC ? ahCasesOverview()
+      : '<div class="ah-note">Service-metric case counts are loading…</div>';
+  }
+
   function ahPaint(d) {
     var box = $('ahBody');
     if (!box) { return; }
@@ -1273,6 +1355,9 @@ VIEWS.home = {
        grades each shop at, and every metric behind it with eBay's own thresholds. Everything
        below it is the portal's operational picture; this section is eBay speaking. */
     var h = ahStandards((d && d.standards) || []);
+    /* the service-metrics OVERVIEW (case scoreboard) fills in from its own 'serviceCases' read —
+       an empty box here so the section keeps its place whichever feed lands first */
+    h += '<div id="ahCasesBox" class="ah-ov"><div class="ah-note">Service-metric case counts are loading…</div></div>';
     h += ahServiceMetrics((d && d.metrics) || []);
 
     h += '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
@@ -1315,6 +1400,7 @@ VIEWS.home = {
       '<p style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 8px">A one-time re-consent per account unlocks campaign watching (ABRT, Hafiza), standards and real fees for everyone. Nothing existing breaks — the sheet automations keep their own keys.</p>' +
       '<button class="minibtn" id="ahConsent">Get the consent links</button><div id="ahConsentBox" style="margin-top:8px"></div></div>';
     box.innerHTML = h;
+    ahFillCases();
 
     var cb = $('ahConsent');
     if (cb) {
@@ -1373,6 +1459,15 @@ VIEWS.home = {
       if (had) { toast('Showing the last health picture — could not refresh just now.'); return; }
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load account health.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
     });
+    /* the case scoreboard rides its own feed — all four windows in one read, so it never blocks
+       the main health picture and the window chips need no further server calls */
+    var scHad = (typeof cacheRead === 'function') ? cacheRead('serviceCases', {}) : null;
+    if (scHad) { AH_SC = scHad; }
+    api('serviceCases', {}).then(function (sc) {
+      AH_SC = sc || null;
+      if (typeof cacheWrite === 'function') { cacheWrite('serviceCases', {}, sc); }
+      ahFillCases();
+    }).catch(function () { ahFillCases(); });
   }
 
   VIEWS.accountHealth = {
@@ -1410,6 +1505,17 @@ VIEWS.home = {
     },
     init: function () {
       ahLoad();
+      /* window chips on the service-metrics overview — one delegated listener on the stable body,
+         so it survives every repaint; switching a window is pure client render (data's already in) */
+      var ahb = $('ahBody');
+      if (ahb) {
+        ahb.addEventListener('click', function (ev) {
+          var w = ev.target && ev.target.closest ? ev.target.closest('[data-ah-win]') : null;
+          if (!w) { return; }
+          AH_WIN = w.getAttribute('data-ah-win');
+          ahFillCases();
+        });
+      }
       var ops = $('ahOpsBtns');
       if (ops) {
         ops.onclick = function (ev) {
@@ -14755,7 +14861,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '' };
 
   function oRange() {
     var t = ukToday();
@@ -14833,6 +14939,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
+    /* the plain headline numbers (traffic, advertised count, CS load, returns) — one Engine read */
+    api('bizExtras', {}).then(function (d) { O.extras = d || null; oPaintExtras(); })
+      .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
     truthPage({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) })
@@ -14847,6 +14956,38 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   /* 30 Aug (owner): "show the amount currently in the account — your funds" + "VAT I need to
      pay ... for that specific account". Two cards: eBay's own seller funds per account, and the
      calculator's VAT-to-HMRC line per account, month to date. */
+  /* 4 Sept (owner): "common man" headline tiles — the numbers a non-technical owner scans first.
+     Traffic (eBay's own impressions/views, a day behind), how many listings are actually being
+     advertised, the customer-service reply backlog, and returns this month vs last. One bizExtras
+     read; each tile deep-links to the board that owns it. */
+  function oPaintExtras() {
+    var box = $('o2Extras');
+    if (!box) { return; }
+    var d = O.extras;
+    if (!d) { return; }
+    var fmtK = function (n) { n = oN(n); return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : n.toLocaleString('en-GB'); };
+    var tr = d.traffic || {}, trTm = tr.tm || {}, trLm = tr.lm || {};
+    var ads = d.ads || {}, adsTot = oN(ads.advertised) + oN(ads.unadvertised);
+    var cs = d.cs || {}, ret = d.returns || {}, rTm = ret.tm || {}, rLm = ret.lm || {};
+    var tile = function (view, label, val, sub, bad) {
+      return '<a href="#' + view + '" style="text-decoration:none;color:inherit">' +
+        '<div class="ac-tile' + (bad ? ' bad' : '') + '"><div class="k">' + label + '</div>' +
+        '<div class="v">' + val + '</div>' +
+        (sub ? '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:4px">' + sub + '</div>' : '') +
+        '</div></a>';
+    };
+    box.innerHTML = '<div class="ac-tiles">' +
+      tile('traffic', 'Shop views · this month', fmtK(trTm.views),
+        fmtK(trTm.imp) + ' impressions · ' + fmtK(trLm.views) + ' views last month') +
+      tile('adsCentre', 'Listings advertised', fmtK(ads.advertised),
+        'of ' + fmtK(adsTot) + ' live · ' + fmtK(ads.unadvertised) + ' not advertised') +
+      tile('csDesk', 'Replies needed', oN(cs.replies_required).toLocaleString('en-GB'),
+        oN(cs.resolved).toLocaleString('en-GB') + ' cases resolved to date', oN(cs.replies_required) > 0) +
+      tile('csDesk', 'Returns · this month', oN(rTm.n).toLocaleString('en-GB'),
+        oGBP0(rTm.gbp) + ' refunded · ' + oN(rLm.n) + ' last month (' + oGBP0(rLm.gbp) + ')') +
+    '</div>';
+  }
+
   function oPaintMoney() {
     var box = $('o2Money');
     if (!box) { return; }
@@ -15427,6 +15568,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +

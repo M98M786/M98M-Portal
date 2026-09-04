@@ -111,7 +111,7 @@
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '' };
 
   function oRange() {
     var t = ukToday();
@@ -189,6 +189,9 @@
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
+    /* the plain headline numbers (traffic, advertised count, CS load, returns) — one Engine read */
+    api('bizExtras', {}).then(function (d) { O.extras = d || null; oPaintExtras(); })
+      .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
     truthPage({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) })
@@ -203,6 +206,38 @@
   /* 30 Aug (owner): "show the amount currently in the account — your funds" + "VAT I need to
      pay ... for that specific account". Two cards: eBay's own seller funds per account, and the
      calculator's VAT-to-HMRC line per account, month to date. */
+  /* 4 Sept (owner): "common man" headline tiles — the numbers a non-technical owner scans first.
+     Traffic (eBay's own impressions/views, a day behind), how many listings are actually being
+     advertised, the customer-service reply backlog, and returns this month vs last. One bizExtras
+     read; each tile deep-links to the board that owns it. */
+  function oPaintExtras() {
+    var box = $('o2Extras');
+    if (!box) { return; }
+    var d = O.extras;
+    if (!d) { return; }
+    var fmtK = function (n) { n = oN(n); return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : n.toLocaleString('en-GB'); };
+    var tr = d.traffic || {}, trTm = tr.tm || {}, trLm = tr.lm || {};
+    var ads = d.ads || {}, adsTot = oN(ads.advertised) + oN(ads.unadvertised);
+    var cs = d.cs || {}, ret = d.returns || {}, rTm = ret.tm || {}, rLm = ret.lm || {};
+    var tile = function (view, label, val, sub, bad) {
+      return '<a href="#' + view + '" style="text-decoration:none;color:inherit">' +
+        '<div class="ac-tile' + (bad ? ' bad' : '') + '"><div class="k">' + label + '</div>' +
+        '<div class="v">' + val + '</div>' +
+        (sub ? '<div style="font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:4px">' + sub + '</div>' : '') +
+        '</div></a>';
+    };
+    box.innerHTML = '<div class="ac-tiles">' +
+      tile('traffic', 'Shop views · this month', fmtK(trTm.views),
+        fmtK(trTm.imp) + ' impressions · ' + fmtK(trLm.views) + ' views last month') +
+      tile('adsCentre', 'Listings advertised', fmtK(ads.advertised),
+        'of ' + fmtK(adsTot) + ' live · ' + fmtK(ads.unadvertised) + ' not advertised') +
+      tile('csDesk', 'Replies needed', oN(cs.replies_required).toLocaleString('en-GB'),
+        oN(cs.resolved).toLocaleString('en-GB') + ' cases resolved to date', oN(cs.replies_required) > 0) +
+      tile('csDesk', 'Returns · this month', oN(rTm.n).toLocaleString('en-GB'),
+        oGBP0(rTm.gbp) + ' refunded · ' + oN(rLm.n) + ' last month (' + oGBP0(rLm.gbp) + ')') +
+    '</div>';
+  }
+
   function oPaintMoney() {
     var box = $('o2Money');
     if (!box) { return; }
@@ -783,6 +818,7 @@
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +

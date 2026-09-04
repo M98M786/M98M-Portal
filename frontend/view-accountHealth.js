@@ -29,7 +29,22 @@
     '.ah-err{font-size:12px;color:var(--bad);font-weight:700}' +
     '.ah-ok{font-size:12px;color:var(--ok);font-weight:700}' +
     '.ah-sync{margin-top:14px;font-size:12px}' +
-    '.ah-sync li{list-style:none;padding:5px 0;border-bottom:1px solid var(--gold-line)}'
+    '.ah-sync li{list-style:none;padding:5px 0;border-bottom:1px solid var(--gold-line)}' +
+    '.ah-ov{margin:6px 0 22px}' +
+    '.ah-ov-wins{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}' +
+    '.ah-ov-wins button{font:inherit;font-size:11.5px;font-weight:800;padding:6px 13px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text-2);cursor:pointer}' +
+    '.ah-ov-wins button.on{background:var(--blue);border-color:var(--blue);color:#fff}' +
+    '.ah-cat-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));margin-bottom:16px}' +
+    '.ah-cat{border:1px solid var(--gold-line);border-radius:12px;padding:14px;background:var(--panel-2)}' +
+    '.ah-cat.risk{border-color:var(--bad)}' +
+    '.ah-cat .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800}' +
+    '.ah-cat .v{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px}' +
+    '.ah-cat.risk .v{color:var(--bad)}' +
+    '.ah-cat .chint{font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px;min-height:28px}' +
+    '.ah-cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;margin-top:10px;padding-top:9px;border-top:1px solid var(--gold-line)}' +
+    '.ah-cat-grid div{font-size:11px;color:var(--text-3);font-weight:600;font-variant-numeric:tabular-nums}' +
+    '.ah-cat-grid b{color:var(--text-2);font-weight:800}' +
+    '.ah-cat-grid .on2,.ah-cat-grid .on2 b{color:var(--blue)}'
   );
 
   function ahStr(v) { return String(v == null ? '' : v).trim(); }
@@ -186,6 +201,73 @@
     return h + '</div>';
   }
 
+  /* 4 Sept (owner): the service-metrics OVERVIEW — the case scoreboard behind eBay's grade, said
+     in plain words. Four kinds of case (return requests, disputes & claims, item not received,
+     not-as-described) across four windows (30 days / 90 days / this month / last month): a fleet
+     headline up top and a per-account table below. ONE 'serviceCases' read carries all four
+     windows, so the window chips switch instantly with no refetch. INAD (not-as-described) is the
+     seller-fault slice of returns — the part that actually moves the service-metric rating — so it
+     rides its own red tile even though it is also counted inside returns. */
+  var AH_SC = null;
+  var AH_WIN = 'd30';
+  var AH_WINS = [['d30', 'Last 30 days'], ['d90', 'Last 90 days'], ['tm', 'This month'], ['lm', 'Last month']];
+  var AH_CATS = [
+    ['returns', 'Return requests', 'buyers asking to send something back', 0],
+    ['disputes', 'Disputes & claims', 'cases and payment disputes opened against you', 0],
+    ['inr', 'Item not received', 'buyer says the parcel never arrived', 0],
+    ['inad', 'Not as described', 'damaged, faulty or wrong — this is the part that hurts your rating', 1]
+  ];
+  function ahWinLabel(k) { for (var i = 0; i < AH_WINS.length; i++) { if (AH_WINS[i][0] === k) { return AH_WINS[i][1]; } } return k; }
+  function ahCasesOverview() {
+    var sc = AH_SC;
+    if (!sc) { return '<div class="ah-note">Service-metric case counts did not load.</div>'; }
+    var tot = sc.total || {};
+    var winSel = '<div class="ah-ov-wins">' + AH_WINS.map(function (w) {
+      return '<button data-ah-win="' + w[0] + '"' + (w[0] === AH_WIN ? ' class="on"' : '') + '>' + esc(w[1]) + '</button>';
+    }).join('') + '</div>';
+    var tiles = '<div class="ah-cat-tiles">' + AH_CATS.map(function (c) {
+      var key = c[0], active = (tot[AH_WIN] || {})[key] || 0;
+      var grid = AH_WINS.map(function (w) {
+        var lbl = w[1].replace('Last ', '').replace('This month', 'this month');
+        return '<div' + (w[0] === AH_WIN ? ' class="on2"' : '') + '>' + esc(lbl) + ' <b>' + (((tot[w[0]] || {})[key]) || 0) + '</b></div>';
+      }).join('');
+      return '<div class="ah-cat' + (c[3] ? ' risk' : '') + '"><div class="k">' + esc(c[1]) + '</div>' +
+        '<div class="v">' + active + '</div>' +
+        '<div class="chint">' + esc(c[2]) + '</div>' +
+        '<div class="ah-cat-grid">' + grid + '</div></div>';
+    }).join('') + '</div>';
+    var byA = sc.by_account || {};
+    var rows = Object.keys(byA).sort().map(function (a) {
+      var w = (byA[a] || {})[AH_WIN] || {};
+      return '<tr><td style="font-weight:700">' + esc(a) + '</td>' +
+        '<td class="ah-num">' + (w.returns || 0) + '</td>' +
+        '<td class="ah-num">' + (w.disputes || 0) + '</td>' +
+        '<td class="ah-num">' + (w.inr || 0) + '</td>' +
+        '<td class="ah-num' + ((w.inad || 0) > 0 ? ' ah-err' : '') + '">' + (w.inad || 0) + '</td>' +
+        '<td class="ah-num">' + (w.total || 0) + '</td></tr>';
+    }).join('');
+    var tw = tot[AH_WIN] || {};
+    var table = '<div class="scroll"><table class="ah-tbl" style="min-width:560px"><thead><tr>' +
+      '<th>Account</th><th>Return requests</th><th>Disputes</th><th>Not received</th><th>Not as described</th><th>All cases</th></tr></thead><tbody>' +
+      rows +
+      '<tr style="border-top:2px solid var(--gold-line)"><td style="font-weight:800">All accounts</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.returns || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.disputes || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.inr || 0) + '</td>' +
+      '<td class="ah-num' + ((tw.inad || 0) > 0 ? ' ah-err' : '') + '" style="font-weight:800">' + (tw.inad || 0) + '</td>' +
+      '<td class="ah-num" style="font-weight:800">' + (tw.total || 0) + '</td></tr>' +
+      '</tbody></table></div>';
+    return '<h3 style="margin:2px 0 4px;font-size:13px">Service metrics — overview ' +
+        '<span style="color:var(--text-3);font-weight:600">(' + esc(ahWinLabel(AH_WIN)) + ' · every case behind eBay’s grade)</span></h3>' +
+      winSel + tiles + table;
+  }
+  function ahFillCases() {
+    var box = $('ahCasesBox');
+    if (!box) { return; }
+    box.innerHTML = AH_SC ? ahCasesOverview()
+      : '<div class="ah-note">Service-metric case counts are loading…</div>';
+  }
+
   function ahPaint(d) {
     var box = $('ahBody');
     if (!box) { return; }
@@ -202,6 +284,9 @@
        grades each shop at, and every metric behind it with eBay's own thresholds. Everything
        below it is the portal's operational picture; this section is eBay speaking. */
     var h = ahStandards((d && d.standards) || []);
+    /* the service-metrics OVERVIEW (case scoreboard) fills in from its own 'serviceCases' read —
+       an empty box here so the section keeps its place whichever feed lands first */
+    h += '<div id="ahCasesBox" class="ah-ov"><div class="ah-note">Service-metric case counts are loading…</div></div>';
     h += ahServiceMetrics((d && d.metrics) || []);
 
     h += '<div class="scroll"><table class="ah-tbl"><thead><tr>' +
@@ -244,6 +329,7 @@
       '<p style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 8px">A one-time re-consent per account unlocks campaign watching (ABRT, Hafiza), standards and real fees for everyone. Nothing existing breaks — the sheet automations keep their own keys.</p>' +
       '<button class="minibtn" id="ahConsent">Get the consent links</button><div id="ahConsentBox" style="margin-top:8px"></div></div>';
     box.innerHTML = h;
+    ahFillCases();
 
     var cb = $('ahConsent');
     if (cb) {
@@ -302,6 +388,15 @@
       if (had) { toast('Showing the last health picture — could not refresh just now.'); return; }
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:18px 0">Could not load account health.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:5px">' + esc(e.message) + '</span></div>';
     });
+    /* the case scoreboard rides its own feed — all four windows in one read, so it never blocks
+       the main health picture and the window chips need no further server calls */
+    var scHad = (typeof cacheRead === 'function') ? cacheRead('serviceCases', {}) : null;
+    if (scHad) { AH_SC = scHad; }
+    api('serviceCases', {}).then(function (sc) {
+      AH_SC = sc || null;
+      if (typeof cacheWrite === 'function') { cacheWrite('serviceCases', {}, sc); }
+      ahFillCases();
+    }).catch(function () { ahFillCases(); });
   }
 
   VIEWS.accountHealth = {
@@ -339,6 +434,17 @@
     },
     init: function () {
       ahLoad();
+      /* window chips on the service-metrics overview — one delegated listener on the stable body,
+         so it survives every repaint; switching a window is pure client render (data's already in) */
+      var ahb = $('ahBody');
+      if (ahb) {
+        ahb.addEventListener('click', function (ev) {
+          var w = ev.target && ev.target.closest ? ev.target.closest('[data-ah-win]') : null;
+          if (!w) { return; }
+          AH_WIN = w.getAttribute('data-ah-win');
+          ahFillCases();
+        });
+      }
       var ops = $('ahOpsBtns');
       if (ops) {
         ops.onclick = function (ev) {
