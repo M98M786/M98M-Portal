@@ -965,6 +965,46 @@ function actionAcknowledgeSignal_(payload, ctx) {
   };
 }
 
+/** Owner (5 Sept): clear the whole board in one press. With 100+ pinned signals, one-at-a-time
+ * acknowledging never seems to move — the 60-card window just refills. This acknowledges EVERY
+ * signal currently visible to the viewer (never anyone else's) in a single column write. */
+function actionAcknowledgeAllSignals_(payload, ctx) {
+  const viewer = signalsViewer_(ctx);
+  const cards = signalsCardIndex_();
+  const sh = getPortalDb_(false).getSheetByName('SIGNALS');
+  if (!sh) throw new Error('SIGNALS tab missing — run setupDatabase()');
+  const stamp = now_();
+  let acked = 0;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    const vals = sh.getDataRange().getValues();
+    if (vals.length < 2) { return { acknowledged_all: true, count: 0 }; }
+    const head = vals[0].map(function (h) { return String(h); });
+    const col = signalsCol_(head, 'acknowledged_by');            // 1-based
+    const colVals = sh.getRange(2, col, vals.length - 1, 1).getValues();
+    for (let i = 1; i < vals.length; i++) {
+      const rec = {};
+      head.forEach(function (h, c) { rec[h] = vals[i][c]; });
+      const type = String(rec.type || '');
+      if (SIG_LAUNCH_TYPES.indexOf(type) < 0 && type !== ADV_SIGNAL_TYPE) continue;
+      const date = signalsDateKey_(rec.date);
+      const itemKey = String(rec.item_id === null || rec.item_id === undefined ? '' : rec.item_id);
+      const period = signalsPeriod_(type, date, itemKey);
+      const card = cards[String(rec.account || '') + '|' + period] || null;
+      if (!signalsVisible_(type, String(rec.account || ''), String(rec.targeted_roles || ''), card, viewer)) continue;
+      const old = String(rec.acknowledged_by || '');
+      const acks = signalsParseAcks_(old);
+      if (acks.mine[viewer.normalized]) continue;               // already acknowledged by me
+      colVals[i - 1][0] = (old ? old + ' | ' : '') + ctx.ident.email + ' @ ' + stamp;
+      acked++;
+    }
+    if (acked) { sh.getRange(2, col, vals.length - 1, 1).setValues(colVals); }
+  } finally { lock.releaseLock(); }
+  if (acked) { logActivity_(ctx.ident.email, 'ACK_ALL_SIGNALS', 'SIGNALS', '', String(acked), 'cleared the board'); }
+  return { acknowledged_all: true, count: acked };
+}
+
 function signalsCol_(head, name) {
   if (SIG_WRITABLE_COLS.indexOf(name) < 0) throw new Error('write outside the SIGNALS whitelist: ' + name);
   const c = head.indexOf(name);
@@ -975,6 +1015,7 @@ function signalsCol_(head, name) {
 const ACTIONS_SIGNALS = {
   mySignals:         [actionMySignals_, 'any'],
   acknowledgeSignal: [actionAcknowledgeSignal_, 'any'],
+  acknowledgeAllSignals: [actionAcknowledgeAllSignals_, 'any'],
 };
 
 
