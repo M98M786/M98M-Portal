@@ -222,7 +222,7 @@ async function authorize(env, idToken, session) {
     }
   }
   const user = await env.DB.prepare(
-    'SELECT email, name, role, status, modules, tools, super, accounts FROM users WHERE email = ?1'
+    'SELECT email, name, role, status, modules, tools, super FROM users WHERE email = ?1'
   ).bind(email).first();
   if (!user || (user.status !== 'approved' && !user.super)) throw new AuthError('auth');
   if (user.super) user.role = 'Management';
