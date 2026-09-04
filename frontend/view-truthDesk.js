@@ -59,6 +59,29 @@
 
   function tdGo(key) { try { location.hash = key; renderView(key); } catch (e) {} }
 
+  /* One approved/returned card leaves the desk WITHOUT re-pulling every feed (the old path blanked
+     the list to a spinner and re-fetched task approvals + hunts + mgmtPendingAS + listDesk — two of
+     them the slow Apps Script backend — just to drop one row). We remove the card, refresh the two
+     "count IS the list" numbers from what's actually left, and decrement the nav badge locally.
+     TILE_EQUALS_LIST holds because the count is recomputed from the surviving .td-item cards. */
+  function tdDropCard(card, box) {
+    if (card && card.parentNode) { card.parentNode.removeChild(card); }
+    if (box) {
+      var n = box.querySelectorAll('.td-item').length;
+      box.querySelectorAll('.td-cn').forEach(function (s) { s.textContent = n; });
+      if (n === 0 && !box.querySelector('[data-td-rej]') && !box.querySelector('.alx-empty')) {
+        var e = document.createElement('div');
+        e.className = 'alx-empty';
+        e.textContent = 'Nothing is waiting on you. The queue is clear.';
+        box.appendChild(e);
+      }
+    }
+    try {
+      STATE.counts.mgmtDesk = Math.max(0, (STATE.counts.mgmtDesk || 1) - 1);
+      if (typeof refreshBadges === 'function') { refreshBadges(); }
+    } catch (e2) {}
+  }
+
   /* ————— tab: Waiting on you ————— */
   function tdWaiting(box) {
     box.innerHTML = '<div class="spinner"></div>';
@@ -92,14 +115,14 @@
           '<button class="minibtn" data-td-retry="1" style="margin-left:auto">Try again</button></div></div>';
       }
       h += '<p class="m" style="font-size:11.5px;color:var(--text-3);font-weight:600;margin:0 0 10px">' +
-        items.length + ' item(s) rendered = ' + items.length + ' item(s) counted — the count IS the list (TILE_EQUALS_LIST).</p>';
+        '<span class="td-cn">' + items.length + '</span> item(s) rendered = <span class="td-cn">' + items.length + '</span> item(s) counted — the count IS the list (TILE_EQUALS_LIST).</p>';
       if (!items.length && !(a.reject_requests || 0)) {
         h += '<div class="alx-empty">Nothing is waiting on you. The queue is clear.</div>';
       }
       h += items.map(function (it, i) {
         if (it.kind === 'task') {
           var t = it.o, id = tdS(t.task_id);
-          return '<div class="td-ap"><div class="h"><span class="td-kind">task approval</span>' +
+          return '<div class="td-ap td-item"><div class="h"><span class="td-kind">task approval</span>' +
             '<span class="t">' + esc(tdS(t.title)) + '</span>' +
             '<span class="m">' + esc(tdS(t.assigned_to).split('@')[0]) + ' · ' + esc(tdS(t.type)) + (tdS(t.account) ? ' · ' + esc(tdS(t.account)) : '') + '</span></div>' +
             (tdS(t.submission_note) ? '<div class="m" style="margin-top:6px"><span class="k">Note</span> ' + esc(tdS(t.submission_note)) + '</div>' : '') +
@@ -109,7 +132,7 @@
         }
         var hu = it.o;
         /* huntQueue rows carry the workbook's own headers: Title / hunter_name / Date Added */
-        return '<div class="td-ap"><div class="h"><span class="td-kind" style="background:var(--warn-soft);color:var(--warn)">hunt approval</span>' +
+        return '<div class="td-ap td-item"><div class="h"><span class="td-kind" style="background:var(--warn-soft);color:var(--warn)">hunt approval</span>' +
           '<span class="t">' + esc(tdS(hu.Title || hu.title || hu['Product Title'] || hu.hunt_id)) + '</span>' +
           '<span class="m">' + esc(tdS(hu.hunter_name || hu.hunter_email || '').split('@')[0]) + (tdS(hu['Date Added']) ? ' · ' + esc(tdS(hu['Date Added'])) : '') + '</span></div>' +
           '<div class="btns"><button class="minibtn" data-td-hunt="1">Decide on Hunt approvals →</button>' +
@@ -134,9 +157,22 @@
       box.querySelectorAll('[data-td-retry]').forEach(function (b) { b.onclick = function () { tdWaiting(box); }; });
       box.querySelectorAll('[data-td-ap]').forEach(function (b) {
         b.onclick = function () {
-          var id = this.getAttribute('data-td-ap'); var me = this; me.disabled = true;
-          api('approveTask', { task_id: id }).then(function () { toast('Approved — it counts now.'); tdWaiting(box); tdCounts(); })
-            .catch(function (e) { me.disabled = false; toast('Not approved: ' + e.message); });
+          var id = this.getAttribute('data-td-ap'); var me = this;
+          if (me.disabled) { return; }
+          var card = me.closest ? me.closest('.td-ap') : null;
+          me.disabled = true; me.textContent = 'Approving…';
+          if (card) { card.style.opacity = '.55'; }
+          /* the write still lands on the sheet backend (unchanged source of truth — the D1-primary
+             flip stays gated); we just stop freezing the desk on the round-trip. On success the card
+             leaves and the counts drop locally, with NO blank-and-refetch of every feed. */
+          api('approveTask', { task_id: id }).then(function () {
+            toast('Approved — it counts now.');
+            tdDropCard(card, box);
+          }).catch(function (e) {
+            me.disabled = false; me.textContent = 'Approve';
+            if (card) { card.style.opacity = ''; }
+            toast('Not approved: ' + e.message);
+          });
         };
       });
       box.querySelectorAll('[data-td-rt]').forEach(function (b) {
@@ -145,9 +181,18 @@
           var ta = box.querySelector('[data-td-cmt="' + id + '"]');
           var comment = ta ? tdS(ta.value).trim() : '';
           if (!comment) { toast('A comment is mandatory when returning a task.'); if (ta) { ta.focus(); } return; }
-          var me = this; me.disabled = true;
-          api('returnTask', { task_id: id, comment: comment }).then(function () { toast('Returned with your comment.'); tdWaiting(box); tdCounts(); })
-            .catch(function (e) { me.disabled = false; toast('Not returned: ' + e.message); });
+          var me = this; if (me.disabled) { return; }
+          var card = me.closest ? me.closest('.td-ap') : null;
+          me.disabled = true; me.textContent = 'Returning…';
+          if (card) { card.style.opacity = '.55'; }
+          api('returnTask', { task_id: id, comment: comment }).then(function () {
+            toast('Returned with your comment.');
+            tdDropCard(card, box);
+          }).catch(function (e) {
+            me.disabled = false; me.textContent = 'Return with comment';
+            if (card) { card.style.opacity = ''; }
+            toast('Not returned: ' + e.message);
+          });
         };
       });
       box.querySelectorAll('[data-td-hunt]').forEach(function (b) { b.onclick = function () { tdGo('huntQueue'); }; });
