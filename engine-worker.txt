@@ -5778,17 +5778,31 @@ const ROUTES = {
       /* Review 3: a duplicated listing shows its WHOLE campaign map — every membership carries
          the campaign's live status, so a paused campaign reads as paused instead of masquerading
          as active. The listing qualifies for this board only when RUNNING in more than one. */
-      const dups = await ctx.env.DB.prepare(
-        'SELECT ca.account, ca.listing_id, ca.campaign_id, c.name, c.status, ia.title ' +
+      /* Owner (5 Sept): the board must know active-vs-paused. A listing qualifies ONLY when it is
+         itself ACTIVE and its membership is genuinely LIVE in more than one campaign (campaign
+         RUNNING and, for CPC, the ad ACTIVE) — an ended listing, or one whose ads are paused, is not
+         double-charged and must not be flagged. Every membership carries funding + ad + listing
+         status so the row shows its TRUE state (LIVE / AD PAUSED / CAMPAIGN PAUSED / LISTING ENDED),
+         computed by the same liveMembershipRow/memberChipStatus the dup-sweep and ads split use. */
+      const dupsRaw = await ctx.env.DB.prepare(
+        'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, c.name, c.status AS c_status, c.funding_model, ia.title, ia.status AS l_status ' +
         'FROM campaign_ads ca ' +
         'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
         'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id ' +
-        'WHERE EXISTS (' +
+        "WHERE ia.status = 'ACTIVE' AND EXISTS (" +
         '  SELECT 1 FROM campaign_ads x JOIN campaigns cx ON cx.account = x.account AND cx.campaign_id = x.campaign_id ' +
-        "  WHERE x.account = ca.account AND x.listing_id = ca.listing_id AND cx.status LIKE '%RUNNING%' " +
+        "  WHERE x.account = ca.account AND x.listing_id = ca.listing_id " +
+        "    AND (cx.status LIKE '%RUNNING%' OR cx.status = 'ENDING_SOON') " +
+        "    AND (cx.funding_model != 'COST_PER_CLICK' OR x.ad_status = 'ACTIVE' OR x.ad_status IS NULL OR x.ad_status = '') " +
         '  GROUP BY x.listing_id HAVING COUNT(DISTINCT x.campaign_id) > 1) ' +
         'ORDER BY ca.account, ca.listing_id'
       ).all();
+      const dups = { results: (dupsRaw.results || []).map((r) => ({
+        account: r.account, listing_id: r.listing_id, campaign_id: r.campaign_id, name: r.name, title: r.title,
+        status: r.c_status,
+        live: liveMembershipRow(r),                 // true = actually being charged (campaign running + ad live + listing active)
+        chip: memberChipStatus(r),                  // LIVE · AD PAUSED · CAMPAIGN PAUSED · LISTING ENDED · ARCHIVED
+      })) };
       const events = await ctx.env.DB.prepare(
         'SELECT account, campaign, item_id, change_type, old, new, actor, at FROM campaign_events ORDER BY id DESC LIMIT 60'
       ).all();
