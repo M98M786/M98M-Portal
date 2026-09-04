@@ -123,7 +123,7 @@ export default {
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync, signalsPull],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -222,7 +222,7 @@ async function authorize(env, idToken, session) {
     }
   }
   const user = await env.DB.prepare(
-    'SELECT email, name, role, status, modules, tools, super FROM users WHERE email = ?1'
+    'SELECT email, name, role, status, modules, tools, super, accounts FROM users WHERE email = ?1'
   ).bind(email).first();
   if (!user || (user.status !== 'approved' && !user.super)) throw new AuthError('auth');
   if (user.super) user.role = 'Management';
@@ -1293,6 +1293,14 @@ async function asRunJobDirect(env, job, args) {
   });
   const t = await r.text();
   try { return JSON.parse(t); } catch (e) { return { ok: false, status: r.status, raw: t.slice(0, 200) }; }
+}
+
+/** Owner (5 Sept): signals were freezing — computeSignals (a heavy per-account sheet read) only ran
+ * on a gated MANUAL refresh, never on a schedule, so "went negative / worst CPC / returns" signals
+ * stopped appearing. The engine now triggers it hourly server-to-server. computeSignals keeps its
+ * own time budget on the Apps Script side, so a slow run simply continues on the next hour. */
+async function signalsPull(env) {
+  try { await asRunJobDirect(env, 'computeSignals'); } catch (e) { /* best-effort — never blocks the slot's other work */ }
 }
 
 async function orderSync(env) {
@@ -3703,6 +3711,9 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE users ADD COLUMN shift TEXT",
     "ALTER TABLE users ADD COLUMN checkpoints TEXT",
     "ALTER TABLE users ADD COLUMN working_days TEXT",
+    "ALTER TABLE users ADD COLUMN accounts TEXT",
+    "CREATE TABLE IF NOT EXISTS signals (skey TEXT PRIMARY KEY, account TEXT, type TEXT, date TEXT, item_id TEXT, value TEXT, baseline TEXT, targeted_roles TEXT, owner_email TEXT, card_json TEXT, acknowledged_by TEXT DEFAULT '', updated_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_sig_type ON signals(type)",
     "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
     "CREATE INDEX IF NOT EXISTS idx_hr_hunter ON hunt_rows(hunter_email)",
     "CREATE INDEX IF NOT EXISTS idx_it_a ON inbox_threads(a_email, last_at)",
@@ -4673,6 +4684,38 @@ const ROUTES = {
   /* Owner (5 Sept): the manager controls the team's tasking — one list of EVERY open task with the
      handles to edit / reassign / extend / end / delete each one (via taskAdmin on the sheet). The
      archive scope is open to everyone (their own completed work; management sees everyone's). */
+  /* Owner (5 Sept): the revision desk, served from the D1 task mirror instead of the slow Apps
+     Script sheet read. Same shape as actionRevisionDesk_ — open queue, recently done, counts. */
+  revisionDeskEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      const role = String(ctx.user.role || '');
+      const REVD = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager', 'CS', 'Order Processor'];
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
+      if (REVD.indexOf(role) < 0 && !mgmt) throw new AuthError('auth');
+      const rs = await ctx.env.DB.prepare(
+        "SELECT task_id, account, item_id, title, details, assigned_to, status, deadline_pkt, created_at, decided_at FROM tasks WHERE type = 'listing_revision'"
+      ).all().catch(() => ({ results: [] }));
+      const now = Date.now(), cut30 = now - 30 * 86400000, cut7 = now - 7 * 86400000, MARK = '[auto-qualify]';
+      const open = [], done = []; let auto30 = 0, overdue = 0, done7 = 0;
+      for (const t of (rs.results || [])) {
+        const isAuto = String(t.details || '').indexOf(MARK) >= 0;
+        const made = Date.parse(String(t.created_at || '')) || 0;
+        if (isAuto && made > cut30) auto30++;
+        const rec = { task_id: String(t.task_id), account: String(t.account || ''), item_id: String(t.item_id || ''),
+          title: String(t.title || ''), details: String(t.details || '').slice(0, 240), assigned_to: String(t.assigned_to || ''),
+          status: String(t.status || ''), deadline_pkt: String(t.deadline_pkt || ''), created_at: String(t.created_at || ''),
+          decided_at: String(t.decided_at || ''), auto: isAuto };
+        if (rec.status === 'Completed') { const dec = Date.parse(rec.decided_at) || made; if (dec > cut7) done7++; done.push(rec); }
+        else { const dl = Date.parse(rec.deadline_pkt); rec.overdue = !isNaN(dl) && dl < now; if (rec.overdue) overdue++; open.push(rec); }
+      }
+      open.sort((a, b) => String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)));
+      done.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
+      return { open: open.slice(0, 200), done: done.slice(0, 60),
+        counts: { open: open.length, overdue, auto_30d: auto30, done_7d: done7 },
+        can_raise: (REVD.indexOf(role) >= 0 || mgmt), source: 'engine' };
+    },
+  },
+
   allTasksEngine: {
     auth: 'any', fn: async (p, ctx) => {
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super || ctx.user.role === 'Team Lead';
@@ -4696,12 +4739,12 @@ const ROUTES = {
       const users = p.users || [];
       for (const u of users) {
         await ctx.env.DB.prepare(
-          'INSERT INTO users (email, name, role, status, modules, tools, super, shift, checkpoints, working_days) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ' +
-          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7, shift=?8, checkpoints=?9, working_days=?10'
+          'INSERT INTO users (email, name, role, status, modules, tools, super, shift, checkpoints, working_days, accounts) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ' +
+          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7, shift=?8, checkpoints=?9, working_days=?10, accounts=?11'
         ).bind(
           String(u.email || '').toLowerCase(), String(u.name || ''), String(u.role || ''),
           String(u.status || ''), String(u.modules || ''), String(u.tools || ''), u.super ? 1 : 0,
-          String(u.shift || ''), String(u.checkpoints || ''), String(u.working_days || '')
+          String(u.shift || ''), String(u.checkpoints || ''), String(u.working_days || ''), String(u.accounts || '')
         ).run();
       }
       return { synced: users.length };
