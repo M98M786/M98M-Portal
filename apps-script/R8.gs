@@ -90,7 +90,7 @@ function actionDeptPending_(payload, ctx) {
     const type = String(t.type || 'general');
     const dept = R8_DEPT_OF_TYPE[type] || 'General';
     const status = String(t.status || '');
-    const rec = depts[dept] = depts[dept] || { dept: dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+    const rec = depts[dept] = depts[dept] || { dept: dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, by_type: {}, system_made: 0, mgmt_made: 0 };
     if (status === TASK_STATUS_COMPLETED) {
       const dAt = taskPktIso_(t.decided_at);
       if (dAt) history.push({ dept: dept, type: type, title: String(t.title || '').slice(0, 80), assigned_to: String(t.assigned_to || ''),
@@ -102,6 +102,7 @@ function actionDeptPending_(payload, ctx) {
     if (r8IsSystemActor_(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
     const who = String(t.assigned_to || '(unassigned)');
     rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
+    rec.by_type[type] = (rec.by_type[type] || 0) + 1;   // which tasks are pending for what (owner, 4 Sept)
     const dl = taskMs_(t.deadline_pkt);
     if (!isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED) rec.overdue++;
     const created = taskPktIso_(t.created_at);
@@ -636,17 +637,24 @@ function actionMgmtPendingAS_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email) && ctx.user.role !== 'Team Lead') throw new Error('management only');
   let huntsPending = 0;
   readTab_('HUNTING_DB').forEach(function (r) { if (String(huntRecord_(r).approval_status || '') === '') huntsPending++; });
-  let submitted = 0, rejreq = 0;
+  let submitted = 0, rejreq = 0, goLive = 0;
   readTab_('TASKS').forEach(function (t) {
     if (String(t.status) === TASK_STATUS_SUBMITTED) submitted++;
     if (String(t.comments || '').indexOf('"flag":"rejreq"') >= 0 &&
         [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED].indexOf(String(t.status)) >= 0) rejreq++;
+    // go-live drafts waiting on the approver (Zaid) — a listing_new carrying the draft flag, not yet live
+    if (String(t.type || '') === 'listing_new' && String(t.status || '') !== TASK_STATUS_COMPLETED &&
+        typeof listingFlagOf_ === 'function') {
+      const fl = listingFlagOf_(t.comments);
+      if (fl && fl.flag === 'draft') goLive++;
+    }
   });
   let registrations = 0;
   readTab_('USERS').forEach(function (u) { if (String(u.status) === 'pending') registrations++; });
   let reviewsPending = 0;
   try { reviewsPending = actionStaffReviewsPending_({}, ctx).pending.length; } catch (e) {}
   return { hunt_approvals: huntsPending, task_approvals: submitted, reject_requests: rejreq,
+    go_live_pending: goLive,
     registrations: registrations, staff_reviews: reviewsPending, week: r8WeekKey_(), as_of: now_() };
 }
 

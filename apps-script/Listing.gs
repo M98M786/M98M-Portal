@@ -904,6 +904,35 @@ function listingMirrorRevisit_(account, itemId, fields, sheetRow, actor) {
 /* The flag shares TASKS.comments with the return-note history (returnTask appends
  * "[stamp] X returned: …" lines there). To never clobber that, the flag rides ONE tagged line
  * and is merged in/out; every other line is preserved. */
+/** Owner (4 Sept): a revision request to a hunter becomes a real task on the hunter's board — not
+ * just a notification. Created for both triggers (a lister asking for a revision, and a hunt sent
+ * back for revision). Deduped per item + hunter so repeated asks don't pile up; skips a paused
+ * account (huntAppendTask_ gates that). Returns the new task_id, or '' when skipped/deduped. */
+function listingHunterRevisionTask_(rec, hunter, note, byEmail) {
+  if (!hunter || !hunter.email) return '';
+  const itemId = String(rec.item_id || '');
+  const already = readTab_('TASKS').some(function (t) {
+    return String(t.type || '') === 'hunt_revision' &&
+      String(t.item_id || '') === itemId &&
+      normalizeEmail(t.assigned_to) === normalizeEmail(hunter.email) &&
+      String(t.status || '') !== TASK_STATUS_COMPLETED;
+  });
+  if (already) return '';
+  const stamp = now_();
+  const id = 'T' + Utilities.getUuid().slice(0, 8);
+  const title = String(rec.title || rec.task_id || '').slice(0, 60);
+  huntAppendTask_({
+    task_id: id, type: 'hunt_revision', account: String(rec.account || ''), item_id: itemId,
+    title: 'hunt_revision — ' + title,
+    details: 'Revision requested by ' + (byEmail || 'management') + ':\n' + String(note || '').slice(0, 800) +
+      (itemId ? '\nItem ID: ' + itemId : '') + '\nListing: ' + title,
+    assigned_by: byEmail || '', assigned_to: hunter.email, priority: String(rec.priority || ''),
+    deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), status: TASK_STATUS_PENDING,
+    created_at: stamp, updated_at: stamp,
+  });
+  return id;
+}
+
 const LISTING_FLAG_TAG = '@LFLAG@';
 
 function listingFlagObj_(flag, by, extra) {
@@ -999,6 +1028,8 @@ function actionListerNeedInfo_(payload, ctx) {
     notify_(hunter.email, 'More info needed on your hunt',
       '🟠 ' + who + ' is listing "' + title + '" and needs more from you: ' + note.slice(0, 400) +
       ' — add what is missing (or revise the hunt) so the listing can go live.', 'hunt:' + hunter.hunt_id);
+    // and a real task on the hunter's board to add the revision (owner, 4 Sept)
+    try { listingHunterRevisionTask_(rec, hunter, note, ctx.ident.email); } catch (e) {}
   }
   notifyManagement_('Listing waiting on hunter',
     '🟠 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' needs more info' +

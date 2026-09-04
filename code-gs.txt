@@ -6114,6 +6114,26 @@ function actionDecideHunt_(payload, ctx) {
       '🟡 Your hunt "' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 120) + '" needs more before a decision: ' +
       comment + ' — open Product hunting, press Revise on it, fill the gap and it goes straight back to the queue.',
       'hunt:' + rrec.hunt_id + ':rev');
+    // and a real task on the hunter's board to add the revision (owner, 4 Sept), deduped per hunt
+    try {
+      const hemail = String(rrec.hunter_email || '');
+      const dup = !hemail || readTab_('TASKS').some(function (t) {
+        return String(t.type || '') === 'hunt_revision' && String(t.details || '').indexOf('hunt:' + rrec.hunt_id) >= 0 && String(t.status || '') !== TASK_STATUS_COMPLETED;
+      });
+      if (hemail && !dup) {
+        const s2 = now_();
+        huntAppendTask_({
+          task_id: 'T' + Utilities.getUuid().slice(0, 8), type: 'hunt_revision',
+          account: String(rrec[HC_ACCOUNT] || ''), item_id: '',
+          title: 'hunt_revision — ' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 60),
+          details: 'Management sent this hunt back for revision (hunt:' + rrec.hunt_id + '):\n' + comment.slice(0, 800) +
+            '\nOpen Product hunting → Revise, fill the gap, and it returns to the queue.',
+          assigned_by: ctx.ident.email, assigned_to: hemail, priority: '',
+          deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), status: TASK_STATUS_PENDING,
+          created_at: s2, updated_at: s2,
+        });
+      }
+    } catch (e) {}
     return { revision: true, hunt_id: rrec.hunt_id };
   }
 
@@ -8066,6 +8086,35 @@ function listingMirrorRevisit_(account, itemId, fields, sheetRow, actor) {
 /* The flag shares TASKS.comments with the return-note history (returnTask appends
  * "[stamp] X returned: …" lines there). To never clobber that, the flag rides ONE tagged line
  * and is merged in/out; every other line is preserved. */
+/** Owner (4 Sept): a revision request to a hunter becomes a real task on the hunter's board — not
+ * just a notification. Created for both triggers (a lister asking for a revision, and a hunt sent
+ * back for revision). Deduped per item + hunter so repeated asks don't pile up; skips a paused
+ * account (huntAppendTask_ gates that). Returns the new task_id, or '' when skipped/deduped. */
+function listingHunterRevisionTask_(rec, hunter, note, byEmail) {
+  if (!hunter || !hunter.email) return '';
+  const itemId = String(rec.item_id || '');
+  const already = readTab_('TASKS').some(function (t) {
+    return String(t.type || '') === 'hunt_revision' &&
+      String(t.item_id || '') === itemId &&
+      normalizeEmail(t.assigned_to) === normalizeEmail(hunter.email) &&
+      String(t.status || '') !== TASK_STATUS_COMPLETED;
+  });
+  if (already) return '';
+  const stamp = now_();
+  const id = 'T' + Utilities.getUuid().slice(0, 8);
+  const title = String(rec.title || rec.task_id || '').slice(0, 60);
+  huntAppendTask_({
+    task_id: id, type: 'hunt_revision', account: String(rec.account || ''), item_id: itemId,
+    title: 'hunt_revision — ' + title,
+    details: 'Revision requested by ' + (byEmail || 'management') + ':\n' + String(note || '').slice(0, 800) +
+      (itemId ? '\nItem ID: ' + itemId : '') + '\nListing: ' + title,
+    assigned_by: byEmail || '', assigned_to: hunter.email, priority: String(rec.priority || ''),
+    deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), status: TASK_STATUS_PENDING,
+    created_at: stamp, updated_at: stamp,
+  });
+  return id;
+}
+
 const LISTING_FLAG_TAG = '@LFLAG@';
 
 function listingFlagObj_(flag, by, extra) {
@@ -8161,6 +8210,8 @@ function actionListerNeedInfo_(payload, ctx) {
     notify_(hunter.email, 'More info needed on your hunt',
       '🟠 ' + who + ' is listing "' + title + '" and needs more from you: ' + note.slice(0, 400) +
       ' — add what is missing (or revise the hunt) so the listing can go live.', 'hunt:' + hunter.hunt_id);
+    // and a real task on the hunter's board to add the revision (owner, 4 Sept)
+    try { listingHunterRevisionTask_(rec, hunter, note, ctx.ident.email); } catch (e) {}
   }
   notifyManagement_('Listing waiting on hunter',
     '🟠 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' needs more info' +
@@ -22675,7 +22726,7 @@ function actionDeptPending_(payload, ctx) {
     const type = String(t.type || 'general');
     const dept = R8_DEPT_OF_TYPE[type] || 'General';
     const status = String(t.status || '');
-    const rec = depts[dept] = depts[dept] || { dept: dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+    const rec = depts[dept] = depts[dept] || { dept: dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, by_type: {}, system_made: 0, mgmt_made: 0 };
     if (status === TASK_STATUS_COMPLETED) {
       const dAt = taskPktIso_(t.decided_at);
       if (dAt) history.push({ dept: dept, type: type, title: String(t.title || '').slice(0, 80), assigned_to: String(t.assigned_to || ''),
@@ -22687,6 +22738,7 @@ function actionDeptPending_(payload, ctx) {
     if (r8IsSystemActor_(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
     const who = String(t.assigned_to || '(unassigned)');
     rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
+    rec.by_type[type] = (rec.by_type[type] || 0) + 1;   // which tasks are pending for what (owner, 4 Sept)
     const dl = taskMs_(t.deadline_pkt);
     if (!isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED) rec.overdue++;
     const created = taskPktIso_(t.created_at);
@@ -23221,17 +23273,24 @@ function actionMgmtPendingAS_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email) && ctx.user.role !== 'Team Lead') throw new Error('management only');
   let huntsPending = 0;
   readTab_('HUNTING_DB').forEach(function (r) { if (String(huntRecord_(r).approval_status || '') === '') huntsPending++; });
-  let submitted = 0, rejreq = 0;
+  let submitted = 0, rejreq = 0, goLive = 0;
   readTab_('TASKS').forEach(function (t) {
     if (String(t.status) === TASK_STATUS_SUBMITTED) submitted++;
     if (String(t.comments || '').indexOf('"flag":"rejreq"') >= 0 &&
         [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED].indexOf(String(t.status)) >= 0) rejreq++;
+    // go-live drafts waiting on the approver (Zaid) — a listing_new carrying the draft flag, not yet live
+    if (String(t.type || '') === 'listing_new' && String(t.status || '') !== TASK_STATUS_COMPLETED &&
+        typeof listingFlagOf_ === 'function') {
+      const fl = listingFlagOf_(t.comments);
+      if (fl && fl.flag === 'draft') goLive++;
+    }
   });
   let registrations = 0;
   readTab_('USERS').forEach(function (u) { if (String(u.status) === 'pending') registrations++; });
   let reviewsPending = 0;
   try { reviewsPending = actionStaffReviewsPending_({}, ctx).pending.length; } catch (e) {}
   return { hunt_approvals: huntsPending, task_approvals: submitted, reject_requests: rejreq,
+    go_live_pending: goLive,
     registrations: registrations, staff_reviews: reviewsPending, week: r8WeekKey_(), as_of: now_() };
 }
 

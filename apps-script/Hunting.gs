@@ -371,6 +371,26 @@ function actionDecideHunt_(payload, ctx) {
       '🟡 Your hunt "' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 120) + '" needs more before a decision: ' +
       comment + ' — open Product hunting, press Revise on it, fill the gap and it goes straight back to the queue.',
       'hunt:' + rrec.hunt_id + ':rev');
+    // and a real task on the hunter's board to add the revision (owner, 4 Sept), deduped per hunt
+    try {
+      const hemail = String(rrec.hunter_email || '');
+      const dup = !hemail || readTab_('TASKS').some(function (t) {
+        return String(t.type || '') === 'hunt_revision' && String(t.details || '').indexOf('hunt:' + rrec.hunt_id) >= 0 && String(t.status || '') !== TASK_STATUS_COMPLETED;
+      });
+      if (hemail && !dup) {
+        const s2 = now_();
+        huntAppendTask_({
+          task_id: 'T' + Utilities.getUuid().slice(0, 8), type: 'hunt_revision',
+          account: String(rrec[HC_ACCOUNT] || ''), item_id: '',
+          title: 'hunt_revision — ' + String(rrec[HC_TITLE] || rrec.hunt_id).slice(0, 60),
+          details: 'Management sent this hunt back for revision (hunt:' + rrec.hunt_id + '):\n' + comment.slice(0, 800) +
+            '\nOpen Product hunting → Revise, fill the gap, and it returns to the queue.',
+          assigned_by: ctx.ident.email, assigned_to: hemail, priority: '',
+          deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), status: TASK_STATUS_PENDING,
+          created_at: s2, updated_at: s2,
+        });
+      }
+    } catch (e) {}
     return { revision: true, hunt_id: rrec.hunt_id };
   }
 
