@@ -690,7 +690,11 @@ function versionWatch(){
       setTimeout(safeReload, 2*60*1000);
       return;
     }
-    location.reload();
+    /* GitHub Pages caches index.html (~10 min), so a plain location.reload() can re-serve the SAME
+       stale build — the tab then sticks on old code and the "already reloaded for this stamp" guard
+       gives up. Force a genuinely fresh document with a one-time cache-busting query (5 Sept). */
+    try{ location.replace(location.pathname + '?v=' + Date.now() + location.hash); }
+    catch(e){ try{ location.reload(true); }catch(e2){ location.reload(); } }
   }
   function check(){
     fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' })
@@ -710,6 +714,8 @@ function versionWatch(){
   setTimeout(check, 15*1000);
 }
 versionWatch();
+/* strip the one-time cache-buster (?v=…) the reloader added, so the address bar stays clean */
+try{ if(/[?&]v=\d/.test(location.search)){ history.replaceState(null, '', location.pathname + location.hash); } }catch(e){}
 
 /* Review 4b (Hasib): "in every data of my portal i need sorting from up to down". One delegated
    handler: click any column header in the portal's standard tables and the body sorts by that
