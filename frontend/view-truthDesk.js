@@ -242,7 +242,7 @@
       box.innerHTML = '<div class="md-grid">' +
         q('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         q('Task approvals', a.task_approvals || 0, 'submitted — decide on Waiting on you', 8, 'mgmtDesk') +
-        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish &amp; add the Item ID', 1, 'goLive') +
+        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish and add the Item ID', 1, 'goLive') +
         q('Rejection requests', a.reject_requests || 0, 'decide on Waiting on you', 1, 'mgmtDesk') +
         q('Listing decisions', e.listing_decisions_pending || 0, '7 days, no sale — end or revise', 5, 'listingDecisions') +
         q('Price alerts open', e.price_alerts_open || 0, 'cost rose — revise or switch supplier', 1, 'alerts') +

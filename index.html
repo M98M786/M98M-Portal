@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260904-2203';
+var BUILD = '20260904-2211';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -24997,7 +24997,7 @@ function saveSchedule() {
       box.innerHTML = '<div class="md-grid">' +
         q('Hunt approvals', a.hunt_approvals || 0, 'products waiting on a decision', 5, 'huntQueue') +
         q('Task approvals', a.task_approvals || 0, 'submitted — decide on Waiting on you', 8, 'mgmtDesk') +
-        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish &amp; add the Item ID', 1, 'goLive') +
+        q('Go-live drafts', a.go_live_pending || 0, 'waiting for Zaid to publish and add the Item ID', 1, 'goLive') +
         q('Rejection requests', a.reject_requests || 0, 'decide on Waiting on you', 1, 'mgmtDesk') +
         q('Listing decisions', e.listing_decisions_pending || 0, '7 days, no sale — end or revise', 5, 'listingDecisions') +
         q('Price alerts open', e.price_alerts_open || 0, 'cost rose — revise or switch supplier', 1, 'alerts') +
