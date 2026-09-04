@@ -51,9 +51,17 @@
     },
     init: function () {
       $('rdRefresh').onclick = function () { rdLoad(); };
+      rdPaintForm(rdCanRaise());   // the raise form is instant — it never needed the slow queue read
       rdLoad();
     }
   };
+
+  /* Who may raise a revision — decided from the role client-side so the form paints at once,
+     instead of waiting on the (slow, Apps Script) queue read. Mirrors the server's gate. */
+  function rdCanRaise() {
+    var r = (STATE.user && STATE.user.role) || '';
+    return ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager', 'CS', 'Order Processor'].indexOf(r) >= 0 || !!(STATE.user && STATE.user.super);
+  }
 
   function rdLoad() {
     var seq = ++RD.seq;
@@ -61,13 +69,12 @@
       if (seq !== RD.seq) { return; }
       d = d || {};
       rdPaintTiles(d.counts || {});
-      rdPaintForm(!!d.can_raise);
       rdPaintQueue((d.open || []));
       rdPaintDone((d.done || []));
     }).catch(function (e) {
       if (seq !== RD.seq) { return; }
-      setHTML('rdTiles', '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + ' — press Refresh.</div>');
-      setHTML('rdForm', ''); setHTML('rdQueue', ''); setHTML('rdDone', '');
+      setHTML('rdTiles', '<div class="hu-hint" style="margin-top:0">Queue is slow to load — the form above still works. Press Refresh for the queue.</div>');
+      setHTML('rdQueue', '<div class="hu-hint" style="margin-top:0">' + esc(e.message) + '</div>'); setHTML('rdDone', '');
     });
   }
 

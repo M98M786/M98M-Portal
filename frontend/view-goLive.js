@@ -37,6 +37,7 @@
     label: 'Go-live desk',
     icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
     roles: GL_ROLES,
+    only: 'zaidkaleem987@gmail.com',   // owner 5 Sept: Zaid alone publishes and enters Item IDs
     order: 17.6,
     badge: function () { return (STATE.counts && STATE.counts.goLive) || 0; },
     render: function () {

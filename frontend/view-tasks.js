@@ -16,6 +16,20 @@
   var TK_APPROVE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager'];
   var TK_OPEN = [TK_PENDING, TK_WORKING, TK_UPDATED];
 
+  /* scope: 'mine' (own open tasks) · 'everyone' (management — every open task, with manage controls)
+     · 'archive' (completed — own, or everyone for management). Owner 5 Sept. */
+  var TKV = { scope: 'mine' };
+  function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+  function tkScopeBar() {
+    var opts = tkIsMgmt() ? [['mine', 'My tasks'], ['everyone', 'All tasks — manage'], ['archive', 'Archive']]
+      : [['mine', 'My tasks'], ['archive', 'Archive']];
+    return '<div class="tk-scope" style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap">' +
+      opts.map(function (o) {
+        var on = TKV.scope === o[0];
+        return '<button class="minibtn" data-tk-scope="' + o[0] + '"' + (on ? ' style="background:var(--gold-a);color:#161616;border-color:var(--gold-a)"' : '') + '>' + o[1] + '</button>';
+      }).join('') + '</div>';
+  }
+
   VIEW_CSS.push(
     '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}' +
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
@@ -199,13 +213,24 @@
           (tkCanCreate() ? '<button class="btn-gold" id="tkNewToggle" style="margin-left:auto">New task</button>' : '') +
         '</div>' +
         (tkCanCreate() ? tkComposer() : '') +
-        '<div class="card enter d2"><div class="hd">Assigned to me ' +
+        '<div id="tkScopeBar">' + tkScopeBar() + '</div>' +
+        '<div class="card enter d2"><div class="hd" id="tkHd">Assigned to me ' +
           '<span class="hint">No task completes itself — every submission waits for approval</span></div>' +
           '<div class="bd" id="tkBody"><div class="spinner"></div></div>' +
         '</div>';
     },
     init: function () {
       if (tkCanCreate()) { tkWireComposer(); }
+      var sb = $('tkScopeBar');
+      if (sb) {
+        sb.onclick = function (ev) {
+          var b = ev.target && ev.target.closest ? ev.target.closest('[data-tk-scope]') : null;
+          if (!b) { return; }
+          TKV.scope = b.getAttribute('data-tk-scope');
+          sb.innerHTML = tkScopeBar();
+          tkLoadTasks();
+        };
+      }
       tkLoadTasks();
       if (tkHas(TK_APPROVE_ROLES, tkRole())) {
         api('pendingApprovals').then(function (d) { tkCount('approvals', ((d && d.tasks) || []).length); }).catch(function () {});
@@ -289,6 +314,8 @@
       the same reason as the hunt queue: the server re-validates every action against the current
       task, so a stale row can only earn a readable error, never a wrong write. */
   function tkFetchTasks() {
+    if (TKV.scope === 'everyone') { return api('allTasksEngine', { scope: 'open' }); }
+    if (TKV.scope === 'archive') { return api('allTasksEngine', { scope: 'archive', everyone: tkIsMgmt() ? 1 : 0 }); }
     return api('myTasks').then(function (d) {
       if (typeof cacheWrite === 'function') { cacheWrite('myTasks', {}, d); }
       return d;
@@ -296,24 +323,41 @@
   }
 
   function tkPaintTasks(box, d) {
-    var tasks = (d && d.tasks) || [], open = 0, i;
-    for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } }
-    tkCount('tasks', open);
+    var all = (d && d.tasks) || [], i, open = 0, tasks;
+    if (TKV.scope === 'archive') {
+      tasks = all.filter(function (t) { return tkStr(t.status) === TK_COMPLETED; });
+    } else {
+      tasks = all.filter(function (t) {
+        if (tkStr(t.status) === TK_COMPLETED) { return false; }        // finished work leaves the active list → Archive
+        if (tkStr(t.type) === 'listing_new') { var fl = tkFlag(t); if (fl && fl.flag === 'draft') { return false; } }   // go-live drafts live on the Go-live desk
+        return true;
+      });
+    }
+    if (TKV.scope === 'mine') { for (i = 0; i < tasks.length; i++) { if (tkHas(TK_OPEN, tkStr(tasks[i].status))) { open++; } } tkCount('tasks', open); }
+    var hd = $('tkHd');
+    if (hd) {
+      hd.innerHTML = (TKV.scope === 'everyone' ? 'All tasks — ' + tasks.length + ' open <span class="hint">every person’s work · edit, reassign, extend, end or delete any of it</span>'
+        : TKV.scope === 'archive' ? 'Archive — ' + tasks.length + ' completed <span class="hint">' + (tkIsMgmt() ? 'everyone’s' : 'your') + ' finished work</span>'
+        : 'Assigned to me <span class="hint">No task completes itself — every submission waits for approval</span>');
+    }
     if (!tasks.length) {
-      box.innerHTML = '<div class="tk-empty">No tasks on you right now.<span>New work lands here the moment someone assigns it.</span></div>';
+      box.innerHTML = '<div class="tk-empty">' + (TKV.scope === 'archive' ? 'Nothing completed yet.' : TKV.scope === 'everyone' ? 'No open tasks anywhere — the board is clear.' : 'No tasks on you right now.') +
+        '<span>' + (TKV.scope === 'mine' ? 'New work lands here the moment someone assigns it.' : '') + '</span></div>';
       return;
     }
+    var showWho = TKV.scope !== 'mine';
     box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
       '<thead><tr><th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
-      '<tbody>' + tasks.map(tkRow).join('') + '</tbody></table></div>';
+      '<tbody>' + tasks.map(function (t) { return tkRow(t, showWho); }).join('') + '</tbody></table></div>';
     tkWireRows(box);
   }
 
   function tkLoadTasks() {
     var box = $('tkBody');
     if (!box) { return; }
-    var had = (typeof cacheRead === 'function') ? cacheRead('myTasks', {}) : null;
+    var had = (TKV.scope === 'mine' && typeof cacheRead === 'function') ? cacheRead('myTasks', {}) : null;
     if (had) { try { tkPaintTasks(box, had); } catch (e) { had = null; } }
+    else { box.innerHTML = '<div class="spinner"></div>'; }
     tkFetchTasks().then(function (d) {
       tkPaintTasks(box, d);
     }).catch(function (e) {
@@ -380,7 +424,7 @@
     return h;
   }
 
-  function tkRow(t) {
+  function tkRow(t, showWho) {
     var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
     var ret = (status === TK_WORKING || status === TK_UPDATED) ? tkReturned(t.comments) : null;
     var details = tkStr(t.details);
@@ -418,10 +462,17 @@
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
     }
+    /* Management authority (owner 5 Sept): the manage handle on EVERY task — edit its details,
+       reassign it, extend the deadline, end it, or delete it outright. */
+    if (tkIsMgmt() && status !== TK_COMPLETED) {
+      act += '<button class="minibtn" data-act="mgmt" data-id="' + tkAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Manage</button>';
+      extra += tkManagePanel(t, id);
+    }
 
     return '<tr class="tk-r">' +
         '<td data-k="Task"><div class="tk-title">' + esc(tkStr(t.title)) + '</div>' +
-          '<div class="tk-meta">' + esc(type) + (priority ? ' · ' + esc(priority) : '') + '</div></td>' +
+          '<div class="tk-meta">' + esc(type) + (priority ? ' · ' + esc(priority) : '') +
+            (showWho && tkStr(t.assigned_to) ? ' · <b style="color:var(--text-2)">' + esc(tkStr(t.assigned_to).split('@')[0]) + '</b>' : '') + '</div></td>' +
         '<td data-k="Account">' + (tkStr(t.account) ? esc(tkStr(t.account)) : '<span class="tk-sub">—</span>') + '</td>' +
         '<td data-k="Item ID" class="mono">' + (tkStr(t.item_id) ? esc(tkStr(t.item_id)) : '—') + '</td>' +
         '<td data-k="Deadline">' + tkDueCell(t) + '</td>' +
@@ -429,6 +480,47 @@
         '<td class="tk-act">' + act + '</td>' +
       '</tr>' +
       (extra ? '<tr class="tk-x"><td colspan="6">' + extra + '</td></tr>' : '');
+  }
+
+  function tkManagePanel(t, id) {
+    return '<div class="tk-box tk-mgmt hidden" data-mgmt="' + tkAttr(id) + '" style="border-color:var(--gold-a)">' +
+      '<div class="k">Manage — ' + esc(id) + '</div>' +
+      '<div style="display:grid;gap:8px;margin-top:6px">' +
+        '<input class="tk-in" data-m-title="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.title)) + '" placeholder="Title">' +
+        '<textarea class="tk-ta" data-m-details="' + tkAttr(id) + '" placeholder="Details">' + esc(tkStr(t.details)) + '</textarea>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<label class="tk-sub" style="min-width:118px">New deadline (PKT)</label>' +
+          '<input class="tk-in" type="datetime-local" data-m-deadline="' + tkAttr(id) + '" style="max-width:220px">' +
+          '<input class="tk-in" data-m-assignee="' + tkAttr(id) + '" placeholder="Reassign to (email)" style="max-width:230px">' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">' +
+          '<button class="btn-gold" data-act="mSave" data-id="' + tkAttr(id) + '">Save changes</button>' +
+          '<button class="minibtn" data-act="mEnd" data-id="' + tkAttr(id) + '">End (complete)</button>' +
+          '<button class="minibtn" data-act="mWithdraw" data-id="' + tkAttr(id) + '">Withdraw</button>' +
+          '<button class="minibtn" data-act="mDel" data-id="' + tkAttr(id) + '" style="border-color:var(--bad);color:var(--bad)">Delete</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+
+  function tkMgmtOp(box, act, id, btn) {
+    if (act === 'mDel' && !window.confirm('Delete task ' + id + ' permanently? This cannot be undone.')) { return; }
+    var payload;
+    if (act === 'mSave') {
+      payload = { op: 'edit', task_id: id };
+      var ti = tkPick(box, 'data-m-title', id), de = tkPick(box, 'data-m-details', id), dl = tkPick(box, 'data-m-deadline', id), as = tkPick(box, 'data-m-assignee', id);
+      if (ti && tkStr(ti.value).trim()) { payload.title = tkStr(ti.value).trim(); }
+      if (de && tkStr(de.value).trim()) { payload.details = tkStr(de.value); }
+      if (as && tkStr(as.value).trim()) { payload.assigned_to = tkStr(as.value).trim(); }
+      if (dl && tkStr(dl.value).trim()) { var v = tkStr(dl.value).trim(); payload.deadline_pkt = v.length === 16 ? v + ':00' : v; }
+      if (!payload.title && !payload.details && !payload.assigned_to && !payload.deadline_pkt) { toast('Change a field first.'); return; }
+    } else if (act === 'mEnd') { payload = { op: 'end', task_id: id }; }
+    else if (act === 'mWithdraw') { payload = { op: 'withdraw', task_id: id }; }
+    else { payload = { op: 'delete', task_id: id }; }
+    if (btn) { btn.disabled = true; }
+    api('taskAdmin', payload).then(function () {
+      toast(act === 'mDel' ? 'Task deleted.' : act === 'mEnd' ? 'Task ended.' : act === 'mWithdraw' ? 'Task withdrawn.' : 'Changes saved.');
+      tkLoadTasks();
+    }).catch(function (e) { if (btn) { btn.disabled = false; } toast('Failed: ' + (e.message || 'try again')); });
   }
 
   /* The flag rides TASKS.comments as one tagged line (shared with the returned-note history), so
@@ -571,6 +663,8 @@
         .catch(function (e) { btn.disabled = false; toast('Not cleared: ' + e.message); });
       return;
     }
+    if (act === 'mgmt') { var mp = tkPick(box, 'data-mgmt', id); if (mp) { mp.classList.toggle('hidden'); } return; }
+    if (act === 'mSave' || act === 'mEnd' || act === 'mWithdraw' || act === 'mDel') { tkMgmtOp(box, act, id, btn); return; }
     form = tkPick(box, 'data-form', id);
     if (act === 'open') {
       if (form) { form.classList.remove('hidden'); var ta = tkPick(box, 'data-note', id); if (ta) { ta.focus(); } }
