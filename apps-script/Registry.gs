@@ -1089,7 +1089,7 @@ function pushSheetRowsHot() {
   try { tasksSweep_(); } catch (e) {}
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
-    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2']
+    enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2', 'paused_accounts']
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}

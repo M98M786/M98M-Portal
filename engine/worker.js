@@ -1283,6 +1283,18 @@ async function statusRefresh(env) {
   ).bind(twoBiz).run();
 }
 
+/** Run one whitelisted Apps Script job server-to-server (the AS /exec walls curl but answers a
+ * proper POST). Key-gated on both ends. Best-effort; callers wrap in try/catch. */
+async function asRunJobDirect(env, job, args) {
+  const key = await secret(env, 'SYNC_KEY');
+  const r = await fetch(env.AS_URL, {
+    method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, redirect: 'follow',
+    body: JSON.stringify({ action: 'engineRunJob', payload: { key, job: String(job || ''), args: args || null } }),
+  });
+  const t = await r.text();
+  try { return JSON.parse(t); } catch (e) { return { ok: false, status: r.status, raw: t.slice(0, 200) }; }
+}
+
 async function orderSync(env) {
   await perAccount(env, 'orderSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
@@ -1347,6 +1359,26 @@ async function orderSync(env) {
       n++; href = page.next || '';
     }
   });
+  /* Owner (4 Sept): a paused account rejoins ALL operations the moment its next order lands. AS
+     mirrors CONFIG.paused_accounts into portal_config; here, any paused account that has taken an
+     order in the last day is un-paused on the sheet side (the source of truth) via the AS relay and
+     dropped from the local mirror so we never call twice. Best-effort — never blocks the sync. */
+  try {
+    const pr = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'paused_accounts'").first();
+    const paused = String((pr && pr.value) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    for (const acc of paused) {
+      const fresh = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders WHERE account = ?1 AND substr(created_at,1,10) >= date('now','-1 day')"
+      ).bind(acc).first();
+      if (fresh && Number(fresh.n) > 0) {
+        await asRunJobDirect(env, 'accountResume', { account: acc });
+        const left = paused.filter((x) => x.toLowerCase() !== acc.toLowerCase());
+        await env.DB.prepare(
+          "INSERT INTO portal_config (key, value, updated_at) VALUES ('paused_accounts', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')"
+        ).bind(left.join(', ')).run();
+      }
+    }
+  } catch (e) { /* best-effort auto-resume */ }
 }
 
 /* Engine → portal bell, in two halves. Enqueue is a D1 write — it can never fail an eBay job,
@@ -4273,7 +4305,7 @@ async function metricDeptTasks(env) {
   for (const t of (rs.results || [])) {
     const dept = DESK_DEPT_OF_TYPE[String(t.type || 'general')] || 'General';
     const status = String(t.status || '');
-    const rec = depts[dept] = depts[dept] || { dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+    const rec = depts[dept] = depts[dept] || { dept, open: 0, overdue: 0, oldest: '', by_assignee: {}, by_type: {}, system_made: 0, mgmt_made: 0 };
     if (status === 'Completed') {
       if (t.decided_at) history.push({ dept, type: String(t.type || ''), title: String(t.title || '').slice(0, 80),
         assigned_to: String(t.assigned_to || ''), origin: isSystem(t.assigned_by) ? 'system' : 'management',
@@ -4285,6 +4317,8 @@ async function metricDeptTasks(env) {
     if (isSystem(t.assigned_by)) rec.system_made++; else rec.mgmt_made++;
     const who = String(t.assigned_to || '(unassigned)');
     rec.by_assignee[who] = (rec.by_assignee[who] || 0) + 1;
+    const ty = String(t.type || 'general');
+    rec.by_type[ty] = (rec.by_type[ty] || 0) + 1;   // which tasks are pending for what (owner, 4 Sept)
     const dl = Date.parse(String(t.deadline_pkt || ''));
     if (!isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval') rec.overdue++;
     const created = String(t.created_at || '');
@@ -4297,11 +4331,12 @@ async function metricDeptTasks(env) {
       "SELECT COUNT(*) AS n, SUM(due_at < datetime('now')) AS ov FROM keyword_tasks WHERE status = 'OPEN' AND opens_at <= datetime('now')"
     ).first();
     if (kw && Number(kw.n)) {
-      const rec = depts['Advertising'] = depts['Advertising'] || { dept: 'Advertising', open: 0, overdue: 0, oldest: '', by_assignee: {}, system_made: 0, mgmt_made: 0 };
+      const rec = depts['Advertising'] = depts['Advertising'] || { dept: 'Advertising', open: 0, overdue: 0, oldest: '', by_assignee: {}, by_type: {}, system_made: 0, mgmt_made: 0 };
       rec.open += Number(kw.n) || 0;
       rec.overdue += Number(kw.ov) || 0;
       rec.system_made += Number(kw.n) || 0;
       rec.by_assignee['keyword docs (Zain)'] = (rec.by_assignee['keyword docs (Zain)'] || 0) + (Number(kw.n) || 0);
+      rec.by_type['keyword_task'] = (rec.by_type['keyword_task'] || 0) + (Number(kw.n) || 0);
     }
   } catch (e) { /* table appears with the first truth-schema pass */ }
   return { departments: Object.values(depts).sort((a, b) => b.open - a.open),
