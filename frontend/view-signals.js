@@ -518,6 +518,18 @@
     });
   }
 
+  /* Owner (5 Sept): clear the whole backlog at once — one press acknowledges every pinned signal
+     for this person, so the board actually empties instead of the 60-card window refilling. */
+  function sgAckAll(btn) {
+    if (!window.confirm('Acknowledge and unpin EVERY signal on your board? Everyone else still sees theirs.')) { return; }
+    btn.disabled = true; var t = btn.textContent; btn.textContent = 'Clearing…';
+    api('acknowledgeAllSignals', {}).then(function (res) {
+      toast('Acknowledged ' + ((res && res.count) || 0) + ' signal(s) — your board is cleared.');
+      sgLoad().then(function () { var box = document.getElementById('sigAll'); if (box && SG.data) { sgPaintAll(box); } });
+      btn.disabled = false; btn.textContent = t;
+    })['catch'](function (e) { btn.disabled = false; btn.textContent = t; toast('Could not clear: ' + (e && e.message)); });
+  }
+
   function sgDrop(key) {
     var list = sgList(), keep = [], i;
     for (i = 0; i < list.length; i++) { if (sgKey(list[i]) !== key) { keep.push(list[i]); } }
@@ -637,7 +649,8 @@
     render: function () {
       return '<div class="hgroup enter d1"><h1>Signals</h1>' +
           '<span class="sub">Pinned until you acknowledge them · Pakistan time</span>' +
-          '<button class="minibtn" data-sig-do="recompute" id="sigRefresh" style="margin-left:auto">Refresh</button>' +
+          '<button class="minibtn" id="sigAckAll" style="margin-left:auto">Acknowledge all</button>' +
+          '<button class="minibtn" data-sig-do="recompute" id="sigRefresh">Refresh</button>' +
         '</div>' +
         '<div class="sig-sum" id="sigSum">Loading…</div>' +
         '<div class="sig-list" id="sigAll"><div class="spinner"></div></div>';
@@ -645,6 +658,8 @@
     init: function () {
       var box = document.getElementById('sigAll'), btn = document.getElementById('sigRefresh');
       if (btn) { btn.onclick = function () { sgRefresh(btn); }; }
+      var ackAll = document.getElementById('sigAckAll');
+      if (ackAll) { ackAll.onclick = function () { sgAckAll(ackAll); }; }
       if (!box) { return; }
       if (SG.data) { sgPaintAll(box); }
       sgLoad().then(function () {
