@@ -91,6 +91,8 @@ const CONFIG_DEFAULTS = {
   ai_max_tokens: '4096',
   email_digest: 'false',
   submission_escalation_hours: '12',
+  go_live_approver: 'zaidkaleem987@gmail.com',            // Zaid Kaleem publishes listings & enters the Item ID
+  paused_accounts: '',                                    // owner pause: accounts that generate NO automated tasks (comma-separated)
   // §16.10 pilot gate: while this is anything but 'true', the pipeline never writes to a live
   // business sheet — intended writes are logged as SHADOW_WRITE so they can be inspected first.
   pipeline_write_external: 'false',

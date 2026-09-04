@@ -255,6 +255,8 @@ const ENGINE_RUNNABLE = {
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
+  applyOwnerBatch: function () { return typeof applyOwnerBatch_ === 'function' ? JSON.stringify(applyOwnerBatch_()) : 'absent'; },
+  accountResume: function (args) { return typeof accountResume_ === 'function' ? JSON.stringify(accountResume_(args)) : 'absent'; },
   metricsWatch: function () { return typeof metricsWatch === 'function' ? String(metricsWatch()) : 'absent'; },
   connectPendingSheets: function () { return typeof connectPendingSheets === 'function' ? String(connectPendingSheets()) : 'absent'; },
   setSalesOpsRole: function () { return typeof setSalesOpsRole === 'function' ? String(setSalesOpsRole()) : 'absent'; },

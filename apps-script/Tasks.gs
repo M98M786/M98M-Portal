@@ -14,7 +14,11 @@ const TASK_STATUS_COMPLETED = 'Completed';
 const TASK_STATUSES = [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED, TASK_STATUS_COMPLETED];
 
 // RL-6 column ownership — the only TASKS columns this module writes after creation.
-const TASK_WRITABLE_COLS = ['item_id', 'comments', 'status', 'updated_at', 'submitted_at', 'submission_note', 'approved_by', 'decided_at', 'time_taken_min'];
+// `assigned_to` is writable so a controlled server action can REASSIGN a task (the go-live
+// hand-off, the retroactive clear, management reassignment). Its value is always chosen by the
+// action, never by the caller — no user-facing path lets someone reassign their own work away.
+// (4 Sept: adding it fixes the draft hand-off, which threw here and stranded the task on the lister.)
+const TASK_WRITABLE_COLS = ['item_id', 'comments', 'status', 'updated_at', 'submitted_at', 'submission_note', 'approved_by', 'decided_at', 'time_taken_min', 'assigned_to'];
 const TASK_ESCALATION_REF = 'task-escalation:';
 
 // ---------- create (§4.3 / §4.4) ----------
@@ -403,11 +407,78 @@ function taskItemId_(value) {
   return s;
 }
 
+/** Management authority (owner, 4 Sept): open ANY task — including one the system created — and
+ * end it, withdraw it, delete it, edit its details, or push out its deadline. Management / super
+ * only. ops: 'end' (close as Completed) · 'withdraw' (close + a withdrawn note) · 'delete' (remove
+ * the row) · 'edit' (title / details / priority / assigned_to / deadline_pkt) · 'extend' (deadline). */
+function actionTaskAdmin_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'management only');
+  const op = String(payload.op || '').trim();
+  const id = String(payload.task_id || '').trim();
+  if (!id) throw new Error('task_id required');
+  const sh = tasksSheet_();
+  const lock = LockService.getScriptLock();
+  const result = { task_id: id, op: op };
+  try {
+    lock.waitLock(10000);
+    const found = taskFind_(sh, id);
+    const rec = found.rec;
+    const stamp = now_();
+    if (op === 'delete') {
+      sh.deleteRow(found.row);
+      logActivity_(ctx.ident.email, 'TASK_DELETE', id, String(rec.status || ''), 'deleted', String(rec.type || ''));
+      result.deleted = true;
+    } else if (op === 'end' || op === 'withdraw') {
+      const note = String(payload.note || '').trim().slice(0, 500);
+      taskAdminWrite_(sh, found, {
+        status: TASK_STATUS_COMPLETED, decided_at: stamp, approved_by: ctx.ident.email, updated_at: stamp,
+        comments: taskAdminAppendNote_(rec.comments, (op === 'withdraw' ? 'Withdrawn' : 'Ended') + ' by management' + (note ? ': ' + note : '')),
+      });
+      logActivity_(ctx.ident.email, op === 'withdraw' ? 'TASK_WITHDRAW' : 'TASK_END', id, String(rec.status || ''), TASK_STATUS_COMPLETED, note);
+      result.status = TASK_STATUS_COMPLETED;
+    } else if (op === 'edit' || op === 'extend') {
+      const patch = { updated_at: stamp };
+      if (payload.title != null && String(payload.title).trim()) patch.title = String(payload.title).slice(0, 160);
+      if (payload.details != null && String(payload.details).trim()) patch.details = String(payload.details).slice(0, 4000);
+      if (payload.priority != null && String(payload.priority).trim()) patch.priority = String(payload.priority).slice(0, 40);
+      if (payload.assigned_to != null && String(payload.assigned_to).trim()) {
+        const u = (typeof listingResolveUser_ === 'function') ? listingResolveUser_(String(payload.assigned_to), '') : null;
+        patch.assigned_to = u ? u.email : String(payload.assigned_to).trim();
+      }
+      if (payload.deadline_pkt != null && String(payload.deadline_pkt).trim()) patch.deadline_pkt = String(payload.deadline_pkt).trim();
+      if (Object.keys(patch).length <= 1) throw new Error('nothing to change — send a title, details, priority, assignee or deadline');
+      taskAdminWrite_(sh, found, patch);
+      logActivity_(ctx.ident.email, 'TASK_EDIT', id, String(rec.status || ''), Object.keys(patch).join(','), '');
+      result.patched = Object.keys(patch);
+    } else {
+      throw new Error('unknown op — end | withdraw | delete | edit | extend');
+    }
+  } finally { lock.releaseLock(); }
+  return result;
+}
+
+/** Raw TASKS writer for the management-authority action ONLY — it may touch columns outside the
+ * RL-6 whitelist (title, details, deadline_pkt, priority, assigned_to) because management is
+ * explicitly authorized to edit any task. Reached only through actionTaskAdmin_'s isMgmt_ gate. */
+function taskAdminWrite_(sh, found, patch) {
+  Object.keys(patch).forEach(function (k) {
+    const c = found.head.indexOf(k);
+    if (c < 0) throw new Error('unknown TASKS column: ' + k);
+    sh.getRange(found.row, c + 1).setValue(patch[k]);
+  });
+}
+
+function taskAdminAppendNote_(comments, note) {
+  const base = String(comments || '');
+  return (base ? base + '\n' : '') + '@MGMT@ ' + note + ' · ' + now_();
+}
+
 const ACTIONS_TASKS = {
   createTask:       [actionCreateTask_, 'any'],
   myTasks:          [actionMyTasks_, 'any'],
   startTask:        [actionStartTask_, 'any'],
   submitTask:       [actionSubmitTask_, 'any'],
+  taskAdmin:        [actionTaskAdmin_, 'any'],   // management gated inside (end/withdraw/delete/edit/extend any task)
   pendingApprovals: [actionPendingApprovals_, 'any'],
   approveTask:      [actionApproveTask_, 'any'],
   returnTask:       [actionReturnTask_, 'any'],

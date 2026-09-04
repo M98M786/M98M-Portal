@@ -500,6 +500,11 @@ function huntWrite_(sh, found, patch) {
 /** Header-addressed TASKS append so a column added to DB_TABS.TASKS later never lands a value
  * in the wrong place. Called with the hunt lock held — it takes no lock of its own. */
 function huntAppendTask_(fields) {
+  // paused account (owner) generates no automated hunter tasks either
+  if (fields && typeof accountPaused_ === 'function' && accountPaused_(fields.account)) {
+    try { logActivity_('system', 'TASK_SKIP_PAUSED', String(fields.item_id || ''), String(fields.account || ''), String(fields.type || 'hunt')); } catch (e) {}
+    return;
+  }
   const sh = getPortalDb_(false).getSheetByName('TASKS');
   const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h); });
   sh.appendRow(head.map(function (h) {

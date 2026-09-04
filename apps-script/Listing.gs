@@ -377,6 +377,12 @@ function actionEnterItemId_(payload, ctx) {
       };
     }
 
+    // A paused account (accountPaused_) makes listingCreateTask_ return '' — drop those stubs so
+    // nothing downstream is notified or logged for a task that was never created.
+    ['campaign_set', 'supplier_add', 'revision'].forEach(function (k) {
+      if (made[k] && !made[k].existing && !made[k].task_id) { made[k] = null; }
+    });
+
     if (!idempotent) {
       const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
       const patch = {
@@ -631,10 +637,53 @@ function releaseCampaignAfterRevision() {
 // ---------- TASKS helpers ----------
 /** Appends a TASKS row in DB_TABS order. The caller holds the script lock; the type is checked
  * against the §7 enum, and every auto-task starts Pending like any assigned task. */
+/** Owner pause (4 Sept): a temporarily-closed account generates NO automated tasks. The list is
+ * CONFIG.paused_accounts (comma-separated account names, matched case-insensitively). Cleared when
+ * the account's next order arrives (engine orderSync calls accountResume). MANUAL management tasks
+ * are unaffected — only the automated generators consult this. */
+function accountPaused_(account) {
+  const a = String(account || '').trim().toLowerCase();
+  if (!a) return false;
+  const raw = String(getConfig('paused_accounts') || '');
+  if (!raw) return false;
+  return raw.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(String).indexOf(a) >= 0;
+}
+
+/** Resume a paused account (owner's "consider it once its next order arrives"): drops it from
+ * CONFIG.paused_accounts. Callable from the engine's orderSync the moment a new order lands, or by
+ * hand via engineRunJob {job:'accountResume', args:{account:'…'}}. Idempotent. */
+function accountResume_(args) {
+  const acc = String((args && (args.account != null ? args.account : args)) || '').trim();
+  const before = String(getConfig('paused_accounts') || '');
+  if (!acc) return { resumed: '', paused_accounts: before };
+  const kept = before.split(',').map(function (s) { return s.trim(); })
+    .filter(function (s) { return s && s.toLowerCase() !== acc.toLowerCase(); });
+  r8SetConfig_('paused_accounts', kept.join(', '));
+  try { logActivity_('system', 'ACCOUNT_RESUME', '', acc, 'removed from paused_accounts'); } catch (e) {}
+  return { resumed: acc, paused_accounts: String(getConfig('paused_accounts') || '') };
+}
+
+/** The compact listing flag (draft / needinfo / needtime) rides one TASKS.comments line as
+ * `@LFLAG@{json}` — the backend twin of the go-live desk's glFlag reader. */
+function listingFlagOf_(comments) {
+  const lines = String(comments || '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf('@LFLAG@') === 0) {
+      try { const o = JSON.parse(lines[i].slice(7)); return (o && o.flag) ? o : null; } catch (e) { return null; }
+    }
+  }
+  return null;
+}
+
 function listingCreateTask_(sh, spec) {
   if (TASK_TYPES.indexOf(spec.type) < 0) throw new Error('unknown task type');
   if (!spec.assigned_to) throw new Error('assigned_to required');
   if (!spec.deadline_pkt) throw new Error('deadline_pkt required');
+  // paused account → the automated chain creates nothing; caller treats '' as "not created".
+  if (accountPaused_(spec.account)) {
+    try { logActivity_('system', 'TASK_SKIP_PAUSED', String(spec.item_id || ''), String(spec.account || ''), String(spec.type || '')); } catch (e) {}
+    return '';
+  }
   const id = 'T' + Utilities.getUuid().slice(0, 8);
   const row = {
     task_id: id, type: spec.type, account: spec.account || '', item_id: spec.item_id || '',
@@ -1001,7 +1050,45 @@ function actionListerDraft_(payload, ctx) {
   notifyManagement_('Draft handed to go-live',
     '🟣 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' left it in draft; ' + go.name + ' will publish and add the Item ID.',
     'task:' + String(rec.task_id));
+  // The lister's part is finished the moment the draft link is in — credit them and clear it from
+  // their board (the task now belongs to the go-live approver).
+  if (handed) {
+    notify_(ctx.ident.email, 'Listing done — handed for go-live',
+      '✅ Your part of "' + title + '" is complete. The draft is with ' + go.name + ' to publish and make live — nothing else is needed from you.',
+      'task:' + String(rec.task_id));
+    logActivity_(ctx.ident.email, 'LISTER_DRAFT_DONE', String(rec.task_id), from, go.email, 'lister complete; go-live handoff');
+  }
   return { task_id: String(rec.task_id), flag: 'draft', assigned_to: go.email, assigned_to_name: go.name, handed_off: handed, draft_link: link };
+}
+
+/** One-off owner batch (4 Sept), re-runnable & idempotent. Points go-live at Zaid Kaleem, pauses
+ * the Azhar Bhai account from automated tasking, and hands every listing draft still stranded on a
+ * lister (the pre-fix hand-off bug) or on the previous approver over to Zaid's go-live desk. Run
+ * with engineRunJob {job:'applyOwnerBatch'}. */
+function applyOwnerBatch_() {
+  const out = { go_live_approver: '', paused_accounts: '', go_live_person: '', drafts_moved: 0, moved_from: [] };
+  r8SetConfig_('go_live_approver', 'zaidkaleem987@gmail.com');
+  r8SetConfig_('paused_accounts', 'Azhar Bhai');
+  out.go_live_approver = String(getConfig('go_live_approver') || '');
+  out.paused_accounts = String(getConfig('paused_accounts') || '');
+  const go = listingGoLivePerson_(readTab_('TASKS'));
+  if (go) {
+    out.go_live_person = go.email;
+    const sh = tasksSheet_();
+    readTab_('TASKS').forEach(function (t) {
+      if (String(t.type || '') !== 'listing_new') return;
+      if (String(t.status || '') === TASK_STATUS_COMPLETED) return;
+      const fl = listingFlagOf_(t.comments);
+      if (!fl || fl.flag !== 'draft') return;
+      if (normalizeEmail(t.assigned_to) === normalizeEmail(go.email)) return;   // already on the go-live desk
+      const found = taskFind_(sh, t.task_id);
+      taskWrite_(sh, found, { assigned_to: go.email, status: TASK_STATUS_WORKING, updated_at: now_() });
+      out.drafts_moved++;
+      out.moved_from.push(String(t.assigned_to || ''));
+    });
+  }
+  logActivity_('system', 'APPLY_OWNER_BATCH', '', '', 'go-live=' + out.go_live_approver + ' paused=' + out.paused_accounts + ' moved=' + out.drafts_moved);
+  return out;
 }
 
 /** Take a need-time / need-info / draft flag back off a task once it is resolved. */
