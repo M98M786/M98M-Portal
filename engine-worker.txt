@@ -4670,6 +4670,27 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => metricDeptTasks(ctx.env),
   },
 
+  /* Owner (5 Sept): the manager controls the team's tasking — one list of EVERY open task with the
+     handles to edit / reassign / extend / end / delete each one (via taskAdmin on the sheet). The
+     archive scope is open to everyone (their own completed work; management sees everyone's). */
+  allTasksEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super || ctx.user.role === 'Team Lead';
+      const scope = String(p.scope || 'open');
+      const cols = 'task_id, type, account, item_id, title, details, assigned_to, assigned_by, status, priority, deadline_pkt, comments, created_at, updated_at, decided_at, submission_note';
+      let sql, binds = [];
+      if (scope === 'archive') {
+        if (mgmt && p.everyone) { sql = 'SELECT ' + cols + " FROM tasks WHERE status = 'Completed' ORDER BY decided_at DESC, updated_at DESC LIMIT 500"; }
+        else { sql = 'SELECT ' + cols + " FROM tasks WHERE status = 'Completed' AND lower(assigned_to) = ?1 ORDER BY decided_at DESC, updated_at DESC LIMIT 500"; binds = [String(ctx.user.email || '').toLowerCase()]; }
+      } else {
+        if (!mgmt) throw new AuthError('management only');
+        sql = 'SELECT ' + cols + " FROM tasks WHERE status != 'Completed' ORDER BY created_at ASC LIMIT 3000";
+      }
+      const rs = await ctx.env.DB.prepare(sql).bind(...binds).all().catch(() => ({ results: [] }));
+      return { tasks: rs.results || [], scope, everyone: !!p.everyone, as_of: new Date().toISOString() };
+    },
+  },
+
   syncUsers: {
     auth: 'sync', fn: async (p, ctx) => {
       const users = p.users || [];

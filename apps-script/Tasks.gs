@@ -18,7 +18,10 @@ const TASK_STATUSES = [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPD
 // hand-off, the retroactive clear, management reassignment). Its value is always chosen by the
 // action, never by the caller — no user-facing path lets someone reassign their own work away.
 // (4 Sept: adding it fixes the draft hand-off, which threw here and stranded the task on the lister.)
-const TASK_WRITABLE_COLS = ['item_id', 'comments', 'status', 'updated_at', 'submitted_at', 'submission_note', 'approved_by', 'decided_at', 'time_taken_min', 'assigned_to'];
+// `title` is writable so go-live can save the final eBay title (enterItemId) and management can
+// relabel a task — both server-controlled, never a lister writing a sensitive column. (5 Sept: its
+// absence made "Make live" throw here after a partial write → the go-live desk's "request failed".)
+const TASK_WRITABLE_COLS = ['item_id', 'comments', 'status', 'updated_at', 'submitted_at', 'submission_note', 'approved_by', 'decided_at', 'time_taken_min', 'assigned_to', 'title'];
 const TASK_ESCALATION_REF = 'task-escalation:';
 
 // ---------- create (§4.3 / §4.4) ----------
