@@ -79,7 +79,10 @@
     '.al-chip.al-c-warn{border-color:rgba(255,159,67,.45);color:var(--warn)}' +
     '.al-chip.al-c-off{color:var(--text-3)}' +
     /* the headline: how much is open and how much of it costs money */
-    '.al-heads{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}' +
+    '.al-heads{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}' +
+    '.al-head.al-h-hi.al-hot{border-color:rgba(240,96,90,.62);background:linear-gradient(135deg,rgba(240,96,90,.16),rgba(240,96,90,.03));box-shadow:0 6px 26px rgba(240,96,90,.20)}' +
+    '.al-head.al-h-hi.al-hot .k,.al-head.al-h-hi.al-hot b{color:var(--bad)}' +
+    '.al-head.al-h-hi.al-cool b{color:var(--ok)}' +
     '.al-head{border:1px solid var(--gold-line);border-radius:12px;padding:14px 15px;background:rgba(120,132,152,.06);min-width:0}' +
     '.al-head .k{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-3);line-height:1.4}' +
     '.al-head b{display:block;font-size:30px;font-weight:800;margin-top:7px;line-height:1.05}' +
@@ -586,23 +589,28 @@
     var box = $('alHeads');
     if (!box) { return; }
     var total = Number(d && d.active_total) || 0;
-    var money = 0, i;
-    for (i = 0; i < AL.rows.length; i++) { if (alIsMoney(AL.rows[i])) { money++; } }
+    var money = 0, high = 0, i;
+    for (i = 0; i < AL.rows.length; i++) {
+      if (alIsMoney(AL.rows[i])) { money++; }
+      if (/high|critical|severe|urgent/i.test(alStr(AL.rows[i].severity))) { high++; }
+    }
     var accounts = (d && d.accounts && d.accounts.length) || 0;
     var shown = Number(d && d.count) || 0;
+    var stamp = alPortalStamp(d && d.computed_at);
 
     box.innerHTML = '<div class="al-heads enter d1" style="margin-top:16px">' +
-      '<div class="al-head al-h-gold"><span class="k">ACTIVE alerts</span>' +
+      '<div class="al-head al-h-gold"><span class="k">Active alerts</span>' +
         '<b class="num">' + esc(alInt(total)) + '</b>' +
-        '<span class="al-sub">' + esc(shown < total ? 'showing the ' + alInt(shown) + ' most severe' : 'across ' + alInt(accounts) + ' account(s)') + '</span></div>' +
+        '<span class="al-sub">' + esc(shown < total ? 'showing the ' + alInt(shown) + ' most severe · ' + alInt(accounts) + ' account(s)' : 'across ' + alInt(accounts) + ' account(s)') + '</span></div>' +
+      '<div class="al-head al-h-hi ' + (high ? 'al-hot' : 'al-cool') + '"><span class="k">High &amp; critical</span>' +
+        '<b class="num">' + esc(alInt(high)) + '</b>' +
+        '<span class="al-sub">' + esc(high ? 'the ones to clear first' : 'nothing severe open') + '</span></div>' +
       '<div class="al-head al-h-money ' + (money ? 'al-hot' : 'al-cool') + '"><span class="k">Losing money</span>' +
         '<b class="num">' + esc(alInt(money)) + '</b>' +
-        '<span class="al-sub">' + esc(money ? 'ads, sales, fulfilment and wrong-advertising alarms' : 'nothing open in the money categories') + '</span></div>' +
-      '<div class="al-head al-h-live"><span class="k">Accounts read</span>' +
+        '<span class="al-sub">' + esc(money ? 'ads · sales · fulfilment · wrong-advertising' : 'nothing in the money categories') + '</span></div>' +
+      '<div class="al-head al-h-live"><span class="k">Accounts watched</span>' +
         '<b class="num">' + esc(alInt(accounts)) + '</b>' +
-        '<span class="al-sub">' + esc(d && d.ads_view_only ?
-          'your version shows the advertising alerts and the wrong-advertising alarms' :
-          'every account with a Daily Account Report connected') + '</span></div>' +
+        '<span class="al-sub">' + esc((d && d.ads_view_only ? 'advertising + wrong-ads alarms' : 'every connected account') + (stamp ? ' · updated ' + stamp : '')) + '</span></div>' +
     '</div>';
   }
 

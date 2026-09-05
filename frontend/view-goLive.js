@@ -129,8 +129,23 @@
           api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
             note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
+              toast('Live ✓ — campaign, supplier and 72-hour tasks created.');
               glLoad();
-            }).catch(function (e) { btn.disabled = false; btn.textContent = 'Make live — enter Item ID'; toast('NOT entered — ' + e.message); });
+            }).catch(function (e) {
+              var msg = String((e && e.message) || '');
+              /* The sheet backend is slow, not broken: it almost always FINISHES entering the Item
+                 ID on the server even when the browser gives up at 25s — so don't report failure and
+                 don't let Zaid re-enter it. Say it's finishing and refresh; the draft leaves this
+                 desk the moment it lands. (owner, 5 Sept — the recurring "go-live not working".) */
+              if (/overloaded|timeout|failed|aborted/i.test(msg)) {
+                btn.textContent = 'Finishing on the server…';
+                toast('Google is slow right now — the Item ID is finishing on the server. Refreshing to confirm…');
+                setTimeout(glLoad, 7000);
+              } else {
+                btn.disabled = false; btn.textContent = 'Make live — enter Item ID';
+                toast('NOT entered — ' + msg);
+              }
+            });
         };
       });
       box.querySelectorAll('[data-gl-back]').forEach(function (b) {

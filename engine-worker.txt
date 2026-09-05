@@ -1301,6 +1301,10 @@ async function asRunJobDirect(env, job, args) {
  * own time budget on the Apps Script side, so a slow run simply continues on the next hour. */
 async function signalsPull(env) {
   try { await asRunJobDirect(env, 'computeSignals'); } catch (e) { /* best-effort — never blocks the slot's other work */ }
+  /* Same freeze applied to the Alerts-centre counters — alertsRefresh writes them into DASH_CACHE
+     and, like computeSignals, had no schedule, so the "overall numbers" went stale. Trigger it
+     hourly too (owner, 5 Sept). */
+  try { await asRunJobDirect(env, 'alertsRefresh'); } catch (e) {}
 }
 
 async function orderSync(env) {
