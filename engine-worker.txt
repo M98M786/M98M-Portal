@@ -5971,7 +5971,11 @@ const ROUTES = {
 
   itemRisk: {
     auth: 'any', fn: async (p, ctx) => {
-      if (['Management', 'Ops Head', 'CS', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      /* Owner (5 Sept): the risk board (returns · item-not-received · late-tracking) opens to
+         Product Hunters and Order Processors too — hunters watch which products they sourced are
+         coming back, processors own the late-tracking. Refund £ here is a RETURN LOSS, not
+         earnings, so it carries no profit-gating. */
+      if (['Management', 'Ops Head', 'CS', 'Team Lead', 'Product Hunter', 'Order Processor'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const today = ukDate('');
       const shiftD = (n) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
       const d1 = shiftD(1), d7 = shiftD(6), d30 = shiftD(29);
