@@ -167,12 +167,14 @@
         '<text x="' + (L - 6) + '" y="' + (Number(y) + 3.5) + '" text-anchor="end" font-size="9" fill="var(--text-3)">' + sxGBP(mx * f) + '</text>';
     }).join('');
     var line = days.map(function (d, i) { return (i ? 'L' : 'M') + (X(i) + bw / 2).toFixed(1) + ',' + Y(Math.max(0, d.ap || d.actual)).toFixed(1); }).join(' ');
+    var profPts = days.map(function (d, i) { var v = Math.max(0, d.ap || d.actual); return { x: X(i) + bw / 2, y: Y(v), label: chartMoney(v), title: d.day + ' · actual ' + sxGBP(d.ap || d.actual) }; });
     var labels = '';
     var step = Math.max(1, Math.floor(n / 9));
     for (var i = 0; i < n; i += step) { labels += '<text x="' + (X(i) + bw / 2).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="9.5" fill="var(--text-3)">' + days[i].day.slice(5) + '</text>'; }
     var liveAny = days.some(function (d) { return d.live; });
     return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:620px;width:100%;height:auto">' + gridLines + bars + labels +
       '<path d="' + line + '" fill="none" stroke="var(--ok)" stroke-width="2.2"/>' +
+      chartValueDots(profPts, { color: 'var(--ok)', ink: '#04120b', fontSize: 9.5, minGap: 42 }) +
       '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--blue)">▮ Sold / day</text>' +
       '<text x="' + (L + 110) + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">▬ Actual profit / day</text>' +
       (liveAny ? '<text x="' + (W - R) + '" y="12" text-anchor="end" font-size="10" font-weight="800" fill="var(--blue)" opacity=".7">▯ dashed = live from eBay API (book not written yet)</text>' : '') +
@@ -264,9 +266,12 @@
     var Y = function (v) { return T + (1 - v / mxV) * (H - T - B); };
     var grid = ''; [0.5, 1].forEach(function (f) { var y = (T + (1 - f) * (H - T - B)); grid += '<line x1="' + L + '" y1="' + y.toFixed(1) + '" x2="' + (W - R) + '" y2="' + y.toFixed(1) + '" stroke="rgba(140,150,170,.16)"/><text x="' + (L - 8) + '" y="' + (y + 3.5).toFixed(1) + '" text-anchor="end" font-size="9.5" fill="var(--text-3)">' + sxK(mxV * f) + '</text>'; });
     var bars = days.map(function (d, i) { var h2 = (H - T - B) * (sold[i] / mxV); return '<rect x="' + (Xc(i) - bw / 2).toFixed(1) + '" y="' + Y(sold[i]).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0, h2).toFixed(1) + '" rx="3" fill="var(--blue)" opacity="' + (d.live ? '.26' : '.18') + '"' + (d.live ? ' stroke="var(--blue)" stroke-dasharray="3 2"' : '') + '><title>' + d.day + ' sold ' + sxGBP(sold[i]) + '</title></rect>'; }).join('');
-    var mkLine = function (arr, c) { return '<path d="M' + arr.map(function (v, i) { return Xc(i).toFixed(1) + ',' + Y(v).toFixed(1); }).join(' L') + '" fill="none" stroke="' + c + '" stroke-width="2.6"/>' + arr.map(function (v, i) { return '<circle cx="' + Xc(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="3" fill="' + c + '"><title>' + days[i].day + ' ' + sxGBP(v) + '</title></circle>'; }).join(''); };
+    var mkLine = function (arr, c, ink) {
+      var pts = arr.map(function (v, i) { return { x: Xc(i), y: Y(v), label: chartMoney(v), title: days[i].day + ' ' + sxGBP(v) }; });
+      return chartLineSeries(pts, { color: c, ink: ink, width: 2.6, fontSize: 10, minGap: 46 });
+    };
     var labels = days.map(function (d, i) { return '<text x="' + Xc(i).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="var(--text-3)">' + esc(String(d.day).slice(5)) + '</text>'; }).join('');
-    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:640px;width:100%;height:auto">' + grid + bars + mkLine(cost, 'var(--warn)') + mkLine(prof, 'var(--ok)') + labels +
+    return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:640px;width:100%;height:auto">' + grid + bars + mkLine(cost, 'var(--warn)', '#1a1205') + mkLine(prof, 'var(--ok)', '#04120b') + labels +
       '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">— Actual profit</text>' +
       '<text x="' + (L + 110) + '" y="12" font-size="10.5" font-weight="800" fill="var(--warn)">— Total cost (ads + Ali)</text></svg></div>';
   }

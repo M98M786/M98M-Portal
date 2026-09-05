@@ -428,7 +428,7 @@
       if (sp) {
         box.innerHTML += mkT('CAMPAIGN GAPS', String(sp.none), 'no campaign · both-live ' + sp.both + ' · multi ' + sp.multi + ' — Wrong advertising has the rows', sp.none || sp.both || sp.multi ? 'warn' : 'ok');
       }
-      var lk = (M.LEAKS_DAILY && M.LEAKS_DAILY.value) || [];
+      var lk = [];   /* LEAKS strip removed from Business overview on the owner's request (6 Sept) */
       if (lk.length) {
         var aSum = 0, rSum = 0, mx = 1;
         lk.forEach(function (d2) { aSum += d2.ads; rSum += d2.refunds; mx = Math.max(mx, d2.ads + d2.refunds); });
@@ -626,11 +626,13 @@
     days.forEach(function (d) { var b = byDate[d]; if (b) { mx = Math.max(mx, b.sold); } });
     function X(i) { return P + i * (W - P - 8) / Math.max(1, days.length - 1); }
     function Y(v) { return H - 22 - (v / mx) * (H - 40); }
-    var pRev = '', pProf = '';
+    var pRev = '', pProf = '', revPts = [], profPts = [];
     days.forEach(function (d, i) {
       var b = byDate[d] || { sold: 0, profit: 0 };
       pRev += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(b.sold).toFixed(1) + ' ';
       pProf += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(Math.max(0, b.profit)).toFixed(1) + ' ';
+      revPts.push({ x: X(i), y: Y(b.sold), label: chartMoney(b.sold), title: d + ' · revenue ' + oGBP0(b.sold) });
+      profPts.push({ x: X(i), y: Y(Math.max(0, b.profit)), label: chartMoney(Math.max(0, b.profit)), title: d + ' · actual profit ' + oGBP0(b.profit) });
     });
     var grid = '';
     for (var g = 1; g <= 3; g++) {
@@ -646,6 +648,8 @@
       '<path d="' + pRev + 'L' + X(days.length - 1).toFixed(1) + ' ' + (H - 22) + ' L' + P + ' ' + (H - 22) + ' Z" fill="rgba(233,169,60,.12)"/>' +
       '<path d="' + pRev + '" fill="none" stroke="var(--gold-a)" stroke-width="2"/>' +
       '<path d="' + pProf + '" fill="none" stroke="var(--ok)" stroke-width="2" stroke-dasharray="1 0"/>' +
+      chartValueDots(revPts, { color: 'var(--gold-a)', ink: '#1a1205', fontSize: 9, minGap: 44, nudge: -9 }) +
+      chartValueDots(profPts, { color: 'var(--ok)', ink: '#04120b', fontSize: 9, minGap: 44, nudge: 10 }) +
       '</svg>' +
       '<div class="legend"><span><i style="background:var(--gold-a)"></i>Revenue / day</span><span><i style="background:var(--ok)"></i>Actual profit / day</span></div>';
   }

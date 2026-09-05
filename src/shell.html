@@ -316,6 +316,54 @@ function mChip(m){
     ' · click Truth Check in the sidebar for evidence" style="display:inline-block;margin-top:3px;font-size:9.5px;font-weight:800;letter-spacing:.04em;color:var(--' + tone + ');cursor:help">' + txt + '</span>';
 }
 function pkDayStr(off){ return new Date(Date.now() + 5*3600000 + (off||0)*86400000).toISOString().slice(0,10); }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────
+   SHARED CHART KIT (owner, 6 Sept: "show numbers in dots in ALL graphs — separate it out so
+   everything can be made through that"). One place, so every line graph in the portal shows
+   the same eBay-style value markers: a filled lozenge sat on each data point with the value
+   inside it. A chart builds its own grid/axes/bars, projects its points to {x,y,label}, then
+   calls chartLineSeries() (line + dots) or chartValueDots() (dots only). Change the look here
+   once and it changes portal-wide.
+   ──────────────────────────────────────────────────────────────────────────────────────── */
+/* compact money for a marker/axis — £505 · £1.7k · £12k (never the long £505.00 in a pill) */
+function chartMoney(n){ n = Number(n) || 0; var a = Math.abs(n), s;
+  if (a >= 1000) { s = '£' + (a / 1000).toFixed(a >= 9950 ? 0 : 1) + 'k'; } else { s = '£' + Math.round(a); }
+  return (n < 0 ? '−' : '') + s; }
+/* compact count — 1.2k for big tallies, the plain number otherwise */
+function chartNum(n){ n = Number(n) || 0; var a = Math.abs(n);
+  return a >= 10000 ? (n / 1000).toFixed(a >= 99500 ? 0 : 1) + 'k' : String(Math.round(n)); }
+/* The value dots. pts = [{x, y, label, title?}] already projected into the SVG's own units.
+   opt: {color, ink, fontSize, nudge, minGap}. Dodges clutter on dense ranges by keeping labels
+   at least minGap apart in x (first & last always shown), so a 7-day view labels every point
+   and a 90-day one thins itself — no caller has to think about it. Returns an SVG <g> string. */
+function chartValueDots(pts, opt){
+  opt = opt || {}; if (!pts || !pts.length) { return ''; }
+  var c = opt.color || 'var(--blue)', ink = opt.ink || '#fff', fs = opt.fontSize || 10;
+  var ny = opt.nudge || 0, minGap = (opt.minGap != null ? opt.minGap : 30), out = '', lastX = -1e9;
+  for (var i = 0; i < pts.length; i++){
+    var p = pts[i]; if (p == null || p.label == null || p.label === '') { continue; }
+    var isEnd = (i === 0 || i === pts.length - 1);
+    if (!isEnd && Math.abs(p.x - lastX) < minGap) { continue; }
+    lastX = p.x;
+    var t = String(p.label), w = Math.max(fs + 9, t.length * fs * 0.60 + 9), h = fs + 6;
+    var cx = p.x, cy = p.y + ny;
+    out += '<g>' + (p.title ? '<title>' + esc(p.title) + '</title>' : '') +
+      '<rect x="' + (cx - w / 2).toFixed(1) + '" y="' + (cy - h / 2).toFixed(1) + '" width="' + w.toFixed(1) +
+        '" height="' + h.toFixed(1) + '" rx="' + (h / 2).toFixed(1) + '" fill="' + c + '" stroke="rgba(0,0,0,.16)" stroke-width=".5"/>' +
+      '<text x="' + cx.toFixed(1) + '" y="' + (cy + fs * 0.34).toFixed(1) + '" text-anchor="middle" font-size="' + fs +
+        '" font-weight="800" fill="' + ink + '" style="pointer-events:none">' + esc(t) + '</text></g>';
+  }
+  return out;
+}
+/* A whole line series in one call: the connecting line, then the value dots on top.
+   pts = [{x, y, label, title?}]. opt adds {width} on top of chartValueDots' options. */
+function chartLineSeries(pts, opt){
+  opt = opt || {}; if (!pts || !pts.length) { return ''; }
+  var c = opt.color || 'var(--blue)';
+  var d = 'M' + pts.map(function(p){ return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' L');
+  return '<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="' + (opt.width || 2.6) +
+    '" stroke-linejoin="round" stroke-linecap="round"/>' + chartValueDots(pts, opt);
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
