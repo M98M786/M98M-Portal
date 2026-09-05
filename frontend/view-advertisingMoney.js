@@ -42,7 +42,7 @@
     /* the SOP target line at 5× on the ROAS axis */
     s += '<line x1="' + padL + '" y1="' + yr(5) + '" x2="' + (W - padR) + '" y2="' + yr(5) + '" stroke="rgba(240,96,90,.5)" stroke-width="1" stroke-dasharray="5 4"/>' +
       '<text x="' + (W - padR + 4) + '" y="' + (yr(5) + 3) + '" font-size="9" fill="rgba(240,96,90,.8)">5×</text>';
-    var line = '';
+    var line = '', roasPts = [];
     rows.forEach(function (r, i) {
       var x0 = padL + i * iw;
       var bw = Math.max(3, iw * 0.28);
@@ -54,12 +54,14 @@
         var px = x0 + iw / 2, py = yr(rv / sp);
         line += (line ? ' L' : 'M') + px.toFixed(1) + ' ' + py.toFixed(1);
         s += '<circle cx="' + px + '" cy="' + py + '" r="2.6" fill="#d9b64e">' + tt + '</circle>';
+        roasPts.push({ x: px, y: py, label: (rv / sp).toFixed(1) + '×', title: r.date + ' · ROAS ' + amROAS(rv, sp) });
       }
       if (rows.length <= 32 && (rows.length <= 14 || i % 2 === 0)) {
         s += '<text x="' + (x0 + iw / 2) + '" y="' + (H - padB + 14) + '" text-anchor="middle" font-size="8.5" fill="rgba(120,132,152,.85)">' + String(r.date).slice(5) + '</text>';
       }
     });
     s += '<path d="' + line + '" fill="none" stroke="#d9b64e" stroke-width="2"/>';
+    s += chartValueDots(roasPts, { color: '#d9b64e', ink: '#1a1205', fontSize: 9.5, minGap: 40 });
     /* ROAS axis on the right */
     [2, 5, Math.round(maxR)].forEach(function (v) {
       s += '<text x="' + (W - padR + 4) + '" y="' + (yr(v) + 3) + '" font-size="9" fill="rgba(217,182,78,.85)">' + v + '×</text>';
