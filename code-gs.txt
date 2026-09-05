@@ -25211,10 +25211,21 @@ function tasksSweep_() {
   try {
     var COLS = ['task_id','type','account','item_id','title','details','comments','assigned_by','assigned_to','priority','deadline_pkt','status','created_at','updated_at','submitted_at','approved_by','decided_at','submission_note','time_taken_min'];
     var rows = readTab_('TASKS');
-    var recent = rows.slice(Math.max(0, rows.length - 100)).map(function (t) {
+    /* Sync the most-recently-UPDATED tasks, not the last 100 CREATED. The old slice(-100) mirrored
+       only the newest rows BY POSITION, so an edit to an OLDER task — go-live clearing a draft flag
+       (enterItemId), a hunter working a revision, a completion — never reached D1, and the
+       engine-served desks (go-live desk, hunting dashboard, dept boards) showed the stale state on
+       every refresh, forever. enterItemId and every worker action bump updated_at, so sorting by it
+       pulls any touched task into the window and it syncs. (owner, 6 Sept — "it says live but comes
+       back on refresh · hunting dashboard still not updating".) */
+    var mapped = rows.map(function (t) {
       var o = {}; COLS.forEach(function (k) { var v = t[k]; o[k] = (v instanceof Date) ? taskPktIso_(v) : String(v == null ? '' : v); });
       return o;
     }).filter(function (o) { return o.task_id; });
+    mapped.sort(function (a, b) {
+      return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
+    });
+    var recent = mapped.slice(0, 250);
     if (recent.length) enginePost_('syncTasks', { tasks: recent });
   } catch (e) {}
 }

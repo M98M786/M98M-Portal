@@ -7,6 +7,13 @@
   'use strict';
 
   var GL_ROLES = ['Team Lead', 'Listing Manager', 'Management', 'Ops Head', 'CS'];
+  /* Item IDs published from THIS desk in this session. The desk reads myListingWork, which is
+     engine-served (D1 tasks mirror) and lags the sheet write enterItemId just made — so without
+     this the draft the publisher just made live comes straight back on the next refresh until the
+     mirror syncs. We only add a task here on a CONFIRMED success, never on a slow/timeout path, so
+     a listing that did not actually publish is never hidden. (owner, 6 Sept — "it says live but
+     comes back on refresh".) A full page reload clears this, by which time the mirror has caught up. */
+  var GL_DONE = {};
 
   VIEW_CSS.push(
     '.gl-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
@@ -59,7 +66,7 @@
     api('myListingWork', {}).then(function (d) {
       var all = (d && d.listings) || [];
       var drafts = all.map(function (t) { return { t: t, f: glFlag(t) }; })
-        .filter(function (x) { return x.f && x.f.flag === 'draft'; });
+        .filter(function (x) { return x.f && x.f.flag === 'draft' && !GL_DONE[glS(x.t.task_id)]; });
       var byAcct = {};
       drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
       try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
@@ -129,6 +136,7 @@
           api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
             note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
+              GL_DONE[id] = true;   // confirmed live — keep it off the desk even while the mirror lags
               toast('Live ✓ — campaign, supplier and 72-hour tasks created.');
               glLoad();
             }).catch(function (e) {
@@ -137,7 +145,7 @@
                  ID on the server even when the browser gives up at 25s — so don't report failure and
                  don't let Zaid re-enter it. Say it's finishing and refresh; the draft leaves this
                  desk the moment it lands. (owner, 5 Sept — the recurring "go-live not working".) */
-              if (/overloaded|timeout|failed|aborted/i.test(msg)) {
+              if (/overloaded|timeout|did not answer|taking long|aborted/i.test(msg)) {
                 btn.textContent = 'Finishing on the server…';
                 toast('Google is slow right now — the Item ID is finishing on the server. Refreshing to confirm…');
                 setTimeout(glLoad, 7000);
