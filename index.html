@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260904-2350';
+var BUILD = '20260905-0000';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -4739,32 +4739,31 @@ function createMeeting() {
          truly RUNNING in more than one place. */
       var urgentN = 0;
       gOrder.forEach(function (k) {
-        var runN = groups[k].filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
-        if (runN > 1) { urgentN++; }
+        if (groups[k].filter(function (r) { return r.live; }).length > 1) { urgentN++; }
       });
-      h += '<div class="cw-dupbox"><h3>🔴 URGENT: ' + urgentN + ' item(s) ACTIVE in more than one RUNNING campaign — eBay can charge each of them in every running campaign they sit in</h3>' +
-        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">Every campaign the listing sits in is shown with its live status — <b style="color:var(--bad)">running</b> memberships cost money and carry ✕ to remove; <b>paused</b> ones are grey and harmless until resumed. A fresh move can echo here for ~90 minutes while the old campaign refreshes.</p>' +
+      h += '<div class="cw-dupbox"><h3>🔴 URGENT: ' + urgentN + ' item(s) LIVE in more than one RUNNING campaign — eBay can charge each of them in every running campaign they sit in</h3>' +
+        '<p style="margin:0 0 8px;font-size:11.5px;color:var(--text-3);font-weight:600">Each campaign the listing sits in shows its TRUE state — only <b style="color:var(--bad)">LIVE</b> memberships (running campaign · active ad · active listing) cost money and carry ✕ to remove. <b>Paused ads, paused campaigns and ended listings are grey and harmless.</b> A fresh move can echo here for ~90 minutes while the old campaign refreshes.</p>' +
         '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Sits in — live status per campaign · ✕ removes from that one</th></tr></thead><tbody>';
       gOrder.forEach(function (k) {
         var list = groups[k];
         var r0 = list[0];
-        var runN = list.filter(function (r) { return /RUNNING/i.test(cwStr(r.status)); }).length;
+        var liveN = list.filter(function (r) { return r.live; }).length;
         var chips = list.map(function (r) {
-          var st = cwStr(r.status);
-          var running = /RUNNING/i.test(st);
-          var paused = /PAUSED/i.test(st);
-          var tone = running ? 'background:var(--bad-soft);border:1px solid rgba(240,96,90,.5);color:var(--bad)'
+          var live = !!r.live;
+          var chip = cwStr(r.chip) || (/RUNNING/i.test(cwStr(r.status)) ? 'LIVE' : cwStr(r.status));
+          var paused = /PAUSED/i.test(chip);
+          var tone = live ? 'background:var(--bad-soft);border:1px solid rgba(240,96,90,.5);color:var(--bad)'
             : paused ? 'background:rgba(120,132,152,.12);border:1px solid rgba(120,132,152,.35);color:var(--text-3)'
             : 'background:rgba(120,132,152,.08);border:1px solid rgba(120,132,152,.25);color:var(--text-3);opacity:.7';
           return '<span class="cw-pill" style="margin:2px 6px 2px 0;display:inline-block;' + tone + '">' +
             esc(cwStr(r.name) || cwStr(r.campaign_id)) +
-            ' <b style="font-size:9px;letter-spacing:.05em">' + (running ? 'RUNNING' : paused ? 'paused' : esc(st.toLowerCase() || '?')) + '</b>' +
-            (running ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
+            ' <b style="font-size:9px;letter-spacing:.05em">' + esc(chip) + '</b>' +
+            (live ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
             '</span>';
         }).join('');
-        h += '<tr' + (runN > 1 ? ' style="background:var(--bad-soft)"' : '') + '><td>' + esc(cwStr(r0.account)) + '</td>' +
+        h += '<tr' + (liveN > 1 ? ' style="background:var(--bad-soft)"' : '') + '><td>' + esc(cwStr(r0.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(cwStr(r0.title) || '(title not synced yet)') + '</div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + (runN > 1 ? ' · <b style="color:var(--bad)">' + runN + ' RUNNING at once</b>' : '') + '</div></td>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r0.listing_id)) + (liveN > 1 ? ' · <b style="color:var(--bad)">' + liveN + ' LIVE at once</b>' : '') + '</div></td>' +
           '<td style="max-width:460px">' + chips + '</td></tr>';
       });
       h += '</tbody></table></div></div>';
