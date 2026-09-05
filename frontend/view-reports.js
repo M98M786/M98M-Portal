@@ -328,8 +328,22 @@
       busy = false;
       btn.disabled = false;
       btn.textContent = was;
-      fail(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'That did not go through. Nothing was saved — please try again.');
-      toast('Report not submitted');
+      var m = String((e && e.message) || '');
+      if (m === 'auth') {
+        fail('Your sign-in expired — please sign in again.');
+        toast('Report not submitted');
+      } else if (/taking long|did not answer|wait a moment|still connecting/i.test(m)) {
+        /* submission is on the engine now — a brief slow spell almost always still lands the
+           save, so don't cry failure: confirm against the shift line, which reads the same store. */
+        fail('The server is finishing — one moment…');
+        setTimeout(load, 4000);
+      } else if (m && m !== 'request failed') {
+        fail(m);                    // the real reason — already submitted, window closed, a missing count…
+        toast('Report not submitted');
+      } else {
+        fail('That did not go through. Nothing was saved — please try again.');
+        toast('Report not submitted');
+      }
     });
   }
 

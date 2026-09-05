@@ -122,7 +122,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
+      '*/15 * * * *': [reportsRelayToSheet, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
       '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync, signalsPull],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
@@ -1305,6 +1305,27 @@ async function signalsPull(env) {
      and, like computeSignals, had no schedule, so the "overall numbers" went stale. Trigger it
      hourly too (owner, 5 Sept). */
   try { await asRunJobDirect(env, 'alertsRefresh'); } catch (e) {}
+}
+
+/* Owner (5 Sept): reports now SUBMIT on the engine (submitReportEngine) so staff get an instant,
+   reliable save. This carries those engine-written rows to the REPORTS_2H sheet — the human record
+   — so the sheet stays whole. It is the reverse of reportsSweep_ (which is sheet→D1). Engine rows
+   are marked by a deterministic 'R2H:' id and an empty synced_at; the AS job dedups by
+   email|date|checkpoint, so re-pushing an already-written row is harmless. Once the sheet has the
+   row, reportsSweep_ carries it back and stamps synced_at, and it stops being picked up here. One
+   cheap fetch, so it rides the 15-minute slot next to the sheet sweep. */
+async function reportsRelayToSheet(env) {
+  try {
+    const rs = await env.DB.prepare(
+      'SELECT report_id, email, role, shift, date, checkpoint, work_summary, count_1, count_2, count_3, count_4, submitted_at, flag ' +
+      "FROM reports_2h WHERE report_id LIKE 'R2H:%' AND (synced_at IS NULL OR synced_at = '') " +
+      'ORDER BY submitted_at DESC LIMIT 100'
+    ).all().catch(() => ({ results: [] }));
+    const rows = rs.results || [];
+    if (!rows.length) return 'reportsRelayToSheet: 0';
+    const out = await asRunJobDirect(env, 'repSheetAppend', { rows });
+    return 'reportsRelayToSheet: sent ' + rows.length + ' → ' + JSON.stringify(out).slice(0, 120);
+  } catch (e) { return 'reportsRelayToSheet ERR ' + String((e && e.message) || e).slice(0, 100); }
 }
 
 async function orderSync(env) {
@@ -7085,6 +7106,67 @@ const ROUTES = {
       }
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
       return { synced: stmts.length };
+    },
+  },
+
+  /* §5 report submission, ON THE ENGINE (5 Sept, owner: "report submission not working for whole
+     staff — make it a fast submission that works perfectly, and accurate"). Submitting used to be
+     Apps-Script-only: under the sheet's peak overload the browser timed out at 25s and told the
+     person "nothing was saved" even when the sheet HAD saved it, and either way the checkpoint line
+     (which reads D1) did not reflect it for up to 15 minutes. This writes the row to D1 straight
+     away — so the shift line updates instantly and the submit never hangs on the sheet — and the
+     REPORTS_2H sheet (the human record) is filled from D1 by the reportsRelayToSheet cron. One row
+     per person·date·checkpoint (deterministic id → idempotent). The validation, the ontime/late
+     rule and the Daily Productivity Report shape mirror actionSubmitReport_ exactly. */
+  submitReportEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const me = String(ctx.user.email || '').toLowerCase();
+      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints FROM users WHERE email = ?1').bind(me).first().catch(() => null);
+      const role = String((u && u.role) || ctx.user.role || '');
+      const cps = String((u && u.checkpoints) || '').split(',').map(repHm).filter(Boolean);
+      if (!cps.length) throw new Error('SAY: there are no checkpoints on your schedule yet — Management sets your timetable');
+      const cp = repHm(p.checkpoint);
+      const i = cps.indexOf(cp);
+      if (i < 0) throw new Error('SAY: that checkpoint is not on your schedule');
+      const date = repShiftDateJs(cps);
+      const t = repTimingJs(cps, date);
+      if (t.nowAbs >= t.deadlines[i]) throw new Error('SAY: that checkpoint window has already closed');
+      const summary = String(p.work_summary || '').trim();
+      if (!summary) throw new Error('SAY: a work summary is required');
+      const labels = REP_COUNT_FIELDS[role] || [];
+      const raw = p.counts;
+      if (labels.length && !Array.isArray(raw)) throw new Error('SAY: the count fields are required');
+      if (Array.isArray(raw) && raw.length > labels.length) throw new Error('SAY: unexpected count field');
+      const counts = labels.map((label, n) => {
+        const v = Array.isArray(raw) ? raw[n] : '';
+        if (v === '' || v === null || v === undefined) throw new Error('SAY: missing count: ' + label);
+        const num = Number(v);
+        if (!isFinite(num) || num < 0 || Math.floor(num) !== num) throw new Error('SAY: ' + label + ' must be a whole number, 0 or more');
+        return num;
+      });
+      const isFinal = (i === cps.length - 1);
+      let stored = summary;
+      if (isFinal) {
+        const va = String(p.value_addition || '').trim();
+        if (!va) throw new Error('SAY: value addition is required on the Daily Productivity Report');
+        stored = summary + '\n\n' + 'Value addition today' + ': ' + va;   // == VALUE_ADDITION_LABEL
+      }
+      const late = await repLateThresholdJs(ctx.env);
+      const flag = (t.nowAbs <= t.abs[i] + late) ? 'ontime' : 'late';
+      const existing = await ctx.env.DB.prepare('SELECT report_id FROM reports_2h WHERE email = ?1 AND date = ?2 AND checkpoint = ?3')
+        .bind(me, date, cp).first().catch(() => null);
+      if (existing) throw new Error('SAY: this checkpoint is already submitted for today');
+      const reportId = 'R2H:' + me + '|' + date + '|' + cp;
+      const cv = (n) => counts.length > n ? String(counts[n]) : '';
+      /* synced_at stays '' on an engine write — that is the flag reportsRelayToSheet looks for. Once
+         the row reaches the sheet and reportsSweep_ carries it back, syncReports stamps synced_at. */
+      await ctx.env.DB.prepare(
+        'INSERT INTO reports_2h (report_id, email, role, shift, date, checkpoint, work_summary, count_1, count_2, count_3, count_4, submitted_at, flag, synced_at) ' +
+        "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,datetime('now'),?12,'') " +
+        'ON CONFLICT(report_id) DO NOTHING'
+      ).bind(reportId, me, role, String((u && u.shift) || ''), date, cp, stored, cv(0), cv(1), cv(2), cv(3), flag).run();
+      return { ok: true, report_id: reportId, date, checkpoint: cp, flag, daily_productivity_report: isFinal };
     },
   },
 

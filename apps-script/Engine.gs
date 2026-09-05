@@ -286,6 +286,7 @@ const ENGINE_RUNNABLE = {
   notifDump: function (args) { return typeof notifDump === 'function' ? String(notifDump(args)) : 'absent'; },
   huntsDump: function (args) { return typeof huntsDump === 'function' ? String(huntsDump(args)) : 'absent'; },
   reportsDump: function (args) { return typeof reportsDump === 'function' ? String(reportsDump(args)) : 'absent'; },
+  repSheetAppend: function (args) { return typeof repSheetAppend_ === 'function' ? JSON.stringify(repSheetAppend_(args)) : 'absent'; },
   adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
   perfSnapshotPush: function () { return typeof perfSnapshotPush_ === 'function' ? (perfSnapshotPush_(), 'ok') : 'absent'; },
   reviewsDump: function () { return typeof reviewsDump === 'function' ? String(reviewsDump()) : 'absent'; },

@@ -765,9 +765,20 @@
       if (sgStr(SG.att.message)) { toast(sgStr(SG.att.message)); }
     })['catch'](function (e) {
       SG.clockBusy = false;
-      SG.att = before;                          // honest rollback — the tap did NOT land
-      sgClockPaint();
-      toast('NOT recorded — ' + e.message + ' · tap it again.');
+      var m = String((e && e.message) || '');
+      /* The sheet is slow, not broken — the clock write usually LANDS on the server even when the
+         browser gives up at 25s. Flipping it back to "not recorded" made people tap again, which
+         then errored "you already concluded" — so it "did it automatically". Hold the optimistic
+         state and re-read attendance instead; if it truly did not land, the fresh read corrects the
+         button on its own. (owner, 5 Sept — "conclude working doesn't work, it does it automatically".) */
+      if (/overloaded|timeout|did not answer|taking long|aborted|failed/i.test(m)) {
+        toast('The server is slow — finishing there. Confirming…');
+        setTimeout(function () { sgAttLoad().then(sgClockPaint)['catch'](function () {}); }, 6000);
+      } else {
+        SG.att = before;                        // a real refusal — honest rollback
+        sgClockPaint();
+        toast('NOT recorded — ' + m + ' · tap it again.');
+      }
     });
   }
 

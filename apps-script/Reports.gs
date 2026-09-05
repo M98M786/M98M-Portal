@@ -330,6 +330,42 @@ function repAppendReport_(sh, o) {
   });
 }
 
+/* Reverse mirror (5 Sept): reports SUBMIT on the engine now (D1-primary, fast). The engine's
+ * reportsRelayToSheet cron hands the engine-written rows here so REPORTS_2H — the human record —
+ * stays whole. Trusted: the engine already validated the submission and holds the master row;
+ * this only reflects it onto the sheet. Idempotent by email|date|checkpoint, so a re-sent batch
+ * (the cron re-sends until reportsSweep_ stamps synced_at) never duplicates a row. */
+function repSheetAppend_(args) {
+  const rows = (args && Array.isArray(args.rows)) ? args.rows : [];
+  if (!rows.length) return { written: 0, skipped: 0 };
+  let written = 0, skipped = 0;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    const sh = getPortalDb_(false).getSheetByName('REPORTS_2H');
+    const idx = repIndexRows_(readTab_('REPORTS_2H'));
+    rows.forEach(function (r) {
+      const email = normalizeEmail(r.email);
+      const date = repDateKey_(r.date);
+      const cp = repCpKey_(r.checkpoint);
+      if (!email || !date || !cp) { skipped++; return; }
+      if (idx[email + '|' + date + '|' + cp]) { skipped++; return; }   // already on the sheet
+      const repRow = {
+        report_id: String(r.report_id || ('R2H:' + email + '|' + date + '|' + cp)),
+        email: email, role: String(r.role || ''), shift: String(r.shift || ''),
+        date: date, checkpoint: cp, work_summary: String(r.work_summary || ''),
+        count_1: r.count_1 == null ? '' : r.count_1, count_2: r.count_2 == null ? '' : r.count_2,
+        count_3: r.count_3 == null ? '' : r.count_3, count_4: r.count_4 == null ? '' : r.count_4,
+        submitted_at: String(r.submitted_at || now_()), flag: String(r.flag || 'ontime'),
+      };
+      repAppendReport_(sh, repRow);
+      idx[email + '|' + date + '|' + cp] = repRow;   // guard duplicates within the same batch
+      written++;
+    });
+  } finally { lock.releaseLock(); }
+  return { written: written, skipped: skipped };
+}
+
 function repCpKey_(v) {
   if (v === null || v === undefined || v === '') return '';
   if (v instanceof Date) return Utilities.formatDate(v, repTz_(), 'HH:mm');

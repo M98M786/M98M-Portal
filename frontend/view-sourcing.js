@@ -9,7 +9,7 @@
 
   var SRC_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
   var SRC_EDIT_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
-  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null };
+  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {} };
 
   VIEW_CSS.push(
     '.src-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px}' +
@@ -52,7 +52,11 @@
     var box = $('srcBody');
     if (!box) { return; }
     var rows = SRC.rows;
-    if (SRC.tab === 'missing') { rows = rows.filter(function (r) { return !r.links_n; }); }
+    /* On the Missing queue, a row a processor just gave a link to would normally vanish the
+       instant it saves — which felt like the save did nothing ("adding link but not getting
+       updated", owner 5 Sept). Keep it pinned with a green ✓ until they press Refresh, so the
+       save is VISIBLY confirmed; it drops off the queue on the next load. */
+    if (SRC.tab === 'missing') { rows = rows.filter(function (r) { return !r.links_n || SRC.justSaved[srcStr(r.item_id)]; }); }
     if (SRC.acct) { rows = rows.filter(function (r) { return srcStr(r.account) === SRC.acct; }); }
     if (SRC.q) {
       var q = SRC.q.toLowerCase();
@@ -74,8 +78,11 @@
         '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th>Price</th><th>Sold 30d</th><th>Open orders</th>' +
         '<th style="text-align:left">Supplier 1</th><th style="text-align:left">Supplier 2</th><th style="text-align:left">Supplier 3</th><th style="text-align:left">Updated</th></tr></thead><tbody>';
       rows.slice(0, 400).forEach(function (r) {
-        h += '<tr' + (!r.links_n ? ' style="background:var(--bad-soft,rgba(255,80,80,.05))"' : '') + '>' +
-          '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(srcStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srcStr(r.title) || srcStr(r.item_id)) + '</div></a></td>' +
+        var js = SRC.justSaved[srcStr(r.item_id)];
+        h += '<tr' + (js ? ' style="background:rgba(46,204,113,.10)"' : (!r.links_n ? ' style="background:var(--bad-soft,rgba(255,80,80,.05))"' : '')) + '>' +
+          '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(srcStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srcStr(r.title) || srcStr(r.item_id)) +
+            (js ? ' <span style="font-size:9px;font-weight:800;letter-spacing:.04em;color:var(--ok);border:1px solid rgba(46,204,113,.5);border-radius:99px;padding:1px 6px">✓ LINK ADDED</span>' : '') +
+          '</div></a></td>' +
           '<td style="text-align:left">' + esc(srcStr(r.account)) + '</td>' +
           '<td class="num">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
           '<td class="num">' + (Number(r.sold_30d) || 0) + '</td>' +
@@ -107,9 +114,11 @@
           api('sourcingSave', { item_id: itemId, slot: Number(slot), url: url }).then(function () {
             row['s' + slot] = url; row['e' + slot] = url || srcStr(row['f' + slot]);
             row.links_n = ['e1', 'e2', 'e3'].filter(function (k) { return srcStr(row[k]); }).length;
+            if (url) { SRC.justSaved[itemId] = true; toast('Saved ✓ supplier ' + slot + ' — it stays here (green) until you press Refresh'); }
+            else { toast('Supplier ' + slot + ' link removed.'); }
             srcRecount(); srcRender();
           }).catch(function (e) {
-            alert(e.message);
+            toast('NOT saved — ' + (e && e.message ? e.message : 'try again'));
             srcRender();
           });
         };
@@ -133,6 +142,7 @@
   function srcLoad() {
     var box = $('srcBody');
     if (!box) { return; }
+    SRC.justSaved = {};                 // a fresh load clears the "just added" pins
     box.innerHTML = '<div class="spinner"></div>';
     api('sourcingBoard', {}).then(function (d) {
       SRC.rows = (d && d.rows) || [];
