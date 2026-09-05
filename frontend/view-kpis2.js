@@ -41,6 +41,7 @@
     var line = days.map(function (d, i) {
       return (i ? 'L' : 'M') + (X(i) + bw / 2).toFixed(1) + ',' + Y(Math.max(0, Number(d.actual) || 0)).toFixed(1);
     }).join(' ');
+    var profPts = days.map(function (d, i) { var v = Math.max(0, Number(d.actual) || 0); return { x: X(i) + bw / 2, y: Y(v), label: chartMoney(v), title: d.day + ' · actual ' + k2GBP(d.actual) }; });
     var grid = '';
     for (var g = 1; g <= 3; g++) {
       var gy = T + (1 - g / 4) * (H - T - B);
@@ -54,6 +55,7 @@
     }
     return '<div class="scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" style="min-width:620px;width:100%;height:auto">' + grid + labels + bars +
       '<path d="' + line + '" fill="none" stroke="var(--ok)" stroke-width="2.2"/>' +
+      chartValueDots(profPts, { color: 'var(--ok)', ink: '#04120b', fontSize: 9.5, minGap: 42 }) +
       '<text x="' + L + '" y="12" font-size="10.5" font-weight="800" fill="var(--blue)">▮ Sold / day (books)</text>' +
       '<text x="' + (L + 140) + '" y="12" font-size="10.5" font-weight="800" fill="var(--ok)">▬ Actual profit / day</text>' +
       '</svg></div>';
