@@ -450,7 +450,7 @@ var ENGINE_ACTIONS = ['whoami','getPublicConfig','mgmtPendingEngine','priceBoard
    simply becomes fast the day the Worker lands - no second frontend release needed.
    Only 'unknown action' falls back. An auth failure or a real error must still surface, which is
    the R6c rule below: a mis-routed call must never be silently papered over. */
-var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine', myTasks: 'myTasksEngine', pendingApprovals: 'pendingApprovalsEngine', huntQueue: 'huntQueueEngine', myHunts: 'myHuntsEngine', myListingWork: 'myListingWorkEngine', listDesk: 'listDeskEngine', huntReasons: 'huntReasonsEngine', myCheckpoints: 'myCheckpointsEngine', reportsGrid: 'reportsGridEngine', accountList: 'accountListEngine', assignableStaff: 'assignableStaffEngine', teamPerformance: 'teamPerformanceEngine', mgmtPendingAS: 'mgmtPendingEngine2', staffDossier: 'staffDossierEngine', revisionDesk: 'revisionDeskEngine' };
+var ENGINE_PREFERRED = { deptPending: 'deptPendingEngine', myTasks: 'myTasksEngine', pendingApprovals: 'pendingApprovalsEngine', huntQueue: 'huntQueueEngine', myHunts: 'myHuntsEngine', myListingWork: 'myListingWorkEngine', listDesk: 'listDeskEngine', huntReasons: 'huntReasonsEngine', myCheckpoints: 'myCheckpointsEngine', reportsGrid: 'reportsGridEngine', accountList: 'accountListEngine', assignableStaff: 'assignableStaffEngine', teamPerformance: 'teamPerformanceEngine', mgmtPendingAS: 'mgmtPendingEngine2', staffDossier: 'staffDossierEngine', revisionDesk: 'revisionDeskEngine', submitReport: 'submitReportEngine' };
 /* Remember a miss. Without this the probe is paid on EVERY call — the department boards refresh
    themselves every 45 seconds, so a not-yet-deployed Engine action turned a 5.5s page into a 7.5s
    page instead of leaving it unchanged. One failed probe per tab is the most this may ever cost.
@@ -575,7 +575,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260905-0049';
+var BUILD = '20260905-0121';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -19434,8 +19434,22 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       busy = false;
       btn.disabled = false;
       btn.textContent = was;
-      fail(e.message === 'auth' ? 'Your sign-in expired — please sign in again.' : 'That did not go through. Nothing was saved — please try again.');
-      toast('Report not submitted');
+      var m = String((e && e.message) || '');
+      if (m === 'auth') {
+        fail('Your sign-in expired — please sign in again.');
+        toast('Report not submitted');
+      } else if (/taking long|did not answer|wait a moment|still connecting/i.test(m)) {
+        /* submission is on the engine now — a brief slow spell almost always still lands the
+           save, so don't cry failure: confirm against the shift line, which reads the same store. */
+        fail('The server is finishing — one moment…');
+        setTimeout(load, 4000);
+      } else if (m && m !== 'request failed') {
+        fail(m);                    // the real reason — already submitted, window closed, a missing count…
+        toast('Report not submitted');
+      } else {
+        fail('That did not go through. Nothing was saved — please try again.');
+        toast('Report not submitted');
+      }
     });
   }
 
@@ -21358,9 +21372,20 @@ function saveSchedule() {
       if (sgStr(SG.att.message)) { toast(sgStr(SG.att.message)); }
     })['catch'](function (e) {
       SG.clockBusy = false;
-      SG.att = before;                          // honest rollback — the tap did NOT land
-      sgClockPaint();
-      toast('NOT recorded — ' + e.message + ' · tap it again.');
+      var m = String((e && e.message) || '');
+      /* The sheet is slow, not broken — the clock write usually LANDS on the server even when the
+         browser gives up at 25s. Flipping it back to "not recorded" made people tap again, which
+         then errored "you already concluded" — so it "did it automatically". Hold the optimistic
+         state and re-read attendance instead; if it truly did not land, the fresh read corrects the
+         button on its own. (owner, 5 Sept — "conclude working doesn't work, it does it automatically".) */
+      if (/overloaded|timeout|did not answer|taking long|aborted|failed/i.test(m)) {
+        toast('The server is slow — finishing there. Confirming…');
+        setTimeout(function () { sgAttLoad().then(sgClockPaint)['catch'](function () {}); }, 6000);
+      } else {
+        SG.att = before;                        // a real refusal — honest rollback
+        sgClockPaint();
+        toast('NOT recorded — ' + m + ' · tap it again.');
+      }
     });
   }
 
@@ -21396,7 +21421,7 @@ function saveSchedule() {
 
   var SRC_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
   var SRC_EDIT_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
-  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null };
+  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {} };
 
   VIEW_CSS.push(
     '.src-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px}' +
@@ -21439,7 +21464,11 @@ function saveSchedule() {
     var box = $('srcBody');
     if (!box) { return; }
     var rows = SRC.rows;
-    if (SRC.tab === 'missing') { rows = rows.filter(function (r) { return !r.links_n; }); }
+    /* On the Missing queue, a row a processor just gave a link to would normally vanish the
+       instant it saves — which felt like the save did nothing ("adding link but not getting
+       updated", owner 5 Sept). Keep it pinned with a green ✓ until they press Refresh, so the
+       save is VISIBLY confirmed; it drops off the queue on the next load. */
+    if (SRC.tab === 'missing') { rows = rows.filter(function (r) { return !r.links_n || SRC.justSaved[srcStr(r.item_id)]; }); }
     if (SRC.acct) { rows = rows.filter(function (r) { return srcStr(r.account) === SRC.acct; }); }
     if (SRC.q) {
       var q = SRC.q.toLowerCase();
@@ -21461,8 +21490,11 @@ function saveSchedule() {
         '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th>Price</th><th>Sold 30d</th><th>Open orders</th>' +
         '<th style="text-align:left">Supplier 1</th><th style="text-align:left">Supplier 2</th><th style="text-align:left">Supplier 3</th><th style="text-align:left">Updated</th></tr></thead><tbody>';
       rows.slice(0, 400).forEach(function (r) {
-        h += '<tr' + (!r.links_n ? ' style="background:var(--bad-soft,rgba(255,80,80,.05))"' : '') + '>' +
-          '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(srcStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srcStr(r.title) || srcStr(r.item_id)) + '</div></a></td>' +
+        var js = SRC.justSaved[srcStr(r.item_id)];
+        h += '<tr' + (js ? ' style="background:rgba(46,204,113,.10)"' : (!r.links_n ? ' style="background:var(--bad-soft,rgba(255,80,80,.05))"' : '')) + '>' +
+          '<td style="text-align:left"><a href="https://www.ebay.co.uk/itm/' + esc(srcStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit"><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(srcStr(r.title) || srcStr(r.item_id)) +
+            (js ? ' <span style="font-size:9px;font-weight:800;letter-spacing:.04em;color:var(--ok);border:1px solid rgba(46,204,113,.5);border-radius:99px;padding:1px 6px">✓ LINK ADDED</span>' : '') +
+          '</div></a></td>' +
           '<td style="text-align:left">' + esc(srcStr(r.account)) + '</td>' +
           '<td class="num">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
           '<td class="num">' + (Number(r.sold_30d) || 0) + '</td>' +
@@ -21494,9 +21526,11 @@ function saveSchedule() {
           api('sourcingSave', { item_id: itemId, slot: Number(slot), url: url }).then(function () {
             row['s' + slot] = url; row['e' + slot] = url || srcStr(row['f' + slot]);
             row.links_n = ['e1', 'e2', 'e3'].filter(function (k) { return srcStr(row[k]); }).length;
+            if (url) { SRC.justSaved[itemId] = true; toast('Saved ✓ supplier ' + slot + ' — it stays here (green) until you press Refresh'); }
+            else { toast('Supplier ' + slot + ' link removed.'); }
             srcRecount(); srcRender();
           }).catch(function (e) {
-            alert(e.message);
+            toast('NOT saved — ' + (e && e.message ? e.message : 'try again'));
             srcRender();
           });
         };
@@ -21520,6 +21554,7 @@ function saveSchedule() {
   function srcLoad() {
     var box = $('srcBody');
     if (!box) { return; }
+    SRC.justSaved = {};                 // a fresh load clears the "just added" pins
     box.innerHTML = '<div class="spinner"></div>';
     api('sourcingBoard', {}).then(function (d) {
       SRC.rows = (d && d.rows) || [];
