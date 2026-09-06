@@ -1045,6 +1045,7 @@ VIEWS.home = {
     return '<div class="hgroup enter d1"><h1>'+greeting()+', <span class="goldtext">'+esc((u.name||'').split(' ')[0]||u.name)+'</span></h1>'+
      '<span class="sub">'+esc(dateStr())+' · <span class="pill role">'+esc(u.role)+'</span></span></div>'+
      '<div id="hmBrief"></div>'+
+     '<div id="hmTeam"></div>'+
      '<div class="grid g-2">'+
        '<div class="card enter d2"><div class="hd">My timetable <span class="hint">set by Management</span></div><div class="bd">'+
          '<div class="tl-row"><span class="k">Shift</span><b>'+esc(u.shift||'Not set yet')+'</b></div>'+
@@ -1106,6 +1107,42 @@ VIEWS.home = {
       paint();
 
       /* TRUTH v2 WO-01a: the health cards moved off Home; the rating strip lands on Business overview at the standards flip (WO-03 step 5). */
+    })();
+    /* Team today (owner, 6 Sept: "update home page with staff attendance and staff working
+       reports"). Management sees, at a glance, who is working / not concluded / late, and how many
+       people have filed their 2-hourly reports — each a click from its full page. Both feeds fail
+       into plain words, never a stuck spinner. */
+    (function(){
+      var u=STATE.user||{};
+      var mgmt = u.role==='Management' || u.role==='Ops Head' || u.isSuper || u.super;
+      var host=$('hmTeam');
+      if(!mgmt || !host){ return; }
+      host.innerHTML='<div class="card enter d2" style="margin-top:16px"><div class="hd">Team today '+
+        '<span class="hint">attendance &amp; 2-hourly reports · PKT</span></div><div class="bd"><div class="grid g-2">'+
+        '<div id="hmAtt"><div class="spinner"></div></div><div id="hmRep"><div class="spinner"></div></div></div></div></div>';
+      var first=function(n){ return String(n||'').split(' ')[0]||n; };
+      var chip=function(l,v,tone){ return '<span style="display:inline-flex;gap:6px;align-items:baseline;border:1px solid var(--gold-line);border-radius:99px;padding:3px 11px;font-size:12px;font-weight:700;margin:0 6px 7px 0'+(tone?';color:var(--'+tone+')':'')+'">'+l+' <b>'+v+'</b></span>'; };
+      api('attendanceGrid',{}).then(function(d){
+        if(!$('hmAtt')){ return; }
+        var t=(d&&d.totals)||{}, rows=(d&&d.rows)||[];
+        var attn=rows.filter(function(r){ return r.status==='not concluded'||r.status==='absent'||r.late_flag; });
+        var h='<div style="font-size:11px;font-weight:800;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px">Attendance</div>'+
+          chip('Working',t.working||0,'ok')+chip('Concluded',t.present||0,'')+chip('Not concluded',t.not_concluded||0,t.not_concluded?'warn':'')+chip('Off',t.off||0,'')+chip('Late',t.late||0,t.late?'bad':'');
+        if(attn.length){ h+='<div style="margin-top:6px;font-size:12px;font-weight:600;color:var(--text-2);line-height:1.7">'+attn.slice(0,10).map(function(r){ return esc(first(r.name))+' <span style="color:var(--text-3)">'+esc(String(r.status||''))+(r.late_flag?' · late':'')+'</span>'; }).join(' &nbsp;·&nbsp; ')+'</div>'; }
+        else { h+='<div style="margin-top:4px;font-size:12px;color:var(--ok);font-weight:700">Everyone on schedule.</div>'; }
+        $('hmAtt').innerHTML=h;
+      }).catch(function(){ if($('hmAtt')){ $('hmAtt').innerHTML='<div class="hu-hint" style="margin-top:0">Attendance not available right now.</div>'; } });
+      api('staffReportsDay',{date:pkDayStr(0)}).then(function(d){
+        if(!$('hmRep')){ return; }
+        var ppl=(d&&d.people)||[], full=ppl.filter(function(p){return p.done>=p.total&&p.total;}).length, none=ppl.filter(function(p){return !p.done;}).length;
+        var h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-size:11px;font-weight:800;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">2-hourly reports</span>'+
+          '<a href="#staffReports" data-hm-nav2="staffReports" style="margin-left:auto;font-size:11.5px;font-weight:700;color:var(--gold-a)">Open ↗</a></div>'+
+          '<div style="font-size:23px;font-weight:800;font-variant-numeric:tabular-nums">'+full+' <span style="font-size:14px;color:var(--text-3);font-weight:700">/ '+ppl.length+' all in</span></div>'+
+          (none?'<div style="margin-top:5px;font-size:12px;color:var(--bad);font-weight:700">'+none+' with nothing submitted yet</div>':'')+
+          '<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--text-2);line-height:1.7">'+ppl.slice().sort(function(a,b){ return (a.done/(a.total||1))-(b.done/(b.total||1)); }).slice(0,7).map(function(p){ return esc(first(p.name))+' <span style="color:'+(p.done>=p.total?'var(--ok)':(p.done?'var(--warn)':'var(--bad)'))+'">'+p.done+'/'+p.total+'</span>'; }).join(' &nbsp;·&nbsp; ')+'</div>';
+        $('hmRep').innerHTML=h;
+        var a=$('hmRep').querySelector('[data-hm-nav2]'); if(a){ a.onclick=function(ev){ ev.preventDefault(); renderView('staffReports'); }; }
+      }).catch(function(){ if($('hmRep')){ $('hmRep').innerHTML='<div class="hu-hint" style="margin-top:0">Reports not available right now.</div>'; } });
     })();
     $('ideaBtn').onclick=function(){
       var v=$('ideaBox').value.trim(); if(!v){ return; }

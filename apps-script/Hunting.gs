@@ -180,33 +180,44 @@ function actionSubmitHunt_(payload, ctx) {
 
   /* TRUTH v2 WO-11 §4: the duplicate check runs AT SUBMIT on the ali item ids of every supplier
      link. A duplicate blocks the hunt unless Management overrides with a note — logged. */
+  var dupHit = null;
   (function () {
-    var dupHit = null;
     var mine = HUNT_DUP_SUPPLIER_COLS.map(function (c) { return huntAliItemId_(huntResolveShortLink_(cols[c])); })
       .filter(Boolean);
-    if (mine.length) {
-      readTab_('HUNTING_DB').some(function (r) {
-        var rec = huntRecord_(r);
-        for (var i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
-          var id0 = huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]);
-          if (id0 && mine.indexOf(id0) >= 0) { dupHit = rec; return true; }
-        }
-        return false;
-      });
-    }
-    if (dupHit) {
-      var note = String(payload.override_note || '').trim();
-      var mgmt = isMgmt_(ctx.user.role, ctx.ident.email);
-      if (!(note && mgmt)) {
-        throw new Error(SAFE_ERROR_PREFIX + 'duplicate product — already hunted by ' +
-          String(dupHit.hunter_email || '').split('@')[0] + ' (' + (dupHit.approval_status || HUNT_PENDING) + ', ' +
-          (String(dupHit[HC_DATE_ADDED] || '') || 'earlier') + ', ' + String(dupHit.hunt_id || '') + '). ' +
-          'Management can override with a note.');
+    if (!mine.length) return;
+    readTab_('HUNTING_DB').some(function (r) {
+      var rec = huntRecord_(r);
+      for (var i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
+        var id0 = huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]);
+        if (id0 && mine.indexOf(id0) >= 0) { dupHit = rec; return true; }
       }
-      logActivity_(ctx.ident.email, 'HUNT_DUP_OVERRIDE', 'all', String(dupHit.hunt_id || ''), '',
-        ('override: ' + note).slice(0, 160));
-    }
+      return false;
+    });
   })();
+  if (dupHit) {
+    /* A hunter's OWN submission from the last few minutes is NOT a new duplicate — it is a retry
+       after a LOST RESPONSE (the sheet write landed, then Apps Script timed out at 25s before the
+       answer got back, so the browser said "not submitted"). Return that just-saved hunt as an
+       idempotent success, so the retry is silent instead of the "item duplicated" wall. (owner,
+       6 Sept — "gives error of not submitted, data comes back, then retry says item duplicated".) */
+    var dupOwn = normalizeEmail(dupHit.hunter_email) === normalizeEmail(ctx.ident.email);
+    var dupTs = 0; try { dupTs = new Date(dupHit.ts).getTime(); } catch (e) {}
+    if (dupOwn && dupTs && (Date.now() - dupTs) < 15 * 60 * 1000) {
+      return { hunt_id: String(dupHit.hunt_id || ''), approval_status: String(dupHit.approval_status || HUNT_PENDING),
+        submitted_at: String(dupHit.ts || ''), criteria_flags: huntCriteriaFlags_(cols), idempotent: true,
+        note: 'Already saved a moment ago — no duplicate was created.' };
+    }
+    var note = String(payload.override_note || '').trim();
+    var mgmt = isMgmt_(ctx.user.role, ctx.ident.email);
+    if (!(note && mgmt)) {
+      throw new Error(SAFE_ERROR_PREFIX + 'duplicate product — already hunted by ' +
+        String(dupHit.hunter_email || '').split('@')[0] + ' (' + (dupHit.approval_status || HUNT_PENDING) + ', ' +
+        (String(dupHit[HC_DATE_ADDED] || '') || 'earlier') + ', ' + String(dupHit.hunt_id || '') + '). ' +
+        'Management can override with a note.');
+    }
+    logActivity_(ctx.ident.email, 'HUNT_DUP_OVERRIDE', 'all', String(dupHit.hunt_id || ''), '',
+      ('override: ' + note).slice(0, 160));
+  }
 
   const advertising = huntAdvertisingType_(cols[HC_CPC], false);
   cols[HC_CPC] = advertising;
@@ -229,7 +240,8 @@ function actionSubmitHunt_(payload, ctx) {
   let subRec = null;
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    try { lock.waitLock(15000); }
+    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — give it a moment and press Submit again (your data is kept)'); }
     const sh = huntSheet_();
     const head = huntHeaders_(sh);
     const row = head.map(function (h) {

@@ -604,7 +604,18 @@
          whatever they had not touched — edits win, nothing is blank. */
       if (typeof draftRestore === 'function') { draftRestore('hunting'); }
       if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
-      toast('NOT saved — ' + e.message + ' · your typing is restored.');
+      var msg = String((e && e.message) || '');
+      /* A slow sheet usually LANDS the row even when the 25s response is lost — so don't declare
+         "not saved" and send the hunter into a re-submit that then hits the duplicate wall. Say we
+         are checking, and re-read their own list; the save shows up there. If it truly did not
+         land, a re-submit is safe now — the server treats an own recent resubmit as idempotent.
+         (owner, 6 Sept — "not submitted, data comes back, retry says duplicated".) */
+      if (/overloaded|timeout|did not answer|taking long|aborted|busy/i.test(msg)) {
+        toast('The server is slow — checking whether it saved…');
+        setTimeout(huLoadMine, 5000);
+      } else {
+        toast('NOT saved — ' + msg + ' · your typing is restored.');
+      }
     });
   }
 

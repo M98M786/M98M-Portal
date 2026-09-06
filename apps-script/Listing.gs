@@ -290,61 +290,80 @@ function actionEnterItemId_(payload, ctx) {
 
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    try { lock.waitLock(15000); }
+    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the tasks sheet is busy right now — give it a moment and press “Make live” again'); }
     const found = taskFind_(sh, payload.task_id);
     rec = found.rec;
-    if (String(rec.type || '') !== 'listing_new') throw new Error('not a listing task');
-    if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'not your task');
+    if (String(rec.type || '') !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'that draft is not a listing task any more — press Refresh');
+    if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'this draft is not assigned to you');
 
     const status = String(rec.status || '');
     const carried = String(rec.item_id || '').trim();
-    idempotent = carried === itemId && (status === TASK_STATUS_SUBMITTED || status === TASK_STATUS_COMPLETED);
-    if (!idempotent) {
-      if (carried && carried !== itemId) throw new Error('this task already carries a different Item ID');
-      if (status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) throw new Error(SAFE_ERROR_PREFIX + 'listing task is not in progress');
+    /* Already published — it carries an Item ID AND sits on a terminal status. Re-entering must not
+       force a new Item ID over a listing that is already live, nor build the §8 chain twice; it only
+       clears the leftover draft flag so the draft finally leaves the go-live desk. (The stale
+       "Completed but still flagged as draft" case that was jamming the desk, 6 Sept.) */
+    if (carried && (status === TASK_STATUS_SUBMITTED || status === TASK_STATUS_COMPLETED)) {
+      try { taskWrite_(sh, found, { comments: listingMergeFlag_(rec.comments, null), updated_at: stamp }); } catch (e2) {}
+      return { ok: true, item_id: carried, task_id: String(rec.task_id), already_live: true,
+        note: 'Already live as Item ID ' + carried + ' — cleared the leftover draft flag.' };
     }
+    if (carried && carried !== itemId) throw new Error(SAFE_ERROR_PREFIX + 'this draft already carries Item ID ' + carried + ' — press Refresh');
+    if (status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) throw new Error(SAFE_ERROR_PREFIX + 'this listing task is not in progress (status: ' + (status || 'unknown') + ') — press Refresh');
+
+    /* THE go-live write comes FIRST — mark the task Submitted, save the Item ID and final title, and
+       CLEAR the draft flag — so the listing goes live and leaves the desk even if a downstream
+       sub-task hiccups. The §8 chain (campaign · supplier · 72h revision) is created best-effort
+       below; each is idempotent on (type, item_id), so a retry only fills what a half-finished
+       attempt missed. Sub-task creation used to run BEFORE this, so any throw there (a busy sheet, a
+       missing role, a bad detail) failed the whole publish with "request failed" and the draft came
+       straight back. (owner, 6 Sept — "still not entered, request failed".) */
+    const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
+    const patch = {
+      item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
+      submission_note: note, updated_at: stamp, time_taken_min: total,
+      comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
+    };
+    if (finalTitle) { patch.title = finalTitle; }
+    taskWrite_(sh, found, patch);
+    approver = String(rec.assigned_by || '').trim();
 
     const all = readTab_('TASKS');
     const account = String(rec.account || '');
     const limited = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
     const product = String(limited['Title'] || rec.title || '');
 
-    // ① campaign_set → Advertising Manager. Created now (§8, §14) and worked in the §8.0.3
-    // testing window that opens when the 72-hour revision is approved.
-    const adv = listingPickForRole_('Advertising Manager', payload.campaign_assignee, all, 'campaign_set');
-    const haveCampaign = listingFindTask_(all, 'campaign_set', itemId);
-    if (haveCampaign) made.campaign_set = { task_id: String(haveCampaign.task_id), existing: true, assigned_to: String(haveCampaign.assigned_to) };
-    else if (adv) {
-      made.campaign_set = {
-        task_id: listingCreateTask_(sh, {
-          type: 'campaign_set', account: account, item_id: itemId,
-          title: 'campaign_set — Item ID ' + itemId,
+    // ① campaign_set → Advertising Manager (best-effort — NEVER undoes the go-live above)
+    try {
+      const adv = listingPickForRole_('Advertising Manager', payload.campaign_assignee, all, 'campaign_set');
+      const haveCampaign = listingFindTask_(all, 'campaign_set', itemId);
+      if (haveCampaign) made.campaign_set = { task_id: String(haveCampaign.task_id), existing: true, assigned_to: String(haveCampaign.assigned_to) };
+      else if (adv) {
+        const cid = listingCreateTask_(sh, {
+          type: 'campaign_set', account: account, item_id: itemId, title: 'campaign_set — Item ID ' + itemId,
           details: listingLines_([
-            'Item ID: ' + itemId,
-            'Listing: ' + product,
+            'Item ID: ' + itemId, 'Listing: ' + product,
             'CPC Selling Chance: ' + String(limited['CPC Selling Chance'] || ''),
             'Testing window: ' + chain.campaign.uk + ' (' + chain.campaign.pkt + ') on ' + chain.campaign.uk_date,
             'Fires when the 72-hour revision is approved (§8.0).',
           ]),
           assigned_by: String(rec.assigned_by || ''), assigned_to: adv.email,
           priority: String(rec.priority || ''), deadline_pkt: chain.campaign.end_pkt, stamp: stamp,
-        }), existing: false, assigned_to: adv.email,
-      };
-    }
+        });
+        if (cid) made.campaign_set = { task_id: cid, existing: false, assigned_to: adv.email };
+      }
+    } catch (subErr) { /* best-effort — the listing is already live */ }
 
-    // ② supplier_add → Order Processor. The Central Main Sheet row itself is created by the
-    // eBay listing sync; the processor fills only the supplier columns (§8.7 whitelist).
-    const proc = listingPickForRole_('Order Processor', payload.supplier_assignee, all, 'supplier_add');
-    const haveSupplier = listingFindTask_(all, 'supplier_add', itemId);
-    if (haveSupplier) made.supplier_add = { task_id: String(haveSupplier.task_id), existing: true, assigned_to: String(haveSupplier.assigned_to) };
-    else if (proc) {
-      made.supplier_add = {
-        task_id: listingCreateTask_(sh, {
-          type: 'supplier_add', account: account, item_id: itemId,
-          title: 'supplier_add — Item ID ' + itemId,
+    // ② supplier_add → Order Processor (best-effort)
+    try {
+      const proc = listingPickForRole_('Order Processor', payload.supplier_assignee, all, 'supplier_add');
+      const haveSupplier = listingFindTask_(all, 'supplier_add', itemId);
+      if (haveSupplier) made.supplier_add = { task_id: String(haveSupplier.task_id), existing: true, assigned_to: String(haveSupplier.assigned_to) };
+      else if (proc) {
+        const sid = listingCreateTask_(sh, {
+          type: 'supplier_add', account: account, item_id: itemId, title: 'supplier_add — Item ID ' + itemId,
           details: listingLines_([
-            'Item ID: ' + itemId,
-            'Listing: ' + product,
+            'Item ID: ' + itemId, 'Listing: ' + product,
             'Fill on the Central Main Sheet: Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3',
             'Product Link 1: ' + String(limited['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
             'Product Link 2: ' + String(limited['Product Link 2\n\n'] || ''),
@@ -352,48 +371,30 @@ function actionEnterItemId_(payload, ctx) {
           ]),
           assigned_by: String(rec.assigned_by || ''), assigned_to: proc.email,
           priority: String(rec.priority || ''), deadline_pkt: chain.supplier_due_pkt, stamp: stamp,
-        }), existing: false, assigned_to: proc.email,
-      };
-    }
+        });
+        if (sid) made.supplier_add = { task_id: sid, existing: false, assigned_to: proc.email };
+      }
+    } catch (subErr) { /* best-effort */ }
 
-    // ③ +72h real revision → the same lister; listing quality is approved by Hamza (§8.0b).
-    const manager = listingPickForRole_('Listing Manager', '', all, 'listing_revision');
-    const have72 = listingFind72h_(all, itemId);
-    if (have72) made.revision = { task_id: String(have72.task_id), existing: true, assigned_to: String(have72.assigned_to) };
-    else {
-      made.revision = {
-        task_id: listingCreateTask_(sh, {
-          type: 'listing_revision', account: account, item_id: itemId,
-          title: LISTING_KIND_72H + ' — Item ID ' + itemId,
+    // ③ +72h real revision → the go-live person (best-effort)
+    try {
+      const have72 = listingFind72h_(all, itemId);
+      if (have72) made.revision = { task_id: String(have72.task_id), existing: true, assigned_to: String(have72.assigned_to) };
+      else {
+        const manager = listingPickForRole_('Listing Manager', '', all, 'listing_revision');
+        const rid = listingCreateTask_(sh, {
+          type: 'listing_revision', account: account, item_id: itemId, title: LISTING_KIND_72H + ' — Item ID ' + itemId,
           details: listingLines_([
-            'Item ID: ' + itemId,
-            'Listing: ' + product,
+            'Item ID: ' + itemId, 'Listing: ' + product,
             'Window: ' + chain.revision.uk + ' (' + chain.revision.pkt + ') on ' + chain.revision.uk_date,
             'Live since ' + chain.go_live_uk + ' on ' + chain.day0_uk_date + ' — 72 hours later this dummy becomes the real competitor-based listing.',
           ]),
           assigned_by: manager ? manager.email : String(rec.assigned_by || ''), assigned_to: String(rec.assigned_to || ''),
           priority: String(rec.priority || ''), deadline_pkt: chain.revision.end_pkt, stamp: stamp,
-        }), existing: false, assigned_to: String(rec.assigned_to || ''),
-      };
-    }
-
-    // A paused account (accountPaused_) makes listingCreateTask_ return '' — drop those stubs so
-    // nothing downstream is notified or logged for a task that was never created.
-    ['campaign_set', 'supplier_add', 'revision'].forEach(function (k) {
-      if (made[k] && !made[k].existing && !made[k].task_id) { made[k] = null; }
-    });
-
-    if (!idempotent) {
-      const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
-      const patch = {
-        item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
-        submission_note: note, updated_at: stamp, time_taken_min: total,
-        comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
-      };
-      if (finalTitle) { patch.title = finalTitle; }
-      taskWrite_(sh, found, patch);
-      approver = String(rec.assigned_by || '').trim();
-    }
+        });
+        if (rid) made.revision = { task_id: rid, existing: false, assigned_to: String(rec.assigned_to || '') };
+      }
+    } catch (subErr) { /* best-effort */ }
   } finally { lock.releaseLock(); }
 
   /* The permanent record (30 Aug): item → title + the hunt's AliExpress link, in the engine's
