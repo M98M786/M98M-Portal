@@ -7170,6 +7170,76 @@ const ROUTES = {
     },
   },
 
+  /* Owner (6 Sept): "a separate page of staff report submission — 2-hour to 2-hour of each staff,
+     yesterday, with custom date; also show them their archive." Reads reports_2h straight from D1
+     (same store the checkpoint line writes), so it is always current and never touches the sheet.
+     staffReportsDay = every scheduled person's checkpoints for one day, with the actual work
+     summary, counts and on-time flag per 2-hour slot. Management / Ops Head / Team Lead only. */
+  staffReportsDay: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!mgmt) throw new AuthError('management only');
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? String(p.date) : repPktNow().day;
+      const us = await ctx.env.DB.prepare("SELECT email, name, role, shift, checkpoints, working_days FROM users WHERE status = 'approved'").all().catch(() => ({ results: [] }));
+      const rr = await ctx.env.DB.prepare('SELECT * FROM reports_2h WHERE date = ?1').bind(date).all().catch(() => ({ results: [] }));
+      const byEmail = {};
+      for (const r of (rr.results || [])) { const k = String(r.email).toLowerCase(); (byEmail[k] = byEmail[k] || []).push(r); }
+      const people = [];
+      for (const u of (us.results || [])) {
+        const cps = String(u.checkpoints || '').split(',').map(repHm).filter(Boolean);
+        if (!cps.length) continue;
+        const working = repIsWorkingDayJs(u.working_days, date);
+        const labels = REP_COUNT_FIELDS[String(u.role)] || [];
+        const mine = byEmail[String(u.email).toLowerCase()] || [];
+        const idx = {}; for (const r of mine) idx[repHm(r.checkpoint)] = r;
+        const rows = cps.map((cp, i) => {
+          const r = idx[cp];
+          return {
+            checkpoint: cp, is_final: i === cps.length - 1,
+            submitted: !!r, flag: r ? String(r.flag || '') : '',
+            submitted_at: r ? String(r.submitted_at || '') : '',
+            work_summary: r ? String(r.work_summary || '') : '',
+            counts: labels.map((label, n) => ({ label, value: r ? String(r['count_' + (n + 1)] == null ? '' : r['count_' + (n + 1)]) : '' })),
+          };
+        });
+        const done = rows.filter((x) => x.submitted).length;
+        people.push({ email: String(u.email).toLowerCase(), name: String(u.name || u.email), role: String(u.role || ''),
+          shift: String(u.shift || ''), working, total: cps.length, done, rows });
+      }
+      people.sort((a, b) => (b.done - a.done) || String(a.name).localeCompare(String(b.name)));
+      return { date, people, note: 'each person’s 2-hourly reports for the day — work summary, counts and on-time flag per checkpoint · straight from D1' };
+    },
+  },
+
+  /* One person's submission history across days — mgmt may read anyone's (pass email); anyone
+     may read their OWN (so staff can see their archive of submitted reports). Newest day first. */
+  staffReportsArchive: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      const me = String(ctx.user.email || '').toLowerCase();
+      const asked = String(p.email || '').toLowerCase();
+      const target = (mgmt && asked) ? asked : me;
+      const u = await ctx.env.DB.prepare('SELECT email, name, role FROM users WHERE email = ?1').bind(target).first().catch(() => null);
+      const labels = REP_COUNT_FIELDS[String((u && u.role) || '')] || [];
+      const rr = await ctx.env.DB.prepare(
+        'SELECT date, checkpoint, work_summary, count_1, count_2, count_3, count_4, submitted_at, flag ' +
+        'FROM reports_2h WHERE email = ?1 ORDER BY date DESC, checkpoint ASC LIMIT 500'
+      ).bind(target).all().catch(() => ({ results: [] }));
+      const byDate = {};
+      for (const r of (rr.results || [])) {
+        const d = String(r.date); (byDate[d] = byDate[d] || []).push({
+          checkpoint: repHm(r.checkpoint), flag: String(r.flag || ''), submitted_at: String(r.submitted_at || ''),
+          work_summary: String(r.work_summary || ''),
+          counts: labels.map((label, n) => ({ label, value: String(r['count_' + (n + 1)] == null ? '' : r['count_' + (n + 1)]) })),
+        });
+      }
+      const days = Object.keys(byDate).sort().reverse().map((d) => ({ date: d, reports: byDate[d] }));
+      return { email: target, name: String((u && u.name) || target), role: String((u && u.role) || ''), days };
+    },
+  },
+
   /* ————— the listing department, served from the engine (2 Sept: "listing department and all
      submissions, approvals, drafts doing issues") — reads only; every write stays on Apps
      Script. Same shapes as Listing.gs/R8.gs, same status walls, same §8.2 whitelist law. */
