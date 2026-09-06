@@ -4322,7 +4322,13 @@ async function metricAds(env, account) {
     return { total, byAccount };
   });
   if (account) { return all.byAccount[account] || { split: { cpc_only: 0, general_only: 0, both: 0, none: 0, active: 0, multi: 0 }, multiRows: [], noneRows: [] }; }
-  return all.total;
+  /* account-to-account view (owner, 6 Sept: "in live listings, present account to account data,
+     listings split also"). The per-account splits are already computed above — expose them as a
+     compact map so the Live listings page can show every account's CPC/General/Both/None side by
+     side without another scan. */
+  const by_account = {};
+  for (const a in all.byAccount) { if (Object.prototype.hasOwnProperty.call(all.byAccount, a)) { by_account[a] = all.byAccount[a].split; } }
+  return Object.assign({}, all.total, { by_account });
 }
 
 /* WO-02 Path A: departments board from the D1 task mirror — ONE function feeds the merged desk
@@ -5041,9 +5047,15 @@ const ROUTES = {
         /* 30 Aug (owner): a fresh order must hand the processor a BUYING link at once - the
            Central Main Sheet columns first, the go-live desk's own record when the sheet row
            has not been filled yet. Cost-role gated below like every supplier column. */
-        "COALESCE(NULLIF(f.sup1_link,''), NULLIF(g.ali_link,'')) AS sup_link, f.current_sup " +
+        /* 6 Sept (owner: "all new ali-express links should come back on the next order"): the
+           portal Sourcing page saves links into the `sourcing` table (s1), which this used to
+           ignore — so a link added there never reached the order screen. Prefer it, then the
+           Central Main Sheet column, then the go-live record. Now every future order of the item
+           hands the processor the buying link automatically. */
+        "COALESCE(NULLIF(s.s1,''), NULLIF(f.sup1_link,''), NULLIF(g.ali_link,'')) AS sup_link, f.current_sup " +
         'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
-        'LEFT JOIN items_facts f ON f.item_id = o.item_id LEFT JOIN golive g ON g.item_id = o.item_id WHERE ' + B[sel] + acctSql +
+        'LEFT JOIN items_facts f ON f.item_id = o.item_id LEFT JOIN golive g ON g.item_id = o.item_id ' +
+        'LEFT JOIN sourcing s ON s.item_id = o.item_id WHERE ' + B[sel] + acctSql +
         " ORDER BY CASE WHEN o.ship_by != '' THEN o.ship_by ELSE o.created_at END " +
         (sel === 'dispatched' || sel === 'all' ? 'DESC' : 'ASC') + ' LIMIT 150');
       let rs;
@@ -7606,6 +7618,10 @@ const ROUTES = {
       const mgmt = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       if (!mgmt) throw new AuthError('auth');
       await ensureTruthSchema(ctx.env);
+      /* 6 Sept (owner): Business overview can now be scoped to one account. Every source below
+         carries an `account` column, so `(?1 = '' OR account = ?1)` gives the correct per-account
+         total and leaves the all-accounts default (acct = '') byte-for-byte unchanged. */
+      const acct = String(p.account || '').trim();
       const d = new Date();
       const mkey = (yr, mo) => yr + '-' + String(mo + 1).padStart(2, '0');
       const tmKey = mkey(d.getUTCFullYear(), d.getUTCMonth());
@@ -7613,7 +7629,7 @@ const ROUTES = {
       const lmKey = mkey(lmDate.getUTCFullYear(), lmDate.getUTCMonth());
       const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
       /* traffic: this month, last month, and last 30 days */
-      const tr = await ctx.env.DB.prepare('SELECT date, SUM(impressions) AS imp, SUM(views) AS vw FROM traffic_daily GROUP BY date').all().catch(() => ({ results: [] }));
+      const tr = await ctx.env.DB.prepare("SELECT date, SUM(impressions) AS imp, SUM(views) AS vw FROM traffic_daily WHERE (?1 = '' OR account = ?1) GROUP BY date").bind(acct).all().catch(() => ({ results: [] }));
       const traffic = { tm: { imp: 0, views: 0 }, lm: { imp: 0, views: 0 }, d30: { imp: 0, views: 0 } };
       for (const r of (tr.results || [])) {
         const dt = String(r.date || ''), imp = Number(r.imp) || 0, vw = Number(r.vw) || 0;
@@ -7623,9 +7639,9 @@ const ROUTES = {
       }
       /* advertised listings, from the one memoised ads pass */
       let ads = { advertised: 0, unadvertised: 0 };
-      try { const A = await metricAds(ctx.env); const s = (A && A.split) || {}; ads = { advertised: (Number(s.active) || 0), unadvertised: (Number(s.none) || 0) }; } catch (e) {}
+      try { const A = await metricAds(ctx.env, acct || undefined); const s = (A && A.split) || {}; ads = { advertised: (Number(s.active) || 0), unadvertised: (Number(s.none) || 0) }; } catch (e) {}
       /* customer service load + returns, from cases */
-      const cs = await ctx.env.DB.prepare('SELECT kind, status, opened_at, closed_at FROM cases').all().catch(() => ({ results: [] }));
+      const cs = await ctx.env.DB.prepare("SELECT kind, status, opened_at, closed_at FROM cases WHERE (?1 = '' OR account = ?1)").bind(acct).all().catch(() => ({ results: [] }));
       let repliesRequired = 0, handledTm = 0, resolved = 0, resolved30 = 0;
       const returns = { tm: { n: 0 }, lm: { n: 0 } };
       const OPEN_DONE = ['CLOSED', 'CS_CLOSED'];
@@ -7638,7 +7654,7 @@ const ROUTES = {
         if (String(c.kind) === 'RETURN') { const om = String(c.opened_at || '').slice(0, 7); if (om === tmKey) returns.tm.n++; if (om === lmKey) returns.lm.n++; }
       }
       /* refund £ by the order's month */
-      const rf = await ctx.env.DB.prepare("SELECT substr(created_at,1,7) AS m, ROUND(SUM(refunded),2) AS gbp FROM orders WHERE refunded > 0 GROUP BY m").all().catch(() => ({ results: [] }));
+      const rf = await ctx.env.DB.prepare("SELECT substr(created_at,1,7) AS m, ROUND(SUM(refunded),2) AS gbp FROM orders WHERE refunded > 0 AND (?1 = '' OR account = ?1) GROUP BY m").bind(acct).all().catch(() => ({ results: [] }));
       for (const r of (rf.results || [])) { if (String(r.m) === tmKey) returns.tm.gbp = Number(r.gbp) || 0; if (String(r.m) === lmKey) returns.lm.gbp = Number(r.gbp) || 0; }
       return { traffic, ads, cs: { replies_required: repliesRequired, resolved: resolved, resolved_30d: resolved30, handled_this_month: handledTm }, returns, as_of: new Date().toISOString() };
     },
@@ -8195,7 +8211,8 @@ const ROUTES = {
       const account = String(p.account || '') || undefined;
       const A = await metricAds(ctx.env, account);
       const inv = A.split.cpc_only + A.split.general_only + A.split.both + A.split.none === A.split.active;
-      return { split: A.split, multi: A.multiRows, none: A.noneRows, invariant_split_ok: inv, as_of: new Date().toISOString() };
+      return { split: A.split, multi: A.multiRows, none: A.noneRows, invariant_split_ok: inv,
+        by_account: A.by_account || null, as_of: new Date().toISOString() };
     },
   },
 

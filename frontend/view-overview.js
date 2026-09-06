@@ -111,7 +111,23 @@
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
+  /* Page-level account filter (owner, 6 Sept: "update the whole page with a selection option,
+     account to account by name, and an all-accounts option which is the default"). O.acct === ''
+     means ALL ACCOUNTS — every section then behaves EXACTLY as before (zero change, zero risk to
+     the numbers). When an account is chosen, each section that can be made correct for one account
+     is filtered — the money truth (pageMetrics), item P&L, live listings and this-month tiles take
+     the account server-side; funds, VAT, ratings, health and the day books are per-account rows we
+     slice client-side. The "Right now" pulse and "Staff performance" are cross-cutting by nature
+     and stay all-accounts (they say so on the tin). */
+  function oAcctParam(base) { base = base || {}; if (O.acct) { base.account = O.acct; } return base; }
+  function oAcctRows(rows) { return O.acct ? (rows || []).filter(function (r) { return oS(r.account) === O.acct; }) : (rows || []); }
+  function oScopeLabels() {
+    var sub = $('o2Sub');
+    if (sub) { sub.textContent = 'Management · ' + (O.acct || 'all accounts') + ' · every number has a live feed behind it'; }
+    var ch = $('o2CollH');
+    if (ch) { ch.textContent = O.acct ? esc(O.acct) + ' — this account' : 'Collective — all accounts'; }
+  }
 
   function oRange() {
     var t = ukToday();
@@ -122,7 +138,9 @@
     return { from: dShift(t, -6), to: t, label: 'Last 7 days' };
   }
   function oRows(from, to) {
-    return (O.days || []).filter(function (r) { return r.date >= from && r.date <= to; });
+    /* the day books for the range — scoped to the chosen account when the page is filtered, so the
+       Profitability chart, per-account ranking and totals all read that one account's books */
+    return oAcctRows(O.days || []).filter(function (r) { return r.date >= from && r.date <= to; });
   }
   function oSum(rows) {
     var t = { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0 };
@@ -185,16 +203,17 @@
       oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth();
       oPaintDated();          // the live "today" tile rides on this feed, not on dailyReport
     }).catch(function (e) { oFeedFailed('o2Today', 'today\u2019s live figures', e); });
-    api('activeListings', {}).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
+    api('activeListings', oAcctParam({})).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
     api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
-    /* the plain headline numbers (traffic, advertised count, CS load, returns) — one Engine read */
-    api('bizExtras', {}).then(function (d) { O.extras = d || null; oPaintExtras(); })
+    /* the plain headline numbers (traffic, advertised count, CS load, returns) — one Engine read,
+       account-scoped when a single account is chosen */
+    api('bizExtras', oAcctParam({})).then(function (d) { O.extras = d || null; oPaintExtras(); })
       .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
-    truthPage({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) })
+    truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
       .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
       .catch(function () { O.truth = null; oPaintMoney(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
@@ -244,7 +263,7 @@
     var f = O.funds, v = O.vat;
     if (!f && !v) { return; }
     var h = '';
-    var fa = (f && f.accounts) || [];
+    var fa = oAcctRows((f && f.accounts) || []);   // one account when the page is scoped, else all
     var okF = fa.filter(function (a) { return !a.error; });
     var tAvail = 0, tHold = 0, tProc = 0, tTot = 0;
     okF.forEach(function (a) { tAvail += oN(a.available); tHold += oN(a.on_hold); tProc += oN(a.processing); tTot += oN(a.total); });
@@ -263,7 +282,7 @@
        month to date, per account — the calculator writes it, the portal reads it. */
     var vm = (O.truth && O.truth.metrics) || null;
     var byA = vm ? (vm.MONEY_BY_ACCOUNT.value || {}) : {};
-    var vaNames = Object.keys(byA).sort();
+    var vaNames = Object.keys(byA).filter(function (a) { return !O.acct || a === O.acct; }).sort();
     var vatTotal = vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].vat); }, 0);
     h += '<div class="o-card"><div class="card-t">VAT to pay — Σ VAT to HMRC · month to date</div>' +
       (vaNames.length
@@ -286,8 +305,8 @@
     var host = $('o2Ratings');
     if (!host) { return; }
     api('accountHealth', {}).then(function (d) {
-      var stds = (d && d.standards) || [];
-      if (!stds.length) { host.innerHTML = '<div class="empty">The standards sync has not landed yet.</div>'; return; }
+      var stds = oAcctRows((d && d.standards) || []);   // scope to the chosen account when one is set
+      if (!stds.length) { host.innerHTML = '<div class="empty">' + (O.acct ? 'No standards row for ' + esc(O.acct) + ' yet.' : 'The standards sync has not landed yet.') + '</div>'; return; }
       host.innerHTML = stds.map(function (r) {
         var p = (r.profiles || [])[0] || {};
         var lv = String(p.standardsLevel || '');
@@ -375,10 +394,10 @@
     /* TRUTH v2 WO-03 (money LIVE): the money tiles read the register for the CHOSEN RANGE —
        Σ Raw Profit, Σ VAT to HMRC, Σ True Order Earning, sheet Sold with the eBay sub-line and
        rows coverage. Ads-family tiles keep the old path until the ads module flips (Phase 4). */
-    var tKey = 't:' + r.from + '|' + r.to;
+    var tKey = 't:' + r.from + '|' + r.to + '|' + O.acct;
     if (O.truthRangeKey !== tKey) {
       O.truthRangeKey = tKey; O.truthRange = null;
-      truthPage({ from: r.from, to: r.to }).then(function (d) {
+      truthPage(oAcctParam({ from: r.from, to: r.to })).then(function (d) {
         if (O.truthRangeKey !== tKey) { return; }
         O.truthRange = d;
         oPaintKpis(r);
@@ -444,18 +463,19 @@
       }
       return;
     }
-    /* old path renders until the register answers */
-    var key = r.from + '|' + r.to;
+    /* old path renders until the register answers · the key carries the account so switching
+       accounts re-computes rather than showing the previous scope's P&L */
+    var key = r.from + '|' + r.to + '|' + O.acct;
     if (O.pnlKey !== key) {
       O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
       box.innerHTML = '<div class="empty">Computing with the P&L brain…</div>';
       var span0 = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
-      api('itemPnl', { from: r.from, to: r.to }).then(function (d) {
+      api('itemPnl', oAcctParam({ from: r.from, to: r.to })).then(function (d) {
         if (O.pnlKey !== key) { return; }
         O.pnlCur = (d && d.total) || {};
         oPaintKpis(r);
       }).catch(function (e) { if (O.pnlKey === key) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
-      api('itemPnl', { from: dShift(r.from, -span0), to: dShift(r.from, -1) }).then(function (d) {
+      api('itemPnl', oAcctParam({ from: dShift(r.from, -span0), to: dShift(r.from, -1) })).then(function (d) {
         if (O.pnlKey !== key) { return; }
         O.pnlPrev = (d && d.total) || {};
         oPaintKpis(r);
@@ -518,7 +538,7 @@
   function oPaintAlerts() {
     var box = $('o2Alerts');
     if (!box || !O.ov) { return; }
-    var dups = O.ov.duplicates || [], losses = O.ov.loss_items || [];
+    var dups = oAcctRows(O.ov.duplicates || []), losses = oAcctRows(O.ov.loss_items || []);
     if (!dups.length && !losses.length) { box.innerHTML = ''; box.style.display = 'none'; return; }
     var h = '';
     losses.slice(0, 2).forEach(function (l) {
@@ -548,11 +568,11 @@
       });
       return h + '</div>';
     }
-    var t = O.ov.today_by_account || [], y = O.ov.yesterday_by_account || [], ad = O.ov.ads_yesterday || [];
+    var t = oAcctRows(O.ov.today_by_account || []), y = oAcctRows(O.ov.yesterday_by_account || []), ad = oAcctRows(O.ov.ads_yesterday || []);
     /* Review 3: yesterday's strips speak the BOOKS' brain columns — Actual (T − CPC − returns)
        and ad spend with each account's own ROAS beside it. */
     var yd = dShift(ukToday(), -1);
-    var booksY = (O.days || []).filter(function (r0) { return r0.date === yd; });
+    var booksY = oAcctRows(O.days || []).filter(function (r0) { return r0.date === yd; });
     if (booksY.length) {
       y = booksY.map(function (r0) { return { account: r0.account, profit: oN(r0.actual) }; })
         .sort(function (a, b) { return b.profit - a.profit; });
@@ -561,7 +581,7 @@
         .sort(function (a, b) { return b.spend - a.spend; });
     }
     box.innerHTML =
-      '<div class="o-card"><span class="card-t">Today\'s sales — all accounts · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
+      '<div class="o-card"><span class="card-t">Today\'s sales — ' + esc(O.acct || 'all accounts') + ' · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ACTUAL profit — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
         var a0 = null;
@@ -713,7 +733,7 @@
   function oPaintAds() {
     var box = $('o2Ads');
     if (!box || !O.ov) { return; }
-    var ads = O.ov.ads_yesterday || [];
+    var ads = oAcctRows(O.ov.ads_yesterday || []);
     var spend = 0, rev = 0;
     ads.forEach(function (a) { spend += oN(a.spend); rev += oN(a.revenue); });
     var roas = spend > 0 ? rev / spend : null;
@@ -725,7 +745,9 @@
     }).join('');
     /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the 7-day split on the home. */
     var sp = O.ov.split_7d || {}, splitCard = '';
-    if (oN(sp.total_rev) > 0) {
+    /* split_7d is a pre-summed all-accounts aggregate (no per-account breakdown), so it is only
+       truthful in the All-accounts view — hidden when the page is scoped to one account. */
+    if (!O.acct && oN(sp.total_rev) > 0) {
       var pPct = Math.max(0, Math.min(100, oN(sp.promoted_pct)));
       /* The card is rollup-only on purpose (promoted revenue needs ads_rev, which today's live
          orders have not got yet). Say the window out loud — an unlabelled "last 7 days" here
@@ -785,7 +807,7 @@
     var box = $('o2Health');
     if (!box || !O.ov) { return; }
     var h = '<div class="health">';
-    (O.ov.health || []).forEach(function (a) {
+    oAcctRows(O.ov.health || []).forEach(function (a) {
       var quiet = !oN(a.orders_7d);
       var dot = oN(a.loss_items) ? 'h-bad' : quiet ? 'h-warn' : 'h-ok';
       h += '<div class="h-card"><div class="hn"><span class="h-dot ' + dot + '"></span>' + esc(oS(a.account)) + '</div><div class="h-rows">' +
@@ -810,8 +832,10 @@
     render: function () {
       return '<div class="ov2">' +
         '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
-          '<span class="sub">Management · all accounts · every number has a live feed behind it</span>' +
-          '<button class="minibtn" id="o2Refresh" style="margin-left:auto">Refresh</button></div>' +
+          '<span class="sub" id="o2Sub">Management · all accounts · every number has a live feed behind it</span>' +
+          '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+            '<select class="alx-sel" id="o2Acct" style="min-width:150px"><option value="">All accounts</option></select>' +
+            '<button class="minibtn" id="o2Refresh">Refresh</button></span></div>' +
         '<div class="dates enter d1"><div class="seg" id="o2Seg">' +
           /* chips render FROM O.mode — the state survives navigation, so static markup lies */
           [['today', 'Today'], ['yday', 'Yesterday'], ['d7', '7 days'], ['d30', '30 days']].map(function (p) {
@@ -823,7 +847,7 @@
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
-        '<div class="sec enter d2"><div class="sec-h"><h2>Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
@@ -891,6 +915,18 @@
       }
       var rf = $('o2Refresh');
       if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); oPulse(); }; }
+      var acctSel = $('o2Acct');
+      if (acctSel) {
+        fillAccountSelect(acctSel, O.acct, function () {
+          O.acct = acctSel.value || '';
+          oScopeLabels();
+          /* drop everything cached for the previous scope so no all-accounts number lingers
+             (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
+          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.extras = null;
+          oFetchAll(); oPulse();
+        });
+      }
+      oScopeLabels();
       oFetchAll();
       oPulse();
     }

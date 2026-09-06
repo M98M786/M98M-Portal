@@ -110,6 +110,23 @@
               ? '<span class="ta-ok">✓ ' + (s.cpc_only + s.general_only + s.both + s.none) + ' = ' + s.active + ' ACTIVE listings — the four buckets partition exactly (verified again every 15 min on Truth Check).</span>'
               : '<span class="ta-bad">✕ buckets sum to ' + (s.cpc_only + s.general_only + s.both + s.none) + ' but eBay shows ' + s.active + ' ACTIVE — the register flags this FAIL on Truth Check.</span>') +
             '</div></div>';
+          /* Account by account (owner, 6 Sept) — every account's CPC / General / Both / None side by
+             side, so the split can be read per shop, not just as one fleet total. Shown in the
+             All-accounts view; picking one account filters to that account's own tiles above. */
+          if (d.by_account && Object.keys(d.by_account).length > 1) {
+            var accts = Object.keys(d.by_account).sort();
+            h += '<div class="card" style="margin-top:14px"><div class="hd">Account by account <span class="hint">every account’s split</span></div>' +
+              '<div class="bd scroll"><table class="ir-tbl" style="min-width:560px"><thead><tr>' +
+              '<th style="text-align:left">Account</th><th>CPC only</th><th>General only</th><th>Both live</th><th>No campaign</th><th>Active</th></tr></thead><tbody>' +
+              accts.map(function (a) {
+                var x = d.by_account[a] || {};
+                return '<tr><td style="text-align:left"><b>' + esc(a) + '</b></td>' +
+                  '<td>' + (x.cpc_only || 0) + '</td><td>' + (x.general_only || 0) + '</td>' +
+                  '<td' + ((x.both || 0) ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (x.both || 0) + '</td>' +
+                  '<td' + ((x.none || 0) ? ' style="color:var(--warn);font-weight:700"' : '') + '>' + (x.none || 0) + '</td>' +
+                  '<td style="font-weight:800">' + (x.active || 0) + '</td></tr>';
+              }).join('') + '</tbody></table></div></div>';
+          }
           if ((d.none || []).length) {
             h += '<div class="card" style="margin-top:14px"><div class="hd">No campaign — first ' + d.none.length + '</div><div class="bd">' +
               d.none.map(function (r) {
