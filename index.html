@@ -623,7 +623,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260908-2208';
+var BUILD = '20260908-2211';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9347,9 +9347,16 @@ VIEWS.dashboard = {
           var rec = HRV.byId[id];
           if (!rec) { toast('That hunt is no longer on the list — refresh.'); return; }
           /* Hand the hunt to the hunting form: it reads this on init, drops the record into its
-             revise map and opens revise mode straight away (no wait for its own list to load). */
+             revise map and opens revise mode straight away (no wait for its own list to load).
+             Trigger EXACTLY ONE render — setting the hash fires a hashchange that renders the view,
+             so calling renderView as well would render twice and the second (clean) pass would wipe
+             the revise mode the first pass just set. Only render directly when the hash is already
+             '#hunting' (no hashchange would fire). */
           try { localStorage.setItem('m98m:reviseHunt', JSON.stringify({ id: id, rec: rec })); } catch (e) {}
-          try { location.hash = 'hunting'; renderView('hunting'); } catch (e) {}
+          try {
+            if ((location.hash || '').replace(/^#/, '') === 'hunting') { renderView('hunting'); }
+            else { location.hash = 'hunting'; }
+          } catch (e) {}
         };
       })(btns[i]);
     }

@@ -89,9 +89,16 @@
           var rec = HRV.byId[id];
           if (!rec) { toast('That hunt is no longer on the list — refresh.'); return; }
           /* Hand the hunt to the hunting form: it reads this on init, drops the record into its
-             revise map and opens revise mode straight away (no wait for its own list to load). */
+             revise map and opens revise mode straight away (no wait for its own list to load).
+             Trigger EXACTLY ONE render — setting the hash fires a hashchange that renders the view,
+             so calling renderView as well would render twice and the second (clean) pass would wipe
+             the revise mode the first pass just set. Only render directly when the hash is already
+             '#hunting' (no hashchange would fire). */
           try { localStorage.setItem('m98m:reviseHunt', JSON.stringify({ id: id, rec: rec })); } catch (e) {}
-          try { location.hash = 'hunting'; renderView('hunting'); } catch (e) {}
+          try {
+            if ((location.hash || '').replace(/^#/, '') === 'hunting') { renderView('hunting'); }
+            else { location.hash = 'hunting'; }
+          } catch (e) {}
         };
       })(btns[i]);
     }
