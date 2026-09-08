@@ -18941,41 +18941,67 @@ function computeSignals() {
   const days = [];
   for (let k = 1; k <= backfill; k++) days.push(signalsAddDays_(signalsToday_(), -k));  // yesterday, -2, …
 
-  const perDay = [];
-  let totalFresh = 0, timedOut = false;
-  for (let d = 0; d < days.length && !timedOut; d++) {
-    const day = days[d];
-    const found = [], scanned = [], notConnected = [], diag = [];
-    for (let i = 0; i < accounts.length; i++) {
+  // Loop ACCOUNTS on the outside, DAYS on the inside. The heavy per-account reads — the Central Main
+  // Sheet index and the Returns log — do not change from day to day, so they are read ONCE per
+  // account; only the light Sales Analysis day tab is re-read per day. (The first backfill build read
+  // both per account PER day, ~3x the heavy reads, which pinned Apps Script long enough for a
+  // Cloudflare 524 and starved live users — owner, 8 Sept.)
+  const found = [];
+  const perDay = {};
+  days.forEach(function (d) { perDay[d] = { day: d, scanned: 0, found: 0, notConnected: 0, diag: [] }; });
+  let timedOut = false;
+
+  for (let ai = 0; ai < accounts.length && !timedOut; ai++) {
+    const account = accounts[ai];
+    let index, returns;
+    try { index = signalsMainIndex_(account); } catch (e) { index = { byTitle: {}, byPrefix: {} }; }
+    try { returns = signalsReadReturns_(account); } catch (e) { returns = { ok: false, reason: String(e && e.message || e).slice(0, 60) }; }
+
+    for (let di = 0; di < days.length; di++) {
       if (Date.now() - started > SIG_SWEEP_BUDGET_MS) { timedOut = true; break; }
-      try {
-        signalsScanAccount_(accounts[i], day, th, owners, found, scanned, notConnected, diag);
-      } catch (e) {
-        logActivity_('system', 'SIGNALS_SCAN_FAIL', accounts[i], '', '', day + ' ' + String(e && e.message || e));
+      const day = days[di];
+      const pd = perDay[day];
+      const before = found.length;
+      let touched = false;
+
+      let sales;
+      try { sales = signalsReadDayTab_(account, day); } catch (e) { sales = { ok: false, reason: String(e && e.message || e).slice(0, 60) }; }
+      if (sales.ok) {
+        touched = true;
+        try { signalsSalesSignals_(account, day, th, sales, index, owners, found); } catch (e) { logActivity_('system', 'SIGNALS_SCAN_FAIL', account, '', '', day + ' sales ' + String(e && e.message || e)); }
+        pd.diag.push({ account: account, tab: sales.tab, rows: (sales.rows || []).length, raised: found.length - before });
+      } else {
+        pd.notConnected++;
+        pd.diag.push({ account: account, salesFail: sales.reason });
       }
+
+      if (returns.ok) {
+        touched = true;
+        try { signalsReturnsSignals_(account, day, th, returns, index, owners, found); } catch (e) { logActivity_('system', 'SIGNALS_SCAN_FAIL', account, '', '', day + ' returns ' + String(e && e.message || e)); }
+      } else if (di === 0) {
+        pd.notConnected++;  // count the returns miss once per account, not once per day
+      }
+
+      if (touched) pd.scanned++;
+      pd.found += found.length - before;
     }
-    const fresh = signalsRaise_(found, 'system');
-    totalFresh += fresh.length;
-    perDay.push({ day: day, scanned: scanned.length, found: found.length, fresh: fresh.length,
-      notConnected: notConnected.length,
-      // carry the per-account detail only for a day that looks wrong — nothing found, or something
-      // failed to connect — so the return line self-explains without a second round-trip.
-      diag: (notConnected.length || !found.length) ? diag : undefined });
   }
 
+  const fresh = signalsRaise_(found, 'system');
   let pruned = 0;
   try { pruned = signalsPrune_(); } catch (e) { logActivity_('system', 'SIGNALS_PRUNE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   CacheService.getScriptCache().put(SIG_LAST_RUN_KEY, String(Date.now()), 21600);
 
+  const order = days.map(function (d) { return perDay[d]; });
   const span = days.length > 1 ? days[days.length - 1] + '..' + days[0] : days[0];
-  const summary = perDay.map(function (p) {
-    return p.day + ':' + p.fresh + '↑/' + p.scanned + 'sc' + (p.notConnected ? '/' + p.notConnected + 'nc' : '');
+  const summary = order.map(function (p) {
+    return p.day + ':' + p.scanned + 'sc' + (p.notConnected ? '/' + p.notConnected + 'nc' : '');
   }).join(' ');
-  const unhealthy = perDay.some(function (p) { return p.notConnected || !p.found; });
-  return 'signals ' + span + ': ' + totalFresh + ' newly raised [' + summary + ']'
+  const unhealthy = order.some(function (p) { return p.notConnected || !p.found; });
+  return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (timedOut ? ', time budget hit — rest next run' : '')
-    + (unhealthy ? ' | diag=' + JSON.stringify(perDay).slice(0, 1800) : '');
+    + (unhealthy ? ' | diag=' + JSON.stringify(order).slice(0, 1800) : '');
 }
 
 /** Accounts whose Sales Analysis or Order Processing workbook is linked (§6) — never a list in
