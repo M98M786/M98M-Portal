@@ -375,6 +375,17 @@
       if (huHas(HU_QUEUE_ROLES, huRole())) {
         api('huntQueue').then(function (d) { huCount('huntQueue', ((d && d.hunts) || []).length); }).catch(function () {});
       }
+      /* Deep-link from the Revisions page: it stores the hunt to fix and sends us here. Drop the
+         record straight into the revise map and open revise mode now — no wait for "My hunts" to
+         load — so the hunter lands on the pre-filled form. */
+      try {
+        var pend = localStorage.getItem('m98m:reviseHunt');
+        if (pend) {
+          localStorage.removeItem('m98m:reviseHunt');
+          var p = JSON.parse(pend);
+          if (p && p.id && p.rec) { HU_MINE[huStr(p.id)] = p.rec; huStartRevise(huStr(p.id)); }
+        }
+      } catch (e) {}
     }
   };
 
