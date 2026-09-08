@@ -87,6 +87,13 @@ const SIGNALS_CONFIG_DEFAULTS = {
   // Rows older than this are deleted from the SIGNALS sheet by the daily prune — keeps the sheet
   // (and the D1 mirror) lean without losing anything still within the pin window.
   signals_retention_days: '21',
+  // How many recent days each run scans, newest first. The engine only ever looked at YESTERDAY,
+  // so a single missed run (AS overload) or a day tab the business builds late left that day's
+  // signals lost forever — the freeze the owner reported on 8 Sept, where the newest signal was
+  // 4 Sept even though 5th/6th day tabs existed. A signal's identity carries its date, so
+  // re-scanning a day that is already covered raises nothing new; the only cost is a few extra
+  // sheet reads inside the same time budget. (owner, 8 Sept — "still no new signals coming".)
+  signals_backfill_days: '3',
 };
 
 // ---------- the business sheets, spelled as the workbooks spell them ----------
@@ -335,41 +342,62 @@ function signalsSeedConfig_() {
 
 // ---------- the engine (runs with the dashboard trigger, and on refresh) ----------
 /** Plain function, no ctx: this is the trigger target. Idempotent — a signal's identity carries
- * its date, so re-running every 15 minutes never raises the same problem twice. */
+ * its date, so re-running raises nothing twice.
+ *
+ * Scans a WINDOW of recent days, newest first (signals_backfill_days, default 3), not just
+ * yesterday. The engine used to look at yesterday alone, so one missed run (AS overload killed the
+ * hourly relay) or a day tab the business built late left that day's signals lost forever — the
+ * freeze the owner hit on 8 Sept, newest signal stuck at 4 Sept while the 5th/6th day tabs already
+ * existed and the 7th had not been built yet. Re-scanning a covered day is free of side effects
+ * (idempotent raise); a day whose tab is not built yet simply comes back 'not connected' and is
+ * picked up on a later run once it appears. */
 function computeSignals() {
   const started = Date.now();
   signalsSeedConfig_();
 
-  const day = signalsYesterday_();
   const th = signalsThresholds_();
   const owners = signalsListingOwners_();
   const accounts = signalsAccounts_();
 
-  const found = [], scanned = [], notConnected = [], diag = [];
-  let skipped = 0;
-  for (let i = 0; i < accounts.length; i++) {
-    if (Date.now() - started > SIG_SWEEP_BUDGET_MS) { skipped = accounts.length - i; break; }
-    try {
-      signalsScanAccount_(accounts[i], day, th, owners, found, scanned, notConnected, diag);
-    } catch (e) {
-      logActivity_('system', 'SIGNALS_SCAN_FAIL', accounts[i], '', '', String(e && e.message || e));
+  const backfill = Math.max(1, Math.round(signalsThreshold_('signals_backfill_days')));
+  const days = [];
+  for (let k = 1; k <= backfill; k++) days.push(signalsAddDays_(signalsToday_(), -k));  // yesterday, -2, …
+
+  const perDay = [];
+  let totalFresh = 0, timedOut = false;
+  for (let d = 0; d < days.length && !timedOut; d++) {
+    const day = days[d];
+    const found = [], scanned = [], notConnected = [], diag = [];
+    for (let i = 0; i < accounts.length; i++) {
+      if (Date.now() - started > SIG_SWEEP_BUDGET_MS) { timedOut = true; break; }
+      try {
+        signalsScanAccount_(accounts[i], day, th, owners, found, scanned, notConnected, diag);
+      } catch (e) {
+        logActivity_('system', 'SIGNALS_SCAN_FAIL', accounts[i], '', '', day + ' ' + String(e && e.message || e));
+      }
     }
+    const fresh = signalsRaise_(found, 'system');
+    totalFresh += fresh.length;
+    perDay.push({ day: day, scanned: scanned.length, found: found.length, fresh: fresh.length,
+      notConnected: notConnected.length,
+      // carry the per-account detail only for a day that looks wrong — nothing found, or something
+      // failed to connect — so the return line self-explains without a second round-trip.
+      diag: (notConnected.length || !found.length) ? diag : undefined });
   }
 
-  const fresh = signalsRaise_(found, 'system');
   let pruned = 0;
   try { pruned = signalsPrune_(); } catch (e) { logActivity_('system', 'SIGNALS_PRUNE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   CacheService.getScriptCache().put(SIG_LAST_RUN_KEY, String(Date.now()), 21600);
-  return 'signals ' + day + ': ' + scanned.length + ' account(s) scanned, ' + found.length
-    + ' standing, ' + fresh.length + ' newly raised'
-    + (notConnected.length ? ', ' + notConnected.length + ' not connected yet' : '')
+
+  const span = days.length > 1 ? days[days.length - 1] + '..' + days[0] : days[0];
+  const summary = perDay.map(function (p) {
+    return p.day + ':' + p.fresh + '↑/' + p.scanned + 'sc' + (p.notConnected ? '/' + p.notConnected + 'nc' : '');
+  }).join(' ');
+  const unhealthy = perDay.some(function (p) { return p.notConnected || !p.found; });
+  return 'signals ' + span + ': ' + totalFresh + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
-    + (skipped ? ', ' + skipped + ' left for the next run (time budget)' : '')
-    // Self-explaining diagnostics: on any run that is not perfectly healthy (something failed to
-    // connect, or nothing was raised at all), append the per-account detail so a caller — the cron
-    // log or a manual signalsKick — can see whether the day tab resolved, how many rows it held, and
-    // how many signals each account produced, without a second round-trip. Healthy runs stay quiet.
-    + ((notConnected.length || !found.length) ? ' | diag=' + JSON.stringify(diag).slice(0, 1500) : '');
+    + (timedOut ? ', time budget hit — rest next run' : '')
+    + (unhealthy ? ' | diag=' + JSON.stringify(perDay).slice(0, 1800) : '');
 }
 
 /** Accounts whose Sales Analysis or Order Processing workbook is linked (§6) — never a list in
