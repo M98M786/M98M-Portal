@@ -345,12 +345,12 @@ function computeSignals() {
   const owners = signalsListingOwners_();
   const accounts = signalsAccounts_();
 
-  const found = [], scanned = [], notConnected = [];
+  const found = [], scanned = [], notConnected = [], diag = [];
   let skipped = 0;
   for (let i = 0; i < accounts.length; i++) {
     if (Date.now() - started > SIG_SWEEP_BUDGET_MS) { skipped = accounts.length - i; break; }
     try {
-      signalsScanAccount_(accounts[i], day, th, owners, found, scanned, notConnected);
+      signalsScanAccount_(accounts[i], day, th, owners, found, scanned, notConnected, diag);
     } catch (e) {
       logActivity_('system', 'SIGNALS_SCAN_FAIL', accounts[i], '', '', String(e && e.message || e));
     }
@@ -364,7 +364,12 @@ function computeSignals() {
     + ' standing, ' + fresh.length + ' newly raised'
     + (notConnected.length ? ', ' + notConnected.length + ' not connected yet' : '')
     + (pruned ? ', ' + pruned + ' old pruned' : '')
-    + (skipped ? ', ' + skipped + ' left for the next run (time budget)' : '');
+    + (skipped ? ', ' + skipped + ' left for the next run (time budget)' : '')
+    // Self-explaining diagnostics: on any run that is not perfectly healthy (something failed to
+    // connect, or nothing was raised at all), append the per-account detail so a caller — the cron
+    // log or a manual signalsKick — can see whether the day tab resolved, how many rows it held, and
+    // how many signals each account produced, without a second round-trip. Healthy runs stay quiet.
+    + ((notConnected.length || !found.length) ? ' | diag=' + JSON.stringify(diag).slice(0, 1500) : '');
 }
 
 /** Accounts whose Sales Analysis or Order Processing workbook is linked (§6) — never a list in
@@ -398,27 +403,36 @@ function signalsListingOwners_() {
 
 /** ONE pass per account: the Central Main Sheet once (for numbers and images), the Sales Analysis
  * day tab once (signals 1 and 2), Returns & INAD once (signal 3). */
-function signalsScanAccount_(account, day, th, owners, found, scanned, notConnected) {
+function signalsScanAccount_(account, day, th, owners, found, scanned, notConnected, diag) {
   const index = signalsMainIndex_(account);
   let touched = false;
+  const rec = { account: account };
 
   const sales = signalsReadDayTab_(account, day);
   if (sales.ok) {
     touched = true;
+    rec.tab = sales.tab; rec.rows = (sales.rows || []).length;
+    const before = found.length;
     signalsSalesSignals_(account, day, th, sales, index, owners, found);
+    rec.salesRaised = found.length - before;
   } else {
+    rec.salesFail = sales.reason;
     notConnected.push({ account: account, kind: 'sales_analysis', reason: sales.reason });
   }
 
   const returns = signalsReadReturns_(account);
   if (returns.ok) {
     touched = true;
+    const before = found.length;
     signalsReturnsSignals_(account, day, th, returns, index, owners, found);
+    rec.retRaised = found.length - before;
   } else {
+    rec.retFail = returns.reason;
     notConnected.push({ account: account, kind: 'order_processing', reason: returns.reason });
   }
 
   if (touched) scanned.push(account);
+  if (diag) diag.push(rec);
 }
 
 /** Title -> {item_id, image}, exact and by leading characters. A '↳' row is the highest-priced
