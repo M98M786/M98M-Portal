@@ -240,7 +240,7 @@ function taskChainNext_(rec, ctx) {
 /** The only path to Completed anywhere in the portal (§8.0b). */
 function actionApproveTask_(payload, ctx) {
   const sh = tasksSheet_();
-  let rec = null, stamp = '';
+  let rec = null, stamp = '', rateOut = 0;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
@@ -258,12 +258,14 @@ function actionApproveTask_(payload, ctx) {
       patch.comments = (String(rec.comments || '') + '\n[' + stamp + '] RATING:' + rating + ' by ' + ctx.ident.email).slice(0, 1900);
     }
     taskWrite_(sh, found, patch);
-    if (rating && String(rec.type) === 'listing_new' && String(rec.item_id || '')) {
-      try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rating }); } catch (e) {}
-    }
+    if (rating && String(rec.type) === 'listing_new' && String(rec.item_id || '')) rateOut = rating;
     logActivity_(ctx.ident.email, 'APPROVE_TASK', rec.task_id, old, TASK_STATUS_COMPLETED, 'lag_min ' + taskElapsedMin_(rec.submitted_at, taskMs_(stamp)) + (rating ? ' · rating ' + rating : ''));
   } finally { lock.releaseLock(); }
   engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
+  // 9 Sept (global-lock work): the provenance rating is a NETWORK write — it must not ride inside
+  // the global script lock, where a slow engine held every task approval (and everyone else's
+  // writes) behind it. Fire it after release; best-effort, same as before.
+  if (rateOut) { try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rateOut }); } catch (e) {} }
 
   taskChainNext_(rec, ctx);
 
