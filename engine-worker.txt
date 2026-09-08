@@ -8697,6 +8697,24 @@ const ROUTES = {
     },
   },
 
+  /* Owner (8 Sept): on-demand signals refresh. computeSignals runs hourly at :50, but when the day
+     books land or a run gets starved under load, Management wants to force a fresh pass without
+     waiting an hour. Mgmt-authed on the engine; the SYNC_KEY stays server-side (never in a browser)
+     — the engine relays to the AS job with it, exactly like the cron does. Returns the AS job's own
+     result so the caller can see how many signals it raised (or the error, if it failed). */
+  signalsKick: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const out = { at: Date.now() };
+      try { out.signals = await asRunJobDirect(ctx.env, 'computeSignals'); }
+      catch (e) { out.signals = { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
+      if (p && p.alerts) {
+        try { out.alerts = await asRunJobDirect(ctx.env, 'alertsRefresh'); }
+        catch (e) { out.alerts = { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
+      }
+      return out;
+    },
+  },
+
   syncAliOrders: {
     auth: 'sync', fn: async (p, ctx) => {
       const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 500);
