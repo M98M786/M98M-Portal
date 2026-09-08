@@ -8715,6 +8715,21 @@ const ROUTES = {
     },
   },
 
+  /* Owner (8 Sept): read-only workbook inspector for Management. Relays the AS wbInspect job (lists
+     a connected workbook's tabs, or the top/tail of one tab) with the server-side SYNC_KEY, so the
+     owner can see whether a Sales Analysis day tab actually exists — the signals engine can only read
+     tabs the business has built. Strictly read-only: wbInspect never writes. */
+  asInspect: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const args = { account: String(p.account || ''), kind: String(p.kind || 'sales_analysis') };
+      if (p.tab) args.tab = String(p.tab);
+      if (p.rows) args.rows = Number(p.rows) || 6;
+      if (p.id) args.id = String(p.id);
+      try { return await asRunJobDirect(ctx.env, 'wbInspect', args); }
+      catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
+    },
+  },
+
   syncAliOrders: {
     auth: 'sync', fn: async (p, ctx) => {
       const rows = (Array.isArray(p.rows) ? p.rows : []).slice(0, 500);
