@@ -1259,8 +1259,20 @@ function adminRenameUser(args) {
    15 min (self-heal); reportsDump backfills history. Rows are small; 80 is a shift's worth. */
 function reportsSweep_() {
   try {
-    const rows = readTab_('REPORTS_2H');
-    const recent = rows.slice(Math.max(0, rows.length - 80)).map(repRowOut_).filter(function (r) { return r.report_id; });
+    /* Tail-read (overload tier-2 #10): the sweep only ships the newest 80 rows, but readTab_
+       pulled the WHOLE REPORTS_2H tab — which grows every two hours forever — on every 15-minute
+       run. Read the header and the last 80 data rows, nothing else. Object shape mirrors
+       readTab_'s exactly (header → value). */
+    const sh = getPortalDb_(false).getSheetByName('REPORTS_2H');
+    if (!sh) return;
+    const last = sh.getLastRow();
+    if (last < 2) return;
+    const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const n = Math.min(80, last - 1);
+    const vals = sh.getRange(last - n + 1, 1, n, head.length).getValues();
+    const recent = vals.filter(function (r) { return r.join('') !== ''; }).map(function (r) {
+      const o = {}; head.forEach(function (h, i) { o[h] = r[i]; }); return o;
+    }).map(repRowOut_).filter(function (r) { return r.report_id; });
     if (recent.length) enginePost_('syncReports', { rows: recent });
   } catch (e) {}
 }

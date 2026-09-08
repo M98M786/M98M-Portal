@@ -35,12 +35,11 @@ function actionAddRule_(payload, ctx) {
 
   const ruleId = 'R' + Utilities.getUuid().slice(0, 8);
   const addedAt = now_();
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-    rulesSheet_('RULES').appendRow([ruleId, department, type, ruleText, ctx.ident.email, addedAt,
-      RULE_ACTIVE, JSON.stringify({ acks: {} })]);
-  } finally { lock.releaseLock(); }
+  /* Append-only: Sheets serialises appendRow atomically on its own (notify_ appends unlocked the
+     same way, portal-wide). The global script lock bought nothing here and cost every other write
+     a queue slot (overload tier-2 #8, 9 Sept). */
+  rulesSheet_('RULES').appendRow([ruleId, department, type, ruleText, ctx.ident.email, addedAt,
+    RULE_ACTIVE, JSON.stringify({ acks: {} })]);
 
   const issuer = ctx.user.name || ctx.ident.name || ctx.ident.email;
   const message = department + ' · ' + type + ' — ' + ruleText + ' · ' + rulesStamp_(issuer, addedAt);
@@ -172,12 +171,9 @@ function actionAddInstruction_(payload, ctx) {
   const date = rulesDate_(payload.date);
 
   const instrId = 'I' + Utilities.getUuid().slice(0, 8);
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-    rulesSheet_('INSTRUCTIONS').appendRow([instrId, text, department, date, ctx.ident.email, true,
-      JSON.stringify({ acks: {} })]);
-  } finally { lock.releaseLock(); }
+  /* Append-only — no lock, same reasoning as actionAddRule_ (overload tier-2 #8). */
+  rulesSheet_('INSTRUCTIONS').appendRow([instrId, text, department, date, ctx.ident.email, true,
+    JSON.stringify({ acks: {} })]);
 
   const ppc = department === RULE_PINNED_DEPT ? rulesPpcAppend_(text, date) : '';
   const issuer = ctx.user.name || ctx.ident.name || ctx.ident.email;
