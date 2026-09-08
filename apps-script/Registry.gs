@@ -1317,7 +1317,12 @@ function huntsSweep_() {
         const iId = header.indexOf('hunt_id'), iStatus = header.indexOf('status');
         if (iId < 0) break;
         for (let i = 0; i < drows.length; i++) {
-          if (String(drows[i][iStatus] || '') !== '') continue;     // only rows the mirror thinks are PENDING
+          /* IN-FLIGHT rows only: PENDING ('') and REVISION REQUIRED. Both can be stale in either
+             direction — a decision's push dropped (pending→decided) or a hunter's revise dropped
+             (revision→pending, 9 Sept) — and both self-correct by re-pushing the TRUE sheet state.
+             Decided rows are final and never re-pushed, so the sweep stays backlog-sized. */
+          const st = String(drows[i][iStatus] || '');
+          if (st !== '' && st !== 'REVISION REQUIRED') continue;
           const id = String(drows[i][iId] || '');
           if (id && sheetById[id]) wanted[id] = sheetById[id];
         }

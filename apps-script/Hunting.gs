@@ -276,9 +276,13 @@ function actionSubmitHunt_(payload, ctx) {
   logActivity_(ctx.ident.email, 'SUBMIT_HUNT', huntId, '', String(cols[HC_TITLE]).slice(0, 200),
     'source ' + cols[HC_SOURCE_PRICE] + ' · price ' + cols[HC_CALC_PRICE] + ' · profit ' + cols[HC_PROFIT]);
 
-  notifyManagement_('Hunt submitted',
-    ctx.user.name + ' submitted "' + String(cols[HC_TITLE]).slice(0, 120) + '" for review' +
-    (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
+  /* The row is IN — everything from here is best-effort tail work. None of it may throw, or the
+     hunter is told "request failed" over a save that landed (9 Sept, Irfan). */
+  try {
+    notifyManagement_('Hunt submitted',
+      ctx.user.name + ' submitted "' + String(cols[HC_TITLE]).slice(0, 120) + '" for review' +
+      (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
+  } catch (e) { logActivity_('system', 'NOTIFY_FAIL', 'submitHunt', '', '', String(e && e.message || e).slice(0, 120)); }
 
   const mirror = huntMirrorAppend_(cols, ctx.ident.email);
   /* The backup-workbook copy is left to huntBackupSync (the 5-min reconciler, which rebuilds
@@ -1059,10 +1063,17 @@ function actionReviseHunt_(payload, ctx) {
 
   logActivity_(ctx.ident.email, 'REVISE_HUNT', rec.hunt_id, String(rec.approval_status || 'PENDING'), 'PENDING',
     Object.keys(sent).join(',').slice(0, 200));
-  if (typeof huntBackupUpsert_ === 'function') {
-    Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
-    huntBackupUpsert_(rec);                        // the revised fields reach the backup too
-  }
+  /* 9 Sept: the queue, the hunter's own list and the Revisions page are all served from the D1
+     mirror — push the revised row NOW (outside the lock) so the status flips REVISION→pending
+     everywhere the moment the save lands, not on the next 15-min sweep. Without this a revised
+     hunt kept showing REVISION REQUIRED on the hunter's screens, which read as "the revise did
+     not work". The backup-workbook copy is deliberately NOT written inline any more — opening
+     that second spreadsheet in the hot path was seconds of extra wall under load (the same slow
+     op the 3 Sept submit hotfix removed) and huntBackupSync, the 5-minute reconciler, rebuilds
+     every tray from HUNTING_DB anyway. */
+  Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
+  rec.approval_status = HUNT_PENDING;   // canonical key the mirror binds — derived at read, so the merge above does not refresh it
+  huntMirrorPush_(rec);
   return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
 }
 

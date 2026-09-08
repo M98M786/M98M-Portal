@@ -623,7 +623,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260908-2211';
+var BUILD = '20260908-2258';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9956,13 +9956,17 @@ VIEWS.dashboard = {
     api('huntDuplicateCheck', { title: title, link: link }).then(function (d) {
       if (!huEl('huDupBand')) { if (done) { done(0); } return; }
       var m = (d && d.matches) || [];
+      /* In revise mode the product ALWAYS matches the hunt being revised — that is not history,
+         it is the very row being fixed. Warning about it forced a second click on every revision
+         (9 Sept, Irfan). Other matches still warn. */
+      if (HU_REVISING) { m = m.filter(function (x) { return huStr(x.hunt_id) !== HU_REVISING; }); }
       if (!d || !d.checked || !m.length) {
         band.style.display = silent ? 'none' : 'block';
         if (!silent) { band.innerHTML = '<div class="hu-hint" style="margin:0;border:1px solid var(--gold-line);border-radius:9px;padding:8px 11px">No earlier hunt matches this product — you are clear to submit.</div>'; }
         if (done) { done(0); }
         return;
       }
-      var rej = d.rejected || 0;
+      var rej = m.filter(function (x) { return x.status_label === 'rejected'; }).length;
       band.style.display = 'block';
       band.innerHTML = '<div style="border:1px solid ' + (rej ? 'var(--bad)' : 'var(--warn)') + ';border-radius:10px;padding:10px 13px;background:' + (rej ? 'var(--bad-soft,rgba(255,90,90,.08))' : 'var(--warn-soft)') + '">' +
         '<div style="font-weight:800;font-size:13px;color:' + (rej ? 'var(--bad)' : 'var(--warn)') + '">' +
@@ -10031,22 +10035,52 @@ VIEWS.dashboard = {
           ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
       huLoadMine();
     }).catch(function (e) {
-      /* Their typing first (the keeper only fills EMPTY fields), then the record tops up
-         whatever they had not touched — edits win, nothing is blank. */
-      if (typeof draftRestore === 'function') { draftRestore('hunting'); }
-      if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
       var msg = String((e && e.message) || '');
-      /* A slow sheet usually LANDS the row even when the 25s response is lost — so don't declare
-         "not saved" and send the hunter into a re-submit that then hits the duplicate wall. Say we
-         are checking, and re-read their own list; the save shows up there. If it truly did not
-         land, a re-submit is safe now — the server treats an own recent resubmit as idempotent.
-         (owner, 6 Sept — "not submitted, data comes back, retry says duplicated".) */
-      if (/overloaded|timeout|did not answer|taking long|aborted|busy/i.test(msg)) {
-        toast('The server is slow — checking whether it saved…');
-        setTimeout(huLoadMine, 5000);
-      } else {
-        toast('NOT saved — ' + msg + ' · your typing is restored.');
+      /* Two kinds of refusal. A VALIDATION refusal (a reason the hunter can act on) → restore the
+         typing at once so they can fix it. A MAYBE-LANDED failure — timeout, overload, or the
+         router's generic "request failed" (an internal error AFTER the row usually already
+         landed) — must NOT dump the form back over a successful save (9 Sept, Irfan: "it says
+         added, then it comes back on the whole form"). For those, VERIFY first: wait a few
+         seconds for the server to finish, re-read the own list, and only restore if the save
+         truly is not there. */
+      var restore = function (note) {
+        if (typeof draftRestore === 'function') { draftRestore('hunting'); }
+        if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
+        toast(note);
+      };
+      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed/i.test(msg)) {
+        restore('NOT saved — ' + msg + ' · your typing is restored.');
+        return;
       }
+      toast('The server hiccupped — checking whether your ' + (revId ? 'revision' : 'hunt') + ' saved…');
+      var wantTitle = huNorm(payload.columns['Title'] || '');
+      setTimeout(function () {
+        api('myHunts', { status: 'all' }).then(function (d) {
+          var hunts = (d && d.hunts) || [], landed = false, i;
+          if (revId) {
+            for (i = 0; i < hunts.length; i++) {
+              if (huStr(hunts[i].hunt_id) === revId) { landed = huStr(hunts[i].approval_status) !== HU_REVISION; break; }
+            }
+          } else {
+            for (i = 0; i < hunts.length; i++) {
+              if (wantTitle && huNorm(huStr(hunts[i]['Title'])) === wantTitle) { landed = true; break; }
+            }
+          }
+          if (landed) {
+            if (typeof draftClear === 'function') { draftClear('hunting'); }
+            toast(revId ? 'Saved ✓ — the revision landed and is back in the review queue.'
+              : 'Saved ✓ — your hunt landed. It is on your list below.');
+            huLoadMine();
+          } else {
+            restore('NOT saved — ' + msg + ' · your typing is restored.');
+            huLoadMine();
+          }
+        }).catch(function () {
+          /* Could not verify either way — keep the typing safe and say so honestly. A re-submit
+             is safe: the server treats an own in-flight resubmit as a revision, never a dup. */
+          restore('The server is slow — your typing is restored. Check "My hunts" first: it may have saved.');
+        });
+      }, 4000);
     });
   }
 

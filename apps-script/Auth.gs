@@ -188,9 +188,17 @@ function readTab_(name) {
   return out;
 }
 function notify_(toEmail, type, message, ref) {
-  const nid = 'N' + Utilities.getUuid().slice(0, 8);
-  const at = now_();
-  getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
+  /* 9 Sept (owner: Irfan's submit "says added, then the whole form comes back"): this appendRow was
+     BARE. Under load Sheets throws here AFTER the caller's own write already landed, the router
+     masks the internal error as "request failed", and the client restores the form over a save that
+     actually succeeded. A lost bell must never kill the action that rang it. */
+  try {
+    const nid = 'N' + Utilities.getUuid().slice(0, 8);
+    const at = now_();
+    getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
+  } catch (e) {
+    try { logActivity_('system', 'NOTIFY_FAIL', String(toEmail || ''), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
+  }
   /* 3 Sept HOTFIX (hunt submits dying "unsaved"): NO inline engine push here — a letter fired
      inside a user action added a whole Google->engine round-trip PER RECIPIENT, and on a slow
      night that alone pushed submits past the client's 25s abort. notifSweep_ (15-min, riding

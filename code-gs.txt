@@ -1252,9 +1252,17 @@ function readTab_(name) {
   return out;
 }
 function notify_(toEmail, type, message, ref) {
-  const nid = 'N' + Utilities.getUuid().slice(0, 8);
-  const at = now_();
-  getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
+  /* 9 Sept (owner: Irfan's submit "says added, then the whole form comes back"): this appendRow was
+     BARE. Under load Sheets throws here AFTER the caller's own write already landed, the router
+     masks the internal error as "request failed", and the client restores the form over a save that
+     actually succeeded. A lost bell must never kill the action that rang it. */
+  try {
+    const nid = 'N' + Utilities.getUuid().slice(0, 8);
+    const at = now_();
+    getPortalDb_(false).getSheetByName('NOTIFICATIONS').appendRow([nid, toEmail, 'system', type, message, ref || '', at, '']);
+  } catch (e) {
+    try { logActivity_('system', 'NOTIFY_FAIL', String(toEmail || ''), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
+  }
   /* 3 Sept HOTFIX (hunt submits dying "unsaved"): NO inline engine push here — a letter fired
      inside a user action added a whole Google->engine round-trip PER RECIPIENT, and on a slow
      night that alone pushed submits past the client's 25s abort. notifSweep_ (15-min, riding
@@ -6060,9 +6068,13 @@ function actionSubmitHunt_(payload, ctx) {
   logActivity_(ctx.ident.email, 'SUBMIT_HUNT', huntId, '', String(cols[HC_TITLE]).slice(0, 200),
     'source ' + cols[HC_SOURCE_PRICE] + ' · price ' + cols[HC_CALC_PRICE] + ' · profit ' + cols[HC_PROFIT]);
 
-  notifyManagement_('Hunt submitted',
-    ctx.user.name + ' submitted "' + String(cols[HC_TITLE]).slice(0, 120) + '" for review' +
-    (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
+  /* The row is IN — everything from here is best-effort tail work. None of it may throw, or the
+     hunter is told "request failed" over a save that landed (9 Sept, Irfan). */
+  try {
+    notifyManagement_('Hunt submitted',
+      ctx.user.name + ' submitted "' + String(cols[HC_TITLE]).slice(0, 120) + '" for review' +
+      (flags.length ? ' — ' + flags.length + ' criteria flag(s)' : ''), 'hunt:' + huntId);
+  } catch (e) { logActivity_('system', 'NOTIFY_FAIL', 'submitHunt', '', '', String(e && e.message || e).slice(0, 120)); }
 
   const mirror = huntMirrorAppend_(cols, ctx.ident.email);
   /* The backup-workbook copy is left to huntBackupSync (the 5-min reconciler, which rebuilds
@@ -6843,10 +6855,17 @@ function actionReviseHunt_(payload, ctx) {
 
   logActivity_(ctx.ident.email, 'REVISE_HUNT', rec.hunt_id, String(rec.approval_status || 'PENDING'), 'PENDING',
     Object.keys(sent).join(',').slice(0, 200));
-  if (typeof huntBackupUpsert_ === 'function') {
-    Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
-    huntBackupUpsert_(rec);                        // the revised fields reach the backup too
-  }
+  /* 9 Sept: the queue, the hunter's own list and the Revisions page are all served from the D1
+     mirror — push the revised row NOW (outside the lock) so the status flips REVISION→pending
+     everywhere the moment the save lands, not on the next 15-min sweep. Without this a revised
+     hunt kept showing REVISION REQUIRED on the hunter's screens, which read as "the revise did
+     not work". The backup-workbook copy is deliberately NOT written inline any more — opening
+     that second spreadsheet in the hot path was seconds of extra wall under load (the same slow
+     op the 3 Sept submit hotfix removed) and huntBackupSync, the 5-minute reconciler, rebuilds
+     every tray from HUNTING_DB anyway. */
+  Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
+  rec.approval_status = HUNT_PENDING;   // canonical key the mirror binds — derived at read, so the merge above does not refresh it
+  huntMirrorPush_(rec);
   return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
 }
 
@@ -25488,7 +25507,12 @@ function huntsSweep_() {
         const iId = header.indexOf('hunt_id'), iStatus = header.indexOf('status');
         if (iId < 0) break;
         for (let i = 0; i < drows.length; i++) {
-          if (String(drows[i][iStatus] || '') !== '') continue;     // only rows the mirror thinks are PENDING
+          /* IN-FLIGHT rows only: PENDING ('') and REVISION REQUIRED. Both can be stale in either
+             direction — a decision's push dropped (pending→decided) or a hunter's revise dropped
+             (revision→pending, 9 Sept) — and both self-correct by re-pushing the TRUE sheet state.
+             Decided rows are final and never re-pushed, so the sweep stays backlog-sized. */
+          const st = String(drows[i][iStatus] || '');
+          if (st !== '' && st !== 'REVISION REQUIRED') continue;
           const id = String(drows[i][iId] || '');
           if (id && sheetById[id]) wanted[id] = sheetById[id];
         }
