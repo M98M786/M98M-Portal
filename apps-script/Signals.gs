@@ -79,6 +79,14 @@ const SIGNALS_CONFIG_DEFAULTS = {
   signals_returns_min_day: '2',
   signals_worst_cpc_per_account: '1',     // §27 says "the item(s)"; one per account by default
   signals_refresh_min_minutes: '15',      // the dashboard trigger's own cadence
+  // How many days a signal stays PINNED. A loss/CPC/returns signal is about a specific day; once
+  // it is older than this it stops nagging (it drops off the board even if never acknowledged),
+  // so a week of un-acked signals can never pile up unbounded. (owner, 8 Sept — "signals not
+  // working properly": 127 pinned, oldest a week old, still labelled 'yesterday'.)
+  signals_pin_days: '4',
+  // Rows older than this are deleted from the SIGNALS sheet by the daily prune — keeps the sheet
+  // (and the D1 mirror) lean without losing anything still within the pin window.
+  signals_retention_days: '21',
 };
 
 // ---------- the business sheets, spelled as the workbooks spell them ----------
@@ -349,10 +357,13 @@ function computeSignals() {
   }
 
   const fresh = signalsRaise_(found, 'system');
+  let pruned = 0;
+  try { pruned = signalsPrune_(); } catch (e) { logActivity_('system', 'SIGNALS_PRUNE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   CacheService.getScriptCache().put(SIG_LAST_RUN_KEY, String(Date.now()), 21600);
   return 'signals ' + day + ': ' + scanned.length + ' account(s) scanned, ' + found.length
     + ' standing, ' + fresh.length + ' newly raised'
     + (notConnected.length ? ', ' + notConnected.length + ' not connected yet' : '')
+    + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (skipped ? ', ' + skipped + ' left for the next run (time budget)' : '');
 }
 
@@ -669,6 +680,37 @@ function signalsRaise_(found, actor) {
   return fresh;
 }
 
+/** Delete SIGNAL rows older than the retention window so the SIGNALS sheet (and its D1 mirror)
+ * stay lean. ONLY real signal types are pruned — the ledger rows other code appends here
+ * (alertsRecordResolution_ 'Account Report Alert', etc.) are left untouched. Capped per run so a
+ * large first-time backlog clears over a few runs rather than blowing the time budget. */
+function signalsPrune_() {
+  const retention = Math.max(7, signalsThreshold_('signals_retention_days'));
+  const cutoff = signalsAddDays_(signalsToday_(), -retention);
+  const db = getPortalDb_(false);
+  const sh = db.getSheetByName('SIGNALS');
+  if (!sh) return 0;
+  let removed = 0;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const vals = sh.getDataRange().getValues();
+    if (vals.length < 2) return 0;
+    const head = vals[0].map(function (h) { return String(h); });
+    const typeCol = head.indexOf('type'), dateCol = head.indexOf('date');
+    if (typeCol < 0 || dateCol < 0) return 0;
+    const kill = [];
+    for (let i = 1; i < vals.length && kill.length < 60; i++) {
+      const type = String(vals[i][typeCol] || '');
+      const date = signalsDateKey_(vals[i][dateCol]);
+      const isSignal = SIG_LAUNCH_TYPES.indexOf(type) >= 0 || type === ADV_SIGNAL_TYPE;
+      if (isSignal && date && date < cutoff) { kill.push(i + 1); }   // 1-based sheet row
+    }
+    for (let j = kill.length - 1; j >= 0; j--) { sh.deleteRow(kill[j]); removed++; }
+  } finally { lock.releaseLock(); }
+  return removed;
+}
+
 /** DASH_CACHE upserted on (metric, account, period) and only when the card actually changed — a
  * 15-minute trigger must not rewrite the same tile forever. Recomputed cache figures are not
  * audited changes, so these rows are deliberately not logged. */
@@ -776,7 +818,11 @@ function actionMySignals_(payload, ctx) {
   const email = viewer.email;
   const cards = signalsCardIndex_();
   const out = [];
-  let acknowledged = 0;
+  let acknowledged = 0, expired = 0;
+  /* A signal is about ONE day; once it is older than the pin window it stops nagging and drops off
+     the board even if nobody acknowledged it — so un-acked signals can never pile up for a week
+     (owner, 8 Sept: 127 pinned, oldest a week old). */
+  const pinCutoff = signalsAddDays_(signalsToday_(), -Math.max(1, signalsThreshold_('signals_pin_days')));
 
   readTab_('SIGNALS').forEach(function (s) {
     const account = String(s.account || '');
@@ -784,6 +830,7 @@ function actionMySignals_(payload, ctx) {
     const date = signalsDateKey_(s.date);
     const itemKey = String(s.item_id === null || s.item_id === undefined ? '' : s.item_id);
     if (!type) return;
+    if (date && date < pinCutoff) { expired++; return; }   // beyond the pin window — no longer pinned
     /* SIGNALS doubles as a resolution LEDGER: alertsRecordResolution_ appends 'Account Report
        Alert' rows whose value is a category name and whose baseline is a message — bookkeeping,
        not a signal. Rendering those as cards put "Yesterday: Payment disputes / Its normal line:
@@ -822,7 +869,7 @@ function actionMySignals_(payload, ctx) {
   const shown = out.slice(0, SIG_CARDS_MAX);
   return {
     signals: stripForRole_(shown, role, email),
-    count: shown.length, total: out.length, acknowledged: acknowledged,
+    count: shown.length, total: out.length, acknowledged: acknowledged, expired: expired,
     date: signalsYesterday_(), types: SIG_LAUNCH_TYPES,
     truncated: out.length > shown.length,
   };
