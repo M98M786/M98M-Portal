@@ -426,7 +426,7 @@ function actionDecideHunt_(payload, ctx) {
   }
 
   const stamp = now_();
-  let rec = null, limited = null;
+  let rec = null, limited = null, idempotentSame = false;
   const lock = LockService.getScriptLock();
   try {
     try { lock.waitLock(15000); }
@@ -436,49 +436,59 @@ function actionDecideHunt_(payload, ctx) {
     rec = huntRecord_(found.rec);
     if (rec.approval_status !== HUNT_PENDING) {
       /* Already decided. If it is the SAME decision, this is a retry after a LOST RESPONSE (the
-         write landed but Apps Script timed out at 25s before the answer got back) — return success
-         idempotently so the approver is not walled with "request failed"; the first attempt's
-         listing task and notifications already stand, so we must NOT create a second task. A
-         DIFFERENT standing decision is a real conflict — say it clearly. (owner, 8 Sept: "not
-         getting approved — request failed / backend overloaded".) */
-      if (String(rec.approval_status) === String(decision)) {
-        return { hunt_id: rec.hunt_id, approval_status: decision, idempotent: true,
-          note: 'Already ' + String(decision).toLowerCase() + ' — no duplicate was created.' };
+         write landed but Apps Script timed out at 25s before the answer got back). We must NOT
+         re-write or create a second task — but the reason the approver is retrying is that the queue
+         STILL shows this hunt, i.e. the first attempt's engine-mirror push was dropped under load.
+         So skip the write path, then re-push the mirror AFTER the lock (below) and return success
+         idempotently — the re-click itself heals the queue. A DIFFERENT standing decision is a real
+         conflict — say it clearly. (owner, 8 Sept: "not getting approved — request failed / backend
+         overloaded".) */
+      if (String(rec.approval_status) === String(decision)) idempotentSame = true;
+      else throw new Error(SAFE_ERROR_PREFIX + 'this hunt is already ' + String(rec.approval_status).toLowerCase() + ' — press Refresh on the queue');
+    }
+
+    if (!idempotentSame) {
+      const patch = {};
+      patch[HC_APPROVAL] = decision;
+      if (comment) patch[HC_COMMENTS] = comment;
+      if (approving) {
+        patch[HC_ACCOUNT] = account;
+        patch[HC_CPC] = advertising;
+        patch[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
       }
-      throw new Error(SAFE_ERROR_PREFIX + 'this hunt is already ' + String(rec.approval_status).toLowerCase() + ' — press Refresh on the queue');
-    }
+      huntWrite_(sh, found, patch);
 
-    const patch = {};
-    patch[HC_APPROVAL] = decision;
-    if (comment) patch[HC_COMMENTS] = comment;
-    if (approving) {
-      patch[HC_ACCOUNT] = account;
-      patch[HC_CPC] = advertising;
-      patch[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
-    }
-    huntWrite_(sh, found, patch);
-
-    if (approving) {
-      rec[HC_ACCOUNT] = account;
-      rec[HC_CPC] = advertising;
-      limited = huntLimitedPayload_(rec);
-      // The listing task is written inside this same lock: an approved hunt with no task would
-      // strand the item, and TASKS carries no structured payload column, so the §8.2 subset
-      // rides in `details` as JSON for the lister screen to render.
-      huntAppendTask_({
-        task_id: taskId, type: 'listing_new', account: account, item_id: '',
-        title: String(rec[HC_TITLE] || '').slice(0, 400),
-        details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
-        assigned_by: ctx.ident.email, assigned_to: lister.email,
-        deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
-      });
+      if (approving) {
+        rec[HC_ACCOUNT] = account;
+        rec[HC_CPC] = advertising;
+        limited = huntLimitedPayload_(rec);
+        // The listing task is written inside this same lock: an approved hunt with no task would
+        // strand the item, and TASKS carries no structured payload column, so the §8.2 subset
+        // rides in `details` as JSON for the lister screen to render.
+        huntAppendTask_({
+          task_id: taskId, type: 'listing_new', account: account, item_id: '',
+          title: String(rec[HC_TITLE] || '').slice(0, 400),
+          details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
+          assigned_by: ctx.ident.email, assigned_to: lister.email,
+          deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
+        });
+      }
     }
   } finally { lock.releaseLock(); }
 
   /* 3 Sept: the decision reflects in the portal queue at once (approve removes it, reject moves
-     it, the count drops) — the 15-min sweep left reviewers staring at already-decided hunts. */
+     it, the count drops) — the 15-min sweep left reviewers staring at already-decided hunts. This
+     runs for a FRESH decision and for an idempotent RETRY alike: a retry means the approver is
+     telling us the queue is still wrong (the first attempt's mirror push was dropped under load),
+     so re-pushing here is exactly how the re-click heals it. Outside the lock — never a network
+     call while the global script lock is held. */
   rec.approval_status = decision;
   huntMirrorPush_(rec);
+
+  if (idempotentSame) {
+    return { hunt_id: rec.hunt_id, approval_status: decision, idempotent: true,
+      note: 'Already ' + String(decision).toLowerCase() + ' — no duplicate was created.' };
+  }
 
   logActivity_(ctx.ident.email, 'DECIDE_HUNT', rec.hunt_id, HUNT_PENDING, decision,
     approving ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId

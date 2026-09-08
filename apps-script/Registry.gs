@@ -1291,8 +1291,47 @@ function reportsDump(args) {
 function huntsSweep_() {
   try {
     const rows = readTab_('HUNTING_DB');
-    const recent = rows.slice(Math.max(0, rows.length - 40)).map(huntValsOut_).filter(function (b) { return b.vals.hunt_id; });
-    if (recent.length) enginePost_('syncHunts', { rows: recent });
+    const sheetById = {};
+    for (let i = 0; i < rows.length; i++) {
+      const id = String(huntRecord_(rows[i]).hunt_id || '');
+      if (id) sheetById[id] = rows[i];
+    }
+
+    const wanted = {};   // hunt_id -> sheet row (deduped)
+    // (1) the newest hunts — catches a brand-new submit whose first live mirror push was dropped.
+    rows.slice(Math.max(0, rows.length - 80)).forEach(function (r) {
+      const id = String(huntRecord_(r).hunt_id || ''); if (id) wanted[id] = r;
+    });
+    // (2) every hunt the ENGINE MIRROR still shows PENDING (status = '') — re-push its TRUE sheet
+    //     state. A hunt approved days after it was submitted sits far outside the newest rows, so the
+    //     old "last-40 created" window never re-synced it: if that decision's live push was dropped
+    //     under load, it stayed 'pending' in the engine-served queue forever and kept coming back for
+    //     approval (owner, 8 Sept — "approved but still not updating"). This set is the approval
+    //     backlog, not the whole history, so the sweep stays cheap.
+    try {
+      let offset = 0;
+      for (let page = 0; page < 8; page++) {                 // hard cap (~20k rows) so it never runs away
+        const dump = enginePost_('backupDump', { table: 'hunt_rows', limit: 2500, offset: offset });
+        const header = (dump && dump.header) || [];
+        const drows = (dump && dump.rows) || [];
+        const iId = header.indexOf('hunt_id'), iStatus = header.indexOf('status');
+        if (iId < 0) break;
+        for (let i = 0; i < drows.length; i++) {
+          if (String(drows[i][iStatus] || '') !== '') continue;     // only rows the mirror thinks are PENDING
+          const id = String(drows[i][iId] || '');
+          if (id && sheetById[id]) wanted[id] = sheetById[id];
+        }
+        offset += drows.length;
+        if (!drows.length || (dump && dump.done)) break;
+      }
+    } catch (e) {}
+
+    const out = [];
+    Object.keys(wanted).forEach(function (id) {
+      const b = huntValsOut_(wanted[id]);
+      if (b.vals.hunt_id) out.push(b);
+    });
+    for (let i = 0; i < out.length; i += 200) enginePost_('syncHunts', { rows: out.slice(i, i + 200) });
   } catch (e) {}
 }
 
