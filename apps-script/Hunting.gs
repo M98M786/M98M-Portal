@@ -195,23 +195,28 @@ function actionSubmitHunt_(payload, ctx) {
     });
   })();
   if (dupHit) {
-    /* A hunter's OWN submission from the last few minutes is NOT a new duplicate — it is a retry
-       after a LOST RESPONSE (the sheet write landed, then Apps Script timed out at 25s before the
-       answer got back, so the browser said "not submitted"). Return that just-saved hunt as an
-       idempotent success, so the retry is silent instead of the "item duplicated" wall. (owner,
-       6 Sept — "gives error of not submitted, data comes back, then retry says item duplicated".) */
     var dupOwn = normalizeEmail(dupHit.hunter_email) === normalizeEmail(ctx.ident.email);
-    var dupTs = 0; try { dupTs = new Date(dupHit.ts).getTime(); } catch (e) {}
-    if (dupOwn && dupTs && (Date.now() - dupTs) < 15 * 60 * 1000) {
-      return { hunt_id: String(dupHit.hunt_id || ''), approval_status: String(dupHit.approval_status || HUNT_PENDING),
-        submitted_at: String(dupHit.ts || ''), criteria_flags: huntCriteriaFlags_(cols), idempotent: true,
-        note: 'Already saved a moment ago — no duplicate was created.' };
+    var dupStatus = String(dupHit.approval_status || HUNT_PENDING);
+    var dupInFlight = dupStatus === HUNT_PENDING || dupStatus === HUNT_REVISION;
+    /* The hunter is re-submitting a product they ALREADY have IN FLIGHT — still pending, or sent
+       back to them for revision. That is not a new duplicate against someone else; it is a REVISION
+       of their own hunt, whether they clicked "Revise" first or just re-entered the product from
+       scratch (or the browser retried a lost response). Apply the edit to that existing hunt —
+       exactly what reviseHunt does — and put it back in the queue, instead of walling them with
+       "already hunted by <themselves>". This subsumes the old <15-minute lost-response retry: an
+       identical re-submit simply re-writes the same fields. (owner, 9 Sept — Irfan: "revise item →
+       item duplication error"; and 6 Sept — "not submitted, data comes back, retry says duplicated".) */
+    if (dupOwn && dupInFlight) {
+      payload.hunt_id = String(dupHit.hunt_id || '');
+      return actionReviseHunt_(payload, ctx);
     }
+    /* A genuine duplicate — the same product already hunted by someone else, or one of this
+       hunter's OWN already-decided hunts. Blocked unless Management overrides with a note. */
     var note = String(payload.override_note || '').trim();
     var mgmt = isMgmt_(ctx.user.role, ctx.ident.email);
     if (!(note && mgmt)) {
       throw new Error(SAFE_ERROR_PREFIX + 'duplicate product — already hunted by ' +
-        String(dupHit.hunter_email || '').split('@')[0] + ' (' + (dupHit.approval_status || HUNT_PENDING) + ', ' +
+        String(dupHit.hunter_email || '').split('@')[0] + ' (' + dupStatus + ', ' +
         (String(dupHit[HC_DATE_ADDED] || '') || 'earlier') + ', ' + String(dupHit.hunt_id || '') + '). ' +
         'Management can override with a note.');
     }
