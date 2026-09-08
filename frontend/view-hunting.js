@@ -1109,7 +1109,7 @@
       api('decideHunt', payload).then(function () {
         huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
         huLoadQueueStats();
-      }).catch(function (e) { huCardBack(box, id); toast('Not sent back — ' + e.message); });
+      }).catch(function (e) { huDecideCatch(box, id, e, 'the revision'); });
       return;
     }
 
@@ -1123,7 +1123,7 @@
       api('decideHunt', payload).then(function () {
         huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
         huLoadQueueStats();
-      }).catch(function (e) { huCardBack(box, id); toast('Not recorded — ' + e.message); });
+      }).catch(function (e) { huDecideCatch(box, id, e, 'the rejection'); });
       return;
     }
 
@@ -1149,7 +1149,23 @@
         ((res.central_copy && res.central_copy.ok === false) ? ' · the sheet copy is still pending' : ''));
       huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
       huLoadQueueStats();
-    }).catch(function (e) { huCardBack(box, id); toast('NOT approved — ' + e.message); });
+    }).catch(function (e) { huDecideCatch(box, id, e, 'the approval'); });
+  }
+
+  /* A slow/overloaded sheet usually still LANDS the decision (the backend treats a repeat of the
+     same decision as idempotent), so on a timeout don't flash "request failed" and bounce the card
+     back — keep it gone, say it's confirming, and reconcile against the reloaded queue: if it did
+     not land, the hunt reappears there. Only a genuine refusal brings the card back. (owner,
+     8 Sept — approvals hitting "request failed / backend overloaded".) */
+  function huDecideCatch(box, id, e, verb) {
+    var msg = String((e && e.message) || '');
+    if (/overloaded|timeout|did not answer|taking long|aborted|busy|finishing/i.test(msg)) {
+      toast('The server is slow — ' + verb + ' is finishing. Confirming…');
+      setTimeout(function () { try { huLoadQueue(); huLoadQueueStats(); } catch (x) {} }, 5000);
+    } else {
+      huCardBack(box, id);
+      toast('NOT done — ' + msg);
+    }
   }
 
   /** The optimistic pair: collapse a decided card instantly; resurrect it if the server says no. */

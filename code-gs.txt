@@ -6143,11 +6143,16 @@ function actionDecideHunt_(payload, ctx) {
     let rrec = null;
     const rlock = LockService.getScriptLock();
     try {
-      rlock.waitLock(10000);
+      try { rlock.waitLock(15000); }
+      catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — press Revise again in a moment'); }
       const rsh = huntSheet_();
       const rfound = huntFind_(rsh, payload.hunt_id);
       rrec = huntRecord_(rfound.rec);
-      if (rrec.approval_status !== HUNT_PENDING) throw new Error('hunt already decided');
+      if (rrec.approval_status !== HUNT_PENDING) {
+        // already in revision = a lost-response retry → idempotent; any other decision = a conflict
+        if (String(rrec.approval_status) === String(HUNT_REVISION)) { return { revision: true, hunt_id: rrec.hunt_id, idempotent: true }; }
+        throw new Error(SAFE_ERROR_PREFIX + 'this hunt is already ' + String(rrec.approval_status).toLowerCase() + ' — press Refresh on the queue');
+      }
       const rpatch = {};
       rpatch[HC_APPROVAL] = HUNT_REVISION;
       rpatch[HC_COMMENTS] = comment;
@@ -6206,11 +6211,24 @@ function actionDecideHunt_(payload, ctx) {
   let rec = null, limited = null;
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000);
+    try { lock.waitLock(15000); }
+    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — press the decision again in a moment (nothing was double-saved)'); }
     const sh = huntSheet_();
     const found = huntFind_(sh, payload.hunt_id);
     rec = huntRecord_(found.rec);
-    if (rec.approval_status !== HUNT_PENDING) throw new Error('hunt already decided');
+    if (rec.approval_status !== HUNT_PENDING) {
+      /* Already decided. If it is the SAME decision, this is a retry after a LOST RESPONSE (the
+         write landed but Apps Script timed out at 25s before the answer got back) — return success
+         idempotently so the approver is not walled with "request failed"; the first attempt's
+         listing task and notifications already stand, so we must NOT create a second task. A
+         DIFFERENT standing decision is a real conflict — say it clearly. (owner, 8 Sept: "not
+         getting approved — request failed / backend overloaded".) */
+      if (String(rec.approval_status) === String(decision)) {
+        return { hunt_id: rec.hunt_id, approval_status: decision, idempotent: true,
+          note: 'Already ' + String(decision).toLowerCase() + ' — no duplicate was created.' };
+      }
+      throw new Error(SAFE_ERROR_PREFIX + 'this hunt is already ' + String(rec.approval_status).toLowerCase() + ' — press Refresh on the queue');
+    }
 
     const patch = {};
     patch[HC_APPROVAL] = decision;
