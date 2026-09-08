@@ -6349,9 +6349,15 @@ function huntFind_(sh, huntId) {
 }
 
 /** RL-6: a write to any HUNTING_DB column outside the decision whitelist throws. */
-function huntWrite_(sh, found, patch) {
+/* allow: the column whitelist for THIS write — defaults to the decision columns (management's
+   pen). actionReviseHunt_ passes the hunter-editable set instead: the default walled the hunter's
+   own revision — the first typed field (Title, price, a link) threw 'write outside the whitelist',
+   the router masked it as "request failed", and EVERY full-form revise died before writing a cell
+   (9 Sept, Irfan — and, via the own-resubmit delegation, his "adding an item" too). */
+function huntWrite_(sh, found, patch, allow) {
+  const allowed = allow || HUNT_DECISION_COLS;
   Object.keys(patch).forEach(function (k) {
-    if (HUNT_DECISION_COLS.indexOf(k) < 0) throw new Error('write outside the HUNTING_DB whitelist: ' + k);
+    if (allowed.indexOf(k) < 0) throw new Error('write outside the HUNTING_DB whitelist: ' + k);
     const c = found.head.indexOf(k);
     if (c < 0) throw new Error('unknown HUNTING_DB column: ' + k);
     sh.getRange(found.row, c + 1).setValue(patch[k]);
@@ -6850,7 +6856,13 @@ function actionReviseHunt_(payload, ctx) {
     sent[HC_APPROVAL] = HUNT_PENDING;                  // back into the queue
     sent[HC_COMMENTS] = String(rec[HC_COMMENTS] || '').slice(0, 1500) +
       (rec[HC_COMMENTS] ? ' · ' : '') + '(revised ' + huntPktDate_() + ')';
-    huntWrite_(sh, found, sent);
+    /* The hunter-editable whitelist: every hunting column EXCEPT the ones that are not theirs to
+       touch — who selected it, when it arrived, the =IMAGE cell, and the two management-only
+       routing columns (already deleted from `sent` above; forbidden here too, belt and braces). */
+    const reviseAllow = HUNTING_COLS.filter(function (c) {
+      return [HC_SELECTED_BY, HC_DATE_ADDED, HC_IMAGE, HC_ACCOUNT, HC_LISTING_STATUS].indexOf(c) < 0;
+    });
+    huntWrite_(sh, found, sent, reviseAllow);
   } finally { lock.releaseLock(); }
 
   logActivity_(ctx.ident.email, 'REVISE_HUNT', rec.hunt_id, String(rec.approval_status || 'PENDING'), 'PENDING',
