@@ -45,7 +45,12 @@
   /* A pinned card is a fact about yesterday: a minute-old copy is current, and 13 people reloading
      their home screen must not each start a fresh read. Recompute happens only on an explicit tap. */
   var SG_TTL_MS = 60000;
-  var SG_ATT_TTL_MS = 120000;
+  /* The top-bar attendance chip re-reads on every view render (sgClockPaint below). At 120s that
+     was the single busiest non-engine sheet read — ~420 calls/hr across the team, each a full
+     ATTENDANCE + SCHEDULES read (a top contributor to "backend overloaded", 8 Sept). Clock state
+     changes a few times a shift, and clock-in/out force their own fresh read, so a 10-minute
+     window keeps the chip honest while cutting the bulk of that load. */
+  var SG_ATT_TTL_MS = 600000;
   /* Home shows the loudest few; the rest are one tap away on the Signals screen. A manager with
      thirty pinned cards must still be able to reach the rest of their home screen. */
   var SG_HOME_MAX = 4;

@@ -7578,7 +7578,14 @@ function actionEnterItemId_(payload, ctx) {
     if (finalTitle) { patch.title = finalTitle; }
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
+  } finally { lock.releaseLock(); }
 
+  /* §8 chain — OUTSIDE the lock (8 Sept overload work): the go-live write above already landed
+     inside the lock, so the listing is live and off the go-live desk. These three sub-tasks are
+     best-effort and idempotent on (type,item_id) via listingFindTask_, and appendRow is atomic —
+     holding the GLOBAL script lock across them (plus a full TASKS re-read) was the longest hot-path
+     lock in the codebase and serialised every other portal write behind it. */
+  if (rec) {
     const all = readTab_('TASKS');
     const account = String(rec.account || '');
     const limited = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
@@ -7646,7 +7653,7 @@ function actionEnterItemId_(payload, ctx) {
         if (rid) made.revision = { task_id: rid, existing: false, assigned_to: String(rec.assigned_to || '') };
       }
     } catch (subErr) { /* best-effort */ }
-  } finally { lock.releaseLock(); }
+  }
 
   /* The permanent record (30 Aug): item → title + the hunt's AliExpress link, in the engine's
      own database, so the order screens can hand the processor a buying link the moment the

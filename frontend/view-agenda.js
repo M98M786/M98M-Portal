@@ -14,7 +14,7 @@ var HISTORY_ROLES = ['Management', 'Ops Head'];
 var RSVP_YES = 'Yes sir, I will be there';
 var RSVP_NO = "Can't attend (+reason)";
 
-var REFRESH_MS = 60000;
+var REFRESH_MS = 300000;   /* today's agenda is set once a day — a 5-min poll is plenty and spares the sheet backend (was 60s, 8 Sept overload work) */
 var DEFAULT_DURATION = 30;
 var DEFAULT_REMINDERS = '60,10';                 // §20.2 default reminder_offsets
 

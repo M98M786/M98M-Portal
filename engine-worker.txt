@@ -123,7 +123,7 @@ export default {
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
       '*/15 * * * *': [reportsRelayToSheet, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
-      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync, signalsPull],
+      '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
          processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
@@ -135,7 +135,12 @@ export default {
       /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
          budget died with the upgrade. Each heavy family still keeps its own invocation. */
       '40 * * * *': [listingSync, trafficSync],
-      '50 * * * *': [marketingSync, feedbackSync],
+      /* signalsPull (computeSignals + alertsRefresh — up to ~8 min of heavy AS workbook scans)
+         moved OFF the :00 slot (8 Sept overload work): at :00 it collided with the pushSheetRowsHot
+         :00 AS trigger AND peak top-of-hour /exec traffic. :50 is clear of the :00/:15/:30/:45
+         mirror ticks and off-peak. Both jobs are idempotent + time-budgeted, so nothing changes but
+         the timing. */
+      '50 * * * *': [marketingSync, feedbackSync, signalsPull],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
