@@ -25,6 +25,11 @@ function revqRows_(dump) {
 
 function revqAssignee_() {
   const users = readTab_('USERS').filter(function (u) { return String(u.status) === 'approved'; });
+  const ovr = listingRevisionOverride_();   // owner 9 Sept: two-week desk override
+  if (ovr) {
+    const hit = users.filter(function (u) { return normalizeEmail(u.email) === ovr; })[0];
+    if (hit) return { email: String(hit.email), name: String(hit.name || hit.email) };
+  }
   for (let i = 0; i < REVQ_ASSIGN_ROLES.length; i++) {
     const hit = users.filter(function (u) { return String(u.role) === REVQ_ASSIGN_ROLES[i]; })[0];
     if (hit) return { email: String(hit.email), name: String(hit.name || hit.email) };

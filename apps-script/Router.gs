@@ -23,6 +23,7 @@ function mergeActions_() {
     importRegistry:   [actionImportRegistry_, 'super'],
     connectionHealth: [actionConnectionHealth_, 'any'],
     writeMode:        [actionWriteMode_, 'any'],   // gated to management inside — the write-path kill switch
+    revisionRouting:  [actionRevisionRouting_, 'any'],   // gated to management inside — the two-week revision-desk override
   };
   const groups = [
     typeof ACTIONS_TASKS      !== 'undefined' ? ACTIONS_TASKS      : null,
@@ -332,6 +333,33 @@ function actionConnectionHealth_(payload, ctx) { return connectionHealth(); }
    'shadow' makes submitHunt best-effort forward each submit to the engine's shadowHuntSubmit
    (rehearsal, fires nothing); 'off' stops it; 'primary' is reserved for Phase 3 (no primary write
    path is wired yet, so it currently behaves like off for submits). */
+/** Owner 9 Sept 2026: every new listing_revision task routes to one desk (the two-week handover
+ * to Muhammad Umar) until the date lapses, then each site's native routing — the lister who
+ * listed the item — takes back over on its own. {} reads · {to, until} sets · {clear:1} ends it
+ * now. Management only. */
+function actionRevisionRouting_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('management only');
+  var to, until;
+  if (payload && payload.clear) {
+    r8SetConfig_('revision_route_to', ''); r8SetConfig_('revision_route_until', '');
+    to = ''; until = '';
+    logActivity_(ctx.ident.email, 'REVISION_ROUTE', 'cleared', '', '', '');
+  } else if (payload && (payload.to || payload.until)) {
+    to = normalizeEmail(payload.to || ''); until = String(payload.until || '').trim();
+    if (!to || !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Error('SAY: need to (email) and until (yyyy-mm-dd)');
+    var ok = false;
+    readTab_('USERS').forEach(function (u) { if (normalizeEmail(u.email) === to && String(u.status) === 'approved') ok = true; });
+    if (!ok) throw new Error('SAY: that email is not an approved portal user');
+    r8SetConfig_('revision_route_to', to); r8SetConfig_('revision_route_until', until);
+    logActivity_(ctx.ident.email, 'REVISION_ROUTE', to, '', until, '');
+  } else {
+    to = String(getConfig('revision_route_to') || ''); until = String(getConfig('revision_route_until') || '');
+  }
+  var today = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+  return { revision_route_to: to, revision_route_until: until,
+    active: !!(to && /^\d{4}-\d{2}-\d{2}$/.test(until) && today <= until) };
+}
+
 function actionWriteMode_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('management only');
   var cur = String(getConfig('write_hunt_mode') || 'off');

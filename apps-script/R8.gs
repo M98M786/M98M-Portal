@@ -460,7 +460,8 @@ function actionDecisionAct_(payload, ctx) {
     if (!lister) {
       try { const p = enginePost_('provenanceGet', { item_id: itemId }); if (p && p.lister_email) lister = String(p.lister_email); } catch (e) {}
     }
-    const who = lister ? { email: lister, name: lister } :
+    const ovr = listingRevisionOverride_();   // owner 9 Sept: two-week desk override outranks provenance
+    const who = ovr ? { email: ovr, name: ovr } : lister ? { email: lister, name: lister } :
       listingPickForRole_('Item Lister', '', all, 'listing_revision') || listingPickForRole_('Listing Manager', '', all, 'listing_revision');
     if (!who) throw new Error('SAY: nobody to send the revision to');
     const taskId = listingCreateTask_(sh, {

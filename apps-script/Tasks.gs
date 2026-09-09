@@ -216,6 +216,12 @@ function taskChainNext_(rec, ctx) {
       ' step of this flow is stuck → grant the module on the Access desk.', 'task:' + rec.task_id);
     return;
   }
+  // Owner 9 Sept: a live revision-desk override outranks the module pick for revision steps.
+  let chainTo = holders[0];
+  if (String(step.type || '') === 'listing_revision') {
+    const ovr = (typeof listingRevisionOverride_ === 'function') ? listingRevisionOverride_() : '';
+    if (ovr) chainTo = ovr;
+  }
   const stamp = now_();
   const nextId = 'T' + Utilities.getUuid().slice(0, 8);
   const hours = Number(step.deadline_hours) || 24;
@@ -226,11 +232,11 @@ function taskChainNext_(rec, ctx) {
   nextDetails.chained_from = String(rec.task_id);
   tasksSheet_().appendRow([
     nextId, String(step.type || 'general'), String(rec.account || ''), String(rec.item_id || ''),
-    String(step.title || rec.title || ''), JSON.stringify(nextDetails), '', 'system:chain', holders[0],
+    String(step.title || rec.title || ''), JSON.stringify(nextDetails), '', 'system:chain', chainTo,
     String(rec.priority || ''), due, TASK_STATUS_PENDING, stamp, stamp, '', '', '', '', '',
   ]);
-  logActivity_('system', 'CHAIN_TASK', nextId, rec.task_id, String(step.type || ''), 'to ' + holders[0]);
-  notify_(holders[0], 'Task assigned',
+  logActivity_('system', 'CHAIN_TASK', nextId, rec.task_id, String(step.type || ''), 'to ' + chainTo);
+  notify_(chainTo, 'Task assigned',
     '🔵 Next step of the flow · ' + String(rec.account || '') + (String(rec.item_id || '') ? ' · ' + String(rec.item_id) : '') +
     ' — "' + String(step.title || rec.title || '') + '". The previous step was just approved' +
     (ctx ? ' by ' + (ctx.user.name || ctx.ident.email) : '') + '; this one is due in ' + hours + 'h → open My tasks.',

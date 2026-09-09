@@ -383,12 +383,13 @@ function actionEnterItemId_(payload, ctx) {
       }
     } catch (subErr) { /* best-effort */ }
 
-    // ③ +72h real revision → the go-live person (best-effort)
+    // ③ +72h real revision → the go-live person, unless the owner's desk override is on (best-effort)
     try {
       const have72 = listingFind72h_(all, itemId);
       if (have72) made.revision = { task_id: String(have72.task_id), existing: true, assigned_to: String(have72.assigned_to) };
       else {
         const manager = listingPickForRole_('Listing Manager', '', all, 'listing_revision');
+        const rev72To = listingRevisionOverride_() || String(rec.assigned_to || '');
         const rid = listingCreateTask_(sh, {
           type: 'listing_revision', account: account, item_id: itemId, title: LISTING_KIND_72H + ' — Item ID ' + itemId,
           details: listingLines_([
@@ -396,10 +397,10 @@ function actionEnterItemId_(payload, ctx) {
             'Window: ' + chain.revision.uk + ' (' + chain.revision.pkt + ') on ' + chain.revision.uk_date,
             'Live since ' + chain.go_live_uk + ' on ' + chain.day0_uk_date + ' — 72 hours later this dummy becomes the real competitor-based listing.',
           ]),
-          assigned_by: manager ? manager.email : String(rec.assigned_by || ''), assigned_to: String(rec.assigned_to || ''),
+          assigned_by: manager ? manager.email : String(rec.assigned_by || ''), assigned_to: rev72To,
           priority: String(rec.priority || ''), deadline_pkt: chain.revision.end_pkt, stamp: stamp,
         });
-        if (rid) made.revision = { task_id: rid, existing: false, assigned_to: String(rec.assigned_to || '') };
+        if (rid) made.revision = { task_id: rid, existing: false, assigned_to: rev72To };
       }
     } catch (subErr) { /* best-effort */ }
   }
@@ -503,6 +504,7 @@ function actionCreateRevision_(payload, ctx) {
 
   const employee = listingResolveUser_(payload.employee_email, payload.employee_name);
   if (!employee) throw new Error('employee is not an approved portal user');
+  const revManTo = listingRevisionOverride_() || employee.email;   // owner 9 Sept: two-week desk override
 
   const win = listingNextRevisionWindow_(new Date());
   const stamp = now_();
@@ -528,20 +530,20 @@ function actionCreateRevision_(payload, ctx) {
         'Requested by: ' + ctx.user.name,
         'Window: ' + win.uk + ' (' + win.pkt + ') on ' + win.uk_date,
       ]),
-      assigned_by: ctx.ident.email, assigned_to: employee.email,
+      assigned_by: ctx.ident.email, assigned_to: revManTo,
       priority: String(payload.priority || '').slice(0, 40), deadline_pkt: win.end_pkt, stamp: stamp,
     });
   } finally { lock.releaseLock(); }
   try { if (taskId) engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: revision on the lister's board at once
 
-  logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + employee.email + ' · ' + changes.slice(0, 120));
+  logActivity_(ctx.ident.email, 'CREATE_REVISION', taskId, '', itemId, 'to ' + revManTo + ' · ' + changes.slice(0, 120));
   /* R8-0a (the Irfan bug): a Product Hunter has no My-listings screen — pointing a hunter at
      "My tasks" left the revision invisible in practice. The bell now names the screen that
      actually shows it richly for their role. */
   let empRole = '';
-  readTab_('USERS').forEach(function (u) { if (normalizeEmail(u.email) === normalizeEmail(employee.email)) empRole = String(u.role || ''); });
+  readTab_('USERS').forEach(function (u) { if (normalizeEmail(u.email) === normalizeEmail(revManTo)) empRole = String(u.role || ''); });
   const whereTo = empRole === 'Product Hunter' ? 'open your Hunting dashboard — it is on your Revisions panel' : 'open My tasks';
-  notify_(employee.email, 'Task assigned',
+  notify_(revManTo, 'Task assigned',
     '🔵 Revision requested by ' + ctx.user.name + ' · ' + itemId + ' — change this: ' + changes.slice(0, 200) +
     '. UK window ' + win.uk + ' (' + win.pkt + ' Pakistan) on ' + win.uk_date + ' → ' + whereTo + '.',
     'task:' + taskId);
@@ -748,6 +750,26 @@ function listingPickForRole_(role, preferredEmail, tasks, type) {
   let best = users[0];
   users.forEach(function (u) { if (load[normalizeEmail(u.email)] < load[normalizeEmail(best.email)]) best = u; });
   return best;
+}
+
+/** Owner 9 Sept 2026 ("for next two weeks umer will do it — ahsan and sajwal are new colleagues"):
+ * while the window is on, EVERY new listing_revision task lands on one desk; when it lapses this
+ * returns '' and each creation site's own routing — the lister who listed the item — resumes on
+ * its own, no second deploy. Set/cleared from the portal via the revisionRouting action; CONFIG
+ * keys revision_route_to + revision_route_until (yyyy-mm-dd, UK, inclusive). Fails safe to '' —
+ * a broken override must never stop a revision task from being created. */
+function listingRevisionOverride_() {
+  try {
+    const to = normalizeEmail(getConfig('revision_route_to') || '');
+    const until = String(getConfig('revision_route_until') || '').trim();
+    if (!to || !/^\d{4}-\d{2}-\d{2}$/.test(until)) return '';
+    if (Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd') > until) return '';
+    let ok = false;
+    readTab_('USERS').forEach(function (u) {
+      if (normalizeEmail(u.email) === to && String(u.status) === 'approved') ok = true;
+    });
+    return ok ? to : '';
+  } catch (e) { return ''; }
 }
 
 /** §8.4's form names an Employee, not an address: an email wins, otherwise a UNIQUE approved
