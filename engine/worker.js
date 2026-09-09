@@ -6227,6 +6227,30 @@ const ROUTES = {
     },
   },
 
+  /* Ops eyes on the outbox: what queued, what rendered, what was sent/shadowed/failed — the
+     proof a template reads exactly as intended BEFORE the switch is thrown. */
+  autoMsgQueue: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const lim = Math.min(200, Math.max(1, Number(p.limit) || 40));
+      const rows = await ctx.env.DB.prepare(
+        'SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, subject, body, status, detail, due_at, created_at ' +
+        'FROM automsg_queue ORDER BY id DESC LIMIT ?1').bind(lim).all();
+      return { rows: rows.results || [] };
+    },
+  },
+
+  /* The arm/disarm switch, one D1 row — Management can throw it from the portal, no deploy. */
+  autoMsgLive: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      if (p.set === 'on' || p.set === 'off') {
+        await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('automsg_live', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=?1, updated_at=datetime('now')").bind(String(p.set)).run();
+        await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'AUTOMSG_LIVE', 'automsg_live', '', ?2, datetime('now'))").bind(ctx.email, String(p.set)).run();
+      }
+      const row = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'automsg_live'").first().catch(() => null);
+      return { automsg_live: String((row && row.value) || 'off'), env_force: String(ctx.env.AUTOMSG_LIVE) === 'true' };
+    },
+  },
+
   autoMsgSet: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
