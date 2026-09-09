@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260909-2101';
+var BUILD = '20260909-2226';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14104,6 +14104,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       box.innerHTML = orders.map(odCard).join('');
       odApplyFilter();   // keep the active chip filter after a list repaint
       odWire(box);
+      odFetchImages(box, orders);   // the day tab has no Image Link column — the engine does
       /* eBay's accepted-carrier list for this account, fetched once and shared by every card. */
       (function () {
         var acct = odStr(OD_ACCOUNT);
@@ -14323,6 +14324,39 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       '</div></div>';
   }
 
+  /* The day tabs never carried an Image Link column — the engine's items_api does. After each
+     paint, ask it by order number and drop the pictures into the placeholders; the rows keep the
+     URL too, so chip-filter repaints stay pictured. Best-effort: a miss leaves "No image". */
+  function odFetchImages(box, orders) {
+    try {
+      if (typeof engineCall !== 'function') { return; }
+      var want = [];
+      orders.forEach(function (o) {
+        if (!odStr(o[OD_H.imageLink]) && odStr(o[OD_H.orderNo])) { want.push(odStr(o[OD_H.orderNo])); }
+      });
+      if (!want.length) { return; }
+      engineCall('itemImages', { order_ids: want }, 15000).then(function (d) {
+        var im = (d && d.images) || {};
+        orders.forEach(function (o) {
+          var u = safeUrl(im['o:' + odStr(o[OD_H.orderNo])] || '');
+          if (u && !odStr(o[OD_H.imageLink])) { o[OD_H.imageLink] = u; }
+        });
+        box.querySelectorAll('[data-odimg]').forEach(function (el) {
+          var u = safeUrl(im['o:' + el.getAttribute('data-odimg')] || '');
+          if (!u) { return; }
+          var img = document.createElement('img');
+          img.alt = ''; img.setAttribute('data-shot', '1');
+          img.onerror = function () {                      // a dead link must not leave a broken frame
+            var s = document.createElement('span'); s.className = 'od-alt'; s.textContent = 'No image';
+            if (img.parentNode) { img.parentNode.replaceChild(s, img); }
+          };
+          img.src = u;
+          if (el.parentNode) { el.parentNode.replaceChild(img, el); }
+        });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   /** What the processor needs in front of them to buy the right thing: the picture, what it sold
    *  for, how many, which variation, and the AliExpress link to open. */
   function odProduct(o, cols) {
@@ -14364,7 +14398,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     return '<div class="od-prod">' +
         '<span class="od-shot">' + (img
           ? '<img src="' + odAttr(img) + '" alt="" data-shot="1">'
-          : '<span class="od-alt">No image</span>') + '</span>' +
+          : '<span class="od-alt" data-odimg="' + odAttr(odStr(o[OD_H.orderNo])) + '">No image</span>') + '</span>' +
         '<div><div class="od-facts">' + facts + '</div>' +
           '<div class="od-links">' + links + '</div></div>' +
       '</div>';
@@ -21486,7 +21520,28 @@ function saveSchedule() {
     if (url) {
       return '<div class="sig-thumb"><img src="' + sgAttr(url) + '" alt="" loading="lazy" data-sig-img="1"></div>';
     }
-    return '<div class="sig-thumb"><span class="ph">' + esc(sgInitials(title)) + '</span></div>';
+    var num = sgItemNumber(rec);
+    return '<div class="sig-thumb"' + (num ? ' data-sigimg="' + sgAttr(num) + '"' : '') + '><span class="ph">' + esc(sgInitials(title)) + '</span></div>';
+  }
+
+  /* Signals born without a picture (the signal row predates the item mirror, or the sheet only
+     knew the title) get one fetched from items_api after the paint — best-effort. */
+  function sgFetchImages(host) {
+    try {
+      if (typeof engineCall !== 'function') { return; }
+      var els = host.querySelectorAll('[data-sigimg]');
+      if (!els.length) { return; }
+      var ids = [], seen = {};
+      els.forEach(function (el) { var v = el.getAttribute('data-sigimg'); if (v && !seen[v]) { seen[v] = 1; ids.push(v); } });
+      engineCall('itemImages', { item_ids: ids }, 15000).then(function (d) {
+        var im = (d && d.images) || {};
+        els.forEach(function (el) {
+          var u = safeUrl(im['i:' + el.getAttribute('data-sigimg')] || '');
+          if (!u) { return; }
+          el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
+        });
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   function sgMeta(rec) {
@@ -21682,6 +21737,7 @@ function saveSchedule() {
         '<button class="minibtn" data-sig-do="all">Open Signals</button></div>';
     }
     host.innerHTML = out;
+    sgFetchImages(host);
     sgWire(host);
   }
 

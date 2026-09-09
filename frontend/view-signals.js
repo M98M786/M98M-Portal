@@ -390,7 +390,28 @@
     if (url) {
       return '<div class="sig-thumb"><img src="' + sgAttr(url) + '" alt="" loading="lazy" data-sig-img="1"></div>';
     }
-    return '<div class="sig-thumb"><span class="ph">' + esc(sgInitials(title)) + '</span></div>';
+    var num = sgItemNumber(rec);
+    return '<div class="sig-thumb"' + (num ? ' data-sigimg="' + sgAttr(num) + '"' : '') + '><span class="ph">' + esc(sgInitials(title)) + '</span></div>';
+  }
+
+  /* Signals born without a picture (the signal row predates the item mirror, or the sheet only
+     knew the title) get one fetched from items_api after the paint — best-effort. */
+  function sgFetchImages(host) {
+    try {
+      if (typeof engineCall !== 'function') { return; }
+      var els = host.querySelectorAll('[data-sigimg]');
+      if (!els.length) { return; }
+      var ids = [], seen = {};
+      els.forEach(function (el) { var v = el.getAttribute('data-sigimg'); if (v && !seen[v]) { seen[v] = 1; ids.push(v); } });
+      engineCall('itemImages', { item_ids: ids }, 15000).then(function (d) {
+        var im = (d && d.images) || {};
+        els.forEach(function (el) {
+          var u = safeUrl(im['i:' + el.getAttribute('data-sigimg')] || '');
+          if (!u) { return; }
+          el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
+        });
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   function sgMeta(rec) {
@@ -586,6 +607,7 @@
         '<button class="minibtn" data-sig-do="all">Open Signals</button></div>';
     }
     host.innerHTML = out;
+    sgFetchImages(host);
     sgWire(host);
   }
 

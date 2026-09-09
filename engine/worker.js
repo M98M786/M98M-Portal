@@ -6230,6 +6230,32 @@ const ROUTES = {
     },
   },
 
+  /* Images live in items_api (the engine's own eBay truth); the day tabs never carried an
+     Image Link column, so the Orders screen asks by ORDER NUMBER and Signals asks by ITEM —
+     one cheap indexed read either way, any signed-in role (a product photo is not PII). */
+  itemImages: {
+    auth: 'any', fn: async (p, ctx) => {
+      const chunk = async (arr, sql, key) => {
+        const out = {};
+        for (let i = 0; i < arr.length; i += 80) {
+          const part = arr.slice(i, i + 80);
+          const qs = part.map(() => '?').join(',');
+          const rs = await ctx.env.DB.prepare(sql.replace('%IN%', qs)).bind(...part).all();
+          for (const r of (rs.results || [])) if (r.image) out[key + String(r.k)] = String(r.image);
+        }
+        return out;
+      };
+      const ords = (Array.isArray(p.order_ids) ? p.order_ids : []).map(String).filter(Boolean).slice(0, 400);
+      const ids = (Array.isArray(p.item_ids) ? p.item_ids : []).map(String).filter(Boolean).slice(0, 400);
+      const images = {};
+      if (ords.length) Object.assign(images, await chunk(ords,
+        "SELECT o.order_id AS k, COALESCE(i.image, '') AS image FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE o.order_id IN (%IN%)", 'o:'));
+      if (ids.length) Object.assign(images, await chunk(ids,
+        'SELECT item_id AS k, image FROM items_api WHERE item_id IN (%IN%)', 'i:'));
+      return { images };
+    },
+  },
+
   /* Ops eyes on the outbox: what queued, what rendered, what was sent/shadowed/failed — the
      proof a template reads exactly as intended BEFORE the switch is thrown. */
   autoMsgQueue: {

@@ -464,6 +464,7 @@
       box.innerHTML = orders.map(odCard).join('');
       odApplyFilter();   // keep the active chip filter after a list repaint
       odWire(box);
+      odFetchImages(box, orders);   // the day tab has no Image Link column — the engine does
       /* eBay's accepted-carrier list for this account, fetched once and shared by every card. */
       (function () {
         var acct = odStr(OD_ACCOUNT);
@@ -683,6 +684,39 @@
       '</div></div>';
   }
 
+  /* The day tabs never carried an Image Link column — the engine's items_api does. After each
+     paint, ask it by order number and drop the pictures into the placeholders; the rows keep the
+     URL too, so chip-filter repaints stay pictured. Best-effort: a miss leaves "No image". */
+  function odFetchImages(box, orders) {
+    try {
+      if (typeof engineCall !== 'function') { return; }
+      var want = [];
+      orders.forEach(function (o) {
+        if (!odStr(o[OD_H.imageLink]) && odStr(o[OD_H.orderNo])) { want.push(odStr(o[OD_H.orderNo])); }
+      });
+      if (!want.length) { return; }
+      engineCall('itemImages', { order_ids: want }, 15000).then(function (d) {
+        var im = (d && d.images) || {};
+        orders.forEach(function (o) {
+          var u = safeUrl(im['o:' + odStr(o[OD_H.orderNo])] || '');
+          if (u && !odStr(o[OD_H.imageLink])) { o[OD_H.imageLink] = u; }
+        });
+        box.querySelectorAll('[data-odimg]').forEach(function (el) {
+          var u = safeUrl(im['o:' + el.getAttribute('data-odimg')] || '');
+          if (!u) { return; }
+          var img = document.createElement('img');
+          img.alt = ''; img.setAttribute('data-shot', '1');
+          img.onerror = function () {                      // a dead link must not leave a broken frame
+            var s = document.createElement('span'); s.className = 'od-alt'; s.textContent = 'No image';
+            if (img.parentNode) { img.parentNode.replaceChild(s, img); }
+          };
+          img.src = u;
+          if (el.parentNode) { el.parentNode.replaceChild(img, el); }
+        });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   /** What the processor needs in front of them to buy the right thing: the picture, what it sold
    *  for, how many, which variation, and the AliExpress link to open. */
   function odProduct(o, cols) {
@@ -724,7 +758,7 @@
     return '<div class="od-prod">' +
         '<span class="od-shot">' + (img
           ? '<img src="' + odAttr(img) + '" alt="" data-shot="1">'
-          : '<span class="od-alt">No image</span>') + '</span>' +
+          : '<span class="od-alt" data-odimg="' + odAttr(odStr(o[OD_H.orderNo])) + '">No image</span>') + '</span>' +
         '<div><div class="od-facts">' + facts + '</div>' +
           '<div class="od-links">' + links + '</div></div>' +
       '</div>';
