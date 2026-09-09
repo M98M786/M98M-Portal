@@ -274,7 +274,9 @@ function actionApproveTask_(payload, ctx) {
   // writes) behind it. Fire it after release; best-effort, same as before.
   if (rateOut) { try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rateOut }); } catch (e) {} }
 
-  taskChainNext_(rec, ctx);
+  // The chain spawn does sheet + USERS work of its own — if it hiccups, the approval (already
+  // written) must still return success; the chain can be re-raised by hand.
+  try { taskChainNext_(rec, ctx); } catch (e) { try { logActivity_('system', 'CHAIN_SPAWN_FAIL', String(rec.task_id), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} }
 
   notify_(rec.assigned_to, 'Task approved',
     '🔵 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +

@@ -1269,9 +1269,15 @@ function notify_(toEmail, type, message, ref) {
      the hot mirror) is the delivery path to the bell. */
 }
 function notifyManagement_(type, message, ref) {
-  const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
-  SUPER_ADMINS.forEach(function (e) { if (mgmt.indexOf(e) < 0) mgmt.push(e); });
-  mgmt.forEach(function (e) { notify_(e, type, message, ref); });
+  // Same law as notify_: a lost bell must never kill the action that rang it — the USERS read
+  // here can throw under load, and it used to take the caller's already-landed write down with it.
+  try {
+    const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
+    SUPER_ADMINS.forEach(function (e) { if (mgmt.indexOf(e) < 0) mgmt.push(e); });
+    mgmt.forEach(function (e) { notify_(e, type, message, ref); });
+  } catch (e) {
+    try { logActivity_('system', 'NOTIFY_MGMT_FAIL', type, '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
+  }
 }
 
 
@@ -2796,7 +2802,9 @@ function actionApproveTask_(payload, ctx) {
   // writes) behind it. Fire it after release; best-effort, same as before.
   if (rateOut) { try { enginePost_('provenanceRate', { item_id: String(rec.item_id), rating: rateOut }); } catch (e) {} }
 
-  taskChainNext_(rec, ctx);
+  // The chain spawn does sheet + USERS work of its own — if it hiccups, the approval (already
+  // written) must still return success; the chain can be re-raised by hand.
+  try { taskChainNext_(rec, ctx); } catch (e) { try { logActivity_('system', 'CHAIN_SPAWN_FAIL', String(rec.task_id), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} }
 
   notify_(rec.assigned_to, 'Task approved',
     '🔵 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +

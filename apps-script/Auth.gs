@@ -205,7 +205,13 @@ function notify_(toEmail, type, message, ref) {
      the hot mirror) is the delivery path to the bell. */
 }
 function notifyManagement_(type, message, ref) {
-  const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
-  SUPER_ADMINS.forEach(function (e) { if (mgmt.indexOf(e) < 0) mgmt.push(e); });
-  mgmt.forEach(function (e) { notify_(e, type, message, ref); });
+  // Same law as notify_: a lost bell must never kill the action that rang it — the USERS read
+  // here can throw under load, and it used to take the caller's already-landed write down with it.
+  try {
+    const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
+    SUPER_ADMINS.forEach(function (e) { if (mgmt.indexOf(e) < 0) mgmt.push(e); });
+    mgmt.forEach(function (e) { notify_(e, type, message, ref); });
+  } catch (e) {
+    try { logActivity_('system', 'NOTIFY_MGMT_FAIL', type, '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
+  }
 }
