@@ -5956,6 +5956,19 @@ function actionSubmitHunt_(payload, ctx) {
     throw new Error('this role does not submit hunts');
   }
 
+  /* Write-path shadow (Phase 1 / WO-2, parity: parity/hunt-submit.md): rehearse this exact submit on
+     the ENGINE — it re-runs the §3 validation + §4 dup-check against the hunt_rows mirror and records
+     the verdict it WOULD have produced, writing NOTHING else (no sheet, no task, no notification).
+     Placed first so a submission the old path is about to reject is still shadowed. Best-effort and
+     gated by config; the old path below is byte-for-byte unchanged. Off unless write_hunt_mode=shadow. */
+  try {
+    if (getConfig('write_hunt_mode') === 'shadow') {
+      enginePost_('shadowHuntSubmit', { columns: (payload && payload.columns) || {},
+        shipping: (payload && payload.shipping) || '', override_note: (payload && payload.override_note) || '',
+        caller: ctx.ident.email, role: ctx.user.role });
+    }
+  } catch (e) { /* the shadow can never affect the real submit */ }
+
   const cols = huntColumnsFromPayload_(payload);
   HUNT_REQUIRED.forEach(function (c) {
     if (String(cols[c] || '').trim() === '') throw new Error('required field missing: ' + c);

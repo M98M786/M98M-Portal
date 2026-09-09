@@ -1290,6 +1290,15 @@ async function statusRefresh(env) {
 
 /** Run one whitelisted Apps Script job server-to-server (the AS /exec walls curl but answers a
  * proper POST). Key-gated on both ends. Best-effort; callers wrap in try/catch. */
+/* Write-path shadow (Phase 1): the shadow table is lazy-created so the feature needs no migration
+   step and stays completely dormant until a submit is actually forwarded. */
+async function shadowEnsure(env) {
+  try {
+    await env.DB.prepare('CREATE TABLE IF NOT EXISTS shadow_hunt_submissions (id TEXT PRIMARY KEY, at TEXT, caller TEXT, role TEXT, request_hash TEXT, verdict TEXT, reason TEXT, dup_hunt_id TEXT, dup_owner TEXT, title TEXT, ali_ids TEXT, short_links INTEGER, payload TEXT)').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_shadow_hunt_at ON shadow_hunt_submissions(at)').run();
+  } catch (e) { /* best-effort; the action retries the create next call */ }
+}
+
 async function asRunJobDirect(env, job, args) {
   const key = await secret(env, 'SYNC_KEY');
   const r = await fetch(env.AS_URL, {
@@ -6964,6 +6973,90 @@ const ROUTES = {
       }
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
       return { synced: stmts.length };
+    },
+  },
+
+  /* ── Write-path shadow (Phase 1, WO-2/WO-3): hunt submit rehearsed on the engine, per
+     parity/hunt-submit.md. shadowHuntSubmit re-runs the §3 validation + §4 dup-check against the
+     hunt_rows mirror and records the verdict it WOULD produce — no sheet write, no task, no
+     notification, nothing external. shadowHuntReport is the nightly divergence reporter. Both stay
+     inert until AS forwards submits under write_hunt_mode=shadow. Rollback = flip that flag off. ── */
+  shadowHuntSubmit: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await shadowEnsure(ctx.env);
+      const cols = (p && p.columns && typeof p.columns === 'object') ? p.columns : {};
+      const caller = String((p && p.caller) || '').toLowerCase();
+      const role = String((p && p.role) || '');
+      const override = String((p && p.override_note) || '').trim();
+      const REQUIRED = ['Title', 'Main Keyword Terapeak link', 'Product Link 1 Main supplier', 'Source Price', 'E-Bey Caluclator + £4'];
+      const SUPPLIER = ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'];
+      const OWNED = ['Selected By', 'Approval Status', 'Comments', 'Date Added', 'Account Selected', 'Listing Status'];
+      const g = (k) => { const v = cols[k]; return v == null ? '' : String(v).trim().slice(0, 5000); };
+      const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); return m ? m[1] : ''; };
+      const isShort = (u) => /^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(String(u || ''));
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0;
+
+      let verdict = 'accepted', reason = '', dupHunt = '', dupOwner = '';
+      let missing = ''; for (const r of REQUIRED) { if (!g(r)) { missing = r; break; } }
+      let owned = ''; for (const k of OWNED) { if (Object.prototype.hasOwnProperty.call(cols, k) && String(cols[k] || '').trim() !== '') { owned = k; break; } }
+      const kindRaw = g('Seasonal').toLowerCase();
+      const kindOk = kindRaw.indexOf('season') >= 0 || kindRaw.indexOf('consist') >= 0;
+      const priceOk = /\d/.test(g('Source Price')) && /\d/.test(g('E-Bey Caluclator + £4'));
+
+      const myIds = [], shorts = [];
+      for (const c of SUPPLIER) { const v = g(c); if (isShort(v)) shorts.push(c); const id = aliId(v); if (id && myIds.indexOf(id) < 0) myIds.push(id); }
+
+      if (owned) { verdict = 'rejected'; reason = 'portal-owned column set: ' + owned; }
+      else if (missing) { verdict = 'rejected'; reason = 'validation: missing ' + missing; }
+      else if (!priceOk) { verdict = 'rejected'; reason = 'validation: price not numeric'; }
+      else if (!kindOk) { verdict = 'rejected'; reason = 'validation: Seasonal/Consistent required'; }
+      else if (myIds.length) {
+        const rs = await ctx.env.DB.prepare('SELECT hunt_id, hunter_email, status, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
+        for (const row of (rs.results || [])) {
+          let vv = {}; try { vv = JSON.parse(row.vals || '{}'); } catch (e) {}
+          let hit = false; for (const c of SUPPLIER) { const id0 = aliId(vv[c]); if (id0 && myIds.indexOf(id0) >= 0) { hit = true; break; } }
+          if (hit) {
+            dupHunt = String(row.hunt_id || ''); dupOwner = String(row.hunter_email || '').toLowerCase();
+            const st = String(row.status || ''); const inflight = st === '' || st === 'REVISION REQUIRED';
+            if (dupOwner === caller && inflight) { verdict = 'revision'; reason = 'own in-flight ' + st; }
+            else if (override && mgmt) { verdict = 'accepted'; reason = 'mgmt override of ' + dupHunt; }
+            else { verdict = 'rejected'; reason = 'duplicate of ' + dupHunt; }
+            break;
+          }
+        }
+      }
+      const title = g('Title');
+      const hash = title.toLowerCase().replace(/\s+/g, ' ') + '|' + myIds.slice().sort().join(',') + '|' + caller;
+      const rid = 'SH' + [...crypto.getRandomValues(new Uint8Array(7))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      try {
+        await ctx.env.DB.prepare(
+          'INSERT INTO shadow_hunt_submissions (id, at, caller, role, request_hash, verdict, reason, dup_hunt_id, dup_owner, title, ali_ids, short_links, payload) ' +
+          "VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+        ).bind(rid, caller, role, hash, verdict, reason, dupHunt, dupOwner, title.slice(0, 200), myIds.join(','), shorts.length, JSON.stringify(cols).slice(0, 4000)).run();
+      } catch (e) {}
+      return { shadow: true, verdict, reason, dup_hunt_id: dupHunt, ali_ids: myIds, short_link_cols: shorts.length };
+    },
+  },
+
+  shadowHuntReport: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      await shadowEnsure(ctx.env);
+      const since = /^\d{4}-\d{2}-\d{2}/.test(String((p && p.since) || '')) ? String(p.since) : new Date(Date.now() - 24 * 3600000).toISOString().slice(0, 10);
+      const rs = await ctx.env.DB.prepare('SELECT * FROM shadow_hunt_submissions WHERE at >= ?1 ORDER BY at DESC LIMIT 3000').bind(since + ' 00:00:00').all().catch(() => ({ results: [] }));
+      const rows = rs.results || [];
+      const byVerdict = {}; let shortSub = 0;
+      rows.forEach((r) => { byVerdict[r.verdict] = (byVerdict[r.verdict] || 0) + 1; if (r.short_links) shortSub++; });
+      const hr = await ctx.env.DB.prepare('SELECT hunter_email, status, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
+      const idx = {};
+      (hr.results || []).forEach((row) => { let vv = {}; try { vv = JSON.parse(row.vals || '{}'); } catch (e) {} ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'].forEach((c) => { const s = String(vv[c] || ''); const m = s.match(/\/item\/(\d{6,})/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); if (m) { (idx[m[1]] = idx[m[1]] || []).push(String(row.hunter_email || '').toLowerCase()); } }); });
+      let checked = 0, matched = 0; const mism = [];
+      rows.forEach((r) => {
+        if (r.short_links) return;                          // short-link submits: shadow can't resolve the id yet — reported separately, out of the rate
+        const ids = String(r.ali_ids || '').split(',').filter(Boolean);
+        const realHit = ids.some((id) => idx[id]);          // accepted → a real row must exist; dup/revision → the matched row must exist
+        checked++; if (realHit) matched++; else if (mism.length < 40) mism.push({ verdict: r.verdict, reason: r.reason, title: r.title, ali_ids: r.ali_ids });
+      });
+      return { since, total: rows.length, byVerdict, shortLinkSubmissions: shortSub, checked, matched, matchRate: checked ? Math.round(matched / checked * 1000) / 10 : 100, mismatches: mism };
     },
   },
 
