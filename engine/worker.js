@@ -2694,7 +2694,10 @@ async function autoMsgSend(env) {
   /* Live is a CONFIG row now (portal_config.automsg_live = 'on'), so arming and the kill switch
      are one D1 write — no worker redeploy. The env var still forces-on for emergencies. */
   const liveRow = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'automsg_live'").first().catch(() => null);
-  const live = String(env.AUTOMSG_LIVE) === 'true' || String((liveRow && liveRow.value) || '') === 'on';
+  /* The CONFIG row is the ONLY authority. The old AUTOMSG_LIVE env var turned out to be armed
+     'true' in production from a previous era — an invisible force-on that nearly live-fired a
+     backfill queue. An operable switch must have exactly one hand on it. */
+  const live = String((liveRow && liveRow.value) || '') === 'on';
   if (!live) {
     await env.DB.prepare(
       "UPDATE automsg_queue SET status = 'SHADOW', detail = 'recorded, not sent — AUTOMSG_LIVE is off' " +
