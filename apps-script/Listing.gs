@@ -761,8 +761,8 @@ function listingPickForRole_(role, preferredEmail, tasks, type) {
 function listingRevisionOverride_() {
   try {
     const to = normalizeEmail(getConfig('revision_route_to') || '');
-    const until = String(getConfig('revision_route_until') || '').trim();
-    if (!to || !/^\d{4}-\d{2}-\d{2}$/.test(until)) return '';
+    const until = listingRevisionDay_(getConfig('revision_route_until'));
+    if (!to || !until) return '';
     if (Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd') > until) return '';
     let ok = false;
     readTab_('USERS').forEach(function (u) {
@@ -770,6 +770,18 @@ function listingRevisionOverride_() {
     });
     return ok ? to : '';
   } catch (e) { return ''; }
+}
+
+/** The CONFIG cell holds whatever Sheets made of the date that was typed — the yyyy-mm-dd string
+ * if the cell stayed text, a Date if Sheets coerced it (it did, first try). Both normalise to the
+ * calendar day AS ENTERED, so format in the script's own timezone, never UK — midnight PKT
+ * formatted in London is the day before. */
+function listingRevisionDay_(v) {
+  if (v && v.getTime) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const s = String(v == null ? '' : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 /** §8.4's form names an Employee, not an address: an email wins, otherwise a UNIQUE approved

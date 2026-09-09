@@ -353,7 +353,8 @@ function actionRevisionRouting_(payload, ctx) {
     r8SetConfig_('revision_route_to', to); r8SetConfig_('revision_route_until', until);
     logActivity_(ctx.ident.email, 'REVISION_ROUTE', to, '', until, '');
   } else {
-    to = String(getConfig('revision_route_to') || ''); until = String(getConfig('revision_route_until') || '');
+    to = String(getConfig('revision_route_to') || '');
+    until = listingRevisionDay_(getConfig('revision_route_until'));
   }
   var today = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
   return { revision_route_to: to, revision_route_until: until,
