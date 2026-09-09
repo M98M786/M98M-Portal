@@ -373,7 +373,12 @@
       huWireForm();
       huLoadMine();
       if (huHas(HU_QUEUE_ROLES, huRole())) {
-        api('huntQueue').then(function (d) { huCount('huntQueue', ((d && d.hunts) || []).length); }).catch(function () {});
+        api('huntQueue').then(function (d) {
+          var hs = (d && d.hunts) || [];
+          var ret = hs.filter(huIsReturned).length;
+          huCount('huntQueue', hs.length - ret);
+          huCount('huntRevised', ret);
+        }).catch(function () {});
       }
       /* Deep-link from the Revisions page: it stores the hunt to fix and sends us here. Drop the
          record straight into the revise map and open revise mode now — no wait for "My hunts" to
@@ -835,6 +840,34 @@
     }
   };
 
+  /* Owner (9 Sept): the returned-revisions decision desk — its own page. Every pending hunt whose
+     Comments carry the "(revised ...)" stamp lands here instead of Hunt approvals: what was asked,
+     what came back, and the same Approve / Send back / Not approved controls. */
+  VIEWS.huntRevised = {
+    label: 'Revision returns',
+    icon: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+    roles: HU_QUEUE_ROLES,
+    order: 16.1,
+    prefetch: function () { return huFetchQueue(); },
+    badge: function () { return (STATE.counts && STATE.counts.huntRevised) || 0; },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Revision <span class="goldtext">returns</span></h1>' +
+          '<span class="sub">hunts the team revised after being sent back — read the trail, decide again</span>' +
+          '<button class="minibtn" id="huRvRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div class="card enter d2"><div class="hd">Back for a decision ' +
+          '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
+          '<div class="bd" id="huRvBody"><div class="spinner"></div></div>' +
+        '</div>' +
+        '<datalist id="huAccList"></datalist>' +
+        '<datalist id="huListerList"></datalist>';
+    },
+    init: function () {
+      huEl('huRvRefresh').onclick = function () { huLoadQueue(); };
+      huLoadPickers();
+      huLoadQueue();
+    }
+  };
+
   /** The per-hunter pulse: one 'all' fetch, aggregated here — pending now, and the last 7 days'
       approved / rejected per person, newest business first. */
   function huLoadQueueStats() {
@@ -973,11 +1006,27 @@
     if (v.indexOf('consist') >= 0) { return 'Consistent'; }
     return 'Unsorted';
   }
+  /* Owner (9 Sept): "make a separate page for revisions here" — the decision desk splits in two.
+     A hunt that was sent back and then REVISED comes back carrying the "(revised ...)" marker
+     actionReviseHunt_ stamps into Comments; those land on the Revision returns page, fresh
+     submissions stay on Hunt approvals. Same cards, same decisions — one queue fetch feeds both. */
+  function huIsReturned(rec) { return /\(revised /i.test(huStr(rec['Comments'] || '')); }
+  function huQBox() { return huEl('huQBody') || huEl('huRvBody'); }
+  function huQMode(box) { return box && box.id === 'huRvBody' ? 'returned' : 'fresh'; }
+  function huQDrop(box) {
+    var key = huQMode(box) === 'returned' ? 'huntRevised' : 'huntQueue';
+    huCount(key, Math.max(0, ((STATE.counts && STATE.counts[key]) || 1) - 1));
+  }
   function huPaintQueue(box, d) {
-    var all = (d && d.hunts) || [];
+    var mode = huQMode(box);
+    var every = (d && d.hunts) || [];
+    var returned = every.filter(huIsReturned);
+    var fresh = every.filter(function (r) { return !huIsReturned(r); });
+    var all = mode === 'returned' ? returned : fresh;
     var types = (d && d.advertising_types && d.advertising_types.length) ? d.advertising_types : HU_ADV_TYPES;
     var can = !!(d && d.can_decide);
-    huCount('huntQueue', all.length);
+    huCount('huntQueue', fresh.length);
+    huCount('huntRevised', returned.length);
 
     var counts = { all: all.length, Seasonal: 0, Consistent: 0, Unsorted: 0 };
     all.forEach(function (r) { counts[huKindOf(r)]++; });
@@ -996,13 +1045,20 @@
           ' style="padding:7px 13px;border-radius:9px;border:1px solid var(--gold-line' + (HU_QK === t[0] ? '-hi' : '') +
           ');background:var(--panel' + (HU_QK === t[0] ? '-2' : '') + ');color:var(--text);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer">' +
           esc(t[1]) + ' <b style="color:var(--gold-a)">' + n + '</b></button>';
-      }).join('') + '</div>';
+      }).join('') +
+      /* the two desks point at each other, with live counts — navigate by hash ONLY (one render) */
+      (mode === 'fresh'
+        ? (returned.length ? '<button class="hu-qtab" data-qgo="huntRevised" style="padding:7px 13px;border-radius:9px;border:1px solid var(--warn);background:var(--panel);color:var(--warn);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer">&#8617; Revision returns <b>' + returned.length + '</b></button>' : '')
+        : '<button class="hu-qtab" data-qgo="huntQueue" style="padding:7px 13px;border-radius:9px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer">&#8592; Fresh submissions <b style="color:var(--gold-a)">' + fresh.length + '</b></button>') +
+      '</div>';
 
     var hunts = HU_QK === 'all' ? all : all.filter(function (r) { return huKindOf(r) === HU_QK; });
 
     var body;
     if (!all.length) {
-      body = '<div class="hu-empty">No hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
+      body = mode === 'returned'
+        ? '<div class="hu-empty">No revised hunt is waiting.<span>When a hunter fixes a sent-back hunt, it lands here for the re-decision.</span></div>'
+        : '<div class="hu-empty">No new hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
     } else if (!hunts.length) {
       body = '<div class="hu-hint" style="margin-top:0">Nothing in the ' + esc(HU_QK === 'all' ? 'queue' : HU_QK + ' tray') + ' right now.</div>';
     } else {
@@ -1010,20 +1066,26 @@
           'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
         hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
     }
-    box.innerHTML = (all.length ? tabs : '') + body;
+    /* the tabs row always shows on the returned desk (it carries the way back), and on the fresh
+       desk whenever there is anything to show or to point at */
+    box.innerHTML = ((all.length || mode === 'returned' || returned.length) ? tabs : '') + body;
     box.querySelectorAll('[data-qk]').forEach(function (b) {
       b.onclick = function () { HU_QK = this.getAttribute('data-qk'); huPaintQueue(box, d); };
+    });
+    box.querySelectorAll('[data-qgo]').forEach(function (b) {
+      b.onclick = function () { location.hash = b.getAttribute('data-qgo'); };
     });
     if (can && hunts.length) { huWireQueue(box); }
   }
 
   function huLoadQueue() {
-    var box = huEl('huQBody');
+    var box = huQBox();
     if (!box) { return; }
     var had = (typeof cacheRead === 'function') ? cacheRead('huntQueue', {}) : null;
     if (had) { try { huPaintQueue(box, had); } catch (e) { had = null; } }
     huFetchQueue().then(function (d) {
-      huPaintQueue(box, d);
+      var b2 = huQBox();
+      if (b2) { huPaintQueue(b2, d); }
     }).catch(function (e) {
       if (had) { toast('Showing the last queue — could not refresh just now.'); return; }
       box.innerHTML = '<div class="hu-empty">The queue could not be loaded just now.<span>' + esc(e.message) + '</span>' +
@@ -1043,9 +1105,13 @@
        rows render only when the fields actually arrived. */
     var hasProfit = Object.prototype.hasOwnProperty.call(rec, 'Our Profit');
 
+    var came = huIsReturned(rec);
     return '<div class="hu-item">' +
       '<div class="hu-h"><span class="hu-t">' + esc(huStr(rec['Title']) || id) + '</span>' +
-        '<span class="pill hu-wait">Awaiting review</span></div>' +
+        (came ? '<span class="pill hu-wait" style="border-color:var(--warn);color:var(--warn)">&#8617; Revised — decide again</span>'
+              : '<span class="pill hu-wait">Awaiting review</span>') + '</div>' +
+      /* what was asked for, and when it came back — the Comments trail carries both */
+      (came ? '<div class="hu-box" style="border-color:var(--warn)"><div class="k" style="color:var(--warn)">Revision trail</div><div class="hu-txt">' + esc(huStr(rec['Comments'])) + '</div></div>' : '') +
       '<div class="hu-meta"><span class="mono">' + esc(id) + '</span> · ' +
         esc(huStr(rec.hunter_name) || huStr(rec.hunter_email)) + ' · submitted ' +
         esc(fmtPkt(rec.ts, true) || huStr(rec['Date Added'])) + '</div>' +
@@ -1152,7 +1218,7 @@
       payload.decision = HU_REVISION;
       huCardGone(box, id, 'Sent back for revision ✓');
       api('decideHunt', payload).then(function () {
-        huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
+        huQDrop(box);
         huLoadQueueStats();
       }).catch(function (e) { huDecideCatch(box, id, e, 'the revision'); });
       return;
@@ -1166,7 +1232,7 @@
          runs behind it. A refusal brings the card back with the reason, nothing is lost. */
       huCardGone(box, id, 'Not approved ✓');
       api('decideHunt', payload).then(function () {
-        huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
+        huQDrop(box);
         huLoadQueueStats();
       }).catch(function (e) { huDecideCatch(box, id, e, 'the rejection'); });
       return;
