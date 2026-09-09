@@ -1392,15 +1392,17 @@ async function orderSync(env) {
         const fhCount = ((o.fulfillmentHrefs || []).length) || 0;
         const id = String(o.orderId);
         if (knownO[id] === status + '|' + qty + '|' + est + '|' + shipBy) continue;   // unchanged → no write
+        const shipTo = ((((o.fulfillmentStartInstructions || [])[0] || {}).shippingStep || {}).shipTo || {});
+        const buyerName = String(shipTo.fullName || (o.buyer && o.buyer.buyerRegistrationAddress && o.buyer.buyerRegistrationAddress.fullName) || '').slice(0, 80);
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, est_delivery, ship_by, payment_status, cancel_state, fh_count) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ' +
-          'ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10, payment_status=?11, cancel_state=?12, fh_count=?13'
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, buyer_name, created_at, qty, est_delivery, ship_by, payment_status, cancel_state, fh_count) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?14, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ' +
+          "ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10, payment_status=?11, cancel_state=?12, fh_count=?13, buyer_name = CASE WHEN ?14 != '' THEN ?14 ELSE buyer_name END"
         ).bind(
           id, acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           status, String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), qty, est, shipBy, payStatus, cancelState, fhCount
+          String(o.creationDate || ''), qty, est, shipBy, payStatus, cancelState, fhCount, buyerName
         ).run();
       }
       n++; href = page.next || '';
@@ -2537,15 +2539,16 @@ async function standardsSync(env) {
    (a feedback ID, a return ID…) — an event queues its message once, ever. Templates speak with
    {{buyer}}, {{item}}, {{order}}. 'arrived' appears in the controls but detection waits on
    delivery events — the desk says so instead of pretending. */
-const AUTOMSG_TRIGGERS = ['ordered', 'shipped', 'arrived', 'return_opened', 'neg_fb', 'pos_fb', 'buyer_query'];
+const AUTOMSG_TRIGGERS = ['ordered', 'shipped', 'arrived', 'return_opened', 'inquiry_opened', 'neg_fb', 'pos_fb', 'buyer_query'];
 
 function renderTemplate(tpl, vars) {
-  return String(tpl || '').replace(/\{\{(\w+)\}\}/g, (m, k) => String(vars[k] || '')).slice(0, 900);
+  return String(tpl || '').replace(/\{\{(\w+)\}\}/g, (m, k) => String(vars[k] || '')).slice(0, 1800);
 }
 
 async function autoMsgScan(env) {
+  await ensureTruthSchema(env);   // subject/buyer_name columns ride the same idempotent DDL list
   await perAccount(env, 'autoMsgScan', async (acct) => {
-    const cfgRs = await env.DB.prepare('SELECT trigger_kind, template, delay_min FROM auto_msgs WHERE account = ?1 AND enabled = 1').bind(acct).all();
+    const cfgRs = await env.DB.prepare('SELECT trigger_kind, template, subject, delay_min FROM auto_msgs WHERE account = ?1 AND enabled = 1').bind(acct).all();
     const cfg = {};
     for (const r of (cfgRs.results || [])) cfg[r.trigger_kind] = r;
     if (!Object.keys(cfg).length) return;
@@ -2555,18 +2558,27 @@ async function autoMsgScan(env) {
       if (!c) return;
       const body = renderTemplate(c.template, vars);
       if (!body) return;
+      const subj = renderTemplate(c.subject || '', vars).slice(0, 200);
       await env.DB.prepare(
-        'INSERT OR IGNORE INTO automsg_queue (account, trigger_kind, ref, buyer, order_id, item_id, body, due_at, status, detail, created_at) ' +
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now', '+' || ?8 || ' minutes'), 'QUEUED', '', datetime('now'))"
+        'INSERT OR IGNORE INTO automsg_queue (account, trigger_kind, ref, buyer, order_id, item_id, body, subject, due_at, status, detail, created_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now', '+' || ?9 || ' minutes'), 'QUEUED', '', datetime('now'))"
       ).bind(acct, kind, ref, String(vars.buyer || ''), String(vars.order || ''), String(vars.item_id || ''),
-        body, String(Math.max(0, Number(c.delay_min) || 0))).run();
+        body, subj, String(Math.max(0, Number(c.delay_min) || 0))).run();
     };
 
     // one titles map per account so {{item}} speaks the listing's name, not its number
     const titles = {};
     const tRs = await env.DB.prepare('SELECT item_id, title FROM items_api WHERE account = ?1').bind(acct).all();
     for (const t of (tRs.results || [])) titles[t.item_id] = t.title;
-    const withTitle = v => ({ ...v, item: String(titles[v.item_id] || v.item_id || '') });
+    /* {{name}}/{{first}} speak the buyer's real (ship-to) name where orders carry one; the
+       username is the honest fallback — RecipientID stays the username either way. */
+    const names = {};
+    const nmRs = await env.DB.prepare("SELECT buyer, buyer_name FROM orders WHERE account = ?1 AND buyer_name != '' AND buyer != ''").bind(acct).all();
+    for (const n0 of (nmRs.results || [])) names[n0.buyer] = n0.buyer_name;
+    const withTitle = v => {
+      const nm = String(v.buyer_name || names[v.buyer] || v.buyer || '');
+      return { ...v, item: String(titles[v.item_id] || v.item_id || ''), name: nm, first: (nm.split(' ')[0] || nm) };
+    };
 
     if (cfg.ordered) {
       /* 'ordered' = the buyer has just paid — an order row exists (these accounts are immediate-pay,
@@ -2575,20 +2587,22 @@ async function autoMsgScan(env) {
          INSERT OR IGNORE on 'ord:'+order_id means each buyer is thanked exactly once. delay_min lets
          it wait a few minutes after payment rather than firing the same second. */
       const rs = await env.DB.prepare(
-        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND buyer != '' " +
+        "SELECT order_id, buyer, buyer_name, item_id FROM orders WHERE account = ?1 AND buyer != '' " +
         "AND status NOT IN ('CANCELLED','NOT_FOUND') AND created_at >= datetime('now', '-1 day')"
       ).bind(acct).all();
       for (const o of (rs.results || [])) {
-        await queue('ordered', 'ord:' + o.order_id, withTitle({ buyer: o.buyer, order: o.order_id, item_id: o.item_id }));
+        await queue('ordered', 'ord:' + o.order_id, withTitle({ buyer: o.buyer, buyer_name: o.buyer_name, order: o.order_id, item_id: o.item_id }));
       }
     }
     if (cfg.shipped) {
       // 6 days, matching the order window — a parcel fulfilled on day 4 still deserves its note
       const rs = await env.DB.prepare(
-        "SELECT order_id, buyer, item_id FROM orders WHERE account = ?1 AND status LIKE '%FULFILLED%' AND created_at >= datetime('now', '-6 day')"
+        "SELECT o.order_id, o.buyer, o.buyer_name, o.item_id, COALESCE(t.tracking, '') AS trk, COALESCE(t.courier_ebay, '') AS courier " +
+        "FROM orders o LEFT JOIN trackings t ON t.order_id = o.order_id " +
+        "WHERE o.account = ?1 AND o.status LIKE '%FULFILLED%' AND o.created_at >= datetime('now', '-6 day')"
       ).bind(acct).all();
       for (const o of (rs.results || [])) {
-        await queue('shipped', 'ship:' + o.order_id, withTitle({ buyer: o.buyer, order: o.order_id, item_id: o.item_id }));
+        await queue('shipped', 'ship:' + o.order_id, withTitle({ buyer: o.buyer, buyer_name: o.buyer_name, order: o.order_id, item_id: o.item_id, tracking: o.trk, carrier: o.courier }));
       }
     }
     if (cfg.return_opened) {
@@ -2597,6 +2611,16 @@ async function autoMsgScan(env) {
       ).bind(acct).all();
       for (const c of (rs.results || [])) {
         await queue('return_opened', 'ret:' + c.case_id, withTitle({ buyer: c.buyer, order: c.order_id, item_id: c.item_id }));
+      }
+    }
+    if (cfg.inquiry_opened) {
+      /* eBay's buyer-opened order inquiry (INR) — same Post-Order family as returns; the reply
+         lands inside the inquiry thread, so the buyer sees it exactly where they asked. */
+      const rs = await env.DB.prepare(
+        "SELECT case_id, buyer, item_id, order_id FROM cases WHERE account = ?1 AND kind = 'INR' AND opened_at >= datetime('now', '-3 day')"
+      ).bind(acct).all();
+      for (const c of (rs.results || [])) {
+        await queue('inquiry_opened', 'inq:' + c.case_id, withTitle({ buyer: c.buyer, order: c.order_id, item_id: c.item_id }));
       }
     }
     if (cfg.buyer_query) {
@@ -2667,7 +2691,11 @@ function xmlEsc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 async function autoMsgSend(env) {
-  if (String(env.AUTOMSG_LIVE) !== 'true') {
+  /* Live is a CONFIG row now (portal_config.automsg_live = 'on'), so arming and the kill switch
+     are one D1 write — no worker redeploy. The env var still forces-on for emergencies. */
+  const liveRow = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'automsg_live'").first().catch(() => null);
+  const live = String(env.AUTOMSG_LIVE) === 'true' || String((liveRow && liveRow.value) || '') === 'on';
+  if (!live) {
     await env.DB.prepare(
       "UPDATE automsg_queue SET status = 'SHADOW', detail = 'recorded, not sent — AUTOMSG_LIVE is off' " +
       "WHERE status = 'QUEUED' AND due_at <= datetime('now')"
@@ -2675,7 +2703,7 @@ async function autoMsgSend(env) {
     return;
   }
   const due = await env.DB.prepare(
-    'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.body, ' +
+    'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.body, q.subject, ' +
     '       COALESCE(a.enabled, 0) AS still_on ' +
     'FROM automsg_queue q LEFT JOIN auto_msgs a ON a.account = q.account AND a.trigger_kind = q.trigger_kind ' +
     "WHERE q.status = 'QUEUED' AND q.due_at <= datetime('now') ORDER BY q.id LIMIT 5"
@@ -2696,9 +2724,15 @@ async function autoMsgSend(env) {
           method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
           body: JSON.stringify({ message: { content: q.body } }) });
         ok = r.ok; detail = ok ? 'sent via return thread' : (r.status + ': ' + (await r.text()).slice(0, 200));
+      } else if (q.trigger_kind === 'inquiry_opened' && q.ref.indexOf('inq:INR:') === 0) {
+        const iid = q.ref.slice('inq:INR:'.length);
+        const r = await fetch('https://api.ebay.com/post-order/v2/inquiry/' + encodeURIComponent(iid) + '/send_message', {
+          method: 'POST', headers: { authorization: 'IAF ' + tok, 'content-type': 'application/json' },
+          body: JSON.stringify({ message: { content: q.body } }) });
+        ok = r.ok; detail = ok ? 'sent via inquiry thread' : (r.status + ': ' + (await r.text()).slice(0, 200));
       } else {
         const xml = '<?xml version="1.0" encoding="utf-8"?><AddMemberMessageAAQToPartnerRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
-          '<ItemID>' + xmlEsc(q.item_id) + '</ItemID><MemberMessage><Subject>About your order</Subject><Body>' +
+          '<ItemID>' + xmlEsc(q.item_id) + '</ItemID><MemberMessage><Subject>' + xmlEsc(String(q.subject || '').trim() || 'About your order') + '</Subject><Body>' +
           xmlEsc(q.body) + '</Body><QuestionType>General</QuestionType>' +
           '<RecipientID>' + xmlEsc(q.buyer) + '</RecipientID></MemberMessage></AddMemberMessageAAQToPartnerRequest>';
         const r = await fetch('https://api.ebay.com/ws/api.dll', {
@@ -3714,6 +3748,9 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE orders ADD COLUMN cancel_state TEXT",
     "ALTER TABLE orders ADD COLUMN fh_count INTEGER",
     "ALTER TABLE orders ADD COLUMN open_seen_at TEXT",
+    "ALTER TABLE orders ADD COLUMN buyer_name TEXT DEFAULT ''",
+    "ALTER TABLE auto_msgs ADD COLUMN subject TEXT DEFAULT ''",
+    "ALTER TABLE automsg_queue ADD COLUMN subject TEXT DEFAULT ''",
     "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
     "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
     "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
@@ -6179,7 +6216,7 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const accs = await ctx.env.DB.prepare('SELECT name FROM accounts ORDER BY name').all();
-      const rows = await ctx.env.DB.prepare('SELECT account, trigger_kind, template, delay_min, enabled FROM auto_msgs').all();
+      const rows = await ctx.env.DB.prepare('SELECT account, trigger_kind, template, subject, delay_min, enabled FROM auto_msgs').all();
       const tail = await ctx.env.DB.prepare(
         'SELECT account, trigger_kind, buyer, body, due_at, status, detail FROM automsg_queue ORDER BY id DESC LIMIT 15'
       ).all();
@@ -6196,13 +6233,14 @@ const ROUTES = {
       const account = String(p.account || ''), kind = String(p.trigger_kind || '');
       if (!account || AUTOMSG_TRIGGERS.indexOf(kind) < 0) throw new Error('SAY: account and a known trigger are needed');
       const enabled = p.enabled ? 1 : 0;
-      const tpl = String(p.template || '').slice(0, 900);
+      const tpl = String(p.template || '').slice(0, 1800);
+      const subj = String(p.subject || '').slice(0, 200);
       const delay = Math.max(0, Math.min(1440, Number(p.delay_min) || 0));
       if (enabled && !tpl.trim()) throw new Error('SAY: an enabled trigger needs a template');
       await ctx.env.DB.prepare(
-        'INSERT INTO auto_msgs (account, trigger_kind, template, delay_min, enabled) VALUES (?1, ?2, ?3, ?4, ?5) ' +
-        'ON CONFLICT(account, trigger_kind) DO UPDATE SET template = ?3, delay_min = ?4, enabled = ?5'
-      ).bind(account, kind, tpl, delay, enabled).run();
+        'INSERT INTO auto_msgs (account, trigger_kind, template, subject, delay_min, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ' +
+        'ON CONFLICT(account, trigger_kind) DO UPDATE SET template = ?3, subject = ?4, delay_min = ?5, enabled = ?6'
+      ).bind(account, kind, tpl, subj, delay, enabled).run();
       await ctx.env.DB.prepare(
         "INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'AUTOMSG_SET', ?2, '', ?3, datetime('now'))"
       ).bind(ctx.email, account + ':' + kind, (enabled ? 'ON' : 'OFF') + ' delay ' + delay + 'm').run();
