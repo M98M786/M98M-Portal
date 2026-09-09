@@ -185,6 +185,68 @@ input,select{font:inherit}
   .top{padding:0 12px; gap:8px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ╔════════ GALAXY EDITION v3 — theme layer (representation only) ════════╗
+   Format source: the black-space reference — near-black background, fine
+   sparse stars, one big stardust swirl wrapping the auth card, giant
+   M98M / Portal side titles. Brand gold and the royal blue accent are
+   kept exactly; only the background scale moves from navy to black so
+   the whole portal carries the reference format.
+   ROLLBACK: set <html data-theme="royal"> and this layer goes dormant.
+   ╚══════════════════════════════════════════════════════════════════════╝ */
+[data-theme="galaxy"]{
+  --bg0:#04060B; --bg1:#0A0D15; --panel:#0A0D15; --panel-2:#10141F;
+  --gold-line:rgba(233,180,60,.16); --gold-line-hi:rgba(233,180,60,.45);
+  --text:#F2F4F8; --text-2:#A7B0C0; --text-3:#6B7688;
+  --blue:#F6D06B; --blue-2:#F2C879; --blue-deep:#B66F1F; --blue-soft:rgba(233,169,60,.12);
+  --glow-gold:0 6px 26px rgba(233,169,60,.14);
+  --glow-blue:0 0 18px rgba(233,169,60,.3);
+}
+[data-theme="galaxy"] body{background:#04060B}
+/* star canvas sits behind everything; only exists visually under galaxy */
+.gx-field{position:fixed; inset:0; z-index:-1; pointer-events:none; display:none}
+[data-theme="galaxy"] .gx-field{display:block}
+/* chrome over black space — panels effectively opaque for table readability */
+[data-theme="galaxy"] .side{background:linear-gradient(180deg,#0A0D15,#04060B)}
+[data-theme="galaxy"] .top{background:rgba(4,6,11,.62)}
+[data-theme="galaxy"] .shiftline{background:rgba(8,10,16,.55)}
+/* auth card: black glass at the swirl's centre, gold-blue hairline kept */
+[data-theme="galaxy"] .card-auth{
+  background:linear-gradient(180deg,rgba(13,16,24,.92),rgba(8,10,16,.96));
+  border-color:rgba(255,255,255,.09); backdrop-filter:blur(12px);
+  box-shadow:0 26px 80px rgba(0,0,0,.7), var(--glow-gold);
+}
+/* the M98M logo glows in the decided gold at the heart of the scene */
+[data-theme="galaxy"] .logo-auth{
+  filter:drop-shadow(0 0 14px rgba(233,169,60,.5)) drop-shadow(0 0 40px rgba(233,169,60,.18));
+}
+/* giant side titles on the auth screens, exactly like the reference */
+[data-theme="galaxy"] .screen{position:relative; overflow:hidden}
+[data-theme="galaxy"] .screen::before,
+[data-theme="galaxy"] .screen::after{
+  position:absolute; top:50%; transform:translateY(-50%); line-height:1;
+  font-weight:700; font-size:clamp(54px,8.5vw,150px); letter-spacing:-.02em;
+  color:#F2F4F8; opacity:.95; pointer-events:none; user-select:none;
+}
+[data-theme="galaxy"] .screen::before{content:"M98M"; left:4vw}
+[data-theme="galaxy"] .screen::after{content:"Portal"; right:4vw}
+@media (max-width:1250px){
+  [data-theme="galaxy"] .screen::before,[data-theme="galaxy"] .screen::after{display:none}
+}
+/* sign-out dissolve — cosmetic black-space overlay, never blocks the flow */
+.gx-dissolve{position:fixed; inset:0; z-index:2147483000; pointer-events:none; opacity:0; visibility:hidden;
+  background:radial-gradient(1000px 640px at 50% 45%, rgba(10,13,20,.95), rgba(3,4,8,.99) 72%);
+  transition:opacity .5s ease, visibility 0s linear .5s}
+.gx-dissolve.gx-on{opacity:1; visibility:visible; transition:opacity .28s ease}
+.gx-dissolve canvas{position:absolute; inset:0; width:100%; height:100%}
+/* Astra rule: no blue anywhere in the chrome — gold hairline, gold selection */
+[data-theme="galaxy"] .card-auth::before{background:linear-gradient(90deg,#B66F1F,#F6D06B,#F2F4F8)}
+[data-theme="galaxy"] ::selection{background:rgba(233,169,60,.3)}
+/* bold main headings across the whole portal (galaxy only) — beats the few
+   inline 500/600 hero weights in views; headings only, body text untouched */
+[data-theme="galaxy"] h1,[data-theme="galaxy"] h2,[data-theme="galaxy"] h3{font-weight:800 !important}
+[data-theme="galaxy"] .hgroup h1{letter-spacing:-.015em}
+[data-theme="galaxy"] .nav-label{font-weight:800}
 </style>
 </head>
 <body>
@@ -623,7 +685,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260909-0000';
+var BUILD = '20260909-0018';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -28355,6 +28417,286 @@ function bootSignIn(cfg){
     }
 }
 window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };
+</script>
+<script>
+(function(){
+'use strict';
+/* ╔════════ GALAXY EDITION v3 script — visual layer only ════════╗
+   Renders the black-space reference format: fine sparse stars plus
+   one big stardust swirl (white sparkle, gold glints) that wraps
+   AROUND the auth card, and a faint swirl echo behind the workspace.
+   Owns: .gx-field canvas, .gx-dissolve overlay, parallax transforms.
+   Never: calls api(), reads/writes STATE, replaces or blocks any
+   handler. Only storage key touched: 'm98m:fx'.
+   URL overrides: ?theme=royal|ivory|galaxy   ?fx=low|full
+   ╚══════════════════════════════════════════════════════════════╝ */
+var root = document.documentElement, doc = document;
+try{
+  var q = new URLSearchParams(location.search || '');
+  var th = q.get('theme');
+  if (th === 'royal' || th === 'ivory' || th === 'galaxy') root.dataset.theme = th;
+  var fq = q.get('fx');
+  if (fq === 'low' || fq === 'full'){ try{ localStorage.setItem('m98m:fx', fq); }catch(e){} }
+}catch(e){}
+if (root.dataset.theme !== 'galaxy') return;
+
+var FX = 'full';
+try{ if (localStorage.getItem('m98m:fx') === 'low') FX = 'low'; }catch(e){}
+try{ if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) FX = 'low'; }catch(e){}
+
+var DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+var field, fctx, overlay, oCanvas, octx, spriteW, spriteG;
+var W = 0, H = 0, stars = [], dust = [], knots = [], mode = 'auth';
+var px = 0, py = 0, rot = 0, raf = 0, running = false, degraded = false;
+var frameCost = 0, frames = 0, lastTs = 0, lastDissolve = 0, resizeT = 0;
+
+function rnd(a, b){ return a + Math.random() * (b - a); }
+function gauss(){ return (Math.random() + Math.random() + Math.random()) / 1.5 - 1; }
+
+function makeSprite(r, g, b){
+  var c = doc.createElement('canvas'); c.width = 48; c.height = 48;
+  var x = c.getContext('2d');
+  var gr = x.createRadialGradient(24, 24, 0, 24, 24, 24);
+  gr.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',1)');
+  gr.addColorStop(0.35, 'rgba(' + r + ',' + g + ',' + b + ',.5)');
+  gr.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 48, 48);
+  return c;
+}
+
+/* ---- the swirl: one log-style arm, ~1.45 turns, wider + brighter outward ---- */
+function buildSwirl(cx, cy, inner, outer, count, knotCount){
+  var d = [], k = [], tmax = Math.PI * 2 * 1.45, tilt = 0.86, i;
+  for (i = 0; i < count; i++){
+    var t = tmax * Math.pow(Math.random(), 0.9);
+    var frac = t / tmax;
+    var r = inner + (outer - inner) * Math.pow(frac, 1.12);
+    r += gauss() * (5 + 30 * frac);
+    var gold = Math.random() < 0.2;
+    d.push({ t: t, r: r, tilt: tilt, cx: cx, cy: cy,
+             sz: rnd(.35, 1.25), a: (0.18 + 0.75 * frac) * rnd(.4, 1),
+             dp: rnd(.5, 1), gold: gold,
+             tw: rnd(0, 6.283), ts: rnd(.5, 1.5) });
+  }
+  for (i = 0; i < knotCount; i++){
+    var t2 = tmax * Math.pow(Math.random(), 0.8);
+    var frac2 = t2 / tmax;
+    var r2 = inner + (outer - inner) * Math.pow(frac2, 1.12) + gauss() * (4 + 18 * frac2);
+    k.push({ t: t2, r: r2, tilt: tilt, cx: cx, cy: cy,
+             sz: rnd(1.6, 3.6), a: rnd(.5, 1) * (0.3 + 0.7 * frac2),
+             dp: rnd(.6, 1), gold: Math.random() < 0.3,
+             tw: rnd(0, 6.283), ts: rnd(.6, 1.6) });
+  }
+  return { dust: d, knots: k };
+}
+
+function seed(){
+  var area = W * H;
+  var n = mode === 'auth' ? Math.round(Math.min(230, area / 11000))
+                          : Math.round(Math.min(150, area / 16000));
+  stars = [];
+  for (var i = 0; i < n; i++){
+    stars.push({ x: rnd(0, W), y: rnd(0, H), z: rnd(.25, 1), r: rnd(.3, 1.15),
+                 a: rnd(.15, .7), tw: rnd(0, 6.283), ts: rnd(.4, 1.5) });
+  }
+  if (mode === 'auth'){
+    var base = Math.min(W, H);
+    var s = buildSwirl(W / 2, H * 0.5, base * 0.30, base * 0.62,
+                       Math.round(Math.min(1500, area / 2300)), 70);
+    dust = s.dust; knots = s.knots;
+  } else {
+    var b2 = Math.min(W, H);
+    var s2 = buildSwirl(W * 0.82, H * 0.12, b2 * 0.14, b2 * 0.3,
+                        Math.round(Math.min(500, area / 7000)), 22);
+    dust = s2.dust; knots = s2.knots;
+  }
+}
+
+function sizeField(){
+  W = window.innerWidth; H = window.innerHeight;
+  field.width = Math.round(W * DPR); field.height = Math.round(H * DPR);
+  field.style.width = W + 'px'; field.style.height = H + 'px';
+  fctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  seed();
+}
+
+function drawStars(t){
+  fctx.fillStyle = '#FFFFFF';
+  for (var i = 0; i < stars.length; i++){
+    var s = stars[i];
+    var a = running ? s.a * (0.7 + 0.3 * Math.sin(t * 0.001 * s.ts + s.tw)) : s.a;
+    fctx.globalAlpha = a * (0.45 + 0.55 * s.z);
+    fctx.beginPath();
+    fctx.arc(s.x + px * 7 * s.z, s.y + py * 5 * s.z, s.r, 0, 6.2832);
+    fctx.fill();
+  }
+  fctx.globalAlpha = 1;
+}
+
+function drawSwirl(t, alphaMul, rotMul){
+  var i, p, a, x, y, al;
+  for (i = 0; i < dust.length; i++){
+    p = dust[i];
+    a = p.t + rot * rotMul * (0.7 + p.dp * 0.5);
+    x = p.cx + Math.cos(a) * p.r + px * 15 * p.dp;
+    y = p.cy + Math.sin(a) * p.r * p.tilt + py * 10 * p.dp;
+    al = p.a * alphaMul * (running ? (0.75 + 0.25 * Math.sin(t * 0.001 * p.ts + p.tw)) : 0.9);
+    fctx.globalAlpha = al;
+    fctx.fillStyle = p.gold ? '#F6D06B' : '#FFFFFF';
+    if (p.sz < 0.8){ fctx.fillRect(x, y, 1, 1); }
+    else { fctx.beginPath(); fctx.arc(x, y, p.sz, 0, 6.2832); fctx.fill(); }
+  }
+  for (i = 0; i < knots.length; i++){
+    p = knots[i];
+    a = p.t + rot * rotMul * (0.7 + p.dp * 0.5);
+    x = p.cx + Math.cos(a) * p.r + px * 15 * p.dp;
+    y = p.cy + Math.sin(a) * p.r * p.tilt + py * 10 * p.dp;
+    al = p.a * alphaMul * (running ? (0.6 + 0.4 * Math.sin(t * 0.001 * p.ts + p.tw)) : 0.8);
+    fctx.globalAlpha = al;
+    fctx.drawImage(p.gold ? spriteG : spriteW, x - p.sz * 3, y - p.sz * 3, p.sz * 6, p.sz * 6);
+  }
+  fctx.globalAlpha = 1;
+}
+
+function draw(t){
+  fctx.clearRect(0, 0, W, H);
+  drawStars(t);
+  if (mode === 'auth') drawSwirl(t, 1, 1);
+  else drawSwirl(t, 0.12, 0);      /* faint static echo behind the workspace */
+}
+
+function tick(ts){
+  if (!running) return;
+  if (lastTs) rot += (ts - lastTs) * 0.000022;      /* one slow revolution ≈ 4.7 min */
+  lastTs = ts;
+  var t0 = performance.now();
+  draw(ts);
+  frameCost += performance.now() - t0; frames++;
+  if (frames >= 120){                               /* auto-degrade on weak machines */
+    if (frameCost / frames > 8 && !degraded){ degraded = true; stopLoop(); drawStatic(); return; }
+    frameCost = 0; frames = 0;
+  }
+  raf = requestAnimationFrame(tick);
+}
+
+function startLoop(){ if (running) return; running = true; lastTs = 0; raf = requestAnimationFrame(tick); }
+function stopLoop(){ running = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+function drawStatic(){ draw(performance.now()); }
+
+function computeMode(){
+  var app = doc.getElementById('appShell');
+  return (app && !app.classList.contains('hidden')) ? 'app' : 'auth';
+}
+function refresh(){
+  if (root.dataset.theme !== 'galaxy'){ stopLoop(); return; }
+  field.style.transform = '';
+  if (mode === 'auth' && FX === 'full' && !degraded && !doc.hidden) startLoop();
+  else { stopLoop(); drawStatic(); }
+}
+function update(){
+  var m = computeMode();
+  if (m !== mode){ mode = m; px = 0; py = 0; seed(); }
+  refresh();
+}
+
+function sizeOverlay(){
+  oCanvas.width = Math.round(W * DPR); oCanvas.height = Math.round(H * DPR);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+function dissolve(){
+  if (root.dataset.theme !== 'galaxy') return;      /* verifier: no overlay after a live flip to royal */
+  var now = performance.now();
+  if (now - lastDissolve < 1200) return;            /* debounce double events */
+  lastDissolve = now;
+  overlay.classList.add('gx-on');
+  if (FX === 'low' || degraded){
+    setTimeout(function(){ overlay.classList.remove('gx-on'); }, 420);
+    return;
+  }
+  sizeOverlay();
+  var sp = [], i;
+  for (i = 0; i < 80; i++){
+    sp.push({ x: rnd(0, W), y: rnd(0, H), vx: rnd(-.02, .02), vy: rnd(-.14, -.04),
+              r: rnd(.5, 1.7), a: rnd(.4, 1) });
+  }
+  var t0 = now;
+  (function step(){
+    var t = performance.now() - t0;
+    octx.clearRect(0, 0, W, H);
+    var fade = t < 260 ? 1 : Math.max(0, 1 - (t - 260) / 560);
+    for (var j = 0; j < sp.length; j++){
+      var s = sp[j];
+      s.x += s.vx * 16; s.y += s.vy * 16;
+      octx.globalAlpha = s.a * fade;
+      octx.fillStyle = '#FFFFFF';
+      octx.beginPath(); octx.arc(s.x, s.y, s.r, 0, 6.2832); octx.fill();
+    }
+    octx.globalAlpha = 1;
+    if (t < 820){ requestAnimationFrame(step); }
+    else { overlay.classList.remove('gx-on'); octx.clearRect(0, 0, W, H); }
+  })();
+}
+
+function init(){
+  field = doc.createElement('canvas'); field.className = 'gx-field';
+  doc.body.insertBefore(field, doc.body.firstChild);
+  fctx = field.getContext('2d');
+  overlay = doc.createElement('div'); overlay.className = 'gx-dissolve';
+  oCanvas = doc.createElement('canvas'); overlay.appendChild(oCanvas);
+  doc.body.appendChild(overlay);
+  octx = oCanvas.getContext('2d');
+  spriteW = makeSprite(255, 255, 255);
+  spriteG = makeSprite(246, 208, 107);
+  sizeField();
+  mode = computeMode();
+  seed();
+  refresh();
+
+  /* watch screen switches + live theme flips — observation only, no handler edits */
+  try{
+    var mo = new MutationObserver(update);
+    ['loginScreen', 'registerScreen', 'pendingScreen', 'appShell'].forEach(function(id){
+      var el = doc.getElementById(id);
+      if (el) mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
+    new MutationObserver(refresh).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+  }catch(e){}
+
+  /* sign-out dissolve: capture-phase observer; the real handlers still run untouched */
+  function maybeDissolve(e){
+    try{
+      var t = e.target;
+      if (t && t.closest && (t.closest('#avatar') || t.closest('#pendingSignout'))) dissolve();
+    }catch(err){}
+  }
+  doc.addEventListener('pointerdown', maybeDissolve, true);
+  doc.addEventListener('click', maybeDissolve, true);
+
+  /* pointer parallax on the auth swirl (full fx only) */
+  doc.addEventListener('pointermove', function(e){
+    if (mode !== 'auth' || !running) return;
+    px = (e.clientX / W - 0.5); py = (e.clientY / H - 0.5);
+  }, { passive: true });
+
+  /* faint scroll parallax behind the workspace (full fx only, transform-only) */
+  var mv = doc.getElementById('mainView');
+  if (mv){
+    mv.addEventListener('scroll', function(){
+      if (mode !== 'app' || FX !== 'full' || degraded) return;
+      var y = Math.max(-60, -mv.scrollTop * 0.04);
+      field.style.transform = 'translateY(' + y + 'px)';
+    }, { passive: true });
+  }
+
+  doc.addEventListener('visibilitychange', refresh);
+  window.addEventListener('resize', function(){
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function(){ sizeField(); refresh(); }, 150);
+  });
+}
+
+try{ init(); }catch(e){ /* cosmetic layer must never break the portal */ }
+})();
 </script>
 </body>
 </html>
