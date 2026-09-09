@@ -22,6 +22,7 @@ function mergeActions_() {
     approveUser:      [actionApproveUser_, 'any'],
     importRegistry:   [actionImportRegistry_, 'super'],
     connectionHealth: [actionConnectionHealth_, 'any'],
+    writeMode:        [actionWriteMode_, 'any'],   // gated to management inside — the write-path kill switch
   };
   const groups = [
     typeof ACTIONS_TASKS      !== 'undefined' ? ACTIONS_TASKS      : null,
@@ -325,3 +326,19 @@ function out_(obj, logMsg, req) {
 function actionPing_() { return { service: 'M98M Portal', phase: 2, ts: now_() }; }
 function actionImportRegistry_(payload, ctx) { return importRegistry(String(payload.registryId || ''), ctx.ident.email); }
 function actionConnectionHealth_(payload, ctx) { return connectionHealth(); }
+
+/* The write-path kill switch (M98M-WRITE-PATH-DEPLOY-v1.md): read or set write_hunt_mode
+   (off | shadow | primary). Management only. A flag change is the whole rollback story — no deploy.
+   'shadow' makes submitHunt best-effort forward each submit to the engine's shadowHuntSubmit
+   (rehearsal, fires nothing); 'off' stops it; 'primary' is reserved for Phase 3 (no primary write
+   path is wired yet, so it currently behaves like off for submits). */
+function actionWriteMode_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('management only');
+  var cur = String(getConfig('write_hunt_mode') || 'off');
+  var m = String((payload && payload.mode) || '').trim().toLowerCase();
+  if (!m) return { write_hunt_mode: cur, options: ['off', 'shadow', 'primary'] };
+  if (['off', 'shadow', 'primary'].indexOf(m) < 0) throw new Error(SAFE_ERROR_PREFIX + 'mode must be off, shadow or primary');
+  r8SetConfig_('write_hunt_mode', m);
+  logActivity_(ctx.ident.email, 'WRITE_MODE', 'write_hunt_mode', cur, m, 'set by ' + ctx.ident.email);
+  return { write_hunt_mode: m, was: cur };
+}
