@@ -6235,9 +6235,14 @@ const ROUTES = {
   autoMsgQueue: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const lim = Math.min(200, Math.max(1, Number(p.limit) || 40));
-      const rows = await ctx.env.DB.prepare(
-        'SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, subject, body, status, detail, due_at, created_at ' +
-        'FROM automsg_queue ORDER BY id DESC LIMIT ?1').bind(lim).all();
+      const before = Number(p.before) || 0;   // page: rows with id below this (0 = newest)
+      const rows = before
+        ? await ctx.env.DB.prepare(
+            'SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, subject, body, status, detail, due_at, created_at ' +
+            'FROM automsg_queue WHERE id < ?2 ORDER BY id DESC LIMIT ?1').bind(lim, before).all()
+        : await ctx.env.DB.prepare(
+            'SELECT id, account, trigger_kind, ref, buyer, order_id, item_id, subject, body, status, detail, due_at, created_at ' +
+            'FROM automsg_queue ORDER BY id DESC LIMIT ?1').bind(lim).all();
       return { rows: rows.results || [] };
     },
   },
