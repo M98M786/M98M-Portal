@@ -1066,22 +1066,30 @@ function truthMoneyBooks_() {
   return out;
 }
 function pushSheetRowsHot() {
-  /* 2 Sept: FOUR days, not two — staff create a day's tab late (Sir Hasib's 31 Aug tab appeared
-     on 2 Sept) and the report agent revises the ad columns for ~2 days after. Two days of cover
-     left late tabs unmirrored and revised numbers stale until the nightly cold walk. */
-  const days = [0, 1, 2, 3].map(function (k) {
-    return Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
-  });
+  /* 10 Sept (owner: portal-wide "overloaded", approvals/taskings dying): the money-book walk
+     below opens every account's external spreadsheet × 4 day-tabs and was doing it EVERY 5
+     MINUTES — ~72s of Sheets scanning per tick, queued against every staff click, all shift.
+     The walk now runs at most once per ~15 min (stamp below, set BEFORE the walk so a crash
+     cannot turn into a hammer-retry); the cheap mirror sweeps further down still ride every
+     tick, so approvals/tasks/bell freshness is unchanged. Trigger cadence itself untouched. */
+  const hotProps = PropertiesService.getScriptProperties();
+  const runBooks = (Date.now() - Number(hotProps.getProperty('SHEETMIRROR_HOT_AT') || 0)) >= 14 * 60000;
   let pushed = 0, tabs = 0;
-  truthMoneyBooks_().forEach(function (b) {
-    try {
-      const ss = SpreadsheetApp.openById(b.id);
-      days.forEach(function (pk) {
-        const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
-        if (!res.missing) { tabs++; pushed += res.rows; }
-      });
-    } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
-  });
+  if (runBooks) {
+    hotProps.setProperty('SHEETMIRROR_HOT_AT', String(Date.now()));
+    const days = [0, 1, 2, 3].map(function (k) {
+      return Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
+    });
+    truthMoneyBooks_().forEach(function (b) {
+      try {
+        const ss = SpreadsheetApp.openById(b.id);
+        days.forEach(function (pk) {
+          const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
+          if (!res.missing) { tabs++; pushed += res.rows; }
+        });
+      } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
+    });
+  }
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}
   try { enginePost_('huntShadowScan', {}); } catch (e) {}   // 4 Sept: D1-primary shadow — read-only, records hunt_shadow only
@@ -1093,7 +1101,7 @@ function pushSheetRowsHot() {
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
-  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), tabs + ' tab(s)');
+  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), runBooks ? tabs + ' tab(s)' : 'books walk skipped (15-min throttle)');
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
 function pushSheetRowsCold() {

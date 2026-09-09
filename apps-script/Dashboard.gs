@@ -627,6 +627,13 @@ function dashPeriodExpired_(period, cutoff) {
  * action and can never be called from a browser. One pass per account; the sweep stops before
  * Apps Script would kill it and picks the rest up on the next run. */
 function buildDashboardCache() {
+  /* 10 Sept overload fix: the KPI rebuild reads external account books and ran every 5 minutes
+     (~28s a tick) against the same documents staff are writing. Daily aggregates do not need
+     5-minute freshness — at most one rebuild per ~15 min. Stamp set before the work so a mid-run
+     crash cannot hammer-retry. */
+  const thrProps = PropertiesService.getScriptProperties();
+  if (Date.now() - Number(thrProps.getProperty('DASH_SWEEP_AT') || 0) < 14 * 60000) return 'throttled (ran recently)';
+  thrProps.setProperty('DASH_SWEEP_AT', String(Date.now()));
   const started = Date.now();
   const stamp = now_();
   const today = dashToday_();
