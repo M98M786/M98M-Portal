@@ -6994,23 +6994,40 @@ const ROUTES = {
       const g = (k) => { const v = cols[k]; return v == null ? '' : String(v).trim().slice(0, 5000); };
       const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); return m ? m[1] : ''; };
       const isShort = (u) => /^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(String(u || ''));
-      /* Deliberately CHEAP: §3 validation + id extraction only, NO hunt_rows scan. The dup-check
-         (§4) runs in shadowHuntReport off the submit's 25s budget, so the shadow can never slow a
-         real submit (parity: faster only, never slower). Stores a prelim verdict; the reporter
-         resolves 'pending-dup' against the mirror. */
-      let vv = '', missing = '', owned = '';
-      for (const r of REQUIRED) { if (!g(r)) { missing = r; break; } }
-      for (const k of OWNED) { if (Object.prototype.hasOwnProperty.call(cols, k) && String(cols[k] || '').trim() !== '') { owned = k; break; } }
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0;
+
+      /* Runs at the TOP of submitHunt, BEFORE the row is created, so the dup-check sees the same
+         pre-submit state the old path does (evaluating it later would self-match the row this very
+         submit is about to create). Validation + dup-check per parity/hunt-submit.md; records the
+         verdict, writes nothing else. */
+      let verdict = 'accepted', reason = '', dupHunt = '', dupOwner = '';
+      let missing = ''; for (const r of REQUIRED) { if (!g(r)) { missing = r; break; } }
+      let owned = ''; for (const k of OWNED) { if (Object.prototype.hasOwnProperty.call(cols, k) && String(cols[k] || '').trim() !== '') { owned = k; break; } }
       const kindRaw = g('Seasonal').toLowerCase();
       const kindOk = kindRaw.indexOf('season') >= 0 || kindRaw.indexOf('consist') >= 0;
       const priceOk = /\d/.test(g('Source Price')) && /\d/.test(g('E-Bey Caluclator + £4'));
-      if (owned) vv = 'rejected:portal-owned:' + owned;
-      else if (missing) vv = 'rejected:validation:missing ' + missing;
-      else if (!priceOk) vv = 'rejected:validation:price';
-      else if (!kindOk) vv = 'rejected:validation:kind';
-      else vv = 'pending-dup';
       const myIds = [], shorts = [];
       for (const c of SUPPLIER) { const v = g(c); if (isShort(v)) shorts.push(c); const id = aliId(v); if (id && myIds.indexOf(id) < 0) myIds.push(id); }
+
+      if (owned) { verdict = 'rejected'; reason = 'portal-owned column set: ' + owned; }
+      else if (missing) { verdict = 'rejected'; reason = 'validation: missing ' + missing; }
+      else if (!priceOk) { verdict = 'rejected'; reason = 'validation: price not numeric'; }
+      else if (!kindOk) { verdict = 'rejected'; reason = 'validation: Seasonal/Consistent required'; }
+      else if (myIds.length) {
+        const rs = await ctx.env.DB.prepare('SELECT hunt_id, hunter_email, status, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
+        for (const row of (rs.results || [])) {
+          let vv = {}; try { vv = JSON.parse(row.vals || '{}'); } catch (e) {}
+          let hit = false; for (const c of SUPPLIER) { const id0 = aliId(vv[c]); if (id0 && myIds.indexOf(id0) >= 0) { hit = true; break; } }
+          if (hit) {
+            dupHunt = String(row.hunt_id || ''); dupOwner = String(row.hunter_email || '').toLowerCase();
+            const st = String(row.status || ''); const inflight = st === '' || st === 'REVISION REQUIRED';
+            if (dupOwner === caller && inflight) { verdict = 'revision'; reason = 'own in-flight ' + (st || 'pending'); }
+            else if (override && mgmt) { verdict = 'accepted'; reason = 'mgmt override of ' + dupHunt; }
+            else { verdict = 'rejected'; reason = 'duplicate of ' + dupHunt; }
+            break;
+          }
+        }
+      }
       const title = g('Title');
       const hash = title.toLowerCase().replace(/\s+/g, ' ') + '|' + myIds.slice().sort().join(',') + '|' + caller;
       const rid = 'SH' + [...crypto.getRandomValues(new Uint8Array(7))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -7018,9 +7035,9 @@ const ROUTES = {
         await ctx.env.DB.prepare(
           'INSERT INTO shadow_hunt_submissions (id, at, caller, role, request_hash, verdict, reason, dup_hunt_id, dup_owner, title, ali_ids, short_links, payload) ' +
           "VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
-        ).bind(rid, caller, role, hash, vv, override ? ('override:' + override.slice(0, 80)) : '', '', '', title.slice(0, 200), myIds.join(','), shorts.length, JSON.stringify(cols).slice(0, 4000)).run();
+        ).bind(rid, caller, role, hash, verdict, reason, dupHunt, dupOwner, title.slice(0, 200), myIds.join(','), shorts.length, JSON.stringify(cols).slice(0, 4000)).run();
       } catch (e) {}
-      return { shadow: true, stored: true, prelim: vv, ali_ids: myIds, short_link_cols: shorts.length };
+      return { shadow: true, verdict, reason, dup_hunt_id: dupHunt, ali_ids: myIds, short_link_cols: shorts.length };
     },
   },
 
@@ -7028,33 +7045,20 @@ const ROUTES = {
     auth: 'mgmt', fn: async (p, ctx) => {
       await shadowEnsure(ctx.env);
       const since = /^\d{4}-\d{2}-\d{2}/.test(String((p && p.since) || '')) ? String(p.since) : new Date(Date.now() - 24 * 3600000).toISOString().slice(0, 10);
-      const rs = await ctx.env.DB.prepare('SELECT id, at, caller, role, verdict, reason, title, ali_ids, short_links FROM shadow_hunt_submissions WHERE at >= ?1 ORDER BY at DESC LIMIT 3000').bind(since + ' 00:00:00').all().catch(() => ({ results: [] }));
+      const rs = await ctx.env.DB.prepare('SELECT id, at, caller, verdict, reason, title, ali_ids, short_links FROM shadow_hunt_submissions WHERE at >= ?1 ORDER BY at DESC LIMIT 3000').bind(since + ' 00:00:00').all().catch(() => ({ results: [] }));
       const rows = rs.results || [];
+      const byVerdict = {}; let shortSub = 0;
+      rows.forEach((r) => { byVerdict[r.verdict] = (byVerdict[r.verdict] || 0) + 1; if (r.short_links) shortSub++; });
       const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); return m ? m[1] : ''; };
       const hr = await ctx.env.DB.prepare('SELECT hunter_email, status, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
       const idx = {};
-      (hr.results || []).forEach((row) => { let v = {}; try { v = JSON.parse(row.vals || '{}'); } catch (e) {} ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'].forEach((c) => { const id = aliId(v[c]); if (id) { (idx[id] = idx[id] || []).push({ owner: String(row.hunter_email || '').toLowerCase(), status: String(row.status || '') }); } }); });
-      const byVerdict = {}; let shortSub = 0, checked = 0, matched = 0; const mism = [];
+      (hr.results || []).forEach((row) => { let v = {}; try { v = JSON.parse(row.vals || '{}'); } catch (e) {} ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'].forEach((c) => { const id = aliId(v[c]); if (id) idx[id] = true; }); });
+      let checked = 0, matched = 0; const mism = [];
       rows.forEach((r) => {
-        let verdict = String(r.verdict || '');
-        const mgmt = ['Management', 'Ops Head'].indexOf(String(r.role || '')) >= 0;
-        const hasOverride = /^override:/.test(String(r.reason || ''));
-        const meLower = String(r.caller || '').toLowerCase();
-        if (verdict === 'pending-dup') {
-          const ids = String(r.ali_ids || '').split(',').filter(Boolean);
-          let hit = null;
-          for (const id of ids) { if (idx[id]) { const own = idx[id].find((e) => e.owner === meLower && (e.status === '' || e.status === 'REVISION REQUIRED')); hit = own || idx[id][0]; if (hit) break; } }
-          if (hit) { const inflight = hit.status === '' || hit.status === 'REVISION REQUIRED';
-            if (hit.owner === meLower && inflight) verdict = 'revision';
-            else if (hasOverride && mgmt) verdict = 'accepted';
-            else verdict = 'rejected';
-          } else verdict = 'accepted';
-        } else if (/^rejected/.test(verdict)) verdict = 'rejected';
-        byVerdict[verdict] = (byVerdict[verdict] || 0) + 1;
-        if (r.short_links) { shortSub++; return; }
+        if (r.short_links) return;                          // short-link submits: shadow can't resolve the id yet — reported separately, out of the rate
         const ids = String(r.ali_ids || '').split(',').filter(Boolean);
-        const realHit = ids.some((id) => idx[id]);
-        checked++; if (realHit) matched++; else if (mism.length < 40) mism.push({ verdict: verdict, title: r.title, ali_ids: r.ali_ids });
+        const realHit = ids.some((id) => idx[id]);          // the verdict's subject product should exist in the real mirror
+        checked++; if (realHit) matched++; else if (mism.length < 40) mism.push({ verdict: r.verdict, reason: r.reason, title: r.title, ali_ids: r.ali_ids });
       });
       return { since, total: rows.length, byVerdict, shortLinkSubmissions: shortSub, checked, matched, matchRate: checked ? Math.round(matched / checked * 1000) / 10 : 100, mismatches: mism };
     },
