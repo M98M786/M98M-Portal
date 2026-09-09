@@ -46,21 +46,19 @@ function actionCreateTask_(payload, ctx) {
   const stamp = now_();
   let assignee = null;
 
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-    readTab_('USERS').forEach(function (u) {
-      if (assignee) return;
-      if (normalizeEmail(u.email) === wanted && String(u.status) === 'approved') assignee = { email: String(u.email), name: String(u.name || u.email) };
-    });
-    if (!assignee) throw new Error('assignee is not an approved portal user');
-    tasksSheet_().appendRow([
-      taskId, type, String(payload.account || '').trim(), itemId, title,
-      String(payload.details || '').trim(), '', ctx.ident.email, assignee.email,
-      String(payload.priority || '').trim().slice(0, 40), deadline, TASK_STATUS_PENDING,
-      stamp, stamp, '', '', '', '', '',
-    ]);
-  } finally { lock.releaseLock(); }
+  // Overload fix: a fresh-id appendRow needs no mutex — appends never collide and the id is a
+  // UUID slice. Holding the portal-wide lock here only made every click queue behind every other.
+  readTab_('USERS').forEach(function (u) {
+    if (assignee) return;
+    if (normalizeEmail(u.email) === wanted && String(u.status) === 'approved') assignee = { email: String(u.email), name: String(u.name || u.email) };
+  });
+  if (!assignee) throw new Error('assignee is not an approved portal user');
+  tasksSheet_().appendRow([
+    taskId, type, String(payload.account || '').trim(), itemId, title,
+    String(payload.details || '').trim(), '', ctx.ident.email, assignee.email,
+    String(payload.priority || '').trim().slice(0, 40), deadline, TASK_STATUS_PENDING,
+    stamp, stamp, '', '', '', '', '',
+  ]);
 
   logActivity_(ctx.ident.email, 'CREATE_TASK', taskId, '', TASK_STATUS_PENDING, type + ' → ' + assignee.email + ' due ' + deadline);
   engineTaskPush_(taskId);   // on the boards within a tick, not an hour
@@ -113,10 +111,11 @@ function actionMyTasks_(payload, ctx) {
  * write it, and submission reads it to close the clock. Do not stamp it from anywhere else. */
 function actionStartTask_(payload, ctx) {
   const sh = tasksSheet_();
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     if (normalizeEmail(found.rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(found.rec.status || '');
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
@@ -135,10 +134,11 @@ function actionSubmitTask_(payload, ctx) {
   if (!note) throw new Error('submission note required');
   const sh = tasksSheet_();
   let rec = null, approver = '', stamp = '';
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(rec.status || '');
@@ -247,10 +247,11 @@ function taskChainNext_(rec, ctx) {
 function actionApproveTask_(payload, ctx) {
   const sh = tasksSheet_();
   let rec = null, stamp = '', rateOut = 0;
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (!taskMayDecide_(rec, ctx)) throw new Error('not the approver');
     const old = String(rec.status || '');
@@ -286,10 +287,11 @@ function actionReturnTask_(payload, ctx) {
   if (!comment) throw new Error(SAFE_ERROR_PREFIX + 'a comment is mandatory when returning a task');
   const sh = tasksSheet_();
   let rec = null, stamp = '';
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (!taskMayDecide_(rec, ctx)) throw new Error('not the approver');
     const old = String(rec.status || '');
@@ -361,6 +363,22 @@ function taskFind_(sh, taskId) {
   throw new Error('task not found');
 }
 
+/** Overload fix (owner, 9 Sept): the full-tab TASKS read happens BEFORE the lock now; inside it
+ * only the one row is re-read to prove the pre-lock find still points at the same task. Rows only
+ * shift when management deletes one (taskAdmin), so the in-lock full re-scan is the rare fallback,
+ * not the every-click cost that was serialising the whole portal behind one mutex. */
+function taskVerify_(sh, pre, taskId) {
+  try {
+    const rowVals = sh.getRange(pre.row, 1, 1, pre.head.length).getValues()[0];
+    if (String(rowVals[0]) === String(taskId || '').trim()) {
+      const rec = {};
+      pre.head.forEach(function (h, c) { rec[h] = rowVals[c]; });
+      return { row: pre.row, head: pre.head, rec: rec };
+    }
+  } catch (e) {}
+  return taskFind_(sh, taskId);
+}
+
 /** RL-6: a write to any column outside TASK_WRITABLE_COLS throws. */
 function taskWrite_(sh, found, patch) {
   Object.keys(patch).forEach(function (k) {
@@ -428,11 +446,12 @@ function actionTaskAdmin_(payload, ctx) {
   const id = String(payload.task_id || '').trim();
   if (!id) throw new Error('task_id required');
   const sh = tasksSheet_();
+  const pre = taskFind_(sh, id);                       // heavy read outside the lock
   const lock = LockService.getScriptLock();
   const result = { task_id: id, op: op };
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, id);
+    const found = taskVerify_(sh, pre, id);
     const rec = found.rec;
     const stamp = now_();
     if (op === 'delete') {

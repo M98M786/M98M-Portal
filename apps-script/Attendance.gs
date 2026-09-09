@@ -309,17 +309,31 @@ function actionClockIn_(payload, ctx) {
   }
 
   let rows = [];
+  /* Overload fix (owner, 9 Sept): the full-tab read and the duplicate-day check run BEFORE the
+     lock; inside it only the rows appended meanwhile are re-checked (a double-tap lands there),
+     then the append. Clock-in storms at shift start stop serialising the whole portal. */
+  const sh = getPortalDb_(false).getSheetByName(ATT_TAB);
+  const vals = sh.getDataRange().getValues();
+  const idx = attHeaderIdx_(vals[0], DB_TABS.ATTENDANCE, ATT_TAB);
+  const n = normalizeEmail(email);
+  for (let i = 1; i < vals.length; i++) {
+    if (normalizeEmail(vals[i][idx.email - 1]) !== n) continue;
+    if (schedDateStr_(vals[i][idx.date - 1]) !== date) continue;
+    throw new Error(SAFE_ERROR_PREFIX + 'you already started office working for ' + date);
+  }
+  const preLast = vals.length;                        // header + rows already checked = sheet row count at read time
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const sh = getPortalDb_(false).getSheetByName(ATT_TAB);
-    const vals = sh.getDataRange().getValues();
-    const idx = attHeaderIdx_(vals[0], DB_TABS.ATTENDANCE, ATT_TAB);
-    const n = normalizeEmail(email);
-    for (let i = 1; i < vals.length; i++) {
-      if (normalizeEmail(vals[i][idx.email - 1]) !== n) continue;
-      if (schedDateStr_(vals[i][idx.date - 1]) !== date) continue;
-      throw new Error(SAFE_ERROR_PREFIX + 'you already started office working for ' + date);
+    const curLast = sh.getLastRow();
+    if (curLast > preLast) {
+      const fresh = sh.getRange(preLast + 1, 1, curLast - preLast, vals[0].length).getValues();
+      for (let i = 0; i < fresh.length; i++) {
+        if (normalizeEmail(fresh[i][idx.email - 1]) === n && schedDateStr_(fresh[i][idx.date - 1]) === date) {
+          throw new Error(SAFE_ERROR_PREFIX + 'you already started office working for ' + date);
+        }
+      }
+      fresh.forEach(function (f) { vals.push(f); });
     }
     // Addressed by header index, never by position, so a reordered tab still writes each value
     // under its own heading — the same rule the business sheets are written by.
@@ -358,58 +372,70 @@ function actionClockOut_(payload, ctx) {
   const n = normalizeEmail(email);
 
   let rows = [], closedDate = '', hours = 0, earlyFlag = '', outHm = '';
+  /* Overload fix (owner, 9 Sept): find + validate the open session BEFORE the lock; inside it,
+     one row is re-read to prove it is still the same open session, and only the three changed
+     cells are written. Attendance rows are never deleted, so the row number is stable. */
+  const sh = getPortalDb_(false).getSheetByName(ATT_TAB);
+  const vals = sh.getDataRange().getValues();
+  const idx = attHeaderIdx_(vals[0], DB_TABS.ATTENDANCE, ATT_TAB);
+
+  let rowNum = -1, rowDate = '', started = null;
+  [date, schedAddDays_(date, -1)].forEach(function (d) {
+    if (rowNum > 0) return;
+    for (let i = 1; i < vals.length; i++) {
+      if (normalizeEmail(vals[i][idx.email - 1]) !== n) continue;
+      if (schedDateStr_(vals[i][idx.date - 1]) !== d) continue;
+      const inS = attStamp_(vals[i][idx.clock_in - 1], d);
+      if (!inS) continue;
+      if (attStamp_(vals[i][idx.clock_out - 1], d)) {
+        if (d === date) throw new Error(SAFE_ERROR_PREFIX + 'you already concluded working for ' + d);
+        continue;
+      }
+      rowNum = i + 1; rowDate = d; started = inS;
+      break;
+    }
+  });
+  if (rowNum < 0) throw new Error(SAFE_ERROR_PREFIX + 'no open working session — tap "Start office working" first');
+
+  const at = attStamp_(stamp, rowDate);
+  const span = attRound2_((at.min - started.min) / 60);
+  if (span < 0) throw new Error(SAFE_ERROR_PREFIX + 'the clock-out is before the recorded start — ask Management to correct the record');
+  if (span > ATT_MAX_SESSION_HOURS) {
+    throw new Error(SAFE_ERROR_PREFIX + 'that session started ' + attHoursLabel_(span) +
+      ' ago and was never concluded — ask Management to correct ' + rowDate);
+  }
+  hours = span;
+  outHm = at.hm;
+  const win = attWindow_(schedule, rowDate);
+  if (win && attIsWorkingDay_(schedule, rowDate)) {
+    const earlyMin = win.end - at.min;
+    if (earlyMin > attGrace_()) earlyFlag = 'early ' + earlyMin + 'm';
+  }
+
+  const rowArr = vals[rowNum - 1].slice();
+  rowArr[idx.clock_out - 1] = stamp;
+  rowArr[idx.working_hours - 1] = hours;
+  rowArr[idx.early_flag - 1] = earlyFlag;
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const sh = getPortalDb_(false).getSheetByName(ATT_TAB);
-    const vals = sh.getDataRange().getValues();
-    const idx = attHeaderIdx_(vals[0], DB_TABS.ATTENDANCE, ATT_TAB);
-
-    let rowNum = -1, rowDate = '', started = null;
-    [date, schedAddDays_(date, -1)].forEach(function (d) {
-      if (rowNum > 0) return;
-      for (let i = 1; i < vals.length; i++) {
-        if (normalizeEmail(vals[i][idx.email - 1]) !== n) continue;
-        if (schedDateStr_(vals[i][idx.date - 1]) !== d) continue;
-        const inS = attStamp_(vals[i][idx.clock_in - 1], d);
-        if (!inS) continue;
-        if (attStamp_(vals[i][idx.clock_out - 1], d)) {
-          if (d === date) throw new Error(SAFE_ERROR_PREFIX + 'you already concluded working for ' + d);
-          continue;
-        }
-        rowNum = i + 1; rowDate = d; started = inS;
-        break;
-      }
-    });
-    if (rowNum < 0) throw new Error(SAFE_ERROR_PREFIX + 'no open working session — tap "Start office working" first');
-
-    const at = attStamp_(stamp, rowDate);
-    const span = attRound2_((at.min - started.min) / 60);
-    if (span < 0) throw new Error(SAFE_ERROR_PREFIX + 'the clock-out is before the recorded start — ask Management to correct the record');
-    if (span > ATT_MAX_SESSION_HOURS) {
-      throw new Error(SAFE_ERROR_PREFIX + 'that session started ' + attHoursLabel_(span) +
-        ' ago and was never concluded — ask Management to correct ' + rowDate);
+    const live = sh.getRange(rowNum, 1, 1, vals[0].length).getValues()[0];
+    if (normalizeEmail(live[idx.email - 1]) !== n || schedDateStr_(live[idx.date - 1]) !== rowDate) {
+      throw new Error(SAFE_ERROR_PREFIX + 'the attendance record shifted — refresh and press again');
     }
-    hours = span;
-    outHm = at.hm;
-    const win = attWindow_(schedule, rowDate);
-    if (win && attIsWorkingDay_(schedule, rowDate)) {
-      const earlyMin = win.end - at.min;
-      if (earlyMin > attGrace_()) earlyFlag = 'early ' + earlyMin + 'm';
+    if (attStamp_(live[idx.clock_out - 1], rowDate)) {
+      throw new Error(SAFE_ERROR_PREFIX + 'you already concluded working for ' + rowDate);
     }
-
-    const rowArr = vals[rowNum - 1].slice();
-    rowArr[idx.clock_out - 1] = stamp;
-    rowArr[idx.working_hours - 1] = hours;
-    rowArr[idx.early_flag - 1] = earlyFlag;
     sh.getRange(rowNum, idx.clock_out).setNumberFormat('@');
-    sh.getRange(rowNum, 1, 1, rowArr.length).setValues([rowArr]);
-    vals[rowNum - 1] = rowArr;
-    closedDate = rowDate;
-    rows = attObjects_(vals);
+    sh.getRange(rowNum, idx.clock_out).setValue(stamp);
+    sh.getRange(rowNum, idx.working_hours).setValue(hours);
+    sh.getRange(rowNum, idx.early_flag).setValue(earlyFlag);
   } finally {
     lock.releaseLock();
   }
+  vals[rowNum - 1] = rowArr;
+  closedDate = rowDate;
+  rows = attObjects_(vals);
 
   logActivity_(ctx.ident.email, 'CLOCK_OUT', ATT_TAB + ':' + closedDate, 'open',
     outHm + ' · ' + hours + 'h', earlyFlag || 'full shift');

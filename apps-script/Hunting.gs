@@ -256,10 +256,10 @@ function actionSubmitHunt_(payload, ctx) {
   const huntId = 'H' + Utilities.getUuid().slice(0, 8);
   const stamp = now_();
   let subRec = null;
-  const lock = LockService.getScriptLock();
-  try {
-    try { lock.waitLock(15000); }
-    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — give it a moment and press Submit again (your data is kept)'); }
+  // Overload fix: a fresh-id appendRow needs no mutex (appends never collide, the id is a UUID
+  // slice, and the dup-check above never was inside this lock anyway). Hunters no longer queue
+  // behind every other write in the portal to submit.
+  {
     const sh = huntSheet_();
     const head = huntHeaders_(sh);
     const row = head.map(function (h) {
@@ -270,7 +270,7 @@ function actionSubmitHunt_(payload, ctx) {
     });
     sh.appendRow(row);
     subRec = {}; head.forEach(function (h, i) { subRec[h] = row[i]; });
-  } finally { lock.releaseLock(); }
+  }
 
   const flags = huntCriteriaFlags_(cols);
 
@@ -381,12 +381,13 @@ function actionDecideHunt_(payload, ctx) {
   if (decision === HUNT_REVISION) {
     if (!comment) throw new Error('say what more is required — the comment carries it to the hunter');
     let rrec = null;
+    const rpre = huntFind_(huntSheet_(), payload.hunt_id);   // heavy read outside the lock
     const rlock = LockService.getScriptLock();
     try {
       try { rlock.waitLock(15000); }
       catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — press Revise again in a moment'); }
       const rsh = huntSheet_();
-      const rfound = huntFind_(rsh, payload.hunt_id);
+      const rfound = huntVerify_(rsh, rpre, payload.hunt_id);
       rrec = huntRecord_(rfound.rec);
       if (rrec.approval_status !== HUNT_PENDING) {
         // already in revision = a lost-response retry → idempotent; any other decision = a conflict
@@ -449,12 +450,13 @@ function actionDecideHunt_(payload, ctx) {
 
   const stamp = now_();
   let rec = null, limited = null, idempotentSame = false;
+  const pre = huntFind_(huntSheet_(), payload.hunt_id);      // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     try { lock.waitLock(15000); }
     catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy right now — press the decision again in a moment (nothing was double-saved)'); }
     const sh = huntSheet_();
-    const found = huntFind_(sh, payload.hunt_id);
+    const found = huntVerify_(sh, pre, payload.hunt_id);
     rec = huntRecord_(found.rec);
     if (rec.approval_status !== HUNT_PENDING) {
       /* Already decided. If it is the SAME decision, this is a retry after a LOST RESPONSE (the
@@ -567,6 +569,21 @@ function huntFind_(sh, huntId) {
     return { row: i + 1, head: head, rec: rec };
   }
   throw new Error('hunt not found');
+}
+
+/** Overload fix (owner, 9 Sept): same shape as taskVerify_ — the full HUNTING_DB read happens
+ * before the lock; inside it one row is re-read and the id checked, with the full re-scan only
+ * when the row genuinely moved. */
+function huntVerify_(sh, pre, huntId) {
+  try {
+    const rowVals = sh.getRange(pre.row, 1, 1, pre.head.length).getValues()[0];
+    if (String(rowVals[0]) === String(huntId || '').trim()) {
+      const rec = {};
+      pre.head.forEach(function (h, c) { rec[h] = rowVals[c]; });
+      return { row: pre.row, head: pre.head, rec: rec };
+    }
+  } catch (e) {}
+  return huntFind_(sh, huntId);
 }
 
 /** RL-6: a write to any HUNTING_DB column outside the decision whitelist throws. */
@@ -1054,11 +1071,12 @@ function actionReviseHunt_(payload, ctx) {
   if (sent[HC_CPC]) sent[HC_CPC] = huntAdvertisingType_(sent[HC_CPC], false);
 
   let rec = null;
+  const pre = huntFind_(huntSheet_(), payload.hunt_id);      // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
     const sh = huntSheet_();
-    const found = huntFind_(sh, payload.hunt_id);
+    const found = huntVerify_(sh, pre, payload.hunt_id);
     rec = huntRecord_(found.rec);
     if (normalizeEmail(rec.hunter_email) !== normalizeEmail(ctx.ident.email) && !isMgmt_(ctx.user.role, ctx.ident.email)) {
       throw new Error('only the hunter who submitted it may revise it');
