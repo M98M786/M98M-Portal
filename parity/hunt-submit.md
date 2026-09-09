@@ -1,5 +1,14 @@
 # Parity Checklist — hunt submit (`submitHunt` → `actionSubmitHunt_`)
 
+> ## ✅ APPROVED — Hasib, 9 Sept 2026
+> Phase 0 gate **PASSED for hunt submit.** This document is now the LOCKED yardstick: the
+> D1-primary shadow path must reproduce every numbered behavior below, and Phase 2's divergence
+> report is scored against it (100% match required before any flip). Any change to hunt-submit
+> behavior after this date must update this checklist first.
+> Phase 1 (shadow build, WO-2/WO-3) is unblocked — to run in a **separate quiet window**: the
+> galaxy front end went live 9 Sept, and the orders forbid stacking a write-path step on the same
+> night. Task/listing parity checklists are written just before their own conversions (Phase 5).
+
 *Write-path plan Phase 0 / WO-1 yardstick. Grounded in the LIVE code as deployed 9 Sept 2026
 (Apps Script v119) — NOT the 8-Sept snapshot in the handover zip, which predates the v118/v119
 revise fixes. The D1-primary shadow path must reproduce every numbered behavior below exactly.*
