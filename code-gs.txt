@@ -17041,7 +17041,8 @@ function actionResolveAlert_(payload, ctx) {
   const msg = ctx.user.name + ' resolved an alert on ' + account + ' — ' + (want.message || fingerprint)
     + (note ? ' — ' + note : '') + '.';
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) {
-    notifyManagement_('Account alert resolved', msg, ALERTS_NOTIFY_REF + alertsKey_(account, fingerprint, want.raised_at));
+    // Owner 9 Sept: account-health alerts go to the CS individuals who work them, with management in the loop.
+    metricsNotifyCsMgmt_('Account alert resolved', msg, ALERTS_NOTIFY_REF + alertsKey_(account, fingerprint, want.raised_at));
   }
 
   return {
@@ -17392,12 +17393,12 @@ function alertsNotifyFresh_(fresh) {
     const dot = sev === 'high' || sev === 'critical' ? '🔴 ' : sev === 'medium' ? '🟠 ' : '🔵 ';
     const msg = dot + (a.category ? a.category + ' alert' : 'Account alert') + ' · ' + a.account + ' — '
       + a.message + (a.action ? ' → ' + a.action : '');
-    notifyManagement_('Account report ACTIVE alert', msg, f.ref);
+    metricsNotifyCsMgmt_('Account report ACTIVE alert', msg, f.ref);   // owner 9 Sept: CS individuals + management
     logActivity_('system', 'ACCOUNT_ALERT_RAISED', a.account + '!' + (a.fingerprint || a.raised_at), '', a.severity, a.message.slice(0, 200));
   });
   if (fresh.length > ALERTS_NOTIFY_MAX) {
     const extra = fresh.length - ALERTS_NOTIFY_MAX;
-    notifyManagement_('Account report ACTIVE alert',
+    metricsNotifyCsMgmt_('Account report ACTIVE alert',
       '🟠 ' + extra + ' more account alerts are open beyond the ones just sent → open the Alerts Centre and work through them by account.',
       ALERTS_NOTIFY_REF + 'batch:' + alertsToday_());
   }
