@@ -687,7 +687,7 @@
   /* The day tabs never carried an Image Link column — the engine's items_api does. After each
      paint, ask it by order number and drop the pictures into the placeholders; the rows keep the
      URL too, so chip-filter repaints stay pictured. Best-effort: a miss leaves "No image". */
-  function odFetchImages(box, orders) {
+  function odFetchImages(box, orders, isRetry) {
     try {
       if (typeof engineCall !== 'function') { return; }
       var want = [];
@@ -713,7 +713,10 @@
           img.src = u;
           if (el.parentNode) { el.parentNode.replaceChild(img, el); }
         });
-      }).catch(function () {});
+      }).catch(function () {
+        // boot race: the first paint can beat session hydration — one quiet retry
+        if (!isRetry) { setTimeout(function () { odFetchImages(box, orders, true); }, 4000); }
+      });
     } catch (e) {}
   }
 

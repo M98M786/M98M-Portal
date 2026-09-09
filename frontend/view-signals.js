@@ -396,7 +396,7 @@
 
   /* Signals born without a picture (the signal row predates the item mirror, or the sheet only
      knew the title) get one fetched from items_api after the paint — best-effort. */
-  function sgFetchImages(host) {
+  function sgFetchImages(host, isRetry) {
     try {
       if (typeof engineCall !== 'function') { return; }
       var els = host.querySelectorAll('[data-sigimg]');
@@ -410,7 +410,10 @@
           if (!u) { return; }
           el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
         });
-      }).catch(function () {});
+      }).catch(function () {
+        // boot race: the first paint can beat session hydration — one quiet retry
+        if (!isRetry) { setTimeout(function () { sgFetchImages(host, true); }, 4000); }
+      });
     } catch (e) {}
   }
 

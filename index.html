@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260909-2226';
+var BUILD = '20260909-2230';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14327,7 +14327,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   /* The day tabs never carried an Image Link column — the engine's items_api does. After each
      paint, ask it by order number and drop the pictures into the placeholders; the rows keep the
      URL too, so chip-filter repaints stay pictured. Best-effort: a miss leaves "No image". */
-  function odFetchImages(box, orders) {
+  function odFetchImages(box, orders, isRetry) {
     try {
       if (typeof engineCall !== 'function') { return; }
       var want = [];
@@ -14353,7 +14353,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           img.src = u;
           if (el.parentNode) { el.parentNode.replaceChild(img, el); }
         });
-      }).catch(function () {});
+      }).catch(function () {
+        // boot race: the first paint can beat session hydration — one quiet retry
+        if (!isRetry) { setTimeout(function () { odFetchImages(box, orders, true); }, 4000); }
+      });
     } catch (e) {}
   }
 
@@ -21526,7 +21529,7 @@ function saveSchedule() {
 
   /* Signals born without a picture (the signal row predates the item mirror, or the sheet only
      knew the title) get one fetched from items_api after the paint — best-effort. */
-  function sgFetchImages(host) {
+  function sgFetchImages(host, isRetry) {
     try {
       if (typeof engineCall !== 'function') { return; }
       var els = host.querySelectorAll('[data-sigimg]');
@@ -21540,7 +21543,10 @@ function saveSchedule() {
           if (!u) { return; }
           el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
         });
-      }).catch(function () {});
+      }).catch(function () {
+        // boot race: the first paint can beat session hydration — one quiet retry
+        if (!isRetry) { setTimeout(function () { sgFetchImages(host, true); }, 4000); }
+      });
     } catch (e) {}
   }
 
