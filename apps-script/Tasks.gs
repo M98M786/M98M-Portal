@@ -133,7 +133,9 @@ function actionSubmitTask_(payload, ctx) {
   const note = String(payload.submission_note || '').trim();
   if (!note) throw new Error('submission note required');
   const sh = tasksSheet_();
-  let rec = null, approver = '', stamp = '';
+  let rec = null, approver = '', stamp = '', total = 0;   // total is read by the bell text below — as a
+  // const inside the try it was a guaranteed ReferenceError AFTER the write landed, masked as
+  // "request failed": every task submit "failed" on screen while actually saving. (Pre-existing.)
   const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
@@ -153,7 +155,7 @@ function actionSubmitTask_(payload, ctx) {
 
     stamp = now_();
     const elapsed = taskElapsedMin_(rec.updated_at, taskMs_(stamp));
-    const total = (Number(rec.time_taken_min) || 0) + elapsed;
+    total = (Number(rec.time_taken_min) || 0) + elapsed;
     const patch = {
       status: TASK_STATUS_SUBMITTED, submitted_at: stamp, submission_note: note.slice(0, 2000),
       updated_at: stamp, time_taken_min: total,
