@@ -1238,6 +1238,8 @@ function enterApp(user){
   $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
   $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
   $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
+  /* the 2-hour report gate arms at sign-in and re-checks every 5 minutes */
+  try{ gateCheck(); if(!GATE.timer){ GATE.timer=setInterval(gateCheck, 300000); } }catch(e){}
   $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
     '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>'+
     '<div style="font-size:9.5px;color:var(--text-3);margin-top:6px;line-height:1.5;opacity:.85">Designed, logiced &amp; made by <b>Zaid Kaleem</b><br>Sales analysis logic by <b>Sir Hasib Ullah</b> &amp; <b>Ubaid Kaleem</b></div>';
@@ -1272,7 +1274,7 @@ function enterApp(user){
      in a Library group at the bottom; Returns & INAD sits with Customer Service; Truth Check
      joins Management. Old entries stay reachable until their modules flip (R9). */
   var NAV_DEPTS = [
-    { name:'My desk',     keys:['home','tasks','approvals'] },
+    { name:'My desk',     keys:['home','tasks','approvals','reports'] },   // owner 10 Sept: My reports on every staff member's own desk
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
         'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','priceDesk',
@@ -1449,6 +1451,57 @@ function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
 function signOut(){ try{ if(STATE.session){ api('sessionEnd', { session: STATE.session }).catch(function(){}); } }catch(e){} try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); psessClear(); STATE.idToken=null; STATE.session=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
+
+/* ---- THE 2-HOUR REPORT GATE (owner, 10 Sept: "if a staff member has not added his 2-hourly
+   report within a 20-minute margin of the checkpoint, stop giving him his portal and alert him
+   that it opens again once the report is added") ----
+   myCheckpoints already computes 'missed' = checkpoint + late_threshold_min (20) passed with no
+   report, so the gate simply refuses the workspace while one exists. The My-reports screen stays
+   reachable — that is the whole point. FAILS OPEN on backend errors: an overloaded night must
+   never lock the whole company out. Owner accounts are exempt (someone must hold the keys). */
+var GATE = { locked:false, timer:null };
+var GATE_EXEMPT = ['m98m786@gmail.com','mrhasibullah91@googlemail.com'];
+function gateOverlay(show){
+  var el = document.getElementById('gateLock');
+  if(!el){
+    el = document.createElement('div'); el.id='gateLock';
+    el.style.cssText='position:fixed;inset:0;z-index:99990;background:rgba(4,6,11,.96);display:none;align-items:center;justify-content:center;padding:24px';
+    el.innerHTML='<div style="max-width:540px;text-align:center;border:1px solid var(--gold-line-hi);border-radius:16px;padding:34px 30px;background:var(--panel-2)">'+
+      '<div style="font-size:34px">\u23F1\uFE0F</div>'+
+      '<h2 style="margin:12px 0 8px">Your portal is paused</h2>'+
+      '<p style="color:var(--text-2);font-weight:600;line-height:1.55;margin:0 0 18px">A 2-hour report is overdue past the 20-minute margin. Your portal will not be available until you add your 2-hourly working report \u2014 it opens again the moment it is submitted.</p>'+
+      '<button class="btn-gold" id="gateGo" style="font-size:14px;padding:12px 22px">Add my 2-hour report now</button></div>';
+    document.body.appendChild(el);
+    el.querySelector('#gateGo').onclick=function(){ el.style.display='none'; location.hash='reports'; try{ renderView('reports'); }catch(e){} };
+  }
+  el.style.display = show?'flex':'none';
+}
+function gateCheck(){
+  try{
+    if(!STATE.user) return;
+    if(GATE_EXEMPT.indexOf(String(STATE.user.email||'').toLowerCase())>=0) return;
+    api('myCheckpoints').then(function(d){
+      var missed=((d&&d.checkpoints)||[]).filter(function(c){ return c.state==='missed' && !c.submitted_at; });
+      var was=GATE.locked;
+      GATE.locked = missed.length>0;
+      if(GATE.locked){
+        var onReports = location.hash.replace('#','')==='reports';
+        gateOverlay(!onReports);
+        if(!was){ try{ toast('Portal paused \u2014 a 2-hour report is overdue. Add it to continue.'); }catch(e){} }
+      } else {
+        gateOverlay(false);
+        if(was){ try{ toast('Report received \u2014 portal unlocked. Thank you.'); }catch(e){} }
+      }
+    }).catch(function(){ /* fails open */ });
+  }catch(e){}
+}
+window.gateRecheck = gateCheck;
+window.addEventListener('hashchange', function(){
+  if(GATE.locked){
+    if(location.hash.replace('#','')!=='reports'){ location.hash='reports'; }
+    gateOverlay(false);
+  }
+});
 
 /* ---- boot: fetch public config (client id + roles) then init sign-in ---- */
 /* ---- the session survives a reload (RL-11 still holds: the token is Google's own, it is

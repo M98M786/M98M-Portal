@@ -319,6 +319,7 @@
     var was = btn.textContent;
     btn.textContent = 'Submitting…';
     api('submitReport', payload).then(function (res) {
+      try { window.gateRecheck && window.gateRecheck(); } catch (e) {}   // a paused portal unlocks the moment the report lands
       busy = false;
       if (res && res.daily_productivity_report) { toast('Daily Productivity Report submitted — thank you.'); }
       else if (res && res.flag === 'late') { toast('Checkpoint ' + hm12(target.checkpoint) + ' submitted — marked late.'); }
