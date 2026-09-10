@@ -7781,26 +7781,11 @@ function actionEnterItemId_(payload, ctx) {
       }
     } catch (subErr) { /* best-effort */ }
 
-    // ③ +72h real revision → the go-live person, unless the owner's desk override is on (best-effort)
-    try {
-      const have72 = listingFind72h_(all, itemId);
-      if (have72) made.revision = { task_id: String(have72.task_id), existing: true, assigned_to: String(have72.assigned_to) };
-      else {
-        const manager = listingPickForRole_('Listing Manager', '', all, 'listing_revision');
-        const rev72To = listingRevisionOverride_() || String(rec.assigned_to || '');
-        const rid = listingCreateTask_(sh, {
-          type: 'listing_revision', account: account, item_id: itemId, title: LISTING_KIND_72H + ' — Item ID ' + itemId,
-          details: listingLines_([
-            'Item ID: ' + itemId, 'Listing: ' + product,
-            'Window: ' + chain.revision.uk + ' (' + chain.revision.pkt + ') on ' + chain.revision.uk_date,
-            'Live since ' + chain.go_live_uk + ' on ' + chain.day0_uk_date + ' — 72 hours later this dummy becomes the real competitor-based listing.',
-          ]),
-          assigned_by: manager ? manager.email : String(rec.assigned_by || ''), assigned_to: rev72To,
-          priority: String(rec.priority || ''), deadline_pkt: chain.revision.end_pkt, stamp: stamp,
-        });
-        if (rid) made.revision = { task_id: rid, existing: false, assigned_to: rev72To };
-      }
-    } catch (subErr) { /* best-effort */ }
+    /* ③ +72h revision — RETIRED as a direct task (owner, 10 Sept): the LISTING LADDER owns the
+       72-hour step now. The engine's ladderWatch queues the item on the Advertising Manager's
+       72-hours Revision page at eBay's own +72h; his keyword decision raises the lister task
+       (tiered) through ladderTask. Spawning one here too gave every go-live a redundant task. */
+    made.revision = { ladder: true };
   }
 
   /* The permanent record (30 Aug): item → title + the hunt's AliExpress link, in the engine's
