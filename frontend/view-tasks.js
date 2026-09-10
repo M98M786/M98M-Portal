@@ -701,7 +701,7 @@
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(details) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(tkStr(t.details)) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';

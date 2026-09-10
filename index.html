@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260910-0105';
+var BUILD = '20260910-0115';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -24949,7 +24949,7 @@ function saveSchedule() {
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(details) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(tkStr(t.details)) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
