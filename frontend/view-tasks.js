@@ -516,6 +516,16 @@
     if (details) {
       act += '<button class="minibtn" data-act="details" data-id="' + tkAttr(id) + '">Details</button>';
     }
+    /* Listing-ladder tasks (owner, 10 Sept): the research button is the lister's data entry —
+       the same keyword/SEO sheet, resubmitted at every revision and archived. Tier-2 tasks may
+       be parked "Waiting for the Advertising Manager's call". */
+    var lad = tkLadder(details);
+    if (lad) {
+      act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
+      if (lad.tier === 'T2' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED)) {
+        act += '<button class="minibtn" data-act="ladPark" data-id="' + tkAttr(id) + '" data-item="' + tkAttr(lad.item) + '">Waiting for AM\u2019s call</button>';
+      }
+    }
 
     if (ret) {
       extra += '<div class="tk-box tk-ret"><div class="k">Returned by ' + esc(ret.by) + ' · ' + esc(tkWhen(ret.when)) + '</div>' +
@@ -524,6 +534,9 @@
     if (details) {
       extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
         '<div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>';
+    }
+    if (lad) {
+      extra += '<div class="tk-box hidden" data-ladres="' + tkAttr(id) + '" data-laditem="' + tkAttr(lad.item) + '" data-ladstage="' + tkAttr(lad.stage) + '"></div>';
     }
     /* R7-4 (Hasib): the lister's states live on the task he actually works — a flag banner when
        one is set, and the three levers (need more time · need info from the hunter · leave in
@@ -688,12 +701,40 @@
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '">Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(details) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
   }
 
+  /* [LADDER:stage:tier:item] marker parser — the bridge stamps it on every ladder task */
+  function tkLadder(details) {
+    var m = /\[LADDER:([^:\]]+):([^:\]]+):([^\]]+)\]/.exec(String(details || ''));
+    if (!m) { return null; }
+    return { stage: m[1], tier: m[2] === '-' ? '' : m[2], item: m[3] };
+  }
+  var TK_SCHEMA = null;
+  function tkLadResToggle(box, id) {
+    var el = box.querySelector('[data-ladres="' + id + '"]');
+    if (!el) { return; }
+    if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    if (el.dataset.built) { return; }
+    el.innerHTML = '<div class="spinner"></div>';
+    (TK_SCHEMA ? Promise.resolve(TK_SCHEMA) : engineCall('ladderSchema', {}, 15000)).then(function (sch) {
+      TK_SCHEMA = sch;
+      el.dataset.built = '1';
+      var h = '<div class="k">Keyword &amp; SEO research — the same sheet, saved to the archive</div>';
+      (sch.columns || []).forEach(function (c) {
+        h += '<div class="field" style="margin-top:8px"><label>' + esc(c.label) + '</label>' +
+          '<textarea class="tk-ta" rows="2" data-ladf="' + tkAttr(c.key) + '" style="min-height:44px"></textarea></div>';
+      });
+      h += '<div class="field" style="margin-top:8px"><label>What changed in this revision</label>' +
+        '<textarea class="tk-ta" rows="2" data-ladf="__changes" style="min-height:44px" placeholder="only for revisions — say exactly what you changed"></textarea></div>' +
+        '<div class="tk-btns" style="margin-top:8px"><button class="btn-gold" data-act="ladResSave" data-id="' + tkAttr(id) + '">Save research</button></div>';
+      el.innerHTML = h;
+    }).catch(function (e) { el.innerHTML = esc(e.message); });
+  }
   function tkWireRows(box) {
     var btns = box.querySelectorAll('button[data-act]'), i;
     for (i = 0; i < btns.length; i++) {
@@ -704,6 +745,35 @@
   }
 
   function tkRowAction(box, act, id, btn) {
+    if (act === 'ladRes') { tkLadResToggle(box, id); return; }
+    if (act === 'ladResSave') {
+      var wrapEl = box.querySelector('[data-ladres="' + id + '"]');
+      if (!wrapEl) { return; }
+      var data = {}, chg = '';
+      wrapEl.querySelectorAll('[data-ladf]').forEach(function (f) {
+        var k = f.getAttribute('data-ladf');
+        if (k === '__changes') { chg = tkStr(f.value); } else if (tkStr(f.value)) { data[k] = tkStr(f.value); }
+      });
+      if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
+      btn.disabled = true;
+      engineCall('ladderResearchSave', { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg }, 20000)
+        .then(function (r) {
+          sessionStorage.setItem('ladres:' + id, '1');
+          btn.textContent = 'Saved ✓ (version ' + (r.versions || '?') + ')';
+          toast('Research saved to the archive.');
+        })
+        .catch(function (e) { btn.disabled = false; toast(e.message); });
+      return;
+    }
+    if (act === 'ladPark') {
+      if (!confirm('Park this Tier-2 task as \u201cWaiting for the Advertising Manager\u2019s call\u201d? Your work on it is done until he calls it in.')) { return; }
+      btn.disabled = true;
+      engineCall('ladderPark', { item_id: btn.getAttribute('data-item') }, 20000).then(function () {
+        return api('submitTask', { task_id: id, submission_note: 'Waiting for the Advertising Manager\u2019s call (Tier 2 parked).' });
+      }).then(function () { toast('Parked — the Advertising Manager has it on his page.'); tkLoadTasks(); })
+        .catch(function (e) { btn.disabled = false; toast('NOT parked — ' + e.message); });
+      return;
+    }
     var form, note, item, payload, block;
     if (act === 'details') {
       block = tkPick(box, 'data-details', id);
@@ -767,6 +837,10 @@
       return;
     }
     if (act === 'send') {
+      if (btn.getAttribute('data-ladder') && !sessionStorage.getItem('ladres:' + id)) {
+        toast('Add the keyword research data first — the "Keyword research" button on this task.');
+        return;
+      }
       note = tkPick(box, 'data-note', id);
       item = tkPick(box, 'data-item', id);
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };

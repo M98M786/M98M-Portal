@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260909-2230';
+var BUILD = '20260910-0028';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -13478,6 +13478,97 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   };
 })();
 
+
+/* ============ THE 20-DAY FINAL DESK (owner, 10 Sept — the listing ladder) ============
+ * Appended as its own layer: items that finished 20 days under the sales target arrive here
+ * with the WHOLE story — sales windows, every research version, every keyword decision, the
+ * video — and Management gives the final word: Keep running / Revise again / End listing. */
+(function () {
+  if (!VIEWS.listingDecisions) { return; }
+  var oldRender = VIEWS.listingDecisions.render;
+  var oldInit = VIEWS.listingDecisions.init;
+  VIEWS.listingDecisions.render = function () {
+    return oldRender().replace('<div id="ldBody"', '<div id="ldFinalWrap" class="enter d2"></div><div id="ldBody"');
+  };
+  VIEWS.listingDecisions.init = function () {
+    if (oldInit) { oldInit(); }
+    ldfLoad();
+  };
+  function ldfHistoryToggle(host, itemId) {
+    var box = host.querySelector('[data-ldfh="' + itemId + '"]');
+    if (!box) { return; }
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (box.dataset.loaded) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    engineCall('ladderHistory', { item_id: itemId }, 20000).then(function (d) {
+      box.dataset.loaded = '1';
+      var l = d.ladder || {};
+      var h = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-weight:700;font-size:12px;margin-bottom:8px">' +
+        '<span>Went live: ' + esc(l.go_live_at || '?') + '</span>' +
+        '<span>First 10 days: <b>' + esc(String(l.sales_first10)) + '</b> sale(s)</span>' +
+        '<span>Second 10 days: <b>' + esc(String(l.sales_second10)) + '</b></span>' +
+        '<span>Total: <b>' + esc(String(l.sales_total)) + '</b></span>' +
+        (l.video_link && safeUrl(l.video_link) ? '<a class="minibtn" target="_blank" rel="noopener noreferrer" href="' + safeUrl(l.video_link).replace(/"/g, '&quot;') + '">Product video</a>' : '') + '</div>';
+      (d.decisions || []).forEach(function (x) {
+        h += '<div style="margin-bottom:7px;font-size:12px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(String(x.tier).replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
+          (x.title_keywords ? '<div style="color:var(--text-2)">Title keywords: ' + esc(x.title_keywords) + '</div>' : '') +
+          (x.desc_keywords ? '<div style="color:var(--text-2)">Description keywords: ' + esc(x.desc_keywords) + '</div>' : '') +
+          (x.comment ? '<div style="color:var(--text-3)">' + esc(x.comment) + '</div>' : '') + '</div>';
+      });
+      (d.research || []).forEach(function (v) {
+        var obj = {}; try { obj = JSON.parse(v.data_json || '{}'); } catch (e) {}
+        h += '<div style="margin:9px 0 3px;font-size:12px"><b>' + esc(v.kind) + ' research</b> — ' + esc(v.submitted_by) + ' · ' + esc(v.submitted_at) +
+          (v.changes_note ? ' · <i>' + esc(v.changes_note) + '</i>' : '') + '</div><table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+        Object.keys(obj).forEach(function (k) { if (String(obj[k]).trim()) { h += '<tr><td style="padding:3px 8px;color:var(--text-3);font-weight:700;width:36%;border-top:1px solid var(--gold-line);vertical-align:top">' + esc(k) + '</td><td style="padding:3px 8px;border-top:1px solid var(--gold-line);white-space:pre-wrap;word-break:break-word">' + esc(obj[k]) + '</td></tr>'; } });
+        h += '</table>';
+      });
+      box.innerHTML = h;
+    }).catch(function (e) { box.innerHTML = esc(e.message); });
+  }
+  function ldfLoad() {
+    var wrap = $('ldFinalWrap');
+    if (!wrap) { return; }
+    engineCall('ladderFinalQueue', {}, 30000).then(function (d) {
+      var rows = d.rows || [];
+      if (!rows.length) { wrap.innerHTML = ''; return; }
+      var can = d.canDecide;
+      var h = '<div class="card" style="margin-bottom:16px"><div class="hd">Final decisions — the 20-day ladder <span class="tk-sub">' + rows.length + ' waiting</span></div><div class="bd">';
+      rows.forEach(function (r) {
+        var u = safeUrl(r.image);
+        h += '<div class="ld-row" style="grid-template-columns:56px 1fr auto">' +
+          '<span class="ld-thumb">' + (u ? '<img src="' + u.replace(/"/g, '&quot;') + '" alt="">' : '📦') + '</span>' +
+          '<div class="ld-mid"><div class="ld-title"><a href="https://www.ebay.co.uk/itm/' + esc(r.item_id) + '" target="_blank" rel="noopener noreferrer">' + esc(r.title || r.item_id) + '</a></div>' +
+          '<div class="ld-badges"><span class="ld-b mono">' + esc(r.item_id) + '</span><span class="ld-b">' + esc(r.account || '') + '</span>' +
+          '<span class="ld-b zero">' + esc(String(r.sales_first10)) + ' + ' + esc(String(r.sales_second10)) + ' sales</span>' +
+          '<span class="ld-b">research ×' + esc(String(r.research_n || 0)) + '</span><span class="ld-b">decisions ×' + esc(String(r.decisions_n || 0)) + '</span></div>' +
+          '<div class="ld-meta">' + (r.lister_email ? 'listed by ' + esc(r.lister_email) + ' · ' : '') + 'live since ' + esc(String(r.go_live_at || '').slice(0, 10)) + '</div></div>' +
+          '<div class="ld-acts"><button class="minibtn" data-ldf="hist" data-id="' + esc(r.item_id) + '">History</button>' +
+          (can ? '<button class="minibtn" data-ldf="KEEP" data-id="' + esc(r.item_id) + '">Keep running</button>' +
+                 '<button class="minibtn" data-ldf="REVISE" data-id="' + esc(r.item_id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Revise again</button>' +
+                 '<button class="minibtn" data-ldf="END" data-id="' + esc(r.item_id) + '" style="border-color:var(--bad);color:var(--bad)">End listing</button>' : '') +
+          '</div></div>' +
+          '<div class="tk-box hidden" data-ldfh="' + esc(r.item_id) + '" style="margin:-4px 0 10px"></div>';
+      });
+      h += '</div></div>';
+      wrap.innerHTML = h;
+      wrap.onclick = function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('[data-ldf]') : null;
+        if (!b) { return; }
+        var op = b.getAttribute('data-ldf'), id = b.getAttribute('data-id');
+        if (op === 'hist') { ldfHistoryToggle(wrap, id); return; }
+        var note = prompt(op === 'END' ? 'End listing ' + id + ' — say why (goes on the record):'
+          : op === 'REVISE' ? 'Revise again — instruction for the lister:' : 'Keep running — a short note:') || '';
+        if (op !== 'KEEP' && !note.trim()) { toast('A note is needed for the record.'); return; }
+        b.disabled = true;
+        engineCall('ladderFinal', { item_id: id, verdict: op, note: note }, 25000)
+          .then(function (r) { toast('Decision recorded' + (r.task ? ' — ' + r.task : '') + '.'); ldfLoad(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+      };
+    }).catch(function () { wrap.innerHTML = ''; });
+  }
+})();
+
 /* ---------- view-marketing.js ---------- */
 /* view-marketing.js — review 4: the Marketing dashboard. Every sale event on every account
  * (name, dates, status, discount, member count), coverage of the "sale on every single item"
@@ -20231,98 +20322,293 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
 })();
 
-/* ---------- view-rev72.js ---------- */
-/* view-rev72.js — R8-3f: the 72-hour revision dashboard. Every listing_revision in flight,
- * bucketed by its window: overdue · due today · ahead · done this week. Manager sees everyone,
- * a lister sees their own. Backend: listDesk (rows carry type/deadline/assignee). */
+/* ---------- view-rev20.js ---------- */
+/* view-rev20.js — the 20-DAYS REVISION desk (owner, 10 Sept): sales-triggered revisions.
+ * Day 10: fewer than 5 sales since go-live → here. Day 20: fewer than 5 more in the second
+ * window → here AGAIN and simultaneously on Management's Listing-decisions desk for the final
+ * call. Same decision machinery as the 72-hours page (keywords, comment, tiers) — the shared
+ * UI helpers live in view-rev72.js (window.LADDER_UI, resolved at runtime). */
 (function () {
-  'use strict';
+  var L20_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager'];
 
-  var RV_ROLES = ['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head', 'Advertising Manager'];
-
-  VIEW_CSS.push(
-    '.rv-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
-    '.rv-t{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
-    '.rv-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
-    '.rv-t b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
-    '.rv-t.bad b{color:var(--bad)}.rv-t.warn b{color:var(--warn)}.rv-t.ok b{color:var(--ok)}' +
-    '.rv-sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--text-3);font-weight:800;margin:14px 0 6px}'
-  );
-
-  function rvS(v) { return String(v == null ? '' : v); }
-
-  VIEWS.rev72 = {
-    label: 'CPC Main Potential Revisions',
-    icon: '<path d="M12 8v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4h4"/>',
-    roles: RV_ROLES,
-    order: 17.7,
-    render: function () {
-      return '<div class="hgroup enter d1"><h1>CPC Main Potential <span class="goldtext">Revisions</span></h1>' +
-          '<span class="sub">the day-3 revision on every listing — window 1:00–5:00 PM UK</span>' +
-          '<button class="minibtn" id="rvRefresh" style="margin-left:auto">Refresh</button></div>' +
-        '<div id="rvTiles" class="enter d1"><div class="spinner"></div></div>' +
-        '<div class="card enter d2"><div class="bd" id="rvBody"><div class="spinner"></div></div></div>';
-    },
-    init: function () { $('rvRefresh').onclick = rvLoad; rvLoad(); }
-  };
-
-  function rvLoad() {
-    cachedCall('listDesk', {}, function (d) {
-      var rows = ((d && d.rows) || []).filter(function (r) { return r.type === 'listing_revision'; });
-      var now = Date.now(), day = 86400000;
-      var late = [], today = [], ahead = [];
-      rows.forEach(function (r) {
-        var t = Date.parse(rvS(r.deadline_pkt)) || 0;
-        if (!t) { ahead.push(r); return; }
-        if (t < now) { late.push(r); } else if (t - now < day) { today.push(r); } else { ahead.push(r); }
-      });
-      setHTML('rvTiles', '<div class="rv-tiles">' +
-        '<div class="rv-t bad"><span class="k">Overdue</span><b>' + late.length + '</b></div>' +
-        '<div class="rv-t warn"><span class="k">Due today</span><b>' + today.length + '</b></div>' +
-        '<div class="rv-t"><span class="k">Ahead</span><b>' + ahead.length + '</b></div>' +
-        '<div class="rv-t ok"><span class="k">In flight total</span><b>' + rows.length + '</b></div>' +
-      '</div>');
-      var sec = function (title, list) {
-        if (!list.length) { return ''; }
-        return '<div class="rv-sec">' + esc(title) + ' · ' + list.length + '</div>' +
-          '<div class="scroll"><table class="ir-tbl" style="min-width:620px"><thead><tr>' +
-          '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Assigned</th>' +
-          '<th style="text-align:left">Window ends</th><th style="text-align:left">Status</th></tr></thead><tbody>' +
-          list.map(function (r) {
-            return '<tr><td style="text-align:left;max-width:260px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rvS(r.title)) + '</div>' +
-              '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(rvS(r.item_id) || rvS(r.task_id)) + '</span></td>' +
-              '<td style="text-align:left">' + esc(rvS(r.account)) + '</td>' +
-              '<td style="text-align:left">' + esc(rvS(r.assigned_to).split('@')[0]) + '</td>' +
-              '<td style="text-align:left;white-space:nowrap' + (r.overdue ? ';color:var(--bad);font-weight:800' : '') + '">' + esc(fmtPkt(r.deadline_pkt, true) || '—') + '</td>' +
-              '<td style="text-align:left">' + esc(rvS(r.status)) + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
-      };
-      var html = sec('Overdue — fix first', late) + sec('Due today', today) + sec('Ahead', ahead);
-      /* 26 Aug (owner): "proper show all archive, concerned items, and proper item related data."
-         The archive of completed revisions, newest first — each with its item, account, who did it,
-         when, and the reason it was raised. */
-      var done = (d && d.revisions_done) || [];
-      if (done.length) {
-        html += '<div class="rv-sec">Archive — completed revisions · ' + done.length + '</div>' +
-          '<div class="scroll"><table class="ir-tbl" style="min-width:680px"><thead><tr>' +
-          '<th style="text-align:left">Item</th><th style="text-align:left">Account</th><th style="text-align:left">Reason it was raised</th>' +
-          '<th style="text-align:left">By</th><th style="text-align:left">Done</th></tr></thead><tbody>' +
-          done.map(function (r) {
-            return '<tr><td style="text-align:left;max-width:240px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rvS(r.title)) + '</div>' +
-              '<span class="mono" style="font-size:10px;color:var(--text-3)">' + esc(rvS(r.item_id) || rvS(r.task_id)) + '</span></td>' +
-              '<td style="text-align:left">' + esc(rvS(r.account)) + '</td>' +
-              '<td style="text-align:left;max-width:260px"><div style="white-space:normal;font-size:11.5px;color:var(--text-2)">' + esc(rvS(r.reason) || '—') + '</div></td>' +
-              '<td style="text-align:left">' + esc(rvS(r.assigned_to).split('@')[0]) + '</td>' +
-              '<td style="text-align:left;white-space:nowrap;color:var(--text-3)">' + esc(fmtPkt(r.decided_at, true) || '—') + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+  function load() {
+    var box = $('r20Body');
+    if (!box) { return; }
+    var U = window.LADDER_UI;
+    engineCall('ladderQueue', { page: 'r20' }, 30000).then(function (d) {
+      var can = d.canDecide, h = '';
+      function section(rows, label, stage, badge) {
+        h += '<div class="lr-sec">' + label + ' · ' + rows.length + '</div>';
+        if (!rows.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing here right now.</div>'; }
+        rows.forEach(function (r) {
+          var extra = '<span class="lr-badge">' + esc(String(r.sales || 0)) + ' sale(s) in window</span>' + (badge || '');
+          h += '<div class="lr-row">' + U.lrHead(r, extra) +
+            '<div class="lr-btns">' +
+            '<button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button>' +
+            (can ? '<button class="minibtn" data-lact="noRev" data-stage="' + stage + '" data-id="' + esc(r.item_id) + '">No revision required</button>' +
+                   '<button class="btn-gold" data-lact="openRev" data-id="' + esc(r.item_id) + '">Revision required…</button>' : '') +
+            '</div></div>' +
+            '<div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div>' +
+            (can ? U.lrDecisionForm(r, stage) : '') + '</div>';
+        });
       }
-      setHTML('rvBody', html || '<div class="hu-hint" style="margin-top:0">No revisions in flight. A CPC Main Potential Revision opens 72 hours after each listing goes live.</div>');
-    }).done.catch(function (e) {
-      setHTML('rvTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
-      setHTML('rvBody', '');
-    });
+      section(d.day10 || [], 'Day-10 — under 5 sales since go-live', 'R10', '');
+      section(d.day20 || [], 'Day-20 — under 5 sales in the second window', 'R20',
+        '<span class="lr-badge" style="color:var(--gold-a)">also with Management for the final call</span>');
+      var rec = d.recent || [];
+      if (rec.length) {
+        h += '<div class="lr-sec">Recently decided</div>';
+        rec.forEach(function (x) {
+          h += '<div class="lr-meta" style="margin-bottom:6px"><span class="mono">' + esc(x.item_id) + '</span><span>' + esc((x.title || '').slice(0, 50)) + '</span>' +
+            '<span><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(x.tier.replace('T', '')) : '') + '</b></span><span>' + esc(x.decided_at) + '</span></div>';
+        });
+      }
+      box.innerHTML = h;
+      /* the same wiring the 72-hours page uses — one delegated handler per page */
+      box.onclick = function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('[data-lact]') : null;
+        if (!b) { return; }
+        var act = b.getAttribute('data-lact'), id = b.getAttribute('data-id');
+        if (act === 'research') { U.lrResearchToggle(box, id); return; }
+        if (act === 'openRev') { var f = box.querySelector('[data-form="' + id + '"]'); if (f) { f.classList.toggle('hidden'); } return; }
+        if (act === 'noRev' || act === 'submitRev') {
+          var payload = { item_id: id, stage: b.getAttribute('data-stage'), decision: act === 'noRev' ? 'NO_REVISION' : 'REVISION' };
+          if (act === 'submitRev') {
+            var tkw = box.querySelector('[data-tkw="' + id + '"]'), dkw = box.querySelector('[data-dkw="' + id + '"]');
+            var cmt = box.querySelector('[data-cmt="' + id + '"]'), tierEl = box.querySelector('input[name="tier-' + id + '"]:checked');
+            if (!tkw || !tkw.value.trim()) { toast('Title keywords are mandatory for a revision.'); if (tkw) { tkw.focus(); } return; }
+            payload.tier = tierEl ? tierEl.value : 'T1'; payload.title_keywords = tkw.value;
+            payload.desc_keywords = dkw ? dkw.value : ''; payload.comment = cmt ? cmt.value : '';
+          }
+          b.disabled = true;
+          engineCall('ladderDecide', payload, 25000)
+            .then(function (r) { toast(act === 'noRev' ? 'Marked: no revision required.' : 'Revision sent — ' + (r.task || 'task raised') + '.'); load(); })
+            .catch(function (e) { b.disabled = false; toast(e.message); });
+        }
+      };
+      box.oninput = function (ev) {
+        var t = ev.target;
+        if (t && t.hasAttribute && t.hasAttribute('data-tkw')) { var c = box.querySelector('[data-tkc="' + t.getAttribute('data-tkw') + '"]'); if (c) { c.textContent = U.lrKwCount(t.value) + ' keywords'; } }
+        if (t && t.hasAttribute && t.hasAttribute('data-dkw')) { var c2 = box.querySelector('[data-dkc="' + t.getAttribute('data-dkw') + '"]'); if (c2) { c2.textContent = U.lrKwCount(t.value) + ' keywords'; } }
+      };
+    }).catch(function (e) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700">' + esc(e.message) + '</div>'; });
   }
 
+  VIEWS.rev20 = {
+    label: '20-days revision',
+    order: 17.66,
+    roles: L20_ROLES,
+    icon: '<path d="M8 2v4M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M9 16l2 2 4-4"/>',
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>20-days <span class="goldtext">revision</span></h1>' +
+        '<span class="sub">the sales ladder: day-10 under 5 sales, day-20 under 5 more — the system sends them, the Advertising Manager decides</span>' +
+        '<button class="minibtn" id="r20Refresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="r20Body" class="enter d2"><div class="spinner"></div></div>';
+    },
+    init: function () { $('r20Refresh').onclick = load; load(); },
+  };
+})();
+
+/* ---------- view-rev72.js ---------- */
+/* view-rev72.js — the 72-HOURS REVISION desk (owner, 10 Sept: "after exact 72 hours the portal
+ * will show there all the listings"). The Advertising Manager decides each arrival:
+ * No revision / Revision (typed TITLE + DESCRIPTION keywords with live counts, a comment,
+ * Tier 1 = 2-day lister task, Tier 2 = parkable). Parked items wait here for his call;
+ * called items can be sent on to VIDEO revision. Data: ladderQueue/ladderDecide/ladderCall/
+ * ladderVideo/ladderResearch (engine). */
+(function () {
+  var LR_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager'];
+
+  VIEW_CSS.push(
+    '.lr-row{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:12px 14px;margin-bottom:10px}' +
+    '.lr-top{display:grid;grid-template-columns:52px 1fr auto;gap:12px;align-items:center}' +
+    '.lr-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;background:var(--panel);border:1px solid var(--gold-line);display:grid;place-items:center;font-size:20px}' +
+    '.lr-thumb img{width:100%;height:100%;object-fit:cover}' +
+    '.lr-title{font-weight:700;font-size:13px;line-height:1.3}.lr-title a{color:inherit}' +
+    '.lr-meta{font-size:10.5px;color:var(--text-3);font-weight:600;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}' +
+    '.lr-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}' +
+    '.lr-form{margin-top:11px;border-top:1px dashed var(--gold-line);padding-top:11px;display:grid;gap:9px}' +
+    '.lr-kw{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:760px){.lr-kw{grid-template-columns:1fr}}' +
+    '.lr-kw label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);display:block;margin-bottom:4px}' +
+    '.lr-kw textarea{width:100%;min-height:92px;padding:9px 11px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;font-size:12.5px;resize:vertical}' +
+    '.lr-count{font-size:10.5px;color:var(--gold-a);font-weight:800;margin-top:3px}' +
+    '.lr-note{width:100%;padding:9px 11px;border-radius:10px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text);font:inherit;font-weight:600;font-size:12.5px}' +
+    '.lr-tier{display:flex;gap:14px;align-items:center;font-size:12px;font-weight:700}' +
+    '.lr-sec{margin:20px 0 10px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}' +
+    '.lr-res{margin-top:10px;border:1px solid var(--gold-line);border-radius:10px;background:var(--panel);padding:10px 12px;font-size:12px}' +
+    '.lr-res table{width:100%;border-collapse:collapse;font-size:11.5px}.lr-res td{padding:4px 8px;border-top:1px solid var(--gold-line);vertical-align:top;white-space:pre-wrap;word-break:break-word}' +
+    '.lr-res .k{color:var(--text-3);font-weight:700;width:38%}' +
+    '.lr-badge{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);white-space:nowrap}'
+  );
+
+  function lrKwCount(s) {
+    return String(s || '').split(/[\n,]/).map(function (x) { return x.trim(); }).filter(String).length;
+  }
+  function lrAge(go) {
+    var ms = Date.now() - new Date(String(go || '').replace(' ', 'T') + 'Z').getTime();
+    if (isNaN(ms)) { return ''; }
+    var h = Math.floor(ms / 3600000);
+    return h < 48 ? h + 'h live' : Math.floor(h / 24) + 'd live';
+  }
+  function lrThumb(r) {
+    var u = safeUrl(r.image);
+    return '<span class="lr-thumb">' + (u ? '<img src="' + u.replace(/"/g, '&quot;') + '" alt="">' : '📦') + '</span>';
+  }
+  function lrHead(r, extraBadges) {
+    return '<div class="lr-top">' + lrThumb(r) +
+      '<div><div class="lr-title"><a href="https://www.ebay.co.uk/itm/' + esc(r.item_id) + '" target="_blank" rel="noopener noreferrer">' + esc(r.title || r.item_id) + '</a></div>' +
+      '<div class="lr-meta"><span class="mono">' + esc(r.item_id) + '</span><span>' + esc(r.account || '') + '</span>' +
+      (r.lister_email ? '<span>listed by ' + esc(r.lister_email) + '</span>' : '') +
+      '<span>' + esc(lrAge(r.go_live_at)) + '</span>' +
+      '<span class="lr-badge">research ×' + esc(String(r.research_n || 0)) + '</span>' + (extraBadges || '') + '</div></div>';
+  }
+  /* read-only research + keyword history, fetched on demand */
+  function lrResearchToggle(host, itemId) {
+    var box = host.querySelector('[data-res="' + itemId + '"]');
+    if (!box) { return; }
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (box.dataset.loaded) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    engineCall('ladderResearch', { item_id: itemId }, 15000).then(function (d) {
+      box.dataset.loaded = '1';
+      var h = '';
+      (d.decisions || []).forEach(function (x) {
+        h += '<div style="margin-bottom:8px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(x.tier.replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
+          (x.title_keywords ? '<div><span class="k">Title keywords:</span> ' + esc(x.title_keywords) + '</div>' : '') +
+          (x.desc_keywords ? '<div><span class="k">Description keywords:</span> ' + esc(x.desc_keywords) + '</div>' : '') +
+          (x.comment ? '<div><span class="k">Comment:</span> ' + esc(x.comment) + '</div>' : '') + '</div>';
+      });
+      (d.research || []).forEach(function (v) {
+        var obj = {}; try { obj = JSON.parse(v.data_json || '{}'); } catch (e) {}
+        h += '<div style="margin:8px 0 4px"><b>' + esc(v.kind) + ' research</b> — ' + esc(v.submitted_by) + ' · ' + esc(v.submitted_at) +
+          (v.changes_note ? ' · <i>' + esc(v.changes_note) + '</i>' : '') + '</div><table>';
+        Object.keys(obj).forEach(function (k) { if (String(obj[k]).trim()) { h += '<tr><td class="k">' + esc(k) + '</td><td>' + esc(obj[k]) + '</td></tr>'; } });
+        h += '</table>';
+      });
+      box.innerHTML = h || '<span style="color:var(--text-3)">No research submitted yet.</span>';
+    }).catch(function (e) { box.innerHTML = esc(e.message); });
+  }
+  function lrDecisionForm(r, stage) {
+    return '<div class="lr-form hidden" data-form="' + esc(r.item_id) + '">' +
+      '<div class="lr-kw"><div><label>Title keywords (required)</label><textarea data-tkw="' + esc(r.item_id) + '" placeholder="one per line or comma-separated"></textarea><div class="lr-count" data-tkc="' + esc(r.item_id) + '">0 keywords</div></div>' +
+      '<div><label>Description keywords</label><textarea data-dkw="' + esc(r.item_id) + '"></textarea><div class="lr-count" data-dkc="' + esc(r.item_id) + '">0 keywords</div></div></div>' +
+      '<input class="lr-note" data-cmt="' + esc(r.item_id) + '" placeholder="Comment for the lister — what to aim for">' +
+      '<div class="lr-tier"><label><input type="radio" name="tier-' + esc(r.item_id) + '" value="T1" checked> Tier 1 — lister has 2 days</label>' +
+      '<label><input type="radio" name="tier-' + esc(r.item_id) + '" value="T2"> Tier 2 — parkable, your call</label>' +
+      '<button class="btn-gold" style="margin-left:auto" data-lact="submitRev" data-id="' + esc(r.item_id) + '" data-stage="' + esc(stage) + '">Submit revision</button></div></div>';
+  }
+  window.LADDER_UI = { lrKwCount: lrKwCount, lrHead: lrHead, lrDecisionForm: lrDecisionForm, lrResearchToggle: lrResearchToggle, lrThumb: lrThumb, lrAge: lrAge };
+
+  function wire(host, reload) {
+    host.onclick = function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('[data-lact]') : null;
+      if (!b) { return; }
+      var act = b.getAttribute('data-lact'), id = b.getAttribute('data-id');
+      if (act === 'research') { lrResearchToggle(host, id); return; }
+      if (act === 'openRev') { var f = host.querySelector('[data-form="' + id + '"]'); if (f) { f.classList.toggle('hidden'); } return; }
+      if (act === 'noRev') {
+        b.disabled = true;
+        engineCall('ladderDecide', { item_id: id, stage: b.getAttribute('data-stage'), decision: 'NO_REVISION' }, 20000)
+          .then(function () { toast('Marked: no revision required.'); reload(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+        return;
+      }
+      if (act === 'submitRev') {
+        var tkw = host.querySelector('[data-tkw="' + id + '"]'), dkw = host.querySelector('[data-dkw="' + id + '"]');
+        var cmt = host.querySelector('[data-cmt="' + id + '"]');
+        var tierEl = host.querySelector('input[name="tier-' + id + '"]:checked');
+        if (!tkw || !tkw.value.trim()) { toast('Title keywords are mandatory for a revision.'); if (tkw) { tkw.focus(); } return; }
+        b.disabled = true;
+        engineCall('ladderDecide', { item_id: id, stage: b.getAttribute('data-stage'), decision: 'REVISION',
+          tier: tierEl ? tierEl.value : 'T1', title_keywords: tkw.value, desc_keywords: dkw ? dkw.value : '',
+          comment: cmt ? cmt.value : '' }, 25000)
+          .then(function (r) { toast('Revision sent — ' + (r.task || 'task raised') + '.'); reload(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+        return;
+      }
+      if (act === 'call') {
+        b.disabled = true;
+        engineCall('ladderCall', { item_id: id }, 25000)
+          .then(function () { toast('Revision called in — the lister has it.'); reload(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+        return;
+      }
+      if (act === 'video') {
+        b.disabled = true;
+        engineCall('ladderVideo', { item_id: id, op: 'send' }, 25000)
+          .then(function () { toast('Sent to video revision.'); reload(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+        return;
+      }
+    };
+    host.oninput = function (ev) {
+      var t = ev.target;
+      if (t && t.hasAttribute && t.hasAttribute('data-tkw')) { var c = host.querySelector('[data-tkc="' + t.getAttribute('data-tkw') + '"]'); if (c) { c.textContent = lrKwCount(t.value) + ' keywords'; } }
+      if (t && t.hasAttribute && t.hasAttribute('data-dkw')) { var c2 = host.querySelector('[data-dkc="' + t.getAttribute('data-dkw') + '"]'); if (c2) { c2.textContent = lrKwCount(t.value) + ' keywords'; } }
+    };
+  }
+
+  function load() {
+    var box = $('r72Body');
+    if (!box) { return; }
+    engineCall('ladderQueue', { page: 'r72' }, 25000).then(function (d) {
+      var can = d.canDecide, h = '';
+      var q = d.queue || [];
+      h += '<div class="lr-sec">Waiting for your decision · ' + q.length + '</div>';
+      if (!q.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing at the 72-hour mark right now.</div>'; }
+      q.forEach(function (r) {
+        h += '<div class="lr-row">' + lrHead(r) +
+          '<div class="lr-btns">' +
+          '<button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button>' +
+          (can ? '<button class="minibtn" data-lact="noRev" data-stage="R72" data-id="' + esc(r.item_id) + '">No revision required</button>' +
+                 '<button class="btn-gold" data-lact="openRev" data-id="' + esc(r.item_id) + '">Revision required…</button>' : '') +
+          '</div></div>' +
+          '<div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div>' +
+          (can ? lrDecisionForm(r, 'R72') : '') + '</div>';
+      });
+      var p = d.parked || [];
+      h += '<div class="lr-sec">Waiting for the Advertising Manager’s call · ' + p.length + '</div>';
+      p.forEach(function (r) {
+        h += '<div class="lr-row">' + lrHead(r) + '<div class="lr-btns">' +
+          '<button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button>' +
+          (can ? '<button class="btn-gold" data-lact="call" data-id="' + esc(r.item_id) + '">Call the revision in</button>' : '') +
+          '</div></div><div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
+      });
+      var v = d.readyForVideo || [];
+      h += '<div class="lr-sec">Tier 2 — called in · decide the video step · ' + v.length + '</div>';
+      v.forEach(function (r) {
+        h += '<div class="lr-row">' + lrHead(r) + '<div class="lr-btns">' +
+          '<button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button>' +
+          (can ? '<button class="btn-gold" data-lact="video" data-id="' + esc(r.item_id) + '">Send to video revision</button>' : '') +
+          '</div></div><div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
+      });
+      var rec = d.recent || [];
+      if (rec.length) {
+        h += '<div class="lr-sec">Recently decided</div>';
+        rec.forEach(function (x) {
+          h += '<div class="lr-meta" style="margin-bottom:6px"><span class="mono">' + esc(x.item_id) + '</span><span>' + esc((x.title || '').slice(0, 50)) + '</span>' +
+            '<span><b>' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(x.tier.replace('T', '')) : '') + '</b></span><span>' + esc(x.decided_by) + '</span><span>' + esc(x.decided_at) + '</span></div>';
+        });
+      }
+      box.innerHTML = h;
+      wire(box, load);
+    }).catch(function (e) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700">' + esc(e.message) + '</div>'; });
+  }
+
+  VIEWS.rev72 = {
+    label: '72-hours revision',
+    order: 17.65,
+    roles: LR_ROLES,
+    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>72-hours <span class="goldtext">revision</span></h1>' +
+        '<span class="sub">every listing lands here exactly 72 hours after go-live — decide, add keywords, pick the tier · the dummy becomes the real listing here</span>' +
+        '<button class="minibtn" id="r72Refresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="r72Body" class="enter d2"><div class="spinner"></div></div>';
+    },
+    init: function () { $('r72Refresh').onclick = load; load(); },
+  };
 })();
 
 /* ---------- view-revisionDesk.js ---------- */
@@ -24407,6 +24693,16 @@ function saveSchedule() {
     if (details) {
       act += '<button class="minibtn" data-act="details" data-id="' + tkAttr(id) + '">Details</button>';
     }
+    /* Listing-ladder tasks (owner, 10 Sept): the research button is the lister's data entry —
+       the same keyword/SEO sheet, resubmitted at every revision and archived. Tier-2 tasks may
+       be parked "Waiting for the Advertising Manager's call". */
+    var lad = tkLadder(details);
+    if (lad) {
+      act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
+      if (lad.tier === 'T2' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED)) {
+        act += '<button class="minibtn" data-act="ladPark" data-id="' + tkAttr(id) + '" data-item="' + tkAttr(lad.item) + '">Waiting for AM\u2019s call</button>';
+      }
+    }
 
     if (ret) {
       extra += '<div class="tk-box tk-ret"><div class="k">Returned by ' + esc(ret.by) + ' · ' + esc(tkWhen(ret.when)) + '</div>' +
@@ -24415,6 +24711,9 @@ function saveSchedule() {
     if (details) {
       extra += '<div class="tk-box tk-det hidden" data-details="' + tkAttr(id) + '"><div class="k">Details</div>' +
         '<div class="tk-txt">' + tkDetailsHtml(details) + '</div></div>';
+    }
+    if (lad) {
+      extra += '<div class="tk-box hidden" data-ladres="' + tkAttr(id) + '" data-laditem="' + tkAttr(lad.item) + '" data-ladstage="' + tkAttr(lad.stage) + '"></div>';
     }
     /* R7-4 (Hasib): the lister's states live on the task he actually works — a flag banner when
        one is set, and the three levers (need more time · need info from the hunter · leave in
@@ -24579,12 +24878,40 @@ function saveSchedule() {
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '">Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(details) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
   }
 
+  /* [LADDER:stage:tier:item] marker parser — the bridge stamps it on every ladder task */
+  function tkLadder(details) {
+    var m = /\[LADDER:([^:\]]+):([^:\]]+):([^\]]+)\]/.exec(String(details || ''));
+    if (!m) { return null; }
+    return { stage: m[1], tier: m[2] === '-' ? '' : m[2], item: m[3] };
+  }
+  var TK_SCHEMA = null;
+  function tkLadResToggle(box, id) {
+    var el = box.querySelector('[data-ladres="' + id + '"]');
+    if (!el) { return; }
+    if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    if (el.dataset.built) { return; }
+    el.innerHTML = '<div class="spinner"></div>';
+    (TK_SCHEMA ? Promise.resolve(TK_SCHEMA) : engineCall('ladderSchema', {}, 15000)).then(function (sch) {
+      TK_SCHEMA = sch;
+      el.dataset.built = '1';
+      var h = '<div class="k">Keyword &amp; SEO research — the same sheet, saved to the archive</div>';
+      (sch.columns || []).forEach(function (c) {
+        h += '<div class="field" style="margin-top:8px"><label>' + esc(c.label) + '</label>' +
+          '<textarea class="tk-ta" rows="2" data-ladf="' + tkAttr(c.key) + '" style="min-height:44px"></textarea></div>';
+      });
+      h += '<div class="field" style="margin-top:8px"><label>What changed in this revision</label>' +
+        '<textarea class="tk-ta" rows="2" data-ladf="__changes" style="min-height:44px" placeholder="only for revisions — say exactly what you changed"></textarea></div>' +
+        '<div class="tk-btns" style="margin-top:8px"><button class="btn-gold" data-act="ladResSave" data-id="' + tkAttr(id) + '">Save research</button></div>';
+      el.innerHTML = h;
+    }).catch(function (e) { el.innerHTML = esc(e.message); });
+  }
   function tkWireRows(box) {
     var btns = box.querySelectorAll('button[data-act]'), i;
     for (i = 0; i < btns.length; i++) {
@@ -24595,6 +24922,35 @@ function saveSchedule() {
   }
 
   function tkRowAction(box, act, id, btn) {
+    if (act === 'ladRes') { tkLadResToggle(box, id); return; }
+    if (act === 'ladResSave') {
+      var wrapEl = box.querySelector('[data-ladres="' + id + '"]');
+      if (!wrapEl) { return; }
+      var data = {}, chg = '';
+      wrapEl.querySelectorAll('[data-ladf]').forEach(function (f) {
+        var k = f.getAttribute('data-ladf');
+        if (k === '__changes') { chg = tkStr(f.value); } else if (tkStr(f.value)) { data[k] = tkStr(f.value); }
+      });
+      if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
+      btn.disabled = true;
+      engineCall('ladderResearchSave', { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg }, 20000)
+        .then(function (r) {
+          sessionStorage.setItem('ladres:' + id, '1');
+          btn.textContent = 'Saved ✓ (version ' + (r.versions || '?') + ')';
+          toast('Research saved to the archive.');
+        })
+        .catch(function (e) { btn.disabled = false; toast(e.message); });
+      return;
+    }
+    if (act === 'ladPark') {
+      if (!confirm('Park this Tier-2 task as \u201cWaiting for the Advertising Manager\u2019s call\u201d? Your work on it is done until he calls it in.')) { return; }
+      btn.disabled = true;
+      engineCall('ladderPark', { item_id: btn.getAttribute('data-item') }, 20000).then(function () {
+        return api('submitTask', { task_id: id, submission_note: 'Waiting for the Advertising Manager\u2019s call (Tier 2 parked).' });
+      }).then(function () { toast('Parked — the Advertising Manager has it on his page.'); tkLoadTasks(); })
+        .catch(function (e) { btn.disabled = false; toast('NOT parked — ' + e.message); });
+      return;
+    }
     var form, note, item, payload, block;
     if (act === 'details') {
       block = tkPick(box, 'data-details', id);
@@ -24658,6 +25014,10 @@ function saveSchedule() {
       return;
     }
     if (act === 'send') {
+      if (btn.getAttribute('data-ladder') && !sessionStorage.getItem('ladres:' + id)) {
+        toast('Add the keyword research data first — the "Keyword research" button on this task.');
+        return;
+      }
       note = tkPick(box, 'data-note', id);
       item = tkPick(box, 'data-item', id);
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
@@ -26958,6 +27318,67 @@ function saveSchedule() {
   };
 })();
 
+/* ---------- view-videoRev.js ---------- */
+/* view-videoRev.js — VIDEO PRODUCT REVISION (owner, 10 Sept): the Tier-2 second step. The
+ * Advertising Manager sends an item here; the lister adds a product video on the eBay listing
+ * itself and records the link — "to get that product running". Every recorded video is kept. */
+(function () {
+  var VR_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager', 'Item Lister'];
+
+  function load() {
+    var box = $('vrBody');
+    if (!box) { return; }
+    var U = window.LADDER_UI;
+    engineCall('ladderQueue', { page: 'r72' }, 25000).then(function (d) {
+      /* the video queue rides the ladder rows: video_status QUEUED = waiting for the lister */
+      return engineCall('ladderVideoList', {}, 20000).catch(function () { return null; }).then(function (vl) {
+        var wait = (vl && vl.queue) || [];
+        var done = (vl && vl.done) || [];
+        var h = '<div class="lr-sec">Waiting for a video · ' + wait.length + '</div>';
+        if (!wait.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">No items are waiting for a video right now.</div>'; }
+        wait.forEach(function (r) {
+          h += '<div class="lr-row">' + U.lrHead(r) +
+            '<div class="lr-form" style="display:grid;grid-template-columns:1fr auto;gap:9px;border-top:0;padding-top:0;margin-top:10px">' +
+            '<input class="lr-note" data-vlink="' + esc(r.item_id) + '" placeholder="Paste the product video link (https)">' +
+            '<button class="btn-gold" data-vact="done" data-id="' + esc(r.item_id) + '">Video added ✓</button></div></div>';
+        });
+        h += '<div class="lr-sec">Videos on record · ' + done.length + '</div>';
+        done.forEach(function (r) {
+          h += '<div class="lr-meta" style="margin-bottom:6px"><span class="mono">' + esc(r.item_id) + '</span>' +
+            '<span>' + esc((r.title || '').slice(0, 50)) + '</span>' +
+            (safeUrl(r.video_link) ? '<a class="minibtn" href="' + safeUrl(r.video_link).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">Open video</a>' : '') + '</div>';
+        });
+        box.innerHTML = h;
+        box.onclick = function (ev) {
+          var b = ev.target && ev.target.closest ? ev.target.closest('[data-vact]') : null;
+          if (!b) { return; }
+          var id = b.getAttribute('data-id');
+          var inp = box.querySelector('[data-vlink="' + id + '"]');
+          if (!inp || !/^https?:\/\//i.test(inp.value.trim())) { toast('Paste the video link first (https…).'); if (inp) { inp.focus(); } return; }
+          b.disabled = true;
+          engineCall('ladderVideo', { item_id: id, op: 'done', link: inp.value.trim() }, 20000)
+            .then(function () { toast('Video recorded — the Advertising Manager has been told.'); load(); })
+            .catch(function (e) { b.disabled = false; toast(e.message); });
+        };
+      });
+    }).catch(function (e) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700">' + esc(e.message) + '</div>'; });
+  }
+
+  VIEWS.videoRev = {
+    label: 'Video revisions',
+    order: 17.67,
+    roles: VR_ROLES,
+    icon: '<rect x="2" y="5" width="14" height="14" rx="2"/><path d="M16 10l6-3v10l-6-3z"/>',
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Video <span class="goldtext">revisions</span></h1>' +
+        '<span class="sub">Tier-2 step two — add the product video on the eBay listing, then record the link here</span>' +
+        '<button class="minibtn" id="vrRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="vrBody" class="enter d2"><div class="spinner"></div></div>';
+    },
+    init: function () { $('vrRefresh').onclick = load; load(); },
+  };
+})();
+
 /* ---------- view-zz-csTools.js ---------- */
 /* view-zz-csTools.js — 2 Sept (owner): Husnain's three CS agents become NATIVE live desks.
  * The playbooks are his own, verbatim, seeded into D1 (cs_playbook) and editable in the
@@ -28166,7 +28587,7 @@ function enterApp(user){
         'rota','reports','reportsGrid','staffReports','perf','team','meetings','agenda'] },
     { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
-    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
+    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRevised','huntRevisions','huntRecords','ideaBox'] },
     { name:'Customer Service', keys:['tasksCS','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','inbox','feedback'] },
     { name:'Library',     keys:['tools','rules'] }

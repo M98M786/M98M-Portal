@@ -22271,6 +22271,7 @@ const ENGINE_RUNNABLE = {
   alertsRefresh: function () { return alertsRefresh(); },
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
   runZeroSalesSweep: function () { return runZeroSalesSweep(); },
+  ladderTask: function (args) { return typeof ladderTaskCreate_ === 'function' ? String(ladderTaskCreate_(args)) : 'absent'; },
   aliSweep: function () { return typeof aliSweep === 'function' ? JSON.stringify(aliSweep()) : 'aliSweep absent'; },
   orderLinkSweep: function () { return typeof orderLinkSweep === 'function' ? String(orderLinkSweep()) : 'absent'; },
   reviewWatch: function () { return typeof reviewWatch === 'function' ? String(reviewWatch()) : 'absent'; },
@@ -22640,6 +22641,84 @@ function pushEngineTasks() {
     retired += Number(r.retired || 0);
   }
   return sent + ' tasks mirrored' + (retired ? ', ' + retired + ' retired' : '');
+}
+
+
+/* ============ Listing-ladder task bridge (owner, 10 Sept) ============
+ * The engine decides WHAT happens on the ladder (72h / 10-day / 20-day, tiers, video, finals);
+ * THIS creates the actual task on the board — through the same routing law as every revision:
+ * the two-week desk override first, then the lister who listed it, then the role fallback.
+ * kind 'revision' → listing_revision task · kind 'video' → the video step ·
+ * kind 'end' → a general end-listing task for the Team Lead. */
+function ladderTaskCreate_(a) {
+  a = a || {};
+  const item = String(a.item_id || '').trim();
+  const account = String(a.account || '').trim();
+  const title = String(a.title || '').trim();
+  const stageRaw = String(a.stage || '').trim();
+  const tier = String(a.tier || '').trim();
+  const kind = String(a.kind || 'revision').trim();
+  if (!item) throw new Error('ladderTask: item_id required');
+  const stageLabel = stageRaw === 'R72' ? '72-hour revision' : stageRaw === 'R10' ? '10-day revision'
+    : stageRaw === 'R20' ? '20-day revision' : (stageRaw || 'revision');
+  const days = Math.max(1, Math.min(14, Number(a.deadline_days) || 2));
+  const due = taskPktIso_(new Date(Date.now() + days * 86400000));
+  const stamp = now_();
+  const all = readTab_('TASKS');
+
+  if (kind === 'end') {
+    const tl = listingPickForRole_('Team Lead', '', all, 'general') || listingPickForRole_('Listing Manager', '', all, 'general');
+    if (!tl) throw new Error('ladderTask: nobody holds Team Lead');
+    const tid = listingCreateTask_(tasksSheet_(), {
+      type: 'general', account: account, item_id: item,
+      title: 'End listing — Item ID ' + item,
+      details: listingLines_([
+        'Item ID: ' + item, title ? 'Listing: ' + title : '',
+        'Management decided at the 20-day mark: END this listing on eBay, then submit the task.',
+        String(a.comment || ''), '[LADDER:FINAL:END:' + item + ']',
+      ].filter(String)),
+      assigned_by: 'system:ladder', assigned_to: tl.email,
+      priority: 'high', deadline_pkt: due, stamp: stamp,
+    });
+    try { engineTaskPush_(tid); } catch (e) {}
+    notify_(tl.email, 'Task assigned', '🔴 End listing ' + item + ' · ' + account + ' — Management decided at the 20-day review: end it on eBay, then submit the task.', 'task:' + tid);
+    return JSON.stringify({ task_id: tid, to: tl.email, kind: 'end' });
+  }
+
+  /* revision + video route to the lister side, under the same law as every revision task */
+  const ovr = (typeof listingRevisionOverride_ === 'function') ? listingRevisionOverride_() : '';
+  let to = ovr || String(a.lister_email || '').trim();
+  if (!to) {
+    const pick = listingPickForRole_('Item Lister', '', all, 'listing_revision') || listingPickForRole_('Listing Manager', '', all, 'listing_revision');
+    to = pick ? pick.email : '';
+  }
+  if (!to) throw new Error('ladderTask: nobody to assign');
+  const isVideo = kind === 'video';
+  const lines = [
+    'Item ID: ' + item, title ? 'Listing: ' + title : '',
+    'Ladder stage: ' + stageLabel + (tier ? ' · Tier ' + tier.replace('T', '') : ''),
+    String(a.comment || ''),
+  ];
+  if (String(a.title_keywords || '').trim()) lines.push('TITLE KEYWORDS (from the Advertising Manager): ' + String(a.title_keywords).trim());
+  if (String(a.desc_keywords || '').trim()) lines.push('DESCRIPTION KEYWORDS: ' + String(a.desc_keywords).trim());
+  if (isVideo) {
+    lines.push('Add a product VIDEO on the eBay listing, then record the video link on the Video revisions page — the task completes there.');
+  } else {
+    lines.push('On submission: say exactly WHAT you changed, and resubmit the keyword/SEO research data (the research button on this task) — every version is archived.');
+    if (tier === 'T2') lines.push('TIER 2: you may press \u201cWaiting for the Advertising Manager\u2019s call\u201d on this task — that parks it until the Advertising Manager calls the revision in.');
+  }
+  lines.push('[LADDER:' + (stageRaw || 'REV') + ':' + (tier || '-') + ':' + item + ']');
+  const tid = listingCreateTask_(tasksSheet_(), {
+    type: 'listing_revision', account: account, item_id: item,
+    title: (isVideo ? 'Video revision' : stageLabel) + ' — Item ID ' + item,
+    details: listingLines_(lines.filter(String)),
+    assigned_by: 'system:ladder', assigned_to: to,
+    priority: tier === 'T2' && !isVideo ? '' : 'high', deadline_pkt: due, stamp: stamp,
+  });
+  try { engineTaskPush_(tid); } catch (e) {}
+  notify_(to, 'Task assigned', (isVideo ? '🎬 Video revision' : '🟣 ' + stageLabel) + ' · Item ' + item + ' · ' + account +
+    (tier ? ' · Tier ' + tier.replace('T', '') : '') + ' — keywords and instructions are on the task.', 'task:' + tid);
+  return JSON.stringify({ task_id: tid, to: to, kind: kind });
 }
 
 

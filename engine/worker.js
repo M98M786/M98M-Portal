@@ -122,7 +122,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [reportsRelayToSheet, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval],
+      '*/15 * * * *': [reportsRelayToSheet, adsItems, autoMsgSend, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch],
       '0 * * * *': [financeSync, csSync, autoMsgScan, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
          invocation's subrequest budget, and anything queued after them silently never runs —
@@ -2545,6 +2545,96 @@ function renderTemplate(tpl, vars) {
   return String(tpl || '').replace(/\{\{(\w+)\}\}/g, (m, k) => String(vars[k] || '')).slice(0, 1800);
 }
 
+/* ============ THE LISTING LADDER (owner, 10 Sept — "the biggest update in listing") ============
+   Dummy listing → Zaid enters Item ID (+title) → provenance row = the clock. From there the
+   SYSTEM drives every revision:
+     +72h            → Zain's 72-hours Revision page (real-listing revision)
+     +10d, <5 sales  → Zain's 20-days Revision page (sales window: since go-live)
+     +20d, <5 more   → revision again AND Zaid's Listing-decisions page (final call)
+   Zain decides No-revision / Revision (typed keywords, comment, Tier 1 = 2-day task,
+   Tier 2 = parkable "Waiting for Advertising Manager's call" → later product rev → video rev).
+   Every revision resubmits keyword/SEO research; every version is archived in listing_research. */
+function ladderUtc(d) { return new Date(d).toISOString().slice(0, 19).replace('T', ' '); }
+function ladderPlus(base, days) { return ladderUtc(new Date(base).getTime() + days * 86400000); }
+async function ladderSales(env, itemId, fromUtc, toUtc) {
+  const r = await env.DB.prepare(
+    "SELECT COALESCE(SUM(qty), 0) AS n FROM orders WHERE item_id = ?1 AND status NOT IN ('CANCELLED','NOT_FOUND') " +
+    "AND substr(replace(created_at, 'T', ' '), 1, 19) >= ?2" + (toUtc ? " AND substr(replace(created_at, 'T', ' '), 1, 19) < ?3" : '')
+  ).bind(...(toUtc ? [itemId, fromUtc, toUtc] : [itemId, fromUtc])).first().catch(() => null);
+  return r ? Number(r.n) || 0 : 0;
+}
+async function ladderWatch(env) {
+  await ensureTruthSchema(env);
+  /* Seed: every go-live (provenance row) from the last 3 days becomes a ladder row once. */
+  const pv = await env.DB.prepare(
+    'SELECT p.item_id, p.account, p.lister_email, p.listed_at, COALESCE(i.title, "") AS title ' +
+    'FROM provenance p LEFT JOIN items_api i ON i.item_id = p.item_id ' +
+    "WHERE COALESCE(p.listed_at, '') != '' AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = p.item_id)"
+  ).all().catch(() => ({ results: [] }));
+  for (const r of (pv.results || [])) {
+    const t = new Date(String(r.listed_at));
+    if (isNaN(t.getTime())) continue;
+    if (Date.now() - t.getTime() > 3 * 86400000) continue;   // the ladder governs go-lives from NOW — no backfill storm
+    const go = ladderUtc(t);
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO listing_ladder (item_id, account, title, lister_email, go_live_at, r72_at, r10_at, r20_at, created_at, updated_at) " +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))"
+    ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
+      go, ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
+  }
+  /* MIGRATION (owner, 10 Sept: "send all the current 72 hours revision to zain"): items whose
+     72-hour revision TASK is still open on the boards predate the ladder — seed them too, with
+     their real go-live where provenance knows it, so they queue for Zain immediately. */
+  const mig = await env.DB.prepare(
+    "SELECT DISTINCT t.item_id, t.account, COALESCE(p.lister_email, '') AS lister_email, COALESCE(p.listed_at, '') AS listed_at, COALESCE(i.title, '') AS title " +
+    "FROM tasks t LEFT JOIN provenance p ON p.item_id = t.item_id LEFT JOIN items_api i ON i.item_id = t.item_id " +
+    "WHERE t.type = 'listing_revision' AND t.title LIKE '%72%' AND t.status NOT IN ('Completed') AND COALESCE(t.item_id, '') != '' " +
+    'AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = t.item_id) LIMIT 60'
+  ).all().catch(() => ({ results: [] }));
+  for (const r of (mig.results || [])) {
+    let t = new Date(String(r.listed_at));
+    if (isNaN(t.getTime())) t = new Date(Date.now() - 4 * 86400000);   // unknown go-live: old enough to be due now
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO listing_ladder (item_id, account, title, lister_email, go_live_at, r72_at, r10_at, r20_at, created_at, updated_at) " +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))"
+    ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
+      ladderUtc(t), ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
+  }
+  const nowU = ladderUtc(new Date());
+  /* 72h due → Zain's queue. "after exact 72 hours the portal will show there all the listings". */
+  const d72 = await env.DB.prepare(
+    "SELECT item_id, title FROM listing_ladder WHERE r72_status = '' AND r72_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+  for (const r of (d72.results || [])) {
+    await env.DB.prepare("UPDATE listing_ladder SET r72_status = 'QUEUED', updated_at = datetime('now') WHERE item_id = ?1 AND r72_status = ''").bind(r.item_id).run();
+    await notifyRole(env, 'Advertising Manager', '72-hour revision',
+      '🟣 72 hours are up · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — it is on your 72-hours Revision page: decide, add keywords, pick the tier.', 'ladder:r72:' + r.item_id);
+  }
+  /* 10-day: fewer than 5 sales since go-live → the 20-days Revision page. */
+  const d10 = await env.DB.prepare(
+    "SELECT item_id, title, go_live_at FROM listing_ladder WHERE r10_status = '' AND r10_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+  for (const r of (d10.results || [])) {
+    const n = await ladderSales(env, r.item_id, r.go_live_at, '');
+    const st = n >= 5 ? 'SALES_OK' : 'QUEUED';
+    await env.DB.prepare("UPDATE listing_ladder SET r10_status = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND r10_status = ''").bind(r.item_id, st).run();
+    if (st === 'QUEUED') await notifyRole(env, 'Advertising Manager', '10-day revision',
+      '🟠 10 days, ' + n + ' sale(s) · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — on the 20-days Revision page.', 'ladder:r10:' + r.item_id);
+  }
+  /* 20-day: fewer than 5 sales in the SECOND 10-day window → revision again + Zaid's final desk. */
+  const d20 = await env.DB.prepare(
+    "SELECT item_id, title, r10_at FROM listing_ladder WHERE r20_status = '' AND r20_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+  for (const r of (d20.results || [])) {
+    const n = await ladderSales(env, r.item_id, r.r10_at, '');
+    const st = n >= 5 ? 'SALES_OK' : 'QUEUED';
+    await env.DB.prepare("UPDATE listing_ladder SET r20_status = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND r20_status = ''").bind(r.item_id, st).run();
+    if (st === 'QUEUED') {
+      await notifyRole(env, 'Advertising Manager', '20-day revision',
+        '🔴 20 days, still under 5 sales in the last window · item ' + r.item_id + ' — on the 20-days Revision page AND with Management for the final call.', 'ladder:r20:' + r.item_id);
+      await queueNotify(env, 'management', 'Listing final decision',
+        '🔴 Item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" finished 20 days under target — it is on the Listing decisions page with its full history.', 'ladder:final:' + r.item_id);
+    }
+  }
+}
+
 async function autoMsgScan(env) {
   await ensureTruthSchema(env);   // subject/buyer_name columns ride the same idempotent DDL list
   await perAccount(env, 'autoMsgScan', async (acct) => {
@@ -3754,6 +3844,11 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE orders ADD COLUMN buyer_name TEXT DEFAULT ''",
     "ALTER TABLE auto_msgs ADD COLUMN subject TEXT DEFAULT ''",
     "ALTER TABLE automsg_queue ADD COLUMN subject TEXT DEFAULT ''",
+    "CREATE TABLE IF NOT EXISTS listing_ladder (item_id TEXT PRIMARY KEY, account TEXT, title TEXT DEFAULT '', lister_email TEXT DEFAULT '', go_live_at TEXT, r72_at TEXT, r10_at TEXT, r20_at TEXT, r72_status TEXT DEFAULT '', r10_status TEXT DEFAULT '', r20_status TEXT DEFAULT '', parked TEXT DEFAULT '', video_status TEXT DEFAULT '', video_link TEXT DEFAULT '', final_status TEXT DEFAULT '', final_by TEXT DEFAULT '', final_at TEXT DEFAULT '', final_note TEXT DEFAULT '', created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS listing_research (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT, account TEXT, kind TEXT, data_json TEXT, changes_note TEXT DEFAULT '', submitted_by TEXT, submitted_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_lr_item ON listing_research(item_id, submitted_at)",
+    "CREATE TABLE IF NOT EXISTS ladder_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT, account TEXT, stage TEXT, decision TEXT, tier TEXT DEFAULT '', title_keywords TEXT DEFAULT '', desc_keywords TEXT DEFAULT '', comment TEXT DEFAULT '', decided_by TEXT, decided_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_lad_item ON ladder_decisions(item_id, decided_at)",
     "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
     "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
     "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
@@ -6227,6 +6322,276 @@ const ROUTES = {
         rows: rows.results || [], queue: tail.results || [],
         live: String(ctx.env.AUTOMSG_LIVE) === 'true',
         note: "'ordered' fires right after the buyer pays (delay_min later) — the order-confirmation touch. 'shipped' fires when tracking goes up. 'arrived' fires when eBay's estimated delivery date passes (no carrier scans, so 'should have arrived by now')." };
+    },
+  },
+
+  /* ============ Listing-ladder actions (owner, 10 Sept) ============ */
+  ladderSchema: {
+    auth: 'any', fn: async (p, ctx) => {
+      const row = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'listing_research_columns'").first().catch(() => null);
+      let cols = [];
+      try { cols = JSON.parse((row && row.value) || '[]'); } catch (e) {}
+      if (!Array.isArray(cols) || !cols.length) {
+        cols = [{ key: 'main_keyword', label: 'Main keyword' }, { key: 'search_volume', label: 'Search volume' },
+          { key: 'competitors', label: 'Competitors' }, { key: 'top_seller_price', label: 'Top seller price' },
+          { key: 'our_price', label: 'Our price' }, { key: 'notes', label: 'Notes' }];
+      }
+      return { columns: cols, placeholder: !(row && row.value) };
+    },
+  },
+  ladderSchemaSet: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const cols = Array.isArray(p.columns) ? p.columns.slice(0, 40).map(c => ({ key: String(c.key || '').slice(0, 60), label: String(c.label || c.key || '').slice(0, 120) })).filter(c => c.key) : [];
+      if (!cols.length) throw new Error('SAY: give the columns list');
+      await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('listing_research_columns', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=?1, updated_at=datetime('now')").bind(JSON.stringify(cols)).run();
+      return { saved: cols.length };
+    },
+  },
+
+  ladderQueue: {
+    auth: 'any', fn: async (p, ctx) => {
+      const seer = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
+      if (!seer) throw new AuthError('auth');
+      const page = String(p.page || 'r72');
+      const canDecide = ['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) >= 0 || !!ctx.user.super;
+      const base = 'SELECT l.*, COALESCE(i.image, "") AS image, COALESCE(i.price, 0) AS price, COALESCE(i.sold_qty, 0) AS sold_qty, ' +
+        '(SELECT COUNT(*) FROM listing_research r WHERE r.item_id = l.item_id) AS research_n ' +
+        'FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id ';
+      if (page === 'r72') {
+        const q = await ctx.env.DB.prepare(base + "WHERE l.r72_status = 'QUEUED' ORDER BY l.r72_at ASC LIMIT 120").all();
+        const parked = await ctx.env.DB.prepare(base + "WHERE l.parked = 'AM_CALL' ORDER BY l.updated_at ASC LIMIT 120").all();
+        const called = await ctx.env.DB.prepare(base + "WHERE l.parked = 'CALLED' AND l.video_status = '' ORDER BY l.updated_at ASC LIMIT 120").all();
+        const done = await ctx.env.DB.prepare(
+          "SELECT d.*, l.title FROM ladder_decisions d LEFT JOIN listing_ladder l ON l.item_id = d.item_id WHERE d.stage = 'R72' ORDER BY d.decided_at DESC LIMIT 30").all();
+        return { canDecide, queue: q.results || [], parked: parked.results || [], readyForVideo: called.results || [], recent: done.results || [] };
+      }
+      if (page === 'r20') {
+        const q10 = await ctx.env.DB.prepare(base + "WHERE l.r10_status = 'QUEUED' ORDER BY l.r10_at ASC LIMIT 120").all();
+        const q20 = await ctx.env.DB.prepare(base + "WHERE l.r20_status = 'QUEUED' ORDER BY l.r20_at ASC LIMIT 120").all();
+        const out10 = [], out20 = [];
+        for (const r of (q10.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.go_live_at, ''); out10.push(r); }
+        for (const r of (q20.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.r10_at, ''); out20.push(r); }
+        const done = await ctx.env.DB.prepare(
+          "SELECT d.*, l.title FROM ladder_decisions d LEFT JOIN listing_ladder l ON l.item_id = d.item_id WHERE d.stage IN ('R10','R20') ORDER BY d.decided_at DESC LIMIT 30").all();
+        return { canDecide, day10: out10, day20: out20, recent: done.results || [] };
+      }
+      throw new Error('SAY: page is r72 or r20');
+    },
+  },
+
+  /* Zain's verdict. "he will have to must upload a proper keyword there" — a REVISION without
+     title keywords is refused; the tier picks the lister's clock (T1 = 2 days, T2 = parkable). */
+  ladderDecide: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || ''), stage = String(p.stage || '').toUpperCase();
+      const decision = String(p.decision || '').toUpperCase();
+      if (['R72', 'R10', 'R20'].indexOf(stage) < 0) throw new Error('SAY: stage must be R72, R10 or R20');
+      if (['NO_REVISION', 'REVISION'].indexOf(decision) < 0) throw new Error('SAY: decision is NO_REVISION or REVISION');
+      const tier = decision === 'REVISION' ? String(p.tier || '').toUpperCase() : '';
+      const tkw = String(p.title_keywords || '').trim().slice(0, 3000);
+      const dkw = String(p.desc_keywords || '').trim().slice(0, 3000);
+      const comment = String(p.comment || '').trim().slice(0, 1000);
+      if (decision === 'REVISION') {
+        if (['T1', 'T2'].indexOf(tier) < 0) throw new Error('SAY: pick Tier 1 or Tier 2');
+        if (!tkw) throw new Error('SAY: title keywords are mandatory for a revision — type them in');
+      }
+      const col = stage === 'R72' ? 'r72_status' : stage === 'R10' ? 'r10_status' : 'r20_status';
+      const row = await ctx.env.DB.prepare('SELECT * FROM listing_ladder WHERE item_id = ?1').bind(item).first();
+      if (!row) throw new Error('SAY: that item is not on the ladder');
+      if (String(row[col]) !== 'QUEUED') throw new Error('SAY: already decided (' + String(row[col]) + ') — refresh');
+      const claim = await ctx.env.DB.prepare(
+        'UPDATE listing_ladder SET ' + col + " = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND " + col + " = 'QUEUED'"
+      ).bind(item, decision === 'NO_REVISION' ? 'NO_REVISION' : tier).run();
+      if (!claim.meta || !claim.meta.changes) throw new Error('SAY: someone else just decided this one — refresh');
+      await ctx.env.DB.prepare(
+        "INSERT INTO ladder_decisions (item_id, account, stage, decision, tier, title_keywords, desc_keywords, comment, decided_by, decided_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))"
+      ).bind(item, String(row.account || ''), stage, decision, tier, tkw, dkw, comment, ctx.user.email).run();
+      let task = null;
+      if (decision === 'REVISION') {
+        try {
+          const out = await asRunJobDirect(ctx.env, 'ladderTask', {
+            item_id: item, account: String(row.account || ''), title: String(row.title || ''),
+            lister_email: String(row.lister_email || ''), stage, tier, kind: 'revision',
+            title_keywords: tkw, desc_keywords: dkw, comment, deadline_days: tier === 'T1' ? 2 : 7,
+          });
+          task = String(out || '').slice(0, 200);
+        } catch (e) { task = 'task relay failed — raise it by hand: ' + String(e && e.message || e).slice(0, 120); }
+      }
+      return { ok: true, item_id: item, stage, decision, tier, task };
+    },
+  },
+
+  /* Tier-2 park: "when he clicks it his work is done". The lister (or their manager) parks the
+     item; it waits on Zain's page until he calls the revision in. */
+  ladderPark: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Item Lister', 'Listing Manager', 'Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || '');
+      const r = await ctx.env.DB.prepare("UPDATE listing_ladder SET parked = 'AM_CALL', updated_at = datetime('now') WHERE item_id = ?1").bind(item).run();
+      if (!r.meta || !r.meta.changes) throw new Error('SAY: that item is not on the ladder');
+      await notifyRole(ctx.env, 'Advertising Manager', 'Waiting for your call',
+        '🕐 Item ' + item + ' is parked "Waiting for the Advertising Manager\u2019s call" — call the revision in from the 72-hours Revision page whenever it is time.', 'ladder:park:' + item);
+      return { ok: true, parked: true };
+    },
+  },
+  ladderCall: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || '');
+      const row = await ctx.env.DB.prepare('SELECT * FROM listing_ladder WHERE item_id = ?1 AND parked = ?2').bind(item, 'AM_CALL').first();
+      if (!row) throw new Error('SAY: that item is not parked for your call');
+      await ctx.env.DB.prepare("UPDATE listing_ladder SET parked = 'CALLED', updated_at = datetime('now') WHERE item_id = ?1").bind(item).run();
+      const last = await ctx.env.DB.prepare("SELECT title_keywords, desc_keywords, comment FROM ladder_decisions WHERE item_id = ?1 ORDER BY decided_at DESC LIMIT 1").bind(item).first().catch(() => null);
+      let task = null;
+      try {
+        const out = await asRunJobDirect(ctx.env, 'ladderTask', {
+          item_id: item, account: String(row.account || ''), title: String(row.title || ''),
+          lister_email: String(row.lister_email || ''), stage: 'TIER-2 CALL', tier: 'T2', kind: 'revision',
+          title_keywords: String((last && last.title_keywords) || ''), desc_keywords: String((last && last.desc_keywords) || ''),
+          comment: 'The Advertising Manager has called this Tier-2 revision in — it is live work now.', deadline_days: 2,
+        });
+        task = String(out || '').slice(0, 200);
+      } catch (e) { task = 'task relay failed: ' + String(e && e.message || e).slice(0, 120); }
+      return { ok: true, called: true, task };
+    },
+  },
+
+  /* Tier-2 step 2: after the product revision Zain sends it to VIDEO — the lister adds a video
+     on the eBay listing and records the link here. */
+  ladderVideo: {
+    auth: 'any', fn: async (p, ctx) => {
+      const item = String(p.item_id || ''), op = String(p.op || '');
+      if (op === 'send') {
+        if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+        const row = await ctx.env.DB.prepare('SELECT * FROM listing_ladder WHERE item_id = ?1').bind(item).first();
+        if (!row) throw new Error('SAY: not on the ladder');
+        await ctx.env.DB.prepare("UPDATE listing_ladder SET video_status = 'QUEUED', updated_at = datetime('now') WHERE item_id = ?1").bind(item).run();
+        let task = null;
+        try {
+          const out = await asRunJobDirect(ctx.env, 'ladderTask', {
+            item_id: item, account: String(row.account || ''), title: String(row.title || ''),
+            lister_email: String(row.lister_email || ''), stage: 'VIDEO', tier: 'T2', kind: 'video',
+            comment: 'Add a product video on the eBay listing, then record the video link on the Video revisions page.', deadline_days: 3,
+          });
+          task = String(out || '').slice(0, 200);
+        } catch (e) { task = 'task relay failed: ' + String(e && e.message || e).slice(0, 120); }
+        return { ok: true, video: 'QUEUED', task };
+      }
+      if (op === 'done') {
+        if (['Item Lister', 'Listing Manager', 'Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+        const link = String(p.link || '').trim();
+        if (!/^https?:\/\//i.test(link)) throw new Error('SAY: paste the product video link (https)');
+        const r = await ctx.env.DB.prepare(
+          "UPDATE listing_ladder SET video_status = 'DONE', video_link = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND video_status = 'QUEUED'"
+        ).bind(item, link.slice(0, 500)).run();
+        if (!r.meta || !r.meta.changes) throw new Error('SAY: that item is not waiting for a video');
+        await notifyRole(ctx.env, 'Advertising Manager', 'Video added',
+          '🎬 Item ' + item + ' has its product video — link recorded on the Video revisions page.', 'ladder:video:' + item);
+        return { ok: true, video: 'DONE' };
+      }
+      throw new Error('SAY: op is send or done');
+    },
+  },
+
+  ladderVideoList: {
+    auth: 'any', fn: async (p, ctx) => {
+      const base = 'SELECT l.*, COALESCE(i.image, "") AS image FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id ';
+      const q = await ctx.env.DB.prepare(base + "WHERE l.video_status = 'QUEUED' ORDER BY l.updated_at ASC LIMIT 100").all();
+      const d = await ctx.env.DB.prepare(base + "WHERE l.video_status = 'DONE' ORDER BY l.updated_at DESC LIMIT 60").all();
+      return { queue: q.results || [], done: d.results || [] };
+    },
+  },
+
+  /* The keyword/SEO research — one row per submission, EVERY version kept ("keep the archive"). */
+  ladderResearchSave: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Item Lister', 'Listing Manager', 'Management', 'Ops Head', 'Advertising Manager', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || '').trim();
+      const kind = String(p.kind || 'LISTING').toUpperCase().slice(0, 12);
+      if (!item) throw new Error('SAY: which item?');
+      const data = (p.data && typeof p.data === 'object') ? p.data : {};
+      const clean = {};
+      let n = 0;
+      for (const k of Object.keys(data)) {
+        if (n >= 40) break;
+        clean[String(k).slice(0, 60)] = String(data[k] == null ? '' : data[k]).slice(0, 2000);
+        n++;
+      }
+      const acct = await ctx.env.DB.prepare('SELECT account FROM listing_ladder WHERE item_id = ?1').bind(item).first().catch(() => null);
+      await ctx.env.DB.prepare(
+        "INSERT INTO listing_research (item_id, account, kind, data_json, changes_note, submitted_by, submitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))"
+      ).bind(item, String((acct && acct.account) || p.account || ''), kind, JSON.stringify(clean), String(p.changes_note || '').slice(0, 1000), ctx.user.email).run();
+      return { ok: true, versions: (await ctx.env.DB.prepare('SELECT COUNT(*) AS n FROM listing_research WHERE item_id = ?1').bind(item).first()).n };
+    },
+  },
+  ladderResearch: {
+    auth: 'any', fn: async (p, ctx) => {
+      const item = String(p.item_id || '');
+      const rs = await ctx.env.DB.prepare('SELECT * FROM listing_research WHERE item_id = ?1 ORDER BY submitted_at DESC LIMIT 20').bind(item).all();
+      const ds = await ctx.env.DB.prepare('SELECT * FROM ladder_decisions WHERE item_id = ?1 ORDER BY decided_at DESC LIMIT 20').bind(item).all();
+      return { research: rs.results || [], decisions: ds.results || [] };
+    },
+  },
+
+  /* Zaid's desk: the 20-day arrivals with the whole story — sales windows, every research
+     version, every decision and keyword set, the video. He keeps, revises again, or ends it. */
+  ladderFinalQueue: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const rs = await ctx.env.DB.prepare(
+        'SELECT l.*, COALESCE(i.image, "") AS image, COALESCE(i.price, 0) AS price, COALESCE(i.sold_qty, 0) AS sold_qty, ' +
+        '(SELECT COUNT(*) FROM listing_research r WHERE r.item_id = l.item_id) AS research_n, ' +
+        '(SELECT COUNT(*) FROM ladder_decisions d WHERE d.item_id = l.item_id) AS decisions_n ' +
+        "FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id WHERE l.r20_status IN ('QUEUED','T1','T2') AND l.final_status = '' ORDER BY l.r20_at ASC LIMIT 100").all();
+      const rows = [];
+      for (const r of (rs.results || [])) {
+        r.sales_first10 = await ladderSales(ctx.env, r.item_id, r.go_live_at, r.r10_at);
+        r.sales_second10 = await ladderSales(ctx.env, r.item_id, r.r10_at, r.r20_at);
+        r.sales_total = await ladderSales(ctx.env, r.item_id, r.go_live_at, '');
+        rows.push(r);
+      }
+      const canDecide = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || !!ctx.user.super;
+      return { rows, canDecide };
+    },
+  },
+  ladderFinal: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const item = String(p.item_id || ''), verdict = String(p.verdict || '').toUpperCase();
+      const note = String(p.note || '').trim().slice(0, 500);
+      if (['KEEP', 'REVISE', 'END'].indexOf(verdict) < 0) throw new Error('SAY: the decision is KEEP, REVISE or END');
+      const row = await ctx.env.DB.prepare("SELECT * FROM listing_ladder WHERE item_id = ?1 AND final_status = ''").bind(item).first();
+      if (!row) throw new Error('SAY: that item is not awaiting a final decision');
+      const claim = await ctx.env.DB.prepare(
+        "UPDATE listing_ladder SET final_status = ?2, final_by = ?3, final_at = datetime('now'), final_note = ?4, updated_at = datetime('now') WHERE item_id = ?1 AND final_status = ''"
+      ).bind(item, verdict, ctx.user.email, note).run();
+      if (!claim.meta || !claim.meta.changes) throw new Error('SAY: someone else just decided — refresh');
+      let task = null;
+      if (verdict !== 'KEEP') {
+        try {
+          const out = await asRunJobDirect(ctx.env, 'ladderTask', {
+            item_id: item, account: String(row.account || ''), title: String(row.title || ''),
+            lister_email: String(row.lister_email || ''), stage: 'FINAL', tier: '', kind: verdict === 'END' ? 'end' : 'revision',
+            comment: note || (verdict === 'END' ? 'Management decided: end this listing on eBay.' : 'Management decided: one more revision.'), deadline_days: 2,
+          });
+          task = String(out || '').slice(0, 200);
+        } catch (e) { task = 'task relay failed: ' + String(e && e.message || e).slice(0, 120); }
+      }
+      return { ok: true, verdict, task };
+    },
+  },
+  ladderHistory: {
+    auth: 'any', fn: async (p, ctx) => {
+      const item = String(p.item_id || '');
+      const l = await ctx.env.DB.prepare('SELECT l.*, COALESCE(i.image, "") AS image, COALESCE(i.price, 0) AS price FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id WHERE l.item_id = ?1').bind(item).first();
+      if (!l) throw new Error('SAY: not on the ladder');
+      const research = await ctx.env.DB.prepare('SELECT * FROM listing_research WHERE item_id = ?1 ORDER BY submitted_at ASC').bind(item).all();
+      const decisions = await ctx.env.DB.prepare('SELECT * FROM ladder_decisions WHERE item_id = ?1 ORDER BY decided_at ASC').bind(item).all();
+      l.sales_first10 = await ladderSales(ctx.env, item, l.go_live_at, l.r10_at);
+      l.sales_second10 = await ladderSales(ctx.env, item, l.r10_at, l.r20_at);
+      l.sales_total = await ladderSales(ctx.env, item, l.go_live_at, '');
+      return { ladder: l, research: research.results || [], decisions: decisions.results || [] };
     },
   },
 
@@ -9435,7 +9800,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

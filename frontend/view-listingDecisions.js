@@ -191,3 +191,94 @@
     }
   };
 })();
+
+
+/* ============ THE 20-DAY FINAL DESK (owner, 10 Sept — the listing ladder) ============
+ * Appended as its own layer: items that finished 20 days under the sales target arrive here
+ * with the WHOLE story — sales windows, every research version, every keyword decision, the
+ * video — and Management gives the final word: Keep running / Revise again / End listing. */
+(function () {
+  if (!VIEWS.listingDecisions) { return; }
+  var oldRender = VIEWS.listingDecisions.render;
+  var oldInit = VIEWS.listingDecisions.init;
+  VIEWS.listingDecisions.render = function () {
+    return oldRender().replace('<div id="ldBody"', '<div id="ldFinalWrap" class="enter d2"></div><div id="ldBody"');
+  };
+  VIEWS.listingDecisions.init = function () {
+    if (oldInit) { oldInit(); }
+    ldfLoad();
+  };
+  function ldfHistoryToggle(host, itemId) {
+    var box = host.querySelector('[data-ldfh="' + itemId + '"]');
+    if (!box) { return; }
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (box.dataset.loaded) { return; }
+    box.innerHTML = '<div class="spinner"></div>';
+    engineCall('ladderHistory', { item_id: itemId }, 20000).then(function (d) {
+      box.dataset.loaded = '1';
+      var l = d.ladder || {};
+      var h = '<div style="display:flex;gap:14px;flex-wrap:wrap;font-weight:700;font-size:12px;margin-bottom:8px">' +
+        '<span>Went live: ' + esc(l.go_live_at || '?') + '</span>' +
+        '<span>First 10 days: <b>' + esc(String(l.sales_first10)) + '</b> sale(s)</span>' +
+        '<span>Second 10 days: <b>' + esc(String(l.sales_second10)) + '</b></span>' +
+        '<span>Total: <b>' + esc(String(l.sales_total)) + '</b></span>' +
+        (l.video_link && safeUrl(l.video_link) ? '<a class="minibtn" target="_blank" rel="noopener noreferrer" href="' + safeUrl(l.video_link).replace(/"/g, '&quot;') + '">Product video</a>' : '') + '</div>';
+      (d.decisions || []).forEach(function (x) {
+        h += '<div style="margin-bottom:7px;font-size:12px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(String(x.tier).replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
+          (x.title_keywords ? '<div style="color:var(--text-2)">Title keywords: ' + esc(x.title_keywords) + '</div>' : '') +
+          (x.desc_keywords ? '<div style="color:var(--text-2)">Description keywords: ' + esc(x.desc_keywords) + '</div>' : '') +
+          (x.comment ? '<div style="color:var(--text-3)">' + esc(x.comment) + '</div>' : '') + '</div>';
+      });
+      (d.research || []).forEach(function (v) {
+        var obj = {}; try { obj = JSON.parse(v.data_json || '{}'); } catch (e) {}
+        h += '<div style="margin:9px 0 3px;font-size:12px"><b>' + esc(v.kind) + ' research</b> — ' + esc(v.submitted_by) + ' · ' + esc(v.submitted_at) +
+          (v.changes_note ? ' · <i>' + esc(v.changes_note) + '</i>' : '') + '</div><table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+        Object.keys(obj).forEach(function (k) { if (String(obj[k]).trim()) { h += '<tr><td style="padding:3px 8px;color:var(--text-3);font-weight:700;width:36%;border-top:1px solid var(--gold-line);vertical-align:top">' + esc(k) + '</td><td style="padding:3px 8px;border-top:1px solid var(--gold-line);white-space:pre-wrap;word-break:break-word">' + esc(obj[k]) + '</td></tr>'; } });
+        h += '</table>';
+      });
+      box.innerHTML = h;
+    }).catch(function (e) { box.innerHTML = esc(e.message); });
+  }
+  function ldfLoad() {
+    var wrap = $('ldFinalWrap');
+    if (!wrap) { return; }
+    engineCall('ladderFinalQueue', {}, 30000).then(function (d) {
+      var rows = d.rows || [];
+      if (!rows.length) { wrap.innerHTML = ''; return; }
+      var can = d.canDecide;
+      var h = '<div class="card" style="margin-bottom:16px"><div class="hd">Final decisions — the 20-day ladder <span class="tk-sub">' + rows.length + ' waiting</span></div><div class="bd">';
+      rows.forEach(function (r) {
+        var u = safeUrl(r.image);
+        h += '<div class="ld-row" style="grid-template-columns:56px 1fr auto">' +
+          '<span class="ld-thumb">' + (u ? '<img src="' + u.replace(/"/g, '&quot;') + '" alt="">' : '📦') + '</span>' +
+          '<div class="ld-mid"><div class="ld-title"><a href="https://www.ebay.co.uk/itm/' + esc(r.item_id) + '" target="_blank" rel="noopener noreferrer">' + esc(r.title || r.item_id) + '</a></div>' +
+          '<div class="ld-badges"><span class="ld-b mono">' + esc(r.item_id) + '</span><span class="ld-b">' + esc(r.account || '') + '</span>' +
+          '<span class="ld-b zero">' + esc(String(r.sales_first10)) + ' + ' + esc(String(r.sales_second10)) + ' sales</span>' +
+          '<span class="ld-b">research ×' + esc(String(r.research_n || 0)) + '</span><span class="ld-b">decisions ×' + esc(String(r.decisions_n || 0)) + '</span></div>' +
+          '<div class="ld-meta">' + (r.lister_email ? 'listed by ' + esc(r.lister_email) + ' · ' : '') + 'live since ' + esc(String(r.go_live_at || '').slice(0, 10)) + '</div></div>' +
+          '<div class="ld-acts"><button class="minibtn" data-ldf="hist" data-id="' + esc(r.item_id) + '">History</button>' +
+          (can ? '<button class="minibtn" data-ldf="KEEP" data-id="' + esc(r.item_id) + '">Keep running</button>' +
+                 '<button class="minibtn" data-ldf="REVISE" data-id="' + esc(r.item_id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Revise again</button>' +
+                 '<button class="minibtn" data-ldf="END" data-id="' + esc(r.item_id) + '" style="border-color:var(--bad);color:var(--bad)">End listing</button>' : '') +
+          '</div></div>' +
+          '<div class="tk-box hidden" data-ldfh="' + esc(r.item_id) + '" style="margin:-4px 0 10px"></div>';
+      });
+      h += '</div></div>';
+      wrap.innerHTML = h;
+      wrap.onclick = function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('[data-ldf]') : null;
+        if (!b) { return; }
+        var op = b.getAttribute('data-ldf'), id = b.getAttribute('data-id');
+        if (op === 'hist') { ldfHistoryToggle(wrap, id); return; }
+        var note = prompt(op === 'END' ? 'End listing ' + id + ' — say why (goes on the record):'
+          : op === 'REVISE' ? 'Revise again — instruction for the lister:' : 'Keep running — a short note:') || '';
+        if (op !== 'KEEP' && !note.trim()) { toast('A note is needed for the record.'); return; }
+        b.disabled = true;
+        engineCall('ladderFinal', { item_id: id, verdict: op, note: note }, 25000)
+          .then(function (r) { toast('Decision recorded' + (r.task ? ' — ' + r.task : '') + '.'); ldfLoad(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+      };
+    }).catch(function () { wrap.innerHTML = ''; });
+  }
+})();
