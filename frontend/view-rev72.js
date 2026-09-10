@@ -26,11 +26,23 @@
     '.lr-res{margin-top:10px;border:1px solid var(--gold-line);border-radius:10px;background:var(--panel);padding:10px 12px;font-size:12px}' +
     '.lr-res table{width:100%;border-collapse:collapse;font-size:11.5px}.lr-res td{padding:4px 8px;border-top:1px solid var(--gold-line);vertical-align:top;white-space:pre-wrap;word-break:break-word}' +
     '.lr-res .k{color:var(--text-3);font-weight:700;width:38%}' +
-    '.lr-badge{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);white-space:nowrap}'
+    '.lr-badge{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);white-space:nowrap}' +
+    '.lr-kwset{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}' +
+    '.lr-kwchip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);line-height:1.5;white-space:normal}' +
+    '.lr-kwlabel{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--gold-a);margin-top:8px}'
   );
 
   function lrKwCount(s) {
     return String(s || '').split(/[\n,]/).map(function (x) { return x.trim(); }).filter(String).length;
+  }
+  /* Owner (11 Sept): "keep each keyword separate with proper spacing" — the stored text keeps
+     Zain's newlines/commas; the SCREEN splits on them and wears one chip per keyword, so a
+     50-keyword set reads as fifty pills, never one run-on paragraph. */
+  function lrKwChips(s, label) {
+    var parts = String(s || '').split(/[\n,]+/).map(function (x) { return x.trim(); }).filter(String);
+    if (!parts.length) { return ''; }
+    return '<div class="lr-kwlabel">' + esc(label) + ' · ' + parts.length + '</div>' +
+      '<div class="lr-kwset">' + parts.map(function (k) { return '<span class="lr-kwchip">' + esc(k) + '</span>'; }).join('') + '</div>';
   }
   function lrAge(go) {
     var ms = Date.now() - new Date(String(go || '').replace(' ', 'T') + 'Z').getTime();
@@ -62,9 +74,9 @@
       box.dataset.loaded = '1';
       var h = '';
       (d.decisions || []).forEach(function (x) {
-        h += '<div style="margin-bottom:8px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(x.tier.replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
-          (x.title_keywords ? '<div><span class="k">Title keywords:</span> ' + esc(x.title_keywords) + '</div>' : '') +
-          (x.desc_keywords ? '<div><span class="k">Description keywords:</span> ' + esc(x.desc_keywords) + '</div>' : '') +
+        h += '<div style="margin-bottom:10px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(x.tier.replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
+          lrKwChips(x.title_keywords, 'Title keywords') +
+          lrKwChips(x.desc_keywords, 'Description keywords') +
           (x.comment ? '<div><span class="k">Comment:</span> ' + esc(x.comment) + '</div>' : '') + '</div>';
       });
       (d.research || []).forEach(function (v) {
@@ -86,7 +98,7 @@
       '<label><input type="radio" name="tier-' + esc(r.item_id) + '" value="T2"> Tier 2 — parkable, your call</label>' +
       '<button class="btn-gold" style="margin-left:auto" data-lact="submitRev" data-id="' + esc(r.item_id) + '" data-stage="' + esc(stage) + '">Submit revision</button></div></div>';
   }
-  window.LADDER_UI = { lrKwCount: lrKwCount, lrHead: lrHead, lrDecisionForm: lrDecisionForm, lrResearchToggle: lrResearchToggle, lrThumb: lrThumb, lrAge: lrAge };
+  window.LADDER_UI = { lrKwCount: lrKwCount, lrKwChips: lrKwChips, lrHead: lrHead, lrDecisionForm: lrDecisionForm, lrResearchToggle: lrResearchToggle, lrThumb: lrThumb, lrAge: lrAge };
 
   function wire(host, reload) {
     host.onclick = function (ev) {

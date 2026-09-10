@@ -225,9 +225,12 @@
         '<span>Total: <b>' + esc(String(l.sales_total)) + '</b></span>' +
         (l.video_link && safeUrl(l.video_link) ? '<a class="minibtn" target="_blank" rel="noopener noreferrer" href="' + safeUrl(l.video_link).replace(/"/g, '&quot;') + '">Product video</a>' : '') + '</div>';
       (d.decisions || []).forEach(function (x) {
-        h += '<div style="margin-bottom:7px;font-size:12px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(String(x.tier).replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
-          (x.title_keywords ? '<div style="color:var(--text-2)">Title keywords: ' + esc(x.title_keywords) + '</div>' : '') +
-          (x.desc_keywords ? '<div style="color:var(--text-2)">Description keywords: ' + esc(x.desc_keywords) + '</div>' : '') +
+        var chips = (window.LADDER_UI && window.LADDER_UI.lrKwChips)
+          ? window.LADDER_UI.lrKwChips(x.title_keywords, 'Title keywords') + window.LADDER_UI.lrKwChips(x.desc_keywords, 'Description keywords')
+          : (x.title_keywords ? '<div style="color:var(--text-2)">Title keywords: ' + esc(x.title_keywords) + '</div>' : '') +
+            (x.desc_keywords ? '<div style="color:var(--text-2)">Description keywords: ' + esc(x.desc_keywords) + '</div>' : '');
+        h += '<div style="margin-bottom:10px;font-size:12px"><b>' + esc(x.stage) + ' · ' + esc(x.decision) + (x.tier ? ' · Tier ' + esc(String(x.tier).replace('T', '')) : '') + '</b> — ' + esc(x.decided_by) + ' · ' + esc(x.decided_at) +
+          chips +
           (x.comment ? '<div style="color:var(--text-3)">' + esc(x.comment) + '</div>' : '') + '</div>';
       });
       (d.research || []).forEach(function (v) {
