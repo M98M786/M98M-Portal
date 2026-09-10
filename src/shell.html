@@ -578,7 +578,7 @@ function engineCall(action, payload, timeoutMs){
   return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
     .then(function(r){ return r.json(); })
-    .then(function(j){ clearTimeout(t); if(!j.ok){ throw new Error(j.error||'request failed'); } return j.data; },
+    .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
           function(e){ clearTimeout(t); throw e; });
 }
 function engineApi(action, payload, engineOnly){
@@ -613,6 +613,7 @@ function engineApi(action, payload, engineOnly){
               : (e2 && e2.message) || 'request failed');
           });
         }
+        if(j.error==='auth' && STATE.session){ authSelfHeal(); }
         throw new Error(j.error||'request failed');
       }, function(){
         return engineCall(action, payload, 12000).catch(function(e2){
@@ -1458,6 +1459,20 @@ function fmtPkt(iso, withDate){
 function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
 $('themeBtn').onclick=function(){ var r=document.documentElement; r.dataset.theme = r.dataset.theme==='royal'?'ivory':'royal'; };
 $('avatar').onclick=signOut;
+/* 11 Sept (the 'auth' epidemic — Husnain's empty My-reports, the lister's research form): the
+   7-day portal session expires QUIETLY and every engine call then answers 'auth' while the tab
+   looks signed-in. One expired-session heal per 10 minutes: drop the dead session and reload —
+   boot's silent Google sign-in re-mints a fresh one without the person touching anything. */
+function authSelfHeal(){
+  try{
+    var last = Number(sessionStorage.getItem('m98m:authHeal') || 0);
+    if (Date.now() - last < 600000) return false;               // once per 10 min — never a loop
+    sessionStorage.setItem('m98m:authHeal', String(Date.now()));
+    psessClear(); sessClear();
+    location.reload();
+    return true;
+  }catch(e){ return false; }
+}
 function signOut(){ try{ if(STATE.session){ api('sessionEnd', { session: STATE.session }).catch(function(){}); } }catch(e){} try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); psessClear(); STATE.idToken=null; STATE.session=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
 /* ---- THE 2-HOUR REPORT GATE (owner, 10 Sept: "if a staff member has not added his 2-hourly
