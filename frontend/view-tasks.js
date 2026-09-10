@@ -519,7 +519,7 @@
     /* Listing-ladder tasks (owner, 10 Sept): the research button is the lister's data entry —
        the same keyword/SEO sheet, resubmitted at every revision and archived. Tier-2 tasks may
        be parked "Waiting for the Advertising Manager's call". */
-    var lad = tkLadder(details);
+    var lad = tkResearchHandle(t);
     if (lad) {
       act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
       if (lad.tier === 'T2' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED)) {
@@ -701,7 +701,7 @@
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkLadder(tkStr(t.details)) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkResearchHandle(t) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
@@ -712,6 +712,18 @@
     var m = /\[LADDER:([^:\]]+):([^:\]]+):([^\]]+)\]/.exec(String(details || ''));
     if (!m) { return null; }
     return { stage: m[1], tier: m[2] === '-' ? '' : m[2], item: m[3] };
+  }
+  /* Owner (10 Sept): the spreadsheet's keyword/SEO research is taken FROM THE LISTER on the
+     LISTING task itself — saved under task:<id> at draft time, rekeyed to the Item ID at
+     go-live. Open listing_new tasks therefore carry the research form too. */
+  function tkResearchHandle(t) {
+    var lad = tkLadder(tkStr(t.details));
+    if (lad) { return lad; }
+    var st = tkStr(t.status);
+    if (tkStr(t.type) === 'listing_new' && (st === TK_PENDING || st === TK_WORKING || st === TK_UPDATED)) {
+      return { stage: 'LISTING', tier: '', item: 'task:' + tkStr(t.task_id) };
+    }
+    return null;
   }
   var TK_SCHEMA = null;
   function tkLadResToggle(box, id) {
@@ -799,7 +811,14 @@
     }
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
     if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
-    if (act === 'draft') { tkSendDraft(box, id, btn); return; }
+    if (act === 'draft') {
+      if (!sessionStorage.getItem('ladres:' + id)) {
+        toast('Add the keyword research data first — the "Keyword research" button on this task. The draft cannot go to go-live without it.');
+        tkLadResToggle(box, id);
+        return;
+      }
+      tkSendDraft(box, id, btn); return;
+    }
     if (act === 'reject') { tkSendReject(box, id, btn); return; }
     if (act === 'flagClear') {
       btn.disabled = true;
