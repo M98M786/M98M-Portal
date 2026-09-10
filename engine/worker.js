@@ -2600,6 +2600,40 @@ async function ladderWatch(env) {
     ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
       ladderUtc(t), ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
   }
+  /* orders fast-path: retry day-tab writes the bridge missed, and keep the per-listing ali-link
+     memory fed from order history (both cheap, both idempotent). */
+  try {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO item_links (item_id, ali_link, last_ali_order, updated_at) " +
+      "SELECT o.item_id, o.ali_link, COALESCE(o.ali_order, ''), datetime('now') FROM orders o " +
+      "WHERE o.ali_link != '' AND o.item_id != '' GROUP BY o.item_id HAVING MAX(o.created_at)"
+    ).run();
+  } catch (e) {}
+  const rt = await env.DB.prepare(
+    "SELECT * FROM order_processing WHERE sheet_status = 'PENDING' ORDER BY updated_at ASC LIMIT 10").all().catch(() => ({ results: [] }));
+  for (const r of (rt.results || [])) {
+    const values = {};
+    if (r.cost) values['Cost'] = r.cost;
+    if (r.ali_order) values['Order Number'] = r.ali_order;
+    if (r.email) values['Email'] = r.email;
+    if (r.new_ali_link) values['New Ali Link'] = r.new_ali_link;
+    if (r.tracking) values['Tracking number'] = r.tracking;
+    if (r.delivery_status) values['Delivery Status'] = r.delivery_status;
+    if (!Object.keys(values).length) { await env.DB.prepare("UPDATE order_processing SET sheet_status='WRITTEN' WHERE order_id=?1").bind(r.order_id).run(); continue; }
+    try {
+      const resp = await fetch(env.AS_URL, {
+        method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'engineSheetWrite', payload: {
+          key: await secret(env, 'SYNC_KEY'), whitelist: 'orders_day', account: r.account,
+          tab: r.tab || undefined, match_header: 'Order number', match_value: r.order_id, values } }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const body = await resp.json().catch(() => ({}));
+      const okNow = body.ok && body.data && body.data.ok !== false;
+      await env.DB.prepare("UPDATE order_processing SET sheet_status = ?2, sheet_reason = ?3 WHERE order_id = ?1")
+        .bind(r.order_id, okNow ? 'WRITTEN' : 'PENDING', String((body.data && body.data.reason) || body.error || '').slice(0, 160)).run();
+    } catch (e) {}
+  }
   const nowU = ladderUtc(new Date());
   /* 72h due → Zain's queue. "after exact 72 hours the portal will show there all the listings". */
   const d72 = await env.DB.prepare(
@@ -3849,6 +3883,8 @@ async function ensureTruthSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_lr_item ON listing_research(item_id, submitted_at)",
     "CREATE TABLE IF NOT EXISTS ladder_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT, account TEXT, stage TEXT, decision TEXT, tier TEXT DEFAULT '', title_keywords TEXT DEFAULT '', desc_keywords TEXT DEFAULT '', comment TEXT DEFAULT '', decided_by TEXT, decided_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_lad_item ON ladder_decisions(item_id, decided_at)",
+    "CREATE TABLE IF NOT EXISTS order_processing (order_id TEXT PRIMARY KEY, account TEXT, tab TEXT DEFAULT '', cost TEXT DEFAULT '', ali_order TEXT DEFAULT '', email TEXT DEFAULT '', new_ali_link TEXT DEFAULT '', tracking TEXT DEFAULT '', delivery_status TEXT DEFAULT '', sheet_status TEXT DEFAULT '', sheet_reason TEXT DEFAULT '', updated_by TEXT DEFAULT '', updated_at TEXT)",
+    "CREATE TABLE IF NOT EXISTS item_links (item_id TEXT PRIMARY KEY, ali_link TEXT DEFAULT '', last_ali_order TEXT DEFAULT '', updated_at TEXT)",
     "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
     "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
     "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
@@ -6363,7 +6399,12 @@ const ROUTES = {
         const called = await ctx.env.DB.prepare(base + "WHERE l.parked = 'CALLED' AND l.video_status = '' ORDER BY l.updated_at ASC LIMIT 120").all();
         const done = await ctx.env.DB.prepare(
           "SELECT d.*, l.title FROM ladder_decisions d LEFT JOIN listing_ladder l ON l.item_id = d.item_id WHERE d.stage = 'R72' ORDER BY d.decided_at DESC LIMIT 30").all();
-        return { canDecide, queue: q.results || [], parked: parked.results || [], readyForVideo: called.results || [], recent: done.results || [] };
+        /* Owner, 10 Sept: "there is no archive and separate listings of tier 1 and tier 2" —
+           the decided listings live on the page in their own two lists. */
+        const t1 = await ctx.env.DB.prepare(base + "WHERE l.r72_status = 'T1' ORDER BY l.updated_at DESC LIMIT 100").all();
+        const t2 = await ctx.env.DB.prepare(base + "WHERE l.r72_status = 'T2' ORDER BY l.updated_at DESC LIMIT 100").all();
+        return { canDecide, queue: q.results || [], parked: parked.results || [], readyForVideo: called.results || [],
+          tier1: t1.results || [], tier2: t2.results || [], recent: done.results || [] };
       }
       if (page === 'r20') {
         const q10 = await ctx.env.DB.prepare(base + "WHERE l.r10_status = 'QUEUED' ORDER BY l.r10_at ASC LIMIT 120").all();
@@ -6592,6 +6633,118 @@ const ROUTES = {
       l.sales_second10 = await ladderSales(ctx.env, item, l.r10_at, l.r20_at);
       l.sales_total = await ladderSales(ctx.env, item, l.go_live_at, '');
       return { ladder: l, research: research.results || [], decisions: decisions.results || [] };
+    },
+  },
+
+  /* ============ FAST order processing (owner, 10 Sept: "trackings and cost and aliexpress
+     order numbers accepted very fastly … updates the sheet within seconds") ============
+     One engine write: D1 instantly (the portal's own record + the per-LISTING ali-link memory),
+     then the v19 bridge stamps the day tab inline — typically 2–6 s end to end, never the 25 s
+     lock queue. A bridge miss is marked PENDING and swept every 15 minutes until it lands. */
+  orderFastRecord: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Order Processor', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const account = String(p.account || '').trim(), orderId = String(p.order_id || '').trim();
+      if (!account || !orderId) throw new Error('SAY: account and order_id are needed');
+      const tab = String(p.tab || '').trim();
+      const values = {}, rec = {};
+      const cost = String(p.cost == null ? '' : p.cost).trim();
+      if (cost !== '') {
+        if (!/^\d+(\.\d{1,2})?$/.test(cost) || Number(cost) <= 0) throw new Error('SAY: the cost is a plain number, e.g. 4.72');
+        values['Cost'] = cost; rec.cost = cost;
+      }
+      const ali = String(p.ali_order_number == null ? '' : p.ali_order_number).replace(/\D/g, '');
+      if (String(p.ali_order_number == null ? '' : p.ali_order_number).trim() !== '') {
+        if (ali.length < 8 || ali.length > 25) throw new Error('SAY: an AliExpress order number is 8–25 digits');
+        values['Order Number'] = ali; rec.ali_order = ali;
+      }
+      const email = String(p.email == null ? '' : p.email).trim();
+      if (email !== '') {
+        if (email.indexOf('@') < 1) throw new Error('SAY: the purchasing account is an email');
+        values['Email'] = email.slice(0, 120); rec.email = email.slice(0, 120);
+      }
+      const link = String(p.new_ali_link == null ? '' : p.new_ali_link).trim();
+      if (link !== '') {
+        if (!/^https:\/\/([a-z0-9-]+\.)*aliexpress\.[a-z.]+\//i.test(link)) throw new Error('SAY: that does not look like an AliExpress link');
+        values['New Ali Link'] = link.slice(0, ALI_LINK_MAX); rec.new_ali_link = link.slice(0, ALI_LINK_MAX);
+      }
+      const trk = String(p.tracking_number == null ? '' : p.tracking_number).trim();
+      if (trk !== '') {
+        if (trk.length < 5 || trk.length > 60) throw new Error('SAY: that tracking number does not look right');
+        values['Tracking number'] = trk; rec.tracking = trk;
+      }
+      const st = String(p.delivery_status == null ? '' : p.delivery_status).trim();
+      if (st !== '') { values['Delivery Status'] = st.slice(0, 60); rec.delivery_status = st.slice(0, 60); }
+      /* the remembered main-supplier link rides into the sheet when the row has none (owner:
+         "if portal has supplier links, paste it in the sheet too") */
+      const supMain = String(p.ali_express_link == null ? '' : p.ali_express_link).trim();
+      if (supMain !== '' && /^https:\/\/([a-z0-9-]+\.)*aliexpress\.[a-z.]+\//i.test(supMain)) {
+        values['Ali Express Link'] = supMain.slice(0, ALI_LINK_MAX);
+      }
+      if (!Object.keys(values).length) throw new Error('SAY: nothing to record');
+
+      const sets = Object.keys(rec).map(k => k + ' = ?').join(', ');
+      await ctx.env.DB.prepare(
+        'INSERT INTO order_processing (order_id, account, tab, ' + Object.keys(rec).join(', ') + ", updated_by, updated_at) VALUES (?" + '' +
+        [1, 2, 3].map(() => '').join('') + '1, ?2, ?3, ' + Object.keys(rec).map((k, i) => '?' + (i + 4)) + ', ?' + (Object.keys(rec).length + 4) + ", datetime('now')) " +
+        'ON CONFLICT(order_id) DO UPDATE SET account=?2, ' + Object.keys(rec).map((k, i) => k + '=?' + (i + 4)).join(', ') + ', updated_by=?' + (Object.keys(rec).length + 4) + ", updated_at=datetime('now')"
+      ).bind(orderId, account, tab, ...Object.keys(rec).map(k => rec[k]), ctx.user.email).run();
+      /* mirror into the truth tables the rest of the portal reads */
+      if (rec.tracking) {
+        await ctx.env.DB.prepare(
+          "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, '', datetime('now'), 'PORTAL') " +
+          "ON CONFLICT(order_id) DO UPDATE SET tracking = CASE WHEN ?2 != '' THEN ?2 ELSE tracking END"
+        ).bind(orderId, rec.tracking).run().catch(() => {});
+      }
+      if (rec.new_ali_link || rec.ali_order) {
+        await ctx.env.DB.prepare(
+          "UPDATE orders SET ali_link = CASE WHEN ?2 != '' THEN ?2 ELSE ali_link END, ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE ali_order END WHERE order_id = ?1"
+        ).bind(orderId, rec.new_ali_link || '', rec.ali_order || '').run().catch(() => {});
+        /* the per-LISTING memory: the next order of this item gets the link back instantly */
+        const o = await ctx.env.DB.prepare('SELECT item_id FROM orders WHERE order_id = ?1').bind(orderId).first().catch(() => null);
+        if (o && o.item_id && rec.new_ali_link) {
+          await ctx.env.DB.prepare(
+            "INSERT INTO item_links (item_id, ali_link, last_ali_order, updated_at) VALUES (?1, ?2, ?3, datetime('now')) " +
+            "ON CONFLICT(item_id) DO UPDATE SET ali_link=?2, last_ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE last_ali_order END, updated_at=datetime('now')"
+          ).bind(String(o.item_id), rec.new_ali_link, rec.ali_order || '').run().catch(() => {});
+        }
+      }
+      /* the sheet — inline, short leash; a miss goes PENDING for the sweep */
+      let sheet = { ok: false, reason: 'bridge did not answer' };
+      try {
+        const r = await fetch(ctx.env.AS_URL, {
+          method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'engineSheetWrite', payload: {
+            key: await secret(ctx.env, 'SYNC_KEY'), whitelist: 'orders_day', account,
+            tab: tab || undefined, match_header: 'Order number', match_value: orderId, values } }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const body = await r.json().catch(() => ({}));
+        sheet = body.ok ? body.data : { ok: false, reason: String(body.error || r.status) };
+      } catch (e) { sheet = { ok: false, reason: String(e && e.message || e).slice(0, 120) }; }
+      await ctx.env.DB.prepare(
+        "UPDATE order_processing SET sheet_status = ?2, sheet_reason = ?3 WHERE order_id = ?1"
+      ).bind(orderId, sheet.ok ? (sheet.shadow ? 'SHADOW' : 'WRITTEN') : 'PENDING', String(sheet.reason || '').slice(0, 160)).run();
+      return { ok: true, sheet, queued_retry: !sheet.ok };
+    },
+  },
+
+  /* The comeback (owner: "if new aliexpress link added for any listing, it comes back on another
+     order of that specific listing") — batch prefill for the Orders screen. */
+  orderPrefill: {
+    auth: 'any', fn: async (p, ctx) => {
+      const ords = (Array.isArray(p.order_ids) ? p.order_ids : []).map(String).filter(Boolean).slice(0, 300);
+      const out = {};
+      for (let i = 0; i < ords.length; i += 80) {
+        const part = ords.slice(i, i + 80);
+        const qs = part.map(() => '?').join(',');
+        const rs = await ctx.env.DB.prepare(
+          'SELECT o.order_id, o.item_id, COALESCE(il.ali_link, o.ali_link, "") AS ali_link ' +
+          'FROM orders o LEFT JOIN item_links il ON il.item_id = o.item_id WHERE o.order_id IN (' + qs + ')'
+        ).bind(...part).all().catch(() => ({ results: [] }));
+        for (const r of (rs.results || [])) if (r.ali_link) out[String(r.order_id)] = { ali_link: String(r.ali_link), item_id: String(r.item_id || '') };
+      }
+      return { prefill: out };
     },
   },
 
@@ -6934,6 +7087,18 @@ const ROUTES = {
         "UPDATE orders SET ali_link = CASE WHEN ?2 != '' THEN ?2 ELSE ali_link END, " +
         "ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE ali_order END WHERE order_id = ?1"
       ).bind(orderId, link.slice(0, ALI_LINK_MAX), aliOrder).run();
+      /* 10 Sept: the link is remembered PER LISTING — the next order of this item gets it back */
+      if (link) {
+        try {
+          const io0 = await ctx.env.DB.prepare('SELECT item_id FROM orders WHERE order_id = ?1').bind(orderId).first();
+          if (io0 && io0.item_id) {
+            await ctx.env.DB.prepare(
+              "INSERT INTO item_links (item_id, ali_link, last_ali_order, updated_at) VALUES (?1, ?2, ?3, datetime('now')) " +
+              "ON CONFLICT(item_id) DO UPDATE SET ali_link=?2, last_ali_order = CASE WHEN ?3 != '' THEN ?3 ELSE last_ali_order END, updated_at=datetime('now')"
+            ).bind(String(io0.item_id), link.slice(0, ALI_LINK_MAX), aliOrder).run();
+          }
+        } catch (e) {}
+      }
       let sheet = { ok: false, reason: 'bridge did not answer' };
       try {
         const values = {};
@@ -7453,7 +7618,7 @@ const ROUTES = {
       const SUPPLIER = ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'];
       const OWNED = ['Selected By', 'Approval Status', 'Comments', 'Date Added', 'Account Selected', 'Listing Status'];
       const g = (k) => { const v = cols[k]; return v == null ? '' : String(v).trim().slice(0, 5000); };
-      const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); return m ? m[1] : ''; };
+      const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/); return m ? m[1] : ''; };   // strict: bare-digit fallback ate hunts (10 Sept)
       const isShort = (u) => /^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(String(u || ''));
       const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0;
 
@@ -7510,7 +7675,7 @@ const ROUTES = {
       const rows = rs.results || [];
       const byVerdict = {}; let shortSub = 0;
       rows.forEach((r) => { byVerdict[r.verdict] = (byVerdict[r.verdict] || 0) + 1; if (r.short_links) shortSub++; });
-      const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})/) || s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/); return m ? m[1] : ''; };
+      const aliId = (u) => { const s = String(u || ''); const m = s.match(/\/item\/(\d{6,})/) || s.match(/\/i\/(\d{6,})/); return m ? m[1] : ''; };   // strict (10 Sept)
       const hr = await ctx.env.DB.prepare('SELECT hunter_email, status, vals FROM hunt_rows').all().catch(() => ({ results: [] }));
       const idx = {};
       (hr.results || []).forEach((row) => { let v = {}; try { v = JSON.parse(row.vals || '{}'); } catch (e) {} ['Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3'].forEach((c) => { const id = aliId(v[c]); if (id) idx[id] = true; }); });

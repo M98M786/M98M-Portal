@@ -226,7 +226,7 @@ function actionEngineNotify_(payload) {
  * so a compromised key still cannot write outside the named workflow's columns. */
 const ENGINE_SHEET_WHITELISTS = {
   // the day-tab columns the orders workspace may write — identical to ORDERS_WRITABLE_COLS
-  orders_day: { scope: 'account', kind: 'order_processing', cols: ['Cost', 'Order Number', 'Tracking number', 'Email', 'Delivery Status', 'New Ali Link'] },
+  orders_day: { scope: 'account', kind: 'order_processing', cols: ['Cost', 'Order Number', 'Tracking number', 'Email', 'Delivery Status', 'New Ali Link', 'Ali Express Link', 'Supplier Link 1', 'Supplier Link 2', 'Supplier Link 3'] },   // 10 Sept: the portal's own supplier knowledge may land on the sheet too
 };
 
 function actionEngineSheetWrite_(payload) {

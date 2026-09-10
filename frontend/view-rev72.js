@@ -171,6 +171,18 @@
           (can ? '<button class="btn-gold" data-lact="video" data-id="' + esc(r.item_id) + '">Send to video revision</button>' : '') +
           '</div></div><div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
       });
+      /* the owner's tier archives — every decided listing in its own list */
+      function tierSection(rows, label) {
+        h += '<div class="lr-sec">' + label + ' · ' + rows.length + '</div>';
+        if (!rows.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">None yet.</div>'; }
+        rows.forEach(function (r) {
+          h += '<div class="lr-row">' + lrHead(r, r.parked === 'AM_CALL' ? '<span class="lr-badge">waiting for your call</span>' : (r.video_status === 'DONE' ? '<span class="lr-badge">🎬 video done</span>' : r.video_status === 'QUEUED' ? '<span class="lr-badge">🎬 in video</span>' : '')) +
+            '<div class="lr-btns"><button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button></div></div>' +
+            '<div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
+        });
+      }
+      tierSection(d.tier1 || [], 'Tier 1 — archive');
+      tierSection(d.tier2 || [], 'Tier 2 — archive');
       var rec = d.recent || [];
       if (rec.length) {
         h += '<div class="lr-sec">Recently decided</div>';

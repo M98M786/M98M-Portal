@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260910-0029';
+var BUILD = '20260910-0055';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14196,6 +14196,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       odApplyFilter();   // keep the active chip filter after a list repaint
       odWire(box);
       odFetchImages(box, orders);   // the day tab has no Image Link column — the engine does
+      odFetchPrefill(box, orders);  // remembered per-listing AliExpress links come back on new orders
       /* eBay's accepted-carrier list for this account, fetched once and shared by every card. */
       (function () {
         var acct = odStr(OD_ACCOUNT);
@@ -14413,6 +14414,40 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         odAddress(o, cols) +
         odWorkBlock(o, cols, row) +
       '</div></div>';
+  }
+
+  /* Owner, 10 Sept: "if a new aliexpress link is added for a listing, it comes back on another
+     order of that specific listing." The engine remembers the link per ITEM; rows whose supplier
+     cell is empty get it pre-filled in the paste box, and the purchase write carries it into the
+     sheet's own Ali Express Link column. */
+  function odFetchPrefill(box, orders) {
+    try {
+      if (typeof engineCall !== 'function') { return; }
+      var want = [];
+      orders.forEach(function (o) {
+        if (!odStr(o[OD_H.aliLink]) && !odStr(o[OD_H.newAliLink]) && odStr(o[OD_H.orderNo])) { want.push(odStr(o[OD_H.orderNo])); }
+      });
+      if (!want.length) { return; }
+      engineCall('orderPrefill', { order_ids: want }, 15000).then(function (d) {
+        var pf = (d && d.prefill) || {};
+        orders.forEach(function (o) {
+          var hit = pf[odStr(o[OD_H.orderNo])];
+          if (hit && safeUrl(hit.ali_link)) { o.__memLink = hit.ali_link; }
+        });
+        box.querySelectorAll('[data-od-alilink-in]').forEach(function (inp) {
+          var hit = pf[inp.getAttribute('data-od-alilink-in')];
+          if (hit && safeUrl(hit.ali_link) && !inp.value) {
+            inp.value = hit.ali_link;
+            inp.style.borderColor = 'var(--gold-a)';
+            var note = document.createElement('span');
+            note.className = 'od-note';
+            note.style.cssText = 'color:var(--gold-a);font-weight:700;font-size:10.5px';
+            note.textContent = 'remembered from a previous order of this listing — press Save link to stamp it';
+            if (inp.parentNode) { inp.parentNode.appendChild(note); }
+          }
+        });
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   /* The day tabs never carried an Image Link column — the engine's items_api does. After each
@@ -14857,7 +14892,29 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function odSend(box, btn, action, payload, row, slot, fields, keyed) {
     btn.disabled = true;
     odMsg(box, slot, 'Writing…', '');
-    api(action, payload).then(function (res) {
+    /* 10 Sept (owner: "accepted very fastly … in the sheet within seconds"): the engine takes the
+       write first — its own record lands instantly, the v19 bridge stamps the day tab in seconds,
+       and a bridge miss auto-retries every 15 minutes. Any engine hiccup falls straight back to
+       the old sheet path, unchanged. */
+    var call;
+    if ((action === 'recordPurchase' || action === 'recordTracking') && typeof engineCall === 'function' && payload.order_number) {
+      var o0 = odFind(row) || {};
+      var fp = { account: payload.account, order_id: payload.order_number, tab: odStr(payload.tab) };
+      ['cost', 'ali_order_number', 'email', 'new_ali_link', 'tracking_number', 'delivery_status'].forEach(function (k) {
+        if (payload[k] !== undefined && payload[k] !== '') { fp[k] = payload[k]; }
+      });
+      if (!fp.delivery_status && payload.uploaded) { fp.delivery_status = 'Tracking'; }
+      // the remembered main-supplier link rides along when the row's own cell is empty
+      if (!odStr(o0[OD_H.aliLink]) && odStr(o0.__memLink)) { fp.ali_express_link = odStr(o0.__memLink); }
+      call = engineCall('orderFastRecord', fp, 25000).then(function (r) {
+        var sh = (r && r.sheet) || {};
+        return { ok: true, shadow: !!sh.shadow, reason: odStr(sh.reason),
+          skipped: [], unchanged: [], pendingSheet: !sh.ok && !sh.shadow };
+      }).catch(function () { return api(action, payload); });
+    } else {
+      call = api(action, payload);
+    }
+    call.then(function (res) {
       btn.disabled = false;
       if (!res || !res.ok) {
         odMsg(box, slot, odStr(res && res.reason) || 'The sheet did not take this.', 'od-bad');
@@ -14885,6 +14942,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       }
       var skipped = (res.skipped || []).length ? ' · not on this tab: ' + (res.skipped || []).join(', ') : '';
       var unchanged = (res.unchanged || []).length ? ' · already the same: ' + (res.unchanged || []).join(', ') : '';
+      if (res.pendingSheet) { unchanged += ' · sheet catching up — it lands automatically within minutes'; }
       odMsg(box, slot, 'Saved to ' + odStr(res.tab) + ' row ' + odInt(res.row) +
         ((res.written || []).length ? ' · ' + (res.written || []).join(', ') : '') + unchanged + skipped, 'od-ok');
       odRepaint(box, row);
@@ -20583,6 +20641,18 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           (can ? '<button class="btn-gold" data-lact="video" data-id="' + esc(r.item_id) + '">Send to video revision</button>' : '') +
           '</div></div><div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
       });
+      /* the owner's tier archives — every decided listing in its own list */
+      function tierSection(rows, label) {
+        h += '<div class="lr-sec">' + label + ' · ' + rows.length + '</div>';
+        if (!rows.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">None yet.</div>'; }
+        rows.forEach(function (r) {
+          h += '<div class="lr-row">' + lrHead(r, r.parked === 'AM_CALL' ? '<span class="lr-badge">waiting for your call</span>' : (r.video_status === 'DONE' ? '<span class="lr-badge">🎬 video done</span>' : r.video_status === 'QUEUED' ? '<span class="lr-badge">🎬 in video</span>' : '')) +
+            '<div class="lr-btns"><button class="minibtn" data-lact="research" data-id="' + esc(r.item_id) + '">Research</button></div></div>' +
+            '<div class="lr-res hidden" data-res="' + esc(r.item_id) + '"></div></div>';
+        });
+      }
+      tierSection(d.tier1 || [], 'Tier 1 — archive');
+      tierSection(d.tier2 || [], 'Tier 2 — archive');
       var rec = d.recent || [];
       if (rec.length) {
         h += '<div class="lr-sec">Recently decided</div>';

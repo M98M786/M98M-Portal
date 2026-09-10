@@ -681,9 +681,13 @@ function huntNormKey_(s) {
    included, so the hunter sees the history before wasting time on a dead product. */
 const HUNT_DUP_SUPPLIER_COLS = [HC_SUPPLIER_1, 'Product Link 2', 'Product Link 3'];
 function huntAliItemId_(url) {
+  /* 10 Sept (owner: "Irfan adds NEW listings and they land in revised"): the old bare-digits
+     fallback matched sku_id/spm/store numbers in the QUERY STRING, so two different products
+     from the same seller "matched", the own-in-flight delegation fired, and the new product
+     OVERWROTE an older pending hunt as a "(revised)" row. Only a real /item/<id> path names a
+     product — anything else is NOT an id. A missed dup is recoverable; a false match eats a hunt. */
   const s = String(url || '');
-  const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/) ||
-    s.match(/(?:^|[^\d])(\d{10,16})(?:[^\d]|$)/);
+  const m = s.match(/\/item\/(\d{6,})(?:\.html)?/) || s.match(/\/i\/(\d{6,})(?:\.html)?/);
   return m ? m[1] : '';
 }
 
