@@ -2566,13 +2566,17 @@ async function ladderSales(env, itemId, fromUtc, toUtc) {
 async function ladderWatch(env) {
   await ensureTruthSchema(env);
   /* Seed: every go-live (provenance row) from the last 3 days becomes a ladder row once. */
+  /* Owner (10 Sept): "consider 72 hours from EBAY — when the listing went live on eBay, not on
+     the go-live desk." eBay's own StartTime (items_api.start_time, from GetMyeBaySelling) is the
+     clock wherever the sync knows it; the desk moment is only the fallback. */
   const pv = await env.DB.prepare(
-    'SELECT p.item_id, p.account, p.lister_email, p.listed_at, COALESCE(i.title, "") AS title ' +
+    'SELECT p.item_id, p.account, p.lister_email, p.listed_at, COALESCE(i.title, "") AS title, COALESCE(i.start_time, "") AS ebay_start ' +
     'FROM provenance p LEFT JOIN items_api i ON i.item_id = p.item_id ' +
     "WHERE COALESCE(p.listed_at, '') != '' AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = p.item_id)"
   ).all().catch(() => ({ results: [] }));
   for (const r of (pv.results || [])) {
-    const t = new Date(String(r.listed_at));
+    const eb = String(r.ebay_start || '').trim();
+    const t = eb ? new Date(eb.replace(' ', 'T') + (eb.indexOf('Z') < 0 ? 'Z' : '')) : new Date(String(r.listed_at));
     if (isNaN(t.getTime())) continue;
     if (Date.now() - t.getTime() > 3 * 86400000) continue;   // the ladder governs go-lives from NOW — no backfill storm
     const go = ladderUtc(t);
@@ -2586,13 +2590,14 @@ async function ladderWatch(env) {
      72-hour revision TASK is still open on the boards predate the ladder — seed them too, with
      their real go-live where provenance knows it, so they queue for Zain immediately. */
   const mig = await env.DB.prepare(
-    "SELECT DISTINCT t.item_id, t.account, COALESCE(p.lister_email, '') AS lister_email, COALESCE(p.listed_at, '') AS listed_at, COALESCE(i.title, '') AS title " +
+    "SELECT DISTINCT t.item_id, t.account, COALESCE(p.lister_email, '') AS lister_email, COALESCE(p.listed_at, '') AS listed_at, COALESCE(i.title, '') AS title, COALESCE(i.start_time, '') AS ebay_start " +
     "FROM tasks t LEFT JOIN provenance p ON p.item_id = t.item_id LEFT JOIN items_api i ON i.item_id = t.item_id " +
     "WHERE t.type = 'listing_revision' AND t.title LIKE '%72%' AND t.status NOT IN ('Completed') AND COALESCE(t.item_id, '') != '' " +
     'AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = t.item_id) LIMIT 60'
   ).all().catch(() => ({ results: [] }));
   for (const r of (mig.results || [])) {
-    let t = new Date(String(r.listed_at));
+    const eb2 = String(r.ebay_start || '').trim();
+    let t = eb2 ? new Date(eb2.replace(' ', 'T') + (eb2.indexOf('Z') < 0 ? 'Z' : '')) : new Date(String(r.listed_at));
     if (isNaN(t.getTime())) t = new Date(Date.now() - 4 * 86400000);   // unknown go-live: old enough to be due now
     await env.DB.prepare(
       "INSERT OR IGNORE INTO listing_ladder (item_id, account, title, lister_email, go_live_at, r72_at, r10_at, r20_at, created_at, updated_at) " +
@@ -2633,6 +2638,22 @@ async function ladderWatch(env) {
       await env.DB.prepare("UPDATE order_processing SET sheet_status = ?2, sheet_reason = ?3 WHERE order_id = ?1")
         .bind(r.order_id, okNow ? 'WRITTEN' : 'PENDING', String((body.data && body.data.reason) || body.error || '').slice(0, 160)).run();
     } catch (e) {}
+  }
+  /* Reclock: undecided rows adopt eBay's StartTime the moment the sync knows it (also converts
+     every already-seeded row from desk-time to eBay-time once — idempotent, only when it differs). */
+  const rc = await env.DB.prepare(
+    'SELECT l.item_id, l.go_live_at, i.start_time FROM listing_ladder l JOIN items_api i ON i.item_id = l.item_id ' +
+    "WHERE COALESCE(i.start_time, '') != '' AND l.r72_status IN ('', 'QUEUED') AND l.final_status = '' LIMIT 200"
+  ).all().catch(() => ({ results: [] }));
+  for (const r of (rc.results || [])) {
+    const eb = String(r.start_time).trim();
+    const t = new Date(eb.replace(' ', 'T') + (eb.indexOf('Z') < 0 ? 'Z' : ''));
+    if (isNaN(t.getTime())) continue;
+    const go = ladderUtc(t);
+    if (go === String(r.go_live_at)) continue;
+    await env.DB.prepare(
+      "UPDATE listing_ladder SET go_live_at = ?2, r72_at = ?3, r10_at = ?4, r20_at = ?5, updated_at = datetime('now') WHERE item_id = ?1 AND r72_status IN ('', 'QUEUED')"
+    ).bind(r.item_id, go, ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
   }
   const nowU = ladderUtc(new Date());
   /* 72h due → Zain's queue. "after exact 72 hours the portal will show there all the listings". */
