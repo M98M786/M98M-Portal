@@ -319,8 +319,11 @@ function actionEnterItemId_(payload, ctx) {
        missing role, a bad detail) failed the whole publish with "request failed" and the draft came
        straight back. (owner, 6 Sept — "still not entered, request failed".) */
     const total = (Number(rec.time_taken_min) || 0) + taskElapsedMin_(rec.updated_at, taskMs_(stamp));
+    /* Owner, 10 Sept ("why does Zaid have to approve his own tasking? he is the one who added the
+       item id"): entering the Item ID IS the approval — the go-live actor is the approver, so the
+       task completes right here instead of queueing on his own desk as paperwork. */
     const patch = {
-      item_id: itemId, status: TASK_STATUS_SUBMITTED, submitted_at: stamp,
+      item_id: itemId, status: TASK_STATUS_COMPLETED, submitted_at: stamp, decided_at: stamp,
       submission_note: note, updated_at: stamp, time_taken_min: total,
       comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
     };
@@ -427,7 +430,8 @@ function actionEnterItemId_(payload, ctx) {
 
   if (!idempotent) {
     const msg = ctx.user.name + ' submitted "' + String(rec.title || '') + '" for approval — ' + note.slice(0, 200);
-    if (approver) notify_(approver, 'Task submitted', msg, 'task:' + String(rec.task_id));
+    // 10 Sept: the task self-completed at go-live — the bell tells the lister it is done, not the approver to rubber-stamp it.
+    if (approver) notify_(approver, 'Task completed', msg, 'task:' + String(rec.task_id));
     else notifyManagement_('Task submitted', msg, 'task:' + String(rec.task_id));
   }
 
