@@ -7781,6 +7781,9 @@ function actionEnterItemId_(payload, ctx) {
       }
     } catch (subErr) { /* best-effort */ }
 
+    /* the lister's keyword/SEO research was saved under task:<id> at draft time — move it onto
+       the real Item ID the moment one exists, so Zain's desk shows it against the listing. */
+    try { enginePost_('ladderResearchRekey', { task_id: String(rec.task_id || ''), item_id: itemId, account: account }); } catch (e) {}
     /* ③ +72h revision — RETIRED as a direct task (owner, 10 Sept): the LISTING LADDER owns the
        72-hour step now. The engine's ladderWatch queues the item on the Advertising Manager's
        72-hours Revision page at eBay's own +72h; his keyword decision raises the lister task

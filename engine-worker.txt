@@ -6603,13 +6603,28 @@ const ROUTES = {
         clean[String(k).slice(0, 60)] = String(data[k] == null ? '' : data[k]).slice(0, 2000);
         n++;
       }
-      const acct = await ctx.env.DB.prepare('SELECT account FROM listing_ladder WHERE item_id = ?1').bind(item).first().catch(() => null);
+      /* At DRAFT time the dummy has no Item ID yet — research saves under 'task:<task_id>' and
+         ladderResearchRekey moves it onto the real item at go-live (owner: the spreadsheet data
+         is taken FROM THE LISTER WHILE ADDING THE DRAFT LINK). */
+      const acct = item.indexOf('task:') === 0 ? null
+        : await ctx.env.DB.prepare('SELECT account FROM listing_ladder WHERE item_id = ?1').bind(item).first().catch(() => null);
       await ctx.env.DB.prepare(
         "INSERT INTO listing_research (item_id, account, kind, data_json, changes_note, submitted_by, submitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))"
       ).bind(item, String((acct && acct.account) || p.account || ''), kind, JSON.stringify(clean), String(p.changes_note || '').slice(0, 1000), ctx.user.email).run();
       return { ok: true, versions: (await ctx.env.DB.prepare('SELECT COUNT(*) AS n FROM listing_research WHERE item_id = ?1').bind(item).first()).n };
     },
   },
+  ladderResearchRekey: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const taskId = String(p.task_id || '').trim(), item = String(p.item_id || '').trim();
+      if (!taskId || !item) throw new Error('task_id and item_id needed');
+      const r = await ctx.env.DB.prepare(
+        "UPDATE listing_research SET item_id = ?2, account = COALESCE(NULLIF(account, ''), ?3) WHERE item_id = ?1"
+      ).bind('task:' + taskId, item, String(p.account || '')).run();
+      return { rekeyed: (r.meta && r.meta.changes) || 0 };
+    },
+  },
+
   ladderResearch: {
     auth: 'any', fn: async (p, ctx) => {
       const item = String(p.item_id || '');
