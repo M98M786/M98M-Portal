@@ -39,7 +39,7 @@
      Zain's newlines/commas; the SCREEN splits on them and wears one chip per keyword, so a
      50-keyword set reads as fifty pills, never one run-on paragraph. */
   function lrKwChips(s, label) {
-    var parts = String(s || '').split(/[\n,]+/).map(function (x) { return x.trim(); }).filter(String);
+    var parts = String(s || '').split(/[\n,]+/).map(function (x) { return x.trim().replace(/^["'\u201c\u201d]+|["'\u201c\u201d]+$/g, '').trim(); }).filter(String);
     if (!parts.length) { return ''; }
     return '<div class="lr-kwlabel">' + esc(label) + ' · ' + parts.length + '</div>' +
       '<div class="lr-kwset">' + parts.map(function (k) { return '<span class="lr-kwchip">' + esc(k) + '</span>'; }).join('') + '</div>';

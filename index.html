@@ -684,7 +684,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260910-2049';
+var BUILD = '20260910-2050';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -20556,7 +20556,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
      Zain's newlines/commas; the SCREEN splits on them and wears one chip per keyword, so a
      50-keyword set reads as fifty pills, never one run-on paragraph. */
   function lrKwChips(s, label) {
-    var parts = String(s || '').split(/[\n,]+/).map(function (x) { return x.trim(); }).filter(String);
+    var parts = String(s || '').split(/[\n,]+/).map(function (x) { return x.trim().replace(/^["'\u201c\u201d]+|["'\u201c\u201d]+$/g, '').trim(); }).filter(String);
     if (!parts.length) { return ''; }
     return '<div class="lr-kwlabel">' + esc(label) + ' · ' + parts.length + '</div>' +
       '<div class="lr-kwset">' + parts.map(function (k) { return '<span class="lr-kwchip">' + esc(k) + '</span>'; }).join('') + '</div>';
