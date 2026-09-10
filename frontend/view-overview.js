@@ -568,21 +568,29 @@
       });
       return h + '</div>';
     }
-    var t = oAcctRows(O.ov.today_by_account || []), y = oAcctRows(O.ov.yesterday_by_account || []), ad = oAcctRows(O.ov.ads_yesterday || []);
-    /* Review 3: yesterday's strips speak the BOOKS' brain columns — Actual (T − CPC − returns)
-       and ad spend with each account's own ROAS beside it. */
+    var t = oAcctRows(O.ov.today_by_account || []);
+    /* Owner (11 Sept: "yesterday's profit is a wrong number — take it from Sales analysis"):
+       this strip speaks ONLY the books' brain — the same sales_daily rows Sales analysis reads
+       (Actual = T − CPC − returns). The old fallback painted the overview's own order-math when
+       the rollup had not landed yet; that is exactly where a £-171.03 came from. An account with
+       no books row yet says "rolling up" — a pending number is honest, an invented one is not. */
     var yd = dShift(ukToday(), -1);
     var booksY = oAcctRows(O.days || []).filter(function (r0) { return r0.date === yd; });
-    if (booksY.length) {
-      y = booksY.map(function (r0) { return { account: r0.account, profit: oN(r0.actual) }; })
-        .sort(function (a, b) { return b.profit - a.profit; });
-      ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
-        .filter(function (a) { return a.spend > 0; })
-        .sort(function (a, b) { return b.spend - a.spend; });
-    }
+    var y = booksY.map(function (r0) { return { account: r0.account, profit: oN(r0.actual) }; })
+      .sort(function (a, b) { return b.profit - a.profit; });
+    var ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
+      .filter(function (a) { return a.spend > 0; })
+      .sort(function (a, b) { return b.spend - a.spend; });
+    var haveY = {};
+    booksY.forEach(function (r0) { haveY[oS(r0.account)] = 1; });
+    var pendingY = oAcctRows(O.ov.yesterday_by_account || []).map(function (a) { return oS(a.account); })
+      .filter(function (n0) { return n0 && !haveY[n0]; });
+    var pendNote = pendingY.length
+      ? '<div class="empty" style="margin-top:6px">' + esc(pendingY.join(', ')) + ' — books still rolling up · the number lands after the nightly close, exactly as on Sales analysis</div>'
+      : '';
     box.innerHTML =
       '<div class="o-card"><span class="card-t">Today\'s sales — ' + esc(O.acct || 'all accounts') + ' · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s ACTUAL profit — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + '</div>' +
+      '<div class="o-card"><span class="card-t">Yesterday\'s ACTUAL profit — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + pendNote + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
         var a0 = null;
         ad.forEach(function (x) { if (Math.abs(oN(x.spend) - v) < 0.005 && !a0) { a0 = x; } });
