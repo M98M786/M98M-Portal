@@ -576,8 +576,14 @@
        no books row yet says "rolling up" — a pending number is honest, an invented one is not. */
     var yd = dShift(ukToday(), -1);
     var booksY = oAcctRows(O.days || []).filter(function (r0) { return r0.date === yd; });
-    var y = booksY.map(function (r0) { return { account: r0.account, profit: oN(r0.actual) }; })
-      .sort(function (a, b) { return b.profit - a.profit; });
+    /* Column choice (owner, 11 Sept): the raw books 'actual' turns to garbage when a day's costs
+       are not yet entered (Sir Hasib: sold £700, cost 0 → actual −171). Sales analysis speaks the
+       money-law 'profit' column (ratio-estimated where costs are missing) — this strip now shows
+       EXACTLY that number, with a chip when the costs are still owed. */
+    var y = booksY.map(function (r0) {
+      return { account: r0.account, profit: oN(r0.profit),
+        costsMissing: oN(r0.cost) < 0.005 && oN(r0.sold) > 1 };
+    }).sort(function (a, b) { return b.profit - a.profit; });
     var ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
       .filter(function (a) { return a.spend > 0; })
       .sort(function (a, b) { return b.spend - a.spend; });
@@ -590,7 +596,10 @@
       : '';
     box.innerHTML =
       '<div class="o-card"><span class="card-t">Today\'s sales — ' + esc(O.acct || 'all accounts') + ' · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s ACTUAL profit — per account</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) + pendNote + '</div>' +
+      '<div class="o-card"><span class="card-t">Yesterday\'s profit — per account · the books\' law, same as Sales analysis</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) +
+        (y.some(function (a) { return a.costsMissing; })
+          ? '<div class="empty" style="margin-top:6px">' + esc(y.filter(function (a) { return a.costsMissing; }).map(function (a) { return a.account; }).join(', ')) + ' — day costs not entered yet · profit is the law\'s estimate until the processor fills them</div>'
+          : '') + pendNote + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
         var a0 = null;
         ad.forEach(function (x) { if (Math.abs(oN(x.spend) - v) < 0.005 && !a0) { a0 = x; } });
