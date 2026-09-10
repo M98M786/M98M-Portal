@@ -411,8 +411,9 @@
           el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
         });
       }).catch(function () {
-        // boot race: the first paint can beat session hydration — one quiet retry
-        if (!isRetry) { setTimeout(function () { sgFetchImages(host, true); }, 4000); }
+        // boot race: signals paints late and can beat session hydration — up to three quiet retries
+        var n = Number(isRetry) || 0;
+        if (n < 3) { setTimeout(function () { sgFetchImages(host, n + 1); }, 4000 * (n + 1)); }
       });
     } catch (e) {}
   }

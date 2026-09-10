@@ -675,7 +675,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260910-0055';
+var BUILD = '20260910-0105';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -21900,8 +21900,9 @@ function saveSchedule() {
           el.innerHTML = '<img src="' + sgAttr(u) + '" alt="" loading="lazy" data-sig-img="1">';
         });
       }).catch(function () {
-        // boot race: the first paint can beat session hydration — one quiet retry
-        if (!isRetry) { setTimeout(function () { sgFetchImages(host, true); }, 4000); }
+        // boot race: signals paints late and can beat session hydration — up to three quiet retries
+        var n = Number(isRetry) || 0;
+        if (n < 3) { setTimeout(function () { sgFetchImages(host, n + 1); }, 4000 * (n + 1)); }
       });
     } catch (e) {}
   }
