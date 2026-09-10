@@ -7653,11 +7653,12 @@ function actionEnterItemId_(payload, ctx) {
   let rec = null, approver = '', idempotent = false;
   const made = { campaign_set: null, supplier_add: null, revision: null };
 
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     try { lock.waitLock(15000); }
     catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the tasks sheet is busy right now — give it a moment and press “Make live” again'); }
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (String(rec.type || '') !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'that draft is not a listing task any more — press Refresh');
     if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'this draft is not assigned to you');
@@ -7939,10 +7940,11 @@ function actionRevisionRevisit_(payload, ctx) {
   const stamp = now_();
   let rec = null, itemId = '', account = '', newStatus = '';
 
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = taskFind_(sh, payload.task_id);
+    const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (String(rec.type || '') !== 'listing_revision') throw new Error('not a revision task');
     const me = normalizeEmail(ctx.ident.email);
@@ -8374,6 +8376,23 @@ function listingListerTask_(sh, payload, ctx, wantOpen) {
   return found;
 }
 
+/** Overload tranche 2 (10 Sept, go-live day): the lister-flow finder runs BEFORE the lock now;
+ * inside it one row is re-read (taskVerify_) and the same guards re-applied to the FRESH values,
+ * so the decision is still made on locked truth — without the full-tab read serialising everyone. */
+function listingListerVerify_(sh, pre, payload, ctx, wantOpen) {
+  const found = taskVerify_(sh, pre, payload.task_id);
+  const rec = found.rec;
+  if (String(rec.type || '') !== 'listing_new') throw new Error('not a listing task');
+  if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email) && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+    throw new Error(SAFE_ERROR_PREFIX + 'not your task');
+  }
+  const status = String(rec.status || '');
+  if (wantOpen && status !== TASK_STATUS_PENDING && status !== TASK_STATUS_WORKING && status !== TASK_STATUS_UPDATED) {
+    throw new Error(SAFE_ERROR_PREFIX + 'this listing is not open — it is ' + (status || 'unknown'));
+  }
+  return found;
+}
+
 /** The hunt_id rides the listing_new task's details JSON; HUNTING_DB carries the hunter's email. */
 function listingHunterFor_(rec) {
   try {
@@ -8394,10 +8413,11 @@ function actionListerNeedTime_(payload, ctx) {
   const eta = String(payload.eta_pkt || '').trim();
   const sh = tasksSheet_();
   let rec = null, pushed = '';
+  const pre = listingListerTask_(sh, payload, ctx, true);   // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = listingListerTask_(sh, payload, ctx, true);
+    const found = listingListerVerify_(sh, pre, payload, ctx, true);
     rec = found.rec;
     const patch = { comments: listingMergeFlag_(rec.comments, listingFlagObj_('needtime', ctx.ident.email, { reason: reason, eta: eta })), updated_at: now_() };
     if (eta) {                                             // only ever push the deadline OUT, never in
@@ -8421,10 +8441,11 @@ function actionListerNeedInfo_(payload, ctx) {
   if (!note) throw new Error('say what information you need from the hunter');
   const sh = tasksSheet_();
   let rec = null, hunter = null;
+  const pre = listingListerTask_(sh, payload, ctx, true);   // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = listingListerTask_(sh, payload, ctx, true);
+    const found = listingListerVerify_(sh, pre, payload, ctx, true);
     rec = found.rec;
     hunter = listingHunterFor_(rec);
     taskWrite_(sh, found, {
@@ -8467,10 +8488,11 @@ function actionListerDraft_(payload, ctx) {
   const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT);
   const sh = tasksSheet_();
   let rec = null, go = null, from = '', handed = false;
+  const pre = listingListerTask_(sh, payload, ctx, true);   // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = listingListerTask_(sh, payload, ctx, true);
+    const found = listingListerVerify_(sh, pre, payload, ctx, true);
     rec = found.rec;
     from = String(rec.assigned_to || '');
     go = listingGoLivePerson_(readTab_('TASKS'));
@@ -8537,10 +8559,11 @@ function applyOwnerBatch_() {
 function actionListerClearFlag_(payload, ctx) {
   const sh = tasksSheet_();
   let rec = null;
+  const pre = listingListerTask_(sh, payload, ctx, false);   // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const found = listingListerTask_(sh, payload, ctx, false);
+    const found = listingListerVerify_(sh, pre, payload, ctx, false);
     rec = found.rec;
     taskWrite_(sh, found, { comments: listingMergeFlag_(rec.comments, null), updated_at: now_() });
   } finally { lock.releaseLock(); }
