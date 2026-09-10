@@ -300,6 +300,7 @@ const ENGINE_RUNNABLE = {
   dispatchOverdueSweep: function () { return dispatchOverdueSweep(); },
   runZeroSalesSweep: function () { return runZeroSalesSweep(); },
   ladderTask: function (args) { return typeof ladderTaskCreate_ === 'function' ? String(ladderTaskCreate_(args)) : 'absent'; },
+  huntsClearFalseRevised: function () { return typeof huntsClearFalseRevised === 'function' ? String(huntsClearFalseRevised()) : 'absent'; },
   aliSweep: function () { return typeof aliSweep === 'function' ? JSON.stringify(aliSweep()) : 'aliSweep absent'; },
   orderLinkSweep: function () { return typeof orderLinkSweep === 'function' ? String(orderLinkSweep()) : 'absent'; },
   reviewWatch: function () { return typeof reviewWatch === 'function' ? String(reviewWatch()) : 'absent'; },

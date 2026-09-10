@@ -1185,3 +1185,32 @@ const ACTIONS_HUNTING = {
   decideHunt: [actionDecideHunt_, 'any'],  // Management / Ops Head gated inside
   reviseHunt: [actionReviseHunt_, 'any'],  // hunter-own or management, gated inside
 };
+
+
+/* 10 Sept (owner: "Irfan's NEW hunts show in Revision returns — he submitted them as new"):
+ * before the strict-id fix, the loose dup matcher merged brand-new submissions into old hunts and
+ * stamped "(revised <date>)". A GENUINE send-back always carries the reviewer's words in Comments,
+ * so a cell holding ONLY revised-markers is a false merge — wipe the marker and the hunt shows as
+ * the fresh pending submission it always was. Mirror re-pushed per fixed hunt. */
+function huntsClearFalseRevised() {
+  const sh = huntSheet_();
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(String);
+  const cCom = head.indexOf(HC_COMMENTS);
+  const cId = head.indexOf('hunt_id');
+  if (cCom < 0 || cId < 0) return 'columns missing';
+  const fixed = [];
+  for (let i = 1; i < vals.length; i++) {
+    const com = String(vals[i][cCom] || '').trim();
+    if (!com) continue;
+    if (/^(\s*\(revised \d{4}-\d{2}-\d{2}\)\s*)+$/.test(com)) {
+      sh.getRange(i + 1, cCom + 1).setValue('');
+      fixed.push(String(vals[i][cId] || ''));
+    }
+  }
+  fixed.forEach(function (id) {
+    try { const f = huntFind_(sh, id); const rec = huntRecord_(f.rec); huntMirrorPush_(rec); } catch (e) {}
+  });
+  logActivity_('system', 'HUNT_FALSE_REVISED_CLEARED', String(fixed.length), '', '', fixed.join(',').slice(0, 250));
+  return 'cleared ' + fixed.length + ' false-revised marker(s): ' + fixed.join(', ').slice(0, 250);
+}
