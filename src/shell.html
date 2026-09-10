@@ -1485,6 +1485,10 @@ function gateOverlay(show){
   el.style.display = show?'flex':'none';
 }
 function gateCheck(){
+  /* OWNER ORDER 10 Sept ~noon: "end the 20-minutes report adding feature right now" — the
+     lockout is OFF. The machinery stays for the day it is wanted back; this return is the
+     entire switch. My-reports stays pinned on every desk; only the enforcement ended. */
+  gateOverlay(false); GATE.locked = false; return;
   try{
     if(!STATE.user) return;
     if(GATE_EXEMPT.indexOf(String(STATE.user.email||'').toLowerCase())>=0) return;
