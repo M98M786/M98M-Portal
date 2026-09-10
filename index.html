@@ -228,6 +228,14 @@ input,select{font:inherit}
 /* hero words — prototype's letter-by-letter type-in, injected by the gx script */
 .gx-words{position:fixed; inset:0; z-index:0; display:none; align-items:center; justify-content:space-between; padding:0 clamp(1.25rem,6vw,6rem); pointer-events:none}
 [data-theme="galaxy"].gx-auth .gx-words.gx-show{display:flex}
+/* the OPENING (owner, 10 Sept: "all stars round first and then the sign-in pops up — exactly like
+   the prototype"): under galaxy the auth card starts invisible and rises in when the intro says
+   so (gx-in, 4300ms on a first visit — the same numbers as m98m-portal-full.html). gx-auth is
+   set by the same script that reveals the card, so if the script ever dies the card is simply
+   visible — the ceremony can fail, sign-in cannot. */
+[data-theme="galaxy"].gx-auth .card-auth{opacity:0;transform:translateY(18px);pointer-events:none;animation:none;transition:opacity .7s cubic-bezier(.22,.8,.24,1),transform .7s cubic-bezier(.22,.8,.24,1)}
+[data-theme="galaxy"].gx-auth .card-auth.gx-in{opacity:1;transform:none;pointer-events:auto}
+@media(prefers-reduced-motion:reduce){[data-theme="galaxy"].gx-auth .card-auth{transition:none;opacity:1;transform:none;pointer-events:auto}}
 .gx-words .word{font-family:var(--font); font-size:clamp(1.5rem,4.2vw,3.8rem); font-weight:500; line-height:1; white-space:nowrap; color:#fff; transition:opacity .6s}
 .gx-words .word span{display:inline-block; opacity:0; letter-spacing:.32em; transition:opacity .5s ease, letter-spacing .9s cubic-bezier(.2,.7,.2,1)}
 .gx-words .word.is-on span{opacity:1; letter-spacing:-.02em}
@@ -675,7 +683,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260910-0127';
+var BUILD = '20260910-0134';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -29233,12 +29241,16 @@ function computeMode(){
 }
 function applyAuthClass(){ try{ root.classList.toggle('gx-auth', mode === 'auth'); }catch(e){} }
 function cardIn(delay){
-  var card = doc.querySelector('.card-auth');
-  if (!card) return;
-  card.classList.add('gx-pre');
-  setTimeout(function(){ card.classList.add('gx-in'); card.classList.remove('gx-pre'); }, Math.max(20, delay));
+  var cards = doc.querySelectorAll('.card-auth');
+  if (!cards.length) return;
+  setTimeout(function(){ for (var i = 0; i < cards.length; i++){ cards[i].classList.add('gx-in'); } }, Math.max(20, delay));
+}
+function cardReset(){
+  var cards = doc.querySelectorAll('.card-auth');
+  for (var i = 0; i < cards.length; i++){ cards[i].classList.remove('gx-in'); }
 }
 function enterAuth(fromSignOut){
+  cardReset();
   wordsBox.classList.add('gx-show');
   if (still){ eng.idle(); typeWords(0); cardIn(60); return; }
   if (fromSignOut){ eng.dissolve(); typeWords(0); setTimeout(function(){ eng.reform(); }, 2300); cardIn(2400); }
@@ -29246,6 +29258,7 @@ function enterAuth(fromSignOut){
   else { eng.intro(); typeWords(200); cardIn(4300); }
 }
 function enterApp(){
+  cardReset();
   words.forEach(function(w){ w.classList.add('is-off'); });
   setTimeout(function(){ wordsBox.classList.remove('gx-show'); words.forEach(function(w){ w.classList.remove('is-off'); }); }, 650);
   if (still){ eng.stop(); } else { eng.away(); }
