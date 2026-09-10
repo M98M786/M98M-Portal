@@ -6362,6 +6362,25 @@ const ROUTES = {
   },
 
   /* ============ Listing-ladder actions (owner, 10 Sept) ============ */
+  /* Mirror hygiene (10 Sept): the owner's "delete everything pending before Sep 3" turned out to
+     be GHOSTS — rows long gone from the TASKS sheet that the mirror never dropped (the reconcile
+     upserts, it does not delete). This removes named rows from the mirror only; the sheet is
+     untouched because the sheet never had them. */
+  tasksMirrorPurge: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const ids = (Array.isArray(p.task_ids) ? p.task_ids : []).map(String).filter(Boolean).slice(0, 500);
+      if (!ids.length) throw new Error('SAY: task_ids needed');
+      let n = 0;
+      for (let i = 0; i < ids.length; i += 60) {
+        const part = ids.slice(i, i + 60);
+        const r = await ctx.env.DB.prepare('DELETE FROM tasks WHERE task_id IN (' + part.map(() => '?').join(',') + ')').bind(...part).run();
+        n += (r.meta && r.meta.changes) || 0;
+      }
+      return { purged: n };
+    },
+  },
+
   ladderSchema: {
     auth: 'any', fn: async (p, ctx) => {
       const row = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'listing_research_columns'").first().catch(() => null);
