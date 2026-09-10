@@ -252,7 +252,24 @@
     return false;
   }
 
+  /* 11 Sept (owner: "Husnain has no option for My reports"): the engine mirror can carry an
+     EMPTY checkpoint list for someone whose schedule is perfectly real (stale users sync). If the
+     fast answer has zero checkpoints, ask Apps Script once — the schedule sheet is the truth for
+     "what do I owe today". If AS has the slots, stay on AS for this session. */
+  var rpAsTried = false;
   function paint(d) {
+    if ((!d || !((d.checkpoints || []).length)) && !rpAsTried) {
+      rpAsTried = true;
+      try { ENGINE_MISSING.myCheckpoints = 1; } catch (e) {}
+      api('myCheckpoints').then(function (d2) {
+        if (d2 && (d2.checkpoints || []).length) { paintReal(d2); }               // AS knew — keep AS this session
+        else { try { delete ENGINE_MISSING.myCheckpoints; } catch (e) {} paintReal(d || {}); }
+      }).catch(function () { try { delete ENGINE_MISSING.myCheckpoints; } catch (e) {} paintReal(d || {}); });
+      return;
+    }
+    paintReal(d);
+  }
+  function paintReal(d) {
     var target = pickTarget(d);
     var hint = $('rpHint'), sub = $('rpSub'), rail = $('rpRail'), list = $('rpList'),
         form = $('rpForm'), hd = $('rpFormHd');
