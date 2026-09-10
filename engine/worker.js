@@ -2676,10 +2676,12 @@ async function ladderWatch(env) {
   }
   /* 20-day: fewer than 5 sales in the SECOND 10-day window → revision again + Zaid's final desk. */
   const d20 = await env.DB.prepare(
-    "SELECT item_id, title, r10_at FROM listing_ladder WHERE r20_status = '' AND r20_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+    "SELECT item_id, title, r10_at, video_status FROM listing_ladder WHERE r20_status = '' AND r20_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
   for (const r of (d20.results || [])) {
     const n = await ladderSales(env, r.item_id, r.r10_at, '');
-    const st = n >= 5 ? 'SALES_OK' : 'QUEUED';
+    /* Owner (10 Sept): day-20 only for items that GOT A VIDEO at the 10-day stage — no video,
+       no third revision; the row closes as SKIPPED_NOVIDEO instead of queueing. */
+    const st = n >= 5 ? 'SALES_OK' : (String(r.video_status) === 'DONE' ? 'QUEUED' : 'SKIPPED_NOVIDEO');
     await env.DB.prepare("UPDATE listing_ladder SET r20_status = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND r20_status = ''").bind(r.item_id, st).run();
     if (st === 'QUEUED') {
       await notifyRole(env, 'Advertising Manager', '20-day revision',
@@ -6547,6 +6549,8 @@ const ROUTES = {
         if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
         const row = await ctx.env.DB.prepare('SELECT * FROM listing_ladder WHERE item_id = ?1').bind(item).first();
         if (!row) throw new Error('SAY: not on the ladder');
+        /* Owner (10 Sept): video revision only for listings that GOT their 72-hour revision. */
+        if (['T1', 'T2'].indexOf(String(row.r72_status)) < 0) throw new Error('SAY: this listing has not had its 72-hour revision yet — video comes after that step');
         await ctx.env.DB.prepare("UPDATE listing_ladder SET video_status = 'QUEUED', updated_at = datetime('now') WHERE item_id = ?1").bind(item).run();
         let task = null;
         try {
