@@ -608,10 +608,41 @@
     else if (act === 'mWithdraw') { payload = { op: 'withdraw', task_id: id }; }
     else { payload = { op: 'delete', task_id: id }; }
     if (btn) { btn.disabled = true; }
+    /* 12 Sept (owner: "task deletion is not working and very slow"). Two faults: (1) the list is
+       served from the engine MIRROR, which never deletes on its own — so after the sheet row went,
+       the task kept showing and a retry hit "task not found" (masked as failed); (2) the sheet
+       write rides the slow Apps Script path. Now: the card disappears the instant you act; a
+       delete also purges the mirror row; and "task not found" / a timeout are treated as
+       done-then-purge, not failure. Only a real refusal brings the card back. */
+    var card = (btn && btn.closest) ? btn.closest('.tk-card,[data-task]') : null;
+    var closing = act === 'mDel' || act === 'mEnd' || act === 'mWithdraw';
+    if (closing && card) { card.style.display = 'none'; }
+    var purgeMirror = function () {
+      return act === 'mDel' ? engineCall('tasksMirrorPurge', { task_ids: [String(id)] }, 15000).catch(function () {}) : Promise.resolve();
+    };
     api('taskAdmin', payload).then(function () {
-      toast(act === 'mDel' ? 'Task deleted.' : act === 'mEnd' ? 'Task ended.' : act === 'mWithdraw' ? 'Task withdrawn.' : 'Changes saved.');
-      tkLoadTasks();
-    }).catch(function (e) { if (btn) { btn.disabled = false; } toast('Failed: ' + (e.message || 'try again')); });
+      return purgeMirror().then(function () {
+        toast(act === 'mDel' ? 'Task deleted.' : act === 'mEnd' ? 'Task ended.' : act === 'mWithdraw' ? 'Task withdrawn.' : 'Changes saved.');
+        /* end/withdraw: the mirror learns the new status on the next sweep — keep the card hidden
+           rather than reload a list that would briefly show it as still open */
+        if (act === 'mDel' || act === 'mSave') { tkLoadTasks(); }
+      });
+    }).catch(function (e) {
+      var msg = String((e && e.message) || '');
+      var notFound = /not found|no such task|task not/i.test(msg);
+      var transient = /overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg);
+      if (act === 'mDel' && (notFound || transient)) {
+        purgeMirror().then(function () {
+          toast(notFound ? 'Deleted — it was already gone from the sheet; cleared the stale copy from the list.'
+                         : 'Deleted — the sheet was slow to answer; cleared it from the list.');
+          tkLoadTasks();
+        });
+        return;
+      }
+      if (card) { card.style.display = ''; }
+      if (btn) { btn.disabled = false; }
+      toast('Failed: ' + (msg || 'try again'));
+    });
   }
 
   /* The flag rides TASKS.comments as one tagged line (shared with the returned-note history), so
