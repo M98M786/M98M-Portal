@@ -559,6 +559,10 @@ function taskDeadlineExtend(args) {
 function tasksPurgeBefore(args) {
   const before = String((args && args.before) || '2026-09-01').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(before)) return 'SAY: before must be yyyy-MM-dd';
+  /* owner (12 Sept): "loss items and listing revision tasking" — an optional type filter, CSV or
+     array; omitted = every type. Types outside the filter are never touched. */
+  const typesRaw = args && args.types;
+  const types = Array.isArray(typesRaw) ? typesRaw.map(String) : String(typesRaw || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   const sh = tasksSheet_();
   const lock = LockService.getScriptLock();
   const deleted = [];
@@ -566,12 +570,13 @@ function tasksPurgeBefore(args) {
     lock.waitLock(20000);
     const vals = sh.getDataRange().getValues();
     const head = vals[0].map(String);
-    const cId = head.indexOf('task_id'), cStatus = head.indexOf('status'), cCreated = head.indexOf('created_at');
-    if (cId < 0 || cStatus < 0 || cCreated < 0) return 'columns missing';
+    const cId = head.indexOf('task_id'), cStatus = head.indexOf('status'), cCreated = head.indexOf('created_at'), cType = head.indexOf('type');
+    if (cId < 0 || cStatus < 0 || cCreated < 0 || cType < 0) return 'columns missing';
     const rowsToDelete = [];
     for (let i = 1; i < vals.length; i++) {
       const status = String(vals[i][cStatus] || '');
       if (status === TASK_STATUS_COMPLETED) continue;
+      if (types.length && types.indexOf(String(vals[i][cType] || '')) < 0) continue;
       const created = taskPktIso_(vals[i][cCreated]).slice(0, 10);
       if (!created || created >= before) continue;
       rowsToDelete.push({ row: i + 1, id: String(vals[i][cId] || '') });
@@ -580,7 +585,7 @@ function tasksPurgeBefore(args) {
     rowsToDelete.forEach(function (r) { sh.deleteRow(r.row); deleted.push(r.id); });
   } finally { lock.releaseLock(); }
   try { logActivity_('system', 'TASKS_PURGE_BEFORE', before, '', String(deleted.length) + ' open tasks deleted', deleted.join(',').slice(0, 900)); } catch (e) {}
-  return 'purged ' + deleted.length + ' open task(s) created before ' + before + ': ' + deleted.join(',');
+  return 'purged ' + deleted.length + ' open task(s)' + (types.length ? ' of type ' + types.join('/') : '') + ' created before ' + before + ': ' + deleted.join(',');
 }
 
 const ACTIONS_TASKS = {
