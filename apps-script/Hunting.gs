@@ -976,14 +976,17 @@ function huntMirrorValues_(cols) {
  * criteria_flags (an array) survives — String()-flattening it was what crashed the queue. Never
  * throws; the 15-min huntsSweep_ is the backstop if this misses. */
 function huntMirrorPush_(rec) {
-  try {
-    const hv = {};
-    Object.keys(rec).forEach(function (k) {
-      const x = rec[k];
-      hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : (x == null ? '' : x);
-    });
-    enginePost_('syncHunts', { rows: [{ vals: hv }] });
-  } catch (e) {}
+  const hv = {};
+  Object.keys(rec).forEach(function (k) {
+    const x = rec[k];
+    hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : (x == null ? '' : x);
+  });
+  /* 11 Sept: ONE retry. The submit has already landed in the sheet, so this is pure best-effort
+     to make the hunt visible to management NOW rather than at the next sweep — but a single
+     dropped call under load was exactly why Irfan's hunts "didn't update on time", so give it a
+     second chance before leaving it to the sweep. Both attempts swallowed; never throws. */
+  try { enginePost_('syncHunts', { rows: [{ vals: hv }] }); return; } catch (e) {}
+  try { enginePost_('syncHunts', { rows: [{ vals: hv }] }); } catch (e) {}
 }
 
 function huntMirrorAppend_(cols, actor) {

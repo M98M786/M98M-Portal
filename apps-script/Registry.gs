@@ -1075,6 +1075,12 @@ function pushSheetRowsHot() {
   const hotProps = PropertiesService.getScriptProperties();
   const runBooks = (Date.now() - Number(hotProps.getProperty('SHEETMIRROR_HOT_AT') || 0)) >= 14 * 60000;
   let pushed = 0, tabs = 0;
+  /* 11 Sept (Irfan's hunts "not updating on time"): the hunt-queue sync is the office's most
+     time-sensitive mirror — reviewers stare at it live. Run it FIRST, before the heavy money-
+     book walk below that can stall the whole tick under load, so a new hunt is on management's
+     approvals page within one sweep no matter what the expensive work does. It is idempotent, so
+     the safety re-run at the tail costs nothing but a no-op when this one already succeeded. */
+  try { huntsSweep_(); } catch (e) {}
   if (runBooks) {
     hotProps.setProperty('SHEETMIRROR_HOT_AT', String(Date.now()));
     const days = [0, 1, 2, 3].map(function (k) {
@@ -1316,6 +1322,23 @@ function huntsSweep_() {
       const id = String(huntRecord_(rows[i]).hunt_id || '');
       if (id) sheetById[id] = rows[i];
     }
+
+    /* 11 Sept (owner: "Irfan submits but it doesn't update on time; management only got one").
+       Diagnosed from the mirror: 9 hunts he submitted overnight all carried synced_at ~18 h
+       LATE — their live push dropped under load, and this sweep's cheap new-hunt path used to
+       share ONE push at the very END, after the expensive 8-page backupDump reconciliation
+       below. Under sustained overload that heavy loop times out, so the final syncHunts never
+       ran and brand-new hunts never reached the mirror management reads. FIX: push the newest
+       hunts FIRST, in their own call, so a new submit lands on the very next sweep no matter
+       what the heavy reconciliation does. */
+    try {
+      const fresh = [];
+      rows.slice(Math.max(0, rows.length - 150)).forEach(function (r) {
+        const b = huntValsOut_(r);
+        if (b.vals.hunt_id) fresh.push(b);
+      });
+      for (let i = 0; i < fresh.length; i += 200) enginePost_('syncHunts', { rows: fresh.slice(i, i + 200) });
+    } catch (e) {}
 
     const wanted = {};   // hunt_id -> sheet row (deduped)
     // (1) the newest hunts — catches a brand-new submit whose first live mirror push was dropped.
