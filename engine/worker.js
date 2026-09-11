@@ -2867,8 +2867,34 @@ async function autoMsgSend(env) {
     ).run();
     return;
   }
+  /* 12 Sept (owner: a 10-Sep order got its "order placed" note 2 days late). A time-sensitive
+     note must never go out stale — a "just placed / just shipped" message days after the fact
+     reads as broken and can even land after a cancellation. Anchor freshness to the order's REAL
+     eBay date (orders.created_at = creationDate), not to queue mechanics, so a backlog drain, a
+     late sync, or the live gate flipping on all get caught. Anything past its window is cancelled
+     in ONE sweep per kind (not drained 5-at-a-time), so stale backlog clears instantly and only
+     genuinely fresh notes are sent. AUTOMSG_FRESH_H (portal_config, JSON) can override per kind. */
+  const AUTOMSG_FRESH_H = { ordered: 24, shipped: 72, arrived: 240 };
+  try {
+    const fr = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'automsg_fresh_h'").first().catch(() => null);
+    if (fr && fr.value) { const o = JSON.parse(fr.value); for (const k in o) if (Number(o[k]) > 0) AUTOMSG_FRESH_H[k] = Number(o[k]); }
+  } catch (e) {}
+  for (const kind in AUTOMSG_FRESH_H) {
+    const hrs = AUTOMSG_FRESH_H[kind];
+    await env.DB.prepare(
+      "UPDATE automsg_queue SET status = 'CANCELLED', detail = 'not sent — the order was older than " + hrs + "h when it came due (stale; a late note was suppressed)' " +
+      "WHERE status = 'QUEUED' AND trigger_kind = ?1 AND order_id != '' AND order_id IN " +
+      "(SELECT order_id FROM orders WHERE created_at != '' AND (julianday('now') - julianday(created_at)) * 24 > ?2)"
+    ).bind(kind, hrs).run();
+  }
+  /* Catch-all for the feedback/case triggers (not order-dated): a note that has waited more than
+     a day PAST its own send time is a stale backlog item — cancel it rather than fire it late. */
+  await env.DB.prepare(
+    "UPDATE automsg_queue SET status = 'CANCELLED', detail = 'not sent — it waited over a day past its send time (stale backlog cleared)' " +
+    "WHERE status = 'QUEUED' AND due_at <= datetime('now', '-1 day')"
+  ).run();
   const due = await env.DB.prepare(
-    'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.body, q.subject, ' +
+    'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.order_id, q.body, q.subject, ' +
     '       COALESCE(a.enabled, 0) AS still_on ' +
     'FROM automsg_queue q LEFT JOIN auto_msgs a ON a.account = q.account AND a.trigger_kind = q.trigger_kind ' +
     "WHERE q.status = 'QUEUED' AND q.due_at <= datetime('now') ORDER BY q.id LIMIT 5"
@@ -2877,6 +2903,17 @@ async function autoMsgSend(env) {
     if (!Number(q.still_on)) {
       await env.DB.prepare("UPDATE automsg_queue SET status = 'CANCELLED', detail = 'trigger was switched off before sending' WHERE id = ?1 AND status = 'QUEUED'").bind(q.id).run();
       continue;
+    }
+    /* backstop: the same freshness rule per item, in case an order aged past its window between
+       the sweep above and now (or the sweep skipped it). Never send a stale time-sensitive note. */
+    if (AUTOMSG_FRESH_H[q.trigger_kind] && String(q.order_id || '')) {
+      const ord = await env.DB.prepare("SELECT created_at FROM orders WHERE order_id = ?1").bind(q.order_id).first().catch(() => null);
+      const oc = ord && ord.created_at ? Date.parse(ord.created_at) : NaN;
+      if (isFinite(oc) && (Date.now() - oc) > AUTOMSG_FRESH_H[q.trigger_kind] * 3600000) {
+        await env.DB.prepare("UPDATE automsg_queue SET status = 'CANCELLED', detail = ?2 WHERE id = ?1 AND status = 'QUEUED'")
+          .bind(q.id, 'not sent — order was ' + Math.round((Date.now() - oc) / 86400000) + ' day(s) old (stale)').run();
+        continue;
+      }
     }
     const claim = await env.DB.prepare("UPDATE automsg_queue SET status = 'SENDING' WHERE id = ?1 AND status = 'QUEUED'").bind(q.id).run();
     if (!claim.meta || !claim.meta.changes) continue;      // someone else holds it
