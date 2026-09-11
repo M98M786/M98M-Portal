@@ -684,7 +684,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260911-1547';
+var BUILD = '20260911-1642';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10114,7 +10114,11 @@ VIEWS.dashboard = {
         if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
         toast(note);
       };
-      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed/i.test(msg)) {
+      /* 11 Sept: Google's front door under evening peak answers with an HTML error page — the
+         client sees "Unexpected token '<'" / "Failed to fetch". Those are MAYBE-LANDED, never a
+         validation refusal (Irfan's evening hunts were being bounced back over saves that were
+         about to land, or lost without a retry). */
+      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg)) {
         restore('NOT saved — ' + msg + ' · your typing is restored.');
         return;
       }
@@ -10138,8 +10142,17 @@ VIEWS.dashboard = {
               : 'Saved ✓ — your hunt landed. It is on your list below.');
             huLoadMine();
           } else {
-            restore('NOT saved — ' + msg + ' · your typing is restored.');
-            huLoadMine();
+            /* Verified missing → ONE automatic resubmit before giving the form back. Safe by
+               design: the server treats an own in-flight resubmit as a revision, never a dup. */
+            toast('Not landed yet — submitting again automatically…');
+            api(revId ? 'reviseHunt' : 'submitHunt', payload).then(function (res2) {
+              if (typeof draftClear === 'function') { draftClear('hunting'); }
+              toast('Saved ✓ on the retry · ' + huStr(res2.hunt_id));
+              huLoadMine();
+            }).catch(function () {
+              restore('NOT saved after a retry — ' + msg + ' · your typing is restored.');
+              huLoadMine();
+            });
           }
         }).catch(function () {
           /* Could not verify either way — keep the typing safe and say so honestly. A re-submit
@@ -25095,6 +25108,20 @@ function saveSchedule() {
         '<textarea class="tk-ta" rows="2" data-ladf="__changes" style="min-height:44px" placeholder="only for revisions — say exactly what you changed"></textarea></div>' +
         '<div class="tk-btns" style="margin-top:8px"><button class="btn-gold" data-act="ladResSave" data-id="' + tkAttr(id) + '">Save research</button></div>';
       el.innerHTML = h;
+      /* 11 Sept: a failed save (expired session, engine hiccup, page reload) must never cost the
+         lister their typed research — the last attempt is stashed on this device and poured back
+         in whenever the form opens again. Cleared only by a successful save. */
+      try {
+        var stash = JSON.parse(localStorage.getItem('m98m:ladres:' + id) || 'null');
+        if (stash && stash.data) {
+          el.querySelectorAll('[data-ladf]').forEach(function (f) {
+            var k = f.getAttribute('data-ladf');
+            var v = k === '__changes' ? stash.chg : stash.data[k];
+            if (v && !f.value) { f.value = v; }
+          });
+          toast('Your unsaved research from last time is back in the form.');
+        }
+      } catch (e2) {}
     }).catch(function (e) { el.innerHTML = esc(e.message); });
   }
   function tkWireRows(box) {
@@ -25118,13 +25145,20 @@ function saveSchedule() {
       });
       if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
       btn.disabled = true;
+      try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: data, chg: chg, at: Date.now() })); } catch (e0) {}
       engineCall('ladderResearchSave', { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg }, 20000)
         .then(function (r) {
           sessionStorage.setItem('ladres:' + id, '1');
+          try { localStorage.removeItem('m98m:ladres:' + id); } catch (e0) {}
           btn.textContent = 'Saved ✓ (version ' + (r.versions || '?') + ')';
           toast('Research saved to the archive.');
         })
-        .catch(function (e) { btn.disabled = false; toast(e.message); });
+        .catch(function (e) {
+          btn.disabled = false;
+          toast(String(e.message) === 'auth'
+            ? 'Your session was refreshed — nothing is lost. The page will reload; open the form and press Save again: your research is kept on this device.'
+            : 'NOT saved — ' + e.message + ' · your research is kept in the form and on this device; press Save again.');
+        });
       return;
     }
     if (act === 'ladPark') {

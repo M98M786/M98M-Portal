@@ -745,6 +745,20 @@
         '<textarea class="tk-ta" rows="2" data-ladf="__changes" style="min-height:44px" placeholder="only for revisions — say exactly what you changed"></textarea></div>' +
         '<div class="tk-btns" style="margin-top:8px"><button class="btn-gold" data-act="ladResSave" data-id="' + tkAttr(id) + '">Save research</button></div>';
       el.innerHTML = h;
+      /* 11 Sept: a failed save (expired session, engine hiccup, page reload) must never cost the
+         lister their typed research — the last attempt is stashed on this device and poured back
+         in whenever the form opens again. Cleared only by a successful save. */
+      try {
+        var stash = JSON.parse(localStorage.getItem('m98m:ladres:' + id) || 'null');
+        if (stash && stash.data) {
+          el.querySelectorAll('[data-ladf]').forEach(function (f) {
+            var k = f.getAttribute('data-ladf');
+            var v = k === '__changes' ? stash.chg : stash.data[k];
+            if (v && !f.value) { f.value = v; }
+          });
+          toast('Your unsaved research from last time is back in the form.');
+        }
+      } catch (e2) {}
     }).catch(function (e) { el.innerHTML = esc(e.message); });
   }
   function tkWireRows(box) {
@@ -768,13 +782,20 @@
       });
       if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
       btn.disabled = true;
+      try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: data, chg: chg, at: Date.now() })); } catch (e0) {}
       engineCall('ladderResearchSave', { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg }, 20000)
         .then(function (r) {
           sessionStorage.setItem('ladres:' + id, '1');
+          try { localStorage.removeItem('m98m:ladres:' + id); } catch (e0) {}
           btn.textContent = 'Saved ✓ (version ' + (r.versions || '?') + ')';
           toast('Research saved to the archive.');
         })
-        .catch(function (e) { btn.disabled = false; toast(e.message); });
+        .catch(function (e) {
+          btn.disabled = false;
+          toast(String(e.message) === 'auth'
+            ? 'Your session was refreshed — nothing is lost. The page will reload; open the form and press Save again: your research is kept on this device.'
+            : 'NOT saved — ' + e.message + ' · your research is kept in the form and on this device; press Save again.');
+        });
       return;
     }
     if (act === 'ladPark') {

@@ -99,6 +99,14 @@ export default {
         : String(e && e.message || e).startsWith('SAY: ') ? String(e.message).slice(5)
         : 'request failed';
       if (msg === 'request failed') console.log('ERR', action, String(e && e.stack || e).slice(0, 500));
+      /* 11 Sept: every refusal is a FACT in err_log — "it gives an error" debugging starts at
+         errLogRead, not at guesswork. Best-effort; pruned to 3 days by ladderWatch. */
+      try {
+        await env.DB.prepare('INSERT INTO err_log (ts, action, email, msg) VALUES (datetime(\'now\'), ?1, ?2, ?3)')
+          .bind(String(action || '').slice(0, 40),
+            String((ctx2 && ctx2.email) || '').slice(0, 60) || ('sess:' + String(body.session || '').slice(0, 8)),
+            (msg === 'request failed' ? 'FAIL: ' + String(e && e.message || e) : msg).slice(0, 300)).run();
+      } catch (e3) {}
       /* the SYNC KEY holder (the build relay) may see the real error — a browser session never does */
       if (msg === 'request failed' && route && route.auth === 'sync' && String(body.key || '') === (await secret(env, 'SYNC_KEY').catch(() => null))) {
         return json({ ok: false, error: msg, debug: String(e && e.stack || e).slice(0, 400) }, 200, cors);
@@ -208,6 +216,12 @@ async function authorize(env, idToken, session) {
       if (!row) return '';
       const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
       if (String(row.expires_at) <= nowStr) return '';
+      /* 11 Sept (staff sessions minted at the 4-Sept onboarding all hit their 7th day mid-shift:
+         engine-only actions started refusing 'auth' while AS fallbacks kept the portal looking
+         fine — the keyword-research save was the visible casualty). SLIDING sessions: a session
+         seen alive rides forward 7 days from now, at most once per 5-minute memo window. A staff
+         member working every day never expires; 7 idle days still ends it. */
+      try { await env.DB.prepare("UPDATE sessions SET expires_at = datetime('now', '+7 day'), last_seen = datetime('now') WHERE token = ?1").bind(String(session)).run(); } catch (e) {}
       return String(row.email).toLowerCase();
     });
   }
@@ -2564,6 +2578,7 @@ async function ladderSales(env, itemId, fromUtc, toUtc) {
   return r ? Number(r.n) || 0 : 0;
 }
 async function ladderWatch(env) {
+  try { await env.DB.prepare("DELETE FROM err_log WHERE ts < datetime('now', '-3 day')").run(); } catch (e) {}
   await ensureTruthSchema(env);
   /* Seed: every go-live (provenance row) from the last 3 days becomes a ladder row once. */
   /* Owner (10 Sept): "consider 72 hours from EBAY — when the listing went live on eBay, not on
@@ -3904,6 +3919,7 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS listing_ladder (item_id TEXT PRIMARY KEY, account TEXT, title TEXT DEFAULT '', lister_email TEXT DEFAULT '', go_live_at TEXT, r72_at TEXT, r10_at TEXT, r20_at TEXT, r72_status TEXT DEFAULT '', r10_status TEXT DEFAULT '', r20_status TEXT DEFAULT '', parked TEXT DEFAULT '', video_status TEXT DEFAULT '', video_link TEXT DEFAULT '', final_status TEXT DEFAULT '', final_by TEXT DEFAULT '', final_at TEXT DEFAULT '', final_note TEXT DEFAULT '', created_at TEXT, updated_at TEXT)",
     "CREATE TABLE IF NOT EXISTS listing_research (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT, account TEXT, kind TEXT, data_json TEXT, changes_note TEXT DEFAULT '', submitted_by TEXT, submitted_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_lr_item ON listing_research(item_id, submitted_at)",
+    "CREATE TABLE IF NOT EXISTS err_log (ts TEXT, action TEXT, email TEXT, msg TEXT)",
     "CREATE TABLE IF NOT EXISTS ladder_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT, account TEXT, stage TEXT, decision TEXT, tier TEXT DEFAULT '', title_keywords TEXT DEFAULT '', desc_keywords TEXT DEFAULT '', comment TEXT DEFAULT '', decided_by TEXT, decided_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_lad_item ON ladder_decisions(item_id, decided_at)",
     "CREATE TABLE IF NOT EXISTS order_processing (order_id TEXT PRIMARY KEY, account TEXT, tab TEXT DEFAULT '', cost TEXT DEFAULT '', ali_order TEXT DEFAULT '', email TEXT DEFAULT '', new_ali_link TEXT DEFAULT '', tracking TEXT DEFAULT '', delivery_status TEXT DEFAULT '', sheet_status TEXT DEFAULT '', sheet_reason TEXT DEFAULT '', updated_by TEXT DEFAULT '', updated_at TEXT)",
@@ -8138,6 +8154,22 @@ const ROUTES = {
       if (rows.length > 1500) rows.length = 1500;
       rows.forEach((r) => { delete r.sort; });
       return { rows, total: rows.length };
+    },
+  },
+
+  /* 11 Sept: the refusal ledger — what error did the portal actually give whom. Mgmt only. */
+  errLogRead: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const lim = Math.max(1, Math.min(500, Number(p.limit) || 120));
+      let sql = 'SELECT ts, action, email, msg FROM err_log', binds = [];
+      const wh = [];
+      if (p.action) { wh.push('action = ?' + (binds.length + 1)); binds.push(String(p.action)); }
+      if (p.email) { wh.push('email LIKE ?' + (binds.length + 1)); binds.push('%' + String(p.email) + '%'); }
+      if (wh.length) sql += ' WHERE ' + wh.join(' AND ');
+      sql += ' ORDER BY ts DESC LIMIT ' + lim;
+      const rs = await ctx.env.DB.prepare(sql).bind(...binds).all();
+      return { rows: rs.results || [] };
     },
   },
 

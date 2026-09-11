@@ -633,7 +633,11 @@
         if (revId) { huFillFromRec(HU_MINE[revId], true); huSetRevise(revId, revTitle); }
         toast(note);
       };
-      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed/i.test(msg)) {
+      /* 11 Sept: Google's front door under evening peak answers with an HTML error page — the
+         client sees "Unexpected token '<'" / "Failed to fetch". Those are MAYBE-LANDED, never a
+         validation refusal (Irfan's evening hunts were being bounced back over saves that were
+         about to land, or lost without a retry). */
+      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg)) {
         restore('NOT saved — ' + msg + ' · your typing is restored.');
         return;
       }
@@ -657,8 +661,17 @@
               : 'Saved ✓ — your hunt landed. It is on your list below.');
             huLoadMine();
           } else {
-            restore('NOT saved — ' + msg + ' · your typing is restored.');
-            huLoadMine();
+            /* Verified missing → ONE automatic resubmit before giving the form back. Safe by
+               design: the server treats an own in-flight resubmit as a revision, never a dup. */
+            toast('Not landed yet — submitting again automatically…');
+            api(revId ? 'reviseHunt' : 'submitHunt', payload).then(function (res2) {
+              if (typeof draftClear === 'function') { draftClear('hunting'); }
+              toast('Saved ✓ on the retry · ' + huStr(res2.hunt_id));
+              huLoadMine();
+            }).catch(function () {
+              restore('NOT saved after a retry — ' + msg + ' · your typing is restored.');
+              huLoadMine();
+            });
           }
         }).catch(function () {
           /* Could not verify either way — keep the typing safe and say so honestly. A re-submit
