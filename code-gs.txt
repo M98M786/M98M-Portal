@@ -6955,7 +6955,7 @@ function actionReviseHunt_(payload, ctx) {
    the pipeline. Read-only for everyone who works with hunting; profit/PII stripped per role by
    stripForRole_. Reviewers still DECIDE on the Hunt approvals page — this page decides nothing. */
 const HUNT_RECORDS_ROLES = ['Product Hunter', 'Team Lead', 'Ops Head', 'Management',
-  'Order Processor', 'Advertising Manager', 'Listing Manager', 'Sales Operations'];
+  'Order Processor', 'Advertising Manager', 'Listing Manager', 'Sales Operations', 'Item Lister'];
 
 function huntStatusCounts_() {
   const c = { approved: 0, not_approved: 0, pending: 0, revision: 0, total: 0 };

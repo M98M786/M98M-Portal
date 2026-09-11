@@ -8,7 +8,7 @@
   'use strict';
 
   var HR_ROLES = ['Product Hunter', 'Team Lead', 'Ops Head', 'Management', 'Order Processor',
-    'Advertising Manager', 'Listing Manager', 'Sales Operations'];
+    'Advertising Manager', 'Listing Manager', 'Sales Operations', 'Item Lister'];   // owner 11 Sept: listers see the hunting archive
 
   /* The three pages, in the owner's spoken order: what's waiting, what got in, what got turned away. */
   var HR_TABS = [

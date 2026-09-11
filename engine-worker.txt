@@ -8084,6 +8084,50 @@ const ROUTES = {
     },
   },
 
+  /* ————— the collective listings archive (11 Sept, owner: "start showing … all previous
+     listings archive to product listers as well" + "show whole archive of all product listers
+     to every product lister collectively"). Every COMPLETED listing job and revision across the
+     whole team, newest first, with who did it. Reads only; listing_new details go through the
+     same lstLimited §8.2 whitelist as a lister's own work, so nothing extra leaks. */
+  listingArchiveEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super;
+      if (['Item Lister', 'Listing Manager', 'Team Lead'].indexOf(role) < 0 && !mgmt) throw new AuthError('role has no listing archive');
+      const names = {};
+      try {
+        const us = await ctx.env.DB.prepare('SELECT email, name FROM users').all();
+        for (const u of (us.results || [])) names[String(u.email || '').toLowerCase()] = String(u.name || u.email || '');
+      } catch (e) { /* names fall back to emails */ }
+      const rs = await ctx.env.DB.prepare(
+        "SELECT * FROM tasks WHERE type IN ('listing_new','listing_revision') AND status = 'Completed'"
+      ).all();
+      const rows = [];
+      for (const t of (rs.results || [])) {
+        const who = String(t.assigned_to || '').toLowerCase();
+        const rec = {
+          task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''),
+          item_id: String(t.item_id || ''), title: String(t.title || ''), status: 'Completed',
+          submitted_at: String(t.submitted_at || ''), created_at: String(t.created_at || ''),
+          assigned_to: who, assigned_name: names[who] || who,
+        };
+        if (t.type === 'listing_new') {
+          const parsed = lstParseDetails(t.details);
+          if (parsed) rec.listing = lstLimited(parsed);
+        } else {
+          rec.is_72h = String(t.title || '').indexOf('listing_revision_72h') === 0;
+        }
+        rec.sort = Date.parse(String(t.submitted_at || t.created_at || '')) || 0;
+        rows.push(rec);
+      }
+      rows.sort((a, b) => b.sort - a.sort);
+      if (rows.length > 1500) rows.length = 1500;
+      rows.forEach((r) => { delete r.sort; });
+      return { rows, total: rows.length };
+    },
+  },
+
   listDeskEngine: {
     auth: 'any', fn: async (p, ctx) => {
       await ensureTruthSchema(ctx.env);
