@@ -907,7 +907,11 @@
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
     if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
     if (act === 'draft') {
-      tkEnsureResearch(box, id, function () { tkSendDraft(box, id, btn); });
+      /* 12 Sept (Sajjawal's video): the research is entered ON this form and saved BY the
+         hand-off itself — so a pre-check for research already in the archive can never pass on a
+         first submit (chicken-and-egg) and blocked every lister with "add the keyword research
+         first". tkSendDraft validates the inline fields and the server enforces the rule. */
+      tkSendDraft(box, id, btn);
       return;
     }
     if (act === 'reject') { tkSendReject(box, id, btn); return; }
