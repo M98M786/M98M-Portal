@@ -2893,11 +2893,15 @@ async function autoMsgSend(env) {
     "UPDATE automsg_queue SET status = 'CANCELLED', detail = 'not sent — it waited over a day past its send time (stale backlog cleared)' " +
     "WHERE status = 'QUEUED' AND due_at <= datetime('now', '-1 day')"
   ).run();
+  /* 12 Sept: LIMIT 5/run (~20/hr) was far too slow — a normal day's orders backed up for hours,
+     so fresh "placed/shipped" notes aged past their freshness window and got cancelled before the
+     drain reached them (messages effectively stopped sending). The account is on the paid plan
+     (1000 subrequests/invocation), so a bigger batch is safe and keeps sends prompt. */
   const due = await env.DB.prepare(
     'SELECT q.id, q.account, q.trigger_kind, q.ref, q.buyer, q.item_id, q.order_id, q.body, q.subject, ' +
     '       COALESCE(a.enabled, 0) AS still_on ' +
     'FROM automsg_queue q LEFT JOIN auto_msgs a ON a.account = q.account AND a.trigger_kind = q.trigger_kind ' +
-    "WHERE q.status = 'QUEUED' AND q.due_at <= datetime('now') ORDER BY q.id LIMIT 5"
+    "WHERE q.status = 'QUEUED' AND q.due_at <= datetime('now') ORDER BY q.id LIMIT 25"
   ).all();
   for (const q of (due.results || [])) {
     if (!Number(q.still_on)) {
