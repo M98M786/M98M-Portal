@@ -521,7 +521,11 @@
        be parked "Waiting for the Advertising Manager's call". */
     var lad = tkResearchHandle(t);
     if (lad) {
-      act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
+      /* New-listing research is entered on the draft/go-live form (owner combined the two). The
+         standalone button stays for REVISIONS (R72/R10/R20), which have no draft link. */
+      if (lad.stage !== 'LISTING') {
+        act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
+      }
       if (lad.tier === 'T2' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED)) {
         act += '<button class="minibtn" data-act="ladPark" data-id="' + tkAttr(id) + '" data-item="' + tkAttr(lad.item) + '">Waiting for AM\u2019s call</button>';
       }
@@ -681,11 +685,16 @@
       '<div class="tk-lform hidden" data-lform="draft:' + tkAttr(id) + '">' +
         '<div class="field"><label>eBay draft link</label>' +
           '<input class="tk-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/…" data-ldraft-link="' + tkAttr(id) + '"></div>' +
+        /* 11 Sept (owner: "combine the page of draft link and keyword research"): the keyword/SEO
+           research now lives ON this same form. One "Hand to go-live" saves the research AND hands
+           the draft off — no separate Save step that can fail. Fields load from the schema below. */
+        '<div class="k" style="margin-top:14px;color:var(--gold-a)">Keyword &amp; SEO research <span class="tk-sub">— required before go-live</span></div>' +
+        '<div data-draftres="' + tkAttr(id) + '"><div class="spinner"></div></div>' +
         '<div class="field" style="margin-top:10px"><label>Note for go-live (optional)</label>' +
           '<textarea class="tk-ta" data-ldraft-note="' + tkAttr(id) + '" placeholder="Anything the person publishing should know"></textarea></div>' +
         '<div class="tk-btns"><button class="minibtn" data-act="draft" data-id="' + tkAttr(id) + '">Hand to go-live</button>' +
           '<button class="minibtn" data-act="leverCancel" data-id="draft:' + tkAttr(id) + '">Cancel</button></div>' +
-        '<div class="tk-sub" style="margin-top:8px">The task leaves your queue and goes to whoever publishes drafts; they add the Item ID once it is live.</div></div>' +
+        '<div class="tk-sub" style="margin-top:8px">One step: this saves your keyword research AND sends the draft to whoever publishes it. They add the Item ID once it is live.</div></div>' +
     '</div>';
   }
 
@@ -760,6 +769,41 @@
         }
       } catch (e2) {}
     }).catch(function (e) { el.innerHTML = esc(e.message); });
+  }
+  /* 11 Sept (owner combined draft + research): build the keyword/SEO fields INTO the go-live draft
+     form, prefilled from any saved version (the archive) and from an unsent on-device stash. */
+  function tkBuildDraftResearch(box, id) {
+    var host = box.querySelector('[data-draftres="' + String(id).replace(/"/g, '') + '"]');
+    if (!host || host.dataset.built) { return; }
+    var item = 'task:' + id;
+    (TK_SCHEMA ? Promise.resolve(TK_SCHEMA) : engineCall('ladderSchema', {}, 15000)).then(function (sch) {
+      TK_SCHEMA = sch;
+      host.dataset.built = '1';
+      var h = '';
+      (sch.columns || []).forEach(function (c) {
+        h += '<div class="field" style="margin-top:8px"><label>' + esc(c.label) + '</label>' +
+          '<textarea class="tk-ta" rows="2" data-draftf="' + tkAttr(c.key) + '" style="min-height:40px"></textarea></div>';
+      });
+      h += '<div data-draftarch="' + tkAttr(id) + '"></div>';
+      host.innerHTML = h;
+      var fill = function (obj) {
+        if (!obj) { return; }
+        host.querySelectorAll('[data-draftf]').forEach(function (f) {
+          var v = obj[f.getAttribute('data-draftf')];
+          if (v && !f.value) { f.value = v; }
+        });
+      };
+      // on-device stash first (unsent), then the latest saved version from the archive
+      try { var stash = JSON.parse(localStorage.getItem('m98m:ladres:' + id) || 'null'); if (stash && stash.data) { fill(stash.data); } } catch (e) {}
+      engineCall('ladderResearch', { item_id: item }, 15000).then(function (d) {
+        var vers = (d && d.research) || [];
+        if (!vers.length) { return; }
+        var latest = {}; try { latest = JSON.parse(vers[0].data_json || '{}'); } catch (e) {}
+        fill(latest);
+        var arch = host.querySelector('[data-draftarch="' + String(id).replace(/"/g, '') + '"]');
+        if (arch) { arch.className = 'tk-sub'; arch.style.marginTop = '6px'; arch.textContent = vers.length + ' saved version(s) in the archive — the latest is loaded above.'; }
+      }).catch(function () {});
+    }).catch(function (e) { host.innerHTML = '<div class="tk-sub">Could not load the research fields — ' + esc(e.message) + '. Press Cancel and reopen.</div>'; });
   }
   function tkWireRows(box) {
     var btns = box.querySelectorAll('button[data-act]'), i;
@@ -852,6 +896,7 @@
         if (key === want + id) { forms[j].classList.toggle('hidden'); }
         else if (key.slice(key.indexOf(':') + 1) === id) { forms[j].classList.add('hidden'); }
       }
+      if (act === 'draftF') { tkBuildDraftResearch(box, id); }
       return;
     }
     if (act === 'leverCancel') {
@@ -989,9 +1034,18 @@
     var l = tkPick(box, 'data-ldraft-link', id), n = tkPick(box, 'data-ldraft-note', id);
     var link = l ? tkStr(l.value) : '';
     if (!safeUrl(link)) { toast('Paste the eBay draft link (it must start with http/https).'); if (l) { l.focus(); } return; }
+    /* Collect the keyword/SEO research entered on this same form (owner combined the two). It is
+       required — the server also enforces it — and rides in the SAME request, so one action saves
+       the research AND hands off. No separate Save step that can silently fail. */
+    var host = box.querySelector('[data-draftres="' + String(id).replace(/"/g, '') + '"]');
+    var research = {};
+    if (host) { host.querySelectorAll('[data-draftf]').forEach(function (f) { if (tkStr(f.value)) { research[f.getAttribute('data-draftf')] = tkStr(f.value); } }); }
+    if (!Object.keys(research).length) { toast('Fill the keyword & SEO research on this form — it is required before go-live.'); if (host) { var fst = host.querySelector('[data-draftf]'); if (fst) { fst.focus(); } } return; }
+    try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: research, at: Date.now() })); } catch (e) {}
     btn.disabled = true;
-    api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '' }).then(function (res) {
-      toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' — they publish it and add the Item ID.');
+    api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '', research: research }).then(function (res) {
+      try { localStorage.removeItem('m98m:ladres:' + id); } catch (e) {}
+      toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' ✓ — research saved and the draft is on their desk.');
       tkLoadTasks();
     }).catch(function (err) {
       var msg = String((err && err.message) || '');

@@ -8568,6 +8568,28 @@ function actionListerDraft_(payload, ctx) {
   const sh = tasksSheet_();
   let rec = null, go = null, from = '', handed = false;
   const pre = listingListerTask_(sh, payload, ctx, true);   // heavy read outside the lock (tranche 2)
+
+  /* 11 Sept (owner: "combine the page of draft link and keyword research"). The keyword/SEO
+     research now rides WITH the hand-off in one request. Save it to D1 through the sync bridge
+     BEFORE the lock (never hold the sheet lock across a network call), then REQUIRE research to
+     exist — a draft cannot reach go-live without it. This one reliable step replaces the separate
+     browser→engine save that kept dropping and left listers stuck. */
+  const resItemKey = 'task:' + String(pre.rec.task_id);
+  const research = (payload.research && typeof payload.research === 'object') ? payload.research : null;
+  let researchOk = false;
+  if (research && Object.keys(research).length) {
+    try {
+      enginePost_('ladderResearchSaveSync', { item_id: resItemKey, kind: 'LISTING',
+        data: research, changes_note: String(payload.changes_note || ''), submitted_by: ctx.ident.email });
+      researchOk = true;
+    } catch (e) {
+      throw new Error(SAFE_ERROR_PREFIX + 'could not save the keyword research just now — press Hand to go-live again in a moment (your typing is kept on this device).');
+    }
+  } else {
+    try { const ex = enginePost_('ladderResearch', { item_id: resItemKey }); researchOk = !!(ex && ex.research && ex.research.length); } catch (e) {}
+  }
+  if (!researchOk) throw new Error(SAFE_ERROR_PREFIX + 'add the keyword & SEO research on the go-live form before handing it off');
+
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
