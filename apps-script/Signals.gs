@@ -1182,7 +1182,14 @@ function runLossEscalationSweep() {
   });
   if (!losses.length) return 'no loss items for ' + yesterday;
 
-  const advHolders = usersWithModule_('advertising', ['Advertising Manager']);
+  /* Owner (11 Sept: "loss items to Zain, NOT Husnain"): the ADVERTISING MANAGER by ROLE owns
+     the loss desk — a module grant (read access) must never steal the tasking. Module holders
+     remain only the fallback if no role-holder exists. */
+  const roleAdv = [];
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.role) === 'Advertising Manager' && String(u.status) === 'approved') roleAdv.push(String(u.email));
+  });
+  const advHolders = roleAdv.length ? roleAdv : usersWithModule_('advertising', ['Advertising Manager']);
   const tlHolders = usersWithModule_('team-lead', ['Team Lead']);
   if (!advHolders.length) {
     notifyManagement_('Loss item', '🔴 Loss items are waiting but nobody holds the advertising module — grant it on the Access desk.', 'loss:noholder');
@@ -1224,6 +1231,10 @@ function runLossEscalationSweep() {
     tlHolders.forEach(function (e) { notify_(e, 'Loss item', msg, 'loss:' + l.item_id + ':' + bucket); });
     pinged++;
   });
+  if (made) {
+    // owner (11 Sept): loss items are management business too — one bell per sweep, never per item
+    notifyManagement_('Loss items', '🔴 ' + made + ' loss item(s) from ' + yesterday + ' raised to the Advertising Manager — the tasks carry the exact figures.', 'loss:made:' + yesterday + ':' + bucket);
+  }
   logActivity_('system', 'LOSS_SWEEP', yesterday, '', made + ' new / ' + pinged + ' pinged', '');
   return made + ' task(s) created, ' + pinged + ' item(s) pinged';
 }
