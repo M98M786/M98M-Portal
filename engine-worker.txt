@@ -2722,17 +2722,31 @@ async function autoMsgScan(env) {
     for (const r of (cfgRs.results || [])) cfg[r.trigger_kind] = r;
     if (!Object.keys(cfg).length) return;
 
+    /* 12 Sept (owner: "3D Sellers sent at the perfect time no matter how many orders"): this scan
+       used to re-issue ~600 sequential INSERT OR IGNORE writes per tick for rows already queued,
+       taking 3-6 minutes per run — and the sender runs AFTER it in the same tick, so every
+       message waited behind that crawl. Now the refs already in the queue are loaded ONCE per
+       account, known refs are skipped in memory, and the few genuinely new rows go in as one
+       batch. The scan is seconds, so the sender starts at once. */
+    const have = new Set();
+    const hv = await env.DB.prepare('SELECT ref FROM automsg_queue WHERE account = ?1').bind(acct).all();
+    for (const r of (hv.results || [])) have.add(String(r.ref));
+    const pending = [];
     const queue = async (kind, ref, vars) => {
       const c = cfg[kind];
       if (!c) return;
+      if (have.has(ref)) return;
       const body = renderTemplate(c.template, vars);
       if (!body) return;
-      const subj = renderTemplate(c.subject || '', vars).slice(0, 200);
-      await env.DB.prepare(
+      // eBay rejects member-message subjects over 100 chars ("Subject is too long") — 251 shipped
+      // notes had silently failed on that. Cap well inside the limit.
+      const subj = renderTemplate(c.subject || '', vars).slice(0, 95);
+      have.add(ref);
+      pending.push(env.DB.prepare(
         'INSERT OR IGNORE INTO automsg_queue (account, trigger_kind, ref, buyer, order_id, item_id, body, subject, due_at, status, detail, created_at) ' +
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now', '+' || ?9 || ' minutes'), 'QUEUED', '', datetime('now'))"
       ).bind(acct, kind, ref, String(vars.buyer || ''), String(vars.order || ''), String(vars.item_id || ''),
-        body, subj, String(Math.max(0, Number(c.delay_min) || 0))).run();
+        body, subj, String(Math.max(0, Number(c.delay_min) || 0))));
     };
 
     // one titles map per account so {{item}} speaks the listing's name, not its number
@@ -2842,6 +2856,7 @@ async function autoMsgScan(env) {
         }
       }
     }
+    for (let i = 0; i < pending.length; i += 50) await env.DB.batch(pending.slice(i, i + 50));
   });
 }
 
@@ -2945,7 +2960,7 @@ async function autoMsgSend(env) {
         ok = r.ok; detail = ok ? 'sent via inquiry thread' : (r.status + ': ' + (await r.text()).slice(0, 200));
       } else {
         const xml = '<?xml version="1.0" encoding="utf-8"?><AddMemberMessageAAQToPartnerRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
-          '<ItemID>' + xmlEsc(q.item_id) + '</ItemID><MemberMessage><Subject>' + xmlEsc(String(q.subject || '').trim() || 'About your order') + '</Subject><Body>' +
+          '<ItemID>' + xmlEsc(q.item_id) + '</ItemID><MemberMessage><Subject>' + xmlEsc((String(q.subject || '').trim() || 'About your order').slice(0, 95)) + '</Subject><Body>' +
           xmlEsc(q.body) + '</Body><QuestionType>General</QuestionType>' +
           '<RecipientID>' + xmlEsc(q.buyer) + '</RecipientID></MemberMessage></AddMemberMessageAAQToPartnerRequest>';
         const r = await fetch('https://api.ebay.com/ws/api.dll', {
