@@ -588,12 +588,92 @@ function tasksPurgeBefore(args) {
   return 'purged ' + deleted.length + ' open task(s)' + (types.length ? ' of type ' + types.join('/') : '') + ' created before ' + before + ': ' + deleted.join(',');
 }
 
+/* 12 Sept (owner: bulk delete "keeps saying Working on 25… sleeps for a century… tasks still
+ * there"). The Manage tab used to fire ONE taskAdmin call PER task — 25 round trips, each taking
+ * the global lock and re-reading the whole sheet — then reloaded a mirror it never purged. This is
+ * the bulk version: ONE sheet read, ONE lock, every change applied in a single pass (deletes
+ * bottom-up so nothing shifts under a later target), and for non-delete ops ONE batched mirror
+ * push so the list is right immediately (deletes are purged from the mirror by the caller via the
+ * mgmt engine action tasksMirrorPurge). Returns done[] and missing[] (ids no longer in the sheet —
+ * mirror ghosts — which the caller must purge too). Management / super only. */
+function actionTaskAdminBulk_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'management only');
+  const op = String(payload.op || '').trim();
+  if (['delete', 'end', 'withdraw', 'edit'].indexOf(op) < 0) throw new Error('unknown op — delete | end | withdraw | edit');
+  const ids = (Array.isArray(payload.task_ids) ? payload.task_ids : String(payload.task_ids || '').split(','))
+    .map(function (s) { return String(s || '').trim(); }).filter(Boolean).slice(0, 300);
+  if (!ids.length) throw new Error('task_ids required');
+  const want = {}; ids.forEach(function (id) { want[id] = true; });
+  const stamp = now_();
+  const note = String(payload.note || '').trim().slice(0, 500);
+  let newAssignee = '';
+  if (op === 'edit' && payload.assigned_to != null && String(payload.assigned_to).trim()) {
+    const u = (typeof listingResolveUser_ === 'function') ? listingResolveUser_(String(payload.assigned_to), '') : null;
+    newAssignee = u ? u.email : String(payload.assigned_to).trim();
+  }
+  const newDeadline = (op === 'edit' && payload.deadline_pkt != null && String(payload.deadline_pkt).trim()) ? taskPktIso_(payload.deadline_pkt) : '';
+  if (op === 'edit' && !newAssignee && !newDeadline) throw new Error('nothing to change — send a deadline or an assignee');
+
+  const sh = tasksSheet_();
+  const lock = LockService.getScriptLock();
+  const done = [], changedRows = [];
+  try {
+    lock.waitLock(20000);
+    const vals = sh.getDataRange().getValues();
+    const head = vals[0].map(String);
+    const col = function (k) { const c = head.indexOf(k); if (c < 0) throw new Error('unknown TASKS column: ' + k); return c; };
+    const cId = col('task_id');
+    const toDelete = [];
+    for (let i = 1; i < vals.length; i++) {
+      const id = String(vals[i][cId] || '');
+      if (!want[id]) continue;
+      const rowNum = i + 1;
+      if (op === 'delete') { toDelete.push({ row: rowNum, id: id }); continue; }
+      const patch = { updated_at: stamp };
+      if (op === 'end' || op === 'withdraw') {
+        patch.status = TASK_STATUS_COMPLETED; patch.decided_at = stamp; patch.approved_by = ctx.ident.email;
+        patch.comments = taskAdminAppendNote_(vals[i][col('comments')], (op === 'withdraw' ? 'Withdrawn' : 'Ended') + ' by management' + (note ? ': ' + note : ''));
+      } else {
+        if (newDeadline) patch.deadline_pkt = newDeadline;
+        if (newAssignee) patch.assigned_to = newAssignee;
+      }
+      Object.keys(patch).forEach(function (k) { const c = col(k); sh.getRange(rowNum, c + 1).setValue(patch[k]); vals[i][c] = patch[k]; });
+      done.push(id);
+      const rec = {}; head.forEach(function (h, c) { rec[h] = vals[i][c]; });
+      changedRows.push(rec);
+    }
+    toDelete.sort(function (a, b) { return b.row - a.row; });
+    toDelete.forEach(function (r) { sh.deleteRow(r.row); done.push(r.id); });
+  } finally { lock.releaseLock(); }
+  const missing = ids.filter(function (id) { return done.indexOf(id) < 0; });
+  try { logActivity_(ctx.ident.email, 'TASK_BULK_' + op.toUpperCase(), String(done.length) + ' task(s)', '', String(missing.length) + ' missing', done.join(',').slice(0, 900)); } catch (e) {}
+  /* ONE mirror push for the rows that changed (never one per task): the engine-served lists show
+     the new status/deadline/assignee at once instead of after the 15-minute sweep. Best-effort. */
+  let mirrored = 0;
+  if (changedRows.length) {
+    try {
+      const rows = changedRows.map(function (t) {
+        return { task_id: String(t.task_id || ''), type: String(t.type || ''), account: String(t.account || ''),
+          item_id: String(t.item_id || ''), title: String(t.title || ''), details: String(t.details || ''),
+          comments: String(t.comments || ''), assigned_by: String(t.assigned_by || ''), assigned_to: String(t.assigned_to || ''),
+          priority: String(t.priority || ''), deadline_pkt: taskPktIso_(t.deadline_pkt), status: String(t.status || ''),
+          created_at: taskPktIso_(t.created_at), updated_at: taskPktIso_(t.updated_at), submitted_at: taskPktIso_(t.submitted_at),
+          approved_by: String(t.approved_by || ''), decided_at: taskPktIso_(t.decided_at),
+          submission_note: String(t.submission_note || ''), time_taken_min: String(t.time_taken_min || '') };
+      });
+      enginePost_('syncTasks', { tasks: rows }); mirrored = rows.length;
+    } catch (e) {}
+  }
+  return { op: op, done: done, missing: missing, mirrored: mirrored };
+}
+
 const ACTIONS_TASKS = {
   createTask:       [actionCreateTask_, 'any'],
   myTasks:          [actionMyTasks_, 'any'],
   startTask:        [actionStartTask_, 'any'],
   submitTask:       [actionSubmitTask_, 'any'],
   taskAdmin:        [actionTaskAdmin_, 'any'],   // management gated inside (end/withdraw/delete/edit/extend any task)
+  taskAdminBulk:    [actionTaskAdminBulk_, 'any'], // management gated inside — ONE pass for many tasks (Manage tab bulk bar)
   pendingApprovals: [actionPendingApprovals_, 'any'],
   approveTask:      [actionApproveTask_, 'any'],
   returnTask:       [actionReturnTask_, 'any'],

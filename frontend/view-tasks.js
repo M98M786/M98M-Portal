@@ -41,18 +41,44 @@
     if (op === 'delete' && !window.confirm('Delete ' + ids.length + ' task(s) permanently? This cannot be undone.')) { return; }
     if (op === 'extend') { var d = window.prompt('New deadline for ' + ids.length + ' task(s) — PKT, format 2026-09-12 21:00'); if (!d) { return; } extra.deadline_pkt = tkStr(d).trim().replace(' ', 'T'); op = 'edit'; }
     if (op === 'reassign') { var em = window.prompt('Reassign ' + ids.length + ' task(s) to (email):'); if (!em) { return; } extra.assigned_to = tkStr(em).trim(); op = 'edit'; }
-    var bar = $('tkBulkBar'); if (bar) { bar.innerHTML = '<b>Working on ' + ids.length + '…</b>'; }
-    var done = 0, failed = 0;
-    (function next(i) {
-      if (i >= ids.length) {
-        toast(done + ' done' + (failed ? ', ' + failed + ' failed' : '') + '.');
-        TKV.sel = {}; tkLoadTasks();
+    var bar = $('tkBulkBar'); if (bar) { bar.innerHTML = '<b>Working on ' + ids.length + '…</b> <span class="tk-sub">one request for all of them</span>'; }
+    /* 12 Sept (owner: "keeps saying Working on 25… sleeps for a century… tasks still there").
+       Was: one taskAdmin round trip PER task (25 locks, 25 full sheet reads), then a reload from a
+       mirror that never got purged. Now: the selected rows vanish at once; ONE taskAdminBulk call
+       applies everything in a single sheet pass; deletes are then purged from the engine mirror
+       (which never deletes on its own — the "still there" half of the bug), other ops are pushed to
+       the mirror by the server; then one reload. A timeout on delete is treated as landed. */
+    var hidden = [];
+    ids.forEach(function (id) {
+      var box = document.querySelector('[data-tk-sel="' + String(id).replace(/"/g, '') + '"]');
+      var card = box && box.closest ? box.closest('tr,.tk-card,[data-task]') : null;
+      if (card) { card.style.display = 'none'; hidden.push(card); }
+    });
+    var payload = { op: op, task_ids: ids };
+    for (var k in extra) { payload[k] = extra[k]; }
+    var isDelete = op === 'delete';
+    var purge = function (list) {
+      return isDelete && list.length ? engineCall('tasksMirrorPurge', { task_ids: list }, 20000).catch(function () {}) : Promise.resolve();
+    };
+    var finish = function (msg) { toast(msg); TKV.sel = {}; tkLoadTasks(); };
+    api('taskAdminBulk', payload).then(function (r) {
+      var done = (r && r.done) || [], missing = (r && r.missing) || [];
+      return purge(done.concat(missing)).then(function () {
+        finish(done.length + ' ' + (isDelete ? 'deleted' : op === 'end' ? 'ended' : op === 'withdraw' ? 'withdrawn' : 'updated') +
+          (missing.length ? ' · ' + missing.length + ' were already gone from the sheet (cleared stale copies)' : '') + '.');
+      });
+    }).catch(function (e) {
+      var msg = String((e && e.message) || '');
+      var transient = /overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg);
+      if (isDelete && transient) {
+        /* the single sheet pass almost certainly landed server-side; make the list honest now */
+        purge(ids).then(function () { finish('Deleted — the sheet was slow to answer; cleared them from the list.'); });
         return;
       }
-      var payload = { op: op, task_id: ids[i] };
-      for (var k in extra) { payload[k] = extra[k]; }
-      api('taskAdmin', payload).then(function () { done++; }).catch(function () { failed++; }).then(function () { next(i + 1); });
-    })(0);
+      hidden.forEach(function (c) { c.style.display = ''; });
+      if (bar) { tkUpdateBulkBar(); }
+      toast('Failed: ' + (msg || 'try again'));
+    });
   }
   function tkScopeBar() {
     var opts = tkIsMgmt() ? [['mine', 'My tasks'], ['everyone', 'All tasks — manage'], ['archive', 'Archive']]
