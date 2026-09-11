@@ -590,8 +590,43 @@
       toast(((r.changes || []).length) + ' change(s) saved — ' +
         (str(r.schedule_note) || str(s.name) + ' has been notified.'));
     }).catch(function (e) {
-      btn.disabled = false;
-      toast('Not saved: ' + e.message);
+      var msg = String((e && e.message) || '');
+      /* 11 Sept (owner: "update staff says backend overloaded"): on a busy evening the save's
+         round trip can pass the client's 25 s abort even though the write landed server-side
+         (the rename job proved it). A timeout/overload is MAYBE-LANDED — never dump a scary
+         "Not saved" over a change that actually went in. Verify: re-read the directory and check
+         whether the person now carries the intended values; only restore if it truly did not. */
+      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg)) {
+        btn.disabled = false;
+        toast('Not saved: ' + msg);
+        return;
+      }
+      toast('The server is slow — checking whether the change saved…');
+      setTimeout(function () {
+        soft(api('assignableStaff')).then(function (rr) {
+          var list = (rr.ok && rr.d && rr.d.staff) || [];
+          var now = null;
+          for (var k = 0; k < list.length; k++) { if (str(list[k].email).toLowerCase() === str(p.new_email || p.email).toLowerCase()) { now = list[k]; break; } }
+          var landed = !!now &&
+            (p.name === undefined || str(now.name) === str(p.name)) &&
+            (p.role === undefined || str(now.role) === str(p.role)) &&
+            (p.accounts === undefined || str(now.accounts) === str(p.accounts));
+          if (landed) {
+            if (p.name !== undefined) { s.name = p.name; }
+            if (p.role !== undefined) { s.role = p.role; }
+            if (p.new_email) { s.email = p.new_email; }
+            if (p.accounts !== undefined) { s.accounts = p.accounts; }
+            S.editing = ''; sortStaff(); paintList('');
+            toast('Saved \u2713 — the change landed despite the slow server.');
+          } else {
+            btn.disabled = false;
+            toast('Not saved — the server was too busy. Nothing changed; try again in a moment.');
+          }
+        }).catch(function () {
+          btn.disabled = false;
+          toast('The server is slow — could not confirm. Press Refresh: the change may have saved.');
+        });
+      }, 4000);
     });
   }
 
