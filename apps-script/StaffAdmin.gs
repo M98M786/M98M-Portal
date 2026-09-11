@@ -416,6 +416,40 @@ function actionUpdateStaff_(payload, ctx) {
   return stripForRole_(out, ctx.user.role, ctx.ident.email);
 }
 
+/* 11 Sept (owner: "update staff Ahsan Ali to Murtaza Ramzan, keep everything the same" — and the
+ * Staff desk was hitting the evening "backend overloaded" 25 s client abort). A rename touches ONE
+ * cell — role, account, tasks, history all stay under the same email. Run it as a server-side job
+ * (engineRunJob {job:'staffRename', args:{email, name}}) so it lands even when the desk's live
+ * request would time out under load. Lock held only around the single-cell write; the USERS cache
+ * is forgotten and the engine users mirror re-synced so every board (rota, archive, sign-in) shows
+ * the new name at once. Idempotent: re-running with the same name is a no-op. */
+function staffRename(args) {
+  const target = normalizeEmail((args && (args.email || args.target)) || '');
+  const name = String((args && args.name) || '').trim().slice(0, 120);
+  if (!target) return 'SAY: email required';
+  if (!name) return 'SAY: name required';
+  const sh = sadmUsersSheet_();
+  const pre = sadmFind_(sh, target);                    // heavy read OUTSIDE the lock
+  const before = String(pre.rec.name || '');
+  if (before === name) return 'no change — already named "' + name + '"';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    const found = sadmFind_(sh, target);                // re-find inside the lock (row may have moved)
+    const c = found.head.indexOf('name');
+    if (c < 0) throw new Error('USERS has no name column');
+    const cell = sh.getRange(found.row, c + 1);
+    cell.setNumberFormat('@');                          // a name typed as "=…" must stay text, never a formula
+    cell.setValue(name);
+  } finally { lock.releaseLock(); }
+  sadmForgetUsers_();
+  try { logActivity_('system', 'STAFF_RENAME', target, before, name, 'via job'); } catch (e) {}
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  try { notify_(target, 'Your name was updated', before + ' → ' + name, 'staff:' + target); } catch (e) {}
+  return 'renamed ' + target + ': "' + before + '" → "' + name + '" · ' + mirror;
+}
+
 // ---------- §4.1b REMOVE (= deactivate) ----------
 /** The button says Remove; nothing is deleted (§16.2). Sign-in is blocked from the next request
  * (RL-5, enforced by the router's fresh USERS read — see the file header). */

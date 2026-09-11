@@ -507,6 +507,48 @@ function taskAdminAppendNote_(comments, note) {
   return (base ? base + '\n' : '') + '@MGMT@ ' + note + ' · ' + now_();
 }
 
+/* 11 Sept (owner: "increase deadline of all the tasks for one day" → "ahsan ali tasking only").
+ * One-shot, re-runnable via engineRunJob {job:'taskDeadlineExtend', args:{assignee, days}}. Gives
+ * ONE named person's OPEN tasks more time. His listing tasks are all already overdue, so "one
+ * more day" means a fresh deadline of end-of-day `days` (default 1) days from now — not +1 day on
+ * a date already in the past, which would still read overdue. Completed tasks are final and
+ * untouched. The deadline + updated_at columns are rewritten in ONE setValues each (no row moves,
+ * indices stay stable), then the engine tasks mirror is reconciled so every board shows the date.
+ * REQUIRES an assignee — it never touches the whole portal by omission. */
+function taskDeadlineExtend(args) {
+  const assignee = normalizeEmail((args && (args.assignee || args.email)) || '');
+  if (!assignee) return 'SAY: assignee required (this job never bumps everyone)';
+  const days = Math.max(1, Math.min(30, Number(args && args.days) || 1));
+  // End of the target day in PKT: today + `days`, at 23:59:59 +05:00.
+  const target = Utilities.formatDate(new Date(Date.now() + days * 86400000), 'Asia/Karachi', 'yyyy-MM-dd') + 'T23:59:59+05:00';
+  const sh = tasksSheet_();
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) return 'no tasks';
+  const head = vals[0].map(String);
+  const cDl = head.indexOf('deadline_pkt');
+  const cStatus = head.indexOf('status');
+  const cWho = head.indexOf('assigned_to');
+  const cUpd = head.indexOf('updated_at');
+  if (cDl < 0 || cStatus < 0 || cWho < 0) return 'columns missing';
+  const stamp = now_();
+  let bumped = 0;
+  const dlOut = [], updOut = [];
+  for (let i = 1; i < vals.length; i++) {
+    let dl = vals[i][cDl], newUpd = vals[i][cUpd];
+    if (normalizeEmail(vals[i][cWho]) === assignee && String(vals[i][cStatus] || '') !== TASK_STATUS_COMPLETED) {
+      dl = target; newUpd = stamp; bumped++;             // updated_at bumped so the mirror sweep re-syncs
+    }
+    dlOut.push([dl]);
+    updOut.push([newUpd]);
+  }
+  sh.getRange(2, cDl + 1, dlOut.length, 1).setValues(dlOut);
+  if (cUpd >= 0) sh.getRange(2, cUpd + 1, updOut.length, 1).setValues(updOut);
+  try { logActivity_('system', 'TASK_DEADLINE_EXTEND', assignee, '', target, bumped + ' open tasks moved'); } catch (e) {}
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  return 'extended ' + bumped + ' open task(s) for ' + assignee + ' to ' + target + ' · ' + mirror;
+}
+
 const ACTIONS_TASKS = {
   createTask:       [actionCreateTask_, 'any'],
   myTasks:          [actionMyTasks_, 'any'],
