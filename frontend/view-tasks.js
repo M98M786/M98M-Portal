@@ -770,6 +770,24 @@
     }
   }
 
+  /* 11 Sept: the go-live guard used to trust ONLY sessionStorage['ladres:'+id] — a per-device
+     flag wiped by any reload, so a lister who really saved research got blocked after a refresh
+     ("still can't add the data"). Now: if the flag is missing, ASK the archive whether research
+     exists for this task's research key; only block when there genuinely is none. */
+  function tkEnsureResearch(box, id, proceed) {
+    if (sessionStorage.getItem('ladres:' + id)) { proceed(); return; }
+    var wrap = box.querySelector('[data-ladres="' + String(id).replace(/"/g, '') + '"]');
+    var item = wrap ? wrap.getAttribute('data-laditem') : ('task:' + id);
+    var blockMsg = 'Add the keyword research data first — the "Keyword research" button on this task. The draft cannot go to go-live without it.';
+    engineCall('ladderResearch', { item_id: item || ('task:' + id) }, 15000).then(function (d) {
+      if (d && d.research && d.research.length) { sessionStorage.setItem('ladres:' + id, '1'); proceed(); }
+      else { toast(blockMsg); tkLadResToggle(box, id); }
+    }).catch(function () {
+      /* Could not check — open the form so they can Save (idempotent) rather than trap them. */
+      toast(blockMsg); tkLadResToggle(box, id);
+    });
+  }
+
   function tkRowAction(box, act, id, btn) {
     if (act === 'ladRes') { tkLadResToggle(box, id); return; }
     if (act === 'ladResSave') {
@@ -782,20 +800,31 @@
       });
       if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
       btn.disabled = true;
+      var rpayload = { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg };
       try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: data, chg: chg, at: Date.now() })); } catch (e0) {}
-      engineCall('ladderResearchSave', { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg }, 20000)
-        .then(function (r) {
-          sessionStorage.setItem('ladres:' + id, '1');
-          try { localStorage.removeItem('m98m:ladres:' + id); } catch (e0) {}
-          btn.textContent = 'Saved ✓ (version ' + (r.versions || '?') + ')';
-          toast('Research saved to the archive.');
-        })
-        .catch(function (e) {
+      function tkResSaved(r) {
+        sessionStorage.setItem('ladres:' + id, '1');
+        try { localStorage.removeItem('m98m:ladres:' + id); } catch (e0) {}
+        btn.textContent = 'Saved \u2713 (version ' + ((r && r.versions) || '?') + ')';
+        toast('Research saved \u2713 — you can hand the draft to go-live now.');
+      }
+      /* 11 Sept (owner: "listing dept still can't add all the data"). Engine-direct first (fast);
+         if that fails for ANY reason on a bad night, fall back to the Apps Script relay, which
+         writes the SAME row to D1 through the sync bridge. Between the two the research lands as
+         long as either backend is up — that is what ends the "can't save" loop. */
+      engineCall('ladderResearchSave', rpayload, 30000).then(tkResSaved).catch(function (e) {
+        if (String(e && e.message) === 'auth') {
+          /* engineCall already kicked a silent re-mint + reload; the on-device stash restores the
+             form and the next Save works. Calm message, not "failed". */
+          toast('Refreshing your session — your research is safe on this device; when the page reloads, open the form and press Save once more.');
+          return;
+        }
+        toast('Saving through the backup route\u2026');
+        api('saveListingResearch', rpayload).then(tkResSaved).catch(function (e2) {
           btn.disabled = false;
-          toast(String(e.message) === 'auth'
-            ? 'Your session was refreshed — nothing is lost. The page will reload; open the form and press Save again: your research is kept on this device.'
-            : 'NOT saved — ' + e.message + ' · your research is kept in the form and on this device; press Save again.');
+          toast('NOT saved — ' + ((e2 && e2.message) || (e && e.message)) + ' \u00b7 your research is kept in the form and on this device; press Save again in a moment.');
         });
+      });
       return;
     }
     if (act === 'ladPark') {
@@ -833,12 +862,8 @@
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
     if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
     if (act === 'draft') {
-      if (!sessionStorage.getItem('ladres:' + id)) {
-        toast('Add the keyword research data first — the "Keyword research" button on this task. The draft cannot go to go-live without it.');
-        tkLadResToggle(box, id);
-        return;
-      }
-      tkSendDraft(box, id, btn); return;
+      tkEnsureResearch(box, id, function () { tkSendDraft(box, id, btn); });
+      return;
     }
     if (act === 'reject') { tkSendReject(box, id, btn); return; }
     if (act === 'flagClear') {
@@ -878,7 +903,8 @@
     }
     if (act === 'send') {
       if (btn.getAttribute('data-ladder') && !sessionStorage.getItem('ladres:' + id)) {
-        toast('Add the keyword research data first — the "Keyword research" button on this task.');
+        /* Check the archive (survives reloads) before blocking, then re-run the send. */
+        tkEnsureResearch(box, id, function () { tkRowAction(box, 'send', id, btn); });
         return;
       }
       note = tkPick(box, 'data-note', id);
@@ -967,7 +993,38 @@
     api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '' }).then(function (res) {
       toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' — they publish it and add the Item ID.');
       tkLoadTasks();
-    }).catch(function (err) { btn.disabled = false; toast('Not handed off: ' + err.message); });
+    }).catch(function (err) {
+      var msg = String((err && err.message) || '');
+      /* 11 Sept (owner: "backend overloaded"): the hand-off is an Apps Script sheet write that can
+         pass the 25 s client abort on a busy night even though it LANDED. Verify before crying
+         failure — re-read My tasks and see whether this task has left the lister's queue (moved to
+         the go-live desk); only show an error if it truly did not move. */
+      if (!/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg)) {
+        btn.disabled = false; toast('Not handed off: ' + msg); return;
+      }
+      toast('The server is slow — checking whether the hand-off went through\u2026');
+      setTimeout(function () {
+        api('myTasks', {}).then(function (d) {
+          var mine = (d && (d.tasks || d.listings || [])) || [];
+          if (Array.isArray(d)) { mine = d; }
+          var still = false;
+          for (var k = 0; k < mine.length; k++) {
+            var tt = mine[k] || {};
+            if (String(tt.task_id) === String(id) && String(tt.type) === 'listing_new' && String(tt.status) !== 'Completed') {
+              var flag = String(tt.comments || tt.details || '');
+              if (flag.indexOf('@LFLAG@') < 0 && !/draft/i.test(flag)) { still = true; }
+              break;
+            }
+          }
+          if (still) { btn.disabled = false; toast('Not handed off — the server was too busy. Nothing changed; press Hand to go-live again.'); }
+          else { toast('Handed to go-live \u2713 — it went through despite the slow server.'); }
+          tkLoadTasks();
+        }).catch(function () {
+          toast('The server is slow — could not confirm. Press Refresh: the hand-off may have gone through.');
+          tkLoadTasks();
+        });
+      }, 4000);
+    });
   }
 
   // ============================== PENDING APPROVALS ==============================

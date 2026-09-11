@@ -1203,6 +1203,30 @@ function actionListerClearFlag_(payload, ctx) {
   return { task_id: String(rec.task_id), flag: '' };
 }
 
+/* 11 Sept (owner: "listing dept still can't add all the data, backend overloaded"). The keyword
+ * research save runs engine-direct from the lister's browser; on a bad night that direct call can
+ * fail (session blip, network) and the research never lands — the go-live guard then blocks the
+ * draft forever. This is the fallback the client calls when the direct save fails: Apps Script
+ * writes the research to D1 through the sync bridge (ladderResearchSaveSync) so it ALWAYS lands
+ * as long as either path is up. Role-gated to the listing workspace + management. No sheet write,
+ * no lock — one engine round trip. */
+function actionSaveListingResearch_(payload, ctx) {
+  const role = String(ctx.user.role || '');
+  if (LISTING_WORKSPACE_ROLES.indexOf(role) < 0 && !isMgmt_(role, ctx.ident.email)) {
+    throw authErr_('not a listing role', ctx.ident.email);
+  }
+  const item = String(payload.item_id || '').trim();
+  if (!item) throw new Error(SAFE_ERROR_PREFIX + 'which item?');
+  const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
+  if (!Object.keys(data).length) throw new Error(SAFE_ERROR_PREFIX + 'fill the research fields first');
+  const out = enginePost_('ladderResearchSaveSync', {
+    item_id: item, kind: String(payload.kind || 'LISTING'), data: data,
+    changes_note: String(payload.changes_note || ''), submitted_by: ctx.ident.email,
+  });
+  logActivity_(ctx.ident.email, 'LISTING_RESEARCH_SAVE', item, '', 'v' + String((out && out.versions) || '?'), 'via AS relay');
+  return out;
+}
+
 const ACTIONS_LISTING = {
   myListingWork:    [actionMyListingWork_, 'any'],
   enterItemId:      [actionEnterItemId_, 'any'],
@@ -1212,4 +1236,5 @@ const ACTIONS_LISTING = {
   listerNeedInfo:   [actionListerNeedInfo_, 'any'],   // alerts the hunter
   listerDraft:      [actionListerDraft_, 'any'],      // hands the draft to the go-live approver
   listerClearFlag:  [actionListerClearFlag_, 'any'],
+  saveListingResearch: [actionSaveListingResearch_, 'any'],   // engine-save fallback (relays to D1 sync)
 };
