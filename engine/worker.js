@@ -134,7 +134,7 @@ export default {
       '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
          orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
-         the */5 order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
+         the five-minute order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
          and sends. Worst case ~7 min from purchase to message, regardless of volume — instead of
          an HOURLY scan + a 15-minute drip that let a busy day back up for a day. Own invocation =
          own subrequest budget, so a packed sync slot can never starve it. */
