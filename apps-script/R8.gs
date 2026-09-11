@@ -826,25 +826,39 @@ function r8SeedTasks() {
  * every LISTER_DRAFT row is the lister handing over their own draft (actor = lister,
  * target = task_id). Re-stamp provenance from it; non-blank input overwrites on the engine. */
 function r8ProvenanceListerFix() {
-  const byTask = {};
+  const goLive = normalizeEmail(getConfig('go_live_approver') || 'zaidkaleem987@gmail.com');
+  const byDraft = {}, byCreate = {};
   readTab_('ACTIVITY_LOG').forEach(function (a) {
-    if (String(a.action) !== 'LISTER_DRAFT') return;
-    const tid = String(a.target || '').trim();
-    if (tid && !byTask[tid]) byTask[tid] = normalizeEmail(a.actor);   // first draft = the lister
+    const act = String(a.action);
+    if (act === 'LISTER_DRAFT') {
+      const tid = String(a.target || '').trim();
+      if (tid && !byDraft[tid]) byDraft[tid] = normalizeEmail(a.actor);   // first draft = the lister
+      return;
+    }
+    /* Layer 2 — pre-logging-era drafts: hunt approval created the task FOR a lister and wrote
+       "account · lister@ · cpc · due … · task Txxxx" into DECIDE_HUNT's detail. */
+    if (act === 'DECIDE_HUNT') {
+      const d = String(a.detail || '');
+      const tm = d.match(/·\s*task\s+(T[A-Za-z0-9]+)/);
+      const em = d.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
+      if (tm && em && !byCreate[tm[1]]) byCreate[tm[1]] = normalizeEmail(em[0]);
+    }
   });
-  let sent = 0, failed = 0, unknown = 0;
+  let sent = 0, failed = 0, unknown = 0, self = 0;
   const tasks = readTab_('TASKS');
   for (let i = 0; i < tasks.length && sent < 250; i++) {
     const t = tasks[i];
     if (String(t.type) !== 'listing_new') continue;
     const itemId = String(t.item_id || '').trim();
     if (!/^\d{9,15}$/.test(itemId)) continue;
-    const lister = byTask[String(t.task_id || '')];
+    const tid = String(t.task_id || '');
+    const lister = byDraft[tid] || byCreate[tid];
     if (!lister) { unknown++; continue; }
+    if (lister === goLive) { self++; continue; }   // would re-stamp the same wrong name
     try { enginePost_('provenanceSet', { item_id: itemId, lister_email: lister }); sent++; }
     catch (e) { failed++; }
   }
-  return 'lister fix: ' + sent + ' re-stamped, ' + unknown + ' with no draft trail (pre-hand-off era, assigned_to already true), ' + failed + ' failed';
+  return 'lister fix: ' + sent + ' re-stamped, ' + unknown + ' with no trail at all, ' + self + ' resolved to the go-live desk itself, ' + failed + ' failed';
 }
 
 /* ---------- provenance backfill (one-shot, ENGINE_RUNNABLE) ---------- */
