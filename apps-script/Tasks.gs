@@ -549,6 +549,40 @@ function taskDeadlineExtend(args) {
   return 'extended ' + bumped + ' open task(s) for ' + assignee + ' to ' + target + ' · ' + mirror;
 }
 
+/* 12 Sept (owner: "delete previous tasking of whole portal before sep" — the pre-September OPEN
+ * tasks still clogging All tasks — manage). One-shot via engineRunJob {job:'tasksPurgeBefore',
+ * args:{before:'2026-09-01'}}. Deletes every task created BEFORE `before` whose status is not
+ * Completed — completed tasks are history (archives, performance) and are never touched. Rows
+ * are removed bottom-up under the lock so earlier deletions can never shift a later target. Returns
+ * the deleted task_ids so the engine mirror (which never deletes on its own) can be purged of the
+ * same set. */
+function tasksPurgeBefore(args) {
+  const before = String((args && args.before) || '2026-09-01').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(before)) return 'SAY: before must be yyyy-MM-dd';
+  const sh = tasksSheet_();
+  const lock = LockService.getScriptLock();
+  const deleted = [];
+  try {
+    lock.waitLock(20000);
+    const vals = sh.getDataRange().getValues();
+    const head = vals[0].map(String);
+    const cId = head.indexOf('task_id'), cStatus = head.indexOf('status'), cCreated = head.indexOf('created_at');
+    if (cId < 0 || cStatus < 0 || cCreated < 0) return 'columns missing';
+    const rowsToDelete = [];
+    for (let i = 1; i < vals.length; i++) {
+      const status = String(vals[i][cStatus] || '');
+      if (status === TASK_STATUS_COMPLETED) continue;
+      const created = taskPktIso_(vals[i][cCreated]).slice(0, 10);
+      if (!created || created >= before) continue;
+      rowsToDelete.push({ row: i + 1, id: String(vals[i][cId] || '') });
+    }
+    rowsToDelete.sort(function (a, b) { return b.row - a.row; });           // bottom-up
+    rowsToDelete.forEach(function (r) { sh.deleteRow(r.row); deleted.push(r.id); });
+  } finally { lock.releaseLock(); }
+  try { logActivity_('system', 'TASKS_PURGE_BEFORE', before, '', String(deleted.length) + ' open tasks deleted', deleted.join(',').slice(0, 900)); } catch (e) {}
+  return 'purged ' + deleted.length + ' open task(s) created before ' + before + ': ' + deleted.join(',');
+}
+
 const ACTIONS_TASKS = {
   createTask:       [actionCreateTask_, 'any'],
   myTasks:          [actionMyTasks_, 'any'],
