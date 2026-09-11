@@ -416,6 +416,29 @@ function actionUpdateStaff_(payload, ctx) {
   return stripForRole_(out, ctx.user.role, ctx.ident.email);
 }
 
+/* 11 Sept (owner: "Daniyal will work in shift 1"). Set a person's rota shift as a server-side
+ * job (engineRunJob {job:'staffSetShift', args:{email, shift_label, work_start?, work_end?}}), so
+ * it lands even when the desk's live request times out. Reuses actionSetSchedule_ with a system
+ * management context (the backend is authoritative), then force-pushes the users mirror so the
+ * new checkpoints AND shift_start reach the engine at once — that also refreshes shift_start for
+ * EVERY staff member, which is what makes the night-shift board reset at clock-in take effect now
+ * instead of at the next hourly sync. */
+function staffSetShift(args) {
+  var email = normalizeEmail((args && (args.email || args.target)) || '');
+  var label = String((args && args.shift_label) || '').trim();
+  if (!email) return 'SAY: email required';
+  if (SCHEDULE_SHIFT_LABELS.indexOf(label) < 0) return 'SAY: shift_label must be one of ' + SCHEDULE_SHIFT_LABELS.join(', ');
+  var ctx = { user: { role: 'Management', email: 'm98m786@gmail.com', name: 'system' }, ident: { email: 'm98m786@gmail.com' } };
+  var payload = { email: email, shift_label: label };
+  if (args && args.work_start) payload.work_start = String(args.work_start);
+  if (args && args.work_end) payload.work_end = String(args.work_end);
+  var out = actionSetSchedule_(payload, ctx);
+  var mirror = '';
+  try { mirror = String(pushEngineSync()); } catch (e) { mirror = 'sync failed: ' + (e && e.message || e); }
+  var cps = (out && out.checkpoints) || [];
+  return 'shift set: ' + email + ' \u2192 ' + label + ' (' + ((out && out.schedule && out.schedule.work_start) || '?') + '-' + ((out && out.schedule && out.schedule.work_end) || '?') + ') \u00b7 checkpoints ' + cps.join(', ') + ' \u00b7 ' + mirror;
+}
+
 /* 11 Sept (owner: "update staff Ahsan Ali to Murtaza Ramzan, keep everything the same" — and the
  * Staff desk was hitting the evening "backend overloaded" 25 s client abort). A rename touches ONE
  * cell — role, account, tasks, history all stay under the same email. Run it as a server-side job

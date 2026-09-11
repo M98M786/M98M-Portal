@@ -3961,6 +3961,7 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE users ADD COLUMN checkpoints TEXT",
     "ALTER TABLE users ADD COLUMN working_days TEXT",
     "ALTER TABLE users ADD COLUMN accounts TEXT",
+    "ALTER TABLE users ADD COLUMN shift_start TEXT",
     "CREATE TABLE IF NOT EXISTS signals (skey TEXT PRIMARY KEY, account TEXT, type TEXT, date TEXT, item_id TEXT, value TEXT, baseline TEXT, targeted_roles TEXT, owner_email TEXT, card_json TEXT, acknowledged_by TEXT DEFAULT '', updated_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_sig_type ON signals(type)",
     "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
@@ -4218,11 +4219,19 @@ function repMin(v) { const k = repHm(v); return k ? Number(k.slice(0, 2)) * 60 +
 function repPktNow() { const d = new Date(Date.now() + 5 * 3600000); return { day: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
 function repAddDays(dateStr, n) { return new Date(Date.parse(dateStr + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
 function repDayDiff(a, b) { return Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000); }
-function repShiftDateJs(cps) {
+function repShiftDateJs(cps, shiftStartMin) {
   const now = repPktNow();
   if (!cps.length) return now.day;
   const first = repMin(cps[0]), last = repMin(cps[cps.length - 1]);
-  if (last <= first && now.min < first) return repAddDays(now.day, -1);
+  /* A day shift resets at midnight (before anyone arrives) — nothing to do. A NIGHT shift crosses
+     midnight, so its working day must begin at the SHIFT START (e.g. 21:00), not at the first
+     checkpoint (23:00). Before this, a night worker who concluded at 06:00 kept seeing that
+     concluded shift from arrival (21:00) until 23:00 — their board never "reset" at clock-in
+     (owner, 11 Sept: "reset it at 9pm"). Boundary = shift start when we know it, else the first
+     checkpoint (old behaviour, so a user with no shift_start still works). */
+  if (last > first) return now.day;
+  const boundary = (typeof shiftStartMin === 'number' && shiftStartMin >= 0 && shiftStartMin < 1440) ? shiftStartMin : first;
+  if (now.min < boundary) return repAddDays(now.day, -1);
   return now.day;
 }
 function repTimingJs(cps, shiftDate) {
@@ -4994,12 +5003,12 @@ const ROUTES = {
       const users = p.users || [];
       for (const u of users) {
         await ctx.env.DB.prepare(
-          'INSERT INTO users (email, name, role, status, modules, tools, super, shift, checkpoints, working_days, accounts) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ' +
-          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7, shift=?8, checkpoints=?9, working_days=?10, accounts=?11'
+          'INSERT INTO users (email, name, role, status, modules, tools, super, shift, checkpoints, working_days, accounts, shift_start) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ' +
+          'ON CONFLICT(email) DO UPDATE SET name=?2, role=?3, status=?4, modules=?5, tools=?6, super=?7, shift=?8, checkpoints=?9, working_days=?10, accounts=?11, shift_start=?12'
         ).bind(
           String(u.email || '').toLowerCase(), String(u.name || ''), String(u.role || ''),
           String(u.status || ''), String(u.modules || ''), String(u.tools || ''), u.super ? 1 : 0,
-          String(u.shift || ''), String(u.checkpoints || ''), String(u.working_days || ''), String(u.accounts || '')
+          String(u.shift || ''), String(u.checkpoints || ''), String(u.working_days || ''), String(u.accounts || ''), String(u.shift_start || '')
         ).run();
       }
       return { synced: users.length };
@@ -7853,10 +7862,11 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       await ensureTruthSchema(ctx.env);
       const me = String(ctx.user.email || '').toLowerCase();
-      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints FROM users WHERE email = ?1').bind(me).first().catch(() => null);
+      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints, shift_start FROM users WHERE email = ?1').bind(me).first().catch(() => null);
       const role = String((u && u.role) || ctx.user.role || '');
       const labels = REP_COUNT_FIELDS[role] || [];
       const cps = String((u && u.checkpoints) || '').split(',').map(repHm).filter(Boolean);
+      const shiftStartMin = (u && repHm(u.shift_start)) ? repMin(u.shift_start) : -1;
       const base = {
         role, shift: String((u && u.shift) || ''),
         countFields: labels,
@@ -7865,7 +7875,7 @@ const ROUTES = {
         valueAdditionPrompt: 'Value addition today: what value did I add to my department?',
       };
       if (!cps.length) { base.date = repPktNow().day; base.checkpoints = []; return base; }
-      const date = repShiftDateJs(cps);
+      const date = repShiftDateJs(cps, shiftStartMin);
       const t = repTimingJs(cps, date);
       const rs = await ctx.env.DB.prepare('SELECT checkpoint, flag, submitted_at FROM reports_2h WHERE email = ?1 AND date = ?2')
         .bind(me, date).all().catch(() => ({ results: [] }));
@@ -7967,14 +7977,14 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       await ensureTruthSchema(ctx.env);
       const me = String(ctx.user.email || '').toLowerCase();
-      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints FROM users WHERE email = ?1').bind(me).first().catch(() => null);
+      const u = await ctx.env.DB.prepare('SELECT role, shift, checkpoints, shift_start FROM users WHERE email = ?1').bind(me).first().catch(() => null);
       const role = String((u && u.role) || ctx.user.role || '');
       const cps = String((u && u.checkpoints) || '').split(',').map(repHm).filter(Boolean);
       if (!cps.length) throw new Error('SAY: there are no checkpoints on your schedule yet — Management sets your timetable');
       const cp = repHm(p.checkpoint);
       const i = cps.indexOf(cp);
       if (i < 0) throw new Error('SAY: that checkpoint is not on your schedule');
-      const date = repShiftDateJs(cps);
+      const date = repShiftDateJs(cps, (u && repHm(u.shift_start)) ? repMin(u.shift_start) : -1);
       const t = repTimingJs(cps, date);
       if (t.nowAbs >= t.deadlines[i]) throw new Error('SAY: that checkpoint window has already closed');
       const summary = String(p.work_summary || '').trim();

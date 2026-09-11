@@ -133,15 +133,15 @@ function pushEngineSync() {
   const users = readTab_('USERS').map(function (u) {
     /* 3 Sept: the reports pages read the ENGINE now — each user's derived §5 checkpoint list
        and working days ride the same hourly push, so derivation stays in ONE place (here). */
-    let cps = '', wdays = '';
+    let cps = '', wdays = '', wstart = '';
     try {
       const s = typeof getScheduleForUser_ === 'function' ? getScheduleForUser_(u.email) : null;
-      if (s) wdays = String(s.working_days || '');
+      if (s) { wdays = String(s.working_days || ''); wstart = String(s.work_start || ''); }
       cps = (typeof getCheckpointsForUser_ === 'function' ? (getCheckpointsForUser_(u.email) || []) : []).join(',');
     } catch (e) {}
     return { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''),
       status: String(u.status || ''), modules: String(u.modules || ''), tools: String(u.tools || ''),
-      shift: String(u.shift || ''), checkpoints: cps, working_days: wdays,
+      shift: String(u.shift || ''), checkpoints: cps, working_days: wdays, shift_start: wstart,
       super: isSuperAdmin(u.email) };
   });
   const su = enginePost_('syncUsers', { users: users });
@@ -255,6 +255,7 @@ const ENGINE_RUNNABLE = {
   provenanceListerFix: function () { return r8ProvenanceListerFix(); },
   taskDeadlineExtend: function (args) { return taskDeadlineExtend(args); },
   staffRename: function (args) { return staffRename(args); },
+  staffSetShift: function (args) { return staffSetShift(args); },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },

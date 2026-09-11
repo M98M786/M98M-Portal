@@ -45,7 +45,9 @@ function actionMyCheckpoints_(payload, ctx) {
   };
   if (!cps.length) { base.date = repToday_(); base.checkpoints = []; return base; }
 
-  const date = repShiftDate_(cps);
+  var mcSched = repScheduleFor_(email);
+  var mcSsMin = (mcSched && repCpKey_(mcSched.work_start)) ? repHhmmToMin_(mcSched.work_start) : -1;
+  const date = repShiftDate_(cps, mcSsMin);
   const t = repTiming_(cps, date);
   const idx = repIndexRows_(readTab_('REPORTS_2H'));
   const key = normalizeEmail(email) + '|' + date + '|';
@@ -216,7 +218,8 @@ function flagMissedCheckpoints() {
       const cps = repCheckpointsFor_(u.email, u.shift);
       if (!cps.length) return;
       const sched = repScheduleFor_(u.email);
-      const base = repShiftDate_(cps);
+      var fmSsMin = (sched && repCpKey_(sched.work_start)) ? repHhmmToMin_(sched.work_start) : -1;
+      const base = repShiftDate_(cps, fmSsMin);
       [base, repAddDays_(base, -1)].forEach(function (date) {
         if (sched && !repIsWorkingDay_(sched.working_days, date)) return;
         const t = repTiming_(cps, date);
@@ -288,11 +291,16 @@ function repScheduleFor_(email) {
 }
 
 /** Checkpoints that wrap past midnight (Shift 2) still belong to the date the shift started. */
-function repShiftDate_(cps) {
+function repShiftDate_(cps, shiftStartMin) {
   if (!cps.length) return repToday_();
   const first = repHhmmToMin_(cps[0]);
   const last = repHhmmToMin_(cps[cps.length - 1]);
-  if (last <= first && repNowMin_() < first) return repAddDays_(repToday_(), -1);
+  if (last > first) return repToday_();   // day shift: resets at midnight before anyone arrives
+  /* Night shift crosses midnight — its working day begins at the SHIFT START, not the first
+     checkpoint, so a night worker's board resets when they clock in (owner, 11 Sept: "reset it at
+     9pm"), not two hours later. Boundary = shift start when known, else the first checkpoint. */
+  const boundary = (typeof shiftStartMin === 'number' && shiftStartMin >= 0 && shiftStartMin < 1440) ? shiftStartMin : first;
+  if (repNowMin_() < boundary) return repAddDays_(repToday_(), -1);
   return repToday_();
 }
 
