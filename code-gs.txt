@@ -7800,7 +7800,7 @@ function actionEnterItemId_(payload, ctx) {
       item_id: itemId, account: String(rec.account || ''),
       title: finalTitle || String(lim2['Title'] || rec.title || ''),
       ali_link: String(lim2['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
-      lister: String(rec.assigned_to || ''), by: ctx.ident.email, at: now_(),
+      lister: listingTrueLister_(rec), by: ctx.ident.email, at: now_(),
     });
   } catch (e) { /* the sheet chain still stands; the record fills on the next go-live touch */ }
 
@@ -7859,7 +7859,7 @@ function actionEnterItemId_(payload, ctx) {
       const parsedD = listingParseDetails_(rec.details);
       enginePost_('provenanceSet', {
         item_id: itemId, account: String(rec.account || ''),
-        lister_email: String(rec.assigned_to || ''),
+        lister_email: listingTrueLister_(rec),
         hunter_email: hunter ? String(hunter.email) : '',
         hunt_id: hunter ? String(hunter.hunt_id) : String((parsedD && parsedD.hunt_id) || ''),
       });
@@ -8071,6 +8071,15 @@ function listingFlagOf_(comments) {
     }
   }
   return null;
+}
+
+/* 11 Sept (owner: "why showing Zaid's name as product lister — Zaid is only making the listing
+ * live"): by go-live time assigned_to is the go-live desk, not the lister. The draft flag the
+ * lister left (@LFLAG@ line, still on the pre-resolve record in memory) carries the truth:
+ * `from` = who the task was handed off from, `by` = who submitted the draft. */
+function listingTrueLister_(rec) {
+  const fl = listingFlagOf_(rec.comments);
+  return normalizeEmail((fl && (fl.from || fl.by)) || rec.assigned_to || '');
 }
 
 function listingCreateTask_(sh, spec) {
@@ -22283,6 +22292,7 @@ function actionEngineSheetWrite_(payload) {
  * one-hour feedback loop. The list is a closed whitelist of read-and-sync jobs: no job here
  * writes to a business sheet, and the shared Engine key is required. */
 const ENGINE_RUNNABLE = {
+  provenanceListerFix: function () { return r8ProvenanceListerFix(); },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
@@ -24011,6 +24021,33 @@ function r8SeedTasks() {
     made++;
   });
   return 'seeds: ' + made + ' created, ' + skipped + ' already there';
+}
+
+/* 11 Sept (owner: "why showing Zaid's name as product lister there? Zaid is only making the
+ * listing live"): the old backfill and the old go-live write both recorded the task's FINAL
+ * assignee — the go-live desk — as lister_email. The real lister survives in the activity log:
+ * every LISTER_DRAFT row is the lister handing over their own draft (actor = lister,
+ * target = task_id). Re-stamp provenance from it; non-blank input overwrites on the engine. */
+function r8ProvenanceListerFix() {
+  const byTask = {};
+  readTab_('ACTIVITY_LOG').forEach(function (a) {
+    if (String(a.action) !== 'LISTER_DRAFT') return;
+    const tid = String(a.target || '').trim();
+    if (tid && !byTask[tid]) byTask[tid] = normalizeEmail(a.actor);   // first draft = the lister
+  });
+  let sent = 0, failed = 0, unknown = 0;
+  const tasks = readTab_('TASKS');
+  for (let i = 0; i < tasks.length && sent < 250; i++) {
+    const t = tasks[i];
+    if (String(t.type) !== 'listing_new') continue;
+    const itemId = String(t.item_id || '').trim();
+    if (!/^\d{9,15}$/.test(itemId)) continue;
+    const lister = byTask[String(t.task_id || '')];
+    if (!lister) { unknown++; continue; }
+    try { enginePost_('provenanceSet', { item_id: itemId, lister_email: lister }); sent++; }
+    catch (e) { failed++; }
+  }
+  return 'lister fix: ' + sent + ' re-stamped, ' + unknown + ' with no draft trail (pre-hand-off era, assigned_to already true), ' + failed + ' failed';
 }
 
 /* ---------- provenance backfill (one-shot, ENGINE_RUNNABLE) ---------- */

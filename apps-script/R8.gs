@@ -820,6 +820,33 @@ function r8SeedTasks() {
   return 'seeds: ' + made + ' created, ' + skipped + ' already there';
 }
 
+/* 11 Sept (owner: "why showing Zaid's name as product lister there? Zaid is only making the
+ * listing live"): the old backfill and the old go-live write both recorded the task's FINAL
+ * assignee — the go-live desk — as lister_email. The real lister survives in the activity log:
+ * every LISTER_DRAFT row is the lister handing over their own draft (actor = lister,
+ * target = task_id). Re-stamp provenance from it; non-blank input overwrites on the engine. */
+function r8ProvenanceListerFix() {
+  const byTask = {};
+  readTab_('ACTIVITY_LOG').forEach(function (a) {
+    if (String(a.action) !== 'LISTER_DRAFT') return;
+    const tid = String(a.target || '').trim();
+    if (tid && !byTask[tid]) byTask[tid] = normalizeEmail(a.actor);   // first draft = the lister
+  });
+  let sent = 0, failed = 0, unknown = 0;
+  const tasks = readTab_('TASKS');
+  for (let i = 0; i < tasks.length && sent < 250; i++) {
+    const t = tasks[i];
+    if (String(t.type) !== 'listing_new') continue;
+    const itemId = String(t.item_id || '').trim();
+    if (!/^\d{9,15}$/.test(itemId)) continue;
+    const lister = byTask[String(t.task_id || '')];
+    if (!lister) { unknown++; continue; }
+    try { enginePost_('provenanceSet', { item_id: itemId, lister_email: lister }); sent++; }
+    catch (e) { failed++; }
+  }
+  return 'lister fix: ' + sent + ' re-stamped, ' + unknown + ' with no draft trail (pre-hand-off era, assigned_to already true), ' + failed + ' failed';
+}
+
 /* ---------- provenance backfill (one-shot, ENGINE_RUNNABLE) ---------- */
 function r8ProvenanceBackfill() {
   let sent = 0, skipped = 0;

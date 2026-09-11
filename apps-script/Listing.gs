@@ -406,7 +406,7 @@ function actionEnterItemId_(payload, ctx) {
       item_id: itemId, account: String(rec.account || ''),
       title: finalTitle || String(lim2['Title'] || rec.title || ''),
       ali_link: String(lim2['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
-      lister: String(rec.assigned_to || ''), by: ctx.ident.email, at: now_(),
+      lister: listingTrueLister_(rec), by: ctx.ident.email, at: now_(),
     });
   } catch (e) { /* the sheet chain still stands; the record fills on the next go-live touch */ }
 
@@ -465,7 +465,7 @@ function actionEnterItemId_(payload, ctx) {
       const parsedD = listingParseDetails_(rec.details);
       enginePost_('provenanceSet', {
         item_id: itemId, account: String(rec.account || ''),
-        lister_email: String(rec.assigned_to || ''),
+        lister_email: listingTrueLister_(rec),
         hunter_email: hunter ? String(hunter.email) : '',
         hunt_id: hunter ? String(hunter.hunt_id) : String((parsedD && parsedD.hunt_id) || ''),
       });
@@ -677,6 +677,15 @@ function listingFlagOf_(comments) {
     }
   }
   return null;
+}
+
+/* 11 Sept (owner: "why showing Zaid's name as product lister — Zaid is only making the listing
+ * live"): by go-live time assigned_to is the go-live desk, not the lister. The draft flag the
+ * lister left (@LFLAG@ line, still on the pre-resolve record in memory) carries the truth:
+ * `from` = who the task was handed off from, `by` = who submitted the draft. */
+function listingTrueLister_(rec) {
+  const fl = listingFlagOf_(rec.comments);
+  return normalizeEmail((fl && (fl.from || fl.by)) || rec.assigned_to || '');
 }
 
 function listingCreateTask_(sh, spec) {

@@ -7208,6 +7208,12 @@ const ROUTES = {
         "hunt_id = CASE WHEN ?5 != '' THEN ?5 ELSE hunt_id END"
       ).bind(id, String(p.account || ''), String(p.hunter_email || '').toLowerCase(),
         String(p.lister_email || '').toLowerCase(), String(p.hunt_id || ''), String(p.listed_at || '')).run();
+      /* 11 Sept: a corrected lister flows into the ladder rows too, so Zain's desks and the
+         who-listed-it revision routing name the person who actually listed it. */
+      const le = String(p.lister_email || '').toLowerCase();
+      if (le) {
+        try { await ctx.env.DB.prepare("UPDATE listing_ladder SET lister_email = ?2, updated_at = datetime('now') WHERE item_id = ?1").bind(id, le).run(); } catch (e) {}
+      }
       return { ok: true, item_id: id };
     },
   },
@@ -8100,12 +8106,19 @@ const ROUTES = {
         const us = await ctx.env.DB.prepare('SELECT email, name FROM users').all();
         for (const u of (us.results || [])) names[String(u.email || '').toLowerCase()] = String(u.name || u.email || '');
       } catch (e) { /* names fall back to emails */ }
+      /* 11 Sept (owner): a listing_new task ends its life on the GO-LIVE desk's name — the real
+         lister is in provenance (re-stamped from the activity log). Prefer it for new listings. */
+      const pv = {};
+      try {
+        const ps = await ctx.env.DB.prepare("SELECT item_id, lister_email FROM provenance WHERE lister_email != ''").all();
+        for (const r of (ps.results || [])) pv[String(r.item_id)] = String(r.lister_email).toLowerCase();
+      } catch (e) {}
       const rs = await ctx.env.DB.prepare(
         "SELECT * FROM tasks WHERE type IN ('listing_new','listing_revision') AND status = 'Completed'"
       ).all();
       const rows = [];
       for (const t of (rs.results || [])) {
-        const who = String(t.assigned_to || '').toLowerCase();
+        const who = (String(t.type) === 'listing_new' && pv[String(t.item_id || '')]) || String(t.assigned_to || '').toLowerCase();
         const rec = {
           task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''),
           item_id: String(t.item_id || ''), title: String(t.title || ''), status: 'Completed',

@@ -252,6 +252,7 @@ function actionEngineSheetWrite_(payload) {
  * one-hour feedback loop. The list is a closed whitelist of read-and-sync jobs: no job here
  * writes to a business sheet, and the shared Engine key is required. */
 const ENGINE_RUNNABLE = {
+  provenanceListerFix: function () { return r8ProvenanceListerFix(); },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
