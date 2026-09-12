@@ -260,6 +260,8 @@ const ENGINE_RUNNABLE = {
   signalsPushEngine: function () { return 'pushed ' + String(signalsPushEngine_(true)) + ' signal row(s) to the engine'; },
   slowActions: function (args) { return slowActions(args); },
   activityTail: function (args) { return activityTail(args); },
+  driveFind: function (args) { return driveFind(args); },
+  connectionLink: function (args) { return connectionLink(args); },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },

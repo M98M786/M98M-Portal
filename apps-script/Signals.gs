@@ -1178,6 +1178,56 @@ function activityTail(args) {
   return out.length ? out.join('\n') : 'no activity rows matched';
 }
 
+/* 12 Sept (owner: "Azhar Bhai's tracking upload is not working"): the registry held NO
+ * order-processing workbook for that account, so the orders desk answered "not connected yet".
+ * Two server-side levers, runnable through engineRunJob (key-checked): driveFind lists the
+ * spreadsheets this portal can open whose title contains the given words; connectionLink writes
+ * one registry row (scope account, the kind given) after proving the workbook opens. */
+function driveFind(args) {
+  const q = String((args && args.q) || '').trim();
+  if (!q) return 'pass {q:"words in the title"}';
+  const words = q.split(/\s+/).filter(String).slice(0, 4);
+  const query = words.map(function (w) { return "title contains '" + w.replace(/'/g, "\\'") + "'"; }).join(' and ') +
+    " and mimeType = 'application/vnd.google-apps.spreadsheet'";
+  const it = DriveApp.searchFiles(query);
+  const out = [];
+  while (it.hasNext() && out.length < 25) {
+    const f = it.next();
+    let owner = '';
+    try { owner = f.getOwner() ? f.getOwner().getEmail() : ''; } catch (e) { owner = '?'; }
+    out.push(f.getName() + ' | ' + f.getId() + ' | updated ' + Utilities.formatDate(f.getLastUpdated(), 'Asia/Karachi', 'yyyy-MM-dd HH:mm') + ' | owner ' + owner);
+  }
+  return out.length ? out.join('\n') : 'no spreadsheet title contains: ' + words.join(' ');
+}
+function connectionLink(args) {
+  const account = String((args && args.account) || '').trim();
+  const kind = String((args && args.kind) || '').trim();
+  const id = String((args && args.id) || '').trim();
+  if (!account || !kind || !id) return 'pass {account, kind, id}';
+  if (ACCOUNT_SHEET_KINDS.indexOf(kind) < 0) return 'unknown kind ' + kind + ' — one of ' + ACCOUNT_SHEET_KINDS.join(', ');
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(id)) return 'that is not a spreadsheet id';
+  let title = '';
+  try { title = SpreadsheetApp.openById(id).getName(); } catch (e) { return 'the portal cannot open ' + id + ': ' + String(e && e.message || e).slice(0, 120); }
+  const conn = getPortalDb_(false).getSheetByName('CONNECTIONS');
+  const vals = conn.getDataRange().getValues();
+  const existing = {};
+  let stored = '';
+  const want = bridgeNormalizeHeader_(account);
+  for (let i = 1; i < vals.length; i++) {
+    existing[String(vals[i][1]) + '|' + String(vals[i][2]) + '|' + String(vals[i][3])] = i + 1;
+    if (!stored && String(vals[i][1]) === 'account' && bridgeNormalizeHeader_(vals[i][2]) === want) stored = String(vals[i][2]);
+  }
+  if (!stored) return 'no account named ' + account + ' in the registry';
+  const key = 'account|' + stored + '|' + kind;
+  const before = existing[key] ? String(vals[existing[key] - 1][4] || '') : '(no row)';
+  const notes = existing[key] ? String(vals[existing[key] - 1][6] || '') : '';
+  upsert_(conn, existing, 'account', stored, kind, id, 'linked', notes || 'linked by the portal 12 Sept 2026 — owner: tracking upload');
+  if (typeof sadmForgetConnections_ === 'function') sadmForgetConnections_();
+  bridgeConnCache_ = null;
+  logActivity_('system', 'CONNECTION_LINK', key, before, id, title);
+  return 'linked ' + stored + ' / ' + kind + ' -> "' + title + '" (' + id + '); was ' + before;
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
