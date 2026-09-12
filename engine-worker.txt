@@ -4032,6 +4032,8 @@ async function ensureTruthSchema(env) {
     "ALTER TABLE users ADD COLUMN accounts TEXT",
     "ALTER TABLE users ADD COLUMN shift_start TEXT",
     "CREATE TABLE IF NOT EXISTS signals (skey TEXT PRIMARY KEY, account TEXT, type TEXT, date TEXT, item_id TEXT, value TEXT, baseline TEXT, targeted_roles TEXT, owner_email TEXT, card_json TEXT, acknowledged_by TEXT DEFAULT '', updated_at TEXT)",
+    "ALTER TABLE signals ADD COLUMN actions_json TEXT DEFAULT '[]'",
+    "ALTER TABLE signals ADD COLUMN count_only INTEGER DEFAULT 0",
     "CREATE INDEX IF NOT EXISTS idx_sig_type ON signals(type)",
     "CREATE INDEX IF NOT EXISTS idx_hr_status ON hunt_rows(status)",
     "CREATE INDEX IF NOT EXISTS idx_hr_hunter ON hunt_rows(hunter_email)",
@@ -9676,6 +9678,99 @@ const ROUTES = {
      waiting an hour. Mgmt-authed on the engine; the SYNC_KEY stays server-side (never in a browser)
      — the engine relays to the AS job with it, exactly like the cron does. Returns the AS job's own
      result so the caller can see how many signals it raised (or the error, if it failed). */
+  /* 12 Sept (owner: "make these things fast"): the signals feed, served from D1. Apps Script
+     pushes every registered signal in the pin window (signalsPushEngine_) after each compute and
+     each acknowledgement; this is the mirror. `full` (last slice) retires rows outside `keys`. */
+  syncSignals: {
+    auth: 'sync', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = Array.isArray(p.rows) ? p.rows : [];
+      const stmts = rows.map((r) => ctx.env.DB.prepare(
+        'INSERT INTO signals (skey, account, type, date, item_id, value, baseline, targeted_roles, owner_email, card_json, acknowledged_by, actions_json, count_only, updated_at) ' +
+        "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,datetime('now')) " +
+        'ON CONFLICT(skey) DO UPDATE SET account=?2, type=?3, date=?4, item_id=?5, value=?6, baseline=?7, targeted_roles=?8, owner_email=?9, card_json=?10, acknowledged_by=?11, actions_json=?12, count_only=?13, updated_at=datetime(\'now\')'
+      ).bind(String(r.skey || ''), String(r.account || ''), String(r.type || ''), String(r.date || ''), String(r.item_id || ''),
+        String(r.value || ''), String(r.baseline || ''), String(r.targeted_roles || ''), String(r.owner_email || '').toLowerCase(),
+        String(r.card_json || ''), String(r.acknowledged_by || ''), JSON.stringify(r.actions || []), r.count_only ? 1 : 0));
+      for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
+      let retired = 0;
+      if (String(p.full || '') === 'true') {
+        const keep = new Set((Array.isArray(p.keys) ? p.keys : []).map(String));
+        const all = await ctx.env.DB.prepare('SELECT skey FROM signals').all();
+        const gone = (all.results || []).map((x) => String(x.skey)).filter((k) => !keep.has(k));
+        for (let i = 0; i < gone.length; i += 60) {
+          const part = gone.slice(i, i + 60);
+          await ctx.env.DB.prepare('DELETE FROM signals WHERE skey IN (' + part.map(() => '?').join(',') + ')').bind(...part).run();
+          retired += part.length;
+        }
+      }
+      return { synced: rows.length, retired };
+    },
+  },
+
+  /* The same three server-side gates as Apps Script's signalsVisible_ (RL-4): account scope,
+     profit clearance, targeted roles (incl. "owning lister" by the card's owner). Same output
+     shape as actionMySignals_, so every screen is unchanged; AS stays the fallback on error. */
+  mySignalsEngine: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const role = String(ctx.user.role || '');
+      const me = String(ctx.user.email || '').toLowerCase();
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
+      const profit = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'].indexOf(role) >= 0 || !!ctx.user.super;
+      const accountsRaw = String(ctx.user.accounts || '').trim();
+      const accountsAllow = (account) => {
+        if (mgmt) return true;
+        if (!accountsRaw || accountsRaw === 'ALL' || accountsRaw === 'per-role') return true;
+        const want = norm(account); if (!want) return false;
+        return accountsRaw.split(',').some((a) => { const have = norm(a); return have !== '' && (have === want || have.indexOf(want) >= 0 || want.indexOf(have) >= 0); });
+      };
+      if (p && p.refresh) {
+        /* the Refresh button: a forced recompute is fired server-to-server and NOT awaited (it can
+           take minutes); the page's own timer or a second Refresh shows the result. Management only. */
+        if (mgmt) ctx.waitUntil ? ctx.waitUntil(asRunJobDirect(ctx.env, 'computeSignals', { force: true }).catch(() => {})) : asRunJobDirect(ctx.env, 'computeSignals', { force: true }).catch(() => {});
+      }
+      const includeAcked = !!(p && p.include_acked);
+      const pinDaysRow = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'signals_pin_days'").first().catch(() => null);
+      const pinDays = Math.max(1, Number(pinDaysRow && pinDaysRow.value) || 3);
+      const pkt = new Date(Date.now() + 5 * 3600000);
+      const today = pkt.toISOString().slice(0, 10);
+      const cutoff = new Date(Date.parse(today + 'T12:00:00Z') - pinDays * 86400000).toISOString().slice(0, 10);
+      const rs = await ctx.env.DB.prepare('SELECT * FROM signals WHERE date >= ?1').bind(cutoff).all();
+      const parse = (raw) => { const list = [], mine = {}, hist = []; String(raw || '').split('|').forEach((part) => { const s = part.trim(); if (!s) return; const at = s.indexOf(' @ '); const who = at > 0 ? s.slice(0, at).trim() : s; const rest = at > 0 ? s.slice(at + 3) : ''; const dash = rest.indexOf(' — '); list.push(s); if (who.indexOf('@') > 0) mine[who.toLowerCase()] = true; hist.push({ who, at: dash > 0 ? rest.slice(0, dash).trim() : rest.trim(), note: dash > 0 ? rest.slice(dash + 3).trim() : '' }); }); return { list, mine, hist }; };
+      const out = []; let acknowledged = 0;
+      for (const r of (rs.results || [])) {
+        const type = String(r.type || ''), account = String(r.account || '');
+        if (!accountsAllow(account)) continue;
+        if (!Number(r.count_only) && !profit) continue;
+        let card = null; try { card = r.card_json ? JSON.parse(r.card_json) : null; } catch (e) { card = null; }
+        const tokens = String(r.targeted_roles || '').split(',').map((t) => t.trim()).filter(Boolean);
+        let visible = false;
+        for (const tok of tokens) {
+          if (tok === 'owning lister') { if (String(r.owner_email || '') && String(r.owner_email).toLowerCase() === me) { visible = true; break; } continue; }
+          if (tok === role) { visible = true; break; }
+          if (['Management', 'Ops Head'].indexOf(tok) >= 0 && mgmt) { visible = true; break; }
+        }
+        if (!visible) continue;
+        const acks = parse(r.acknowledged_by);
+        const ackedByMe = !!acks.mine[me];
+        if (ackedByMe && !includeAcked) { acknowledged++; continue; }
+        if (ackedByMe) acknowledged++;
+        let actions = []; try { actions = JSON.parse(r.actions_json || '[]'); } catch (e) { actions = []; }
+        const rec = { date: String(r.date), account, type, item_id: String(r.item_id || ''), value: r.value, baseline: r.baseline,
+          targeted_roles: String(r.targeted_roles || ''), actions, pinned: !ackedByMe, acked_by_me: ackedByMe,
+          acknowledged_by_others: acks.list, ack_history: acks.hist, title: '', image: '' };
+        if (card) { for (const k of Object.keys(card)) { if (k === 'targeted_roles' || k === 'actions') continue; rec[k] = card[k]; } rec.item_id = String(card.item_id || rec.item_id); }
+        out.push(rec);
+      }
+      const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
+      out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return String(a.account).localeCompare(String(b.account)); });
+      const MAX = 60;
+      return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, date: new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10), engine: true };
+    },
+  },
+
   signalsKick: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const out = { at: Date.now() };

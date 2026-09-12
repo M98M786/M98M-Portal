@@ -80,7 +80,12 @@ function doPost(e) {
     ctx.idToken = req.idToken;                              // batch re-authorises each inner call
     ctx.session = req.session;
     if (req.idem && seenIdem_(req.idem)) return out_({ ok: true, idempotent: true }, null, req);
+    const t0 = Date.now();
     const data = routerRun_(req.action, entry, req.payload || {}, ctx);
+    /* 12 Sept: the executions log shows only "doPost" — never WHICH action was slow. Any request
+       over 4 s leaves its name and time in the activity log, so speed work targets facts. */
+    const ms = Date.now() - t0;
+    if (ms > 4000) { try { logActivity_(ctx && ctx.ident ? ctx.ident.email : 'router', 'SLOW_ACTION', String(req.action || ''), '', String(ms) + 'ms', ''); } catch (e) {} }
     if (req.idem) markIdem_(req.idem);
     return out_({ ok: true, data: data }, null, req);
   } catch (err) {

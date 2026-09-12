@@ -1086,15 +1086,29 @@ function pushSheetRowsHot() {
     const days = [0, 1, 2, 3].map(function (k) {
       return Utilities.formatDate(new Date(Date.now() + 5 * 3600000 - k * 86400000), 'Etc/GMT', 'yyyy-MM-dd');
     });
+    /* 12 Sept (owner: "make these things fast" — this walk was 84 s per tick, the single heaviest
+       recurring load on Apps Script, competing with every staff click). Per-book change detection:
+       Drive's lastUpdated stamp is one cheap metadata call; a book nobody has edited since its last
+       push is skipped outright. A quiet tick now costs ~6 metadata calls instead of opening every
+       book × 4 day tabs. Safety: every book is still walked at least once an hour. */
+    let fpMap = {};
+    try { fpMap = JSON.parse(hotProps.getProperty('SHEETMIRROR_BOOK_FP') || '{}') || {}; } catch (e) { fpMap = {}; }
+    let skipped = 0;
     truthMoneyBooks_().forEach(function (b) {
       try {
+        let stamp = '';
+        try { stamp = String(DriveApp.getFileById(b.id).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
+        const prev = fpMap[b.id] || {};
+        if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 3600000) { skipped++; return; }
         const ss = SpreadsheetApp.openById(b.id);
         days.forEach(function (pk) {
           const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
           if (!res.missing) { tabs++; pushed += res.rows; }
         });
+        fpMap[b.id] = { stamp: stamp, at: Date.now() };
       } catch (e) { logActivity_('system', 'SHEETMIRROR_FAIL', b.account, '', '', String(e && e.message || e).slice(0, 120)); }
     });
+    try { hotProps.setProperty('SHEETMIRROR_BOOK_FP', JSON.stringify(fpMap).slice(0, 8000)); } catch (e) {}
   }
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
   try { huntsSweep_(); } catch (e) {}

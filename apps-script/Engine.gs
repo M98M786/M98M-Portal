@@ -257,6 +257,7 @@ const ENGINE_RUNNABLE = {
   staffRename: function (args) { return staffRename(args); },
   staffSetShift: function (args) { return staffSetShift(args); },
   tasksPurgeBefore: function (args) { return tasksPurgeBefore(args); },
+  signalsPushEngine: function () { return 'pushed ' + String(signalsPushEngine_(true)) + ' signal row(s) to the engine'; },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },

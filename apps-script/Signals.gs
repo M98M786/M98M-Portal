@@ -453,6 +453,7 @@ function computeSignals(args) {
   }).join(' ');
   const unhealthy = order.some(function (p) { return p.notConnected || !p.found; });
   if (!timedOut) { try { props.setProperty('SIG_FP', fp); props.setProperty('SIG_FP_AT', String(Date.now())); } catch (e) {} }
+  try { signalsPushEngine_(true); } catch (e) {}
   return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (timedOut ? ', time budget hit — rest next run' : '')
@@ -1079,6 +1080,45 @@ function signalsAckHistory_(raw) {
   return out;
 }
 
+/* 12 Sept (owner: "make these things fast"): the signals feed was the heaviest recurring Apps
+ * Script read (home screen + Signals + the two department pages every 5 min). The engine now
+ * serves it (mySignalsEngine) from a D1 mirror this pushes: every registered signal in the pin
+ * window with its card, owner and the full acknowledgement ledger. Called after computeSignals
+ * and after every acknowledgement (one round trip, outside any lock). `full` lets the engine
+ * drop rows that left the window. Best-effort: the AS feed remains the fallback. */
+function signalsPushEngine_(full) {
+  try {
+    const cards = signalsCardIndex_();
+    const pinCutoff = signalsAddDays_(signalsToday_(), -Math.max(1, signalsThreshold_('signals_pin_days')));
+    const rows = [];
+    readTab_('SIGNALS').forEach(function (r) {
+      const type = String(r.type || '');
+      if (SIG_LAUNCH_TYPES.indexOf(type) < 0 && type !== ADV_SIGNAL_TYPE) return;
+      const date = signalsDateKey_(r.date);
+      if (!date || date < pinCutoff) return;
+      const account = String(r.account || '');
+      const itemKey = String(r.item_id === null || r.item_id === undefined ? '' : r.item_id);
+      const card = cards[account + '|' + signalsPeriod_(type, date, itemKey)] || null;
+      rows.push({
+        skey: signalsKey_(account, type, date, itemKey), account: account, type: type, date: date, item_id: itemKey,
+        value: String(r.value === null || r.value === undefined ? '' : r.value),
+        baseline: String(r.baseline === null || r.baseline === undefined ? '' : r.baseline),
+        targeted_roles: String(r.targeted_roles || ''),
+        owner_email: card && card.owner_email ? String(card.owner_email) : '',
+        card_json: card ? JSON.stringify(card).slice(0, 6000) : '',
+        acknowledged_by: String(r.acknowledged_by || ''),
+        actions: SIG_ACTIONS[type] || [],
+        count_only: SIG_COUNT_ONLY_TYPES.indexOf(type) >= 0,
+      });
+    });
+    for (let i = 0; i < rows.length || (i === 0 && full); i += 150) {
+      enginePost_('syncSignals', { rows: rows.slice(i, i + 150), full: (full && i + 150 >= rows.length) ? 'true' : '', keys: full ? rows.map(function (x) { return x.skey; }) : [] });
+      if (!rows.length) break;
+    }
+    return rows.length;
+  } catch (e) { try { logActivity_('system', 'SIGNALS_PUSH_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} return -1; }
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
@@ -1129,6 +1169,7 @@ function actionAcknowledgeSignal_(payload, ctx) {
   if (!row) throw new Error(SAFE_ERROR_PREFIX + 'that signal is no longer on the board');
   if (!already) {
     logActivity_(ctx.ident.email, 'ACK_SIGNAL', account + '!' + (itemKey || '-'), old, next, type + ' ' + date);
+    try { signalsPushEngine_(false); } catch (e) {}   // the engine-served feed sees the comment at once
   }
   return {
     account: account, type: type, date: date, item_id: itemKey,
@@ -1174,7 +1215,7 @@ function actionAcknowledgeAllSignals_(payload, ctx) {
     }
     if (acked) { sh.getRange(2, col, vals.length - 1, 1).setValues(colVals); }
   } finally { lock.releaseLock(); }
-  if (acked) { logActivity_(ctx.ident.email, 'ACK_ALL_SIGNALS', 'SIGNALS', '', String(acked), 'cleared the board'); }
+  if (acked) { logActivity_(ctx.ident.email, 'ACK_ALL_SIGNALS', 'SIGNALS', '', String(acked), 'cleared the board'); try { signalsPushEngine_(false); } catch (e) {} }
   return { acknowledged_all: true, count: acked };
 }
 
