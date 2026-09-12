@@ -20130,6 +20130,32 @@ function signalsPushEngine_(full) {
   } catch (e) { try { logActivity_('system', 'SIGNALS_PUSH_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} return -1; }
 }
 
+/* 12 Sept (owner: "make these things fast"): the SLOW_ACTION ledger doPost writes, summarised —
+ * which actions ran over 4 s, how often, worst and average, who last. Runnable: engineRunJob
+ * job=slowActions args={hours:24}. Reads the append-only log from the newest row back. */
+function slowActions(args) {
+  const hours = Math.max(1, Number(args && args.hours) || 24);
+  const cutoff = Date.now() - hours * 3600000;
+  const rows = readTab_('ACTIVITY_LOG');
+  const by = {};
+  let n = 0;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    const ts = new Date(String(r.ts));
+    if (!isNaN(ts) && ts.getTime() < cutoff) break;
+    if (String(r.action) !== 'SLOW_ACTION') continue;
+    const ms = Number(String(r.new_value || '').replace(/[^0-9]/g, '')) || 0;
+    const a = String(r.target || '?');
+    const b = by[a] || (by[a] = { n: 0, max: 0, sum: 0, last: '' });
+    b.n++; b.sum += ms; if (ms > b.max) b.max = ms;
+    if (!b.last) b.last = String(r.ts).slice(5, 16) + ' ' + String(r.actor || '').split('@')[0];
+    n++;
+  }
+  const list = Object.keys(by).map(function (a) { const b = by[a]; return { a: a, n: b.n, s: a + ' ×' + b.n + ' max ' + (b.max / 1000).toFixed(1) + 's avg ' + (b.sum / b.n / 1000).toFixed(1) + 's (last ' + b.last + ')' }; })
+    .sort(function (x, y) { return y.n - x.n; }).map(function (x) { return x.s; });
+  return 'slow actions (>4 s) in last ' + hours + 'h: ' + n + (list.length ? ' — ' + list.slice(0, 20).join('; ') : '');
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
@@ -22673,6 +22699,7 @@ const ENGINE_RUNNABLE = {
   staffSetShift: function (args) { return staffSetShift(args); },
   tasksPurgeBefore: function (args) { return tasksPurgeBefore(args); },
   signalsPushEngine: function () { return 'pushed ' + String(signalsPushEngine_(true)) + ' signal row(s) to the engine'; },
+  slowActions: function (args) { return slowActions(args); },
   pushEngineSync: function () { return pushEngineSync(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
