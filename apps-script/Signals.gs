@@ -1156,6 +1156,28 @@ function slowActions(args) {
   return 'slow actions (>4 s) in last ' + hours + 'h: ' + n + (list.length ? ' — ' + list.slice(0, 20).join('; ') : '');
 }
 
+/* 12 Sept: read the ACTIVITY_LOG tail without opening the sheet — `match` is a case-insensitive
+ * substring over actor|action|target|old|new|detail, `hours` the window, `limit` the row cap.
+ * Runnable: engineRunJob job=activityTail args={hours:6, match:'azhar', limit:30}. */
+function activityTail(args) {
+  const hours = Math.max(1, Number(args && args.hours) || 24);
+  const limit = Math.min(80, Math.max(1, Number(args && args.limit) || 30));
+  const match = String((args && args.match) || '').toLowerCase();
+  const cutoff = Date.now() - hours * 3600000;
+  const rows = readTab_('ACTIVITY_LOG');
+  const out = [];
+  for (let i = rows.length - 1; i >= 0 && out.length < limit; i--) {
+    const r = rows[i];
+    const ts = new Date(String(r.ts));
+    if (!isNaN(ts) && ts.getTime() < cutoff) break;
+    const line = [String(r.ts).slice(5, 19), String(r.actor || '').split('@')[0], String(r.action || ''), String(r.target || '').slice(0, 70),
+      String(r.old_value || '').slice(0, 40), String(r.new_value || '').slice(0, 60), String(r.detail || '').slice(0, 180)].join(' | ');
+    if (match && line.toLowerCase().indexOf(match) < 0) continue;
+    out.push(line);
+  }
+  return out.length ? out.join('\n') : 'no activity rows matched';
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
