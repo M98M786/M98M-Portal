@@ -720,6 +720,18 @@
       if (box) { sgPaintAll(box); }
       var host = document.getElementById('sigPins');
       if (host) { sgPaintPins(host); }
+      // Engine-served board: the recompute was started in the background (it can take a minute or
+      // two); read the board again when it has had time to land, so the tap actually shows it.
+      if (SG.data && SG.data.refresh_started) {
+        toast('Recomputing signals in the background — the board updates itself in about a minute');
+        setTimeout(function () {
+          sgLoad({ fresh: true }).then(function () {
+            var b2 = document.getElementById('sigAll'), h2 = document.getElementById('sigPins');
+            if (b2) { sgPaintAll(b2); }
+            if (h2) { sgPaintPins(h2); }
+          })['catch'](function () {});
+        }, 75000);
+      }
     })['catch'](function (e) { toast('Not refreshed: ' + e.message); })
       .then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; } });
   }

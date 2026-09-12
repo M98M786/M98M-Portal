@@ -684,7 +684,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260912-0110';
+var BUILD = '20260912-0117';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -22324,6 +22324,18 @@ function saveSchedule() {
       if (box) { sgPaintAll(box); }
       var host = document.getElementById('sigPins');
       if (host) { sgPaintPins(host); }
+      // Engine-served board: the recompute was started in the background (it can take a minute or
+      // two); read the board again when it has had time to land, so the tap actually shows it.
+      if (SG.data && SG.data.refresh_started) {
+        toast('Recomputing signals in the background — the board updates itself in about a minute');
+        setTimeout(function () {
+          sgLoad({ fresh: true }).then(function () {
+            var b2 = document.getElementById('sigAll'), h2 = document.getElementById('sigPins');
+            if (b2) { sgPaintAll(b2); }
+            if (h2) { sgPaintPins(h2); }
+          })['catch'](function () {});
+        }, 75000);
+      }
     })['catch'](function (e) { toast('Not refreshed: ' + e.message); })
       .then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; } });
   }

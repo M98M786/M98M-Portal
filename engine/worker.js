@@ -60,6 +60,7 @@ export default {
         ctx2 = await authorize(env, String(body.idToken || ''), String(body.session || ''));
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
+      ctx2.waitUntil = (pr) => { try { ctx.waitUntil(pr); } catch (e) {} };   // lets an action finish background work after answering
       const t0 = Date.now();
       /* SPEED (Hasib, night order): the heavy read boards recomputed full scans on every
          screen visit. These actions return IDENTICAL data to every permitted caller, so a
@@ -9715,21 +9716,35 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       await ensureTruthSchema(ctx.env);
       const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      /* Apps Script's normalizeEmail: googlemail = gmail, and gmail ignores dots. The ledger and
+         the owner stamps were written through it, so the viewer must be compared through it too. */
+      const normEmail = (e) => { let s = String(e || '').trim().toLowerCase(); const at = s.lastIndexOf('@'); if (at < 0) return s; let local = s.slice(0, at), domain = s.slice(at + 1); if (domain === 'googlemail.com') domain = 'gmail.com'; if (domain === 'gmail.com') local = local.replace(/\./g, ''); return local + '@' + domain; };
       const role = String(ctx.user.role || '');
-      const me = String(ctx.user.email || '').toLowerCase();
+      const me = normEmail(ctx.user.email);
       const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
-      const profit = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'].indexOf(role) >= 0 || !!ctx.user.super;
-      const accountsRaw = String(ctx.user.accounts || '').trim();
+      const profit = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'].indexOf(role) >= 0;
+      /* the session row carries no account scope — read it (users.accounts mirrors the sheet's
+         accounts_access column); an empty scope means every account, exactly as on Apps Script */
+      const urow = await ctx.env.DB.prepare('SELECT accounts FROM users WHERE email = ?1').bind(String(ctx.user.email || '').toLowerCase()).first().catch(() => null);
+      const accountsRaw = String((urow && urow.accounts) || '').trim();
+      const PROFIT_FIELDS = ['Our Profit', 'ROI', 'Profit', 'Order Earning', 'order_earning', 'profit', 'roi', 'Raw Profit', 'Actual Profit', 'margin', 'Margin', 'earning', 'Earning', 'Our price net', 'net_after_cpc'];
+      const PII_FIELDS = ['Full Address', 'Post to name', 'Post to address 1', 'Post to address 2', 'Post to city', 'Post to county', 'Post to postcode', 'Post to phone', 'Email', 'buyer', 'Buyer', 'Customer Address Detail'];
+      const piiOk = role === 'CS' || role === 'Order Processor' || mgmt;
+      const strip = (rec) => { if (profit && piiOk) return rec; const o = {}; for (const k of Object.keys(rec)) { if (!profit && PROFIT_FIELDS.indexOf(k) >= 0) continue; if (!piiOk && PII_FIELDS.indexOf(k) >= 0) continue; o[k] = rec[k]; } return o; };
       const accountsAllow = (account) => {
         if (mgmt) return true;
         if (!accountsRaw || accountsRaw === 'ALL' || accountsRaw === 'per-role') return true;
         const want = norm(account); if (!want) return false;
         return accountsRaw.split(',').some((a) => { const have = norm(a); return have !== '' && (have === want || have.indexOf(want) >= 0 || want.indexOf(have) >= 0); });
       };
-      if (p && p.refresh) {
+      let refreshStarted = false;
+      if (p && p.refresh && mgmt) {
         /* the Refresh button: a forced recompute is fired server-to-server and NOT awaited (it can
-           take minutes); the page's own timer or a second Refresh shows the result. Management only. */
-        if (mgmt) ctx.waitUntil ? ctx.waitUntil(asRunJobDirect(ctx.env, 'computeSignals', { force: true }).catch(() => {})) : asRunJobDirect(ctx.env, 'computeSignals', { force: true }).catch(() => {});
+           take minutes); Apps Script pushes the new board here when it finishes and the page
+           re-reads a minute later. Management only — anyone else just gets a fresh read. */
+        const pr = asRunJobDirect(ctx.env, 'computeSignals', { force: true }).catch(() => {});
+        if (ctx.waitUntil) ctx.waitUntil(pr);
+        refreshStarted = true;
       }
       const includeAcked = !!(p && p.include_acked);
       const pinDaysRow = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'signals_pin_days'").first().catch(() => null);
@@ -9737,18 +9752,19 @@ const ROUTES = {
       const pkt = new Date(Date.now() + 5 * 3600000);
       const today = pkt.toISOString().slice(0, 10);
       const cutoff = new Date(Date.parse(today + 'T12:00:00Z') - pinDays * 86400000).toISOString().slice(0, 10);
-      const rs = await ctx.env.DB.prepare('SELECT * FROM signals WHERE date >= ?1').bind(cutoff).all();
-      const parse = (raw) => { const list = [], mine = {}, hist = []; String(raw || '').split('|').forEach((part) => { const s = part.trim(); if (!s) return; const at = s.indexOf(' @ '); const who = at > 0 ? s.slice(0, at).trim() : s; const rest = at > 0 ? s.slice(at + 3) : ''; const dash = rest.indexOf(' — '); list.push(s); if (who.indexOf('@') > 0) mine[who.toLowerCase()] = true; hist.push({ who, at: dash > 0 ? rest.slice(0, dash).trim() : rest.trim(), note: dash > 0 ? rest.slice(dash + 3).trim() : '' }); }); return { list, mine, hist }; };
-      const out = []; let acknowledged = 0;
+      const rs = await ctx.env.DB.prepare('SELECT * FROM signals').all();
+      const parse = (raw) => { const list = [], mine = {}, hist = []; String(raw || '').split('|').forEach((part) => { const s = part.trim(); if (!s) return; const at = s.indexOf(' @ '); const who = at > 0 ? s.slice(0, at).trim() : s; const rest = at > 0 ? s.slice(at + 3) : ''; const dash = rest.indexOf(' — '); list.push(s); if (who.indexOf('@') > 0) mine[normEmail(who)] = true; hist.push({ who, at: dash > 0 ? rest.slice(0, dash).trim() : rest.trim(), note: dash > 0 ? rest.slice(dash + 3).trim() : '' }); }); return { list, mine, hist }; };
+      const out = []; let acknowledged = 0, expired = 0;
       for (const r of (rs.results || [])) {
         const type = String(r.type || ''), account = String(r.account || '');
+        if (String(r.date || '') && String(r.date) < cutoff) { expired++; continue; }
         if (!accountsAllow(account)) continue;
         if (!Number(r.count_only) && !profit) continue;
         let card = null; try { card = r.card_json ? JSON.parse(r.card_json) : null; } catch (e) { card = null; }
         const tokens = String(r.targeted_roles || '').split(',').map((t) => t.trim()).filter(Boolean);
         let visible = false;
         for (const tok of tokens) {
-          if (tok === 'owning lister') { if (String(r.owner_email || '') && String(r.owner_email).toLowerCase() === me) { visible = true; break; } continue; }
+          if (tok === 'owning lister') { if (String(r.owner_email || '') && normEmail(r.owner_email) === me) { visible = true; break; } continue; }
           if (tok === role) { visible = true; break; }
           if (['Management', 'Ops Head'].indexOf(tok) >= 0 && mgmt) { visible = true; break; }
         }
@@ -9762,12 +9778,13 @@ const ROUTES = {
           targeted_roles: String(r.targeted_roles || ''), actions, pinned: !ackedByMe, acked_by_me: ackedByMe,
           acknowledged_by_others: acks.list, ack_history: acks.hist, title: '', image: '' };
         if (card) { for (const k of Object.keys(card)) { if (k === 'targeted_roles' || k === 'actions') continue; rec[k] = card[k]; } rec.item_id = String(card.item_id || rec.item_id); }
-        out.push(rec);
+        out.push(strip(rec));
       }
       const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
-      out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return String(a.account).localeCompare(String(b.account)); });
+      out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0); });
       const MAX = 60;
-      return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, date: new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10), engine: true };
+      return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, expired, types: order,
+        date: new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10), engine: true, refresh_started: refreshStarted };
     },
   },
 
