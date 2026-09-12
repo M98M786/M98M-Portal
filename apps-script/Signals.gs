@@ -908,13 +908,18 @@ function actionMySignals_(payload, ctx) {
     if (!signalsVisible_(type, account, String(s.targeted_roles || ''), card, viewer)) return;
 
     const acks = signalsParseAcks_(s.acknowledged_by);
-    if (acks.mine[viewer.normalized]) { acknowledged++; return; }       // pinned until THIS person clears it
+    const ackedByMe = !!acks.mine[viewer.normalized];
+    /* 12 Sept (owner: "show history there — who said what"): the department pages ask for
+       include_acked and get every signal in the pin window WITH its full ledger, mine included;
+       the pinned board keeps hiding what this person already cleared. */
+    if (ackedByMe && !(payload && payload.include_acked)) { acknowledged++; return; }
+    if (ackedByMe) acknowledged++;
 
     const rec = {
       date: date, account: account, type: type, item_id: itemKey,
       value: s.value, baseline: s.baseline, targeted_roles: String(s.targeted_roles || ''),
-      actions: SIG_ACTIONS[type] || [], pinned: true,
-      acknowledged_by_others: acks.list,
+      actions: SIG_ACTIONS[type] || [], pinned: !ackedByMe, acked_by_me: ackedByMe,
+      acknowledged_by_others: acks.list, ack_history: signalsAckHistory_(s.acknowledged_by),
       title: '', image: '',
     };
     if (card) {
@@ -1026,6 +1031,21 @@ function signalsParseAcks_(raw) {
   return { list: list, mine: mine };
 }
 
+/** The same ledger, structured for the screen: [{who, at, note}] oldest first. */
+function signalsAckHistory_(raw) {
+  const out = [];
+  String(raw === null || raw === undefined ? '' : raw).split('|').forEach(function (part) {
+    const s = part.trim();
+    if (!s) return;
+    const at = s.indexOf(' @ ');
+    const who = at > 0 ? s.slice(0, at).trim() : s;
+    const rest = at > 0 ? s.slice(at + 3) : '';
+    const dash = rest.indexOf(' — ');
+    out.push({ who: who, at: dash > 0 ? rest.slice(0, dash).trim() : rest.trim(), note: dash > 0 ? rest.slice(dash + 3).trim() : '' });
+  });
+  return out;
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
@@ -1037,6 +1057,9 @@ function actionAcknowledgeSignal_(payload, ctx) {
   const itemKey = signalsText_(payload.item_id, SIG_MAX_TEXT);
   const note = signalsText_(payload.note, 500);
   if (!account || !type || !date) throw new Error(SAFE_ERROR_PREFIX + 'account, type and date are needed to clear a signal');
+  /* 12 Sept (owner): nobody clears a signal silently — every acknowledgement carries the person's
+     own words, and the ledger shows who said what. Enforced here, not only in the screen. */
+  if (!note) throw new Error(SAFE_ERROR_PREFIX + 'write a comment before acknowledging — what did you find or do?');
 
   const key = signalsKey_(account, type, date, itemKey);
   const viewer = signalsViewer_(ctx);
@@ -1084,6 +1107,8 @@ function actionAcknowledgeSignal_(payload, ctx) {
  * acknowledging never seems to move — the 60-card window just refills. This acknowledges EVERY
  * signal currently visible to the viewer (never anyone else's) in a single column write. */
 function actionAcknowledgeAllSignals_(payload, ctx) {
+  const note = signalsText_(payload && payload.note, 500);
+  if (!note) throw new Error(SAFE_ERROR_PREFIX + 'write a comment to apply to every signal you are acknowledging');
   const viewer = signalsViewer_(ctx);
   const cards = signalsCardIndex_();
   const sh = getPortalDb_(false).getSheetByName('SIGNALS');
@@ -1111,7 +1136,7 @@ function actionAcknowledgeAllSignals_(payload, ctx) {
       const old = String(rec.acknowledged_by || '');
       const acks = signalsParseAcks_(old);
       if (acks.mine[viewer.normalized]) continue;               // already acknowledged by me
-      colVals[i - 1][0] = (old ? old + ' | ' : '') + ctx.ident.email + ' @ ' + stamp;
+      colVals[i - 1][0] = (old ? old + ' | ' : '') + ctx.ident.email + ' @ ' + stamp + ' — ' + note;
       acked++;
     }
     if (acked) { sh.getRange(2, col, vals.length - 1, 1).setValues(colVals); }

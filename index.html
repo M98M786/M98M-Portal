@@ -684,7 +684,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260911-2223';
+var BUILD = '20260912-0055';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -21733,6 +21733,11 @@ function saveSchedule() {
     '@keyframes sigLive{0%,100%{opacity:1}50%{opacity:.35}}',
     '.clockbtn .short{display:none}',
 
+    '.sig-ackform{padding:6px 18px 12px}.sig-ackform.hidden{display:none}',
+    '.sig-ackta{width:100%;min-height:54px;padding:9px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:12.5px;resize:vertical}',
+    '.sig-hist{padding:6px 0;border-top:1px dashed rgba(120,132,152,.25);font-size:12px}.sig-hist:first-of-type{border-top:0}',
+    '.sig-hist-note{color:var(--text-2);margin-top:2px}.sig-hist-none{color:var(--text-3);font-style:italic}',
+    '.sig-dept-sum{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--text-2);margin:0 0 12px}',
     '@media(max-width:880px){',
     '.sig-hd,.sig-bd,.sig-acts,.sig-foot{padding-left:15px}',
     '.sig-thumb{width:58px;height:58px}',
@@ -22044,20 +22049,44 @@ function saveSchedule() {
         out += '<span class="sig-todo" title="This step is done outside the portal for now">' + esc(label) + '</span>';
       }
     }
-    out += '<button class="sig-ackb" data-sig-do="ack" data-sig-i="' + i + '">Acknowledge</button>';
-    return '<div class="sig-acts">' + out + '</div>';
+    if (rec.acked_by_me) {
+      out += '<span class="sig-todo" title="You already acknowledged this">Acknowledged by you</span>';
+      return '<div class="sig-acts">' + out + '</div>';
+    }
+    out += '<button class="sig-ackb" data-sig-do="ackopen" data-sig-i="' + i + '">Acknowledge…</button>';
+    /* 12 Sept (owner): an acknowledgement MUST carry a comment — the box opens under the card and
+       the server refuses an empty one, so nobody clears a signal silently. */
+    return '<div class="sig-acts">' + out + '</div>' +
+      '<div class="sig-ackform hidden" data-sig-ackform="' + i + '">' +
+        '<textarea class="sig-ackta" data-sig-note="' + i + '" rows="2" placeholder="What did you find or do about this? (required)"></textarea>' +
+        '<div class="sig-acts" style="padding-top:8px"><button class="sig-ackb" data-sig-do="ack" data-sig-i="' + i + '">Acknowledge with this comment</button>' +
+        '<button class="minibtn" data-sig-do="ackcancel" data-sig-i="' + i + '">Cancel</button></div>' +
+      '</div>';
   }
 
+  function sgWho(email) { var e = sgStr(email); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : e; }
   function sgFoot(rec, full) {
-    var acks = rec.acknowledged_by_others || [], j, out;
-    if (!acks.length) { return ''; }
-    if (!full) {
-      return '<div class="sig-foot">Already acknowledged by ' + esc(String(acks.length)) +
-        ' other' + (acks.length === 1 ? '' : 's') + ' — it stays pinned for you until you clear it.</div>';
+    var hist = rec.ack_history || [], j, out, h;
+    if (!hist.length) {
+      var acks = rec.acknowledged_by_others || [];
+      if (!acks.length) { return ''; }
+      hist = acks.map(function (a) { return { who: a, at: '', note: '' }; });
     }
+    if (!full) {
+      h = hist[hist.length - 1];
+      return '<div class="sig-foot">' + esc(String(hist.length)) + ' acknowledged — latest ' + esc(sgWho(h.who)) +
+        (h.note ? ': “' + esc(h.note) + '”' : '') + (rec.acked_by_me ? '' : ' · still pinned for you') + '</div>';
+    }
+    /* 12 Sept (owner): the history — who said what, in order. */
     out = '';
-    for (j = 0; j < acks.length; j++) { out += (out ? '<br>' : '') + esc(sgStr(acks[j])); }
-    return '<div class="sig-foot">Acknowledged so far · ' + out + '</div>';
+    for (j = 0; j < hist.length; j++) {
+      h = hist[j];
+      out += '<div class="sig-hist"><b>' + esc(sgWho(h.who)) + '</b>' +
+        (h.at ? ' <span class="sig-when num">' + esc(sgStr(h.at).replace('T', ' ').slice(0, 16)) + '</span>' : '') +
+        (h.note ? '<div class="sig-hist-note">“' + esc(h.note) + '”</div>' : '<div class="sig-hist-note sig-hist-none">no comment</div>') +
+        '</div>';
+    }
+    return '<div class="sig-foot"><div class="k">Acknowledgement history · who said what</div>' + out + '</div>';
   }
 
   function sgCard(rec, i, full) {
@@ -22097,6 +22126,7 @@ function saveSchedule() {
     }
   }
 
+  var SG_PAGE_LIST = null;   // set by a department page while it paints, so ack/go index into ITS list
   function sgClick(ev) {
     var el = ev.target, act, idx;
     while (el && el !== this && !el.getAttribute) { el = el.parentNode; }
@@ -22104,6 +22134,8 @@ function saveSchedule() {
     if (!el || el === this) { return; }
     act = el.getAttribute('data-sig-do');
     idx = Number(el.getAttribute('data-sig-i'));
+    if (act === 'ackopen') { sgAckOpen(idx, el, true); return; }
+    if (act === 'ackcancel') { sgAckOpen(idx, el, false); return; }
     if (act === 'ack') { sgAck(idx, el); return; }
     if (act === 'go') { sgGo(idx, el.getAttribute('data-sig-act')); return; }
     if (act === 'all') { sgOpen('signals'); return; }
@@ -22128,18 +22160,35 @@ function saveSchedule() {
 
   /** §27: acknowledging unpins it for THIS person and is logged; nothing is deleted, and the same
       problem stays in front of everyone else it was raised for. */
+  function sgAckOpen(i, btn, open) {
+    var host = btn && btn.closest ? btn.closest('.sig') : null;
+    var form = host ? host.querySelector('[data-sig-ackform="' + i + '"]') : null;
+    if (!form) { return; }
+    form.className = 'sig-ackform' + (open ? '' : ' hidden');
+    if (open) { var ta = form.querySelector('textarea'); if (ta) { ta.focus(); } }
+  }
   function sgAck(i, btn) {
-    var rec = sgList()[i], key;
+    var rec = (SG_PAGE_LIST || sgList())[i], key, host, ta, note;
     if (!rec) { return; }
+    host = btn && btn.closest ? btn.closest('.sig') : null;
+    ta = host ? host.querySelector('[data-sig-note="' + i + '"]') : null;
+    note = ta ? sgStr(ta.value) : '';
+    if (!note) { toast('Write a comment first — what did you find or do about this signal?'); if (ta) { ta.focus(); } return; }
     key = sgKey(rec);
     if (SG.busy[key]) { return; }
     SG.busy[key] = true;
     btn.disabled = true;
     btn.textContent = 'Clearing…';
     api('acknowledgeSignal', {
-      account: rec.account, type: rec.type, date: rec.date, item_id: rec.item_id
+      account: rec.account, type: rec.type, date: rec.date, item_id: rec.item_id, note: note
     }).then(function (res) {
       delete SG.busy[key];
+      if (SG_PAGE_LIST) {
+        rec.acked_by_me = true; rec.pinned = false;
+        (rec.ack_history = rec.ack_history || []).push({ who: (STATE.user && STATE.user.email) || 'you', at: (res && res.acknowledged_at) || '', note: note });
+        var pg = document.getElementById('sigCsAll') ? ['sigCsAll', 'sigCsSum', 'CS', 'customer service'] : ['sigAdAll', 'sigAdSum', 'Advertising Manager', 'advertising'];
+        sgDeptPaint(pg[0], pg[1], pg[2], pg[3]);
+      }
       sgDrop(key);
       sgUnpin(key);
       toast((res && res.alreadyAcknowledged) ? 'Already acknowledged — unpinned.'
@@ -22147,7 +22196,7 @@ function saveSchedule() {
     })['catch'](function (e) {
       delete SG.busy[key];
       btn.disabled = false;
-      btn.textContent = 'Acknowledge';
+      btn.textContent = 'Acknowledge with this comment';
       toast('Not acknowledged: ' + e.message);
     });
   }
@@ -22155,9 +22204,12 @@ function saveSchedule() {
   /* Owner (5 Sept): clear the whole backlog at once — one press acknowledges every pinned signal
      for this person, so the board actually empties instead of the 60-card window refilling. */
   function sgAckAll(btn) {
-    if (!window.confirm('Acknowledge and unpin EVERY signal on your board? Everyone else still sees theirs.')) { return; }
+    var note = window.prompt('Acknowledge EVERY signal on your board. One comment is required and will be recorded on each of them — what did you find or do?');
+    if (note === null) { return; }
+    note = sgStr(note);
+    if (!note) { toast('A comment is required to acknowledge.'); return; }
     btn.disabled = true; var t = btn.textContent; btn.textContent = 'Clearing…';
-    api('acknowledgeAllSignals', {}).then(function (res) {
+    api('acknowledgeAllSignals', { note: note }).then(function (res) {
       toast('Acknowledged ' + ((res && res.count) || 0) + ' signal(s) — your board is cleared.');
       sgLoad().then(function () { var box = document.getElementById('sigAll'); if (box && SG.data) { sgPaintAll(box); } });
       btn.disabled = false; btn.textContent = t;
@@ -22305,6 +22357,90 @@ function saveSchedule() {
         box.innerHTML = '<div class="sig-warnline">Signals could not be loaded — ' + esc(e.message) + '</div>';
       });
     }
+  };
+
+  // ============================== department signal pages (owner, 12 Sept) ==============================
+  /* "Make a separate page of customer service signals and a separate page of advertising signals;
+     they should get updated every 5 minutes." Each page reads the same feed with include_acked so
+     the acknowledgement HISTORY (who said what) stays visible after a signal is cleared, filters by
+     the department token in targeted_roles, and re-fetches itself every 5 minutes while open.
+     Signal DETECTION itself is the hourly engine run (heavy workbook scans) + the Refresh button;
+     this timer keeps the page current with every acknowledgement and every new card within 5 min. */
+  var SG_DEPT = { data: null, at: 0, timer: null, key: '' };
+  var SG_DEPT_MS = 5 * 60 * 1000;
+  function sgDeptLoad(fresh) {
+    if (!fresh && SG_DEPT.data && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
+    return api('mySignals', { include_acked: true }).then(function (d) { SG_DEPT.data = d || {}; SG_DEPT.at = Date.now(); return SG_DEPT.data; });
+  }
+  function sgDeptFilter(token) {
+    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], out = [], i, roles;
+    for (i = 0; i < all.length; i++) {
+      roles = sgStr(all[i].targeted_roles).split(',').map(function (t) { return t.trim(); });
+      if (roles.indexOf(token) >= 0) { out.push(all[i]); }
+    }
+    return out;
+  }
+  function sgDeptPaint(boxId, sumId, token, label) {
+    var box = document.getElementById(boxId), sum = document.getElementById(sumId), list, out = '', i, pending = 0, acked = 0;
+    if (!box) { return; }
+    list = sgDeptFilter(token);
+    for (i = 0; i < list.length; i++) { if (list[i].acked_by_me) { acked++; } else { pending++; } }
+    if (sum) {
+      sum.innerHTML = '<b class="num">' + pending + '</b> waiting on you · <b class="num">' + acked + '</b> acknowledged by you · ' +
+        '<span>' + list.length + ' ' + esc(label) + ' signal' + (list.length === 1 ? '' : 's') + ' in the window</span>' +
+        '<span class="sig-when num" style="margin-left:auto">updated ' + esc(new Date().toTimeString().slice(0, 5)) + ' · refreshes every 5 min</span>';
+    }
+    if (!list.length) {
+      box.innerHTML = '<div class="card enter d1"><div class="hd">Nothing for ' + esc(label) + '</div><div class="bd"><div class="sig-empty"><b>No ' + esc(label) + ' signal in the current window.</b> New ones appear here within 5 minutes of the engine finding them.</div></div></div>';
+      return;
+    }
+    // pending first, then acknowledged (history still shown on those)
+    list.sort(function (a, b) { return (a.acked_by_me ? 1 : 0) - (b.acked_by_me ? 1 : 0); });
+    SG_PAGE_LIST = list;
+    for (i = 0; i < list.length; i++) { out += sgCard(list[i], i, true); }
+    box.innerHTML = out;
+    sgFetchImages(box);
+    sgWire(box);
+  }
+  function sgDeptInit(boxId, sumId, refreshId, token, label) {
+    var box = document.getElementById(boxId), btn = document.getElementById(refreshId);
+    if (SG_DEPT.timer) { clearInterval(SG_DEPT.timer); SG_DEPT.timer = null; }
+    var paint = function () { if (document.body.contains(box)) { sgDeptPaint(boxId, sumId, token, label); } };
+    var load = function (fresh) {
+      return sgDeptLoad(fresh).then(paint)['catch'](function (e) {
+        if (box && document.body.contains(box) && !(SG_DEPT.data)) { box.innerHTML = '<div class="sig-warnline">Signals could not be loaded — ' + esc(e.message) + '</div>'; }
+      });
+    };
+    if (btn) { btn.onclick = function () { btn.disabled = true; btn.textContent = 'Refreshing…'; load(true).then(function () { btn.disabled = false; btn.textContent = 'Refresh'; }); }; }
+    if (SG_DEPT.data) { paint(); }
+    load(true);
+    SG_DEPT.timer = setInterval(function () {
+      if (!document.body.contains(box)) { clearInterval(SG_DEPT.timer); SG_DEPT.timer = null; SG_PAGE_LIST = null; return; }
+      load(true);
+    }, SG_DEPT_MS);
+  }
+  function sgDeptRender(title, sub, boxId, sumId, refreshId) {
+    return '<div class="hgroup enter d1"><h1>' + title + '</h1>' +
+        '<span class="sub">' + sub + '</span>' +
+        '<button class="minibtn" id="' + refreshId + '" style="margin-left:auto">Refresh</button></div>' +
+      '<div class="sig-dept-sum" id="' + sumId + '">Loading…</div>' +
+      '<div class="sig-list" id="' + boxId + '"><div class="spinner"></div></div>';
+  }
+  VIEWS.csSignals = {
+    label: 'CS signals',
+    icon: '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4M12 17.6h.01"/>',
+    roles: ['CS', 'Management', 'Ops Head', 'Team Lead'],
+    order: 0.3,
+    render: function () { return sgDeptRender('Customer service <span class="goldtext">signals</span>', 'negative-profit days and returns above usual for the CS desk · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigCsAll', 'sigCsSum', 'sigCsRefresh'); },
+    init: function () { sgDeptInit('sigCsAll', 'sigCsSum', 'sigCsRefresh', 'CS', 'customer service'); }
+  };
+  VIEWS.adSignals = {
+    label: 'Advertising signals',
+    icon: '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4M12 17.6h.01"/>',
+    roles: ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'],
+    order: 0.3,
+    render: function () { return sgDeptRender('Advertising <span class="goldtext">signals</span>', 'worst CPC performers, negative days and Wrong Advertising alarms · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigAdAll', 'sigAdSum', 'sigAdRefresh'); },
+    init: function () { sgDeptInit('sigAdAll', 'sigAdSum', 'sigAdRefresh', 'Advertising Manager', 'advertising'); }
   };
 
   // ============================== §28.1 clock in / clock out ==============================
@@ -29020,11 +29156,11 @@ function enterApp(user){
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','staffReports','perf','team','meetings','agenda'] },
-    { name:'Advertising', keys:['tasksAds','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRevised','huntRevisions','huntRecords','ideaBox'] },
-    { name:'Customer Service', keys:['tasksCS','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','inbox','feedback'] },
+    { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','inbox','feedback'] },
     { name:'Library',     keys:['tools','rules'] }
   ];
   var placed = {};
