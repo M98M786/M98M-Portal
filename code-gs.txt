@@ -20123,7 +20123,7 @@ function signalsPushEngine_(full) {
       });
     });
     for (let i = 0; i < rows.length || (i === 0 && full); i += 150) {
-      enginePost_('syncSignals', { rows: rows.slice(i, i + 150), full: (full && i + 150 >= rows.length) ? 'true' : '', keys: full ? rows.map(function (x) { return x.skey; }) : [] });
+      enginePost_('syncSignals', { rows: rows.slice(i, i + 150), full: (full && i + 150 >= rows.length) ? 'true' : '', keys: full ? rows.map(function (x) { return x.skey; }) : [], pin_days: String(signalsThreshold_('signals_pin_days')) });
       if (!rows.length) break;
     }
     return rows.length;

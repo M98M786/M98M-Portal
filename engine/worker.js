@@ -9694,6 +9694,9 @@ const ROUTES = {
         String(r.value || ''), String(r.baseline || ''), String(r.targeted_roles || ''), String(r.owner_email || '').toLowerCase(),
         String(r.card_json || ''), String(r.acknowledged_by || ''), JSON.stringify(r.actions || []), r.count_only ? 1 : 0));
       for (let i = 0; i < stmts.length; i += 50) await ctx.env.DB.batch(stmts.slice(i, i + 50));
+      if (p.pin_days !== undefined && p.pin_days !== null && String(p.pin_days) !== '') {
+        await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('signals_pin_days', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=?1, updated_at=datetime('now')").bind(String(p.pin_days)).run();
+      }
       let retired = 0;
       if (String(p.full || '') === 'true') {
         const keep = new Set((Array.isArray(p.keys) ? p.keys : []).map(String));
@@ -9748,7 +9751,7 @@ const ROUTES = {
       }
       const includeAcked = !!(p && p.include_acked);
       const pinDaysRow = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'signals_pin_days'").first().catch(() => null);
-      const pinDays = Math.max(1, Number(pinDaysRow && pinDaysRow.value) || 3);
+      const pinDays = Math.max(1, Number(pinDaysRow && pinDaysRow.value) || 4);   // Apps Script's SIGNALS_CONFIG_DEFAULTS.signals_pin_days = 4; the sync mirrors any override
       const pkt = new Date(Date.now() + 5 * 3600000);
       const today = pkt.toISOString().slice(0, 10);
       const cutoff = new Date(Date.parse(today + 'T12:00:00Z') - pinDays * 86400000).toISOString().slice(0, 10);
@@ -9777,7 +9780,10 @@ const ROUTES = {
         const rec = { date: String(r.date), account, type, item_id: String(r.item_id || ''), value: r.value, baseline: r.baseline,
           targeted_roles: String(r.targeted_roles || ''), actions, pinned: !ackedByMe, acked_by_me: ackedByMe,
           acknowledged_by_others: acks.list, ack_history: acks.hist, title: '', image: '' };
-        if (card) { for (const k of Object.keys(card)) { if (k === 'targeted_roles' || k === 'actions') continue; rec[k] = card[k]; } rec.item_id = String(card.item_id || rec.item_id); }
+        /* the card may carry an EMPTY item_id (title-keyed books); the row's own key wins then —
+           merged after the card so the card's blank cannot erase it (parity with actionMySignals_) */
+        const itemKey = String(r.item_id || '');
+        if (card) { for (const k of Object.keys(card)) { if (k === 'targeted_roles' || k === 'actions') continue; rec[k] = card[k]; } rec.item_id = String(card.item_id || itemKey); }
         out.push(strip(rec));
       }
       const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
