@@ -4047,10 +4047,19 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS validation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, metric_id TEXT, scope_key TEXT, ran_at TEXT, shown TEXT, recomputed TEXT, delta TEXT, status TEXT, method TEXT, evidence TEXT, next_run_at TEXT)",
     "CREATE INDEX IF NOT EXISTS ix_validation_metric ON validation_runs (metric_id, ran_at)",
   ];
+  /* 12 Sept (owner: "make these things fast"): this pass ran ~70 sequential D1 statements on the
+     FIRST request of every fresh isolate — ~5 s added to whichever staff click happened to land
+     on a cold isolate (measured: 5.5 s then 0.3 s for the same action). The DDL is idempotent, so
+     it only needs to run once per DDL text: a KV tag (edge-cached read, ~ms) remembers which
+     DDL text has already been applied; a changed list (new column/table) runs once and re-tags. */
+  let tag = 'schema:' + ddl.length + ':';
+  { let h = 2166136261; const txt = ddl.join('\n'); for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } tag += h.toString(16); }
+  try { if ((await env.HOT.get('schema:tag')) === tag) { TRUTH_SCHEMA_OK = true; return; } } catch (e) {}
   for (const s of ddl) {
     try { await env.DB.prepare(s).run(); } catch (e) { /* duplicate column / raced isolate */ }
   }
   TRUTH_SCHEMA_OK = true;
+  try { await env.HOT.put('schema:tag', tag); } catch (e) {}
 }
 
 /* ---- time: Pakistan day (Asia/Karachi, UTC+5, no DST) ---- */

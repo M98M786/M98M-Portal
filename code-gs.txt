@@ -20150,6 +20150,17 @@ function slowActions(args) {
     b.n++; b.sum += ms; if (ms > b.max) b.max = ms;
     if (!b.last) b.last = String(r.ts).slice(5, 16) + ' ' + String(r.actor || '').split('@')[0];
     n++;
+    /* a slow batch names its inner calls ("myTasks 3200ms, mySignals 1800ms"): count the inner
+       actions that took over 1.5 s, so the ledger points at the real culprit, not at "batch" */
+    if (a === 'batch') {
+      String(r.detail || '').split(',').forEach(function (part) {
+        const m = part.trim().match(/^(\S+)\s+(\d+)ms/);
+        if (!m || Number(m[2]) < 1500) return;
+        const k = 'batch>' + m[1];
+        const c = by[k] || (by[k] = { n: 0, max: 0, sum: 0, last: b.last });
+        c.n++; c.sum += Number(m[2]); if (Number(m[2]) > c.max) c.max = Number(m[2]);
+      });
+    }
   }
   const list = Object.keys(by).map(function (a) { const b = by[a]; return { a: a, n: b.n, s: a + ' ×' + b.n + ' max ' + (b.max / 1000).toFixed(1) + 's avg ' + (b.sum / b.n / 1000).toFixed(1) + 's (last ' + b.last + ')' }; })
     .sort(function (x, y) { return y.n - x.n; }).map(function (x) { return x.s; });
@@ -24690,7 +24701,7 @@ function doPost(e) {
     /* 12 Sept: the executions log shows only "doPost" — never WHICH action was slow. Any request
        over 4 s leaves its name and time in the activity log, so speed work targets facts. */
     const ms = Date.now() - t0;
-    if (ms > 4000) { try { logActivity_(ctx && ctx.ident ? ctx.ident.email : 'router', 'SLOW_ACTION', String(req.action || ''), '', String(ms) + 'ms', ''); } catch (e) {} }
+    if (ms > 4000) { try { logActivity_(ctx && ctx.ident ? ctx.ident.email : 'router', 'SLOW_ACTION', String(req.action || ''), '', String(ms) + 'ms', req.action === 'batch' ? BATCH_TIMINGS_.join(', ') : ''); } catch (e) {} }
     if (req.idem) markIdem_(req.idem);
     return out_({ ok: true, data: data }, null, req);
   } catch (err) {
@@ -24819,19 +24830,25 @@ function authorizeFor_(level, idToken, session) {
  * own error without spoiling the rest. */
 const BATCH_MAX_CALLS = 12;
 
+let BATCH_TIMINGS_ = [];   // the last batch's per-call timings (one execution = one request, so no cross-talk)
 function actionBatch_(payload, ctx) {
   const calls = payload && payload.calls;
   if (!Array.isArray(calls) || !calls.length) throw new Error(SAFE_ERROR_PREFIX + 'nothing to do');
   if (calls.length > BATCH_MAX_CALLS) throw new Error('batch too large');
 
+  BATCH_TIMINGS_ = [];
   const results = calls.map(function (call) {
     const name = call && call.action;
     const entry = ACTIONS[name];
     if (!entry || name === 'batch') return { ok: false, error: 'unknown action' };
+    const t0 = Date.now();
     try {
       const inner = authorizeFor_(entry[1], ctx.idToken, ctx.session);
-      return { ok: true, data: routerRun_(name, entry, call.payload || {}, inner) };
+      const data = routerRun_(name, entry, call.payload || {}, inner);
+      BATCH_TIMINGS_.push(name + ' ' + (Date.now() - t0) + 'ms');     // per-call split for the SLOW_ACTION ledger
+      return { ok: true, data: data };
     } catch (err) {
+      BATCH_TIMINGS_.push(name + ' ' + (Date.now() - t0) + 'ms!');
       logActivity_('router', 'ERROR:batch:' + name, name, '', '', String(err && err.stack || err));
       const raw = String(err && err.message || '');
       return { ok: false, error: raw === 'auth' ? 'auth'

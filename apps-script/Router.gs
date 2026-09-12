@@ -85,7 +85,7 @@ function doPost(e) {
     /* 12 Sept: the executions log shows only "doPost" — never WHICH action was slow. Any request
        over 4 s leaves its name and time in the activity log, so speed work targets facts. */
     const ms = Date.now() - t0;
-    if (ms > 4000) { try { logActivity_(ctx && ctx.ident ? ctx.ident.email : 'router', 'SLOW_ACTION', String(req.action || ''), '', String(ms) + 'ms', ''); } catch (e) {} }
+    if (ms > 4000) { try { logActivity_(ctx && ctx.ident ? ctx.ident.email : 'router', 'SLOW_ACTION', String(req.action || ''), '', String(ms) + 'ms', req.action === 'batch' ? BATCH_TIMINGS_.join(', ') : ''); } catch (e) {} }
     if (req.idem) markIdem_(req.idem);
     return out_({ ok: true, data: data }, null, req);
   } catch (err) {
@@ -214,19 +214,25 @@ function authorizeFor_(level, idToken, session) {
  * own error without spoiling the rest. */
 const BATCH_MAX_CALLS = 12;
 
+let BATCH_TIMINGS_ = [];   // the last batch's per-call timings (one execution = one request, so no cross-talk)
 function actionBatch_(payload, ctx) {
   const calls = payload && payload.calls;
   if (!Array.isArray(calls) || !calls.length) throw new Error(SAFE_ERROR_PREFIX + 'nothing to do');
   if (calls.length > BATCH_MAX_CALLS) throw new Error('batch too large');
 
+  BATCH_TIMINGS_ = [];
   const results = calls.map(function (call) {
     const name = call && call.action;
     const entry = ACTIONS[name];
     if (!entry || name === 'batch') return { ok: false, error: 'unknown action' };
+    const t0 = Date.now();
     try {
       const inner = authorizeFor_(entry[1], ctx.idToken, ctx.session);
-      return { ok: true, data: routerRun_(name, entry, call.payload || {}, inner) };
+      const data = routerRun_(name, entry, call.payload || {}, inner);
+      BATCH_TIMINGS_.push(name + ' ' + (Date.now() - t0) + 'ms');     // per-call split for the SLOW_ACTION ledger
+      return { ok: true, data: data };
     } catch (err) {
+      BATCH_TIMINGS_.push(name + ' ' + (Date.now() - t0) + 'ms!');
       logActivity_('router', 'ERROR:batch:' + name, name, '', '', String(err && err.stack || err));
       const raw = String(err && err.message || '');
       return { ok: false, error: raw === 'auth' ? 'auth'

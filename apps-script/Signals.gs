@@ -1139,6 +1139,17 @@ function slowActions(args) {
     b.n++; b.sum += ms; if (ms > b.max) b.max = ms;
     if (!b.last) b.last = String(r.ts).slice(5, 16) + ' ' + String(r.actor || '').split('@')[0];
     n++;
+    /* a slow batch names its inner calls ("myTasks 3200ms, mySignals 1800ms"): count the inner
+       actions that took over 1.5 s, so the ledger points at the real culprit, not at "batch" */
+    if (a === 'batch') {
+      String(r.detail || '').split(',').forEach(function (part) {
+        const m = part.trim().match(/^(\S+)\s+(\d+)ms/);
+        if (!m || Number(m[2]) < 1500) return;
+        const k = 'batch>' + m[1];
+        const c = by[k] || (by[k] = { n: 0, max: 0, sum: 0, last: b.last });
+        c.n++; c.sum += Number(m[2]); if (Number(m[2]) > c.max) c.max = Number(m[2]);
+      });
+    }
   }
   const list = Object.keys(by).map(function (a) { const b = by[a]; return { a: a, n: b.n, s: a + ' ×' + b.n + ' max ' + (b.max / 1000).toFixed(1) + 's avg ' + (b.sum / b.n / 1000).toFixed(1) + 's (last ' + b.last + ')' }; })
     .sort(function (x, y) { return y.n - x.n; }).map(function (x) { return x.s; });
