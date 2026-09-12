@@ -52,8 +52,11 @@ export default {
     const route = ROUTES[action];
     if (!route) return json({ ok: false, error: 'unknown action' }, 200, cors);
 
+    /* 12 Sept: ctx2 was declared INSIDE the try — the catch below could not see it, its err_log
+       INSERT threw ReferenceError into an empty catch, and the ledger stayed at zero rows for a
+       day while every refusal looked like "no errors". Declared here, visible to both. */
+    let ctx2 = { env, user: null, email: '' };
     try {
-      let ctx2 = { env, user: null, email: '' };
       if (route.auth === 'sync') {
         if (String(body.key || '') !== (await secret(env, 'SYNC_KEY'))) throw new AuthError('auth');
       } else if (route.auth !== 'public') {
