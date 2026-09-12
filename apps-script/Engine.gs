@@ -278,7 +278,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   pushSheetRowsHot: function () { return typeof pushSheetRowsHot === 'function' ? String(pushSheetRowsHot()) : 'absent'; },
-  computeSignals: function () { return typeof computeSignals === 'function' ? String(computeSignals()) : 'absent'; },
+  computeSignals: function (args) { return typeof computeSignals === 'function' ? String(computeSignals(args || null)) : 'absent'; },
   pushSheetRowsCold: function () { return typeof pushSheetRowsCold === 'function' ? String(pushSheetRowsCold()) : 'absent'; },
   ensureTruthTriggers: function () { return typeof ensureTruthTriggers === 'function' ? String(ensureTruthTriggers()) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },

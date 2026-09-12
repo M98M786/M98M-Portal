@@ -155,7 +155,12 @@ export default {
          :00 AS trigger AND peak top-of-hour /exec traffic. :50 is clear of the :00/:15/:30/:45
          mirror ticks and off-peak. Both jobs are idempotent + time-budgeted, so nothing changes but
          the timing. */
-      '50 * * * *': [marketingSync, feedbackSync, signalsPull],
+      '50 * * * *': [marketingSync, feedbackSync, alertsPull],
+      /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
+         quarter-hour trigger (:05/:20/:35/:50). The Apps Script side fingerprints its inputs and
+         skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
+         quarter-hour and reacts within 15 minutes when staff edit a day tab. */
+      '5-59/15 * * * *': [signalsPull],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -1336,9 +1341,10 @@ async function asRunJobDirect(env, job, args) {
  * own time budget on the Apps Script side, so a slow run simply continues on the next hour. */
 async function signalsPull(env) {
   try { await asRunJobDirect(env, 'computeSignals'); } catch (e) { /* best-effort — never blocks the slot's other work */ }
-  /* Same freeze applied to the Alerts-centre counters — alertsRefresh writes them into DASH_CACHE
-     and, like computeSignals, had no schedule, so the "overall numbers" went stale. Trigger it
-     hourly too (owner, 5 Sept). */
+}
+/* The Alerts-centre counters stay hourly (owner, 5 Sept) — split out of signalsPull when signals
+   moved to the quarter-hour trigger, so the alerts refresh is not run four times as often. */
+async function alertsPull(env) {
   try { await asRunJobDirect(env, 'alertsRefresh'); } catch (e) {}
 }
 
@@ -9673,7 +9679,7 @@ const ROUTES = {
   signalsKick: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const out = { at: Date.now() };
-      try { out.signals = await asRunJobDirect(ctx.env, 'computeSignals'); }
+      try { out.signals = await asRunJobDirect(ctx.env, 'computeSignals', { force: true }); }
       catch (e) { out.signals = { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
       if (p && p.alerts) {
         try { out.alerts = await asRunJobDirect(ctx.env, 'alertsRefresh'); }

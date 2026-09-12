@@ -19362,9 +19362,32 @@ function signalsSeedConfig_() {
  * existed and the 7th had not been built yet. Re-scanning a covered day is free of side effects
  * (idempotent raise); a day whose tab is not built yet simply comes back 'not connected' and is
  * picked up on a later run once it appears. */
-function computeSignals() {
+/* 12 Sept (owner: "make detection also every 15 minutes"). computeSignals is a heavy scan (up to
+ * SIG_SWEEP_BUDGET_MS of workbook reads); at a 15-minute cadence that would burn hours of Apps
+ * Script execution a day and could exhaust the daily quota that EVERY portal action shares. The
+ * safety valve: fingerprint the INPUTS first — Drive's lastUpdated of every linked workbook the
+ * scan reads (central main sheet, order processing, sales analysis) plus the day list — and skip
+ * the scan when nothing changed since the last completed run. Staff editing a day tab moves the
+ * stamp, so a real change is picked up within 15 minutes; a quiet quarter-hour costs ~6 Drive
+ * metadata calls. A full scan is still forced at least hourly, and always by the manual Refresh. */
+function signalsInputFingerprint_(accounts, days) {
+  const parts = [days.join(',')];
+  accounts.forEach(function (account) {
+    ['central', 'order_processing', 'sales_analysis'].forEach(function (kind) {
+      try {
+        const id = (typeof bridgeResolveSheetId_ === 'function') ? bridgeResolveSheetId_('account', account, kind) : '';
+        if (!id) { parts.push(account + '|' + kind + '|-'); return; }
+        parts.push(account + '|' + kind + '|' + DriveApp.getFileById(id).getLastUpdated().getTime());
+      } catch (e) { parts.push(account + '|' + kind + '|?'); }
+    });
+  });
+  return parts.join(';');
+}
+
+function computeSignals(args) {
   const started = Date.now();
   signalsSeedConfig_();
+  const force = !!(args && (args.force === true || String(args.force) === 'true'));
 
   const th = signalsThresholds_();
   const owners = signalsListingOwners_();
@@ -19373,6 +19396,15 @@ function computeSignals() {
   const backfill = Math.max(1, Math.round(signalsThreshold_('signals_backfill_days')));
   const days = [];
   for (let k = 1; k <= backfill; k++) days.push(signalsAddDays_(signalsToday_(), -k));  // yesterday, -2, …
+
+  // change-detection short-circuit (see signalsInputFingerprint_ above)
+  const props = PropertiesService.getScriptProperties();
+  const fp = signalsInputFingerprint_(accounts, days);
+  const lastFp = String(props.getProperty('SIG_FP') || '');
+  const lastAt = Number(props.getProperty('SIG_FP_AT') || 0);
+  if (!force && fp === lastFp && (Date.now() - lastAt) < 3600000) {
+    return 'unchanged — no linked workbook moved since ' + new Date(lastAt).toISOString().slice(11, 16) + 'Z; scan skipped';
+  }
 
   // Loop ACCOUNTS on the outside, DAYS on the inside. The heavy per-account reads — the Central Main
   // Sheet index and the Returns log — do not change from day to day, so they are read ONCE per
@@ -19431,6 +19463,7 @@ function computeSignals() {
     return p.day + ':' + p.scanned + 'sc' + (p.notConnected ? '/' + p.notConnected + 'nc' : '');
   }).join(' ');
   const unhealthy = order.some(function (p) { return p.notConnected || !p.found; });
+  if (!timedOut) { try { props.setProperty('SIG_FP', fp); props.setProperty('SIG_FP_AT', String(Date.now())); } catch (e) {} }
   return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (timedOut ? ', time budget hit — rest next run' : '')
@@ -19971,7 +20004,7 @@ function signalsRefresh_(ctx) {
   if (last && Date.now() - last < gapMs) return false;
   cache.put(SIG_LAST_RUN_KEY, String(Date.now()), 21600);
   try {
-    computeSignals();
+    computeSignals({ force: true });
   } catch (e) {
     // A refresh that fails must still show the cards the last run left behind.
     logActivity_(ctx.ident.email, 'SIGNALS_REFRESH_FAIL', 'SIGNALS', '', '', String(e && e.message || e));
@@ -22619,7 +22652,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   pushSheetRowsHot: function () { return typeof pushSheetRowsHot === 'function' ? String(pushSheetRowsHot()) : 'absent'; },
-  computeSignals: function () { return typeof computeSignals === 'function' ? String(computeSignals()) : 'absent'; },
+  computeSignals: function (args) { return typeof computeSignals === 'function' ? String(computeSignals(args || null)) : 'absent'; },
   pushSheetRowsCold: function () { return typeof pushSheetRowsCold === 'function' ? String(pushSheetRowsCold()) : 'absent'; },
   ensureTruthTriggers: function () { return typeof ensureTruthTriggers === 'function' ? String(ensureTruthTriggers()) : 'absent'; },
   connectSirHasib: function () { return typeof connectSirHasib === 'function' ? String(connectSirHasib()) : 'absent'; },
