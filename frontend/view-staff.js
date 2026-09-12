@@ -70,6 +70,13 @@
     '.ax-chip.on{border-color:var(--gold);background:rgba(212,175,55,.14);color:var(--gold)}',
     '.ax-chip.off{text-decoration:line-through;opacity:.55;border-color:var(--bad,#f06d6d);color:var(--bad,#f06d6d)}',
     '.st-right{text-align:right;white-space:nowrap}',
+    '.st-more{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel);margin-top:16px}',
+    '.st-more>summary{cursor:pointer;padding:13px 16px;font-weight:800;list-style:none;display:flex;gap:10px;align-items:center;font-size:14px}',
+    '.st-more>summary::-webkit-details-marker{display:none}',
+    '.st-more>summary::before{content:"▸";font-size:12px;color:var(--gold);transition:transform .15s}',
+    '.st-more[open]>summary::before{transform:rotate(90deg)}',
+    '.st-more>summary .hint{font-weight:500;color:var(--text-3);margin-left:auto;font-size:12px}',
+    '.st-more>.bd{padding:0 16px 16px}',
     '.st-card{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:linear-gradient(180deg,var(--panel-2),var(--panel))}',
     '.st-card+.st-card{margin-top:12px}',
     '.st-card:hover{border-color:var(--gold-line-hi)}',
@@ -279,6 +286,9 @@
   function paintQueue(err) {
     var box = $('stQueue');
     if (!box) { return; }
+    var wrap = $('stQueueWrap'), cnt = $('stQueueCount');
+    if (wrap) { wrap.open = !err && S.pending.length > 0; }
+    if (cnt) { cnt.textContent = err ? 'could not load' : (S.pending.length ? S.pending.length + ' waiting — open to approve' : 'nobody is waiting'); }
     if (err) { box.innerHTML = '<div class="st-empty">' + esc(err) + '</div>'; return; }
     if (!S.pending.length) {
       box.innerHTML = '<div class="st-empty">Nobody is waiting for approval.' +
@@ -341,7 +351,7 @@
     if (!box) { return; }
     if (!canManage()) {
       box.innerHTML = '<div class="st-note">Adding, editing and removing colleagues is Management\'s ' +
-        'to do (§4.4). You can approve the people waiting above.</div>';
+        'to do. You can approve the people waiting above.</div>';
       return;
     }
     box.innerHTML =
@@ -540,7 +550,7 @@
       '<div class="st-f" style="margin-top:12px"><label>Note</label>' +
         '<input class="st-in" id="stEdNote" placeholder="Leave blank to keep the note already on their row">' +
         '<div class="st-note" style="margin-top:7px">Typing here replaces the note, including anything written there when they were added.</div></div>' +
-      (sup ? '' : '<div class="st-note" style="margin-top:10px">Role and email are changed by a super admin (§4.1). Everything else here is yours.</div>') +
+      (sup ? '' : '<div class="st-note" style="margin-top:10px">Role and email are changed by a super admin. Everything else here is yours.</div>') +
       '<div class="st-act">' +
         '<button class="btn-gold" data-act="save" data-i="' + i + '">Save changes</button>' +
         '<button class="minibtn" data-act="cancel">Cancel</button>' +
@@ -778,7 +788,7 @@
   function paintRemoved(err) {
     var box = $('stRemoved');
     if (!box) { return; }
-    if (!canManage()) { box.innerHTML = '<div class="st-note">The archive is Management\'s (§4.4).</div>'; return; }
+    if (!canManage()) { box.innerHTML = '<div class="st-note">The archive is Management\'s.</div>'; return; }
     if (err) { box.innerHTML = '<div class="st-empty">' + esc(err) + '</div>'; return; }
     if (!S.removed.length) {
       box.innerHTML = '<div class="st-empty">Nobody has been removed.' +
@@ -865,7 +875,7 @@
     var box = $('stAccounts');
     if (!box) { return; }
     if (!canManage()) {
-      box.innerHTML = '<div class="st-note">Account and sheet admin is a super admin\'s (§4.4).</div>';
+      box.innerHTML = '<div class="st-note">Linking sheets is for Management.</div>';
       return;
     }
     if (err) { box.innerHTML = '<div class="st-empty">' + esc(err) + '</div>'; return; }
@@ -883,7 +893,7 @@
       (accounts.length - live.length ? pill('st-dim', (accounts.length - live.length) + ' archived') : '') +
       '</div>' +
       '<div class="st-note" style="margin-bottom:12px">A sheet the portal cannot open shows as ' +
-      '<b>not connected yet</b> rather than an error — §6. Archiving an account keeps its four links so ' +
+      '<b>not connected yet</b> rather than an error. Archiving an account keeps its four links so ' +
       'its history stays readable.</div>';
 
     if (!accounts.length) {
@@ -1097,39 +1107,38 @@
 
     render: function () {
       var mgr = canManage();
+      /* 13 Sept (owner: "too complicated and doesn't work at all"): two things on top — the team
+         and the eBay accounts' sheets — and everything occasional folded away underneath. */
       var h = '<div class="hgroup enter d1"><h1>Staff &amp; <span class="goldtext">accounts</span></h1>' +
-        '<span class="sub">Who gets in, what they may see, and which sheets are connected</span>' +
-        '<button class="btn-ghost" id="stRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<span class="sub">Your team, and the Google Sheets behind each eBay account</span>' +
+        '<button class="btn-ghost" id="stRefresh" style="margin-left:auto">Refresh</button></div>';
 
-        '<div class="card enter d2"><div class="hd">Waiting for approval ' +
-          '<span class="hint">nobody can sign in until you approve them</span></div>' +
-          '<div class="bd" id="stQueue">' + spinnerCard('Reading the queue…') + '</div></div>';
-
-      if (mgr) {
-        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">Add a staff member ' +
-          '<span class="hint">§4.1b — straight in, no registration needed</span></div>' +
-          '<div class="bd" id="stAdd"></div></div>';
-      } else {
-        h += '<div class="card enter d3" style="margin-top:16px"><div class="bd" id="stAdd"></div></div>';
-      }
-
-      if (mgr) {
-        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">Access control ' +
-          '<span class="hint">pick a person · grant or take away screens and tools · applies at their next sign-in</span></div>' +
-          '<div class="bd" id="stAccess">' + spinnerCard('Reading the directory…') + '</div></div>';
-      }
-
-      h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">The team ' +
-          '<span class="hint">timetables live on the Rota screen</span></div>' +
+      h += '<div class="card enter d2"><div class="hd">The team ' +
+          '<span class="hint">Edit changes a name, role, shift or accounts · hours live on the Rota screen</span></div>' +
           '<div class="bd" id="stList">' + spinnerCard('Reading the staff list…') + '</div></div>';
 
       if (mgr) {
-        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">Removed staff ' +
-            '<span class="hint">nothing is ever purged</span></div>' +
-            '<div class="bd" id="stRemoved">' + spinnerCard('Reading the archive…') + '</div></div>' +
-          '<div class="card enter d3" style="margin-top:16px"><div class="hd">eBay accounts &amp; their sheets ' +
-            '<span class="hint">§6 connection health</span></div>' +
+        h += '<div class="card enter d3" style="margin-top:16px"><div class="hd">eBay accounts &amp; their sheets ' +
+            '<span class="hint">paste a Google Sheets link into a slot and press Save — the portal checks it can open it</span></div>' +
             '<div class="bd" id="stAccounts">' + spinnerCard('Reading the connections…') + '</div></div>';
+      }
+
+      h += '<details class="st-more enter d3" id="stQueueWrap"><summary>Waiting for approval' +
+          '<span class="hint" id="stQueueCount">nobody is waiting</span></summary>' +
+          '<div class="bd" id="stQueue">' + spinnerCard('Reading the queue…') + '</div></details>';
+
+      if (mgr) {
+        h += '<details class="st-more enter d3"><summary>Add a staff member' +
+            '<span class="hint">they can sign in straight away</span></summary>' +
+            '<div class="bd" id="stAdd"></div></details>' +
+          '<details class="st-more enter d3"><summary>Screens &amp; tools per person' +
+            '<span class="hint">grant or take away · applies at their next sign-in</span></summary>' +
+            '<div class="bd" id="stAccess">' + spinnerCard('Reading the directory…') + '</div></details>' +
+          '<details class="st-more enter d3"><summary>Removed staff' +
+            '<span class="hint">nothing is ever purged</span></summary>' +
+            '<div class="bd" id="stRemoved">' + spinnerCard('Reading the archive…') + '</div></details>';
+      } else {
+        h += '<div id="stAdd"></div>';
       }
       return h;
     },

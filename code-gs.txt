@@ -21178,7 +21178,7 @@ function sadmIdOut_(id, canEdit) {
 /** §3 + §6 — the accounts screen and the connection-health checklist in one read. */
 function actionAccountsAdmin_(payload, ctx) {
   sadmAssertStaffAdmin_(ctx);
-  const canEdit = isSuperAdmin(ctx.ident.email);
+  const canEdit = sadmIsManagement_(ctx);           // 13 Sept: Management edits sheet links (was super-only)
   const rows = readTab_('CONNECTIONS');
   // The account part of the key is normalized on both sides: the registry's own names carry
   // trailing spaces ('Sir Hasib ') and connectionHealth reports them exactly as stored.
@@ -21237,7 +21237,11 @@ function actionAccountsAdmin_(payload, ctx) {
  * keeps the links so a historical account's data (Yasin Bhai, Imtiaz Bhai in the order-check
  * workbooks) stays readable. Super admin only (§4.1). */
 function actionSaveAccount_(payload, ctx) {
-  sadmAssertSuper_(ctx);
+  /* 13 Sept (owner: "Staff & accounts is too complicated and doesn't work at all"): the sheet
+     links were super-admin-only, so the owner's everyday Management login saw a read-only screen
+     and every save answered 'auth'. Management may link, rename and archive accounts now; role
+     and email changes on people stay super-only (unchanged, in actionUpdateStaff_). */
+  sadmAssertStaffAdmin_(ctx);
   const scope = String(payload.scope || 'account').trim() === 'global' ? 'global' : 'account';
   const notes = sadmText_(payload.notes, 300);
   const done = [], unreadable = [];
@@ -21358,7 +21362,7 @@ const ACTIONS_STAFFADMIN = {
   removedStaff:    [actionRemovedStaff_, 'any'],
   reassignTasks:   [actionReassignTasks_, 'any'],
   accountsAdmin:   [actionAccountsAdmin_, 'any'],
-  saveAccount:     [actionSaveAccount_, 'super'],
+  saveAccount:     [actionSaveAccount_, 'any'],     // Management gated inside (13 Sept)
 };
 
 
