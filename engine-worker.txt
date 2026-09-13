@@ -5016,12 +5016,18 @@ const ROUTES = {
          own notification only reaches the engine on the 15-minute notifSweep. Full sweeps are
          reconciliation, never a reason to ring. */
       const ring = [];
-      if (!full && rows.length && rows.length <= 5) {
+      /* 13 Sept (later): the sweep now pushes only what changed (small), and some task makers —
+         the hourly supplier-link sweep, hunt approvals in bulk — reach the mirror only through
+         it. Ring for any NEW Pending task created in the last two hours in a push of ≤ 60 rows;
+         the full reconcile (full=true) still never rings, and re-mirrored old rows cannot. */
+      const twoHoursAgo = new Date(Date.now() + 5 * 3600000 - 2 * 3600000).toISOString().slice(0, 19);
+      if (!full && rows.length && rows.length <= 60) {
         for (const t of rows) {
           const id = String(t.task_id || ''), to = String(t.assigned_to || '').toLowerCase();
           if (!id || to.indexOf('@') < 0) continue;
           const prev = await ctx.env.DB.prepare('SELECT assigned_to, status FROM tasks WHERE task_id = ?1').bind(id).first().catch(() => null);
-          const fresh = !prev && String(t.status || '') === 'Pending';
+          const recent = String(t.created_at || '').slice(0, 19) >= twoHoursAgo;
+          const fresh = !prev && String(t.status || '') === 'Pending' && recent;
           const moved = prev && String(prev.assigned_to || '').toLowerCase() !== to && String(t.status || '') !== 'Completed';
           if (fresh || moved) ring.push({ t, to, moved: !!moved });
         }
