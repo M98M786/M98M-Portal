@@ -64,6 +64,7 @@ export default {
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
       ctx2.waitUntil = (pr) => { try { ctx.waitUntil(pr); } catch (e) {} };   // lets an action finish background work after answering
+      try { ctx2.ua = String(req.headers.get('user-agent') || '').replace(/Mozilla\/5\.0 |AppleWebKit\/\S+ |\(KHTML, like Gecko\) /g, '').slice(0, 70); } catch (e) { ctx2.ua = ''; }
       const t0 = Date.now();
       /* SPEED (Hasib, night order): the heavy read boards recomputed full scans on every
          screen visit. These actions return IDENTICAL data to every permitted caller, so a
@@ -8067,7 +8068,12 @@ const ROUTES = {
       if (!cps.length) throw new Error('SAY: there are no checkpoints on your schedule yet — Management sets your timetable');
       const cp = repHm(p.checkpoint);
       const i = cps.indexOf(cp);
-      if (i < 0) throw new Error('SAY: that checkpoint (' + String(p.checkpoint == null ? '' : p.checkpoint).slice(0, 24) + ') is not on your schedule — your slots are ' + cps.join(', ') + '. Refresh My reports and pick a slot from the list.');
+      if (i < 0) {
+        /* 13 Sept diagnosis line: WHO sends an empty/odd slot and from WHAT — the payload's keys and
+           the client, kept in err_log under their own action so the staff message stays clean */
+        try { await ctx.env.DB.prepare("INSERT INTO err_log (ts, action, email, msg) VALUES (datetime('now'), 'submitReportDiag', ?1, ?2)").bind(me, ('keys=' + Object.keys(p || {}).join(',') + ' cp=' + JSON.stringify(p.checkpoint == null ? null : p.checkpoint).slice(0, 30) + ' ua=' + String(ctx.ua || '')).slice(0, 300)).run(); } catch (e) {}
+        throw new Error('SAY: that checkpoint (' + String(p.checkpoint == null ? '' : p.checkpoint).slice(0, 24) + ') is not on your schedule — your slots are ' + cps.join(', ') + '. Refresh My reports and pick a slot from the list.');
+      }
       const date = repShiftDateJs(cps, (u && repHm(u.shift_start)) ? repMin(u.shift_start) : -1);
       const t = repTimingJs(cps, date);
       if (t.nowAbs >= t.deadlines[i]) throw new Error('SAY: that checkpoint window has already closed');
