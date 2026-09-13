@@ -936,10 +936,17 @@ function dispatchOverdueSweep() {
   const started = Date.now();
 
   const sent = {};
-  readTab_('NOTIFICATIONS').forEach(function (n) {
-    const ref = String(n.ref || '');
-    if (ref.indexOf(ORDERS_OVERDUE_REF) === 0) sent[ref] = true;
-  });
+  /* 13 Sept: "already sent today?" only needs the newest letters, not the whole 35k-row tab. */
+  (function () {
+    const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+    const lr = sh.getLastRow();
+    if (lr < 2) return;
+    const n = Math.min(3000, lr - 1);
+    sh.getRange(lr - n + 1, 6, n, 1).getValues().forEach(function (r) {
+      const ref = String(r[0] || '');
+      if (ref.indexOf(ORDERS_OVERDUE_REF) === 0) sent[ref] = true;
+    });
+  })();
 
   let scanned = 0, notified = 0, skipped = 0;
   const accounts = ordersConnectedAccounts_();

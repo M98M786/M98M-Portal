@@ -1136,6 +1136,16 @@ function pushSheetRowsHot() {
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
+  /* 13 Sept: the deferred dispatch-overdue sweep (flagged at :05 on odd hours) runs here once the
+     top-of-hour jobs are over — second half of the hour only, one run per flag. */
+  try {
+    const dprops = PropertiesService.getScriptProperties();
+    if (dprops.getProperty('DISPATCH_SWEEP_DUE') === '1' && new Date().getMinutes() >= 30 && typeof dispatchOverdueSweep === 'function') {
+      dprops.deleteProperty('DISPATCH_SWEEP_DUE');
+      const dres = dispatchOverdueSweep();
+      logActivity_('system', 'DISPATCH_SWEEP', '', '', '', String(dres).slice(0, 160));
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), runBooks
     ? tabs + ' tab(s) · walked ' + (typeof walkedNames !== 'undefined' ? walkedNames.join(', ') : '?') + ' · skipped ' + (typeof skippedNames !== 'undefined' ? skippedNames.join(', ') : '?') + ' · ' + Math.round((Date.now() - (typeof walkT0 !== 'undefined' ? walkT0 : Date.now())) / 1000) + 's'
     : 'books walk skipped (15-min throttle)');

@@ -170,8 +170,11 @@ function runMissedCheckpointSweep() {
       catch (e) { logActivity_('trigger', 'ERROR:alertsRefresh', '', '', '', String(e && e.stack || e)); }
     }
   } else if (typeof dispatchOverdueSweep === 'function') {
-    try { dispatchOverdueSweep(); }
-    catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e)); }
+    /* 13 Sept: this rider rebuilds every account's whole-month orders dashboard (200+ s) and
+       used to run here at :05, on top of the hourly users/cost push at :03 — the top-of-hour
+       "overloaded" staff felt. It now only raises a flag; the 15-minute hot mirror runs the
+       sweep in the quiet second half of the hour (see pushSheetRowsHot). */
+    try { PropertiesService.getScriptProperties().setProperty('DISPATCH_SWEEP_DUE', '1'); } catch (e) {}
   }
   /* The hunting backup workbook's dated Drive copy — day-gated by property, so the first hour
    * of the Pakistan day with budget to spare takes it. */
