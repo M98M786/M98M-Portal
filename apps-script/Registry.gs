@@ -538,8 +538,16 @@ function notifPrune() {
       if (ageOk) { keep.push(vals[i]); kept++; } else { dropped++; }
     }
     if (dropped) {
+      /* 13 Sept: notifSweep_ ships by ROW NUMBER (NOTIF_PUSH_ROW). Rewriting the tab shorter
+         left that cursor pointing past the new last row, so every bell written after a prune
+         waited until the tab grew back by `dropped` rows — hours of "Task assigned" and "Hunt
+         approved" never reached anyone. Keep the same number of UNSHIPPED tail rows after the
+         rewrite: cursor' = newLast − (oldLast − cursor). */
+      const cur = Number(PropertiesService.getScriptProperties().getProperty('NOTIF_PUSH_ROW') || 0);
+      const unshipped = cur ? Math.max(0, (vals.length) - cur) : 0;
       sh.clearContents();
       sh.getRange(1, 1, keep.length, head.length).setValues(keep);
+      if (cur) PropertiesService.getScriptProperties().setProperty('NOTIF_PUSH_ROW', String(Math.max(1, keep.length - unshipped)));
     }
   } finally { lock.releaseLock(); }
   logActivity_('system', 'NOTIF_PRUNE', 'NOTIFICATIONS', '', String(dropped), 'kept ' + kept + ', dropped ' + dropped);

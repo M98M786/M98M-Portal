@@ -1238,6 +1238,39 @@ function connectionLink(args) {
   return 'linked ' + stored + ' / ' + kind + ' -> "' + title + '" (' + id + '); was ' + before;
 }
 
+/* 13 Sept: bell diagnostics. notifTail lists the newest NOTIFICATIONS rows (optionally matching a
+ * substring) with the sweep cursor; notifCursorFix moves the cursor back `back` rows and ships —
+ * re-sends are harmless (notif_live ignores a repeated as_id). */
+function notifTail(args) {
+  const n = Math.min(200, Math.max(1, Number(args && args.n) || 30));
+  const match = String((args && args.match) || '').toLowerCase();
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const lr = sh.getLastRow();
+  const cur = PropertiesService.getScriptProperties().getProperty('NOTIF_PUSH_ROW') || '';
+  if (lr < 2) return 'empty · cursor ' + cur;
+  const take = Math.min(n * 6, lr - 1);
+  const vals = sh.getRange(lr - take + 1, 1, take, 8).getValues();
+  const out = [];
+  for (let i = vals.length - 1; i >= 0 && out.length < n; i--) {
+    const r = vals[i];
+    const line = [lr - take + 1 + i, String(r[0]), String(r[1]), String(r[3]), String(r[5]).slice(0, 30), String(r[6]).slice(0, 19), String(r[4]).slice(0, 60)].join(' | ');
+    if (match && line.toLowerCase().indexOf(match) < 0) continue;
+    out.push(line);
+  }
+  return 'lastRow ' + lr + ' · cursor ' + cur + '\n' + (out.length ? out.join('\n') : 'no rows matched');
+}
+function notifCursorFix(args) {
+  const back = Math.min(3000, Math.max(1, Number(args && args.back) || 500));
+  const sh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+  const lr = sh.getLastRow();
+  const props = PropertiesService.getScriptProperties();
+  const before = props.getProperty('NOTIF_PUSH_ROW') || '';
+  props.setProperty('NOTIF_PUSH_ROW', String(Math.max(1, lr - back)));
+  let shipped = '';
+  try { shipped = String(notifSweep_()); } catch (e) { shipped = 'sweep failed: ' + String(e && e.message || e).slice(0, 120); }
+  return 'cursor ' + before + ' → ' + Math.max(1, lr - back) + ' (lastRow ' + lr + ') · ' + shipped;
+}
+
 // ---------- acknowledging (logged, never a delete) ----------
 /** §27: a signal stays pinned until acknowledged, and acknowledgements are logged. Per person, not
  * per signal — Management clearing a card must not blind Zain or the CS desk to the same problem.
