@@ -359,9 +359,11 @@ function signalsSeedConfig_() {
  * the scan when nothing changed since the last completed run. Staff editing a day tab moves the
  * stamp, so a real change is picked up within 15 minutes; a quiet quarter-hour costs ~6 Drive
  * metadata calls. A full scan is still forced at least hourly, and always by the manual Refresh. */
-function signalsInputFingerprint_(accounts, days) {
-  const parts = [days.join(',')];
+/* 13 Sept: the fingerprint is kept per account (see computeSignals) — one map, one join. */
+function signalsInputFingerprintMap_(accounts, days) {
+  const map = { __days: days.join(',') };
   accounts.forEach(function (account) {
+    const parts = [];
     ['central', 'order_processing', 'sales_analysis'].forEach(function (kind) {
       try {
         const id = (typeof bridgeResolveSheetId_ === 'function') ? bridgeResolveSheetId_('account', account, kind) : '';
@@ -369,8 +371,15 @@ function signalsInputFingerprint_(accounts, days) {
         parts.push(account + '|' + kind + '|' + DriveApp.getFileById(id).getLastUpdated().getTime());
       } catch (e) { parts.push(account + '|' + kind + '|?'); }
     });
+    map[account] = parts.join(';');
   });
-  return parts.join(';');
+  return map;
+}
+function signalsInputFingerprintJoin_(map) {
+  return Object.keys(map).sort().map(function (k) { return map[k]; }).join(';');
+}
+function signalsInputFingerprint_(accounts, days) {
+  return signalsInputFingerprintJoin_(signalsInputFingerprintMap_(accounts, days));
 }
 
 function computeSignals(args) {
@@ -388,12 +397,24 @@ function computeSignals(args) {
 
   // change-detection short-circuit (see signalsInputFingerprint_ above)
   const props = PropertiesService.getScriptProperties();
-  const fp = signalsInputFingerprint_(accounts, days);
+  const fpMap = signalsInputFingerprintMap_(accounts, days);
+  const fp = signalsInputFingerprintJoin_(fpMap);
   const lastFp = String(props.getProperty('SIG_FP') || '');
   const lastAt = Number(props.getProperty('SIG_FP_AT') || 0);
   if (!force && fp === lastFp && (Date.now() - lastAt) < 3600000) {
     return 'unchanged — no linked workbook moved since ' + new Date(lastAt).toISOString().slice(11, 16) + 'Z; scan skipped';
   }
+  /* 13 Sept (owner: "make the speed fast"): the gate above is all-or-nothing — one processor
+     typing on ONE account's day tab re-read every account's Central index + Returns log + day
+     tabs (40–49 s every quarter-hour through the day shift, always "0 newly raised"). The
+     fingerprint is now ALSO kept per account: an account whose three linked workbooks have not
+     moved since its last complete scan is skipped. The hourly full pass stays as the safety net
+     (thresholds, listing owners and config changes reach it) and `force` always scans all. */
+  let lastMap = {};
+  try { lastMap = JSON.parse(props.getProperty('SIG_FP_MAP') || '{}') || {}; } catch (e) { lastMap = {}; }
+  const fullPass = force || (Date.now() - lastAt) >= 3600000 || String(lastMap.__days || '') !== days.join(',');
+  const skipped = [];
+  const scannedFp = {};
 
   // Loop ACCOUNTS on the outside, DAYS on the inside. The heavy per-account reads — the Central Main
   // Sheet index and the Returns log — do not change from day to day, so they are read ONCE per
@@ -407,6 +428,7 @@ function computeSignals(args) {
 
   for (let ai = 0; ai < accounts.length && !timedOut; ai++) {
     const account = accounts[ai];
+    if (!fullPass && fpMap[account] && fpMap[account].indexOf('|?') < 0 && lastMap[account] === fpMap[account]) { skipped.push(account); continue; }
     let index, returns;
     try { index = signalsMainIndex_(account); } catch (e) { index = { byTitle: {}, byPrefix: {} }; }
     try { returns = signalsReadReturns_(account); } catch (e) { returns = { ok: false, reason: String(e && e.message || e).slice(0, 60) }; }
@@ -439,6 +461,7 @@ function computeSignals(args) {
       if (touched) pd.scanned++;
       pd.found += found.length - before;
     }
+    if (!timedOut) scannedFp[account] = fpMap[account];
   }
 
   const fresh = signalsRaise_(found, 'system');
@@ -452,10 +475,17 @@ function computeSignals(args) {
     return p.day + ':' + p.scanned + 'sc' + (p.notConnected ? '/' + p.notConnected + 'nc' : '');
   }).join(' ');
   const unhealthy = order.some(function (p) { return p.notConnected || !p.found; });
-  if (!timedOut) { try { props.setProperty('SIG_FP', fp); props.setProperty('SIG_FP_AT', String(Date.now())); } catch (e) {} }
+  if (!timedOut && fullPass) { try { props.setProperty('SIG_FP', fp); props.setProperty('SIG_FP_AT', String(Date.now())); } catch (e) {} }
+  try {
+    const nextMap = fullPass ? {} : lastMap;
+    Object.keys(scannedFp).forEach(function (a) { nextMap[a] = scannedFp[a]; });
+    nextMap.__days = days.join(',');
+    props.setProperty('SIG_FP_MAP', JSON.stringify(nextMap));
+  } catch (e) {}
   try { signalsPushEngine_(true); } catch (e) {}
   return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
+    + (skipped.length ? ', ' + skipped.length + ' unchanged account(s) skipped' : '')
     + (timedOut ? ', time budget hit — rest next run' : '')
     + (unhealthy ? ' | diag=' + JSON.stringify(order).slice(0, 1800) : '');
 }
