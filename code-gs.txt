@@ -26364,7 +26364,10 @@ function pushSheetRowsHot() {
      book walk below that can stall the whole tick under load, so a new hunt is on management's
      approvals page within one sweep no matter what the expensive work does. It is idempotent, so
      the safety re-run at the tail costs nothing but a no-op when this one already succeeded. */
+  var stepT = Date.now(), stepLog = [];
+  var stepDone = function (name) { stepLog.push(name + ' ' + Math.round((Date.now() - stepT) / 1000) + 's'); stepT = Date.now(); };
   try { huntsSweep_(); } catch (e) {}
+  stepDone('hunts');
   if (runBooks) {
     hotProps.setProperty('SHEETMIRROR_HOT_AT', String(Date.now()));
     const days = [0, 1, 2, 3].map(function (k) {
@@ -26396,12 +26399,16 @@ function pushSheetRowsHot() {
     });
     try { hotProps.setProperty('SHEETMIRROR_BOOK_FP', JSON.stringify(fpMap).slice(0, 8000)); } catch (e) {}
   }
+  stepDone('books');
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
+  stepDone('notif');
   /* 13 Sept: the hunt sweep already ran FIRST in this tick (top of the function); running it a
      second time here doubled the tick's heaviest read for no new information. */
   try { enginePost_('huntShadowScan', {}); } catch (e) {}   // 4 Sept: D1-primary shadow — read-only, records hunt_shadow only
   try { reportsSweep_(); } catch (e) {}
+  stepDone('reports');
   try { tasksSweep_(); } catch (e) {}
+  stepDone('tasks');
   /* the three R8 reason lists ride across too — tiny, keeps huntReasonsEngine current */
   try {
     enginePost_('syncConfig', { rows: ['hunt_reject_reasons', 'hunt_revise_needs', 'lister_reject_reasons', 'late_threshold_min', 'checkpoints_shift1', 'checkpoints_shift2', 'paused_accounts']
@@ -26418,9 +26425,10 @@ function pushSheetRowsHot() {
       logActivity_('system', 'DISPATCH_SWEEP', '', '', '', String(dres).slice(0, 160));
     }
   } catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e).slice(0, 300)); }
-  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), runBooks
-    ? tabs + ' tab(s) · walked ' + (typeof walkedNames !== 'undefined' ? walkedNames.join(', ') : '?') + ' · skipped ' + (typeof skippedNames !== 'undefined' ? skippedNames.join(', ') : '?') + ' · ' + Math.round((Date.now() - (typeof walkT0 !== 'undefined' ? walkT0 : Date.now())) / 1000) + 's'
-    : 'books walk skipped (15-min throttle)');
+  stepDone('dispatch');
+  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), (runBooks
+    ? tabs + ' tab(s) · walked ' + (typeof walkedNames !== 'undefined' ? walkedNames.join(', ') : '?') + ' · skipped ' + (typeof skippedNames !== 'undefined' ? skippedNames.join(', ') : '?')
+    : 'books walk skipped (15-min throttle)') + ' · steps: ' + stepLog.join(', '));
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
 function pushSheetRowsCold() {
