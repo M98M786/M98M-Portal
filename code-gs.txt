@@ -6487,13 +6487,14 @@ function actionDecideHunt_(payload, ctx) {
         // The listing task is written inside this same lock: an approved hunt with no task would
         // strand the item, and TASKS carries no structured payload column, so the §8.2 subset
         // rides in `details` as JSON for the lister screen to render.
-        huntAppendTask_({
+        var taskRowOut = {
           task_id: taskId, type: 'listing_new', account: account, item_id: '',
           title: String(rec[HC_TITLE] || '').slice(0, 400),
           details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
           assigned_by: ctx.ident.email, assigned_to: lister.email,
           deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
-        });
+        };
+        huntAppendTask_(taskRowOut);
       }
     }
   } finally { lock.releaseLock(); }
@@ -6525,7 +6526,7 @@ function actionDecideHunt_(payload, ctx) {
     limited: approving ? limited : null, actor: ctx.ident.email });
   const mirror = { ok: true, queued: true };
   let central = { ok: true, queued: approving };
-  if (taskId) engineTaskPush_(taskId);          // the lister's new task on the boards in seconds
+  if (taskId) engineTaskPush_(taskId, (typeof taskRowOut !== 'undefined' && taskRowOut) ? taskRowOut : null);   // the lister's new task on the boards in seconds — no re-read of TASKS
 
   if (approving) {
     notify_(rec.hunter_email, 'Hunt approved',
@@ -6558,13 +6559,19 @@ function huntHeaders_(sh) {
 function huntFind_(sh, huntId) {
   const id = String(huntId || '').trim();
   if (!id) throw new Error('hunt_id required');
-  const vals = sh.getDataRange().getValues();
-  const head = vals[0].map(function (h) { return String(h); });
-  for (let i = 1; i < vals.length; i++) {
-    if (String(vals[i][0]) !== id) continue;
+  /* 13 Sept (owner: "make the speed fast"): every hunt action opened with a read of the WHOLE
+     HUNTING_DB (every column of every hunt) to locate one row by id. Scan column A, then read
+     that one row — the same answer for a fraction of the transfer. */
+  const lr = sh.getLastRow();
+  if (lr < 2) throw new Error('hunt not found');
+  const ids = sh.getRange(2, 1, lr - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) !== id) continue;
+    const head = huntHeaders_(sh);
+    const rowVals = sh.getRange(i + 2, 1, 1, head.length).getValues()[0];
     const rec = {};
-    head.forEach(function (h, c) { rec[h] = vals[i][c]; });
-    return { row: i + 1, head: head, rec: rec };
+    head.forEach(function (h, c) { rec[h] = rowVals[c]; });
+    return { row: i + 2, head: head, rec: rec };
   }
   throw new Error('hunt not found');
 }
