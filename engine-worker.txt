@@ -5021,16 +5021,22 @@ const ROUTES = {
          it. Ring for any NEW Pending task created in the last two hours in a push of ≤ 60 rows;
          the full reconcile (full=true) still never rings, and re-mirrored old rows cannot. */
       const twoHoursAgo = new Date(Date.now() + 5 * 3600000 - 2 * 3600000).toISOString().slice(0, 19);
-      if (!full && rows.length && rows.length <= 60) {
-        for (const t of rows) {
-          const id = String(t.task_id || ''), to = String(t.assigned_to || '').toLowerCase();
-          if (!id || to.indexOf('@') < 0) continue;
-          const prev = await ctx.env.DB.prepare('SELECT assigned_to, status FROM tasks WHERE task_id = ?1').bind(id).first().catch(() => null);
-          const recent = String(t.created_at || '').slice(0, 19) >= twoHoursAgo;
-          const fresh = !prev && String(t.status || '') === 'Pending' && recent;
-          const moved = prev && String(prev.assigned_to || '').toLowerCase() !== to && String(t.status || '') !== 'Completed';
-          if (fresh || moved) ring.push({ t, to, moved: !!moved });
-        }
+      /* a FULL push (hourly reconcile) rings only for rows brand-new to D1 and created in the
+         last 15 minutes — tasks made while that hour's push was already reading the sheet
+         (the supplier-link sweep at :05, approvals at :04) used to reach D1 that way and never
+         rang; old rows re-mirrored by a reconcile still never ring. */
+      const fifteenAgo = new Date(Date.now() + 5 * 3600000 - 15 * 60000).toISOString().slice(0, 19);
+      const small = !full && rows.length && rows.length <= 60;
+      for (const t of rows) {
+        const id = String(t.task_id || ''), to = String(t.assigned_to || '').toLowerCase();
+        if (!id || to.indexOf('@') < 0) continue;
+        const createdAt = String(t.created_at || '').slice(0, 19);
+        if (!small && !(createdAt >= fifteenAgo && String(t.status || '') === 'Pending')) continue;   // full push: cheap pre-filter, no lookups for old rows
+        const prev = await ctx.env.DB.prepare('SELECT assigned_to, status FROM tasks WHERE task_id = ?1').bind(id).first().catch(() => null);
+        const recent = createdAt >= (small ? twoHoursAgo : fifteenAgo);
+        const fresh = !prev && String(t.status || '') === 'Pending' && recent;
+        const moved = small && prev && String(prev.assigned_to || '').toLowerCase() !== to && String(t.status || '') !== 'Completed';
+        if (fresh || moved) ring.push({ t, to, moved: !!moved });
       }
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
       for (const r of ring) {
