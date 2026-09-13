@@ -397,7 +397,13 @@ function computeSignals(args) {
 
   // change-detection short-circuit (see signalsInputFingerprint_ above)
   const props = PropertiesService.getScriptProperties();
+  /* 13 Sept: phase timers ride in the summary ("t=fp 5s idx 12s …") so the log itself says where a
+     slow quarter-hour went — the fingerprint calls, the Central index reads, the Returns reads,
+     the day tabs, or the raise/prune/push tail. */
+  const tm = { fp: 0, idx: 0, ret: 0, days: 0, tail: 0 };
+  const tFp0 = Date.now();
   const fpMap = signalsInputFingerprintMap_(accounts, days);
+  tm.fp = Date.now() - tFp0;
   const fp = signalsInputFingerprintJoin_(fpMap);
   const lastFp = String(props.getProperty('SIG_FP') || '');
   const lastAt = Number(props.getProperty('SIG_FP_AT') || 0);
@@ -439,8 +445,13 @@ function computeSignals(args) {
     const sk = skipKey(account);
     if (!fullPass && sk && sk.indexOf('|?') < 0 && lastMap[account] === sk) { skipped.push(account); continue; }
     let index, returns;
+    const tIdx0 = Date.now();
     try { index = signalsMainIndex_(account); } catch (e) { index = { byTitle: {}, byPrefix: {} }; }
+    tm.idx += Date.now() - tIdx0;
+    const tRet0 = Date.now();
     try { returns = signalsReadReturns_(account); } catch (e) { returns = { ok: false, reason: String(e && e.message || e).slice(0, 60) }; }
+    tm.ret += Date.now() - tRet0;
+    const tDays0 = Date.now();
 
     for (let di = 0; di < days.length; di++) {
       if (Date.now() - started > SIG_SWEEP_BUDGET_MS) { timedOut = true; break; }
@@ -470,9 +481,11 @@ function computeSignals(args) {
       if (touched) pd.scanned++;
       pd.found += found.length - before;
     }
+    tm.days += Date.now() - tDays0;
     if (!timedOut) scannedFp[account] = sk;
   }
 
+  const tTail0 = Date.now();
   const fresh = signalsRaise_(found, 'system');
   let pruned = 0;
   try { pruned = signalsPrune_(); } catch (e) { logActivity_('system', 'SIGNALS_PRUNE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
@@ -492,9 +505,12 @@ function computeSignals(args) {
     props.setProperty('SIG_FP_MAP', JSON.stringify(nextMap));
   } catch (e) {}
   try { signalsPushEngine_(true); } catch (e) {}
+  tm.tail = Date.now() - tTail0;
+  const sec = function (ms) { return (ms / 1000).toFixed(1) + 's'; };
   return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (skipped.length ? ', ' + skipped.length + ' unchanged account(s) skipped' : '')
+    + ' t=fp ' + sec(tm.fp) + ' idx ' + sec(tm.idx) + ' ret ' + sec(tm.ret) + ' days ' + sec(tm.days) + ' tail ' + sec(tm.tail)
     + (timedOut ? ', time budget hit — rest next run' : '')
     + (unhealthy ? ' | diag=' + JSON.stringify(order).slice(0, 1800) : '');
 }
