@@ -198,14 +198,10 @@ function actionSubmitHunt_(payload, ctx) {
     var mine = HUNT_DUP_SUPPLIER_COLS.map(function (c) { return huntAliItemId_(huntResolveShortLink_(cols[c])); })
       .filter(Boolean);
     if (!mine.length) return;
-    readTab_('HUNTING_DB').some(function (r) {
-      var rec = huntRecord_(r);
-      for (var i = 0; i < HUNT_DUP_SUPPLIER_COLS.length; i++) {
-        var id0 = huntAliItemId_(rec[HUNT_DUP_SUPPLIER_COLS[i]]);
-        if (id0 && mine.indexOf(id0) >= 0) { dupHit = rec; return true; }
-      }
-      return false;
-    });
+    /* 13 Sept (owner: "make the speed fast"): the dup-check read EVERY column of every hunt ever
+       submitted (≈40 columns × all rows, 4–6 s) to compare three link columns. Read only the
+       columns the verdict needs; the hit carries exactly the fields the branches below use. */
+    huntDupScan_(mine, function (rec) { dupHit = rec; });
   })();
   if (dupHit) {
     var dupOwn = normalizeEmail(dupHit.hunter_email) === normalizeEmail(ctx.ident.email);
@@ -680,6 +676,32 @@ function huntNormKey_(s) {
    overlap. Returns every prior hunt of the same product with what happened to it, rejected ones
    included, so the hunter sees the history before wasting time on a dead product. */
 const HUNT_DUP_SUPPLIER_COLS = [HC_SUPPLIER_1, 'Product Link 2', 'Product Link 3'];
+/* Slim duplicate scan: five columns instead of the whole HUNTING_DB. Calls `onHit` with the
+ * first hunt whose supplier links carry one of the ali item ids in `mine`. */
+function huntDupScan_(mine, onHit) {
+  const sh = huntSheet_();
+  const lr = sh.getLastRow();
+  if (lr < 2) return;
+  const head = huntHeaders_(sh);
+  const want = ['hunt_id', 'hunter_email', HC_APPROVAL, HC_DATE_ADDED].concat(HUNT_DUP_SUPPLIER_COLS);
+  const col = {};
+  want.forEach(function (name) { const i = head.indexOf(name); if (i >= 0) col[name] = sh.getRange(2, i + 1, lr - 1, 1).getValues(); });
+  const links = HUNT_DUP_SUPPLIER_COLS.filter(function (c) { return col[c]; });
+  for (let r = 0; r < lr - 1; r++) {
+    for (let k = 0; k < links.length; k++) {
+      const id0 = huntAliItemId_(col[links[k]][r][0]);
+      if (id0 && mine.indexOf(id0) >= 0) {
+        const rec = {};
+        want.forEach(function (name) { rec[name] = col[name] ? huntCellOut_(col[name][r][0]) : ''; });
+        rec.hunt_id = String(rec.hunt_id || ''); rec.hunter_email = String(rec.hunter_email || '');
+        rec.approval_status = String(rec[HC_APPROVAL] || '');
+        onHit(rec);
+        return;
+      }
+    }
+  }
+}
+
 function huntAliItemId_(url) {
   /* 10 Sept (owner: "Irfan adds NEW listings and they land in revised"): the old bare-digits
      fallback matched sku_id/spm/store numbers in the QUERY STRING, so two different products
@@ -696,6 +718,11 @@ function huntAliItemId_(url) {
 function huntResolveShortLink_(url) {
   var u = String(url || '').trim();
   if (!/^https?:\/\/(a\.aliexpress\.com|s\.click\.aliexpress\.com)\//i.test(u)) return u;
+  /* 13 Sept: each hop is a live HTTP round-trip (1–3 s) and the same short link is resolved at
+     preview AND at submit — remember the answer for six hours. */
+  var ck = 'slink:' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, u)).slice(0, 40);
+  try { var hit = CacheService.getScriptCache().get(ck); if (hit) return hit; } catch (e) {}
+  var u0 = u;
   for (var hop = 0; hop < 3; hop++) {
     try {
       var r = UrlFetchApp.fetch(u, { followRedirects: false, muteHttpExceptions: true });
@@ -705,6 +732,7 @@ function huntResolveShortLink_(url) {
       if (huntAliItemId_(u)) break;
     } catch (e) { break; }
   }
+  try { if (u !== u0) CacheService.getScriptCache().put(ck, u, 21600); } catch (e) {}
   return u;
 }
 

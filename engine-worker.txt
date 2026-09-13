@@ -5041,8 +5041,13 @@ const ROUTES = {
       }
       let retired = 0;
       if (full && rows.length) {
-        /* the sheet is the master — anything it no longer carries must not linger on a board */
-        const r = await ctx.env.DB.prepare('DELETE FROM tasks WHERE synced_at != ?1').bind(stamp).run();
+        /* the sheet is the master — anything it no longer carries must not linger on a board.
+           13 Sept: "!= stamp" deleted 200 live tasks — the 15-min tasksSweep ran BETWEEN this
+           push's slices and re-stamped 250 rows with its own (newer) stamp, so the final slice's
+           retire threw them out and every lister's desk lost tasks until the next sweep put them
+           back. Stamps begin with an ISO time, so "older than this push began" is the only
+           honest ghost test: anything written since the push started is kept, whoever wrote it. */
+        const r = await ctx.env.DB.prepare('DELETE FROM tasks WHERE synced_at < ?1').bind(stamp).run();
         retired = (r.meta && r.meta.changes) || 0;
       }
       await ctx_setSync(ctx.env, 'taskMirror', '', String(rows.length) + ' tasks');

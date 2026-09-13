@@ -210,7 +210,14 @@ function notifyManagement_(type, message, ref) {
   try {
     const mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
     SUPER_ADMINS.forEach(function (e) { if (mgmt.indexOf(e) < 0) mgmt.push(e); });
-    mgmt.forEach(function (e) { notify_(e, type, message, ref); });
+    /* 13 Sept: one append of N rows instead of N appends — a hunt submit used to pay five sheet
+       writes here, one per manager, after its own row had already landed. */
+    const at = now_();
+    const rows = mgmt.map(function (e) { return ['N' + Utilities.getUuid().slice(0, 8), e, 'system', type, message, ref || '', at, '']; });
+    if (rows.length) {
+      const nsh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+      nsh.getRange(nsh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    }
   } catch (e) {
     try { logActivity_('system', 'NOTIFY_MGMT_FAIL', type, '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
   }
