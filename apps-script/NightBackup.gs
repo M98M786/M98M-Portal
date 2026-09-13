@@ -247,9 +247,24 @@ function aliSweep() {
     return String(c.sheet_kind) === 'order_processing' && String(c.status || '').toLowerCase() !== 'off';
   });
   var out = [], opened = 0;
+  /* 13 Sept (owner: "make the speed fast"): this hourly full sweep opened every order book and
+     read EVERY column of seven day tabs each — 290 s at the top of every hour, exactly when the
+     hourly users/cost push also runs, so staff clicks queued behind both. Two cuts: a book whose
+     Drive lastUpdated has not moved since the last sweep is skipped (full read forced every 6 h),
+     and a tab is read only across the columns the sweep uses, like the 5-minute fast path. */
+  var swProps = PropertiesService.getScriptProperties();
+  var swMap = {};
+  try { swMap = JSON.parse(swProps.getProperty('ALI_SWEEP_FP') || '{}') || {}; } catch (e) { swMap = {}; }
+  var swSkipped = 0;
   conns.forEach(function (c) {
+    var bookId = String(c.spreadsheet_id);
+    var stamp = '';
+    try { stamp = String(DriveApp.getFileById(bookId).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
+    var prev = swMap[bookId] || {};
+    if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 6 * 3600000) { swSkipped++; return; }
     var ss;
-    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
+    try { ss = SpreadsheetApp.openById(bookId); } catch (e) { return; }
+    swMap[bookId] = { stamp: stamp, at: Date.now() };
     var sheets = ss.getSheets();
     for (var back = 0; back <= 6; back++) {
       /* UK day, like the tabs themselves — see aliSweepFast. Asking Karachi put the window a
@@ -261,10 +276,25 @@ function aliSweep() {
         if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
         opened++;
         /* DISPLAY values, not raw: a 16-digit Ali order number in a numeric cell loses its last
-         * digit to float precision through getValues — the display string is what was typed. */
-        var values = sheets[s].getDataRange().getDisplayValues();
+         * digit to float precision through getValues — the display string is what was typed.
+         * 13 Sept: column-limited — header row first, then only the span the sweep uses. */
+        var sheet0 = sheets[s];
+        var lastRow0 = sheet0.getLastRow(), lastCol0 = sheet0.getLastColumn();
+        if (lastRow0 < 2 || lastCol0 < 1) continue;
+        var head0 = sheet0.getRange(1, 1, 1, lastCol0).getDisplayValues()[0];
+        var cols = nbHeaderCols_(head0);
+        var idx0 = [cols.ebayCol, cols.aliNumCol, cols.linkCol, cols.altLinkCol].filter(function (i) { return i >= 0; });
+        var values = [head0];
+        if (idx0.length) {
+          var minC0 = Math.min.apply(null, idx0), maxC0 = Math.max.apply(null, idx0);
+          var body0 = sheet0.getRange(2, minC0 + 1, lastRow0 - 1, maxC0 - minC0 + 1).getDisplayValues();
+          for (var bi = 0; bi < body0.length; bi++) {
+            var full = new Array(lastCol0);
+            for (var ci = 0; ci < body0[bi].length; ci++) full[minC0 + ci] = body0[bi][ci];
+            values.push(full);
+          }
+        }
         if (values.length < 2) continue;
-        var cols = nbHeaderCols_(values[0]);
         /* altLinkCol belongs in this gate. nbHeaderCols_ returns it precisely so the per-row
            fallback below can reach 'Ali Express Link' when a book has no 'New Ali Link' column —
            but leaving it out here skipped the whole TAB before a single row was read, cancelling
@@ -290,9 +320,10 @@ function aliSweep() {
     var res = enginePost_('syncAliOrders', { rows: out.slice(i, i + 400) });
     written += Number(res.written) || 0;
   }
+  try { swProps.setProperty('ALI_SWEEP_FP', JSON.stringify(swMap).slice(0, 8000)); } catch (e) {}
   PropertiesService.getScriptProperties().setProperty('ALI_SWEEP_LAST',
-    JSON.stringify({ at: new Date().toISOString(), tabs: opened, found: out.length, written: written }));
-  return { accounts: conns.length, tabs: opened, found: out.length, written: written };
+    JSON.stringify({ at: new Date().toISOString(), tabs: opened, found: out.length, written: written, skipped_books: swSkipped }));
+  return { accounts: conns.length, tabs: opened, found: out.length, written: written, skipped_books: swSkipped };
 }
 
 /* ------------------------------------------------------------------------------------------ */

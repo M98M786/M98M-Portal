@@ -436,7 +436,7 @@ const ACTIONS_ENGINE = {
  * time budget. Recent days are visited first because those are the ones staff are looking at.
  * Multi-line orders are summed: three lines of one order is one order that cost the sum. */
 const COST_LOOKBACK_DAYS = 45;
-const COST_BUDGET_MS = 110000;         // shares pushEngineSync's 6-minute life with the facts pass
+const COST_BUDGET_MS = 70000;          // 13 Sept: 110 s → 70 s; the recent-days pass below keeps today's costs fresh, the long cycle just turns slower
 const FACTS_BUDGET_MS = 110000;
 const COST_CURSOR_KEY = 'COST_SYNC_CURSOR';
 /* A day tab carries TWO order-number columns and they differ only in one letter's case:
@@ -472,9 +472,19 @@ function pushEngineCosts() {
   const today = ordersToday_();          // day tabs are named on the PKT day, like the processors' shift
   let tabs = 0, sent = 0, landed = 0, misses = 0;
 
+  /* 13 Sept: read TODAY and YESTERDAY for every account first — those are the costs the profit
+     figures and the loss signals need within the hour; the 45-day cursor cycle continues after
+     with whatever budget is left, so old corrections still land, just on a slower turn. */
+  const plan = [];
+  accounts.forEach(function (acc) { plan.push({ a: acc, d: 0 }); plan.push({ a: acc, d: 1 }); });
+  let planIdx = 0;
+
   while (Date.now() - started < COST_BUDGET_MS) {
-    const account = accounts[ai];
-    const ymd = ordersAddDays_(today, -di);
+    const fromPlan = planIdx < plan.length;
+    const account = fromPlan ? plan[planIdx].a : accounts[ai];
+    const dayBack = fromPlan ? plan[planIdx].d : di;
+    if (fromPlan) planIdx++;
+    const ymd = ordersAddDays_(today, -dayBack);
     let read = null;
     try {
       read = ordersReadTab_(account, ordersDayTabCandidates_(ymd), 600, ORDERS_EXPECT_DAY);
@@ -486,8 +496,7 @@ function pushEngineCosts() {
       if (!map[COST_COL_ORDER] || !map[COST_COL_COST]) {
         logActivity_('system', 'ENGINE_COST_HEADERS', account + '!' + ymd, '', '',
           'day tab has no ' + (map[COST_COL_ORDER] ? COST_COL_COST : COST_COL_ORDER) + ' column');
-        di++;
-        if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; }
+        if (!fromPlan) { di++; if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; } }
         continue;
       }
       const byOrder = {};
@@ -525,8 +534,7 @@ function pushEngineCosts() {
       }
     } else { misses++; }
 
-    di++;
-    if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; }
+    if (!fromPlan) { di++; if (di >= COST_LOOKBACK_DAYS) { di = 0; ai = (ai + 1) % accounts.length; } }
   }
 
   props.setProperty(COST_CURSOR_KEY, JSON.stringify({ a: ai, d: di }));
