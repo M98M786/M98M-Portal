@@ -322,9 +322,13 @@ function mirrorEnqueue_(kind, payload) {
   }
 }
 
-function engineTaskPush_(taskId) {
+function engineTaskPush_(taskId, known) {
   try {
-    const t = readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
+    /* 13 Sept: start/submit already hold the row they just wrote — re-reading the whole TASKS
+       sheet a third time (2–3 s at 500+ rows) only to find it again was the slowest part of a
+       task click. A caller that passes the merged record skips the read. */
+    const t = (known && String(known.task_id || '') === String(taskId)) ? known
+      : readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
     if (!t) return;
     enginePost_('syncTasks', { tasks: [t] });
   } catch (e) {

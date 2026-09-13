@@ -119,13 +119,15 @@ function actionStartTask_(payload, ctx) {
     if (normalizeEmail(found.rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(found.rec.status || '');
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
-    taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
+    var startPatch = { status: TASK_STATUS_WORKING, updated_at: now_() };
+    taskWrite_(sh, found, startPatch);
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
     var startedId = found.rec.task_id;
+    var startedRec = Object.assign({}, found.rec, startPatch);
   } finally { lock.releaseLock(); }
   /* OUTSIDE the lock (30 Aug outage): a network call inside the global lock serialized every
      task action portal-wide until the backend stopped answering. Push after release, always. */
-  engineTaskPush_(startedId);
+  engineTaskPush_(startedId, startedRec);
   return { task_id: startedId, status: TASK_STATUS_WORKING };
 }
 
@@ -164,8 +166,9 @@ function actionSubmitTask_(payload, ctx) {
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
+    var submittedRec = Object.assign({}, rec, patch);
   } finally { lock.releaseLock(); }
-  engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
+  engineTaskPush_(rec.task_id, submittedRec);   // outside the lock — see 30 Aug outage note
 
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
     (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +

@@ -807,7 +807,9 @@ function actionWrongOrderCounters_(payload, ctx) {
 
   // 1) the portal's own record — the only place Processed By and the finder exist.
   const logged = {};
-  readTab_('ACTIVITY_LOG').forEach(function (a) {
+  /* 13 Sept: the whole ACTIVITY_LOG (tens of thousands of rows) was read for a few hundred
+     wrong-order lines — 6 s on every management home visit. The newest 15,000 rows cover months. */
+  (typeof activityTailRows_ === 'function' ? activityTailRows_(15000) : readTab_('ACTIVITY_LOG')).forEach(function (a) {
     if (String(a.action || '') !== WRONG_ORDER_LOG_ACTION) return;
     const target = String(a.target || '');
     if (target.indexOf(WRONG_ORDER_LOG_TARGET) !== 0) return;

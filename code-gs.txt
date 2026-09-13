@@ -2647,13 +2647,15 @@ function actionStartTask_(payload, ctx) {
     if (normalizeEmail(found.rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error('not your task');
     const old = String(found.rec.status || '');
     if (old !== TASK_STATUS_PENDING) throw new Error(SAFE_ERROR_PREFIX + 'task is not Pending');
-    taskWrite_(sh, found, { status: TASK_STATUS_WORKING, updated_at: now_() });
+    var startPatch = { status: TASK_STATUS_WORKING, updated_at: now_() };
+    taskWrite_(sh, found, startPatch);
     logActivity_(ctx.ident.email, 'START_TASK', found.rec.task_id, old, TASK_STATUS_WORKING, '');
     var startedId = found.rec.task_id;
+    var startedRec = Object.assign({}, found.rec, startPatch);
   } finally { lock.releaseLock(); }
   /* OUTSIDE the lock (30 Aug outage): a network call inside the global lock serialized every
      task action portal-wide until the backend stopped answering. Push after release, always. */
-  engineTaskPush_(startedId);
+  engineTaskPush_(startedId, startedRec);
   return { task_id: startedId, status: TASK_STATUS_WORKING };
 }
 
@@ -2692,8 +2694,9 @@ function actionSubmitTask_(payload, ctx) {
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
     logActivity_(ctx.ident.email, 'SUBMIT_TASK', rec.task_id, old, TASK_STATUS_SUBMITTED, 'time_taken_min ' + total);
+    var submittedRec = Object.assign({}, rec, patch);
   } finally { lock.releaseLock(); }
-  engineTaskPush_(rec.task_id);   // outside the lock — see 30 Aug outage note
+  engineTaskPush_(rec.task_id, submittedRec);   // outside the lock — see 30 Aug outage note
 
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
     (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
@@ -13700,7 +13703,9 @@ function actionWrongOrderCounters_(payload, ctx) {
 
   // 1) the portal's own record — the only place Processed By and the finder exist.
   const logged = {};
-  readTab_('ACTIVITY_LOG').forEach(function (a) {
+  /* 13 Sept: the whole ACTIVITY_LOG (tens of thousands of rows) was read for a few hundred
+     wrong-order lines — 6 s on every management home visit. The newest 15,000 rows cover months. */
+  (typeof activityTailRows_ === 'function' ? activityTailRows_(15000) : readTab_('ACTIVITY_LOG')).forEach(function (a) {
     if (String(a.action || '') !== WRONG_ORDER_LOG_ACTION) return;
     const target = String(a.target || '');
     if (target.indexOf(WRONG_ORDER_LOG_TARGET) !== 0) return;
@@ -24841,6 +24846,21 @@ const ROUTER_MEMO = {
   evaluations:        { sec: 30, scope: 'role' },
   ruleAckGrid:        { sec: 30, scope: 'role' },
   dashboard:          { sec: 45, scope: 'user' },
+  /* 13 Sept (owner: "make the speed fast"): the SLOW_ACTION ledger named the management home
+     batch — alertsCentre 20 s, recheckQueue 5 s, wrongOrderCounters 6 s, myPerformance 10 s,
+     attendanceGrid 3 s, todayAgenda 2 s, potential-CPC boards 3-5 s — recomputed on EVERY visit.
+     Same memo discipline: role-scoped where the answer is the role's, user-scoped where personal. */
+  alertsCentre:       { sec: 90, scope: 'role' },
+  recheckQueue:       { sec: 45, scope: 'user' },
+  wrongOrderCounters: { sec: 120, scope: 'user' },
+  attendanceGrid:     { sec: 60, scope: 'role' },
+  todayAgenda:        { sec: 60, scope: 'user' },
+  myPotentialCpc:     { sec: 90, scope: 'user' },
+  potentialCpcQueue:  { sec: 60, scope: 'role' },
+  connectionHealth:   { sec: 60, scope: 'role' },
+  accountsAdmin:      { sec: 30, scope: 'user' },
+  removedStaff:       { sec: 60, scope: 'role' },
+  listPending:        { sec: 30, scope: 'role' },
 };
 /* A write must be visible to its own author IMMEDIATELY — "I pressed Start and the board still
    says Pending" is exactly the complaint this week. Each write family clears the memo keys of
@@ -24851,9 +24871,13 @@ const ROUTER_BUST = {
   startTask: 1, submitTask: 1, approveTask: 1, returnTask: 1, createTask: 1, reassignTasks: 1,
   decideHunt: 1, submitHunt: 1, reviseHunt: 1, listerRejectRequest: 1,
   staffReviewSave: 1, saveEvaluation: 1, setSchedule: 1, replacementCreate: 1,
+  submitRecheck: 1, logWrongOrder: 1, saveAccount: 1, addStaff: 1, updateStaff: 1, deactivateStaff: 1,
+  reactivateStaff: 1, approveUser: 1, acknowledgeSignal: 1, acknowledgeAllSignals: 1, submitReport: 1,
 };
 const ROUTER_BUST_READS = ['deptPending', 'myTasks', 'pendingApprovals', 'listDesk',
-  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending'];
+  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending',
+  'recheckQueue', 'wrongOrderCounters', 'connectionHealth', 'accountsAdmin', 'removedStaff', 'listPending',
+  'staffDirectory', 'attendanceGrid', 'todayAgenda', 'alertsCentre'];
 function routerBust_(ctx) {
   try {
     const keys = [];
@@ -25414,9 +25438,13 @@ function mirrorEnqueue_(kind, payload) {
   }
 }
 
-function engineTaskPush_(taskId) {
+function engineTaskPush_(taskId, known) {
   try {
-    const t = readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
+    /* 13 Sept: start/submit already hold the row they just wrote — re-reading the whole TASKS
+       sheet a third time (2–3 s at 500+ rows) only to find it again was the slowest part of a
+       task click. A caller that passes the merged record skips the read. */
+    const t = (known && String(known.task_id || '') === String(taskId)) ? known
+      : readTab_('TASKS').filter(function (r) { return String(r.task_id) === String(taskId); })[0];
     if (!t) return;
     enginePost_('syncTasks', { tasks: [t] });
   } catch (e) {

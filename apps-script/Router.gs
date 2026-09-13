@@ -136,6 +136,21 @@ const ROUTER_MEMO = {
   evaluations:        { sec: 30, scope: 'role' },
   ruleAckGrid:        { sec: 30, scope: 'role' },
   dashboard:          { sec: 45, scope: 'user' },
+  /* 13 Sept (owner: "make the speed fast"): the SLOW_ACTION ledger named the management home
+     batch — alertsCentre 20 s, recheckQueue 5 s, wrongOrderCounters 6 s, myPerformance 10 s,
+     attendanceGrid 3 s, todayAgenda 2 s, potential-CPC boards 3-5 s — recomputed on EVERY visit.
+     Same memo discipline: role-scoped where the answer is the role's, user-scoped where personal. */
+  alertsCentre:       { sec: 90, scope: 'role' },
+  recheckQueue:       { sec: 45, scope: 'user' },
+  wrongOrderCounters: { sec: 120, scope: 'user' },
+  attendanceGrid:     { sec: 60, scope: 'role' },
+  todayAgenda:        { sec: 60, scope: 'user' },
+  myPotentialCpc:     { sec: 90, scope: 'user' },
+  potentialCpcQueue:  { sec: 60, scope: 'role' },
+  connectionHealth:   { sec: 60, scope: 'role' },
+  accountsAdmin:      { sec: 30, scope: 'user' },
+  removedStaff:       { sec: 60, scope: 'role' },
+  listPending:        { sec: 30, scope: 'role' },
 };
 /* A write must be visible to its own author IMMEDIATELY — "I pressed Start and the board still
    says Pending" is exactly the complaint this week. Each write family clears the memo keys of
@@ -146,9 +161,13 @@ const ROUTER_BUST = {
   startTask: 1, submitTask: 1, approveTask: 1, returnTask: 1, createTask: 1, reassignTasks: 1,
   decideHunt: 1, submitHunt: 1, reviseHunt: 1, listerRejectRequest: 1,
   staffReviewSave: 1, saveEvaluation: 1, setSchedule: 1, replacementCreate: 1,
+  submitRecheck: 1, logWrongOrder: 1, saveAccount: 1, addStaff: 1, updateStaff: 1, deactivateStaff: 1,
+  reactivateStaff: 1, approveUser: 1, acknowledgeSignal: 1, acknowledgeAllSignals: 1, submitReport: 1,
 };
 const ROUTER_BUST_READS = ['deptPending', 'myTasks', 'pendingApprovals', 'listDesk',
-  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending'];
+  'mgmtPendingAS', 'teamPerformance', 'huntQueue', 'myHunts', 'huntDesk', 'staffReviewsPending',
+  'recheckQueue', 'wrongOrderCounters', 'connectionHealth', 'accountsAdmin', 'removedStaff', 'listPending',
+  'staffDirectory', 'attendanceGrid', 'todayAgenda', 'alertsCentre'];
 function routerBust_(ctx) {
   try {
     const keys = [];

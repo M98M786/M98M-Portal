@@ -5011,7 +5011,34 @@ const ROUTES = {
         String(t.submitted_at || ''), String(t.approved_by || ''), String(t.decided_at || ''), stamp,
         String(t.submission_note || ''), String(t.time_taken_min || '')
       ));
+      /* 13 Sept (owner: "task receiving more smooth"): a per-task push (1–5 rows) that brings a
+         NEW task, or moves one to a different person, rings that person's bell NOW — the sheet's
+         own notification only reaches the engine on the 15-minute notifSweep. Full sweeps are
+         reconciliation, never a reason to ring. */
+      const ring = [];
+      if (!full && rows.length && rows.length <= 5) {
+        for (const t of rows) {
+          const id = String(t.task_id || ''), to = String(t.assigned_to || '').toLowerCase();
+          if (!id || to.indexOf('@') < 0) continue;
+          const prev = await ctx.env.DB.prepare('SELECT assigned_to, status FROM tasks WHERE task_id = ?1').bind(id).first().catch(() => null);
+          const fresh = !prev && String(t.status || '') === 'Pending';
+          const moved = prev && String(prev.assigned_to || '').toLowerCase() !== to && String(t.status || '') !== 'Completed';
+          if (fresh || moved) ring.push({ t, to, moved: !!moved });
+        }
+      }
       for (let i = 0; i < stmts.length; i += 40) await ctx.env.DB.batch(stmts.slice(i, i + 40));
+      for (const r of ring) {
+        try {
+          const t = r.t;
+          const kind = String(t.type || '').replace(/_/g, ' ');
+          const msg = (r.moved ? '🔵 Task moved to you: ' : '🔵 New ' + kind + ' task') + (t.account ? ' · ' + t.account : '') + (t.item_id ? ' · ' + t.item_id : '') +
+            ' — "' + String(t.title || '').slice(0, 120) + '"' + (t.assigned_by ? ' from ' + String(t.assigned_by).split('@')[0] : '') +
+            (t.deadline_pkt ? ', due ' + String(t.deadline_pkt).slice(0, 16).replace('T', ' ') + ' (Pakistan time)' : '') + '. Open My tasks to start it.';
+          const at = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 19);
+          await ctx.env.DB.prepare('INSERT OR IGNORE INTO notif_live (as_id, to_email, from_email, type, message, ref, created_at, read_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)')
+            .bind('T:' + String(t.task_id) + ':' + (r.moved ? 'moved' : 'assign'), r.to, String(t.assigned_by || 'system').toLowerCase().slice(0, 60), 'Task assigned', msg.slice(0, 900), 'task:' + String(t.task_id), at, '').run();
+        } catch (e) {}
+      }
       let retired = 0;
       if (full && rows.length) {
         /* the sheet is the master — anything it no longer carries must not linger on a board */
@@ -8702,6 +8729,12 @@ const ROUTES = {
         const asId = String(r.as_id || '');
         const to = String(r.to || '').toLowerCase();
         if (!asId || !to || to.indexOf('@') < 0) continue;
+        /* the engine already rang this bell the moment the task was mirrored (syncTasks) — the
+           sheet's copy, arriving up to 15 min later, must not ring it twice */
+        if (String(r.type || '') === 'Task assigned' && /^task:/.test(String(r.ref || ''))) {
+          const dup = await ctx.env.DB.prepare("SELECT 1 AS x FROM notif_live WHERE to_email = ?1 AND ref = ?2 AND type = 'Task assigned' LIMIT 1").bind(to, String(r.ref || '')).first().catch(() => null);
+          if (dup) continue;
+        }
         stmts.push(ctx.env.DB.prepare(
           'INSERT OR IGNORE INTO notif_live (as_id, to_email, from_email, type, message, ref, created_at, read_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)'
         ).bind(asId, to, String(r.from || 'system').slice(0, 60), String(r.type || '').slice(0, 80),

@@ -286,6 +286,7 @@
     },
     init: function () {
       if (tkCanCreate()) { tkWireComposer(); }
+      tkPollStart();
       var sb = $('tkScopeBar');
       if (sb) {
         sb.onclick = function (ev) {
@@ -1000,9 +1001,25 @@
       toast('Started — the clock is running.');
       api('startTask', { task_id: id }).then(function () { tkLoadTasks(); })
         .catch(function (e) {
+          var m0 = String((e && e.message) || '');
+          /* 13 Sept: a slow sheet is not a failed start — the write usually landed. Re-read the
+             list and only roll back if the task really is still Pending. */
+          if (/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(m0)) {
+            toast('The server is slow — confirming the start\u2026');
+            setTimeout(function () {
+              tkFetchTasks().then(function (d) {
+                var list = (d && d.tasks) || [], k, still = false;
+                for (k = 0; k < list.length; k++) { if (String(list[k].task_id) === String(id) && tkStr(list[k].status) === 'Pending') { still = true; } }
+                if (still) { if (card0 && undo0 != null) { card0.innerHTML = undo0; } else { btn.disabled = false; } toast('NOT started — the server did not take it; press Start again.'); }
+                else { toast('Started \u2713'); }
+                tkLoadTasks();
+              })['catch'](function () { tkLoadTasks(); });
+            }, 2500);
+            return;
+          }
           if (card0 && undo0 != null) { card0.innerHTML = undo0; }
           else { btn.disabled = false; }
-          toast('NOT started — ' + e.message);
+          toast('NOT started — ' + m0);
           tkLoadTasks();
         });
       return;
@@ -1033,12 +1050,64 @@
       toast('Sent for approval.');
       api('submitTask', payload).then(function () { tkLoadTasks(); })
         .catch(function (e) {
+          var m1 = String((e && e.message) || '');
+          if (/overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(m1)) {
+            /* 13 Sept: the submit usually landed even when the answer was lost — check before
+               telling anyone it failed, and keep their note on screen if it truly did not. */
+            toast('The server is slow — confirming your submission\u2026');
+            setTimeout(function () {
+              tkFetchTasks().then(function (d) {
+                var list = (d && d.tasks) || [], k, open = false;
+                for (k = 0; k < list.length; k++) { if (String(list[k].task_id) === String(id) && /^(Working|Updated|Pending)$/i.test(tkStr(list[k].status))) { open = true; } }
+                if (open) { btn.disabled = false; btn.textContent = 'Send for approval'; if (form) { form.classList.remove('hidden'); } toast('NOT submitted — the server did not take it; press Send again.'); }
+                else { toast('Submitted \u2713 — waiting for approval.'); tkLoadTasks(); }
+              })['catch'](function () { btn.disabled = false; btn.textContent = 'Send for approval'; if (form) { form.classList.remove('hidden'); } });
+            }, 2500);
+            return;
+          }
           btn.disabled = false; btn.textContent = 'Send for approval';
           if (form) { form.classList.remove('hidden'); }
-          toast('NOT submitted — ' + e.message);
+          toast('NOT submitted — ' + m1);
         });
     }
   }
+
+  /* 13 Sept (owner: "task receiving more smooth"): while My tasks is open, re-read the engine
+     list every 60 s and repaint only when something changed — a brand-new task on the desk gets a
+     toast the moment the mirror carries it. Never repaints over a form someone is typing in. */
+  function tkSig(d) {
+    var list = (d && d.tasks) || [], out = [], i;
+    for (i = 0; i < list.length; i++) { out.push(String(list[i].task_id) + ':' + tkStr(list[i].status)); }
+    return out.sort().join('|');
+  }
+  function tkTyping(box) {
+    var a = document.activeElement;
+    if (a && box && box.contains(a) && /^(TEXTAREA|INPUT|SELECT)$/.test(a.tagName)) { return true; }
+    var open = box ? box.querySelectorAll('[data-lform]:not(.hidden), .tk-form:not(.hidden), form:not(.hidden)') : [];
+    return !!(open && open.length);
+  }
+  function tkPollStart() {
+    tkPollStop();
+    TKV.pollSig = null;
+    TKV.poll = setInterval(function () {
+      var box = $('tkBody');
+      if (!box || !document.body.contains(box)) { tkPollStop(); return; }
+      if (document.hidden || TKV.scope !== 'mine' || tkTyping(box)) { return; }
+      tkFetchTasks().then(function (d) {
+        var sig = tkSig(d);
+        if (TKV.pollSig === null) { TKV.pollSig = sig; return; }
+        if (sig === TKV.pollSig) { return; }
+        var before = {}, i, list = (d && d.tasks) || [], fresh = [];
+        TKV.pollSig.split('|').forEach(function (s) { before[s.split(':')[0]] = 1; });
+        for (i = 0; i < list.length; i++) { if (!before[String(list[i].task_id)] && tkHas(TK_OPEN, tkStr(list[i].status))) { fresh.push(list[i]); } }
+        TKV.pollSig = sig;
+        if (!tkTyping(box)) { tkPaintTasks(box, d); }
+        if (fresh.length) { toast(fresh.length === 1 ? 'New task on your desk: ' + tkStr(fresh[0].title).slice(0, 60) : fresh.length + ' new tasks on your desk'); }
+        if (typeof refreshBadges === 'function') { refreshBadges(); }
+      })['catch'](function () {});
+    }, 60000);
+  }
+  function tkPollStop() { if (TKV.poll) { clearInterval(TKV.poll); TKV.poll = null; } }
 
   function tkSendNeedTime(box, id, btn) {
     var r = tkPick(box, 'data-ltime-reason', id), e = tkPick(box, 'data-ltime-eta', id);

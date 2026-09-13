@@ -1400,14 +1400,13 @@ function warmUp(){
      a live cost for a benefit that had not landed. Doing it here means the answer is already
      known by the time anyone opens the page: if the Engine has the action, that page becomes a
      ~50ms read; if it does not, nothing was ever slower than before. */
+  /* 13 Sept: this used to call EVERY engine-preferred action with an empty payload — eighteen
+     calls per sign-in per person, including the report SUBMIT (which refused '' and filled the
+     error ledger with 139 bogus "not on your schedule" rows in a day) and the management-only
+     boards (an 'auth' each for every non-manager). One harmless read warms the engine; whether a
+     given action exists is still learnt lazily, on its first real call, exactly as before. */
   try{
-    Object.keys(ENGINE_PREFERRED).forEach(function(a){
-      if(ENGINE_MISSING[a]) return;
-      if(!(STATE.config && STATE.config.engine_url)) return;
-      engineApi(ENGINE_PREFERRED[a], {}).catch(function(e){
-        if(String((e && e.message) || e) === 'unknown action'){ ENGINE_MISSING[a] = true; }
-      });
-    });
+    if(STATE.config && STATE.config.engine_url){ engineApi('myCheckpointsEngine', {}).catch(function(){}); }
   }catch(e){}
   /* 27 Aug ("portal is working very slowly"): firing every prefetch at once packed them into
      one giant batch that ran 20-40s server-side — and the person's own first clicks queued
