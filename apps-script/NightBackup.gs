@@ -345,10 +345,24 @@ function aliSweepFast() {
    * run at 6 minutes. Whatever is read by the cutoff is pushed; the rest catches the next tick
    * (5 minutes) or the hourly full sweep. Never let the fast path starve its neighbours. */
   var deadline = Date.now() + 90000;
+  /* 13 Sept (owner: "make the speed fast"): this opened EVERY order book every five minutes —
+     the heaviest recurring cost in the project (30–60 s per tick, all day). Drive's lastUpdated
+     is one metadata call per book: a book nobody edited since the last fast sweep is skipped;
+     every book is still read at least every 30 minutes as a safety net. */
+  var fpProps = PropertiesService.getScriptProperties();
+  var fpMap = {};
+  try { fpMap = JSON.parse(fpProps.getProperty('ALI_FAST_FP') || '{}') || {}; } catch (e) { fpMap = {}; }
+  var skipped = 0;
   conns.forEach(function (c) {
     if (Date.now() > deadline) return;
+    var bookId = String(c.spreadsheet_id);
+    var stamp = '';
+    try { stamp = String(DriveApp.getFileById(bookId).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
+    var prev = fpMap[bookId] || {};
+    if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 1800000) { skipped++; return; }
     var ss;
-    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
+    try { ss = SpreadsheetApp.openById(bookId); } catch (e) { return; }
+    fpMap[bookId] = { stamp: stamp, at: Date.now() };
     var sheets = ss.getSheets();
     for (var s = 0; s < sheets.length; s++) {
       if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
@@ -383,6 +397,7 @@ function aliSweepFast() {
     var res = enginePost_('syncAliOrders', { rows: out.slice(i, i + 400) });
     written += Number(res.written) || 0;
   }
+  try { fpProps.setProperty('ALI_FAST_FP', JSON.stringify(fpMap).slice(0, 8000)); } catch (e) {}
   return { tabs: tabs, found: out.length, written: written };
 }
 

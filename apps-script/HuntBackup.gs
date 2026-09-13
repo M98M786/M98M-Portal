@@ -156,6 +156,16 @@ function huntBackupUpsert_(rec) {
  * mirror it stops right there — the backup workbook is never even opened. Force with true to
  * rebuild regardless (a hand-edited tray, a restored file). */
 function huntBackupSync(force) {
+  /* 13 Sept: this read the WHOLE HUNTING_DB every five minutes just to hash it. Every hunt write
+     now bumps HUNT_DB_TOUCH (huntTouch_); unchanged touch + a full check within the hour = skip.
+     Direct edits in the sheet are still caught by the hourly full read. */
+  const tprops = PropertiesService.getScriptProperties();
+  if (!force) {
+    const touch = String(tprops.getProperty('HUNT_DB_TOUCH') || '');
+    const seen = String(tprops.getProperty('HUNT_BACKUP_TOUCH_SEEN') || '');
+    const lastFull = Number(tprops.getProperty('HUNT_BACKUP_FULL_AT') || 0);
+    if (touch && touch === seen && Date.now() - lastFull < 3600000) return 'unchanged (no hunt written)';
+  }
   let rows;
   try { rows = readTab_('HUNTING_DB'); }
   catch (e) {
@@ -185,6 +195,7 @@ function huntBackupSync(force) {
   /* A bumped format version has to reach a workbook that is otherwise sitting still, so it counts
    * as a reason to open the book — one property read, and cosmetics can never wait on a hunt. */
   const fmtStale = props.getProperty(HUNT_BACKUP_FMT_PROP) !== HUNT_BACKUP_FMT_VERSION;
+  try { props.setProperty('HUNT_BACKUP_FULL_AT', String(Date.now())); props.setProperty('HUNT_BACKUP_TOUCH_SEEN', String(props.getProperty('HUNT_DB_TOUCH') || '')); } catch (e) {}
   if (!force && !fmtStale && fp === props.getProperty(HUNT_BACKUP_FP_PROP)) {
     return 'unchanged (' + live.length + ' hunts)';
   }

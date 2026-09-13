@@ -6267,6 +6267,7 @@ function actionSubmitHunt_(payload, ctx) {
       return Object.prototype.hasOwnProperty.call(cols, h) ? cols[h] : '';
     });
     sh.appendRow(row);
+    huntTouch_();
     subRec = {}; head.forEach(function (h, i) { subRec[h] = row[i]; });
   }
 
@@ -6597,7 +6598,10 @@ function huntVerify_(sh, pre, huntId) {
    own revision — the first typed field (Title, price, a link) threw 'write outside the whitelist',
    the router masked it as "request failed", and EVERY full-form revise died before writing a cell
    (9 Sept, Irfan — and, via the own-resubmit delegation, his "adding an item" too). */
+/* 13 Sept: one property write per hunt change lets the 5-minute backup skip its full read. */
+function huntTouch_() { try { PropertiesService.getScriptProperties().setProperty('HUNT_DB_TOUCH', String(Date.now())); } catch (e) {} }
 function huntWrite_(sh, found, patch, allow) {
+  huntTouch_();
   const allowed = allow || HUNT_DECISION_COLS;
   Object.keys(patch).forEach(function (k) {
     if (allowed.indexOf(k) < 0) throw new Error('write outside the HUNTING_DB whitelist: ' + k);
@@ -7415,6 +7419,16 @@ function huntBackupUpsert_(rec) {
  * mirror it stops right there — the backup workbook is never even opened. Force with true to
  * rebuild regardless (a hand-edited tray, a restored file). */
 function huntBackupSync(force) {
+  /* 13 Sept: this read the WHOLE HUNTING_DB every five minutes just to hash it. Every hunt write
+     now bumps HUNT_DB_TOUCH (huntTouch_); unchanged touch + a full check within the hour = skip.
+     Direct edits in the sheet are still caught by the hourly full read. */
+  const tprops = PropertiesService.getScriptProperties();
+  if (!force) {
+    const touch = String(tprops.getProperty('HUNT_DB_TOUCH') || '');
+    const seen = String(tprops.getProperty('HUNT_BACKUP_TOUCH_SEEN') || '');
+    const lastFull = Number(tprops.getProperty('HUNT_BACKUP_FULL_AT') || 0);
+    if (touch && touch === seen && Date.now() - lastFull < 3600000) return 'unchanged (no hunt written)';
+  }
   let rows;
   try { rows = readTab_('HUNTING_DB'); }
   catch (e) {
@@ -7444,6 +7458,7 @@ function huntBackupSync(force) {
   /* A bumped format version has to reach a workbook that is otherwise sitting still, so it counts
    * as a reason to open the book — one property read, and cosmetics can never wait on a hunt. */
   const fmtStale = props.getProperty(HUNT_BACKUP_FMT_PROP) !== HUNT_BACKUP_FMT_VERSION;
+  try { props.setProperty('HUNT_BACKUP_FULL_AT', String(Date.now())); props.setProperty('HUNT_BACKUP_TOUCH_SEEN', String(props.getProperty('HUNT_DB_TOUCH') || '')); } catch (e) {}
   if (!force && !fmtStale && fp === props.getProperty(HUNT_BACKUP_FP_PROP)) {
     return 'unchanged (' + live.length + ' hunts)';
   }
@@ -23694,10 +23709,24 @@ function aliSweepFast() {
    * run at 6 minutes. Whatever is read by the cutoff is pushed; the rest catches the next tick
    * (5 minutes) or the hourly full sweep. Never let the fast path starve its neighbours. */
   var deadline = Date.now() + 90000;
+  /* 13 Sept (owner: "make the speed fast"): this opened EVERY order book every five minutes —
+     the heaviest recurring cost in the project (30–60 s per tick, all day). Drive's lastUpdated
+     is one metadata call per book: a book nobody edited since the last fast sweep is skipped;
+     every book is still read at least every 30 minutes as a safety net. */
+  var fpProps = PropertiesService.getScriptProperties();
+  var fpMap = {};
+  try { fpMap = JSON.parse(fpProps.getProperty('ALI_FAST_FP') || '{}') || {}; } catch (e) { fpMap = {}; }
+  var skipped = 0;
   conns.forEach(function (c) {
     if (Date.now() > deadline) return;
+    var bookId = String(c.spreadsheet_id);
+    var stamp = '';
+    try { stamp = String(DriveApp.getFileById(bookId).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
+    var prev = fpMap[bookId] || {};
+    if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 1800000) { skipped++; return; }
     var ss;
-    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); } catch (e) { return; }
+    try { ss = SpreadsheetApp.openById(bookId); } catch (e) { return; }
+    fpMap[bookId] = { stamp: stamp, at: Date.now() };
     var sheets = ss.getSheets();
     for (var s = 0; s < sheets.length; s++) {
       if (!ordersTabIsCandidate_(sheets[s].getName(), candidates)) continue;
@@ -23732,6 +23761,7 @@ function aliSweepFast() {
     var res = enginePost_('syncAliOrders', { rows: out.slice(i, i + 400) });
     written += Number(res.written) || 0;
   }
+  try { fpProps.setProperty('ALI_FAST_FP', JSON.stringify(fpMap).slice(0, 8000)); } catch (e) {}
   return { tabs: tabs, found: out.length, written: written };
 }
 

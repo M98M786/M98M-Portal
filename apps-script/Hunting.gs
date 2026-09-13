@@ -265,6 +265,7 @@ function actionSubmitHunt_(payload, ctx) {
       return Object.prototype.hasOwnProperty.call(cols, h) ? cols[h] : '';
     });
     sh.appendRow(row);
+    huntTouch_();
     subRec = {}; head.forEach(function (h, i) { subRec[h] = row[i]; });
   }
 
@@ -595,7 +596,10 @@ function huntVerify_(sh, pre, huntId) {
    own revision — the first typed field (Title, price, a link) threw 'write outside the whitelist',
    the router masked it as "request failed", and EVERY full-form revise died before writing a cell
    (9 Sept, Irfan — and, via the own-resubmit delegation, his "adding an item" too). */
+/* 13 Sept: one property write per hunt change lets the 5-minute backup skip its full read. */
+function huntTouch_() { try { PropertiesService.getScriptProperties().setProperty('HUNT_DB_TOUCH', String(Date.now())); } catch (e) {} }
 function huntWrite_(sh, found, patch, allow) {
+  huntTouch_();
   const allowed = allow || HUNT_DECISION_COLS;
   Object.keys(patch).forEach(function (k) {
     if (allowed.indexOf(k) < 0) throw new Error('write outside the HUNTING_DB whitelist: ' + k);
