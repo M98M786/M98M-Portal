@@ -2538,7 +2538,7 @@ const ACTIONS_BRAIN = {
  * + mandatory comment). actionApproveTask_ is the ONLY path to Completed — nothing counts
  * toward targets, performance (§12.1) or shoutouts before an approval lands. */
 
-const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'loss_review'];
+const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'loss_review', 'sourcing_link'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
 /* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
 const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
 const TASK_STATUS_PENDING = 'Pending';

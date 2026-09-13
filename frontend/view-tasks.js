@@ -10,8 +10,8 @@
   var TK_UPDATED = 'Updated';
   var TK_SUBMITTED = 'Submitted — awaiting approval';
   var TK_COMPLETED = 'Completed';
-  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query'];
-  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review'];
+  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'sourcing_link'];
+  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'sourcing_link'];
   var TK_CREATE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager'];       // §4.3 + §4.4
   var TK_APPROVE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager'];
   var TK_OPEN = [TK_PENDING, TK_WORKING, TK_UPDATED];
