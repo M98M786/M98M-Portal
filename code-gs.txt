@@ -19498,6 +19498,14 @@ function computeSignals(args) {
   const fullPass = force || (Date.now() - lastAt) >= 3600000 || String(lastMap.__days || '') !== days.join(',');
   const skipped = [];
   const scannedFp = {};
+  /* The per-account skip key leaves the order-processing workbook OUT: processors write today's
+     order rows to it every few minutes through the shift (13:35 PKT: 5 of 6 accounts re-scanned,
+     34 s, nothing new), while the scan only reads its 'Returns & INAD' tab for the days BEFORE
+     today — a return logged today is dated today and is never in the judged window. A past-dated
+     backfill reaches the hourly full pass, which still fingerprints all three workbooks. */
+  const skipKey = function (a) {
+    return String(fpMap[a] || '').split(';').filter(function (p) { return p.indexOf('|order_processing|') < 0; }).join(';');
+  };
 
   // Loop ACCOUNTS on the outside, DAYS on the inside. The heavy per-account reads — the Central Main
   // Sheet index and the Returns log — do not change from day to day, so they are read ONCE per
@@ -19511,7 +19519,8 @@ function computeSignals(args) {
 
   for (let ai = 0; ai < accounts.length && !timedOut; ai++) {
     const account = accounts[ai];
-    if (!fullPass && fpMap[account] && fpMap[account].indexOf('|?') < 0 && lastMap[account] === fpMap[account]) { skipped.push(account); continue; }
+    const sk = skipKey(account);
+    if (!fullPass && sk && sk.indexOf('|?') < 0 && lastMap[account] === sk) { skipped.push(account); continue; }
     let index, returns;
     try { index = signalsMainIndex_(account); } catch (e) { index = { byTitle: {}, byPrefix: {} }; }
     try { returns = signalsReadReturns_(account); } catch (e) { returns = { ok: false, reason: String(e && e.message || e).slice(0, 60) }; }
@@ -19544,7 +19553,7 @@ function computeSignals(args) {
       if (touched) pd.scanned++;
       pd.found += found.length - before;
     }
-    if (!timedOut) scannedFp[account] = fpMap[account];
+    if (!timedOut) scannedFp[account] = sk;
   }
 
   const fresh = signalsRaise_(found, 'system');
