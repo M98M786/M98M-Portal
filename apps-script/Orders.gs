@@ -930,10 +930,18 @@ function actionReturnsInad_(payload, ctx) {
 // ---------- §10.2 / §14 the overdue sweep (time trigger — no ctx) ----------
 /** OVERDUE > 0 notifies Management and the account's Order Processors, once per account per PKT
  * day, and leaves the month's tiles in DASH_CACHE for the §13.3 operations counters. */
-function dispatchOverdueSweep() {
+/* 13 Sept: the whole-month dashboard rebuild costs ~46 s PER account and grows with the day's
+   order volume (92 s at midday, 278 s mid-afternoon for 6 accounts). Inside the 15-minute hot
+   mirror that pushed a tick to 323 s, near the 6-minute trigger kill. It is now RESUMABLE:
+   opts.budgetMs caps one slice, a round-robin cursor (DISPATCH_SWEEP_CURSOR) carries the rest to
+   the next tick, and the per-day "already sent" guard keeps resuming idempotent. Cursor 0 = a
+   clean finish; the mirror keeps the DUE flag until it reads the cursor back at 0. */
+function dispatchOverdueSweep(opts) {
+  const budgetMs = Math.max(15000, Number(opts && opts.budgetMs) || ORDERS_SWEEP_BUDGET_MS);
   const today = ordersToday_();
   const monthKey = today.slice(0, 7);
   const started = Date.now();
+  const props = PropertiesService.getScriptProperties();
 
   const sent = {};
   /* 13 Sept: "already sent today?" only needs the newest letters, not the whole 35k-row tab. */
@@ -948,11 +956,17 @@ function dispatchOverdueSweep() {
     });
   })();
 
-  let scanned = 0, notified = 0, skipped = 0;
+  let scanned = 0, notified = 0, left = 0, nextCursor = 0;
   const accounts = ordersConnectedAccounts_();
-  for (let i = 0; i < accounts.length; i++) {
-    if (Date.now() - started > ORDERS_SWEEP_BUDGET_MS) { skipped = accounts.length - i; break; }
-    const account = accounts[i];
+  let startAt = Number(props.getProperty('DISPATCH_SWEEP_CURSOR') || 0);
+  if (!(startAt >= 0) || startAt >= accounts.length) startAt = 0;
+  for (let processed = 0; processed < accounts.length; processed++) {
+    if (processed > 0 && Date.now() - started > budgetMs) {
+      nextCursor = (startAt + processed) % accounts.length;
+      left = accounts.length - processed;
+      break;
+    }
+    const account = accounts[(startAt + processed) % accounts.length];
     let dash = null;
     try {
       dash = ordersDashboardAccount_(account, monthKey, false);
@@ -978,8 +992,9 @@ function dispatchOverdueSweep() {
     notified++;
   }
 
+  try { props.setProperty('DISPATCH_SWEEP_CURSOR', String(nextCursor)); } catch (e) {}
   return 'dispatch sweep: ' + scanned + ' account(s) scanned, ' + notified + ' notified'
-    + (skipped ? ', ' + skipped + ' left for the next run (time budget)' : '');
+    + (left ? ', ' + left + ' left for the next tick (budget)' : '');
 }
 
 /** DASH_CACHE keyed by (metric, account, period) — upserted, never appended, so a 15-minute

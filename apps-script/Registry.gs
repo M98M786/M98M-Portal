@@ -1086,6 +1086,7 @@ function pushSheetRowsHot() {
      tick, so approvals/tasks/bell freshness is unchanged. Trigger cadence itself untouched. */
   const hotProps = PropertiesService.getScriptProperties();
   const runBooks = (Date.now() - Number(hotProps.getProperty('SHEETMIRROR_HOT_AT') || 0)) >= 14 * 60000;
+  const hotStarted = Date.now();
   let pushed = 0, tabs = 0;
   /* 11 Sept (Irfan's hunts "not updating on time"): the hunt-queue sync is the office's most
      time-sensitive mirror — reviewers stare at it live. Run it FIRST, before the heavy money-
@@ -1144,13 +1145,18 @@ function pushSheetRowsHot() {
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
   /* 13 Sept: the deferred dispatch-overdue sweep (flagged at :05 on odd hours) runs here once the
-     top-of-hour jobs are over — second half of the hour only, one run per flag. */
+     top-of-hour jobs are over — the quiet second half of the hour, OR any tick while a sweep is
+     mid-cursor. It is time-boxed so the WHOLE mirror tick stays ~300 s (well under the 6-minute
+     trigger kill) even at peak order volume; a sweep that does not finish leaves its cursor > 0
+     and the flag set, so the next tick resumes it. */
   try {
     const dprops = PropertiesService.getScriptProperties();
-    if (dprops.getProperty('DISPATCH_SWEEP_DUE') === '1' && new Date().getMinutes() >= 30 && typeof dispatchOverdueSweep === 'function') {
-      dprops.deleteProperty('DISPATCH_SWEEP_DUE');
-      const dres = dispatchOverdueSweep();
+    const midSweep = Number(dprops.getProperty('DISPATCH_SWEEP_CURSOR') || 0) > 0;
+    if (dprops.getProperty('DISPATCH_SWEEP_DUE') === '1' && (new Date().getMinutes() >= 30 || midSweep) && typeof dispatchOverdueSweep === 'function') {
+      const budgetMs = Math.max(30000, 300000 - (Date.now() - hotStarted));
+      const dres = dispatchOverdueSweep({ budgetMs: budgetMs });
       logActivity_('system', 'DISPATCH_SWEEP', '', '', '', String(dres).slice(0, 160));
+      if (Number(dprops.getProperty('DISPATCH_SWEEP_CURSOR') || 0) === 0) dprops.deleteProperty('DISPATCH_SWEEP_DUE');
     }
   } catch (e) { logActivity_('trigger', 'ERROR:dispatchOverdue', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   stepDone('dispatch');
