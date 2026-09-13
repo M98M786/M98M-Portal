@@ -9912,6 +9912,16 @@ const ROUTES = {
      each pull is its own invocation, so the subrequest budget is never at risk. The whitelist
      is explicit and CREDENTIAL-FREE: sessions never leave, engine_config never leaves, and the
      accounts table gives up only its names — never app ids, certs or oauth refs. */
+  /* 13 Sept: the 15-minute hunt sweep used to page the WHOLE hunt_rows table (every column, the
+     vals JSON blob included) through backupDump just to learn which hunts are still in flight.
+     One small answer instead: the ids whose mirror state is pending or revision. */
+  huntInflightIds: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const rs = await ctx.env.DB.prepare("SELECT hunt_id FROM hunt_rows WHERE status = '' OR status = 'REVISION REQUIRED' LIMIT 5000").all().catch(() => ({ results: [] }));
+      return { ids: (rs.results || []).map((r) => String(r.hunt_id || '')).filter(Boolean) };
+    },
+  },
+
   backupDump: {
     auth: 'sync', fn: async (p, ctx) => {
       const T = {

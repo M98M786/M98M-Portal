@@ -1117,7 +1117,8 @@ function pushSheetRowsHot() {
     try { hotProps.setProperty('SHEETMIRROR_BOOK_FP', JSON.stringify(fpMap).slice(0, 8000)); } catch (e) {}
   }
   try { notifSweep_(); } catch (e) { logActivity_('system', 'NOTIF_SWEEP_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
-  try { huntsSweep_(); } catch (e) {}
+  /* 13 Sept: the hunt sweep already ran FIRST in this tick (top of the function); running it a
+     second time here doubled the tick's heaviest read for no new information. */
   try { enginePost_('huntShadowScan', {}); } catch (e) {}   // 4 Sept: D1-primary shadow — read-only, records hunt_shadow only
   try { reportsSweep_(); } catch (e) {}
   try { tasksSweep_(); } catch (e) {}
@@ -1260,8 +1261,16 @@ function tasksSweep_() {
     mapped.sort(function (a, b) {
       return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
     });
-    var recent = mapped.slice(0, 250);
-    if (recent.length) enginePost_('syncTasks', { tasks: recent });
+    /* 13 Sept: push what CHANGED since the last sweep (cursor = newest updated_at already
+       pushed) plus the newest 40 as a floor — not a flat 250 rows every 15 minutes. The hourly
+       full reconcile (pushEngineTasks) still covers everything else. */
+    var tprops = PropertiesService.getScriptProperties();
+    var cursor = String(tprops.getProperty('TASKS_SWEEP_CURSOR') || '');
+    var recent = mapped.filter(function (o, i) { return i < 40 || String(o.updated_at || o.created_at || '') > cursor; }).slice(0, 400);
+    if (recent.length) {
+      enginePost_('syncTasks', { tasks: recent });
+      try { tprops.setProperty('TASKS_SWEEP_CURSOR', String(mapped[0].updated_at || mapped[0].created_at || '')); } catch (e) {}
+    }
   } catch (e) {}
 }
 
@@ -1374,26 +1383,13 @@ function huntsSweep_() {
     //     approval (owner, 8 Sept — "approved but still not updating"). This set is the approval
     //     backlog, not the whole history, so the sweep stays cheap.
     try {
-      let offset = 0;
-      for (let page = 0; page < 8; page++) {                 // hard cap (~20k rows) so it never runs away
-        const dump = enginePost_('backupDump', { table: 'hunt_rows', limit: 2500, offset: offset });
-        const header = (dump && dump.header) || [];
-        const drows = (dump && dump.rows) || [];
-        const iId = header.indexOf('hunt_id'), iStatus = header.indexOf('status');
-        if (iId < 0) break;
-        for (let i = 0; i < drows.length; i++) {
-          /* IN-FLIGHT rows only: PENDING ('') and REVISION REQUIRED. Both can be stale in either
-             direction — a decision's push dropped (pending→decided) or a hunter's revise dropped
-             (revision→pending, 9 Sept) — and both self-correct by re-pushing the TRUE sheet state.
-             Decided rows are final and never re-pushed, so the sweep stays backlog-sized. */
-          const st = String(drows[i][iStatus] || '');
-          if (st !== '' && st !== 'REVISION REQUIRED') continue;
-          const id = String(drows[i][iId] || '');
-          if (id && sheetById[id]) wanted[id] = sheetById[id];
-        }
-        offset += drows.length;
-        if (!drows.length || (dump && dump.done)) break;
-      }
+      /* 13 Sept: one small call for the in-flight ids (huntInflightIds) replaces paging the whole
+         mirror table through backupDump — this loop was most of the 15-minute tick's cost. */
+      const inflight = enginePost_('huntInflightIds', {});
+      ((inflight && inflight.ids) || []).forEach(function (id) {
+        id = String(id || '');
+        if (id && sheetById[id]) wanted[id] = sheetById[id];
+      });
     } catch (e) {}
 
     const out = [];
