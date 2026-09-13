@@ -1098,12 +1098,14 @@ function pushSheetRowsHot() {
     let fpMap = {};
     try { fpMap = JSON.parse(hotProps.getProperty('SHEETMIRROR_BOOK_FP') || '{}') || {}; } catch (e) { fpMap = {}; }
     let skipped = 0;
+    var walkedNames = [], skippedNames = [], walkT0 = Date.now();
     truthMoneyBooks_().forEach(function (b) {
       try {
         let stamp = '';
         try { stamp = String(DriveApp.getFileById(b.id).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
         const prev = fpMap[b.id] || {};
-        if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 3600000) { skipped++; return; }
+        if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 3600000) { skipped++; skippedNames.push(b.account); return; }
+        walkedNames.push(b.account + (stamp && prev.stamp ? (prev.stamp === stamp ? '(hourly)' : '(edited)') : '(first)'));
         const ss = SpreadsheetApp.openById(b.id);
         days.forEach(function (pk) {
           const res = truthPushTab_(ss, b.id, b.account, truthDayTabName_(pk), pk);
@@ -1125,7 +1127,9 @@ function pushSheetRowsHot() {
       .map(function (k) { return { key: k, value: String(getConfig(k) || '') }; })
       .filter(function (r) { return r.value; }) });
   } catch (e) {}
-  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), runBooks ? tabs + ' tab(s)' : 'books walk skipped (15-min throttle)');
+  logActivity_('system', 'SHEETMIRROR_HOT', '', '', String(pushed), runBooks
+    ? tabs + ' tab(s) · walked ' + (typeof walkedNames !== 'undefined' ? walkedNames.join(', ') : '?') + ' · skipped ' + (typeof skippedNames !== 'undefined' ? skippedNames.join(', ') : '?') + ' · ' + Math.round((Date.now() - (typeof walkT0 !== 'undefined' ? walkT0 : Date.now())) / 1000) + 's'
+    : 'books walk skipped (15-min throttle)');
   return tabs + ' tab(s), ' + pushed + ' row(s) mirrored (last 4 days)';
 }
 function pushSheetRowsCold() {
