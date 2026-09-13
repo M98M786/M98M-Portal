@@ -343,6 +343,17 @@
       else { toast('Checkpoint ' + hm12(target.checkpoint) + ' submitted on time.'); }
       load();
     }).catch(function (e) {
+      /* 13 Sept: "that checkpoint is not on your schedule" = the slot list on screen came from a
+         different source than the engine that judges the submit. Drop the pinned/cached list and
+         re-read it from the engine so the next press offers exactly what the engine accepts. */
+      try {
+        if (/not on your schedule/i.test(String((e && e.message) || ''))) {
+          try { delete ENGINE_MISSING.myCheckpoints; } catch (x) {}
+          rpAsTried = false;
+          try { if (typeof cacheForget === 'function') { cacheForget('myCheckpoints', {}); } } catch (x) {}
+          setTimeout(load, 600);
+        }
+      } catch (x) {}
       busy = false;
       btn.disabled = false;
       btn.textContent = was;

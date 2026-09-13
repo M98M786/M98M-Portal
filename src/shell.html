@@ -581,12 +581,16 @@ function engineCall(action, payload, timeoutMs){
     .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
           function(e){ clearTimeout(t); throw e; });
 }
+/* 13 Sept: a 2.5 s first try sent the checkpoint LIST to Apps Script on any slow engine moment
+   while the SUBMIT stayed on the engine — two different answers for "your slots", and the submit
+   then refused the slot the screen had offered. These reads wait for the engine like a write. */
+var ENGINE_PATIENT = { myCheckpointsEngine: 12000, mySignalsEngine: 8000, myTasksEngine: 8000 };
 function engineApi(action, payload, engineOnly){
   var isWrite = ENGINE_WRITE_ACTIONS.indexOf(action) >= 0;
   /* Engine-ONLY actions (the ENGINE_ACTIONS list) get a patient first try and NEVER detour
      through Apps Script: AS cannot know them, and asking it costs 10–20 s of "unknown action"
      before the engine got its real retry. That detour is what made the truth pages crawl. */
-  return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 15000 : 2500))
+  return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 15000 : (ENGINE_PATIENT[action] || 2500)))
     .catch(function(e){
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
@@ -896,6 +900,9 @@ function cacheRead(action, payload){
 function cacheWrite(action, payload, data){
   try{ localStorage.setItem(cacheKey(action,payload), JSON.stringify({ t:Date.now(), d:data })); }
   catch(e){ /* quota or private mode — caching is an optimisation, never a requirement */ }
+}
+function cacheForget(action, payload){
+  try { localStorage.removeItem(cacheKey(action, payload)); } catch(e){}
 }
 function cacheClearAll(){
   try{

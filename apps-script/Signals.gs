@@ -1122,10 +1122,20 @@ function signalsPushEngine_(full) {
 /* 12 Sept (owner: "make these things fast"): the SLOW_ACTION ledger doPost writes, summarised —
  * which actions ran over 4 s, how often, worst and average, who last. Runnable: engineRunJob
  * job=slowActions args={hours:24}. Reads the append-only log from the newest row back. */
+/* 13 Sept: the two log diagnostics read the WHOLE ACTIVITY_LOG (40–50 s per run at 25k+ rows) —
+ * every watch tick cost the sheet more than the staff did. Read only the newest K rows. */
+function activityTailRows_(k) {
+  const sh = getPortalDb_(false).getSheetByName('ACTIVITY_LOG');
+  const lr = sh.getLastRow();
+  if (lr < 2) return [];
+  const n = Math.min(Math.max(1, k), lr - 1);
+  const head = sh.getRange(1, 1, 1, 7).getValues()[0].map(String);
+  return sh.getRange(lr - n + 1, 1, n, 7).getValues().map(function (r) { const o = {}; head.forEach(function (h, i) { o[h] = r[i]; }); return o; });
+}
 function slowActions(args) {
   const hours = Math.max(1, Number(args && args.hours) || 24);
   const cutoff = Date.now() - hours * 3600000;
-  const rows = readTab_('ACTIVITY_LOG');
+  const rows = activityTailRows_(Math.min(6000, 400 * hours));
   const by = {};
   let n = 0;
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -1164,7 +1174,7 @@ function activityTail(args) {
   const limit = Math.min(80, Math.max(1, Number(args && args.limit) || 30));
   const match = String((args && args.match) || '').toLowerCase();
   const cutoff = Date.now() - hours * 3600000;
-  const rows = readTab_('ACTIVITY_LOG');
+  const rows = activityTailRows_(Math.min(6000, 400 * hours));
   const out = [];
   for (let i = rows.length - 1; i >= 0 && out.length < limit; i--) {
     const r = rows[i];

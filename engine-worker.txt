@@ -8067,7 +8067,7 @@ const ROUTES = {
       if (!cps.length) throw new Error('SAY: there are no checkpoints on your schedule yet — Management sets your timetable');
       const cp = repHm(p.checkpoint);
       const i = cps.indexOf(cp);
-      if (i < 0) throw new Error('SAY: that checkpoint is not on your schedule');
+      if (i < 0) throw new Error('SAY: that checkpoint (' + String(p.checkpoint == null ? '' : p.checkpoint).slice(0, 24) + ') is not on your schedule — your slots are ' + cps.join(', ') + '. Refresh My reports and pick a slot from the list.');
       const date = repShiftDateJs(cps, (u && repHm(u.shift_start)) ? repMin(u.shift_start) : -1);
       const t = repTimingJs(cps, date);
       if (t.nowAbs >= t.deadlines[i]) throw new Error('SAY: that checkpoint window has already closed');
