@@ -1153,7 +1153,12 @@ function pushSheetRowsHot() {
     const dprops = PropertiesService.getScriptProperties();
     const midSweep = Number(dprops.getProperty('DISPATCH_SWEEP_CURSOR') || 0) > 0;
     if (dprops.getProperty('DISPATCH_SWEEP_DUE') === '1' && (new Date().getMinutes() >= 30 || midSweep) && typeof dispatchOverdueSweep === 'function') {
-      const budgetMs = Math.max(30000, 300000 - (Date.now() - hotStarted));
+      /* 14 Sept: the 300 s target let the 07:37 tick TIME OUT at 361 s — a single dispatch
+         account can overrun the between-account budget check by its own ~50 s, and it stacked on
+         the money-book walk. Target 220 s total and hard-cap the slice at 150 s: worst case is
+         ~150 s walk + 150 s dispatch nowhere near the 360 s kill, and the resumable cursor just
+         spreads the rest over the next ticks. */
+      const budgetMs = Math.max(30000, Math.min(150000, 220000 - (Date.now() - hotStarted)));
       const dres = dispatchOverdueSweep({ budgetMs: budgetMs });
       logActivity_('system', 'DISPATCH_SWEEP', '', '', '', String(dres).slice(0, 160));
       if (Number(dprops.getProperty('DISPATCH_SWEEP_CURSOR') || 0) === 0) dprops.deleteProperty('DISPATCH_SWEEP_DUE');

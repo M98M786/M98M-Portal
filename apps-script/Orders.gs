@@ -961,7 +961,10 @@ function dispatchOverdueSweep(opts) {
   let startAt = Number(props.getProperty('DISPATCH_SWEEP_CURSOR') || 0);
   if (!(startAt >= 0) || startAt >= accounts.length) startAt = 0;
   for (let processed = 0; processed < accounts.length; processed++) {
-    if (processed > 0 && Date.now() - started > budgetMs) {
+    /* 14 Sept: stop when under ~45 s of budget remains, not only when it is already spent — one
+       account's whole-month rebuild takes that long, and letting it start would overshoot the
+       tick's ceiling. The cursor carries the rest to the next tick. */
+    if (processed > 0 && Date.now() - started > budgetMs - 45000) {
       nextCursor = (startAt + processed) % accounts.length;
       left = accounts.length - processed;
       break;
