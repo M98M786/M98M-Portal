@@ -988,9 +988,10 @@ function runZeroSalesSweepInner_() {
     if (id) open[id] = true;
   });
 
-  let made = 0, scanned = 0;
+  let made = 0, scanned = 0, skippedAccts = [];
   (connectionHealth().perAccount || []).forEach(function (a) {
-    const account = String(a.account || '');
+   const account = String(a.account || '');
+   try {
     const read = advReadPpcTab_(account, ADV_ALARM_MAX);
     if (!read.ok) return;
     const layout = advPpcLayout_(read.headers);
@@ -1020,9 +1021,16 @@ function runZeroSalesSweepInner_() {
         'zerosales:' + rec.item_id);
       logActivity_('system', 'ZERO_SALES_TASK', taskId, '', rec.item_id, account);
     });
+   } catch (e) {
+    /* one account's workbook being unshared/permission-locked must not fail the whole daily
+       sweep (this was the silent 100%-fail: an uncaught "You do not have permission" from a
+       single account's PPC read). Skip it, name it, carry on. */
+    skippedAccts.push(account + ': ' + String(e && e.message || e).slice(0, 60));
+   }
   });
-  logActivity_('system', 'ZERO_SALES_SWEEP', 'PPC', '', made + ' task(s)', scanned + ' candidate(s)');
-  return made + ' task(s) created from ' + scanned + ' zero-sales candidate(s)';
+  if (skippedAccts.length) logActivity_('system', 'ZERO_SALES_SKIP', 'PPC', '', String(skippedAccts.length) + ' account(s)', skippedAccts.join(' | ').slice(0, 400));
+  logActivity_('system', 'ZERO_SALES_SWEEP', 'PPC', '', made + ' task(s)', scanned + ' candidate(s)' + (skippedAccts.length ? ' · ' + skippedAccts.length + ' acct(s) skipped' : ''));
+  return made + ' task(s) created from ' + scanned + ' zero-sales candidate(s)' + (skippedAccts.length ? ', ' + skippedAccts.length + ' account(s) skipped (see log)' : '');
 }
 
 const ACTIONS_ADVERTISING = {
