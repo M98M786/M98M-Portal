@@ -2983,8 +2983,20 @@ async function autoMsgSend(env) {
         ok = r.ok && rx.indexOf('<Ack>Failure</Ack>') < 0;
         detail = ok ? 'sent as member message' : (xmlTag(rx, 'LongMessage') || ('HTTP ' + r.status)).slice(0, 200);
       }
+      /* 14 Sept: a return/inquiry that has already moved past the just-opened state — eBay
+         Post-Order errorId 1502 "Illegal State transition" (e.g. the buyer already shipped the
+         item back before the hourly return sync queued this note) — makes the "we've got your
+         request" message both impossible to post AND stale. Record it CANCELLED like the other
+         stale time-sensitive suppressions, not FAIL, so a normal return-state race does not read
+         as an error on the health board. */
+      let finalStatus = ok ? 'SENT' : 'FAIL';
+      let finalDetail = detail;
+      if (!ok && (/Illegal State transition/i.test(detail) || /"errorId":\s*1502/.test(detail))) {
+        finalStatus = 'CANCELLED';
+        finalDetail = 'not sent \u2014 the return/inquiry had already moved past the opened state (stale open-note suppressed)';
+      }
       await env.DB.prepare('UPDATE automsg_queue SET status = ?2, detail = ?3 WHERE id = ?1')
-        .bind(q.id, ok ? 'SENT' : 'FAIL', detail).run();
+        .bind(q.id, finalStatus, finalDetail).run();
     } catch (e) {
       await env.DB.prepare("UPDATE automsg_queue SET status = 'FAIL', detail = ?2 WHERE id = ?1")
         .bind(q.id, String(e && e.message || e).slice(0, 200)).run();
