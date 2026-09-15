@@ -758,6 +758,14 @@
 
   function tkSubmitForm(t, id, type) {
     var wantsItem = tkHas(TK_ITEM_TYPES, type);
+    /* 15 Sept (owner: "staff add keywords but it keeps saying add keywords, and they cannot add
+       the draft link"). Only stamp the research gate when this row ACTUALLY renders the standalone
+       "Keyword research" panel. A listing_new task enters its research on the go-live draft form,
+       and the row deliberately omits that panel (see tkRow: lad.stage !== 'LISTING') — so gating
+       Submit on it told the lister to press a button that is not on their row and trapped them
+       there for good. Revisions (R72/R10/R20) do render the panel and keep the gate. */
+    var ladSub = tkResearchHandle(t);
+    var gateRes = !!(ladSub && ladSub.stage !== 'LISTING');
     return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
       (type === 'listing_revision' ? '<div class="field"><label>What did you change? (tick all that apply)</label>' +
         '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px">' +
@@ -768,7 +776,7 @@
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (tkResearchHandle(t) ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (gateRes ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
@@ -880,13 +888,22 @@
     if (sessionStorage.getItem('ladres:' + id)) { proceed(); return; }
     var wrap = box.querySelector('[data-ladres="' + String(id).replace(/"/g, '') + '"]');
     var item = wrap ? wrap.getAttribute('data-laditem') : ('task:' + id);
-    var blockMsg = 'Add the keyword research data first — the "Keyword research" button on this task. The draft cannot go to go-live without it.';
+    /* 15 Sept: never dead-end. A row without the standalone panel (a new listing) keeps its
+       research on the go-live form — open THAT, and say so, instead of naming a button the lister
+       cannot see. */
+    var blockMsg = wrap
+      ? 'Add the keyword research data first — the "Keyword research" button on this task.'
+      : 'Keyword research for a new listing goes on the \u201cLeave in draft\u201d form, with the draft link \u2014 opening it for you now.';
+    var openRes = function () {
+      if (wrap) { tkLadResToggle(box, id); return; }
+      tkRowAction(box, 'draftF', id, null);
+    };
     engineCall('ladderResearch', { item_id: item || ('task:' + id) }, 15000).then(function (d) {
       if (d && d.research && d.research.length) { sessionStorage.setItem('ladres:' + id, '1'); proceed(); }
-      else { toast(blockMsg); tkLadResToggle(box, id); }
+      else { toast(blockMsg); openRes(); }
     }).catch(function () {
-      /* Could not check — open the form so they can Save (idempotent) rather than trap them. */
-      toast(blockMsg); tkLadResToggle(box, id);
+      /* Could not check — open the form so they can fill it in rather than trap them. */
+      toast(blockMsg); openRes();
     });
   }
 
