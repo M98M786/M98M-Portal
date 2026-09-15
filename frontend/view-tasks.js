@@ -543,16 +543,12 @@
     if (details) {
       act += '<button class="minibtn" data-act="details" data-id="' + tkAttr(id) + '">Details</button>';
     }
-    /* Listing-ladder tasks (owner, 10 Sept): the research button is the lister's data entry —
-       the same keyword/SEO sheet, resubmitted at every revision and archived. Tier-2 tasks may
-       be parked "Waiting for the Advertising Manager's call". */
+    /* 16 Sept (owner: "end the keyword research page from the portal ... just delete that concept,
+       take just item draft link at the submission from the item lister"). Keyword/SEO research
+       entry is removed from the task flow entirely. Tier-2 ladder tasks can still be parked for
+       the Advertising Manager's call. */
     var lad = tkResearchHandle(t);
     if (lad) {
-      /* New-listing research is entered on the draft/go-live form (owner combined the two). The
-         standalone button stays for REVISIONS (R72/R10/R20), which have no draft link. */
-      if (lad.stage !== 'LISTING') {
-        act += '<button class="minibtn" data-act="ladRes" data-id="' + tkAttr(id) + '">Keyword research</button>';
-      }
       if (lad.tier === 'T2' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED)) {
         act += '<button class="minibtn" data-act="ladPark" data-id="' + tkAttr(id) + '" data-item="' + tkAttr(lad.item) + '">Waiting for AM\u2019s call</button>';
       }
@@ -743,29 +739,17 @@
       '<div class="tk-lform hidden" data-lform="draft:' + tkAttr(id) + '">' +
         '<div class="field"><label>eBay draft link</label>' +
           '<input class="tk-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/…" data-ldraft-link="' + tkAttr(id) + '"></div>' +
-        /* 11 Sept (owner: "combine the page of draft link and keyword research"): the keyword/SEO
-           research now lives ON this same form. One "Hand to go-live" saves the research AND hands
-           the draft off — no separate Save step that can fail. Fields load from the schema below. */
-        '<div class="k" style="margin-top:14px;color:var(--gold-a)">Keyword &amp; SEO research <span class="tk-sub">— required before go-live</span></div>' +
-        '<div data-draftres="' + tkAttr(id) + '"><div class="spinner"></div></div>' +
+        /* 16 Sept: the keyword/SEO research block is gone — the hand-off takes the draft link. */
         '<div class="field" style="margin-top:10px"><label>Note for go-live (optional)</label>' +
           '<textarea class="tk-ta" data-ldraft-note="' + tkAttr(id) + '" placeholder="Anything the person publishing should know"></textarea></div>' +
         '<div class="tk-btns"><button class="minibtn" data-act="draft" data-id="' + tkAttr(id) + '">Hand to go-live</button>' +
           '<button class="minibtn" data-act="leverCancel" data-id="draft:' + tkAttr(id) + '">Cancel</button></div>' +
-        '<div class="tk-sub" style="margin-top:8px">One step: this saves your keyword research AND sends the draft to whoever publishes it. They add the Item ID once it is live.</div></div>' +
+        '<div class="tk-sub" style="margin-top:8px">Paste the eBay draft link and send it to whoever publishes it. They add the Item ID once it is live.</div></div>' +
     '</div>';
   }
 
   function tkSubmitForm(t, id, type) {
     var wantsItem = tkHas(TK_ITEM_TYPES, type);
-    /* 15 Sept (owner: "staff add keywords but it keeps saying add keywords, and they cannot add
-       the draft link"). Only stamp the research gate when this row ACTUALLY renders the standalone
-       "Keyword research" panel. A listing_new task enters its research on the go-live draft form,
-       and the row deliberately omits that panel (see tkRow: lad.stage !== 'LISTING') — so gating
-       Submit on it told the lister to press a button that is not on their row and trapped them
-       there for good. Revisions (R72/R10/R20) do render the panel and keep the gate. */
-    var ladSub = tkResearchHandle(t);
-    var gateRes = !!(ladSub && ladSub.stage !== 'LISTING');
     return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
       (type === 'listing_revision' ? '<div class="field"><label>What did you change? (tick all that apply)</label>' +
         '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px">' +
@@ -776,7 +760,7 @@
         '<textarea class="tk-ta" data-note="' + tkAttr(id) + '" placeholder="What you did, and anything the approver should check"></textarea></div>' +
       (wantsItem ? '<div class="field" style="margin-top:10px"><label>Item ID' + (type === 'listing_new' ? ' (required)' : '') + '</label>' +
         '<input class="tk-in" type="text" inputmode="numeric" autocomplete="off" data-item="' + tkAttr(id) + '" value="' + tkAttr(tkStr(t.item_id)) + '"></div>' : '') +
-      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '"' + (gateRes ? ' data-ladder="1"' : '') + '>Submit for approval</button>' +
+      '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '">Submit for approval</button>' +
         '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
         '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
     '</div>';
@@ -800,152 +784,7 @@
     }
     return null;
   }
-  var TK_SCHEMA = null;
-  function tkLadResToggle(box, id) {
-    var el = box.querySelector('[data-ladres="' + id + '"]');
-    if (!el) { return; }
-    if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
-    el.classList.remove('hidden');
-    if (el.dataset.built) { return; }
-    el.innerHTML = '<div class="spinner"></div>';
-    (TK_SCHEMA ? Promise.resolve(TK_SCHEMA) : engineCall('ladderSchema', {}, 15000)).then(function (sch) {
-      TK_SCHEMA = sch;
-      el.dataset.built = '1';
-      var h = '<div class="k">Keyword &amp; SEO research — the same sheet, saved to the archive</div>';
-      (sch.columns || []).forEach(function (c) {
-        h += '<div class="field" style="margin-top:8px"><label>' + esc(c.label) + '</label>' +
-          '<textarea class="tk-ta" rows="2" data-ladf="' + tkAttr(c.key) + '" style="min-height:44px"></textarea></div>';
-      });
-      h += '<div class="field" style="margin-top:8px"><label>What changed in this revision</label>' +
-        '<textarea class="tk-ta" rows="2" data-ladf="__changes" style="min-height:44px" placeholder="only for revisions — say exactly what you changed"></textarea></div>' +
-        '<div class="tk-btns" style="margin-top:8px"><button class="btn-gold" data-act="ladResSave" data-id="' + tkAttr(id) + '">Save research</button></div>';
-      el.innerHTML = h;
-      /* 11 Sept: a failed save (expired session, engine hiccup, page reload) must never cost the
-         lister their typed research — the last attempt is stashed on this device and poured back
-         in whenever the form opens again. Cleared only by a successful save. */
-      try {
-        var stash = JSON.parse(localStorage.getItem('m98m:ladres:' + id) || 'null');
-        if (stash && stash.data) {
-          el.querySelectorAll('[data-ladf]').forEach(function (f) {
-            var k = f.getAttribute('data-ladf');
-            var v = k === '__changes' ? stash.chg : stash.data[k];
-            if (v && !f.value) { f.value = v; }
-          });
-          toast('Your unsaved research from last time is back in the form.');
-        }
-      } catch (e2) {}
-    }).catch(function (e) { el.innerHTML = esc(e.message); });
-  }
-  /* 11 Sept (owner combined draft + research): build the keyword/SEO fields INTO the go-live draft
-     form, prefilled from any saved version (the archive) and from an unsent on-device stash. */
-  function tkBuildDraftResearch(box, id) {
-    var host = box.querySelector('[data-draftres="' + String(id).replace(/"/g, '') + '"]');
-    if (!host || host.dataset.built) { return; }
-    var item = 'task:' + id;
-    (TK_SCHEMA ? Promise.resolve(TK_SCHEMA) : engineCall('ladderSchema', {}, 15000)).then(function (sch) {
-      TK_SCHEMA = sch;
-      host.dataset.built = '1';
-      var h = '';
-      (sch.columns || []).forEach(function (c) {
-        h += '<div class="field" style="margin-top:8px"><label>' + esc(c.label) + '</label>' +
-          '<textarea class="tk-ta" rows="2" data-draftf="' + tkAttr(c.key) + '" style="min-height:40px"></textarea></div>';
-      });
-      h += '<div data-draftarch="' + tkAttr(id) + '"></div>';
-      host.innerHTML = h;
-      var fill = function (obj) {
-        if (!obj) { return; }
-        host.querySelectorAll('[data-draftf]').forEach(function (f) {
-          var v = obj[f.getAttribute('data-draftf')];
-          if (v && !f.value) { f.value = v; }
-        });
-      };
-      // on-device stash first (unsent), then the latest saved version from the archive
-      try { var stash = JSON.parse(localStorage.getItem('m98m:ladres:' + id) || 'null'); if (stash && stash.data) { fill(stash.data); } } catch (e) {}
-      engineCall('ladderResearch', { item_id: item }, 15000).then(function (d) {
-        var vers = (d && d.research) || [];
-        if (!vers.length) { return; }
-        var latest = {}; try { latest = JSON.parse(vers[0].data_json || '{}'); } catch (e) {}
-        fill(latest);
-        var arch = host.querySelector('[data-draftarch="' + String(id).replace(/"/g, '') + '"]');
-        if (arch) { arch.className = 'tk-sub'; arch.style.marginTop = '6px'; arch.textContent = vers.length + ' saved version(s) in the archive — the latest is loaded above.'; }
-      }).catch(function () {});
-    }).catch(function (e) { host.innerHTML = '<div class="tk-sub">Could not load the research fields — ' + esc(e.message) + '. Press Cancel and reopen.</div>'; });
-  }
-  function tkWireRows(box) {
-    var btns = box.querySelectorAll('button[data-act]'), i;
-    for (i = 0; i < btns.length; i++) {
-      (function (b) {
-        b.onclick = function () { tkRowAction(box, b.getAttribute('data-act'), b.getAttribute('data-id'), b); };
-      })(btns[i]);
-    }
-  }
-
-  /* 11 Sept: the go-live guard used to trust ONLY sessionStorage['ladres:'+id] — a per-device
-     flag wiped by any reload, so a lister who really saved research got blocked after a refresh
-     ("still can't add the data"). Now: if the flag is missing, ASK the archive whether research
-     exists for this task's research key; only block when there genuinely is none. */
-  function tkEnsureResearch(box, id, proceed) {
-    if (sessionStorage.getItem('ladres:' + id)) { proceed(); return; }
-    var wrap = box.querySelector('[data-ladres="' + String(id).replace(/"/g, '') + '"]');
-    var item = wrap ? wrap.getAttribute('data-laditem') : ('task:' + id);
-    /* 15 Sept: never dead-end. A row without the standalone panel (a new listing) keeps its
-       research on the go-live form — open THAT, and say so, instead of naming a button the lister
-       cannot see. */
-    var blockMsg = wrap
-      ? 'Add the keyword research data first — the "Keyword research" button on this task.'
-      : 'Keyword research for a new listing goes on the \u201cLeave in draft\u201d form, with the draft link \u2014 opening it for you now.';
-    var openRes = function () {
-      if (wrap) { tkLadResToggle(box, id); return; }
-      tkRowAction(box, 'draftF', id, null);
-    };
-    engineCall('ladderResearch', { item_id: item || ('task:' + id) }, 15000).then(function (d) {
-      if (d && d.research && d.research.length) { sessionStorage.setItem('ladres:' + id, '1'); proceed(); }
-      else { toast(blockMsg); openRes(); }
-    }).catch(function () {
-      /* Could not check — open the form so they can fill it in rather than trap them. */
-      toast(blockMsg); openRes();
-    });
-  }
-
   function tkRowAction(box, act, id, btn) {
-    if (act === 'ladRes') { tkLadResToggle(box, id); return; }
-    if (act === 'ladResSave') {
-      var wrapEl = box.querySelector('[data-ladres="' + id + '"]');
-      if (!wrapEl) { return; }
-      var data = {}, chg = '';
-      wrapEl.querySelectorAll('[data-ladf]').forEach(function (f) {
-        var k = f.getAttribute('data-ladf');
-        if (k === '__changes') { chg = tkStr(f.value); } else if (tkStr(f.value)) { data[k] = tkStr(f.value); }
-      });
-      if (!Object.keys(data).length) { toast('Fill the research fields first.'); return; }
-      btn.disabled = true;
-      var rpayload = { item_id: wrapEl.getAttribute('data-laditem'), kind: wrapEl.getAttribute('data-ladstage') || 'LISTING', data: data, changes_note: chg };
-      try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: data, chg: chg, at: Date.now() })); } catch (e0) {}
-      function tkResSaved(r) {
-        sessionStorage.setItem('ladres:' + id, '1');
-        try { localStorage.removeItem('m98m:ladres:' + id); } catch (e0) {}
-        btn.textContent = 'Saved \u2713 (version ' + ((r && r.versions) || '?') + ')';
-        toast('Research saved \u2713 — you can hand the draft to go-live now.');
-      }
-      /* 11 Sept (owner: "listing dept still can't add all the data"). Engine-direct first (fast);
-         if that fails for ANY reason on a bad night, fall back to the Apps Script relay, which
-         writes the SAME row to D1 through the sync bridge. Between the two the research lands as
-         long as either backend is up — that is what ends the "can't save" loop. */
-      engineCall('ladderResearchSave', rpayload, 30000).then(tkResSaved).catch(function (e) {
-        if (String(e && e.message) === 'auth') {
-          /* engineCall already kicked a silent re-mint + reload; the on-device stash restores the
-             form and the next Save works. Calm message, not "failed". */
-          toast('Refreshing your session — your research is safe on this device; when the page reloads, open the form and press Save once more.');
-          return;
-        }
-        toast('Saving through the backup route\u2026');
-        api('saveListingResearch', rpayload).then(tkResSaved).catch(function (e2) {
-          btn.disabled = false;
-          toast('NOT saved — ' + ((e2 && e2.message) || (e && e.message)) + ' \u00b7 your research is kept in the form and on this device; press Save again in a moment.');
-        });
-      });
-      return;
-    }
     if (act === 'ladPark') {
       if (!confirm('Park this Tier-2 task as \u201cWaiting for the Advertising Manager\u2019s call\u201d? Your work on it is done until he calls it in.')) { return; }
       btn.disabled = true;
@@ -971,7 +810,6 @@
         if (key === want + id) { forms[j].classList.toggle('hidden'); }
         else if (key.slice(key.indexOf(':') + 1) === id) { forms[j].classList.add('hidden'); }
       }
-      if (act === 'draftF') { tkBuildDraftResearch(box, id); }
       return;
     }
     if (act === 'leverCancel') {
@@ -982,10 +820,7 @@
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
     if (act === 'needInfo') { tkSendNeedInfo(box, id, btn); return; }
     if (act === 'draft') {
-      /* 12 Sept (Sajjawal's video): the research is entered ON this form and saved BY the
-         hand-off itself — so a pre-check for research already in the archive can never pass on a
-         first submit (chicken-and-egg) and blocked every lister with "add the keyword research
-         first". tkSendDraft validates the inline fields and the server enforces the rule. */
+      /* 16 Sept: the hand-off takes the draft link only — no research pre-check of any kind. */
       tkSendDraft(box, id, btn);
       return;
     }
@@ -1042,11 +877,6 @@
       return;
     }
     if (act === 'send') {
-      if (btn.getAttribute('data-ladder') && !sessionStorage.getItem('ladres:' + id)) {
-        /* Check the archive (survives reloads) before blocking, then re-run the send. */
-        tkEnsureResearch(box, id, function () { tkRowAction(box, 'send', id, btn); });
-        return;
-      }
       note = tkPick(box, 'data-note', id);
       item = tkPick(box, 'data-item', id);
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
@@ -1181,18 +1011,9 @@
     var l = tkPick(box, 'data-ldraft-link', id), n = tkPick(box, 'data-ldraft-note', id);
     var link = l ? tkStr(l.value) : '';
     if (!safeUrl(link)) { toast('Paste the eBay draft link (it must start with http/https).'); if (l) { l.focus(); } return; }
-    /* Collect the keyword/SEO research entered on this same form (owner combined the two). It is
-       required — the server also enforces it — and rides in the SAME request, so one action saves
-       the research AND hands off. No separate Save step that can silently fail. */
-    var host = box.querySelector('[data-draftres="' + String(id).replace(/"/g, '') + '"]');
-    var research = {};
-    if (host) { host.querySelectorAll('[data-draftf]').forEach(function (f) { if (tkStr(f.value)) { research[f.getAttribute('data-draftf')] = tkStr(f.value); } }); }
-    if (!Object.keys(research).length) { toast('Fill the keyword & SEO research on this form — it is required before go-live.'); if (host) { var fst = host.querySelector('[data-draftf]'); if (fst) { fst.focus(); } } return; }
-    try { localStorage.setItem('m98m:ladres:' + id, JSON.stringify({ data: research, at: Date.now() })); } catch (e) {}
     btn.disabled = true;
-    api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '', research: research }).then(function (res) {
-      try { localStorage.removeItem('m98m:ladres:' + id); } catch (e) {}
-      toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' ✓ — research saved and the draft is on their desk.');
+    api('listerDraft', { task_id: id, draft_link: link, note: n ? tkStr(n.value) : '' }).then(function (res) {
+      toast('Handed to ' + (tkStr(res && res.assigned_to_name) || 'go-live') + ' ✓ — the draft is on their desk.');
       tkLoadTasks();
     }).catch(function (err) {
       var msg = String((err && err.message) || '');
