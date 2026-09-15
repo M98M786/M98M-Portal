@@ -784,6 +784,18 @@
     }
     return null;
   }
+  /* 16 Sept: restored — this wiring function sat between the removed keyword-research helpers and
+     was deleted with them, which broke My tasks entirely ("tkWireRows is not defined"). Every row
+     button is bound here, so nothing on the page works without it. */
+  function tkWireRows(box) {
+    var btns = box.querySelectorAll('button[data-act]'), i;
+    for (i = 0; i < btns.length; i++) {
+      (function (b) {
+        b.onclick = function () { tkRowAction(box, b.getAttribute('data-act'), b.getAttribute('data-id'), b); };
+      })(btns[i]);
+    }
+  }
+
   function tkRowAction(box, act, id, btn) {
     if (act === 'ladPark') {
       if (!confirm('Park this Tier-2 task as \u201cWaiting for the Advertising Manager\u2019s call\u201d? Your work on it is done until he calls it in.')) { return; }

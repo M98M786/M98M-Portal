@@ -688,7 +688,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260915-1951';
+var BUILD = '20260915-2143';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25344,6 +25344,18 @@ function saveSchedule() {
     }
     return null;
   }
+  /* 16 Sept: restored — this wiring function sat between the removed keyword-research helpers and
+     was deleted with them, which broke My tasks entirely ("tkWireRows is not defined"). Every row
+     button is bound here, so nothing on the page works without it. */
+  function tkWireRows(box) {
+    var btns = box.querySelectorAll('button[data-act]'), i;
+    for (i = 0; i < btns.length; i++) {
+      (function (b) {
+        b.onclick = function () { tkRowAction(box, b.getAttribute('data-act'), b.getAttribute('data-id'), b); };
+      })(btns[i]);
+    }
+  }
+
   function tkRowAction(box, act, id, btn) {
     if (act === 'ladPark') {
       if (!confirm('Park this Tier-2 task as \u201cWaiting for the Advertising Manager\u2019s call\u201d? Your work on it is done until he calls it in.')) { return; }
