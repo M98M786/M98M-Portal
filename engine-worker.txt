@@ -6643,7 +6643,8 @@ const ROUTES = {
       const comment = String(p.comment || '').trim().slice(0, 1000);
       if (decision === 'REVISION') {
         if (['T1', 'T2'].indexOf(tier) < 0) throw new Error('SAY: pick Tier 1 or Tier 2');
-        if (!tkw) throw new Error('SAY: title keywords are mandatory for a revision — type them in');
+        /* 16 Sept (owner): the keyword boxes are gone from the 72-hour and 20-day desks, so
+           keywords are no longer collected anywhere — a revision must not demand them. */
       }
       const col = stage === 'R72' ? 'r72_status' : stage === 'R10' ? 'r10_status' : 'r20_status';
       const row = await ctx.env.DB.prepare('SELECT * FROM listing_ladder WHERE item_id = ?1').bind(item).first();

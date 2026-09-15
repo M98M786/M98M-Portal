@@ -49,22 +49,16 @@
         if (act === 'noRev' || act === 'submitRev') {
           var payload = { item_id: id, stage: b.getAttribute('data-stage'), decision: act === 'noRev' ? 'NO_REVISION' : 'REVISION' };
           if (act === 'submitRev') {
-            var tkw = box.querySelector('[data-tkw="' + id + '"]'), dkw = box.querySelector('[data-dkw="' + id + '"]');
+            /* 16 Sept (owner): keyword boxes removed — comment + tier only. */
             var cmt = box.querySelector('[data-cmt="' + id + '"]'), tierEl = box.querySelector('input[name="tier-' + id + '"]:checked');
-            if (!tkw || !tkw.value.trim()) { toast('Title keywords are mandatory for a revision.'); if (tkw) { tkw.focus(); } return; }
-            payload.tier = tierEl ? tierEl.value : 'T1'; payload.title_keywords = tkw.value;
-            payload.desc_keywords = dkw ? dkw.value : ''; payload.comment = cmt ? cmt.value : '';
+            payload.tier = tierEl ? tierEl.value : 'T1';
+            payload.comment = cmt ? cmt.value : '';
           }
           b.disabled = true;
           engineCall('ladderDecide', payload, 25000)
             .then(function (r) { toast(act === 'noRev' ? 'Marked: no revision required.' : 'Revision sent — ' + (r.task || 'task raised') + '.'); load(); })
             .catch(function (e) { b.disabled = false; toast(e.message); });
         }
-      };
-      box.oninput = function (ev) {
-        var t = ev.target;
-        if (t && t.hasAttribute && t.hasAttribute('data-tkw')) { var c = box.querySelector('[data-tkc="' + t.getAttribute('data-tkw') + '"]'); if (c) { c.textContent = U.lrKwCount(t.value) + ' keywords'; } }
-        if (t && t.hasAttribute && t.hasAttribute('data-dkw')) { var c2 = box.querySelector('[data-dkc="' + t.getAttribute('data-dkw') + '"]'); if (c2) { c2.textContent = U.lrKwCount(t.value) + ' keywords'; } }
       };
     }).catch(function (e) { box.innerHTML = '<div style="color:var(--text-2);font-weight:700">' + esc(e.message) + '</div>'; });
   }

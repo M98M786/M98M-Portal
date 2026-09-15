@@ -91,8 +91,8 @@
   }
   function lrDecisionForm(r, stage) {
     return '<div class="lr-form hidden" data-form="' + esc(r.item_id) + '">' +
-      '<div class="lr-kw"><div><label>Title keywords (required)</label><textarea data-tkw="' + esc(r.item_id) + '" placeholder="one per line or comma-separated"></textarea><div class="lr-count" data-tkc="' + esc(r.item_id) + '">0 keywords</div></div>' +
-      '<div><label>Description keywords</label><textarea data-dkw="' + esc(r.item_id) + '"></textarea><div class="lr-count" data-dkc="' + esc(r.item_id) + '">0 keywords</div></div></div>' +
+      /* 16 Sept (owner): keyword boxes removed from the 72-hour and 20-day desks. A revision is
+         now a comment + tier decision. */
       '<input class="lr-note" data-cmt="' + esc(r.item_id) + '" placeholder="Comment for the lister — what to aim for">' +
       '<div class="lr-tier"><label><input type="radio" name="tier-' + esc(r.item_id) + '" value="T1" checked> Tier 1 — lister has 2 days</label>' +
       '<label><input type="radio" name="tier-' + esc(r.item_id) + '" value="T2"> Tier 2 — parkable, your call</label>' +
@@ -115,13 +115,11 @@
         return;
       }
       if (act === 'submitRev') {
-        var tkw = host.querySelector('[data-tkw="' + id + '"]'), dkw = host.querySelector('[data-dkw="' + id + '"]');
         var cmt = host.querySelector('[data-cmt="' + id + '"]');
         var tierEl = host.querySelector('input[name="tier-' + id + '"]:checked');
-        if (!tkw || !tkw.value.trim()) { toast('Title keywords are mandatory for a revision.'); if (tkw) { tkw.focus(); } return; }
         b.disabled = true;
         engineCall('ladderDecide', { item_id: id, stage: b.getAttribute('data-stage'), decision: 'REVISION',
-          tier: tierEl ? tierEl.value : 'T1', title_keywords: tkw.value, desc_keywords: dkw ? dkw.value : '',
+          tier: tierEl ? tierEl.value : 'T1',
           comment: cmt ? cmt.value : '' }, 25000)
           .then(function (r) { toast('Revision sent — ' + (r.task || 'task raised') + '.'); reload(); })
           .catch(function (e) { b.disabled = false; toast(e.message); });
@@ -141,11 +139,6 @@
           .catch(function (e) { b.disabled = false; toast(e.message); });
         return;
       }
-    };
-    host.oninput = function (ev) {
-      var t = ev.target;
-      if (t && t.hasAttribute && t.hasAttribute('data-tkw')) { var c = host.querySelector('[data-tkc="' + t.getAttribute('data-tkw') + '"]'); if (c) { c.textContent = lrKwCount(t.value) + ' keywords'; } }
-      if (t && t.hasAttribute && t.hasAttribute('data-dkw')) { var c2 = host.querySelector('[data-dkc="' + t.getAttribute('data-dkw') + '"]'); if (c2) { c2.textContent = lrKwCount(t.value) + ' keywords'; } }
     };
   }
 
@@ -215,7 +208,7 @@
     icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
     render: function () {
       return '<div class="hgroup enter d1"><h1>72-hours <span class="goldtext">revision</span></h1>' +
-        '<span class="sub">every listing lands here exactly 72 hours after go-live — decide, add keywords, pick the tier · the dummy becomes the real listing here</span>' +
+        '<span class="sub">every listing lands here exactly 72 hours after go-live — decide and pick the tier · the dummy becomes the real listing here</span>' +
         '<button class="minibtn" id="r72Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="r72Body" class="enter d2"><div class="spinner"></div></div>';
     },
