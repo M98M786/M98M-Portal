@@ -1110,8 +1110,12 @@ function listingGoLivePerson_(all) {
   for (let i = 0; i < approved.length; i++) {
     if (normalizeEmail(approved[i].email) === configured) return { email: String(approved[i].email), name: String(approved[i].name || approved[i].email) };
   }
-  return listingPickForRole_('Listing Manager', '', all, 'listing_new') ||
-    listingPickForRole_('Team Lead', '', all, 'listing_new') || null;
+  /* 16 Sept: `all` may be a FUNCTION that loads the TASKS tab. The configured approver exists on
+     every normal day, so the full-tab read behind it — which the hand-off used to pay INSIDE the
+     script lock on every click — now only happens on the rare fallback. */
+  const rows = (typeof all === 'function') ? all() : all;
+  return listingPickForRole_('Listing Manager', '', rows, 'listing_new') ||
+    listingPickForRole_('Team Lead', '', rows, 'listing_new') || null;
 }
 
 function actionListerDraft_(payload, ctx) {
@@ -1132,7 +1136,12 @@ function actionListerDraft_(payload, ctx) {
     const found = listingListerVerify_(sh, pre, payload, ctx, true);
     rec = found.rec;
     from = String(rec.assigned_to || '');
-    go = listingGoLivePerson_(readTab_('TASKS'));
+    /* 16 Sept (a lister's hand-off hit the browser's abort — "The server is slow — checking whether the
+       hand-off went through…"). Inside the lock this used to pay a FULL read of the TASKS tab just to
+       find the go-live person (who is a config value), then four single-cell writes. Now: the tab is only
+       read on the fallback, and the patch lands in ONE range write. The locked section is a one-row read
+       and one write. */
+    go = listingGoLivePerson_(function () { return readTab_('TASKS'); });
     if (!go) throw new Error('no go-live approver is set up — tell Management');
     handed = normalizeEmail(go.email) !== normalizeEmail(rec.assigned_to);
     const patch = {
@@ -1140,25 +1149,28 @@ function actionListerDraft_(payload, ctx) {
       status: TASK_STATUS_WORKING, updated_at: now_(),
     };
     if (handed) patch.assigned_to = go.email;              // owner moves so the approver can enter the Item ID
-    taskWrite_(sh, found, patch);
+    taskWriteSpan_(sh, found, patch);
   } finally { lock.releaseLock(); }
   logActivity_(ctx.ident.email, 'LISTER_DRAFT', String(rec.task_id), from, go.email, link.slice(0, 200));
   const who = ctx.user.name || ctx.ident.email;
   const title = String(rec.title || rec.task_id).slice(0, 60);
-  notify_(go.email, 'Draft listing to publish',
-    '🟣 ' + who + ' left "' + title + '" in draft · ' + String(rec.account || '') + '. Publish it on eBay, then open the task and enter the Item ID — that starts the campaign, supplier and 72-hour tasks.' +
-    (note ? ' Note: ' + note.slice(0, 300) : '') + ' Draft: ' + link, 'task:' + String(rec.task_id));
-  notifyManagement_('Draft handed to go-live',
-    '🟣 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' left it in draft; ' + go.name + ' will publish and add the Item ID.',
-    'task:' + String(rec.task_id));
+  const ref = 'task:' + String(rec.task_id);
+  // Three separate NOTIFICATIONS writes (one a per-manager fan-out) became ONE — same bells, fewer trips.
+  const bells = [
+    { to: go.email, type: 'Draft listing to publish',
+      message: '🟣 ' + who + ' left "' + title + '" in draft · ' + String(rec.account || '') + '. Publish it on eBay, then open the task and enter the Item ID — that starts the campaign, supplier and 72-hour tasks.' +
+        (note ? ' Note: ' + note.slice(0, 300) : '') + ' Draft: ' + link, ref: ref },
+    { to: '@management', type: 'Draft handed to go-live',
+      message: '🟣 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' left it in draft; ' + go.name + ' will publish and add the Item ID.', ref: ref },
+  ];
   // The lister's part is finished the moment the draft link is in — credit them and clear it from
   // their board (the task now belongs to the go-live approver).
   if (handed) {
-    notify_(ctx.ident.email, 'Listing done — handed for go-live',
-      '✅ Your part of "' + title + '" is complete. The draft is with ' + go.name + ' to publish and make live — nothing else is needed from you.',
-      'task:' + String(rec.task_id));
+    bells.push({ to: ctx.ident.email, type: 'Listing done — handed for go-live',
+      message: '✅ Your part of "' + title + '" is complete. The draft is with ' + go.name + ' to publish and make live — nothing else is needed from you.', ref: ref });
     logActivity_(ctx.ident.email, 'LISTER_DRAFT_DONE', String(rec.task_id), from, go.email, 'lister complete; go-live handoff');
   }
+  notifyMany_(bells);
   return { task_id: String(rec.task_id), flag: 'draft', assigned_to: go.email, assigned_to_name: go.name, handed_off: handed, draft_link: link };
 }
 

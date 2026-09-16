@@ -456,6 +456,33 @@ function notifPop(o){
    caller still gets its own promise and its own error. Nothing in the views had to change. */
 var API_BATCH_WINDOW_MS = 20;
 var API_BATCH_MAX = 6;   // 27 Aug: 10 actions serial in one doPost ran 20-40s; 6 halves the worst case
+/* 16 Sept (owner: "The server is slow — checking whether the hand-off went through…" on a lister's
+   screen). A sheet WRITE used to ride in the same batch as whatever reads fired in the same 20 ms —
+   the server runs a batch's calls one after another, the browser aborts the WHOLE batch at 25 s,
+   and on abort every call was re-sent singly, the write included. So a hand-off could be aborted
+   before it even started (a slow read ahead of it), then re-sent against a task that had already
+   moved, and answer "not your task" for a hand-off that went through. Three rules now:
+   1. a write goes out ALONE — never shares an abort budget with reads;
+   2. a write gets a patient 60 s abort — a slow save is not a failed save;
+   3. a write is NEVER re-sent by the batch fallback, and carries an idempotency key so a genuine
+      double-click is answered "already done" by the router instead of being done twice.
+   Reads keep the 25 s abort and the batching — that is what keeps the boards fast. */
+var SHEET_WRITE_ACTIONS = [
+  'listerDraft','startTask','submitTask','approveTask','returnTask','createTask','taskAdmin','taskAdminBulk','reassignTasks',
+  'listerNeedTime','listerNeedInfo','listerRejectRequest','listerClearFlag','enterItemId','goLiveReturn','createRevision','revisionRevisit',
+  'decisionAct','zeroSaleDecide','submitHunt','reviseHunt','decideHunt','mgmtRejectDecide','submitReport','clockIn','clockOut',
+  'updateStaff','addStaff','deactivateStaff','reactivateStaff','saveAccount','approveUser','setSchedule','staffReviewSave','saveEvaluation',
+  'submitRecheck','submitPotentialCpc','decidePotentialCpc','switchPotentialCpcCampaign','submitCpcResearch','keywordDecide','approveKeywords','returnKeywords',
+  'sourcingSave','logWrongOrder','replacementCreate','createCase','updateCase','recoveryUpsert','resolveAlert','priceAck',
+  'acknowledgeSignal','acknowledgeAllSignals','sendMessage','inboxSend','createMeeting','rsvp','setAgenda','congratulate',
+  'ideaSubmit','ideaDecide','retireRule','register','toolStateSave','csPlaybookSave','csToolLog'
+];
+var SHEET_WRITE_TIMEOUT_MS = 60000;
+function isSheetWrite(action){ return SHEET_WRITE_ACTIONS.indexOf(action) >= 0; }
+function apiIdem(){
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
+  return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
 var apiQueue = [];
 var apiTimer = null;
 
@@ -495,15 +522,17 @@ function apiFinished(){
   if(apiInflight === 0){ clearTimeout(apiSlowTimer); apiSlowTimer = null; slowBanner(false); }
 }
 
-function apiSend(action, payload){
-  var body = JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} });
+function apiSend(action, payload, timeoutMs){
+  var req = { action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} };
+  if (isSheetWrite(action)) { req.idem = apiIdem(); }
+  var body = JSON.stringify(req);
   apiStarted();
   /* 2 Sept peak collapse: Apps Script answered in 36–83 s under load. The browser allows ~6
      connections per origin — without a timeout a handful of zombie requests wedged EVERY later
      sheet call behind them and the whole portal read as "loading". 25 s releases the socket:
      a slow answer becomes a fast, retryable failure instead of a queue-blocker. */
   var ac = new AbortController();
-  var t = setTimeout(function(){ ac.abort(); }, 25000);
+  var t = setTimeout(function(){ ac.abort(); }, timeoutMs || 25000);
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow', signal: ac.signal })
     .then(function(r){ return r.json(); })
     .then(function(j){ clearTimeout(t); apiFinished(); return j; },
@@ -539,6 +568,11 @@ function apiFlush(){
 
 function apiRetrySingly(batch){
   batch.forEach(function(c){
+    if(isSheetWrite(c.action)){
+      // never replay a write: the first send may have landed. The caller's own verify path decides.
+      c.reject(new Error('the sheet backend is overloaded right now — it will retry on the next refresh'));
+      return;
+    }
     apiSend(c.action, c.payload)
       .then(function(j){ if(!j.ok){ c.reject(new Error(j.error||'request failed')); } else { c.resolve(j.data); } })
       .catch(function(e){ c.reject(e); });
@@ -667,6 +701,12 @@ function apiViaSheet(action, payload){
       return j.data;
     });
   }
+  if(isSheetWrite(action)){
+    return apiSend(action, payload, SHEET_WRITE_TIMEOUT_MS).then(function(j){
+      if(!j.ok){ throw new Error(j.error||'request failed'); }
+      return j.data;
+    });
+  }
   return new Promise(function(resolve, reject){
     apiQueue.push({ action:action, payload:payload||{}, resolve:resolve, reject:reject });
     if(apiQueue.length >= API_BATCH_MAX){ clearTimeout(apiTimer); apiFlush(); return; }
@@ -688,7 +728,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260915-2143';
+var BUILD = '20260916-1643';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives

@@ -396,6 +396,31 @@ function taskWrite_(sh, found, patch) {
   });
 }
 
+/** 16 Sept: taskWrite_ costs one round-trip PER patched cell — the lister hand-off paid four of them
+ * inside the script lock. This writes the smallest column span covering every patched column in ONE
+ * setValues; the untouched cells inside that span are rewritten with the values the caller just
+ * re-read under the lock (taskVerify_), i.e. unchanged. RL-6 is applied to what CHANGES exactly as
+ * taskWrite_ applies it: every patched key must be in TASK_WRITABLE_COLS. Callers must pass a `found`
+ * that was read under the same lock — never a stale pre-lock find. */
+function taskWriteSpan_(sh, found, patch) {
+  const keys = Object.keys(patch);
+  if (!keys.length) return;
+  const cols = keys.map(function (k) {
+    if (TASK_WRITABLE_COLS.indexOf(k) < 0) throw new Error('write outside the TASKS whitelist: ' + k);
+    const c = found.head.indexOf(k);
+    if (c < 0) throw new Error('unknown TASKS column: ' + k);
+    return c;
+  });
+  const lo = Math.min.apply(null, cols), hi = Math.max.apply(null, cols);
+  const row = [];
+  for (let c = lo; c <= hi; c++) {
+    const h = found.head[c];
+    const cur = found.rec[h];
+    row.push(Object.prototype.hasOwnProperty.call(patch, h) ? patch[h] : (cur === undefined || cur === null ? '' : cur));
+  }
+  sh.getRange(found.row, lo + 1, 1, hi - lo + 1).setValues([row]);
+}
+
 function taskMayDecide_(rec, ctx) {
   if (isMgmt_(ctx.user.role, ctx.ident.email)) return true;
   const approver = normalizeEmail(rec.assigned_by);

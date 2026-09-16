@@ -222,3 +222,33 @@ function notifyManagement_(type, message, ref) {
     try { logActivity_('system', 'NOTIFY_MGMT_FAIL', type, '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
   }
 }
+/** 16 Sept: several bells in ONE sheet write. entries: [{to, type, message, ref}]. `to` may be
+ * '@management', which expands to exactly notifyManagement_'s list (approved Management / Ops Head
+ * plus the super admins). Same law as notify_: a lost bell must never kill the action that rang it. */
+function notifyMany_(entries) {
+  try {
+    const at = now_();
+    let mgmt = null;
+    const rows = [];
+    (entries || []).forEach(function (e) {
+      if (!e) return;
+      let tos = [String(e.to || '')];
+      if (tos[0] === '@management') {
+        if (mgmt === null) {
+          mgmt = readTab_('USERS').filter(function (u) { return MGMT_ROLES.indexOf(u.role) >= 0 && String(u.status) === 'approved'; }).map(function (u) { return u.email; });
+          SUPER_ADMINS.forEach(function (x) { if (mgmt.indexOf(x) < 0) mgmt.push(x); });
+        }
+        tos = mgmt;
+      }
+      tos.forEach(function (to) {
+        if (!to) return;
+        rows.push(['N' + Utilities.getUuid().slice(0, 8), to, 'system', String(e.type || ''), String(e.message || ''), e.ref || '', at, '']);
+      });
+    });
+    if (!rows.length) return;
+    const nsh = getPortalDb_(false).getSheetByName('NOTIFICATIONS');
+    nsh.getRange(nsh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  } catch (e) {
+    try { logActivity_('system', 'NOTIFY_MANY_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {}
+  }
+}
