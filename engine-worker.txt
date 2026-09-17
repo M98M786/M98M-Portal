@@ -4783,6 +4783,16 @@ const ADTOOL_ACTIONS_P4 = {
    Advertising Tool — Phase 5: alerts A01–A19 (§6.10), Yesterday's report (+ PDF), Command centre, ROAS target (§6.13),
    Data health. Jobs behind adtool_alerts / adtool_report / adtool_roas; pages behind adtool_page_command / _alerts /
    _report / _roas / _health. Alerts inform; nothing here changes anything on eBay. */
+/* One door for everything this tool tells people. It is SHUT until the owner has seen the module:
+   portal_config.adtool_notify must be 'on'. Until then an alert lives on the Alerts page and nowhere else.
+   'advertising' and 'management' are roles, not addresses — notifyRole resolves them to the approved people. */
+async function adtNotify(env, audience, type, message, ref) {
+  try {
+    if ((await adtFlag(env, 'adtool_notify')) !== 'on') return;
+    const roles = audience === 'advertising' ? ['Advertising Manager'] : audience === 'management' ? ['Management', 'Ops Head'] : [String(audience)];
+    for (const role of roles) await notifyRole(env, role, type, message, ref);
+  } catch (e) { /* telling someone must never fail the job that raised it */ }
+}
 /* ADTOOL-P5-PURE-BEGIN */
 const ADTOOL_ALERT_RULES = {
   A01: { sev: 'high', cool: 3, text: 'ROAS below break-even on 5 consecutive days with spend ≥ £2/day', action: 'stop' },
@@ -4984,8 +4994,8 @@ async function adtoolAlerts(env) {
     for (const id of Object.keys(open)) if (open[id].cleared_at === '' && !found[id]) { stmts.push(env.DB.prepare('UPDATE adtool_alerts SET cleared_at = ?2 WHERE alert_id = ?1').bind(id, now)); cleared++; }
     await adtBatch(env, stmts); rows = stmts.length;
     /* high alerts go to the portal inbox at once (advertising + management), capped per run */
-    for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await queueNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); await queueNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); } catch (e) { /* inbox is best effort */ } }
-    if (highNew.length > 6) { try { await queueNotify(env, 'advertising', 'Ads alerts', '🟠 ' + (highNew.length - 6) + ' more high ads alerts this hour — open the Alerts page.', 'adtool:alertmore:' + today + ':' + ukNow.hour); } catch (e) {} }
+    for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await adtNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); await adtNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); } catch (e) { /* inbox is best effort */ } }
+    if (highNew.length > 6) { try { await adtNotify(env, 'advertising', 'Ads alerts', '🟠 ' + (highNew.length - 6) + ' more high ads alerts this hour — open the Alerts page.', 'adtool:alertmore:' + today + ':' + ukNow.hour); } catch (e) {} }
     await adtJobEnd(env, 'adtoolAlerts', t, rows, 'ok', 'fired ' + fired + ' · open ' + kept + ' · cleared ' + cleared + ' · found ' + Object.keys(found).length);
   } catch (e) { await adtJobEnd(env, 'adtoolAlerts', t, rows, 'error', String(e && e.message || e)); throw e; }
 }
@@ -5055,7 +5065,7 @@ async function adtoolReport(env) {
     const report = { day, weekday: ADTOOL_DOW[wd], generated_at: new Date().toISOString(), fleet: Object.assign({ roas: roasY }, y), vs_7day: per(w7), vs_same_weekday_last_week: lw ? Object.assign({ roas: lw.spend > 0 ? round2(lw.attr_revenue / lw.spend) : null }, lw) : null, decisions: { applied: 0, scored: 0, note: 'decision engine arrives with Phase 6 (shadow)' }, by_account: byAcct, hours: hourRows, slots: slotZ, winners: win, losers: lose, what_changed: bullets, ad_status_changes: evs, open_alerts: alerts, capped_listings: capN, sources: ['eBay ads report (T+1)', 'orders', 'Brain v17', 'sampled hours (from 17 Sep)', 'fleet hour × weekday profile'] };
     await env.DB.prepare("INSERT INTO adtool_reports (day, generated_at, json, pdf_asset) VALUES (?1, ?2, ?3, '') ON CONFLICT(day) DO UPDATE SET generated_at = ?2, json = ?3").bind(day, report.generated_at, JSON.stringify(report)).run();
     const msg = '📊 Yesterday\'s ads report (' + day + '): £' + y.spend + ' spend · ' + y.attr_units + ' ad sales · ROAS ' + (roasY == null ? '—' : roasY + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + bullets[0];
-    try { await queueNotify(env, 'advertising', "Yesterday's ads report", msg, 'adtool:report:' + day); await queueNotify(env, 'management', "Yesterday's ads report", msg, 'adtool:reportm:' + day); } catch (e) {}
+    try { await adtNotify(env, 'advertising', "Yesterday's ads report", msg, 'adtool:report:' + day); await adtNotify(env, 'management', "Yesterday's ads report", msg, 'adtool:reportm:' + day); } catch (e) {}
     await adtJobEnd(env, 'adtoolReport', t, 1 + capStmts.length, 'ok', 'report ' + day + ' · ' + capN + ' capped listings · ' + bullets.length + ' bullets');
   } catch (e) { await adtJobEnd(env, 'adtoolReport', t, 0, 'error', String(e && e.message || e)); throw e; }
 }
@@ -5147,7 +5157,7 @@ const ADTOOL_ACTIONS_P5 = {
         L.push('# Losers'); for (const w of report.losers) L.push(money(w.ad_profit).padStart(9) + '  ' + w.item_id + '  ' + w.account + '  ' + String(w.title || '').slice(0, 60));
         return { day, pdf_base64: adtPdf(L), filename: 'ads-report-' + day + '.pdf' };
       }
-      if (p && p.send && report) { const u = ctx.user || {}; const y = report.fleet; try { await queueNotify(env, 'management', "Yesterday's ads report", '📊 Ads report ' + day + ' sent by ' + (u.email || '') + ': £' + y.spend + ' spend · ROAS ' + (y.roas == null ? '—' : y.roas + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + report.what_changed[0], 'adtool:reportsend:' + day + ':' + Date.now()); } catch (e) {} return { ok: true }; }
+      if (p && p.send && report) { const u = ctx.user || {}; const y = report.fleet; try { await adtNotify(env, 'management', "Yesterday's ads report", '📊 Ads report ' + day + ' sent by ' + (u.email || '') + ': £' + y.spend + ' spend · ROAS ' + (y.roas == null ? '—' : y.roas + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + report.what_changed[0], 'adtool:reportsend:' + day + ':' + Date.now()); } catch (e) {} return { ok: true }; }
       return { day, report, days, computed_at: new Date().toISOString() };
     },
   },
@@ -5379,7 +5389,7 @@ async function adtoolDecisions(env, batch) {
     }
     await adtBatch(env, stmts);
     const note = B + ' batch ' + day + ': ' + counts.STOP + ' stop · ' + counts.REDUCE + ' reduce · ' + counts.PUSH + ' push · ' + counts.KEEP + ' keep · ' + confident + ' confident (shadow — nothing sent to eBay)';
-    if (B === 'morning' && (counts.STOP + counts.REDUCE + counts.PUSH) > 0) { try { await queueNotify(env, 'advertising', 'Stop today (shadow)', '🟡 ' + note, 'adtool:dec:' + day); } catch (e) {} }
+    if (B === 'morning' && (counts.STOP + counts.REDUCE + counts.PUSH) > 0) { try { await adtNotify(env, 'advertising', 'Stop today (shadow)', '🟡 ' + note, 'adtool:dec:' + day); } catch (e) {} }
     await adtJobEnd(env, 'adtoolDecisions:' + B, t, inputs.length, 'ok', note);
   } catch (e) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'error', String(e && e.message || e)); throw e; }
 }
@@ -5408,7 +5418,7 @@ async function adtoolDecisionScore(env) {
     const baseRate = base && Number(base.n) ? Number(base.neg) / Number(base.n) : 0.5;
     const hist = (await env.DB.prepare("SELECT rules_json, outcome_score FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1").bind(adtAddDays(today, -30)).all()).results || [];
     const roll = {}; for (const h of hist) { let rs = []; try { rs = JSON.parse(h.rules_json); } catch (e) {} for (const ru of rs) { const b = (roll[ru] = roll[ru] || { n: 0, r: 0 }); b.n++; b.r += Number(h.outcome_score); } }
-    for (const ru of Object.keys(roll)) { const b = roll[ru]; const score = b.n ? b.r / b.n : null; const trusted = !(b.n >= 10 && score != null && score < baseRate) ? 1 : 0; stmts.push(env.DB.prepare('INSERT INTO adtool_rule_scores (rule_id, scored_day, decisions, right_n, score, trusted) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(rule_id, scored_day) DO UPDATE SET decisions = ?3, right_n = ?4, score = ?5, trusted = ?6').bind(ru, today, b.n, b.r, score == null ? null : round2(score), trusted)); if (!trusted) { try { await queueNotify(env, 'management', 'Ads rule demoted', '🟠 Decision rule ' + ru + ' scored ' + Math.round(score * 100) + ' % over ' + b.n + ' decisions, under the ' + Math.round(baseRate * 100) + ' % base rate — it is now shown but never applied.', 'adtool:ruledemote:' + ru + ':' + today); } catch (e) {} } }
+    for (const ru of Object.keys(roll)) { const b = roll[ru]; const score = b.n ? b.r / b.n : null; const trusted = !(b.n >= 10 && score != null && score < baseRate) ? 1 : 0; stmts.push(env.DB.prepare('INSERT INTO adtool_rule_scores (rule_id, scored_day, decisions, right_n, score, trusted) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(rule_id, scored_day) DO UPDATE SET decisions = ?3, right_n = ?4, score = ?5, trusted = ?6').bind(ru, today, b.n, b.r, score == null ? null : round2(score), trusted)); if (!trusted) { try { await adtNotify(env, 'management', 'Ads rule demoted', '🟠 Decision rule ' + ru + ' scored ' + Math.round(score * 100) + ' % over ' + b.n + ' decisions, under the ' + Math.round(baseRate * 100) + ' % base rate — it is now shown but never applied.', 'adtool:ruledemote:' + ru + ':' + today); } catch (e) {} } }
     await adtBatch(env, stmts);
     /* the 14-day shadow acceptance (spec §12 phase 6) */
     const days = await env.DB.prepare("SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL").first();
@@ -5802,7 +5812,7 @@ const ADTOOL_ACTIONS_P8 = {
         if (p.on && !pre) throw new Error('SAY: run the preflight for ' + a + ' first — it confirms the endpoints against the live API without writing anything');
         await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(key, v).run();
         await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_APPLY_LIVE', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), a, v).run();
-        try { await queueNotify(env, 'management', 'Ads live apply', (p.on ? '🔴 Live apply switched ON for ' + a : '🟢 Live apply switched OFF for ' + a) + ' by ' + (u.email || '') + '.', 'adtool:live:' + a + ':' + Date.now()); } catch (e) {}
+        try { await adtNotify(env, 'management', 'Ads live apply', (p.on ? '🔴 Live apply switched ON for ' + a : '🟢 Live apply switched OFF for ' + a) + ' by ' + (u.email || '') + '.', 'adtool:live:' + a + ':' + Date.now()); } catch (e) {}
         return { ok: true, account: a, value: v };
       }
       if (p && p.op === 'undo') {
@@ -6118,8 +6128,8 @@ async function wasteAlarm(env) {
   const msg = '🔴 Ad waste today: ' + items.length + ' item(s) took £' + total.toFixed(2) +
     ' and returned ZERO orders — ' + lines + (items.length > 10 ? ' … +' + (items.length - 10) + ' more' : '') +
     '. Pause or fix them: every hour they run is money gone. Full list on the Ads command centre.';
-  await queueNotify(env, 'advertising', 'Ad waste', msg, dayRef);
-  await queueNotify(env, 'management', 'Ad waste', msg, 'waste-m:day:' + day);
+  await adtNotify(env, 'advertising', 'Ad waste', msg, dayRef);
+  await adtNotify(env, 'management', 'Ad waste', msg, 'waste-m:day:' + day);
   /* Review 4: Team Lead gets LOSS alerts — and nothing else of the money picture */
   await notifyRole(env, 'Team Lead', 'Ad waste',
     '🔴 Losing money today: ' + items.length + ' item(s), £' + total.toFixed(2) + ' spent, zero orders — chase advertising.',
@@ -6727,8 +6737,8 @@ async function cpcAudit(env) {
     CPC_MIN_PROFIT.toFixed(2) + ' profit floor — ' + cpcLines +
     (digest.length > 10 ? ' … +' + (digest.length - 10) + ' more' : '') +
     '. Every CPC sale on these loses money: move them out of CPC or reprice them.';
-  await queueNotify(env, 'advertising', 'Wrong CPC decision', cpcMsg, cpcDayRef);
-  await queueNotify(env, 'management', 'Wrong CPC decision', cpcMsg, 'engine:cpcrule-m:day:' + today);
+  await adtNotify(env, 'advertising', 'Wrong CPC decision', cpcMsg, cpcDayRef);
+  await adtNotify(env, 'management', 'Wrong CPC decision', cpcMsg, 'engine:cpcrule-m:day:' + today);
 }
 
 /* One shape for both the nightly snapshot and the live Account-health screen. */
