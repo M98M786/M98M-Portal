@@ -241,6 +241,8 @@ function run(argv) {
   t('decide: P1 feeds a capped winner at ≥ 1.5 × break-even with a budget rise', p1.decision === 'PUSH' && p1.rules.indexOf('P1') >= 0 && /budget \+30/.test(p1.action), p1);
   const keep = F.adtDecide(Object.assign({}, base, { y: { spend: 3, attr_units: 1, attr_revenue: 12, ad_profit: 1 }, d7: { spend: 21, attr_units: 7, attr_revenue: 90, ad_profit: 6 }, d30: { spend: 90, attr_units: 30, attr_revenue: 380, ad_profit: 25 }, halves: [1, 1], profile_today: 1 }));
   t('decide: a profitable listing is left alone', keep.decision === 'KEEP' && keep.rules.length === 0, keep);
+  const samp = F.adtDecide(Object.assign({}, base, { y_source: 'sampled', y: { spend: 4, attr_units: 0, attr_revenue: 0, ad_profit: -4 } }));
+  t('decide: a yesterday taken from the samples says so in its reason', /sampled — the report for that day has not landed/.test(samp.why) && !/sampled/.test(F.adtDecide(base).why), samp.why);
   t('decide: EV weights today, the week and yesterday as the spec says', near(F.adtDecide(Object.assign({}, base, { profile_today: 10, d7: { spend: 7, attr_revenue: 0, ad_profit: 70 }, y: { spend: 1, attr_revenue: 0, ad_profit: 5 } })).ev, 0.5 * 10 + 0.3 * 10 + 0.2 * 5), null);
   t('score: a stop was right when the day lost money, wrong when it made money', F.adtScoreDecision('STOP', { ad_profit: -4 }, 3) === 1 && F.adtScoreDecision('STOP', { ad_profit: 4 }, 3) === 0, null);
   t('score: a push was right when the realised ROAS beat 1.2 × break-even', F.adtScoreDecision('PUSH', { spend: 10, attr_revenue: 40 }, 3) === 1 && F.adtScoreDecision('PUSH', { spend: 10, attr_revenue: 20 }, 3) === 0, null);

@@ -5232,7 +5232,7 @@ function adtDecide(I) {
   }
   const why = [];
   const money = v => (v < 0 ? '−£' : '+£') + Math.abs(r2(v)).toFixed(2);
-  why.push('yesterday ' + money(Number(y.ad_profit) || 0) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : ''));
+  why.push('yesterday ' + money(Number(y.ad_profit) || 0) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : '') + (I.y_source === 'sampled' ? ' (sampled — the report for that day has not landed)' : ''));
   why.push('today expected ' + money(Number(I.profile_today) || 0) + ' (EV ' + money(ev) + ')');
   if (I.weekday_name) why.push(I.weekday_name + (I.weekday_p != null ? ' p=' + I.weekday_p : '') + (I.weekday_losing ? ' is a losing day for it' : I.weekday_winning ? ' is a winning day for it' : ''));
   if (I.stage) why.push('stage ' + I.stage);
@@ -5315,13 +5315,23 @@ async function adtDecisionInputs(env, day) {
   const desc = {}; for (const r of ((await env.DB.prepare('SELECT item_id, json FROM adtool_descriptors WHERE day = (SELECT MAX(day) FROM adtool_descriptors)').all()).results || [])) { try { desc[r.item_id] = JSON.parse(r.json); } catch (e) {} }
   const capped = {}; for (const r of ((await env.DB.prepare('SELECT item_id, COUNT(*) AS n FROM adtool_cap_days WHERE day >= ?1 GROUP BY item_id').bind(adtAddDays(day, -7)).all()).results || [])) capped[r.item_id] = Number(r.n);
   const organic = {}; for (const r of ((await env.DB.prepare('SELECT item_id, SUM(units) AS u, SUM(attr_units) AS a FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY item_id').bind(adtAddDays(day, -3), yday).all()).results || [])) organic[r.item_id] = Math.max(0, Number(r.u) - Number(r.a));
+  /* §6.11: the boundary batch runs before eBay's report for yesterday exists, so yesterday's row carries orders
+     but no spend. Fill it from the tool's own closing sample of that report day — the reason the sampling was
+     built — and say so, rather than deciding off a £0 that only means "the report has not landed". */
+  const sampled = {};
+  const haveReport = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_listing_day WHERE day = ?1 AND spend > 0').bind(yday).first();
+  if (!haveReport || !Number(haveReport.n)) {
+    for (const r of ((await env.DB.prepare('SELECT item_id, SUM(cum_spend) AS sp, SUM(cum_clicks) AS cl, SUM(cum_units) AS un, SUM(cum_revenue) AS rv FROM (SELECT i.item_id, i.family, i.cum_spend, i.cum_clicks, i.cum_units, i.cum_revenue FROM adtool_ads_intraday i JOIN (SELECT item_id, family, MAX(sampled_at) AS last_at FROM adtool_ads_intraday WHERE report_day = ?1 GROUP BY item_id, family) m ON m.item_id = i.item_id AND m.family = i.family AND m.last_at = i.sampled_at WHERE i.report_day = ?1) GROUP BY item_id').bind(yday).all()).results || [])) sampled[r.item_id] = { spend: round2(Number(r.sp) || 0), clicks: Math.round(Number(r.cl) || 0), attr_units: Math.round(Number(r.un) || 0), attr_revenue: round2(Number(r.rv) || 0) };
+  }
   const todayWd = adtWeekdayOf(day);
   const out = [];
   for (const iid of Object.keys(byItem)) {
     const m = L[iid]; if (!m) continue;
     const rs = byItem[iid]; const sum = (k, n) => rs.slice(-n).reduce((t, r) => t + (Number(r[k]) || 0), 0);
     const win = n => ({ spend: round2(sum('spend', n)), attr_units: sum('attr_units', n), attr_revenue: round2(sum('attr_revenue', n)), ad_profit: round2(sum('ad_profit', n)) });
-    const y = rs.length && rs[rs.length - 1].day === yday ? { spend: Number(rs[rs.length - 1].spend), attr_units: Number(rs[rs.length - 1].attr_units), attr_revenue: Number(rs[rs.length - 1].attr_revenue), ad_profit: Number(rs[rs.length - 1].ad_profit) } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 };
+    let y = rs.length && rs[rs.length - 1].day === yday ? { spend: Number(rs[rs.length - 1].spend), attr_units: Number(rs[rs.length - 1].attr_units), attr_revenue: Number(rs[rs.length - 1].attr_revenue), ad_profit: Number(rs[rs.length - 1].ad_profit) } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 };
+    let ySource = 'report';
+    if (y.spend === 0 && sampled[iid]) { const sm = sampled[iid]; const mg = Number(m.margin_before_ads); y = { spend: sm.spend, attr_units: sm.attr_units, attr_revenue: sm.attr_revenue, ad_profit: isNaN(mg) ? -sm.spend : round2(sm.attr_units * mg - sm.spend) }; ySource = 'sampled'; }
     const d7 = win(7), d14 = win(14), d30 = win(30);
     if (d30.spend <= 0 && !live[iid]) continue;                       // never advertised and not live: nothing to decide
     /* halves of the last 30 days */
@@ -5351,7 +5361,7 @@ async function adtDecisionInputs(env, day) {
     const firstAd = rs.find(r => Number(r.spend) > 0);
     out.push({
       item_id: iid, account: m.account, title: m.title, margin: m.margin_before_ads, be, ads_running: !!live[iid], campaigns: live[iid] || 0,
-      y, d7, d14, d30, halves, days_with_spend_30: daysWithSpend, zero_streak: zero, roas_under_be_5d: under5,
+      y, y_source: ySource, d7, d14, d30, halves, days_with_spend_30: daysWithSpend, zero_streak: zero, roas_under_be_5d: under5,
       stage: stages[iid] ? stages[iid].stage : '', age_days: m.start_time ? Math.floor((Date.now() - new Date(String(m.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : 999,
       age_ads: firstAd ? Math.round((new Date(day + 'T00:00:00Z') - new Date(firstAd.day + 'T00:00:00Z')) / 86400000) : 0,
       organic3: organic[iid] || 0, capped7: capped[iid] || 0, profile_today: profileToday, weekday_p: p, weekday_name: ADTOOL_DOW[todayWd],
