@@ -728,7 +728,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260917-1934';
+var BUILD = '20260917-1939';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -22030,6 +22030,7 @@ function saveSchedule() {
     '.sig-hist{padding:6px 0;border-top:1px dashed rgba(120,132,152,.25);font-size:12px}.sig-hist:first-of-type{border-top:0}',
     '.sig-hist-note{color:var(--text-2);margin-top:2px}.sig-hist-none{color:var(--text-3);font-style:italic}',
     '.sig-dept-sum{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--text-2);margin:0 0 12px}',
+    '.sig-dept-head{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2);margin:8px 0 -4px;padding-left:2px}.sig-dept-head .num{margin-left:6px;color:var(--text-3)}',
     '@media(max-width:880px){',
     '.sig-hd,.sig-bd,.sig-acts,.sig-foot{padding-left:15px}',
     '.sig-thumb{width:58px;height:58px}',
@@ -22602,7 +22603,16 @@ function saveSchedule() {
         'the moment the daily engine finds one, and stays until you acknowledge it.</div></div></div>';
       return;
     }
-    for (i = 0; i < list.length; i++) { out += sgCard(list[i], i, true); }
+    // grouped by department (owner, 18 Sept) — each card keeps its index into sgList() for ack/go
+    var groups = { 'Advertising Manager': [], 'CS': [], '': [] }, order = ['Advertising Manager', 'CS', ''], filled = 0, g, k, j;
+    for (i = 0; i < list.length; i++) { groups[sgDeptOf(sgStr(list[i].type))].push(i); }
+    for (k = 0; k < order.length; k++) { if (groups[order[k]].length) { filled++; } }
+    for (k = 0; k < order.length; k++) {
+      g = groups[order[k]];
+      if (!g.length) { continue; }
+      if (filled > 1) { out += '<div class="sig-dept-head">' + esc(SG_DEPT_LABEL[order[k]]) + ' <span class="num">' + g.length + '</span></div>'; }
+      for (j = 0; j < g.length; j++) { out += sgCard(list[g[j]], g[j], true); }
+    }
     box.innerHTML = out;
     sgWire(box);
   }
@@ -22639,7 +22649,7 @@ function saveSchedule() {
     order: 8,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Signals</h1>' +
-          '<span class="sub">Pinned until you acknowledge them · Pakistan time</span>' +
+          '<span class="sub">Pinned until you acknowledge them · grouped by department · Pakistan time</span>' +
           '<button class="minibtn" id="sigAckAll" style="margin-left:auto">Acknowledge all</button>' +
           '<button class="minibtn" data-sig-do="recompute" id="sigRefresh">Refresh</button>' +
         '</div>' +
@@ -22672,15 +22682,29 @@ function saveSchedule() {
      this timer keeps the page current with every acknowledgement and every new card within 5 min. */
   var SG_DEPT = { data: null, at: 0, timer: null, key: '' };
   var SG_DEPT_MS = 5 * 60 * 1000;
+  /* 18 Sept (owner: "advertising, customer service and signals — all signal pages should have
+     different signals; you are showing the same to everyone; they should receive signals related
+     to their own departments"). A department page is a set of signal TYPES. The old filter used
+     the department's ROLE TOKEN in targeted_roles — and the went-negative signal is raised to CS
+     and the Advertising Manager together, so both desks were painted the same 47 cards. */
+  var SG_DEPT_TYPES = {
+    'Advertising Manager': ['WORST CPC PERFORMER YESTERDAY', 'WENT NEGATIVE YESTERDAY', 'Wrong Advertising'],
+    'CS': ['RETURNS ABOVE USUAL', 'NEGATIVE FEEDBACK YESTERDAY', 'CASES OPENED YESTERDAY']
+  };
+  var SG_DEPT_LABEL = { 'Advertising Manager': 'Advertising', 'CS': 'Customer service', '': 'Other' };
+  function sgDeptOf(type) {
+    var k;
+    for (k in SG_DEPT_TYPES) { if (SG_DEPT_TYPES.hasOwnProperty(k) && SG_DEPT_TYPES[k].indexOf(type) >= 0) { return k; } }
+    return '';
+  }
   function sgDeptLoad(fresh) {
     if (!fresh && SG_DEPT.data && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
     return api('mySignals', { include_acked: true }).then(function (d) { SG_DEPT.data = d || {}; SG_DEPT.at = Date.now(); return SG_DEPT.data; });
   }
   function sgDeptFilter(token) {
-    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], out = [], i, roles;
+    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], out = [], i;
     for (i = 0; i < all.length; i++) {
-      roles = sgStr(all[i].targeted_roles).split(',').map(function (t) { return t.trim(); });
-      if (roles.indexOf(token) >= 0) { out.push(all[i]); }
+      if (types.indexOf(sgStr(all[i].type)) >= 0) { out.push(all[i]); }
     }
     return out;
   }
@@ -22735,7 +22759,7 @@ function saveSchedule() {
     icon: '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4M12 17.6h.01"/>',
     roles: ['CS', 'Management', 'Ops Head', 'Team Lead'],
     order: 0.3,
-    render: function () { return sgDeptRender('Customer service <span class="goldtext">signals</span>', 'negative-profit days and returns above usual for the CS desk · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigCsAll', 'sigCsSum', 'sigCsRefresh'); },
+    render: function () { return sgDeptRender('Customer service <span class="goldtext">signals</span>', 'returns above usual, negative feedback and new cases for the CS desk · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigCsAll', 'sigCsSum', 'sigCsRefresh'); },
     init: function () { sgDeptInit('sigCsAll', 'sigCsSum', 'sigCsRefresh', 'CS', 'customer service'); }
   };
   VIEWS.adSignals = {
