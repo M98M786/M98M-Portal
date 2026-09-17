@@ -548,6 +548,12 @@ async function listingSync(env) {
       ));
     }
     for (let i = 0; i < upserts.length; i += 50) await env.DB.batch(upserts.slice(i, i + 50));
+    /* ADTOOL (Advertising Tool, owner-approved 17 Sep): eBay's primary category as one nullable column,
+       filled read-only by GetItem for up to 40 items per account per run while the flag is on. */
+    if ((await adtFlag(env, 'adtool_primary_category')) === 'on') {
+      try { await adtoolPrimaryCategoryFill(env, acct, tok); }
+      catch (e) { await ctx_setSync(env, 'adtoolCategoryFill', acct, String(e && e.message || e).slice(0, 200)); }
+    }
     const totalPages = Number(xmlTag(xmlTag(xml, 'ActiveList'), 'TotalNumberOfPages')) || 1;
     const next = page >= totalPages ? 1 : page + 1;
     await env.DB.prepare(
@@ -3263,6 +3269,8 @@ async function ensureAdtoolPhase1Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_fixture (kind TEXT NOT NULL, k1 TEXT NOT NULL, k2 TEXT NOT NULL DEFAULT '', spend REAL DEFAULT 0, clicks INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, profit REAL, margin REAL, extra TEXT DEFAULT '', PRIMARY KEY (kind, k1, k2))",
   ];
   for (const q of ddl) { try { await env.DB.prepare(q).run(); } catch (e) { /* exists / raced */ } }
+  /* owner-approved single nullable column on the existing grain: eBay's primary category path */
+  try { await env.DB.prepare('ALTER TABLE items_api ADD COLUMN primary_category TEXT').run(); } catch (e) { /* already there */ }
   ADTOOL_P1_SCHEMA_OK = true;
 }
 async function adtFlag(env, key) {
@@ -3274,8 +3282,35 @@ async function adtJobEnd(env, job, t, rows, status, note) { await env.DB.prepare
 async function adtBatch(env, stmts) { for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50)); return stmts.length; }
 
 /* ---- job: listings (facts + margins + taxonomy) ---- */
+/* ---- primary category fill (Phase 1 open item; read-only, one nullable column) ----
+   GetMyeBaySelling does not carry the category, so listingSync — with portal_config.adtool_primary_category = 'on' —
+   asks Trading GetItem (PrimaryCategory only) for up to 40 uncategorised items per account per run and stores the
+   category path ("A > B > C") in items_api.primary_category; adtool_listings takes the id and path at the same time.
+   An eBay refusal for an item is recorded as '' (asked, nothing to store) so it is never asked again; a transport
+   error leaves NULL so the next run retries. */
+async function adtoolPrimaryCategoryFill(env, acct, tok) {
+  await ensureAdtoolPhase1Schema(env);
+  const rows = (await env.DB.prepare("SELECT item_id FROM items_api WHERE account = ?1 AND primary_category IS NULL ORDER BY (status = 'ACTIVE') DESC, api_synced_at DESC LIMIT 40").bind(acct).all()).results || [];
+  if (!rows.length) return 0;
+  const stmts = []; let n = 0;
+  for (const r of rows) {
+    const body = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>' + r.item_id + '</ItemID><OutputSelector>Item.PrimaryCategory</OutputSelector></GetItemRequest>';
+    const res = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' }, body });
+    const xml = await res.text();
+    if (!res.ok) continue;                                                   // transport / 5xx: retry next run
+    if (xml.indexOf('<Ack>Failure</Ack>') >= 0) { stmts.push(env.DB.prepare("UPDATE items_api SET primary_category = '' WHERE item_id = ?1").bind(r.item_id)); continue; }
+    const pc = xmlTag(xml, 'PrimaryCategory') || '';
+    const name = String(xmlTag(pc, 'CategoryName') || ''), id = String(xmlTag(pc, 'CategoryID') || '');
+    const path = name.split(':').map(x => x.trim()).filter(Boolean).join(' > ');
+    stmts.push(env.DB.prepare('UPDATE items_api SET primary_category = ?2 WHERE item_id = ?1').bind(r.item_id, path));
+    if (id || path) stmts.push(env.DB.prepare('UPDATE adtool_listings SET ebay_category_id = ?2, ebay_category_path = ?3 WHERE item_id = ?1').bind(r.item_id, id, path));
+    n++;
+  }
+  await adtBatch(env, stmts);
+  return n;
+}
 async function adtoolListingsRefresh(env) {
-  const items = (await env.DB.prepare('SELECT item_id, account, title, price, qty, status, start_time FROM items_api').all()).results || [];
+  const items = (await env.DB.prepare('SELECT item_id, account, title, price, qty, status, start_time, primary_category FROM items_api').all()).results || [];
   const facts = {};
   for (const f of ((await env.DB.prepare('SELECT item_id, profit, ali_cost, category FROM items_facts').all()).results || [])) facts[f.item_id] = f;
   /* the listing's own orders, last 90 days: 0.8 × (sold − cost − fees) per unit, cost and fees both known */
@@ -3303,7 +3338,7 @@ async function adtoolListingsRefresh(env) {
     stmts.push(env.DB.prepare(
       'INSERT INTO adtool_listings (item_id, account, title, ebay_category_path, m98m_category, category_source, is_case, case_type, case_type_source, price, margin_before_ads, margin_source, breakeven_roas, start_time, quantity, status, first_ad_day, first_order_day, last_ad_day, campaigns_json, synced_at) ' +
       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, datetime('now')) ON CONFLICT(item_id) DO UPDATE SET account = ?2, title = ?3, ebay_category_path = ?4, m98m_category = ?5, category_source = ?6, is_case = ?7, case_type = ?8, case_type_source = ?9, price = ?10, margin_before_ads = ?11, margin_source = ?12, breakeven_roas = ?13, start_time = ?14, quantity = ?15, status = ?16, first_ad_day = ?17, first_order_day = ?18, last_ad_day = ?19, campaigns_json = ?20, synced_at = datetime('now')"
-    ).bind(it.item_id, it.account, it.title || '', String(f.category || ''), cat, ov && ov.m98m_category ? 'manual' : 'rule', tx.is_case ? 1 : 0, ct, ov && ov.case_type ? 'manual' : 'rule', Number(it.price) || 0, mg.margin, mg.source, (mg.margin && Number(it.price) > 0) ? round2(Number(it.price) / mg.margin) : null, it.start_time || '', Number(it.qty) || 0, it.status || '', firstAd[it.item_id] || '', firstOrder[it.item_id] || '', lastAd[it.item_id] || '', JSON.stringify(camps[it.item_id] || [])));
+    ).bind(it.item_id, it.account, it.title || '', String(it.primary_category || f.category || ''), cat, ov && ov.m98m_category ? 'manual' : 'rule', tx.is_case ? 1 : 0, ct, ov && ov.case_type ? 'manual' : 'rule', Number(it.price) || 0, mg.margin, mg.source, (mg.margin && Number(it.price) > 0) ? round2(Number(it.price) / mg.margin) : null, it.start_time || '', Number(it.qty) || 0, it.status || '', firstAd[it.item_id] || '', firstOrder[it.item_id] || '', lastAd[it.item_id] || '', JSON.stringify(camps[it.item_id] || [])));
   }
   return adtBatch(env, stmts);
 }
