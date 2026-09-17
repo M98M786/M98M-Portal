@@ -3314,7 +3314,8 @@ async function adtoolPrimaryCategoryFill(env, acct, tok) {
     if (xml.indexOf('<Ack>Failure</Ack>') >= 0) { stmts.push(env.DB.prepare("UPDATE items_api SET primary_category = '' WHERE item_id = ?1").bind(r.item_id)); continue; }
     const pc = xmlTag(xml, 'PrimaryCategory') || '';
     const name = String(xmlTag(pc, 'CategoryName') || ''), id = String(xmlTag(pc, 'CategoryID') || '');
-    const path = name.split(':').map(x => x.trim()).filter(Boolean).join(' > ');
+    const unxml = s => String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (m, c) => String.fromCharCode(Number(c)));
+    const path = unxml(name).split(':').map(x => x.trim()).filter(Boolean).join(' > ');   // eBay XML-escapes the names (&amp;)
     stmts.push(env.DB.prepare('UPDATE items_api SET primary_category = ?2 WHERE item_id = ?1').bind(r.item_id, path));
     if (id || path) stmts.push(env.DB.prepare('UPDATE adtool_listings SET ebay_category_id = ?2, ebay_category_path = ?3 WHERE item_id = ?1').bind(r.item_id, id, path));
     n++;
