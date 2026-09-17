@@ -3553,6 +3553,12 @@ async function adtoolRollups(env) {
       const fc = String(await adtFlag(env, 'adtool_forecast_cursor') || '');
       if (fc !== today + '|done' && Date.now() - t0 < 200000) { try { await adtoolForecast(env); } catch (e) { /* recorded by the job */ } }
     }
+    /* Phase 6: a boundary batch that was missed (a deploy in that minute, a cron that did not fire) is still
+       worth having while the report day is young — it is the weekday work for the day that has just started. */
+    if (cursor >= adtAddDays(today, -1) && (await adtFlag(env, 'adtool_decisions')) === 'on' && adtUkParts(Date.now()).hour < 5) {
+      const b = await env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND batch = 'boundary'").bind(today).first();
+      if (!b || !Number(b.n)) { try { await adtoolDecisionsBoundary(env); } catch (e) { /* recorded by the job */ } }
+    }
     /* Phase 5: the morning outputs catch up the same way (each is a no-op once it has today's row) */
     if (cursor >= adtAddDays(today, -1)) {
       if ((await adtFlag(env, 'adtool_report')) === 'on') { try { await adtoolReport(env); } catch (e) { /* recorded */ } }
