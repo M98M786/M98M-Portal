@@ -19194,11 +19194,18 @@ const ACTIONS_PERFORMANCE = {
 const SIG_TYPE_NEGATIVE = 'WENT NEGATIVE YESTERDAY';
 const SIG_TYPE_WORST_CPC = 'WORST CPC PERFORMER YESTERDAY';
 const SIG_TYPE_RETURNS = 'RETURNS ABOVE USUAL';
-const SIG_LAUNCH_TYPES = [SIG_TYPE_NEGATIVE, SIG_TYPE_WORST_CPC, SIG_TYPE_RETURNS];
+/* 18 Sept (owner: "advertising, customer service and signals — all signal pages should have
+   different signals; they should receive signals related to their own departments"). The CS desk
+   had one signal of its own (a per-item returns spike, rare) and was otherwise shown the
+   Advertising desk's loss cards. Two CS-only signals now come from the engine's eBay truth — the
+   feedback and cases tables it syncs — so the desk sees what actually landed on it yesterday. */
+const SIG_TYPE_NEG_FB = 'NEGATIVE FEEDBACK YESTERDAY';
+const SIG_TYPE_CASES = 'CASES OPENED YESTERDAY';
+const SIG_LAUNCH_TYPES = [SIG_TYPE_NEGATIVE, SIG_TYPE_WORST_CPC, SIG_TYPE_RETURNS, SIG_TYPE_NEG_FB, SIG_TYPE_CASES];
 
 /** The only §27 signal that carries no money, and therefore the only one a profit-restricted role
  * may ever receive. Anything else — including a type Management adds later — needs profit clearance. */
-const SIG_COUNT_ONLY_TYPES = [SIG_TYPE_RETURNS];
+const SIG_COUNT_ONLY_TYPES = [SIG_TYPE_RETURNS, SIG_TYPE_NEG_FB, SIG_TYPE_CASES];
 
 /** targeted_roles is a role list, except for this one token: §27 sends the returns signal to "the
  * owning lister", which is one named person per item, not a department. The owner is the lister
@@ -19209,7 +19216,9 @@ const SIG_TARGET_OWNING_LISTER = 'owning lister';
    manager too — I am talking about signals." An item that went negative is a price/margin problem
    the Advertising Manager can act on (pause the ad, move the tier), so they now receive and can
    see this signal alongside Management. WORST_CPC already reached them. */
-const SIG_ROLES_NEGATIVE = 'Management, Ops Head, Team Lead, CS, Advertising Manager';
+/* 18 Sept (owner): a loss item is an advertising/price matter — it no longer pages the CS desk. */
+const SIG_ROLES_NEGATIVE = 'Management, Ops Head, Team Lead, Advertising Manager';
+const SIG_ROLES_CS_DESK = 'Management, Ops Head, CS';
 const SIG_ROLES_WORST_CPC = 'Management, Ops Head, Advertising Manager';
 const SIG_ROLES_RETURNS = 'Management, Ops Head, CS, ' + SIG_TARGET_OWNING_LISTER;
 
@@ -19219,11 +19228,15 @@ const SIG_ACTIONS = {};
 SIG_ACTIONS[SIG_TYPE_NEGATIVE] = ['open record', 'create revision task', 'flag to advertising'];
 SIG_ACTIONS[SIG_TYPE_WORST_CPC] = ['pause', 'day-4 verdict', 'move tier'];
 SIG_ACTIONS[SIG_TYPE_RETURNS] = ['open case history'];
+SIG_ACTIONS[SIG_TYPE_NEG_FB] = ['open feedback desk'];
+SIG_ACTIONS[SIG_TYPE_CASES] = ['open case history'];
 
 const SIG_ROLES_FOR_TYPE = {};
 SIG_ROLES_FOR_TYPE[SIG_TYPE_NEGATIVE] = SIG_ROLES_NEGATIVE;
 SIG_ROLES_FOR_TYPE[SIG_TYPE_WORST_CPC] = SIG_ROLES_WORST_CPC;
 SIG_ROLES_FOR_TYPE[SIG_TYPE_RETURNS] = SIG_ROLES_RETURNS;
+SIG_ROLES_FOR_TYPE[SIG_TYPE_NEG_FB] = SIG_ROLES_CS_DESK;
+SIG_ROLES_FOR_TYPE[SIG_TYPE_CASES] = SIG_ROLES_CS_DESK;
 
 // ---------- CONFIG seeds (§27: "thresholds in CONFIG") ----------
 /** Seeded into CONFIG so Hasib can retune without a deploy; every read falls back to the value
@@ -19236,6 +19249,11 @@ const SIGNALS_CONFIG_DEFAULTS = {
   // A first-ever return is a data point, not a spike: with a 30-day rate of nothing, twice
   // nothing is still nothing and every single return would page CS, Management and a lister.
   signals_returns_min_day: '2',
+  // 18 Sept — the CS desk's own signals (engine feedback + cases tables), per account per day
+  signals_feedback_day_count: '2',        // negative/neutral feedback in one day that pages the CS desk
+  signals_cases_day_count: '3',           // returns + INR + cases opened in one day
+  signals_cases_multiple: '2',            // …or more than 2x the account's own 30-day daily rate
+  signals_cases_min_day: '2',
   signals_worst_cpc_per_account: '1',     // §27 says "the item(s)"; one per account by default
   signals_refresh_min_minutes: '15',      // the dashboard trigger's own cadence
   // How many days a signal stays PINNED. A loss/CPC/returns signal is about a specific day; once
@@ -19477,6 +19495,10 @@ function signalsThresholds_() {
     returnsDayCount: signalsThreshold_('signals_returns_day_count'),
     baselineDays: Math.max(1, Math.round(signalsThreshold_('signals_returns_baseline_days'))),
     returnsMinDay: Math.max(1, Math.round(signalsThreshold_('signals_returns_min_day'))),
+    feedbackDayCount: Math.max(1, Math.round(signalsThreshold_('signals_feedback_day_count'))),
+    casesDayCount: Math.max(1, Math.round(signalsThreshold_('signals_cases_day_count'))),
+    casesMultiple: signalsThreshold_('signals_cases_multiple'),
+    casesMinDay: Math.max(1, Math.round(signalsThreshold_('signals_cases_min_day'))),
     worstPerAccount: Math.max(1, Math.round(signalsThreshold_('signals_worst_cpc_per_account'))),
   };
 }
@@ -19559,7 +19581,7 @@ function computeSignals(args) {
   /* 13 Sept: phase timers ride in the summary ("t=fp 5s idx 12s …") so the log itself says where a
      slow quarter-hour went — the fingerprint calls, the Central index reads, the Returns reads,
      the day tabs, or the raise/prune/push tail. */
-  const tm = { fp: 0, idx: 0, ret: 0, days: 0, tail: 0 };
+  const tm = { fp: 0, idx: 0, ret: 0, days: 0, cs: 0, tail: 0 };
   const tFp0 = Date.now();
   const fpMap = signalsInputFingerprintMap_(accounts, days);
   tm.fp = Date.now() - tFp0;
@@ -19567,7 +19589,9 @@ function computeSignals(args) {
   const lastFp = String(props.getProperty('SIG_FP') || '');
   const lastAt = Number(props.getProperty('SIG_FP_AT') || 0);
   if (!force && fp === lastFp && (Date.now() - lastAt) < 3600000) {
-    return 'unchanged — no linked workbook moved since ' + new Date(lastAt).toISOString().slice(11, 16) + 'Z; scan skipped';
+    const skippedReport = 'unchanged — no linked workbook moved since ' + new Date(lastAt).toISOString().slice(11, 16) + 'Z; scan skipped';
+    try { PropertiesService.getScriptProperties().setProperty('SIG_LAST_SKIP', new Date().toISOString() + ' ' + skippedReport); } catch (e) {}
+    return skippedReport;
   }
   /* 13 Sept (owner: "make the speed fast"): the gate above is all-or-nothing — one processor
      typing on ONE account's day tab re-read every account's Central index + Returns log + day
@@ -19644,11 +19668,28 @@ function computeSignals(args) {
     if (!timedOut) scannedFp[account] = sk;
   }
 
+  /* 18 Sept: the CS desk's own signals — engine feedback + cases, once per hourly full pass (the
+     engine syncs feedback hourly), never gated by a workbook fingerprint. */
+  if (fullPass && !timedOut) {
+    const tCs0 = Date.now();
+    try {
+      const facts = signalsEngineCsFacts_(days);
+      if (facts.ok) { accounts.forEach(function (account) { days.forEach(function (day) { signalsCsSignals_(account, day, th, facts, found); }); }); }
+      else logActivity_('system', 'SIGNALS_CS_FACTS_FAIL', '', '', '', facts.reason);
+    } catch (e) { logActivity_('system', 'SIGNALS_SCAN_FAIL', '', '', '', 'cs ' + String(e && e.message || e).slice(0, 100)); }
+    tm.cs = Date.now() - tCs0;
+  }
+
   const tTail0 = Date.now();
-  const fresh = signalsRaise_(found, 'system');
+  /* 18 Sept: every tail step is fenced and the engine mirror is pushed BEFORE the prune — from
+     16 Sept 09:06 no run reached the push for 34 hours and the board froze on the 14th with
+     nothing in any log to say why. A raise that fails is now logged and the mirror still moves. */
+  let fresh = [];
+  try { fresh = signalsRaise_(found, 'system'); } catch (e) { logActivity_('system', 'SIGNALS_RAISE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
+  const pushedRows = signalsPushEngine_(true);
   let pruned = 0;
   try { pruned = signalsPrune_(); } catch (e) { logActivity_('system', 'SIGNALS_PRUNE_FAIL', '', '', '', String(e && e.message || e).slice(0, 120)); }
-  CacheService.getScriptCache().put(SIG_LAST_RUN_KEY, String(Date.now()), 21600);
+  try { CacheService.getScriptCache().put(SIG_LAST_RUN_KEY, String(Date.now()), 21600); } catch (e) {}
 
   const order = days.map(function (d) { return perDay[d]; });
   const span = days.length > 1 ? days[days.length - 1] + '..' + days[0] : days[0];
@@ -19663,15 +19704,24 @@ function computeSignals(args) {
     nextMap.__days = days.join(',');
     props.setProperty('SIG_FP_MAP', JSON.stringify(nextMap));
   } catch (e) {}
-  try { signalsPushEngine_(true); } catch (e) {}
   tm.tail = Date.now() - tTail0;
   const sec = function (ms) { return (ms / 1000).toFixed(1) + 's'; };
-  return 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
+  const report = 'signals ' + span + ': ' + fresh.length + ' newly raised [' + summary + ']'
     + (pruned ? ', ' + pruned + ' old pruned' : '')
     + (skipped.length ? ', ' + skipped.length + ' unchanged account(s) skipped' : '')
-    + ' t=fp ' + sec(tm.fp) + ' idx ' + sec(tm.idx) + ' ret ' + sec(tm.ret) + ' days ' + sec(tm.days) + ' tail ' + sec(tm.tail)
+    + ', mirror ' + (pushedRows < 0 ? 'PUSH FAILED' : pushedRows + ' rows')
+    + ' t=fp ' + sec(tm.fp) + ' idx ' + sec(tm.idx) + ' ret ' + sec(tm.ret) + ' days ' + sec(tm.days) + ' cs ' + sec(tm.cs) + ' tail ' + sec(tm.tail)
     + (timedOut ? ', time budget hit — rest next run' : '')
     + (unhealthy ? ' | diag=' + JSON.stringify(order).slice(0, 1800) : '');
+  signalsRememberRun_(props, report, fresh.length, pushedRows);
+  return report;
+}
+/** 18 Sept: the engine calls this scan every quarter hour and throws its answer away, so a run
+ * that died left no trace anywhere a person could read. The last report now lives in Script
+ * Properties (signalsStatus shows it to Management) and every run writes one ACTIVITY_LOG line. */
+function signalsRememberRun_(props, report, raised, pushed) {
+  try { props.setProperty('SIG_LAST_SUMMARY', JSON.stringify({ at: new Date().toISOString(), text: String(report).slice(0, 900), raised: raised, pushed: pushed })); } catch (e) {}
+  try { logActivity_('system', 'SIGNALS_RUN', '', '', String(raised), String(report).slice(0, 200)); } catch (e) {}
 }
 
 /** Accounts whose Sales Analysis or Order Processing workbook is linked (§6) — never a list in
@@ -19907,6 +19957,76 @@ function signalsReturnsSignals_(account, day, th, read, index, owners, found) {
   });
 }
 
+/* ---------- 18 Sept: the CS desk's own signals, from the engine ---------- */
+/** One pull per run of the engine's feedback (negative/neutral only) and cases rows back to the
+ * oldest scanned day minus the baseline window. backupDump pages in insertion order, so the
+ * whole table is walked once (feedback ~6k rows = two pages) and only the window is kept. */
+function signalsEngineCsFacts_(days) {
+  const out = { ok: false, feedback: [], cases: [], reason: '' };
+  try {
+    const oldest = days[days.length - 1];
+    const since = signalsAddDays_(oldest, -Math.max(1, Math.round(signalsThreshold_('signals_returns_baseline_days'))));
+    const pull = function (table, dateOf, keep) {
+      const rows = [];
+      let offset = 0;
+      for (let page = 0; page < 8; page++) {
+        const d = enginePost_('backupDump', { table: table, offset: offset, limit: 4000 }) || {};
+        const header = d.header || [], got = d.rows || [];
+        got.forEach(function (r) {
+          const o = {};
+          header.forEach(function (h, i) { o[h] = r[i]; });
+          if (String(dateOf(o) || '').slice(0, 10) >= since && keep(o)) rows.push(o);
+        });
+        if (d.done || !got.length) break;
+        offset += got.length;
+      }
+      return rows;
+    };
+    out.feedback = pull('feedback', function (o) { return o.at; }, function (o) { return String(o.type) === 'Negative' || String(o.type) === 'Neutral'; });
+    out.cases = pull('cases', function (o) { return o.opened_at; }, function () { return true; });
+    out.ok = true;
+  } catch (e) { out.reason = String(e && e.message || e).slice(0, 100); }
+  return out;
+}
+/** Two account-level, count-only cards for one day: negative/neutral feedback (at or above the
+ * day count) and cases opened (returns + INR + cases, a spike against the account's own rate). */
+function signalsCsSignals_(account, day, th, facts, found) {
+  const baseStart = signalsAddDays_(day, -th.baselineDays);
+  const split = function (rows, dateOf) {
+    const inDay = [], base = [];
+    rows.forEach(function (r) {
+      if (String(r.account || '') !== account) return;
+      const when = String(dateOf(r) || '').slice(0, 10);
+      if (when === day) inDay.push(r);
+      else if (when >= baseStart && when < day) base.push(r);
+    });
+    return { day: inDay, base: base };
+  };
+  const fb = split(facts.feedback, function (r) { return r.at; });
+  if (fb.day.length >= th.feedbackDayCount) {
+    const rate = Math.round((fb.base.length / th.baselineDays) * 100) / 100;
+    found.push(signalsCandidate_(account, SIG_TYPE_NEG_FB, day, { key: 'feedback', item_id: '', image: '' },
+      fb.day.length + ' negative or neutral feedback', null, fb.day.length, rate, {
+        feedback: fb.day.slice(0, 8).map(function (r) { return { buyer: String(r.buyer || ''), type: String(r.type || ''), text: signalsText_(r.text, 140), item_id: String(r.item_id || '') }; }),
+        baseline_days: th.baselineDays, baseline_count: fb.base.length, baseline_per_day: rate,
+      }));
+  }
+  const cs = split(facts.cases, function (r) { return r.opened_at; });
+  if (cs.day.length) {
+    const rate = cs.base.length / th.baselineDays;
+    const spike = cs.day.length >= th.casesDayCount || (cs.day.length >= th.casesMinDay && cs.day.length > th.casesMultiple * rate);
+    if (spike) {
+      const kinds = {};
+      cs.day.forEach(function (r) { const k = String(r.kind || 'CASE'); kinds[k] = (kinds[k] || 0) + 1; });
+      found.push(signalsCandidate_(account, SIG_TYPE_CASES, day, { key: 'cases', item_id: '', image: '' },
+        cs.day.length + ' cases opened', null, cs.day.length, Math.round(rate * 100) / 100, {
+          cases: cs.day.slice(0, 8).map(function (r) { return { kind: String(r.kind || ''), buyer: String(r.buyer || ''), order_id: String(r.order_id || ''), item_id: String(r.item_id || ''), reason: signalsText_(r.reason, 80), status: String(r.status || '') }; }),
+          kinds: signalsCounts_(kinds), baseline_days: th.baselineDays, baseline_count: cs.base.length, baseline_per_day: Math.round(rate * 100) / 100,
+        }));
+    }
+  }
+}
+
 function signalsCounts_(bag) {
   return Object.keys(bag).map(function (k) { return { label: k, count: bag[k] }; })
     .sort(function (a, b) { return b.count - a.count; });
@@ -20045,7 +20165,13 @@ function signalsCacheCards_(db, found, stamp) {
   found.forEach(function (f) {
     const json = JSON.stringify(f.card);
     const k = f.account + '|' + f.period;
-    if (at[k]) {
+    /* 18 Sept: a card queued for APPEND in this run was marked at[k] = -1, and when the same item
+       sat on a day tab twice (two rows, one title) the second copy took that -1 for a sheet row —
+       getRange(-1, …) → "The starting row of the range is too small". Inside the raise, unfenced,
+       so every quarter-hour scan died there from 16 Sept 09:21 and no signal moved for 34 hours.
+       The first copy of a card wins; a row number below 1 is never a row. */
+    if (at[k] === -1) return;
+    if (at[k] > 0) {
       if (was[k] === json) return;
       sh.getRange(at[k], 1, 1, 5).setValues([[SIG_DASH_METRIC, f.account, f.period, json, stamp]]);
       was[k] = json;
@@ -20119,6 +20245,14 @@ function signalsMessage_(f) {
   if (f.type === SIG_TYPE_RETURNS) {
     return '🟠 Returns spike on ' + head + ' — ' + f.value + ' return(s) on ' + f.date +
       ' against its own ' + f.card.baseline_days + '-day rate of ' + f.baseline + ' a day. Check the listing photos/description and the supplier batch before it costs more.';
+  }
+  if (f.type === SIG_TYPE_NEG_FB) {
+    return '🟠 ' + f.value + ' negative or neutral feedback on ' + f.account + ' on ' + f.date + ' (its usual line is ' + f.baseline +
+      ' a day). Read each one on the Feedback desk, reply, and ask for a revision where the buyer was helped.';
+  }
+  if (f.type === SIG_TYPE_CASES) {
+    return '🟠 ' + f.value + ' cases opened on ' + f.account + ' on ' + f.date + ' (returns, item-not-received and disputes; its usual line is ' + f.baseline +
+      ' a day). Work them the same day from the Returns and CS desks so none escalates.';
   }
   return '🔵 ' + f.type + ' · ' + head + ' on ' + f.date + '.';
 }
@@ -20592,8 +20726,23 @@ function signalsCol_(head, name) {
   return c + 1;
 }
 
+/** 18 Sept: what the scan last reported — the run text with its timings and diag, when, and how
+ * many rows reached the engine mirror. Management only; the answer to "are signals working?". */
+function actionSignalsStatus_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('SAY: Management only');
+  const props = PropertiesService.getScriptProperties();
+  let last = null;
+  try { last = JSON.parse(props.getProperty('SIG_LAST_SUMMARY') || 'null'); } catch (e) { last = null; }
+  return {
+    last_run: last, last_skip: String(props.getProperty('SIG_LAST_SKIP') || ''),
+    fingerprint_at: Number(props.getProperty('SIG_FP_AT') || 0) ? new Date(Number(props.getProperty('SIG_FP_AT'))).toISOString() : '',
+    now: new Date().toISOString(), types: SIG_LAUNCH_TYPES,
+  };
+}
+
 const ACTIONS_SIGNALS = {
   mySignals:         [actionMySignals_, 'any'],
+  signalsStatus:     [actionSignalsStatus_, 'any'],
   acknowledgeSignal: [actionAcknowledgeSignal_, 'any'],
   acknowledgeAllSignals: [actionAcknowledgeAllSignals_, 'any'],
 };
