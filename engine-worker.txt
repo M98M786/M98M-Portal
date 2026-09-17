@@ -166,7 +166,7 @@ export default {
          profiles / forecast / report / decisions / analyst as their phases land. Every job is
          flag-gated in portal_config (adtool_*); flags off = the invocation returns at once. */
       '20 * * * *': [adtoolRollups],
-      '20 5 * * *': [adtoolTruth],
+      '20 5 * * *': [adtoolTruth, adtoolProfiles],
       /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
          quarter-hour trigger (:05/:20/:35/:50). The Apps Script side fingerprints its inputs and
          skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
@@ -3534,6 +3534,12 @@ async function adtoolRollups(env) {
     }
     note = notes.join(', ') + ' in ' + Math.round((Date.now() - t0) / 1000) + 's';
     await adtJobEnd(env, 'adtoolRollups', t, rows, 'ok', note);
+    /* Phase 3: profiles for today are built in the morning chain; if that run was cut short (or the flag went on
+       mid-day) the hourly slot finishes them a batch at a time, once the history itself is complete */
+    if (cursor >= adtAddDays(today, -1) && (await adtFlag(env, 'adtool_profiles')) === 'on') {
+      const pc = String(await adtFlag(env, 'adtool_profiles_cursor') || '');
+      if (pc !== today + '|done' && Date.now() - t0 < 200000) { try { await adtoolProfiles(env); } catch (e) { /* recorded by the job */ } }
+    }
     /* once the history is complete, the truth check runs right away if a fixture is loaded and no
        parity run exists for today — the 05:20 UTC slot then only repeats it */
     if (cursor >= adtAddDays(today, -1)) {
@@ -3802,10 +3808,11 @@ const ADTOOL_ACTIONS = {
       for (const x of dom) x.units_day = x.dates ? round2(x.units / x.dates) : null;
       const camps = JSON.parse(L.campaigns_json || '[]');
       let where = null; try { where = await adtWhereRows(env, iid); } catch (e) { where = null; }
+      let profile = null; try { profile = await adtListingProfileBundle(env, iid); } catch (e) { profile = null; }
       const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
       return {
         header: { item_id: iid, account: L.account, title: L.title, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null },
-        kpis, campaigns: camps, where, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
+        kpis, campaigns: camps, where, profile, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
         hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
         computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Brain v17)', sample_size: days.length,
       };
@@ -4093,6 +4100,433 @@ const ADTOOL_ACTIONS_P2 = {
   },
 };
 /* ADTOOL-P2-END ===================================================================================== */
+/* ADTOOL-P3-BEGIN ===================================================================================
+   Advertising Tool — Phase 3: profiles with shrinkage, pattern memory / regimes, behaviour descriptors and
+   lifecycle stages (spec §6.3, §6.3a, §6.4, §6.5) + the Accounts / Categories / Phone cases / Time slots
+   pages (§7). Job behind portal_config.adtool_profiles; pages behind adtool_page_accounts / _categories /
+   _cases / _slots. Everything is computed from the tool's own rollups; nothing is written to eBay. */
+/* ADTOOL-P3-PURE-BEGIN */
+function adtRng(seed) {
+  /* mulberry32: a small seeded generator so every p-value is reproducible from (item id, day) */
+  let a = (Number(seed) >>> 0) || 1;
+  return function () { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function adtSeedFrom(str) { let h = 2166136261; const s = String(str); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
+function adtDecay(ageDays, halfLife) { return Math.pow(0.5, Math.max(0, ageDays) / (halfLife || 14)); }
+function adtShrink(sum, n, prior, kappa) { return (sum + kappa * (prior || 0)) / (n + kappa); }
+function adtWeekdayProfile(days, priorRates, kappa, todayYmd) {
+  /* days: [{day, units}] (any span of history); priorRates: 7 rates (units/day) from the level above; kappa = 4 days.
+     Decayed weights (half-life 14 days) so the profile follows the listing without forgetting old days. */
+  const K = kappa == null ? 4 : kappa;
+  const acc = ADTOOL_DOW.map(() => ({ n: 0, w: 0, wu: 0, raw: 0 }));
+  const today = todayYmd || (days.length ? days[days.length - 1].day : '');
+  for (const d of days) {
+    const wd = adtWeekdayOf(d.day); const age = today ? Math.round((new Date(today + 'T00:00:00Z') - new Date(d.day + 'T00:00:00Z')) / 86400000) : 0;
+    const w = adtDecay(age, 14); const a = acc[wd]; a.n++; a.w += w; a.wu += w * (Number(d.units) || 0); a.raw += Number(d.units) || 0;
+  }
+  return acc.map((a, i) => ({ day: ADTOOL_DOW[i], n: a.n, raw_rate: a.n ? a.raw / a.n : null, rate: adtShrink(a.wu, a.w, priorRates ? priorRates[i] : 0, K), prior: priorRates ? priorRates[i] : null, weight: a.w }));
+}
+function adtShareProfile(counts, priorShares, kappa) {
+  /* slots (4, kappa 20 orders) and hour × weekday cells (168, kappa 30): shrunk shares that sum to 1 */
+  const total = counts.reduce((t, v) => t + v, 0);
+  const out = counts.map((c, i) => adtShrink(c, total, priorShares ? priorShares[i] : 1 / counts.length, kappa));
+  const s = out.reduce((t, v) => t + v, 0) || 1;
+  return { shares: out.map(v => v / s), n: total };
+}
+function adtPermWeekday(values, wds, d, N, rng) {
+  /* the review's test (analyze30, 20,000 draws): mean of the dates on weekday d minus the mean of the other dates,
+     against random subsets of the same size. p = share of draws at least as extreme. */
+  const idx = values.map((v, i) => i); const k = wds.filter(w => w === d).length;
+  if (!k || k === values.length) return { diff: null, p: null, k };
+  const mean = arr => arr.reduce((t, v) => t + v, 0) / arr.length;
+  const inD = values.filter((v, i) => wds[i] === d), outD = values.filter((v, i) => wds[i] !== d);
+  const obs = mean(inD) - mean(outD); let cnt = 0;
+  const total = values.reduce((t, v) => t + v, 0);
+  for (let s = 0; s < N; s++) {
+    /* partial Fisher–Yates: draw k distinct indices */
+    const pool = idx.slice(); let sumIn = 0;
+    for (let j = 0; j < k; j++) { const r = j + Math.floor(rng() * (pool.length - j)); const t = pool[j]; pool[j] = pool[r]; pool[r] = t; sumIn += values[pool[j]]; }
+    const mIn = sumIn / k, mOut = (total - sumIn) / (values.length - k);
+    if (Math.abs(mIn - mOut) >= Math.abs(obs) - 1e-12) cnt++;
+  }
+  return { diff: Math.round(obs * 100) / 100, p: Math.round(cnt / N * 1000) / 1000, k };
+}
+function adtPermSpread(values, wds, N, rng) {
+  /* spec §6.3: shuffle the day labels, compare the spread (standard deviation) of the seven weekday means */
+  const spread = labels => { const s = [0, 0, 0, 0, 0, 0, 0], n = [0, 0, 0, 0, 0, 0, 0]; for (let i = 0; i < values.length; i++) { s[labels[i]] += values[i]; n[labels[i]]++; } const m = s.map((v, i) => n[i] ? v / n[i] : null).filter(v => v != null); if (m.length < 2) return 0; const mu = m.reduce((t, v) => t + v, 0) / m.length; return Math.sqrt(m.reduce((t, v) => t + (v - mu) * (v - mu), 0) / m.length); };
+  const obs = spread(wds); let cnt = 0; const lab = wds.slice();
+  for (let s = 0; s < N; s++) { for (let i = lab.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = lab[i]; lab[i] = lab[j]; lab[j] = t; } if (spread(lab) >= obs - 1e-12) cnt++; }
+  return { spread: Math.round(obs * 1000) / 1000, p: Math.round(cnt / N * 1000) / 1000 };
+}
+function adtJsd(p, q) {
+  /* Jensen–Shannon divergence (base-2 logs, 0..1) between two share vectors */
+  const n = Math.max(p.length, q.length); const sp = p.reduce((t, v) => t + v, 0) || 1, sq = q.reduce((t, v) => t + v, 0) || 1;
+  let d = 0; for (let i = 0; i < n; i++) { const a = (p[i] || 0) / sp, b = (q[i] || 0) / sq, m = (a + b) / 2; if (a > 0) d += 0.5 * a * Math.log2(a / m); if (b > 0) d += 0.5 * b * Math.log2(b / m); }
+  return d;
+}
+function adtRegime(dailyShapes, threshold, consecutive, minCount) {
+  /* dailyShapes: oldest → newest, each {day, counts:[24]}; compares the last 7 days' shape with the prior 28 days',
+     on each of the last `consecutive` days. A new regime when every one of those days diverges above threshold. */
+  const th = threshold == null ? 0.05 : threshold, C = consecutive || 3, minN = minCount == null ? 20 : minCount;
+  const n = dailyShapes.length; if (n < 35) return { regime_change: false, reason: 'fewer than 35 days', divergences: [] };
+  const sum = arr => arr.reduce((t, c) => { for (let h = 0; h < 24; h++) t[h] += c.counts[h] || 0; return t; }, new Array(24).fill(0));
+  const divs = [];
+  for (let back = 0; back < C; back++) {
+    const end = n - back; const last7 = dailyShapes.slice(Math.max(0, end - 7), end), prior28 = dailyShapes.slice(Math.max(0, end - 35), end - 7);
+    const a = sum(last7), b = sum(prior28); const na = a.reduce((t, v) => t + v, 0), nb = b.reduce((t, v) => t + v, 0);
+    if (na < minN || nb < minN) return { regime_change: false, reason: 'too few orders (' + na + ' / ' + nb + ')', divergences: divs };
+    divs.push({ day: dailyShapes[end - 1].day, jsd: Math.round(adtJsd(a, b) * 10000) / 10000, last7: a, prior28: b });
+  }
+  const change = divs.length === C && divs.every(x => x.jsd > th);
+  let note = '';
+  if (change) { const a = divs[0].last7, b = divs[0].prior28; const sa = a.reduce((t, v) => t + v, 0) || 1, sb = b.reduce((t, v) => t + v, 0) || 1; const slotOf = h => h < 6 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'; const sh = {}; for (let h = 0; h < 24; h++) { const s = slotOf(h); sh[s] = sh[s] || [0, 0]; sh[s][0] += a[h] / sa; sh[s][1] += b[h] / sb; } const moved = Object.keys(sh).map(s => ({ s, now: sh[s][0], was: sh[s][1], d: Math.abs(sh[s][0] - sh[s][1]) })).sort((x, y) => y.d - x.d).slice(0, 2).sort((x, y) => (y.now - y.was) - (x.now - x.was)); note = moved.map(m => m.s + ' share ' + Math.round(m.was * 100) + ' % → ' + Math.round(m.now * 100) + ' %').join(', '); }
+  return { regime_change: change, divergences: divs, note };
+}
+function adtCenteredMA(values, w) {
+  const h = Math.floor((w || 7) / 2); return values.map((v, i) => { let s = 0, n = 0; for (let j = i - h; j <= i + h; j++) { if (j >= 0 && j < values.length) { s += values[j]; n++; } } return n ? s / n : 0; });
+}
+function adtTheilSen(values) {
+  /* median of pairwise slopes per unit step (robust to a bank-holiday spike) */
+  const n = values.length; if (n < 2) return 0; const slopes = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) slopes.push((values[j] - values[i]) / (j - i));
+  slopes.sort((a, b) => a - b); const m = slopes.length; return m % 2 ? slopes[(m - 1) / 2] : (slopes[m / 2 - 1] + slopes[m / 2]) / 2;
+}
+function adtPelt(series, penalty) {
+  /* PELT with a mean-shift (sum of squared residuals) cost; returns the changepoint start indices (0 excluded) */
+  const n = series.length; if (n < 4) return [];
+  const pen = penalty == null ? 2 * Math.log(n) : penalty;
+  const cs = [0], cs2 = [0]; for (let i = 0; i < n; i++) { cs.push(cs[i] + series[i]); cs2.push(cs2[i] + series[i] * series[i]); }
+  const cost = (a, b) => { const m = b - a; if (m <= 0) return 0; const s = cs[b] - cs[a], s2 = cs2[b] - cs2[a]; return s2 - s * s / m; };
+  const F = new Array(n + 1).fill(Infinity), prev = new Array(n + 1).fill(0); F[0] = -pen; let cands = [0];
+  for (let t = 1; t <= n; t++) {
+    let best = Infinity, bi = 0;
+    for (const s of cands) { const v = F[s] + cost(s, t) + pen; if (v < best) { best = v; bi = s; } }
+    F[t] = best; prev[t] = bi;
+    cands = cands.filter(s => F[s] + cost(s, t) <= F[t]); cands.push(t);
+  }
+  const cps = []; let t = n; while (t > 0) { const s = prev[t]; if (s > 0) cps.push(s); t = s; }
+  return cps.sort((a, b) => a - b);
+}
+function adtStage(input) {
+  /* input: {units: [daily units, oldest → newest, all history], ageDays, firstOrderAgeDays, adActive, prevStage, prevDaysInStage}
+     spec §6.5 rules in order; slopes on log1p of the 7-day centred average; slope as % per day */
+  const u = input.units || [];
+  const n = u.length; const last = (k) => u.slice(Math.max(0, n - k));
+  const sum = arr => arr.reduce((t, v) => t + v, 0);
+  const m = adtCenteredMA(u, 7).map(v => Math.log1p(v));
+  const slope28 = n >= 8 ? adtTheilSen(m.slice(Math.max(0, n - 28))) * 100 : 0;      // % per day (log scale)
+  const level28 = n ? sum(last(28)) / Math.min(28, n) : 0;
+  let peak = 0; for (let i = 0; i < n; i++) { const w = u.slice(Math.max(0, i - 27), i + 1); peak = Math.max(peak, sum(w) / w.length); }
+  const prevSeg = n > 28 ? sum(u.slice(Math.max(0, n - 56), n - 28)) / Math.min(28, n - 28) : level28;
+  /* decline persistence: the 28-day slope evaluated on each of the last 14 days */
+  let declineDays = 0; for (let back = 0; back < 14 && n - back >= 8; back++) { const seg = m.slice(Math.max(0, n - back - 28), n - back); if (adtTheilSen(seg) * 100 < -1) declineDays++; else break; }
+  const weeks = []; for (let i = n; i > 0; i -= 7) weeks.unshift(sum(u.slice(Math.max(0, i - 7), i)));
+  const cps = weeks.length >= 4 ? adtPelt(weeks) : [];
+  const changepointWeeksAgo = cps.length ? weeks.length - cps[cps.length - 1] : null;
+  const units42 = sum(last(42)), units14 = sum(last(14));
+  let stage = 'Plateau';
+  if (units42 === 0 && !input.adActive) stage = 'Dead';
+  else if (units14 < 1 && sum(u) > 0) stage = 'Dormant';
+  else if ((input.ageDays != null && input.ageDays < 28) || (input.firstOrderAgeDays != null && input.firstOrderAgeDays < 21)) stage = 'Launch';
+  else if (slope28 > 1 && level28 >= 1.2 * prevSeg) stage = 'Growth';
+  else if (slope28 < -1 && declineDays >= 14 && level28 < 0.8 * peak) stage = 'Decline';
+  const l28 = last(28); const mu = l28.length ? sum(l28) / l28.length : 0; const cv = mu > 0 ? Math.sqrt(l28.reduce((t, v) => t + (v - mu) * (v - mu), 0) / l28.length) / mu : 1;
+  const confidence = Math.min(0.95, Math.max(0.2, 1 - 1 / Math.sqrt(Math.max(1, n)) - 0.5 * cv));
+  const daysInStage = (input.prevStage === stage) ? (Number(input.prevDaysInStage) || 0) + 1 : 1;
+  const label = stage === 'Decline' && daysInStage < 21 ? 'Early decline' : stage;
+  return { stage, label, confidence: Math.round(confidence * 100) / 100, slope28: Math.round(slope28 * 100) / 100, level28: Math.round(level28 * 100) / 100, peak_level: Math.round(peak * 100) / 100, prev_segment: Math.round(prevSeg * 100) / 100, decline_days: declineDays, changepoint_weeks_ago: changepointWeeksAgo, days_in_stage: daysInStage, cv28: Math.round(cv * 100) / 100 };
+}
+function adtDescriptors(dayRows, weekly, weekdayProfile, slotShares, pSpread) {
+  /* §6.4, all on the last 28 days unless stated: weekday effect, slot concentration, volatility, intermittency, ad dependence, elasticity */
+  const last28 = dayRows.slice(-28);
+  const units = last28.map(r => Number(r.units) || 0), attr = last28.reduce((t, r) => t + (Number(r.attr_units) || 0), 0), tot = units.reduce((t, v) => t + v, 0);
+  const mu = units.length ? tot / units.length : 0; const cv = mu > 0 ? Math.sqrt(units.reduce((t, v) => t + (v - mu) * (v - mu), 0) / units.length) / mu : null;
+  const rates = weekdayProfile.map(w => w.rate); let bi = 0, wi = 0; rates.forEach((r, i) => { if (r > rates[bi]) bi = i; if (r < rates[wi]) wi = i; });
+  const hhi = slotShares.reduce((t, s) => t + s * s, 0);
+  /* elasticity: weeks with distinct spend levels (≥ 20 % apart) → median Δ attributed units ÷ Δ spend between consecutive weeks */
+  const el = []; for (let i = 1; i < weekly.length; i++) { const a = weekly[i - 1], b = weekly[i]; if (a.spend > 0 && Math.abs(b.spend - a.spend) >= 0.2 * a.spend) el.push((b.attr_units - a.attr_units) / (b.spend - a.spend)); }
+  el.sort((a, b) => a - b);
+  return {
+    weekday_best: ADTOOL_DOW[bi], weekday_worst: ADTOOL_DOW[wi], weekday_ratio: rates[wi] > 0 ? Math.round(rates[bi] / rates[wi] * 100) / 100 : null, weekday_p: pSpread == null ? null : pSpread, weekday_label: pSpread == null ? 'not enough data' : (pSpread < 0.05 ? 'real weekday effect' : 'within noise'),
+    top_slot: [0, 1, 2, 3].reduce((b, i) => slotShares[i] > slotShares[b] ? i : b, 0), top_slot_share: Math.round(Math.max.apply(null, slotShares) * 1000) / 1000, slot_hhi: Math.round(hhi * 1000) / 1000,
+    volatility_cv28: cv == null ? null : Math.round(cv * 100) / 100, intermittency28: units.length ? Math.round(units.filter(v => v === 0).length / units.length * 100) / 100 : null,
+    ad_dependence28: tot > 0 ? Math.round(attr / tot * 100) / 100 : null, spend_elasticity: el.length ? Math.round(el[Math.floor(el.length / 2)] * 1000) / 1000 : null, elasticity_levels: el.length + 1,
+  };
+}
+/* ADTOOL-P3-PURE-END */
+
+let ADTOOL_P3_SCHEMA_OK = false;
+async function ensureAdtoolPhase3Schema(env) {
+  if (ADTOOL_P3_SCHEMA_OK) return;
+  await ensureAdtoolPhase1Schema(env);
+  const ddl = [
+    'CREATE TABLE IF NOT EXISTS adtool_profiles (scope TEXT NOT NULL, scope_id TEXT NOT NULL, kind TEXT NOT NULL, computed_day TEXT NOT NULL, json TEXT, PRIMARY KEY (scope, scope_id, kind, computed_day))',
+    'CREATE INDEX IF NOT EXISTS idx_adtp_latest ON adtool_profiles(scope, kind, computed_day)',
+    "CREATE TABLE IF NOT EXISTS adtool_stages (account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, stage TEXT, label TEXT DEFAULT '', confidence REAL, slope28 REAL, level28 REAL, peak_level REAL, days_in_stage INTEGER, changepoint_day TEXT DEFAULT '', PRIMARY KEY (item_id, day))",
+    'CREATE INDEX IF NOT EXISTS idx_adts_day ON adtool_stages(day, stage)',
+    'CREATE TABLE IF NOT EXISTS adtool_descriptors (item_id TEXT NOT NULL, day TEXT NOT NULL, json TEXT, PRIMARY KEY (item_id, day))',
+    "CREATE TABLE IF NOT EXISTS adtool_regimes (scope TEXT, scope_id TEXT, kind TEXT, detected_day TEXT, note TEXT DEFAULT '', shape_json TEXT, PRIMARY KEY (scope, scope_id, kind, detected_day))",
+    "CREATE TABLE IF NOT EXISTS adtool_stage_events (item_id TEXT, day TEXT, from_stage TEXT, to_stage TEXT, account TEXT DEFAULT '', PRIMARY KEY (item_id, day))",
+  ];
+  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtoolRegisterSeedP3(env);
+  ADTOOL_P3_SCHEMA_OK = true;
+}
+const ADTOOL_REGISTER_P3 = [
+  ['PROFILE_WEEKDAY', 'Weekday rate per listing (units/day), shrunk', '(Σ w·units_dow + 4·prior) ÷ (Σ w + 4), w = 0.5^(age/14); prior = account × M98M-category rate shrunk (κ 20) to the account rate', 'adtool_listing_day', 'adtoolProfiles daily 05:20 UTC (+ hourly catch-up when incomplete)', 'raw n and rate stored next to the shrunk rate; fixture window shuffle test'],
+  ['PROFILE_WEEKDAY_P', 'Weekday effect p-value per listing', 'permutation test: day labels shuffled 1,000 times (seeded by item id + day), spread = SD of the seven weekday means; label real weekday effect when p < 0.05', 'adtool_listing_day', 'same', 'fleet: Saturday significant, Tue/Thu not, on 17 Aug – 15 Sep (ADTOOL_SHUFFLE_FLEET)'],
+  ['PROFILE_SLOT', 'Slot share per listing, shrunk', '(orders_slot + 20·prior_share) ÷ (orders + 20), prior = account slot share', 'adtool_orders', 'same', 'shares sum to 1; n stored'],
+  ['PROFILE_HOUR_WEEKDAY', 'Hour × weekday cell share per listing, shrunk', '(orders_cell + 30·prior_cell) ÷ (orders + 30), prior = account cell share', 'adtool_orders', 'same', 'n stored'],
+  ['PROFILE_DOM', 'Date-of-month buckets and month-position bands', '31 buckets (κ 3), shown only with ≥ 90 days of history; bands 1–7 / 8–14 / 15–21 / 22–24 / 25–31 at fleet, account and category level', 'adtool_listing_day', 'same', 'review: 25th–31st best stretch, 1st–7th most spend'],
+  ['REGIME_CHANGE', 'Pattern change (A17 input)', 'Jensen–Shannon divergence of the last 7 days\' hourly order shape vs the prior 28 days > 0.05 on 3 consecutive days (≥ 20 orders in each window)', 'adtool_orders', 'same', 'synthetic shift test in the unit suite'],
+  ['STAGE', 'Lifecycle stage per listing per day', 'Dead / Dormant / Launch / Growth / Decline / Plateau in that order (§6.5) from Theil–Sen slope of log1p(7-day centred average) over 28 days, 28-day level vs previous segment and peak, PELT changepoints on weekly units; confidence = 1 − 1/√days − 0.5·CV clipped 0.2..0.95', 'adtool_listing_day, adtool_listings, campaign_ads', 'same', 'stage flips recorded in adtool_stage_events'],
+  ['DESCRIPTORS', 'Behaviour descriptors per listing', 'best/worst weekday + ratio + p; top slot share + HHI; CV of daily units (28 d); zero-sale day share (28 d); attributed ÷ total units (28 d); spend elasticity = median Δ attributed units ÷ Δ spend across weeks with ≥ 20 % spend difference', 'adtool_listing_day, adtool_listing_week, profiles', 'same', 'stored as JSON per day'],
+];
+async function adtoolRegisterSeedP3(env) {
+  const stmts = ADTOOL_REGISTER_P3.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 3, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 3").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  return adtBatch(env, stmts);
+}
+
+/* ---- the profiles job: fleet / account / category priors first, then listings in batches with a cursor ---- */
+const ADTOOL_PROFILE_BATCH = 600;
+async function adtoolProfiles(env) {
+  if ((await adtFlag(env, 'adtool_profiles')) !== 'on') return;
+  await ensureAdtoolPhase3Schema(env);
+  const t = await adtJobStart(env, 'adtoolProfiles');
+  let rows = 0, note = '';
+  try {
+    const today = ukDate('');
+    const cur = String(await adtFlag(env, 'adtool_profiles_cursor') || '');
+    const [curDay, curAfter] = cur.split('|');
+    const resume = curDay === today && curAfter && curAfter !== 'done';
+    if (curDay === today && curAfter === 'done') { await adtJobEnd(env, 'adtoolProfiles', t, 0, 'ok', 'already complete for ' + today); return; }
+    const from120 = adtAddDays(today, -120), from28 = adtAddDays(today, -28), from35 = adtAddDays(today, -35);
+    /* listing meta */
+    const L = {}; for (const r of ((await env.DB.prepare('SELECT item_id, account, m98m_category, is_case, case_type, start_time, first_order_day, first_ad_day, price, margin_before_ads, breakeven_roas FROM adtool_listings').all()).results || [])) L[r.item_id] = r;
+    /* orders by hour / slot / weekday, 28 days (profiles) and 35 days (regimes) */
+    const ordRows = (await env.DB.prepare("SELECT item_id, account, local_date, local_hour, weekday, slot, qty FROM adtool_orders WHERE status <> 'CANCELLED' AND local_date >= ?1 AND local_date < ?2").bind(from35, today).all()).results || [];
+    const acctSlot = {}, acctCell = {}, itemSlot = {}, itemCell = {}, itemShape = {}, acctShape = {}, fleetShape = {};
+    const bump = (m, k, i, v) => { (m[k] = m[k] || new Array(i.length).fill(0)); };
+    for (const o of ordRows) {
+      const q = Number(o.qty) || 1; const wd = Number(o.weekday), h = Number(o.local_hour), sl = Number(o.slot);
+      if (o.local_date >= from28) {
+        (acctSlot[o.account] = acctSlot[o.account] || [0, 0, 0, 0])[sl] += q; (itemSlot[o.item_id] = itemSlot[o.item_id] || [0, 0, 0, 0])[sl] += q;
+        (acctCell[o.account] = acctCell[o.account] || new Array(168).fill(0))[wd * 24 + h] += q; (itemCell[o.item_id] = itemCell[o.item_id] || new Array(168).fill(0))[wd * 24 + h] += q;
+      }
+      const sh = (itemShape[o.item_id] = itemShape[o.item_id] || {}); (sh[o.local_date] = sh[o.local_date] || new Array(24).fill(0))[h] += q;
+      const ash = (acctShape[o.account] = acctShape[o.account] || {}); (ash[o.local_date] = ash[o.local_date] || new Array(24).fill(0))[h] += q;
+      (fleetShape[o.local_date] = fleetShape[o.local_date] || new Array(24).fill(0))[h] += q;
+    }
+    const shapesOf = m => { const days = []; for (let i = 35; i >= 1; i--) { const d = adtAddDays(today, -i); days.push({ day: d, counts: m[d] || new Array(24).fill(0) }); } return days; };
+    /* listing days, 120 days */
+    const dayRows = (await env.DB.prepare('SELECT item_id, day, weekday, dom, units, attr_units, spend, ad_profit, orders FROM adtool_listing_day WHERE day >= ?1 AND day < ?2 ORDER BY item_id, day').bind(from120, today).all()).results || [];
+    const byItem = {}; for (const r of dayRows) (byItem[r.item_id] = byItem[r.item_id] || []).push(r);
+    /* priors: account weekday rate (units/day per listing-day), account × category, fleet; decayed */
+    const agg = {}; const add = (k, r) => { const a = (agg[k] = agg[k] || { w: ADTOOL_DOW.map(() => 0), wu: ADTOOL_DOW.map(() => 0), dom: new Array(31).fill(0), domN: new Array(31).fill(0), band: [0, 0, 0, 0, 0], bandN: [0, 0, 0, 0, 0], bandSp: [0, 0, 0, 0, 0], bandPr: [0, 0, 0, 0, 0] }); const age = Math.round((new Date(today + 'T00:00:00Z') - new Date(r.day + 'T00:00:00Z')) / 86400000); const w = adtDecay(age, 14); a.w[r.weekday] += w; a.wu[r.weekday] += w * (Number(r.units) || 0); const d = Number(r.dom) || 1; a.dom[d - 1] += Number(r.units) || 0; a.domN[d - 1]++; const b = d <= 7 ? 0 : d <= 14 ? 1 : d <= 21 ? 2 : d <= 24 ? 3 : 4; a.band[b] += Number(r.units) || 0; a.bandN[b]++; a.bandSp[b] += Number(r.spend) || 0; a.bandPr[b] += Number(r.ad_profit) || 0; };
+    for (const r of dayRows) { const m = L[r.item_id] || {}; add('fleet|all', r); add('account|' + (m.account || ''), r); add('category|' + (m.account || '') + '|' + (m.m98m_category || ''), r); add('cat|' + (m.m98m_category || ''), r); }
+    const rateOf = (k, prior, kappa) => { const a = agg[k]; return ADTOOL_DOW.map((d, i) => a ? adtShrink(a.wu[i], a.w[i], prior ? prior[i] : 0, kappa) : (prior ? prior[i] : 0)); };
+    const fleetRate = rateOf('fleet|all', null, 0);
+    const acctRate = {}; for (const k of Object.keys(agg)) if (k.startsWith('account|')) acctRate[k.slice(8)] = rateOf(k, fleetRate, 20);
+    const catRate = {}; for (const k of Object.keys(agg)) if (k.startsWith('category|')) { const [_, acct] = k.split('|'); catRate[k.slice(9)] = rateOf(k, acctRate[acct] || fleetRate, 20); }
+    const bands = k => { const a = agg[k]; if (!a) return null; return a.band.map((u, i) => ({ band: ['1st–7th', '8th–14th', '15th–21st', '22nd–24th', '25th–31st'][i], listing_days: a.bandN[i], units_day: a.bandN[i] ? round2(u / a.bandN[i]) : null, spend_day: a.bandN[i] ? round2(a.bandSp[i] / a.bandN[i]) : null, ad_profit_day: a.bandN[i] ? round2(a.bandPr[i] / a.bandN[i]) : null })); };
+    const stmts = [];
+    const put = (scope, id, kind, obj) => stmts.push(env.DB.prepare('INSERT INTO adtool_profiles (scope, scope_id, kind, computed_day, json) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(scope, scope_id, kind, computed_day) DO UPDATE SET json = ?5').bind(scope, id, kind, today, JSON.stringify(obj)));
+    if (!resume) {
+      /* scope profiles: fleet, accounts, categories (weekday, slot, hour×weekday, dom bands, regimes, review-style shuffle) */
+      const shareOf = (counts, prior, kappa) => adtShareProfile(counts || new Array(prior ? prior.length : 4).fill(0), prior, kappa);
+      const fleetSlotC = [0, 0, 0, 0], fleetCellC = new Array(168).fill(0); for (const a of Object.keys(acctSlot)) { acctSlot[a].forEach((v, i) => fleetSlotC[i] += v); } for (const a of Object.keys(acctCell)) { acctCell[a].forEach((v, i) => fleetCellC[i] += v); }
+      const fleetSlot = shareOf(fleetSlotC, [0.25, 0.25, 0.25, 0.25], 20), fleetCell = shareOf(fleetCellC, new Array(168).fill(1 / 168), 30);
+      /* fleet weekday — the review's per-weekday test on est. ad profit per date over the fixture window (seeded) */
+      const fx = await env.DB.prepare("SELECT k1 FROM adtool_fixture WHERE kind = 'meta' AND k1 IN ('from', 'to')").all();
+      const meta = {}; for (const r of ((await env.DB.prepare("SELECT k1, extra FROM adtool_fixture WHERE kind = 'meta'").all()).results || [])) meta[r.k1] = r.extra;
+      const wFrom = meta.from || '2026-08-17', wTo = meta.to || '2026-09-15';
+      const perDate = (await env.DB.prepare('SELECT day, ROUND(SUM(ad_profit), 2) AS pr, ROUND(SUM(spend), 2) AS sp, SUM(attr_units) AS un FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY day ORDER BY day').bind(wFrom, wTo).all()).results || [];
+      const vals = perDate.map(r => Number(r.pr) || 0), wds = perDate.map(r => ADTOOL_DOW[adtWeekdayOf(r.day)]);
+      const rng = adtRng(20260917); const review = {};
+      for (const d of ADTOOL_DOW) review[d] = adtPermWeekday(vals, wds, d, 20000, rng);
+      const spreadF = adtPermSpread(vals, perDate.map(r => adtWeekdayOf(r.day)), 2000, adtRng(20260918));
+      put('fleet', 'all', 'weekday', { rates: adtWeekdayProfile(dayRows.map(r => ({ day: r.day, units: r.units })), null, 0, today), review_shuffle: review, window: [wFrom, wTo], spread: spreadF, n_dates: perDate.length });
+      put('fleet', 'all', 'slot', fleetSlot); put('fleet', 'all', 'hour_weekday', fleetCell); put('fleet', 'all', 'dom', { bands: bands('fleet|all') });
+      const fr = adtRegime(shapesOf(fleetShape)); put('fleet', 'all', 'regime', fr);
+      if (fr.regime_change) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_regimes (scope, scope_id, kind, detected_day, note, shape_json) VALUES ('fleet', 'all', 'hour', ?1, ?2, ?3)").bind(today, fr.note, JSON.stringify(fr.divergences[0])));
+      const acctPrevWinFrom = wFrom;
+      for (const a of Object.keys(acctRate)) {
+        const aRows = dayRows.filter(r => (L[r.item_id] || {}).account === a);
+        const pd = {}; for (const r of aRows) { if (r.day >= wFrom && r.day <= wTo) { pd[r.day] = (pd[r.day] || 0) + (Number(r.ad_profit) || 0); } }
+        const days = Object.keys(pd).sort(); const av = days.map(d => pd[d]), aw = days.map(d => ADTOOL_DOW[adtWeekdayOf(d)]);
+        const rr = adtRng(adtSeedFrom(a + '|' + today)); const rev = {}; for (const d of ADTOOL_DOW) rev[d] = days.length >= 14 ? adtPermWeekday(av, aw, d, 4000, rr) : { diff: null, p: null, k: 0 };
+        put('account', a, 'weekday', { rates: adtWeekdayProfile(aRows.map(r => ({ day: r.day, units: r.units })), fleetRate, 20, today), review_shuffle: rev, spread: days.length >= 14 ? adtPermSpread(av, days.map(d => adtWeekdayOf(d)), 2000, rr) : null, n_dates: days.length });
+        put('account', a, 'slot', shareOf(acctSlot[a], fleetSlot.shares, 20)); put('account', a, 'hour_weekday', shareOf(acctCell[a], fleetCell.shares, 30)); put('account', a, 'dom', { bands: bands('account|' + a) });
+        const ar = adtRegime(shapesOf(acctShape[a] || {})); put('account', a, 'regime', ar);
+        if (ar.regime_change) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_regimes (scope, scope_id, kind, detected_day, note, shape_json) VALUES ('account', ?1, 'hour', ?2, ?3, ?4)").bind(a, today, ar.note, JSON.stringify(ar.divergences[0])));
+      }
+      for (const k of Object.keys(agg)) if (k.startsWith('cat|')) { const c = k.slice(4); put('category', c || '(none)', 'weekday', { rates: rateOf(k, fleetRate, 20), n: agg[k].w.map(v => Math.round(v * 100) / 100) }); put('category', c || '(none)', 'dom', { bands: bands(k) }); }
+      await adtBatch(env, stmts); rows += stmts.length; stmts.length = 0;
+    }
+    /* listings, in batches, resumable */
+    const ids = Object.keys(byItem).sort(); const startIdx = resume ? ids.findIndex(x => x > curAfter) : 0;
+    const prevStage = {}; for (const r of ((await env.DB.prepare('SELECT item_id, stage, days_in_stage FROM adtool_stages WHERE day = ?1').bind(adtAddDays(today, -1)).all()).results || [])) prevStage[r.item_id] = r;
+    const adActive = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, COUNT(*) AS n FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED')) GROUP BY ca.listing_id").all()).results || [])) adActive[r.listing_id] = Number(r.n) > 0;
+    const weeklyRows = (await env.DB.prepare('SELECT item_id, iso_week, spend, attr_units FROM adtool_listing_week WHERE iso_week >= ?1 ORDER BY item_id, iso_week').bind(adtIsoWeek(adtAddDays(today, -70))).all()).results || [];
+    const weeklyBy = {}; for (const r of weeklyRows) (weeklyBy[r.item_id] = weeklyBy[r.item_id] || []).push({ spend: Number(r.spend) || 0, attr_units: Number(r.attr_units) || 0 });
+    let done = 0, lastId = curAfter || '';
+    for (let i = Math.max(0, startIdx); i < ids.length && done < ADTOOL_PROFILE_BATCH; i++) {
+      const iid = ids[i]; const m = L[iid] || {}; const dr = byItem[iid]; done++; lastId = iid;
+      /* fill the calendar so zero days count (from the listing's first day in the window) */
+      const first = dr[0].day; const cal = []; const idx = {}; for (const r of dr) idx[r.day] = r; for (let d = first; d < today; d = adtAddDays(d, 1)) { const r = idx[d]; cal.push(r || { day: d, weekday: adtWeekdayOf(d), dom: Number(d.slice(8, 10)), units: 0, attr_units: 0, spend: 0, ad_profit: 0, orders: 0 }); }
+      const prior = catRate[(m.account || '') + '|' + (m.m98m_category || '')] || acctRate[m.account] || fleetRate;
+      const wdp = adtWeekdayProfile(cal.map(r => ({ day: r.day, units: r.units })), prior, 4, today);
+      const rng = adtRng(adtSeedFrom(iid + '|' + today));
+      const nDates = cal.length; const pv = nDates >= 14 ? adtPermSpread(cal.map(r => Number(r.units) || 0), cal.map(r => Number(r.weekday)), 1000, rng) : null;
+      const slot = adtShareProfile(itemSlot[iid] || [0, 0, 0, 0], (acctSlot[m.account] ? adtShareProfile(acctSlot[m.account], [0.25, 0.25, 0.25, 0.25], 20).shares : [0.25, 0.25, 0.25, 0.25]), 20);
+      const cell = adtShareProfile(itemCell[iid] || new Array(168).fill(0), (acctCell[m.account] ? adtShareProfile(acctCell[m.account], new Array(168).fill(1 / 168), 30).shares : new Array(168).fill(1 / 168)), 30);
+      const dom = new Array(31).fill(0), domN = new Array(31).fill(0); for (const r of cal) { dom[(Number(r.dom) || 1) - 1] += Number(r.units) || 0; domN[(Number(r.dom) || 1) - 1]++; }
+      const domProfile = { shown: nDates >= 90, days_of_history: nDates, buckets: dom.map((u, i) => ({ dom: i + 1, n: domN[i], rate: adtShrink(u, domN[i], (agg['account|' + m.account] ? (agg['account|' + m.account].dom[i] / Math.max(1, agg['account|' + m.account].domN[i])) : 0), 3) })) };
+      const reg = adtRegime(shapesOf(itemShape[iid] || {}));
+      const st = adtStage({ units: cal.map(r => Number(r.units) || 0), ageDays: m.start_time ? Math.floor((Date.now() - new Date(String(m.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null, firstOrderAgeDays: m.first_order_day ? Math.round((new Date(today + 'T00:00:00Z') - new Date(m.first_order_day + 'T00:00:00Z')) / 86400000) : null, adActive: !!adActive[iid], prevStage: prevStage[iid] ? prevStage[iid].stage : '', prevDaysInStage: prevStage[iid] ? prevStage[iid].days_in_stage : 0 });
+      const desc = adtDescriptors(cal, weeklyBy[iid] || [], wdp, slot.shares, pv ? pv.p : null);
+      put('listing', iid, 'weekday', { rates: wdp, spread: pv, n_dates: nDates, prior_source: catRate[(m.account || '') + '|' + (m.m98m_category || '')] ? 'account × category' : 'account' });
+      put('listing', iid, 'slot', slot); put('listing', iid, 'hour_weekday', cell); put('listing', iid, 'dom', domProfile); put('listing', iid, 'regime', { regime_change: reg.regime_change, note: reg.note, reason: reg.reason || '', jsd: reg.divergences.map(x => x.jsd) });
+      if (reg.regime_change) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_regimes (scope, scope_id, kind, detected_day, note, shape_json) VALUES ('listing', ?1, 'hour', ?2, ?3, ?4)").bind(iid, today, reg.note, JSON.stringify(reg.divergences[0])));
+      stmts.push(env.DB.prepare('INSERT INTO adtool_stages (account, item_id, day, stage, label, confidence, slope28, level28, peak_level, days_in_stage, changepoint_day) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT(item_id, day) DO UPDATE SET stage = ?4, label = ?5, confidence = ?6, slope28 = ?7, level28 = ?8, peak_level = ?9, days_in_stage = ?10, changepoint_day = ?11')
+        .bind(m.account || '', iid, today, st.stage, st.label, st.confidence, st.slope28, st.level28, st.peak_level, st.days_in_stage, st.changepoint_weeks_ago == null ? '' : adtAddDays(today, -7 * st.changepoint_weeks_ago)));
+      if (prevStage[iid] && prevStage[iid].stage !== st.stage) stmts.push(env.DB.prepare('INSERT OR IGNORE INTO adtool_stage_events (item_id, day, from_stage, to_stage, account) VALUES (?1, ?2, ?3, ?4, ?5)').bind(iid, today, prevStage[iid].stage, st.stage, m.account || ''));
+      stmts.push(env.DB.prepare('INSERT INTO adtool_descriptors (item_id, day, json) VALUES (?1, ?2, ?3) ON CONFLICT(item_id, day) DO UPDATE SET json = ?3').bind(iid, today, JSON.stringify(Object.assign(desc, { stage: st.stage, stage_label: st.label, stage_confidence: st.confidence, slope28: st.slope28, level28: st.level28, cv28: st.cv28 }))));
+      if (stmts.length >= 400) { await adtBatch(env, stmts); rows += stmts.length; stmts.length = 0; }
+    }
+    await adtBatch(env, stmts); rows += stmts.length;
+    const finished = (Math.max(0, startIdx) + done) >= ids.length;
+    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_profiles_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today + '|' + (finished ? 'done' : lastId)).run();
+    note = (resume ? 'resumed after ' + curAfter + ': ' : 'scopes + ') + done + ' listings' + (finished ? ' — complete for ' + today : ' — continues next run');
+    if (finished) {
+      /* acceptance (§12 phase 3): the fleet shuffle reproduces the review — Saturday significant, Tue/Thu not */
+      const fw = await env.DB.prepare("SELECT json FROM adtool_profiles WHERE scope = 'fleet' AND scope_id = 'all' AND kind = 'weekday' AND computed_day = ?1").bind(today).first();
+      const rs = fw ? (JSON.parse(fw.json).review_shuffle || {}) : {};
+      const sat = rs.Sat && rs.Sat.p, tue = rs.Tue && rs.Tue.p, thu = rs.Thu && rs.Thu.p;
+      const ok = sat != null && sat < 0.05 && tue != null && tue >= 0.05 && thu != null && thu >= 0.05;
+      await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_SHUFFLE_FLEET', 'weekday', ?1, ?2, ?3, 0, ?4, 'adtoolProfiles review-style permutation, 20,000 draws, seed 20260917', ?5, '')")
+        .bind(new Date().toISOString(), JSON.stringify({ review: { Sat: 0.017, Tue: 0.611, Thu: 0.503 } }), JSON.stringify(Object.keys(rs).reduce((o, k) => { o[k] = rs[k].p; return o; }, {})), ok ? 'PASS' : 'FAIL', ok ? 'Saturday significant, Tuesday and Thursday within noise — matches the review' : 'does not match the review finding').run();
+      note += ' · shuffle ' + (ok ? 'PASS' : 'FAIL') + ' (Sat ' + sat + ', Tue ' + tue + ', Thu ' + thu + ')';
+    }
+    await adtJobEnd(env, 'adtoolProfiles', t, rows, 'ok', note);
+  } catch (e) {
+    await adtJobEnd(env, 'adtoolProfiles', t, rows, 'error', String(e && e.message || e));
+    throw e;
+  }
+}
+/* ADTOOL-P3-END ===================================================================================== */
+/* ADTOOL-P3-ACTIONS-BEGIN ============================================================================
+   Phase 3 pages: Accounts, Categories, Phone cases, Time slots (spec §7) + the profile fields the product page shows. */
+async function adtLatestProfiles(env, scope, kind) {
+  const day = await env.DB.prepare('SELECT MAX(computed_day) AS d FROM adtool_profiles WHERE scope = ?1 AND kind = ?2').bind(scope, kind).first();
+  if (!day || !day.d) return { day: '', rows: {} };
+  const rows = {}; for (const r of ((await env.DB.prepare('SELECT scope_id, json FROM adtool_profiles WHERE scope = ?1 AND kind = ?2 AND computed_day = ?3').bind(scope, kind, day.d).all()).results || [])) { try { rows[r.scope_id] = JSON.parse(r.json); } catch (e) { rows[r.scope_id] = null; } }
+  return { day: day.d, rows };
+}
+async function adtLatestStages(env) {
+  const day = await env.DB.prepare('SELECT MAX(day) AS d FROM adtool_stages').first();
+  if (!day || !day.d) return { day: '', rows: [] };
+  return { day: day.d, rows: (await env.DB.prepare('SELECT account, item_id, stage, label, confidence, slope28, level28, days_in_stage FROM adtool_stages WHERE day = ?1').bind(day.d).all()).results || [] };
+}
+function adtWindowDays(today, n) { return { from: adtAddDays(today, -n), to: adtAddDays(today, -1) }; }
+const ADTOOL_ACTIONS_P3 = {
+  adtoolAccounts: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_accounts');
+      const env = ctx.env; await ensureAdtoolPhase3Schema(env);
+      const today = ukDate(''); const w = adtWindowDays(today, 30); const acct = String((p && p.account) || '');
+      const filt = acct ? ' AND l.account = ?3' : '';
+      const bind = acct ? [w.from, w.to, acct] : [w.from, w.to];
+      const kpi = await env.DB.prepare('SELECT COUNT(DISTINCT d.item_id) AS listings, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit, SUM(d.orders) AS orders, SUM(d.units) AS units, ROUND(SUM(d.revenue), 2) AS revenue, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2' + filt).bind(...bind).first();
+      const byAcctWd = (await env.DB.prepare('SELECT l.account, d.weekday, COUNT(DISTINCT d.day) AS dates, ROUND(SUM(d.ad_profit), 2) AS ad_profit, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2' + filt + ' GROUP BY l.account, d.weekday ORDER BY l.account, d.weekday').bind(...bind).all()).results || [];
+      const byAcct = (await env.DB.prepare('SELECT l.account, COUNT(DISTINCT d.item_id) AS listings, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit, SUM(d.units) AS units, ROUND(SUM(d.actual_profit), 2) AS actual_profit FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2' + filt + ' GROUP BY l.account ORDER BY l.account').bind(...bind).all()).results || [];
+      const slots = await adtLatestProfiles(env, 'account', 'slot');
+      const wdP = await adtLatestProfiles(env, 'account', 'weekday');
+      const st = await adtLatestStages(env);
+      const stageMix = {}; for (const r of st.rows) { if (acct && r.account !== acct) continue; const m = (stageMix[r.account] = stageMix[r.account] || {}); m[r.stage] = (m[r.stage] || 0) + 1; }
+      const regimes = (await env.DB.prepare("SELECT scope, scope_id, detected_day, note FROM adtool_regimes WHERE scope IN ('fleet', 'account') ORDER BY detected_day DESC LIMIT 20").all()).results || [];
+      return { window: w, account: acct, kpi, by_account: byAcct, by_account_weekday: byAcctWd, slot_profiles: slots, weekday_profiles: wdP, stage_mix: stageMix, stage_day: st.day, regimes, one_liners: null, computed_at: new Date().toISOString(), source: 'adtool_listing_day (orders + eBay ads report), adtool_orders, adtool_profiles, adtool_stages' };
+    },
+  },
+  adtoolCategories: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_categories');
+      const env = ctx.env; await ensureAdtoolPhase3Schema(env);
+      const today = ukDate(''); const w = adtWindowDays(today, 30);
+      const cats = (await env.DB.prepare("SELECT COALESCE(NULLIF(l.m98m_category, ''), '(unclassified)') AS category, COUNT(DISTINCT d.item_id) AS listings, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit, SUM(d.units) AS units FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2 GROUP BY 1 ORDER BY spend DESC").bind(w.from, w.to).all()).results || [];
+      const total = cats.reduce((t, c) => t + Number(c.spend), 0);
+      const wd = (await env.DB.prepare("SELECT COALESCE(NULLIF(l.m98m_category, ''), '(unclassified)') AS category, d.weekday, COUNT(DISTINCT d.day) AS dates, ROUND(SUM(d.ad_profit), 2) AS ad_profit, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.spend), 2) AS spend FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2 GROUP BY 1, 2").bind(w.from, w.to).all()).results || [];
+      const slot = (await env.DB.prepare("SELECT COALESCE(NULLIF(l.m98m_category, ''), '(unclassified)') AS category, o.slot, SUM(o.qty) AS units FROM adtool_orders o JOIN adtool_listings l ON l.item_id = o.item_id WHERE o.status <> 'CANCELLED' AND o.local_date >= ?1 AND o.local_date <= ?2 GROUP BY 1, 2").bind(adtAddDays(today, -28), adtAddDays(today, -1)).all()).results || [];
+      const tree = (await env.DB.prepare("SELECT COALESCE(NULLIF(ebay_category_path, ''), '(no eBay category yet)') AS ebay_path, COALESCE(NULLIF(m98m_category, ''), '(unclassified)') AS category, COUNT(*) AS listings FROM adtool_listings GROUP BY 1, 2 ORDER BY listings DESC LIMIT 200").all()).results || [];
+      for (const c of cats) { c.roas = Number(c.spend) > 0 ? round2(Number(c.attr_revenue) / Number(c.spend)) : null; c.spend_share = total > 0 ? round2(Number(c.spend) / total) : null; const w7 = wd.filter(x => x.category === c.category); let best = null; for (const x of w7) { const pd = Number(x.dates) ? Number(x.ad_profit) / Number(x.dates) : 0; if (!best || pd > best.pd) best = { day: ADTOOL_DOW[x.weekday], pd: round2(pd) }; } c.best_day = best; const sl = slot.filter(x => x.category === c.category); let bs = null; for (const x of sl) if (!bs || Number(x.units) > bs.units) bs = { slot: Number(x.slot), units: Number(x.units) }; c.best_slot = bs; }
+      return { window: w, categories: cats, weekday: wd, slot, tree, computed_at: new Date().toISOString(), source: 'adtool_listing_day, adtool_orders, adtool_listings (taxonomy + eBay primary category)' };
+    },
+  },
+  adtoolCases: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_cases');
+      const env = ctx.env; await ensureAdtoolPhase3Schema(env);
+      const u = ctx.user || {};
+      if (p && p.set && p.set.item_id) {
+        if (MGMT_ROLES.indexOf(String(u.role || '')) < 0 && !u.super) throw new AuthError('auth');
+        const iid = String(p.set.item_id).replace(/\D/g, ''); const cat = String(p.set.m98m_category || '').slice(0, 60); const ct = String(p.set.case_type || '').slice(0, 60);
+        const L = await env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first();
+        await env.DB.prepare("INSERT INTO adtool_overrides (account, item_id, m98m_category, case_type, set_by, set_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) ON CONFLICT(item_id) DO UPDATE SET m98m_category = ?3, case_type = ?4, set_by = ?5, set_at = datetime('now')").bind(L ? L.account : '', iid, cat, ct, String(u.email || '')).run();
+        await env.DB.prepare("UPDATE adtool_listings SET m98m_category = CASE WHEN ?2 <> '' THEN ?2 ELSE m98m_category END, category_source = CASE WHEN ?2 <> '' THEN 'manual' ELSE category_source END, is_case = CASE WHEN ?3 <> '' THEN 1 ELSE is_case END, case_type = CASE WHEN ?3 <> '' THEN ?3 ELSE case_type END, case_type_source = CASE WHEN ?3 <> '' THEN 'manual' ELSE case_type_source END WHERE item_id = ?1").bind(iid, cat, ct).run();
+        await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_TAXONOMY', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), iid, cat + ' / ' + ct).run();
+        return { ok: true };
+      }
+      const today = ukDate(''); const w = adtWindowDays(today, 30);
+      const fleet = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, ROUND(SUM(ad_profit), 2) AS ad_profit FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2').bind(w.from, w.to).first();
+      const cases = await env.DB.prepare('SELECT COUNT(DISTINCT d.item_id) AS listings, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.is_case = 1 AND d.day >= ?1 AND d.day <= ?2').bind(w.from, w.to).first();
+      const zero = await env.DB.prepare('SELECT COUNT(*) AS listings, ROUND(SUM(sp), 2) AS spend FROM (SELECT d.item_id, SUM(d.spend) AS sp, SUM(d.attr_units) AS un FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.is_case = 1 AND d.day >= ?1 AND d.day <= ?2 GROUP BY d.item_id HAVING SUM(d.spend) > 0 AND SUM(d.attr_units) = 0)').bind(w.from, w.to).first();
+      const matrix = (await env.DB.prepare("SELECT l.account, COALESCE(NULLIF(l.case_type, ''), '(type unknown)') AS case_type, COUNT(DISTINCT d.item_id) AS listings, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.is_case = 1 AND d.day >= ?1 AND d.day <= ?2 GROUP BY 1, 2 ORDER BY 1, spend DESC").bind(w.from, w.to).all()).results || [];
+      const per = (await env.DB.prepare('SELECT d.item_id, l.account, l.title, l.case_type, l.price, l.margin_before_ads, l.breakeven_roas, l.category_source, l.case_type_source, ROUND(SUM(d.spend), 2) AS spend, SUM(d.attr_units) AS attr_units, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.ad_profit), 2) AS ad_profit FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.is_case = 1 AND d.day >= ?1 AND d.day <= ?2 GROUP BY d.item_id HAVING SUM(d.spend) > 0 ORDER BY ad_profit ASC').bind(w.from, w.to).all()).results || [];
+      for (const r of per) r.roas = Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null;
+      const losers = per.slice(0, 25);
+      const winners = per.filter(r => Number(r.ad_profit) > 0 && r.roas != null && r.breakeven_roas && r.roas >= 2 * Number(r.breakeven_roas) && Number(r.spend) >= 5).sort((a, b) => Number(b.ad_profit) - Number(a.ad_profit)).slice(0, 25);
+      const types = {}; for (const m of matrix) { const t = (types[m.case_type] = types[m.case_type] || { case_type: m.case_type, listings: 0, spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 }); t.listings += Number(m.listings); t.spend += Number(m.spend); t.attr_units += Number(m.attr_units); t.attr_revenue += Number(m.attr_revenue); t.ad_profit += Number(m.ad_profit); }
+      const overrides = (await env.DB.prepare('SELECT item_id, m98m_category, case_type, set_by, set_at FROM adtool_overrides ORDER BY set_at DESC LIMIT 50').all()).results || [];
+      return { window: w, fleet, cases, zero_sale: zero, share_spend: fleet && Number(fleet.spend) > 0 ? round2(Number(cases.spend) / Number(fleet.spend)) : null, share_profit: fleet && Number(fleet.ad_profit) !== 0 ? round2(Number(cases.ad_profit) / Number(fleet.ad_profit)) : null, matrix, types: Object.values(types).map(t => Object.assign(t, { spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), ad_profit: round2(t.ad_profit), roas: t.spend > 0 ? round2(t.attr_revenue / t.spend) : null })).sort((a, b) => b.spend - a.spend), losers, winners, overrides, case_types: ['MagSafe / magnetic', 'Rugged / shockproof', 'Wallet / leather / card', 'Clear / slim', 'Silicone / soft', 'Glitter / bling', 'Kickstand / ring', 'Other case'], computed_at: new Date().toISOString(), source: 'adtool_listing_day, adtool_listings (rule taxonomy + manual overrides)' };
+    },
+  },
+  adtoolSlots: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_slots');
+      const env = ctx.env; await ensureAdtoolPhase3Schema(env);
+      const today = ukDate(''); const from28 = adtAddDays(today, -28), yday = adtAddDays(today, -1);
+      const acct = String((p && p.account) || ''), cat = String((p && p.category) || '');
+      const where = (alias) => (acct ? ' AND ' + alias + '.account = ?3' : '') + (cat ? ' AND l.m98m_category = ?' + (acct ? 4 : 3) : '');
+      const bind = [from28, yday]; if (acct) bind.push(acct); if (cat) bind.push(cat);
+      const sales = (await env.DB.prepare("SELECT o.slot, o.weekday, SUM(o.qty) AS units, COUNT(*) AS orders, ROUND(SUM(o.sold), 2) AS revenue FROM adtool_orders o JOIN adtool_listings l ON l.item_id = o.item_id WHERE o.status <> 'CANCELLED' AND o.local_date >= ?1 AND o.local_date <= ?2" + where('o') + ' GROUP BY o.slot, o.weekday').bind(...bind).all()).results || [];
+      const sampled = (await env.DB.prepare('SELECT h.hour, ROUND(SUM(COALESCE(h.spend_r, h.spend_s)), 2) AS spend, SUM(COALESCE(h.clicks_r, h.clicks_s)) AS clicks, SUM(COALESCE(h.attr_units_r, h.attr_units_s)) AS attr_units, COUNT(DISTINCT h.day) AS days FROM adtool_listing_hour h JOIN adtool_listings l ON l.item_id = h.item_id WHERE h.day >= ?1 AND h.day <= ?2 AND h.samples > 0' + where('l') + ' GROUP BY h.hour').bind(...bind).all()).results || [];
+      const conc = (await env.DB.prepare("SELECT d.item_id, l.account, l.title, l.m98m_category, d.json FROM adtool_descriptors d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors)" + (acct ? ' AND l.account = ?1' : '') + (cat ? ' AND l.m98m_category = ?' + (acct ? 2 : 1) : '')).bind(...[acct, cat].filter(Boolean)).all()).results || [];
+      const products = conc.map(r => { let j = {}; try { j = JSON.parse(r.json); } catch (e) {} return { item_id: r.item_id, account: r.account, title: r.title, category: r.m98m_category, top_slot: j.top_slot, top_slot_share: j.top_slot_share, slot_hhi: j.slot_hhi, stage: j.stage_label || j.stage, ad_dependence: j.ad_dependence28 }; }).filter(x => x.top_slot_share != null).sort((a, b) => b.slot_hhi - a.slot_hhi).slice(0, 40);
+      /* cap hours yesterday: first sample at ≥ 95 % of the listing's summed running budget with flat clicks after */
+      const caps = [];
+      const budgets = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN c.budget <> '' THEN CAST(c.budget AS REAL) ELSE 0 END) AS budget FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY ca.listing_id").all()).results || [])) budgets[r.listing_id] = Number(r.budget) || 0;
+      const samp = (await env.DB.prepare("SELECT item_id, sampled_at, SUM(cum_spend) AS cum_spend, SUM(cum_clicks) AS cum_clicks FROM adtool_ads_intraday WHERE report_day = ?1 GROUP BY item_id, sampled_at ORDER BY item_id, sampled_at").bind(yday).all()).results || [];
+      const byI = {}; for (const r of samp) (byI[r.item_id] = byI[r.item_id] || []).push(r);
+      for (const iid of Object.keys(byI)) { const b = budgets[iid]; if (!b) continue; const h = adtCapHour(byI[iid], b); if (h != null) caps.push({ item_id: iid, cap_hour: h, budget: b, spend: byI[iid][byI[iid].length - 1].cum_spend }); }
+      const regimes = (await env.DB.prepare('SELECT scope, scope_id, detected_day, note FROM adtool_regimes ORDER BY detected_day DESC LIMIT 30').all()).results || [];
+      const fleetSlot = await adtLatestProfiles(env, acct ? 'account' : 'fleet', 'slot');
+      return { window: { from: from28, to: yday }, account: acct, category: cat, sales_by_slot_weekday: sales, sampled_by_hour: sampled, sampled_from: '2026-09-17', products_by_concentration: products, cap_hours_yesterday: caps.slice(0, 40), cap_day: yday, regimes, slot_profile: fleetSlot, note: 'eBay cannot schedule ads by hour: slots drive bids, budgets and review timing; weekdays drive pauses', computed_at: new Date().toISOString(), source: 'adtool_orders, adtool_listing_hour (sampled from 17 Sep), adtool_descriptors, adtool_ads_intraday + campaigns (cap hours)' };
+    },
+  },
+};
+async function adtListingProfileBundle(env, iid) {
+  /* what the product page adds in Phase 3: stage badge, weekday p-value, hour × weekday shrunk cells, slot profile, descriptors */
+  await ensureAdtoolPhase3Schema(env);
+  const out = { stage: null, weekday: null, slot: null, hour_weekday: null, descriptors: null, regime: null };
+  const st = await env.DB.prepare('SELECT day, stage, label, confidence, slope28, level28, peak_level, days_in_stage, changepoint_day FROM adtool_stages WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid).first();
+  if (st) out.stage = st;
+  for (const r of ((await env.DB.prepare('SELECT kind, json, computed_day FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2)').bind('listing', iid).all()).results || [])) { try { out[r.kind === 'hour_weekday' ? 'hour_weekday' : r.kind] = Object.assign(JSON.parse(r.json), { computed_day: r.computed_day }); } catch (e) {} }
+  const d = await env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid).first();
+  if (d) { try { out.descriptors = Object.assign(JSON.parse(d.json), { day: d.day }); } catch (e) {} }
+  out.stage_history = (await env.DB.prepare('SELECT day, stage, confidence FROM adtool_stages WHERE item_id = ?1 ORDER BY day').bind(iid).all()).results || [];
+  return out;
+}
+/* ADTOOL-P3-ACTIONS-END ============================================================================== */
 
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
    eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
@@ -11620,7 +12054,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -11719,3 +12153,4 @@ const ROUTES = {
 };
 Object.assign(ROUTES, ADTOOL_ACTIONS);   /* ADTOOL actions (read rollups only; role + preview-flag gated) */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P2); /* ADTOOL Phase 2: campaign truth (read-only; role + preview-flag gated) */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P3); /* ADTOOL Phase 3: profiles, stages, the four analytics pages */
