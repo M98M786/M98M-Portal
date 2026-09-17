@@ -3454,32 +3454,43 @@ async function adtoolRollups(env) {
   let rows = 0, note = '';
   try {
     const today = ukDate('');
-    const cursor = await adtFlag(env, 'adtool_rollup_cursor');       // last fully built day, or 'off'
+    const t0 = Date.now(), BUDGET_MS = 240000;   // one cron invocation may keep building chunks for up to 4 minutes
+    let cursor = await adtFlag(env, 'adtool_rollup_cursor');       // last fully built day, or 'off'
+    const notes = [];
     if (cursor === 'off' || cursor < ADTOOL_HISTORY_START) {
-      /* first build: everything from the first ad day, six days per invocation, self-continuing */
+      /* first build: everything from the first ad day, six days per chunk, chunk after chunk while the
+         time budget lasts; self-continuing on the next hourly slot if it runs out */
       rows += await adtoolRegisterSeed(env);
       rows += await adtoolListingsRefresh(env);
       rows += await adtoolOrdersRoll(env, '2026-08-01T00:00:00Z');
-      const from = ADTOOL_HISTORY_START, to = adtAddDays(from, 5) < today ? adtAddDays(from, 5) : today;
+      cursor = adtAddDays(ADTOOL_HISTORY_START, -1);
+      notes.push('first build');
+    }
+    let chunks = 0;
+    while (cursor < adtAddDays(today, -1) && (chunks === 0 || Date.now() - t0 < BUDGET_MS)) {
+      const from = adtAddDays(cursor, 1), to = adtAddDays(from, 5) < today ? adtAddDays(from, 5) : today;
+      if (chunks > 0 || notes.length === 0) rows += await adtoolOrdersRoll(env, new Date(new Date(from + 'T00:00:00Z').getTime() - 2 * 86400000).toISOString());
       rows += await adtoolRollupDays(env, from, to);
       await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_rollup_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(to).run();
-      note = 'first build ' + from + '..' + to;
-    } else if (cursor < adtAddDays(today, -1)) {
-      /* still catching up: next six days */
-      const from = adtAddDays(cursor, 1), to = adtAddDays(from, 5) < today ? adtAddDays(from, 5) : today;
-      rows += await adtoolOrdersRoll(env, new Date(new Date(from + 'T00:00:00Z').getTime() - 2 * 86400000).toISOString());
-      rows += await adtoolRollupDays(env, from, to);
-      await env.DB.prepare("UPDATE portal_config SET value = ?1, updated_at = datetime('now') WHERE key = 'adtool_rollup_cursor'").bind(to).run();
-      note = 'catch-up ' + from + '..' + to;
-    } else {
-      /* steady state: listings nightly-ish (every run is cheap enough), orders + last 3 days hourly */
+      cursor = to; chunks++;
+      notes.push((chunks === 1 && notes[0] === 'first build' ? '' : 'catch-up ') + from + '..' + to);
+    }
+    if (chunks === 0) {
+      /* steady state: listings every run (cheap), orders + last 3 days hourly */
       rows += await adtoolListingsRefresh(env);
       rows += await adtoolOrdersRoll(env, new Date(Date.now() - 4 * 86400000).toISOString());
       rows += await adtoolRollupDays(env, adtAddDays(today, -2), today);
-      await env.DB.prepare("UPDATE portal_config SET value = ?1, updated_at = datetime('now') WHERE key = 'adtool_rollup_cursor'").bind(today).run();
-      note = 'last 3 days';
+      await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_rollup_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today).run();
+      notes.push('last 3 days');
     }
+    note = notes.join(', ') + ' in ' + Math.round((Date.now() - t0) / 1000) + 's';
     await adtJobEnd(env, 'adtoolRollups', t, rows, 'ok', note);
+    /* once the history is complete, the truth check runs right away if a fixture is loaded and no
+       parity run exists for today — the 05:20 UTC slot then only repeats it */
+    if (cursor >= adtAddDays(today, -1)) {
+      const ran = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_PARITY_FLEET' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first();
+      if (!ran || !Number(ran.n)) { try { await adtoolTruth(env); } catch (e) { /* recorded by adtoolTruth itself */ } }
+    }
   } catch (e) {
     await adtJobEnd(env, 'adtoolRollups', t, rows, 'error', String(e && e.message || e));
     throw e;
