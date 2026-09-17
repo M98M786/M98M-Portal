@@ -3087,8 +3087,106 @@ const ADS_FAMILIES = {
    either polls the pending intraday tasks or kicks fresh ones — effective refresh is 5-10
    minutes, which is the honest floor of eBay's report pipeline, not the wished-for 2. Results
    land in ads_today (replaced wholesale — partial-day totals), never in ads_daily. */
+/* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
+   eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
+   total. adsIntraday has polled that total every ~5 minutes since August and OVERWRITTEN it in
+   ads_today; the history was thrown away. With portal_config.adtool_intraday = 'on' every
+   ingested sample whose cumulative figures moved is APPENDED here, per listing per family per
+   report day (the UTC day eBay reports on), and a tick row records every sample so quiet hours
+   and gaps stay distinguishable without a heartbeat row per listing (560 listings x ~190
+   samples a day would be ~100k rows of nothing). A cumulative that goes DOWN is an eBay revision
+   (invalid clicks removed, attribution moved): stored with correction = 1, never as negative
+   spend. Nothing here touches ads_today, the waste alarm or the daily report path; flag off =
+   the code below never runs. Roll back = set the flag to 'off'. */
+let ADTOOL_SCHEMA_OK = false;
+async function ensureAdtoolSchema(env) {
+  if (ADTOOL_SCHEMA_OK) return;
+  const ddl = [
+    "CREATE TABLE IF NOT EXISTS adtool_ads_intraday (account TEXT NOT NULL, item_id TEXT NOT NULL, family TEXT NOT NULL, report_day TEXT NOT NULL, sampled_at TEXT NOT NULL, " +
+      "cum_spend REAL DEFAULT 0, cum_clicks INTEGER DEFAULT 0, cum_units INTEGER DEFAULT 0, cum_revenue REAL DEFAULT 0, cum_impressions INTEGER DEFAULT 0, " +
+      "task_id TEXT DEFAULT '', correction INTEGER DEFAULT 0, PRIMARY KEY (account, item_id, family, report_day, sampled_at))",
+    "CREATE INDEX IF NOT EXISTS idx_adti_day ON adtool_ads_intraday(report_day, account, item_id)",
+    "CREATE TABLE IF NOT EXISTS adtool_intraday_latest (account TEXT NOT NULL, item_id TEXT NOT NULL, family TEXT NOT NULL, report_day TEXT NOT NULL, sampled_at TEXT, " +
+      "cum_spend REAL DEFAULT 0, cum_clicks INTEGER DEFAULT 0, cum_units INTEGER DEFAULT 0, cum_revenue REAL DEFAULT 0, cum_impressions INTEGER DEFAULT 0, " +
+      "PRIMARY KEY (account, item_id, family))",
+    "CREATE TABLE IF NOT EXISTS adtool_intraday_ticks (account TEXT NOT NULL, family TEXT NOT NULL, report_day TEXT NOT NULL, sampled_at TEXT NOT NULL, task_id TEXT DEFAULT '', " +
+      "kicked_at TEXT DEFAULT '', rows_total INTEGER DEFAULT 0, rows_changed INTEGER DEFAULT 0, rows_corrected INTEGER DEFAULT 0, source TEXT DEFAULT 'api', " +
+      "PRIMARY KEY (account, family, report_day, sampled_at))",
+  ];
+  for (const q of ddl) { try { await env.DB.prepare(q).run(); } catch (e) { /* exists / raced another isolate */ } }
+  ADTOOL_SCHEMA_OK = true;
+}
+async function adtoolIntradayOn(env) {
+  const row = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'adtool_intraday'").first().catch(() => null);
+  return String((row && row.value) || 'off') === 'on';
+}
+/* UTC calendar day = eBay's report day (spec §2.2: the report is requested as a UTC day). */
+function utcDate(d) { return (d || new Date()).toISOString().slice(0, 10); }
+/* Same parse as ingestAdsToday, kept as one function so both writers read one report identically.
+   Adds revenue (sale_amount) and impressions, which ads_today never stored. */
+function parseAdsReportTsv(tsv) {
+  const lines = String(tsv || '').split(/\r?\n/).filter(l => l.trim() !== '');
+  let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
+  if (hi < 0) return null;
+  const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
+  const col = re => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
+  const cL = heads.findIndex(h => /listing/.test(h));
+  const cS = col(/ad_fee/), cC = col(/^clicks$|^cpc_clicks$/), cU = col(/^sales$|^cpc_attributed_sales$/);
+  const cR = col(/sale_amount/), cI = col(/^impressions$|^cpc_impressions$/);
+  const agg = {};
+  for (let i = hi + 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    const lid = String(cells[cL] || '').replace(/\D/g, '');
+    if (!lid) continue;
+    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
+    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
+    const a = (agg[lid] = agg[lid] || { s: 0, c: 0, u: 0, r: 0, i: 0 });
+    a.s += sum(cS); a.c += sum(cC); a.u += sum(cU); a.r += sum(cR); a.i += sum(cI);
+  }
+  return agg;
+}
+async function adtoolAppendIntraday(env, acct, family, reportDay, agg, taskId, kickedAt) {
+  await ensureAdtoolSchema(env);
+  const now = new Date().toISOString();
+  const latRs = await env.DB.prepare(
+    'SELECT item_id, report_day, cum_spend, cum_clicks, cum_units, cum_revenue, cum_impressions FROM adtool_intraday_latest WHERE account = ?1 AND family = ?2'
+  ).bind(acct, family).all();
+  const lat = {};
+  for (const r of (latRs.results || [])) lat[r.item_id] = r;
+  const stmts = [];
+  let changed = 0, corrected = 0;
+  for (const lid of Object.keys(agg)) {
+    const a = agg[lid];
+    const sp = round2(a.s), cl = Math.round(a.c), un = Math.round(a.u), rv = round2(a.r), im = Math.round(a.i);
+    const L = lat[lid];
+    const sameDay = L && String(L.report_day) === reportDay;
+    if (sameDay && Number(L.cum_spend) === sp && Number(L.cum_clicks) === cl && Number(L.cum_units) === un &&
+        Number(L.cum_revenue) === rv && Number(L.cum_impressions) === im) continue;
+    const corr = (sameDay && (sp < Number(L.cum_spend) || cl < Number(L.cum_clicks) || un < Number(L.cum_units) || im < Number(L.cum_impressions))) ? 1 : 0;
+    changed++; if (corr) corrected++;
+    stmts.push(env.DB.prepare(
+      'INSERT INTO adtool_ads_intraday (account, item_id, family, report_day, sampled_at, cum_spend, cum_clicks, cum_units, cum_revenue, cum_impressions, task_id, correction) ' +
+      'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT(account, item_id, family, report_day, sampled_at) DO NOTHING'
+    ).bind(acct, lid, family, reportDay, now, sp, cl, un, rv, im, String(taskId || ''), corr));
+    stmts.push(env.DB.prepare(
+      'INSERT INTO adtool_intraday_latest (account, item_id, family, report_day, sampled_at, cum_spend, cum_clicks, cum_units, cum_revenue, cum_impressions) ' +
+      'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(account, item_id, family) DO UPDATE SET report_day = ?4, sampled_at = ?5, ' +
+      'cum_spend = ?6, cum_clicks = ?7, cum_units = ?8, cum_revenue = ?9, cum_impressions = ?10'
+    ).bind(acct, lid, family, reportDay, now, sp, cl, un, rv, im));
+  }
+  stmts.push(env.DB.prepare(
+    'INSERT INTO adtool_intraday_ticks (account, family, report_day, sampled_at, task_id, kicked_at, rows_total, rows_changed, rows_corrected, source) ' +
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'api') ON CONFLICT(account, family, report_day, sampled_at) DO NOTHING"
+  ).bind(acct, family, reportDay, now, String(taskId || ''), String(kickedAt || ''), Object.keys(agg).length, changed, corrected));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { total: Object.keys(agg).length, changed, corrected };
+}
+
 async function adsIntraday(env) {
   const day = ukDate('');
+  const adtoolOn = await adtoolIntradayOn(env);
+  /* ADTOOL: the day eBay reports on is the UTC day; ads_today keeps its UK-day meaning. */
+  const reportDay = adtoolOn ? utcDate() : day;
   /* Rollover is a hard reset: rows from any other day are DELETED, not zeroed — so "today" on
      every board is only ever today, and a family that stopped spending can't strand yesterday's
      numbers behind the other family's fresh day stamp. The dying day's final total is recorded
@@ -3114,14 +3212,15 @@ async function adsIntraday(env) {
 
     // 1) poll anything pending for this account
     const pend = await env.DB.prepare(
-      "SELECT task_id, family, report_date FROM ad_report_tasks WHERE account = ?1 AND status = 'PENDING' AND family LIKE '%_intra'"
+      "SELECT task_id, family, report_date, created_at FROM ad_report_tasks WHERE account = ?1 AND status = 'PENDING' AND family LIKE '%_intra'"
     ).bind(acct).all();
     let polled = 0;
     for (const t of (pend.results || [])) {
       /* A task kicked before UK midnight completes AFTER it — ingesting that report under the
          new day would stamp yesterday's full spend as today's and ring every waste bell again.
          The report's own date decides; a stale one is dropped unread. */
-      if (String(t.report_date) !== day) {
+      const otherDay = String(t.report_date) !== day;
+      if (otherDay && !adtoolOn) {
         await env.DB.prepare("UPDATE ad_report_tasks SET status = 'FAILED', error = 'stale day — never ingested' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
         polled++;
         continue;
@@ -3149,31 +3248,61 @@ async function adsIntraday(env) {
         const ds = new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')));
         text = await ds.text();
       } else { text = new TextDecoder().decode(buf); }
-      await ingestAdsToday(env, acct, day, text, String(t.family).indexOf('cpc') === 0);
+      const isCpcFam = String(t.family).indexOf('cpc') === 0;
+      const agg = parseAdsReportTsv(text) || {};
+      if (adtoolOn) {
+        try { await adtoolAppendIntraday(env, acct, isCpcFam ? 'cpc' : 'std', String(t.report_date), agg, t.task_id, t.created_at); }
+        catch (e) { await ctx_setSync(env, 'adtoolIntradayErr', acct, String(e && e.message || e).slice(0, 300)); }
+      }
+      if (otherDay) {
+        /* Kept for the history only: a report for a day that is not today's UK day must never
+           reach ads_today (it would stamp another day's spend as today's and ring the waste bell). */
+        await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = 'intraday adtool-only' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
+        polled++;
+        continue;
+      }
+      await ingestAdsTodayAgg(env, acct, day, agg, isCpcFam);
       await env.DB.prepare("UPDATE ad_report_tasks SET status = 'INGESTED', error = 'intraday' WHERE account = ?1 AND task_id = ?2").bind(acct, t.task_id).run();
       polled++;
     }
     if ((pend.results || []).length && !polled) continue;   // still building — try next tick
 
     // 2) nothing pending → kick both families for today
-    for (const fam of Object.keys(ADS_FAMILIES)) {
+    /* ADTOOL (flag on): the report is asked for the UTC report day, so sampling runs right up to
+       the 01:00-UK boundary in BST instead of stopping at UK midnight; and in the first quarter
+       hour after the boundary one closing task per family is filed for the day that just ended
+       (the spec's "last sample after the boundary"). eBay's refusals are recorded, because until
+       now a non-202 was silently skipped and nobody could see why no task exists 23:00–07:00 UTC. */
+    const kickDays = [reportDay];
+    if (adtoolOn) {
+      const nowUtc = new Date();
+      if (nowUtc.getUTCHours() === 0 && nowUtc.getUTCMinutes() < 15) {
+        const prev = utcDate(new Date(nowUtc.getTime() - 86400000));
+        const closed = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'adtoolIntradayClose' AND account = ?1").bind(acct).first().catch(() => null);
+        if (!closed || String(closed.cursor) !== prev) { kickDays.push(prev); await ctx_setSync(env, 'adtoolIntradayClose', acct, prev); }
+      }
+    }
+    for (const kd of kickDays) for (const fam of Object.keys(ADS_FAMILIES)) {
       const F = ADS_FAMILIES[fam];
       const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
         method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
         body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
-          dateFrom: day + 'T00:00:00.000Z', dateTo: day + 'T23:59:59.000Z', fundingModels: [F.model],
+          dateFrom: kd + 'T00:00:00.000Z', dateTo: kd + 'T23:59:59.000Z', fundingModels: [F.model],
           dimensions: F.dims.map(d => ({ dimensionKey: d })), metricKeys: F.keys }),
       });
-      if (cr.status !== 202 && !cr.ok) continue;
+      if (cr.status !== 202 && !cr.ok) {
+        if (adtoolOn) { try { await ctx_setSync(env, 'adtoolIntradayKick', acct, fam + ' ' + kd + ' HTTP ' + cr.status + ' ' + (await cr.text()).slice(0, 220) + ' @' + new Date().toISOString()); } catch (e) {} }
+        continue;
+      }
       const loc = cr.headers.get('location') || '';
       const taskId = loc.split('/').filter(Boolean).pop();
       /* No location header → no trackable id. Never fabricate one: a made-up id polls 404
          forever and (before the timeout above) wedged the kick gate for good. */
-      if (!taskId) continue;
+      if (!taskId) { if (adtoolOn) { try { await ctx_setSync(env, 'adtoolIntradayKick', acct, fam + ' ' + kd + ' HTTP ' + cr.status + ' no location header @' + new Date().toISOString()); } catch (e) {} } continue; }
       await env.DB.prepare(
         "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
         "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) ON CONFLICT(account, task_id) DO NOTHING"
-      ).bind(acct, taskId, day, fam + '_intra').run();
+      ).bind(acct, taskId, kd, fam + '_intra').run();
     }
   }
   await wasteAlarm(env);
@@ -3181,23 +3310,11 @@ async function adsIntraday(env) {
 
 /* One family's partial-day rows replace that family's columns wholesale — a snapshot, never a sum. */
 async function ingestAdsToday(env, acct, day, tsv, isCpc) {
-  const lines = String(tsv || '').split(/\r?\n/).filter(l => l.trim() !== '');
-  let hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
-  if (hi < 0) return 0;
-  const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
-  const col = re => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
-  const cL = heads.findIndex(h => /listing/.test(h));
-  const cS = col(/ad_fee/), cC = col(/^clicks$|^cpc_clicks$/), cU = col(/^sales$|^cpc_attributed_sales$/);
-  const agg = {};
-  for (let i = hi + 1; i < lines.length; i++) {
-    const cells = lines[i].split('\t');
-    const lid = String(cells[cL] || '').replace(/\D/g, '');
-    if (!lid) continue;
-    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
-    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
-    const a = (agg[lid] = agg[lid] || { s: 0, c: 0, u: 0 });
-    a.s += sum(cS); a.c += sum(cC); a.u += sum(cU);
-  }
+  const agg = parseAdsReportTsv(tsv);
+  if (!agg) return 0;
+  return ingestAdsTodayAgg(env, acct, day, agg, isCpc);
+}
+async function ingestAdsTodayAgg(env, acct, day, agg, isCpc) {
   /* Day rollover is handled by adsIntraday's DELETE of any other-day rows before polling —
      within one day the report is cumulative, so an item present earlier is present later too. */
   /* CHANGE-ONLY writes (20 Aug): a full rewrite of ~570 rows per ingest was ~80k D1 rows a day
