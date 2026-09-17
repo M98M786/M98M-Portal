@@ -3542,6 +3542,74 @@ async function adtoolRegisterSeed(env) {
 }
 
 /* ---- job: parity truth (spec §11.1) ---- */
+/* ---- review verdict rules (spec §11.1): the 30-day review's Tue/Thu and Sunday verdicts and confidence tiers,
+   re-implemented as one pure function so the truth check can reproduce them from the raw report rows ---- */
+const ADTOOL_MIN_SP = 1.5;
+function adtVerdicts(rows, margin, ctx) {
+  /* rows: this listing's ads_daily rows inside the fixture window as {date, sp, cl, un, rv}; margin: £ per unit or
+     null; ctx: {h1To, h2From, last7From, campAllStopped} (campaign state is a point-in-time fact carried by the fixture) */
+  const m = (margin == null || isNaN(Number(margin))) ? null : Number(margin);
+  const r2 = v => Math.round(v * 100) / 100;
+  const mk = () => { const o = {}; for (const d of ADTOOL_DOW) o[d] = { sp: 0, cl: 0, un: 0, rv: 0 }; return o; };
+  const all = mk(), h1 = mk(), h2 = mk();
+  let ttSpent = 0, ttSold = 0, ttLoss = 0, sunSpent = 0, sunSold = 0, spLast7 = 0, bestOther = null, bestSun = null;
+  for (const r of rows) {
+    const wd = ADTOOL_DOW[adtWeekdayOf(r.date)];
+    const tgt = [all[wd]]; if (r.date <= ctx.h1To) tgt.push(h1[wd]); else if (r.date >= ctx.h2From) tgt.push(h2[wd]);
+    for (const g of tgt) { g.sp += r.sp; g.cl += r.cl; g.un += r.un; g.rv += r.rv; }
+    const p = m == null ? null : r.un * m - r.sp;
+    if (wd === 'Tue' || wd === 'Thu') { if (r.sp > 0) ttSpent++; if (r.un > 0) ttSold++; if (p != null && p < 0) ttLoss++; }
+    if (wd === 'Sun') { if (r.sp > 0) sunSpent++; if (r.un > 0) sunSold++; if (p != null) bestSun = bestSun == null ? p : Math.max(bestSun, p); }
+    if (wd === 'Mon' || wd === 'Wed' || wd === 'Fri' || wd === 'Sat') { if (p != null) bestOther = bestOther == null ? p : Math.max(bestOther, p); }
+    if (r.date >= ctx.last7From) spLast7 += r.sp;
+  }
+  /* the review rounds each weekday cell to pennies before grouping; do the same so thresholds fall on the same side */
+  const G = (o, names) => { let sp = 0, cl = 0, un = 0, rv = 0; for (const n of names) { sp += r2(o[n].sp); cl += o[n].cl; un += o[n].un; rv += r2(o[n].rv); } sp = r2(sp); return { sp, cl, un, rv: r2(rv), profit: m == null ? null : r2(un * m - sp) }; };
+  const S = { TueThu: G(all, ['Tue', 'Thu']), Other: G(all, ['Mon', 'Wed', 'Fri', 'Sat']), All: G(all, ADTOOL_DOW), SunG: G(all, ['Sun']) };
+  const H1 = { TueThu: G(h1, ['Tue', 'Thu']), All: G(h1, ADTOOL_DOW), SunG: G(h1, ['Sun']) };
+  const H2 = { TueThu: G(h2, ['Tue', 'Thu']), All: G(h2, ADTOOL_DOW), SunG: G(h2, ['Sun']) };
+  const hs = (h, k) => { const x = h[k]; if (x.sp < 1.0 || x.profit == null) return 0; return x.profit < 0 ? -1 : (x.profit > 0 ? 1 : 0); };
+  const tt = S.TueThu, ot = S.Other, al = S.All, su = S.SunG;
+  const otherExBest = (ot.profit != null && bestOther != null) ? r2(ot.profit - bestOther) : null;
+  const otherSpike = otherExBest != null && ot.profit > 0 && otherExBest <= 0;
+  const sunExBest = (su.profit != null && bestSun != null) ? r2(su.profit - bestSun) : null;
+  const sunSpike = sunExBest != null && su.profit > 0 && sunExBest <= 0;
+  const dark = spLast7 <= 0, stopped = !!(ctx && ctx.campAllStopped);
+  let c = '';
+  if (tt.sp < ADTOOL_MIN_SP) c = '';
+  else if (tt.profit == null) c = 'no margin data';
+  else if (tt.profit < 0) {
+    if (ot.sp >= ADTOOL_MIN_SP && ot.profit > 0) c = 'PAUSE Tue+Thu';
+    else if (ot.sp >= ADTOOL_MIN_SP && al.profit != null && al.profit < 0) c = 'LOSES ACROSS THE WEEK';
+    else if (ot.sp >= ADTOOL_MIN_SP) c = 'Tue/Thu loss, Sunday carries it';
+    else c = 'Tue/Thu loss, other days thin';
+  } else c = 'ok on Tue/Thu';
+  let tier = '';
+  if (c === 'PAUSE Tue+Thu') {
+    const hh = [hs(H1, 'TueThu'), hs(H2, 'TueThu')];
+    const consistent = hh.filter(x => x !== 0).length === 2 && hh.filter(x => x < 0).length === 2;
+    tier = (consistent && tt.profit <= -5 && ttSpent >= 4 && ttLoss >= Math.ceil(0.6 * Math.max(ttSpent, 1)) && !otherSpike && !dark && !stopped) ? 'confident' : 'watch';
+  }
+  if (c === 'LOSES ACROSS THE WEEK') {
+    const ha = [hs(H1, 'All'), hs(H2, 'All')];
+    const consistent = ha.filter(x => x !== 0).length === 2 && ha.every(x => x < 0);
+    tier = (consistent && al.profit <= -10 && !dark && !stopped) ? 'confident' : 'watch';
+  }
+  let sc = '';
+  if (su.sp < 1.0) sc = '';
+  else if (su.profit == null) sc = 'no margin data';
+  else if (su.un >= 1 && su.profit > 0) sc = 'SUNDAY WINNER';
+  else if (su.profit < 0) sc = 'Sunday loss';
+  else sc = 'flat';
+  let stier = '';
+  if (sc === 'SUNDAY WINNER') {
+    const hsun = [hs(H1, 'SunG'), hs(H2, 'SunG')];
+    const consistent = hsun.filter(x => x !== 0).length === 2 && hsun.filter(x => x > 0).length === 2;
+    stier = (consistent && sunSold >= 3 && su.profit >= 5 && su.sp >= 5 && !sunSpike && !dark && !stopped) ? 'confident' : 'watch';
+  }
+  return { tt_class: c, tt_tier: tier, sun_class: sc, sun_tier: stier, dark, other_spike: otherSpike, sun_spike: sunSpike, tt_days_spent: ttSpent, tt_loss_days: ttLoss, sun_days_sold: sunSold, sums: S };
+}
+
 async function adtoolTruth(env) {
   if ((await adtFlag(env, 'adtool_rollups')) !== 'on') return;
   await ensureAdtoolPhase1Schema(env);
@@ -3551,41 +3619,58 @@ async function adtoolTruth(env) {
     for (const r of ((await env.DB.prepare("SELECT k1, extra FROM adtool_fixture WHERE kind = 'meta'").all()).results || [])) meta[r.k1] = r.extra;
     if (!meta.from || !meta.to) { await adtJobEnd(env, 'adtoolTruth', t, 0, 'skipped', 'no fixture loaded'); return; }
     const from = meta.from, to = meta.to;
-    const margins = {};
-    for (const r of ((await env.DB.prepare('SELECT item_id, margin_before_ads FROM adtool_listings').all()).results || [])) margins[r.item_id] = Number(r.margin_before_ads);
+    const vctx = { h1To: meta.h1_to || '2026-08-31', h2From: meta.h2_from || '2026-09-01', last7From: meta.last7_from || '2026-09-09' };
+    const toolM = {};
+    for (const r of ((await env.DB.prepare('SELECT item_id, margin_before_ads FROM adtool_listings').all()).results || [])) toolM[r.item_id] = Number(r.margin_before_ads);
+    const fx = {}, fxListing = {};
+    for (const r of ((await env.DB.prepare("SELECT kind, k1, k2, spend, clicks, units, revenue, profit, margin, extra FROM adtool_fixture WHERE kind <> 'meta'").all()).results || [])) { fx[r.kind + '|' + r.k1 + (r.k2 ? '|' + r.k2 : '')] = r; if (r.kind === 'listing') fxListing[r.k1] = r; }
+    /* margins: the fixture carries the review's own per-listing margin, so parity judges the tool's arithmetic on
+       the raw report rows and not margin freshness (own-order margins move every day); the tool's current margins
+       are reported next to it as drift. A listing without a margin is left out of every profit sum, as the review does. */
+    const margins = {}; let drift = 0, driftN = 0;
+    for (const iid of Object.keys(fxListing)) { const fm = fxListing[iid].margin; margins[iid] = (fm == null) ? null : Number(fm); const tm = toolM[iid]; if (fm != null && tm != null && !isNaN(tm)) { driftN++; if (Math.abs(tm - Number(fm)) > 0.01) drift++; } }
     const raw = (await env.DB.prepare('SELECT account, item_id, date, spend + cpc_spend AS sp, clicks + cpc_clicks AS cl, sales + cpc_sales AS un, sale_amount + cpc_sale_amount AS rv FROM ads_daily WHERE date >= ?1 AND date <= ?2').bind(from, to).all()).results || [];
-    const agg = { fleet: {}, weekday: {}, acct: {}, date: {}, listing: {} };
-    const add = (bucket, key, r) => { const a = (bucket[key] = bucket[key] || { sp: 0, cl: 0, un: 0, rv: 0, pr: 0, prOk: true }); a.sp += r.sp; a.cl += r.cl; a.un += r.un; a.rv += r.rv; const m = margins[r.item_id]; if (m == null || isNaN(m)) { if (r.un > 0) a.prOk = false; a.pr -= r.sp; } else a.pr += r.un * m - r.sp; };
+    const agg = { fleet: {}, weekday: {}, acct: {}, date: {}, listing: {}, listing_wd: {} };
+    const byListing = {}; let toolPr = 0;
+    const add = (bucket, key, r) => { const a = (bucket[key] = bucket[key] || { sp: 0, cl: 0, un: 0, rv: 0, pr: 0 }); a.sp += r.sp; a.cl += r.cl; a.un += r.un; a.rv += r.rv; const m = margins[r.item_id]; a.pr += (m == null) ? 0 : r.un * m - r.sp; };
     for (const r of raw) {
       const wd = ADTOOL_DOW[adtWeekdayOf(r.date)];
-      add(agg.fleet, 'all', r); add(agg.weekday, wd, r); add(agg.acct, r.account + '|' + wd, r); add(agg.date, r.date, r); add(agg.listing, r.item_id, r);
+      add(agg.fleet, 'all', r); add(agg.weekday, wd, r); add(agg.acct, r.account + '|' + wd, r); add(agg.date, r.date, r); add(agg.listing, r.item_id, r); add(agg.listing_wd, r.item_id + '|' + wd, r);
+      (byListing[r.item_id] = byListing[r.item_id] || []).push(r);
+      const tm = toolM[r.item_id]; toolPr += (tm == null || isNaN(tm)) ? 0 : r.un * tm - r.sp;
     }
-    const fx = {};
-    for (const r of ((await env.DB.prepare("SELECT kind, k1, k2, spend, clicks, units, revenue, profit FROM adtool_fixture WHERE kind <> 'meta'").all()).results || [])) fx[r.kind + '|' + r.k1 + (r.k2 ? '|' + r.k2 : '')] = r;
     const runs = [];
     const now = new Date().toISOString();
-    const cmp = (metric, scopeKey, tool, f) => {
+    const driftNote = 'tool margins today: est. profit £' + round2(toolPr) + ' (' + drift + ' of ' + driftN + ' listing margins moved > 1p since the cut)';
+    const cmp = (metric, scopeKey, tool, f, extraNote) => {
       const exact = Math.abs(round2(tool.sp) - Number(f.spend)) < 0.006 && tool.cl === Number(f.clicks) && tool.un === Number(f.units) && Math.abs(round2(tool.rv) - Number(f.revenue)) < 0.006;
       const prDelta = f.profit == null ? 0 : round2(tool.pr) - Number(f.profit);
       const prOk = f.profit == null || Math.abs(prDelta) <= Math.max(0.5, 0.01 * Math.abs(Number(f.profit)));
       runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'adtoolTruth vs adtool_fixture', ?8, '')")
-        .bind(metric, scopeKey, now, JSON.stringify({ spend: Number(f.spend), clicks: Number(f.clicks), units: Number(f.units), revenue: Number(f.revenue), profit: f.profit }), JSON.stringify({ spend: round2(tool.sp), clicks: tool.cl, units: tool.un, revenue: round2(tool.rv), profit: round2(tool.pr) }), round2((round2(tool.sp) - Number(f.spend)) + prDelta), (exact && prOk) ? 'PASS' : 'FAIL', exact ? (prOk ? 'exact; profit within tolerance' : 'exact spend/clicks/units/revenue; profit delta ' + round2(prDelta)) : 'spend/clicks/units/revenue differ'));
+        .bind(metric, scopeKey, now, JSON.stringify({ spend: Number(f.spend), clicks: Number(f.clicks), units: Number(f.units), revenue: Number(f.revenue), profit: f.profit }), JSON.stringify({ spend: round2(tool.sp), clicks: tool.cl, units: tool.un, revenue: round2(tool.rv), profit: round2(tool.pr) }), round2((round2(tool.sp) - Number(f.spend)) + prDelta), (exact && prOk) ? 'PASS' : 'FAIL', (exact ? (prOk ? 'exact; profit within tolerance' : 'exact spend/clicks/units/revenue; profit delta ' + round2(prDelta)) : 'spend/clicks/units/revenue differ') + (extraNote ? '; ' + extraNote : '')));
       return exact && prOk;
     };
     let pass = 0, fail = 0;
-    const check = (metric, bucket, kind) => { for (const k of Object.keys(bucket)) { const f = fx[kind + '|' + k]; if (!f) { fail++; continue; } if (cmp(metric, k, bucket[k], f)) pass++; else fail++; } };
-    check('ADTOOL_PARITY_FLEET', agg.fleet, 'fleet'); check('ADTOOL_PARITY_WEEKDAY', agg.weekday, 'weekday'); check('ADTOOL_PARITY_ACCT', agg.acct, 'acct'); check('ADTOOL_PARITY_DATE', agg.date, 'date');
-    /* listings: every fixture listing must be reproduced exactly on the four counts; profit tolerance is judged at fleet level */
-    let lp = 0, lf = 0;
-    for (const k of Object.keys(fx)) {
-      if (!k.startsWith('listing|')) continue;
-      const iid = k.slice(8); const tool = agg.listing[iid] || { sp: 0, cl: 0, un: 0, rv: 0, pr: 0 }; const f = fx[k];
-      const exact = Math.abs(round2(tool.sp) - Number(f.spend)) < 0.006 && tool.cl === Number(f.clicks) && tool.un === Number(f.units) && Math.abs(round2(tool.rv) - Number(f.revenue)) < 0.006;
-      if (exact) lp++; else lf++;
+    const check = (metric, bucket, kind, extraNote) => { for (const k of Object.keys(bucket)) { const f = fx[kind + '|' + k]; if (!f) { fail++; runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES (?1, ?2, ?3, '', ?4, 0, 'FAIL', 'adtoolTruth vs adtool_fixture', 'scope missing from the fixture', '')").bind(metric, k, now, JSON.stringify(bucket[k]))); continue; } if (cmp(metric, k, bucket[k], f, extraNote)) pass++; else fail++; } };
+    check('ADTOOL_PARITY_FLEET', agg.fleet, 'fleet', driftNote); check('ADTOOL_PARITY_WEEKDAY', agg.weekday, 'weekday'); check('ADTOOL_PARITY_ACCT', agg.acct, 'acct'); check('ADTOOL_PARITY_DATE', agg.date, 'date');
+    /* listings and listing × weekday: every fixture row reproduced exactly on the four counts */
+    const countExact = (kind, bucket) => { let ok = 0, bad = 0; const misses = []; for (const k of Object.keys(fx)) { if (!k.startsWith(kind + '|')) continue; const key = k.slice(kind.length + 1); const tool = bucket[key] || { sp: 0, cl: 0, un: 0, rv: 0 }; const f = fx[k]; const exact = Math.abs(round2(tool.sp) - Number(f.spend)) < 0.006 && tool.cl === Number(f.clicks) && tool.un === Number(f.units) && Math.abs(round2(tool.rv) - Number(f.revenue)) < 0.006; if (exact) ok++; else { bad++; if (misses.length < 10) misses.push(key + ' tool ' + round2(tool.sp) + '/' + tool.cl + '/' + tool.un + '/' + round2(tool.rv) + ' vs ' + f.spend + '/' + f.clicks + '/' + f.units + '/' + f.revenue); } } return { ok, bad, misses }; };
+    const lc = countExact('listing', agg.listing), lw = countExact('listing_wd', agg.listing_wd);
+    runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PARITY_LISTING', 'all', ?1, ?2, ?3, ?4, ?5, 'adtoolTruth vs adtool_fixture', ?6, '')").bind(now, String(lc.ok + lc.bad), String(lc.ok), lc.bad, lc.bad ? 'FAIL' : 'PASS', lc.ok + ' listings exact, ' + lc.bad + ' differ' + (lc.misses.length ? ': ' + lc.misses.join(' | ') : '')));
+    runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PARITY_LISTING_WD', 'all', ?1, ?2, ?3, ?4, ?5, 'adtoolTruth vs adtool_fixture', ?6, '')").bind(now, String(lw.ok + lw.bad), String(lw.ok), lw.bad, lw.bad ? 'FAIL' : 'PASS', lw.ok + ' listing-weekday cells exact, ' + lw.bad + ' differ' + (lw.misses.length ? ': ' + lw.misses.join(' | ') : '')));
+    /* verdicts: the review's Tue/Thu and Sunday classes and confidence tiers re-derived from the raw rows */
+    let vok = 0, vbad = 0; const vm = [];
+    for (const iid of Object.keys(fxListing)) {
+      let ex = {}; try { ex = JSON.parse(fxListing[iid].extra || '{}'); } catch (e) { ex = {}; }
+      if (ex.tt_class == null) continue;
+      const v = adtVerdicts(byListing[iid] || [], margins[iid], Object.assign({ campAllStopped: !!ex.camp_all_stopped }, vctx));
+      if (v.tt_class === (ex.tt_class || '') && v.tt_tier === (ex.tt_tier || '') && v.sun_class === (ex.sun_class || '') && v.sun_tier === (ex.sun_tier || '')) vok++;
+      else { vbad++; if (vm.length < 10) vm.push(iid + ' tool [' + v.tt_class + '/' + v.tt_tier + ' · ' + v.sun_class + '/' + v.sun_tier + '] review [' + (ex.tt_class || '') + '/' + (ex.tt_tier || '') + ' · ' + (ex.sun_class || '') + '/' + (ex.sun_tier || '') + ']'); }
     }
-    runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PARITY_LISTING', 'all', ?1, ?2, ?3, ?4, ?5, 'adtoolTruth vs adtool_fixture', ?6, '')").bind(now, String(lp + lf), String(lp), lf, lf ? 'FAIL' : 'PASS', lp + ' listings exact, ' + lf + ' differ'));
+    runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PARITY_VERDICT', 'all', ?1, ?2, ?3, ?4, ?5, 'adtoolTruth vs adtool_fixture', ?6, '')").bind(now, String(vok + vbad), String(vok), vbad, vbad ? 'FAIL' : 'PASS', vok + ' verdicts reproduced, ' + vbad + ' differ' + (vm.length ? ': ' + vm.join(' | ') : '')));
     await adtBatch(env, runs);
-    await adtJobEnd(env, 'adtoolTruth', t, runs.length, fail || lf ? 'FAIL' : 'PASS', 'pass ' + pass + ' fail ' + fail + ' listings ' + lp + '/' + (lp + lf));
+    const bad = fail || lc.bad || lw.bad || vbad;
+    await adtJobEnd(env, 'adtoolTruth', t, runs.length, bad ? 'FAIL' : 'PASS', 'scopes pass ' + pass + ' fail ' + fail + ' · listings ' + lc.ok + '/' + (lc.ok + lc.bad) + ' · cells ' + lw.ok + '/' + (lw.ok + lw.bad) + ' · verdicts ' + vok + '/' + (vok + vbad) + ' · ' + driftNote);
   } catch (e) {
     await adtJobEnd(env, 'adtoolTruth', t, 0, 'error', String(e && e.message || e));
     throw e;
