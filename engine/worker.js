@@ -3528,7 +3528,70 @@ async function adsReportKick(env) {
   });
 }
 
+/* ADTOOL one-shot back-fill (owner, 17 Sep: "back-fill Sir Hasib 17-20 Aug once and report the delta").
+   portal_config.adtool_backfill = {"account":"Sir Hasib","from":"2026-08-13","to":"2026-08-20"} makes
+   every 15-minute adsReportPoll tick file the missing DAILY report tasks for that range (both
+   families, at most 8 creates per tick) through ad_report_tasks, so the poll below ingests them
+   exactly as the nightly ones: ads_daily upsert + sales_daily.ads. The nightly adsReportKick only
+   looks back 7 days, which is why a hole older than a week never healed. The row is deleted once
+   every (day, family) has a task; progress and eBay refusals go to sync_state 'adtoolBackfill'. */
+async function adtoolBackfillKick(env) {
+  const row = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'adtool_backfill'").first().catch(() => null);
+  if (!row || !row.value) return;
+  let cfg = null;
+  try { cfg = JSON.parse(String(row.value)); } catch (e) { cfg = null; }
+  const acct = String((cfg && cfg.account) || ''), from = String((cfg && cfg.from) || ''), to = String((cfg && cfg.to) || '');
+  const okDay = d => /^\d{4}-\d{2}-\d{2}$/.test(d);
+  if (!acct || !okDay(from) || !okDay(to) || to < from) { await ctx_setSync(env, 'adtoolBackfill', acct || '?', 'bad config: ' + String(row.value).slice(0, 120)); return; }
+  const tok = await ebayAccessToken(env, acct);
+  const md = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_metadata/listing_performance_report', { headers: { authorization: 'Bearer ' + tok } });
+  if (!md.ok) { await ctx_setSync(env, 'adtoolBackfill', acct, 'metadata ' + md.status); return; }
+  const meta = await md.json();
+  const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
+  const families = Object.keys(ADS_FAMILIES)
+    .map(f => ({ family: f, model: ADS_FAMILIES[f].model, dims: ADS_FAMILIES[f].dims, keys: ADS_FAMILIES[f].keys.filter(m => mets.indexOf(m) >= 0) }))
+    .filter(x => x.keys.length);
+  const have = {};
+  const doneRs = await env.DB.prepare(
+    "SELECT report_date, family, status FROM ad_report_tasks WHERE account = ?1 AND report_date >= ?2 AND report_date <= ?3 AND family NOT LIKE '%_intra'"
+  ).bind(acct, from, to).all();
+  for (const r of (doneRs.results || [])) {
+    if (r.status === 'INGESTED' || r.status === 'PENDING' || r.status === 'SUCCESS') have[String(r.report_date) + '|' + String(r.family || 'std')] = true;
+  }
+  const days = [];
+  for (let t = new Date(from + 'T00:00:00Z').getTime(); t <= new Date(to + 'T00:00:00Z').getTime(); t += 86400000) days.push(new Date(t).toISOString().slice(0, 10));
+  let kicked = 0, remaining = 0;
+  const problems = [];
+  for (const day of days) for (const fam of families) {
+    if (have[day + '|' + fam.family]) continue;
+    if (kicked >= 8) { remaining++; continue; }
+    const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+      method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+      body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP',
+        dateFrom: day + 'T00:00:00.000Z', dateTo: day + 'T23:59:59.000Z', fundingModels: [fam.model],
+        dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
+    });
+    kicked++;
+    if (cr.status !== 202 && !cr.ok) {
+      remaining++;
+      problems.push(fam.family + ' ' + day + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160));
+      continue;
+    }
+    const loc = cr.headers.get('location') || '';
+    const taskId = loc.split('/').filter(Boolean).pop();
+    if (!taskId) { remaining++; problems.push(fam.family + ' ' + day + ' no location header'); continue; }
+    await env.DB.prepare(
+      "INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) " +
+      "VALUES (?1, ?2, ?3, 'PENDING', 'adtool backfill', datetime('now'), ?4) ON CONFLICT(account, task_id) DO NOTHING"
+    ).bind(acct, taskId, day, fam.family).run();
+  }
+  if (!remaining) await env.DB.prepare("DELETE FROM portal_config WHERE key = 'adtool_backfill'").run();
+  await ctx_setSync(env, 'adtoolBackfill', acct, from + '..' + to + ' kicked ' + kicked + ' remaining ' + remaining + (remaining ? '' : ' DONE') +
+    (problems.length ? ' | ' + problems.join(' | ') : '') + ' @' + new Date().toISOString());
+}
+
 async function adsReportPoll(env) {
+  try { await adtoolBackfillKick(env); } catch (e) { try { await ctx_setSync(env, 'adtoolBackfill', '', 'err ' + String(e && e.message || e).slice(0, 200)); } catch (e2) {} }
   await perAccount(env, 'adsReportPoll', async (acct) => {
     const pend = await env.DB.prepare(
       "SELECT task_id, report_date, family FROM ad_report_tasks WHERE account = ?1 AND status IN ('PENDING', 'SUCCESS') AND family NOT LIKE '%_intra' ORDER BY created_at LIMIT 20"
