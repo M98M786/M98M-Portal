@@ -4910,7 +4910,7 @@ async function ensureAdtoolPhase5Schema(env) {
   ADTOOL_P5_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P5 = [
-  ['ALERT_RULES', 'Alert rules A01–A19', 'spec §6.10 rules with severity and cool-down; an alert stays open while its condition holds, clears when it stops, and cannot re-fire inside its cool-down', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'adtoolAlerts hourly :25', 'fixture window: A03 on 237045118774, A07 on AZHAR ABRT 9 Sep, A05 on 406483438958 (ADTOOL_ALERTS_FIXTURE)'],
+  ['ALERT_RULES', 'Alert rules A01–A19', 'spec §6.10 rules with severity and cool-down; an alert stays open while its condition holds, clears when it stops, and cannot re-fire inside its cool-down', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'adtoolAlerts hourly :25', 'the three cases the spec names, configured privately in portal_config.adtool_fixture_alerts (ADTOOL_ALERTS_FIXTURE)'],
   ['REPORT_YESTERDAY', "Yesterday's report", 'fleet and per-account spend / ad sales / ROAS / est. ad profit vs the 7-day average and the same weekday last week; orders + actual profit; hour by hour vs the fleet profile; winners / losers; what changed (rule-generated bullets)', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'adtoolReport daily 05:20 UTC chain (+ hourly catch-up)', '3 consecutive mornings without manual help (dates in the notes)'],
   ['ROAS_LADDER', 'ROAS target, gap and the five levers', '§6.13 lever arithmetic on the last 30 report days with printed assumptions; cut-only ceiling; cost per sale; per-account gap', 'adtool_listing_day, adtool_listings', 'adtoolRoas daily in the chain', 'review numbers on the fixture window (lever 1 → 4.34× / £6,971 etc.)'],
   ['BUDGET_CAPPED_DAY', 'Budget-capped listing-days', 'first sample of the day at ≥ 95 % of the summed running daily budget with flat clicks after (adtCapHour)', 'adtool_ads_intraday, campaigns', 'adtoolReport daily (yesterday)', 'A15 input; count on the Data health page'],
@@ -4994,15 +4994,23 @@ async function adtoolAlertsFixtureCheck(env) {
   await ensureAdtoolPhase5Schema(env);
   const meta = {}; for (const r of ((await env.DB.prepare("SELECT k1, extra FROM adtool_fixture WHERE kind = 'meta'").all()).results || [])) meta[r.k1] = r.extra;
   const to = meta.to || '2026-09-15';
-  const rowsA = (await env.DB.prepare('SELECT item_id, day, spend, attr_units, attr_revenue, ad_profit, clicks FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day').bind('237045118774', to).all()).results || [];
-  const a03 = adtListingAlerts(rowsA, { item_id: '237045118774' }, null).some(x => x.rule === 'A03');
-  const abrt = (await env.DB.prepare("SELECT d.day, ROUND(SUM(d.spend), 2) AS spend FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.account = 'AZHAR ABRT' AND d.day >= ?1 AND d.day <= ?2 GROUP BY d.day ORDER BY d.day").bind('2026-08-28', '2026-09-10').all()).results || [];
+  /* the three listings and the account the spec names are real ids and stay OUT of this public repo: they live
+     in portal_config.adtool_fixture_alerts as {"a03":"<item>","a07":"<account>","a05":"<item>"}. Without the row
+     the check reports 'not configured' rather than inventing a result. */
+  let cfg = {}; try { cfg = JSON.parse(await adtFlag(env, 'adtool_fixture_alerts') || '{}'); } catch (e) { cfg = {}; }
+  if (!cfg.a03 || !cfg.a07 || !cfg.a05) {
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'the three cases named in the spec', '', 0, 'skipped', 'rules evaluated on the fixture window', 'portal_config.adtool_fixture_alerts is not set — the item ids stay out of the public repo', '')").bind(new Date().toISOString()).run();
+    return { configured: false };
+  }
+  const rowsA = (await env.DB.prepare('SELECT item_id, day, spend, attr_units, attr_revenue, ad_profit, clicks FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day').bind(String(cfg.a03), to).all()).results || [];
+  const a03 = adtListingAlerts(rowsA, { item_id: String(cfg.a03) }, null).some(x => x.rule === 'A03');
+  const abrt = (await env.DB.prepare('SELECT d.day, ROUND(SUM(d.spend), 2) AS spend FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.account = ?3 AND d.day >= ?1 AND d.day <= ?2 GROUP BY d.day ORDER BY d.day').bind('2026-08-28', '2026-09-10', String(cfg.a07)).all()).results || [];
   const a07 = adtAccountSpendAlerts(abrt).some(x => x.rule === 'A07');
-  const dual = await env.DB.prepare("SELECT SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' THEN 1 ELSE 0 END) AS cpc, SUM(CASE WHEN c.funding_model = 'COST_PER_SALE' THEN 1 ELSE 0 END) AS cps FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = '406483438958' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))").first();
+  const dual = await env.DB.prepare("SELECT SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' THEN 1 ELSE 0 END) AS cpc, SUM(CASE WHEN c.funding_model = 'COST_PER_SALE' THEN 1 ELSE 0 END) AS cps FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = ?1 AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))").bind(String(cfg.a05)).first();
   const a05 = !!(dual && Number(dual.cpc) > 0 && Number(dual.cps) > 0);
   const ok = a03 && a07 && a05;
-  await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'A03 on 237045118774, A07 on AZHAR ABRT 9 Sep, A05 on 406483438958', ?2, 0, ?3, 'rules evaluated on the fixture window / current campaign map', ?4, '')")
-    .bind(new Date().toISOString(), JSON.stringify({ A03: a03, A07: a07, A05: a05 }), ok ? 'PASS' : 'FAIL', 'A03 ' + (a03 ? 'fires' : 'does not fire') + ' · A07 ' + (a07 ? 'fires (ABRT 9–10 Sep)' : 'does not fire') + ' · A05 ' + (a05 ? 'fires (live in both today)' : 'does not fire today — the campaign map is a point-in-time fact')).run();
+  await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'the three cases named in the spec', ?2, 0, ?3, 'rules evaluated on the fixture window / current campaign map', ?4, '')")
+    .bind(new Date().toISOString(), JSON.stringify({ A03: a03, A07: a07, A05: a05 }), ok ? 'PASS' : 'FAIL', 'A03 ' + (a03 ? 'fires' : 'does not fire') + ' · A07 ' + (a07 ? 'fires (9–10 Sep)' : 'does not fire') + ' · A05 ' + (a05 ? 'fires (live in both today)' : 'does not fire today — the campaign map is a point-in-time fact')).run();
   return { a03, a07, a05, abrt: abrt.slice(-5) };
 }
 
