@@ -168,6 +168,13 @@ export default {
       '20 * * * *': [adtoolRollups],
       '25 * * * *': [adtoolAlerts],
       '20 5 * * *': [adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas],
+      /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
+         then the apply job (which sends nothing unless an account's own switch is on) */
+      '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApply],
+      /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything */
+      '30 23 * * *': [adtoolDecisionsBoundary],
+      /* today-only pauses come back at 00:05 UK */
+      '5 0 * * *': [adtoolResume],
       /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
          quarter-hour trigger (:05/:20/:35/:50). The Apps Script side fingerprints its inputs and
          skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
@@ -3821,10 +3828,12 @@ const ADTOOL_ACTIONS = {
       let where = null; try { where = await adtWhereRows(env, iid); } catch (e) { where = null; }
       let profile = null; try { profile = await adtListingProfileBundle(env, iid); } catch (e) { profile = null; }
       let forecast = null; try { forecast = await adtForecastBundle(env, iid); } catch (e) { forecast = null; }
+      let decision = null; try { decision = await env.DB.prepare("SELECT day, batch, decision, rules_json, why, action, confidence, expected_value, outcome_score FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC, batch LIMIT 1").bind(iid).first(); } catch (e) { decision = null; }
+      let narrative = null; try { narrative = await env.DB.prepare("SELECT text, model, validated, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 ORDER BY day DESC LIMIT 1").bind(iid).first(); } catch (e) { narrative = null; }
       const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
       return {
         header: { item_id: iid, account: L.account, title: L.title, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null },
-        kpis, campaigns: camps, where, profile, forecast, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
+        kpis, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
         hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
         computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Brain v17)', sample_size: days.length,
       };
@@ -5171,6 +5180,652 @@ const ADTOOL_ACTIONS_P5 = {
   },
 };
 /* ADTOOL-P5-END ===================================================================================== */
+/* ADTOOL-P6-BEGIN ===================================================================================
+   Advertising Tool — Phase 6: the decision engine (spec §6.11) in SHADOW, scoring, carry-forward validation
+   (§6.12), the action log and the Stop today page. Two batches a day. In shadow nothing is sent to eBay: every
+   decision is written, scored the next day against what actually happened, and shown with its score. The live
+   apply path is Phase 8 and is gated per account by its own flag, off by default. */
+/* ADTOOL-P6-PURE-BEGIN */
+function adtDecide(I) {
+  /* I: the inputs snapshot of §6.11. Returns {decision, rules[], confidence, ev, why, action}.
+     First rule that fires wins; every rule that fired is recorded. */
+  const r2 = v => Math.round(v * 100) / 100;
+  const y = I.y || { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 }, d7 = I.d7 || { spend: 0, ad_profit: 0, attr_revenue: 0 }, d30 = I.d30 || { spend: 0, ad_profit: 0, attr_revenue: 0 }, d14 = I.d14 || { spend: 0, ad_profit: 0 };
+  const be = Number(I.be) || 0;
+  const roasOf = w => (w && w.spend > 0) ? w.attr_revenue / w.spend : null;
+  const ev = r2(0.5 * (Number(I.profile_today) || 0) + 0.3 * (Number(d7.ad_profit) || 0) / 7 + 0.2 * (Number(y.ad_profit) || 0));
+  const fired = [];
+  const halvesNeg = (I.halves || []).filter(h => h < 0).length, halvesWithSpend = (I.halves || []).filter(h => h !== 0).length;
+  const daysWithSpend = Number(I.days_with_spend_30) || 0, stillSpending = Number(d7.spend) > 0;
+  const confidentStop = halvesWithSpend === 2 && halvesNeg === 2 && daysWithSpend >= 10 && stillSpending;
+  /* STOP candidates */
+  const s1 = d30.ad_profit < 0 && d7.ad_profit < 0 && ev < 0 && confidentStop;
+  const s2 = Number(I.zero_streak) >= 14 && Number(d14.spend) >= 10;
+  const s3 = !!I.roas_under_be_5d;
+  const s4 = I.margin != null && Number(I.margin) <= 0 && !!I.ads_running;
+  if (s1) fired.push('S1'); if (s2) fired.push('S2'); if (s3) fired.push('S3'); if (s4) fired.push('S4');
+  const stopWanted = s1 || s2 || s3 || s4, hardStop = s2 || s4;
+  /* guardrails */
+  let blocked = '';
+  if (stopWanted) {
+    if (Number(I.age_ads) < 14 && !hardStop) blocked = 'the ad is under 14 days old';
+    else if (Number(I.organic3) >= 1 && Number(d30.ad_profit) >= -5 && !hardStop) blocked = 'it still sells without the ad and the 30-day loss is under £5';
+    else if (String(I.stage) === 'Launch' && Number(I.age_days) < 21 && !hardStop) blocked = 'it is a Launch-stage listing under 21 days old';
+  }
+  const why = [];
+  const money = v => (v < 0 ? '−£' : '+£') + Math.abs(r2(v)).toFixed(2);
+  why.push('yesterday ' + money(Number(y.ad_profit) || 0) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : ''));
+  why.push('today expected ' + money(Number(I.profile_today) || 0) + ' (EV ' + money(ev) + ')');
+  if (I.weekday_name) why.push(I.weekday_name + (I.weekday_p != null ? ' p=' + I.weekday_p : '') + (I.weekday_losing ? ' is a losing day for it' : I.weekday_winning ? ' is a winning day for it' : ''));
+  if (I.stage) why.push('stage ' + I.stage);
+  if (stopWanted && !blocked) return { decision: 'STOP', rules: fired, confidence: (s1 && confidentStop) || s2 || s4 ? 'confident' : 'watch', ev, why: why.join(' · '), action: 'pause the ad in every campaign it sits in', blocked: '' };
+  /* REDUCE */
+  const r1 = !!I.weekday_losing_confident;
+  const r2rule = halvesWithSpend === 2 && halvesNeg === 1 && Number(d30.ad_profit) < 0;
+  const r3 = String(I.stage) === 'Decline' && Number(d7.ad_profit) < 0 && Number(d30.ad_profit) > 0;
+  const r4 = stopWanted && !!blocked;
+  if (r1) fired.push('R1'); if (r2rule) fired.push('R2'); if (r3) fired.push('R3'); if (r4) fired.push('R4');
+  if (r1) return { decision: 'REDUCE', rules: fired, confidence: 'confident', ev, why: why.join(' · '), action: 'pause today only, auto-resume tomorrow 00:05', blocked: '' };
+  if (r4) return { decision: 'REDUCE', rules: fired, confidence: 'watch', ev, why: why.join(' · ') + ' · stop blocked: ' + blocked, action: 'bid −20 %', blocked };
+  if (r2rule) return { decision: 'REDUCE', rules: fired, confidence: 'watch', ev, why: why.join(' · ') + ' · the two halves of the month disagree', action: 'bid −20 %, re-evaluate in 7 days', blocked: '' };
+  if (r3) return { decision: 'REDUCE', rules: fired, confidence: 'watch', ev, why: why.join(' · '), action: 'bid −20 %', blocked: '' };
+  /* PUSH */
+  const roas30 = roasOf(d30), roas7 = roasOf(d7);
+  const p1 = be > 0 && roas30 != null && roas7 != null && roas30 >= 1.5 * be && roas7 >= 1.5 * be && Number(I.capped7) >= 3;
+  const p2 = !!I.weekday_winning_confident && Number(d7.ad_profit) > 0;
+  const p3 = String(I.stage) === 'Growth' && be > 0 && roas7 != null && roas7 >= 1.5 * be && Number(I.capped7) < 3;
+  if (p1) fired.push('P1'); if (p2) fired.push('P2'); if (p3) fired.push('P3');
+  if (p1) return { decision: 'PUSH', rules: fired, confidence: 'confident', ev, why: why.join(' · ') + ' · capped on ' + I.capped7 + ' of the last 7 days at ' + r2(roas7) + '×', action: 'daily budget +30 % (capped at 2× the current)', blocked: '' };
+  if (p2) return { decision: 'PUSH', rules: fired, confidence: 'confident', ev, why: why.join(' · '), action: 'bid +20 % for today (capped at 2× the current)', blocked: '' };
+  if (p3) return { decision: 'PUSH', rules: fired, confidence: 'watch', ev, why: why.join(' · '), action: 'bid +10 %', blocked: '' };
+  return { decision: 'KEEP', rules: fired, confidence: 'confident', ev, why: why.join(' · '), action: 'leave it alone', blocked: '' };
+}
+function adtScoreDecision(decision, realised, be) {
+  /* §6.11 scoring, for shadow decisions (the listing kept running, so the day is observable) */
+  if (!realised) return null;
+  if (decision === 'STOP' || decision === 'REDUCE') return (Number(realised.ad_profit) < 0) ? 1 : 0;
+  if (decision === 'PUSH') { const roas = Number(realised.spend) > 0 ? Number(realised.attr_revenue) / Number(realised.spend) : null; return (roas != null && be > 0 && roas >= 1.2 * be) ? 1 : 0; }
+  if (decision === 'KEEP') return (Number(realised.ad_profit) >= 0) ? 1 : 0;
+  return null;
+}
+function adtCarryForward(listings) {
+  /* §6.12: each listing carries {selected (rule fired in the first window), repeated (same behaviour in the second)}.
+     Returns the rule's hit rate, the base rate over every spending listing, and whether it is trusted. */
+  const sel = listings.filter(l => l.selected), tested = sel.filter(l => l.repeated != null);
+  const rate = tested.length ? tested.filter(l => l.repeated).length / tested.length : null;
+  const all = listings.filter(l => l.repeated != null);
+  const base = all.length ? all.filter(l => l.repeated).length / all.length : null;
+  const trusted = rate != null && base != null && rate >= base + 0.10;
+  return { selected: sel.length, tested: tested.length, rate: rate == null ? null : Math.round(rate * 100), base_rate: base == null ? null : Math.round(base * 100), trusted, spend: Math.round(sel.reduce((t, l) => t + (Number(l.spend) || 0), 0) * 100) / 100 };
+}
+/* ADTOOL-P6-PURE-END */
+
+let ADTOOL_P6_SCHEMA_OK = false;
+async function ensureAdtoolPhase6Schema(env) {
+  if (ADTOOL_P6_SCHEMA_OK) return;
+  await ensureAdtoolPhase5Schema(env);
+  const ddl = [
+    "CREATE TABLE IF NOT EXISTS adtool_decisions (decision_id TEXT PRIMARY KEY, day TEXT, batch TEXT DEFAULT 'morning', account TEXT, item_id TEXT, decision TEXT, rules_json TEXT DEFAULT '[]', inputs_json TEXT DEFAULT '{}', expected_value REAL, confidence TEXT, why TEXT DEFAULT '', action TEXT DEFAULT '', mode TEXT DEFAULT 'shadow', applied_at TEXT DEFAULT '', applied_by TEXT DEFAULT '', api_result_json TEXT DEFAULT '', undo_json TEXT DEFAULT '', undone_at TEXT DEFAULT '', outcome_day TEXT DEFAULT '', outcome_ad_profit REAL, outcome_score INTEGER)",
+    'CREATE INDEX IF NOT EXISTS idx_adtd_day ON adtool_decisions(day, decision)',
+    'CREATE INDEX IF NOT EXISTS idx_adtd_item ON adtool_decisions(item_id, day)',
+    "CREATE TABLE IF NOT EXISTS adtool_rule_scores (rule_id TEXT, scored_day TEXT, decisions INTEGER, right_n INTEGER, score REAL, trusted INTEGER DEFAULT 1, PRIMARY KEY (rule_id, scored_day))",
+    "CREATE TABLE IF NOT EXISTS adtool_carry (rule_id TEXT, run_day TEXT, selected INTEGER, tested INTEGER, rate INTEGER, base_rate INTEGER, trusted INTEGER, spend REAL, window_json TEXT DEFAULT '', PRIMARY KEY (rule_id, run_day))",
+  ];
+  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtoolRegisterSeedP6(env);
+  ADTOOL_P6_SCHEMA_OK = true;
+}
+const ADTOOL_REGISTER_P6 = [
+  ['DECISION', 'Decision per advertised listing per day', '§6.11: first rule that fires wins (S1–S4 → STOP, R1–R4 → REDUCE, P1–P3 → PUSH, else KEEP) with guardrails; EV = 0.5 × today expected + 0.3 × 7-day profit/day + 0.2 × yesterday', 'adtool_listing_day, adtool_profiles, adtool_stages, adtool_cap_days, campaign_ads', 'adtoolDecisions: boundary batch 23:30 UTC, morning batch 05:55 UTC', '14 days of shadow scores published (ADTOOL_SHADOW_14D)'],
+  ['DECISION_SCORE', 'Was yesterday\'s decision right?', 'shadow: STOP/REDUCE right when the realised ad profit that day was negative; PUSH right when realised ROAS ≥ 1.2 × break-even; KEEP right when the day was not a loss', 'adtool_decisions, adtool_listing_day', 'adtoolDecisionScore daily 06:00 UTC', 'the Stop today page shows yesterday and the trailing 30 days'],
+  ['RULE_TRUST', 'Trailing 30-day score per rule', 'share of that rule\'s scored decisions that were right; a rule under the base rate is switched to watch automatically', 'adtool_rule_scores', 'same', 'shown on the Stop today page'],
+  ['CARRY_FORWARD', 'Does the rule repeat? (§6.12)', 'every Monday: the rule applied to days −28…−15 and scored on −14…−1, against the base rate of all spending listings; trusted needs rate ≥ base + 10 points', 'adtool_listing_day, adtool_carry', 'adtoolCarry weekly (Monday, morning chain)', "the review's own finding: Tue/Thu pause does not repeat, loses-across-the-week and Sunday winners do"],
+];
+async function adtoolRegisterSeedP6(env) {
+  const stmts = ADTOOL_REGISTER_P6.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 6, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 6").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  return adtBatch(env, stmts);
+}
+async function adtDecisionInputs(env, day) {
+  /* one pass over the tool's own rollups → the §6.11 snapshot per advertised listing */
+  const yday = adtAddDays(day, -1);
+  const L = {}; for (const r of ((await env.DB.prepare('SELECT item_id, account, title, price, margin_before_ads, breakeven_roas, start_time, status FROM adtool_listings').all()).results || [])) L[r.item_id] = r;
+  const rows = (await env.DB.prepare('SELECT item_id, day, weekday, spend, attr_units, attr_revenue, ad_profit, units, clicks FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 ORDER BY item_id, day').bind(adtAddDays(day, -31), yday).all()).results || [];
+  const byItem = {}; for (const r of rows) (byItem[r.item_id] = byItem[r.item_id] || []).push(r);
+  const live = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, COUNT(*) AS n FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED')) GROUP BY ca.listing_id").all()).results || [])) live[r.listing_id] = Number(r.n);
+  const stages = {}; for (const r of ((await env.DB.prepare('SELECT item_id, stage, days_in_stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages)').all()).results || [])) stages[r.item_id] = r;
+  const wdp = await adtLatestProfiles(env, 'listing', 'weekday');
+  const desc = {}; for (const r of ((await env.DB.prepare('SELECT item_id, json FROM adtool_descriptors WHERE day = (SELECT MAX(day) FROM adtool_descriptors)').all()).results || [])) { try { desc[r.item_id] = JSON.parse(r.json); } catch (e) {} }
+  const capped = {}; for (const r of ((await env.DB.prepare('SELECT item_id, COUNT(*) AS n FROM adtool_cap_days WHERE day >= ?1 GROUP BY item_id').bind(adtAddDays(day, -7)).all()).results || [])) capped[r.item_id] = Number(r.n);
+  const organic = {}; for (const r of ((await env.DB.prepare('SELECT item_id, SUM(units) AS u, SUM(attr_units) AS a FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY item_id').bind(adtAddDays(day, -3), yday).all()).results || [])) organic[r.item_id] = Math.max(0, Number(r.u) - Number(r.a));
+  const todayWd = adtWeekdayOf(day);
+  const out = [];
+  for (const iid of Object.keys(byItem)) {
+    const m = L[iid]; if (!m) continue;
+    const rs = byItem[iid]; const sum = (k, n) => rs.slice(-n).reduce((t, r) => t + (Number(r[k]) || 0), 0);
+    const win = n => ({ spend: round2(sum('spend', n)), attr_units: sum('attr_units', n), attr_revenue: round2(sum('attr_revenue', n)), ad_profit: round2(sum('ad_profit', n)) });
+    const y = rs.length && rs[rs.length - 1].day === yday ? { spend: Number(rs[rs.length - 1].spend), attr_units: Number(rs[rs.length - 1].attr_units), attr_revenue: Number(rs[rs.length - 1].attr_revenue), ad_profit: Number(rs[rs.length - 1].ad_profit) } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 };
+    const d7 = win(7), d14 = win(14), d30 = win(30);
+    if (d30.spend <= 0 && !live[iid]) continue;                       // never advertised and not live: nothing to decide
+    /* halves of the last 30 days */
+    const h1 = rs.slice(-30, -15), h2 = rs.slice(-15);
+    const sgn = arr => { const sp = arr.reduce((t, r) => t + Number(r.spend), 0); if (sp < 1) return 0; const p = arr.reduce((t, r) => t + Number(r.ad_profit), 0); return p < 0 ? -1 : (p > 0 ? 1 : 0); };
+    const halves = [sgn(h1), sgn(h2)];
+    /* zero streak while spending, days with spend, roas under be for 5 days */
+    let zero = 0; for (let i = rs.length - 1; i >= 0; i--) { if (Number(rs[i].attr_units) > 0) break; if (Number(rs[i].spend) > 0) zero++; else if (zero) break; }
+    const daysWithSpend = rs.filter(r => Number(r.spend) > 0).length;
+    const be = Number(m.breakeven_roas) || 0;
+    const l5 = rs.slice(-5); const under5 = l5.length === 5 && be > 0 && l5.every(r => Number(r.spend) >= 2 && (Number(r.attr_revenue) / Math.max(0.0001, Number(r.spend))) < be);
+    /* today's weekday from the listing's own profile + the weekday halves */
+    const prof = wdp.rows[iid]; const dsc = desc[iid] || {};
+    const wdRows = rs.filter(r => Number(r.weekday) === todayWd);
+    const wdH1 = wdRows.filter(r => r.day < adtAddDays(day, -15)), wdH2 = wdRows.filter(r => r.day >= adtAddDays(day, -15));
+    const wdSign = [sgn(wdH1), sgn(wdH2)];
+    const otherRows = rs.filter(r => Number(r.weekday) !== todayWd); const otherProfit = otherRows.reduce((t, r) => t + Number(r.ad_profit), 0);
+    const p = prof && prof.spread ? prof.spread.p : null;
+    const wdLosingConf = p != null && p < 0.05 && wdSign[0] === -1 && wdSign[1] === -1 && otherProfit > 0;
+    const soldRecent = wdRows.slice(-4).filter(r => Number(r.attr_units) > 0).length;
+    const wdWinningConf = p != null && p < 0.05 && wdSign[0] === 1 && wdSign[1] === 1 && soldRecent >= 3;
+    /* expected ad profit today from the weekday profile */
+    const rate = prof && prof.rates ? Number(prof.rates[todayWd].rate) : null;
+    const adDep = dsc.ad_dependence28 == null ? (d30.attr_units && rs.reduce((t, r) => t + Number(r.units), 0) ? d30.attr_units / rs.slice(-30).reduce((t, r) => t + Number(r.units), 0) : 0) : Number(dsc.ad_dependence28);
+    const spendDow = wdRows.length ? wdRows.reduce((t, r) => t + Number(r.spend), 0) / wdRows.length : (d7.spend / 7);
+    const profileToday = rate == null || m.margin_before_ads == null ? (d7.ad_profit / 7) : round2(rate * adDep * Number(m.margin_before_ads) - spendDow);
+    const firstAd = rs.find(r => Number(r.spend) > 0);
+    out.push({
+      item_id: iid, account: m.account, title: m.title, margin: m.margin_before_ads, be, ads_running: !!live[iid], campaigns: live[iid] || 0,
+      y, d7, d14, d30, halves, days_with_spend_30: daysWithSpend, zero_streak: zero, roas_under_be_5d: under5,
+      stage: stages[iid] ? stages[iid].stage : '', age_days: m.start_time ? Math.floor((Date.now() - new Date(String(m.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : 999,
+      age_ads: firstAd ? Math.round((new Date(day + 'T00:00:00Z') - new Date(firstAd.day + 'T00:00:00Z')) / 86400000) : 0,
+      organic3: organic[iid] || 0, capped7: capped[iid] || 0, profile_today: profileToday, weekday_p: p, weekday_name: ADTOOL_DOW[todayWd],
+      weekday_losing: wdSign[0] === -1 && wdSign[1] === -1, weekday_winning: wdSign[0] === 1 && wdSign[1] === 1,
+      weekday_losing_confident: wdLosingConf, weekday_winning_confident: wdWinningConf,
+    });
+  }
+  return out;
+}
+async function adtoolDecisions(env, batch) {
+  if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
+  await ensureAdtoolPhase6Schema(env);
+  const B = batch || 'morning';
+  const t = await adtJobStart(env, 'adtoolDecisions:' + B);
+  try {
+    /* the boundary batch decides for the report day that is starting; the morning batch for today */
+    const day = B === 'boundary' ? adtAddDays(ukDate(''), (adtUkParts(Date.now()).hour >= 22 ? 1 : 0)) : ukDate('');
+    const done = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND batch = ?2').bind(day, B).first();
+    if (done && Number(done.n)) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'ok', B + ' batch for ' + day + ' already decided (' + done.n + ')'); return; }
+    const inputs = await adtDecisionInputs(env, day);
+    const trust = {}; for (const r of ((await env.DB.prepare('SELECT rule_id, trusted FROM adtool_rule_scores WHERE scored_day = (SELECT MAX(scored_day) FROM adtool_rule_scores)').all()).results || [])) trust[r.rule_id] = Number(r.trusted);
+    const stmts = []; const counts = { STOP: 0, REDUCE: 0, PUSH: 0, KEEP: 0 }; let confident = 0;
+    for (const I of inputs) {
+      const d = adtDecide(I);
+      /* the boundary batch is weekday work only: it never STOPs (spec §6.11) */
+      if (B === 'boundary' && d.decision === 'STOP') { d.decision = 'REDUCE'; d.rules = d.rules.concat(['boundary-no-stop']); d.action = 'held for the morning batch (the boundary batch never stops)'; d.confidence = 'watch'; }
+      if (B === 'boundary' && d.decision === 'KEEP') continue;                        // nothing to record
+      /* a rule the carry-forward or the trailing score has demoted can still be shown, never as confident */
+      if (d.rules.some(r => trust[r] === 0)) d.confidence = 'watch';
+      counts[d.decision]++; if (d.confidence === 'confident') confident++;
+      const id = day + '|' + B + '|' + I.item_id;
+      stmts.push(env.DB.prepare("INSERT INTO adtool_decisions (decision_id, day, batch, account, item_id, decision, rules_json, inputs_json, expected_value, confidence, why, action, mode) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'shadow') ON CONFLICT(decision_id) DO UPDATE SET decision = ?6, rules_json = ?7, inputs_json = ?8, expected_value = ?9, confidence = ?10, why = ?11, action = ?12")
+        .bind(id, day, B, I.account, I.item_id, d.decision, JSON.stringify(d.rules), JSON.stringify({ y: I.y, d7: I.d7, d30: I.d30, be: I.be, stage: I.stage, halves: I.halves, zero_streak: I.zero_streak, capped7: I.capped7, organic3: I.organic3, age_ads: I.age_ads, profile_today: I.profile_today, weekday_p: I.weekday_p, weekday: I.weekday_name, title: I.title, campaigns: I.campaigns, blocked: d.blocked }), d.ev, d.confidence, d.why, d.action));
+      if (stmts.length >= 400) { await adtBatch(env, stmts); stmts.length = 0; }
+    }
+    await adtBatch(env, stmts);
+    const note = B + ' batch ' + day + ': ' + counts.STOP + ' stop · ' + counts.REDUCE + ' reduce · ' + counts.PUSH + ' push · ' + counts.KEEP + ' keep · ' + confident + ' confident (shadow — nothing sent to eBay)';
+    if (B === 'morning' && (counts.STOP + counts.REDUCE + counts.PUSH) > 0) { try { await queueNotify(env, 'advertising', 'Stop today (shadow)', '🟡 ' + note, 'adtool:dec:' + day); } catch (e) {} }
+    await adtJobEnd(env, 'adtoolDecisions:' + B, t, inputs.length, 'ok', note);
+  } catch (e) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'error', String(e && e.message || e)); throw e; }
+}
+async function adtoolDecisionsBoundary(env) { return adtoolDecisions(env, 'boundary'); }
+async function adtoolDecisionScore(env) {
+  if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
+  await ensureAdtoolPhase6Schema(env);
+  const t = await adtJobStart(env, 'adtoolDecisionScore');
+  try {
+    const today = ukDate(''), yday = adtAddDays(today, -1);
+    const dec = (await env.DB.prepare("SELECT decision_id, item_id, decision, rules_json, inputs_json FROM adtool_decisions WHERE day = ?1 AND outcome_score IS NULL").bind(yday).all()).results || [];
+    if (!dec.length) { await adtJobEnd(env, 'adtoolDecisionScore', t, 0, 'ok', 'nothing to score for ' + yday); return; }
+    const real = {}; for (const r of ((await env.DB.prepare('SELECT item_id, spend, attr_revenue, ad_profit FROM adtool_listing_day WHERE day = ?1').bind(yday).all()).results || [])) real[r.item_id] = r;
+    const stmts = []; const byRule = {}; let right = 0, scored = 0;
+    for (const d of dec) {
+      const rr = real[d.item_id]; let be = 0; try { be = Number(JSON.parse(d.inputs_json).be) || 0; } catch (e) {}
+      const sc = adtScoreDecision(d.decision, rr, be);
+      if (sc == null) continue;
+      scored++; if (sc) right++;
+      stmts.push(env.DB.prepare('UPDATE adtool_decisions SET outcome_day = ?2, outcome_ad_profit = ?3, outcome_score = ?4 WHERE decision_id = ?1').bind(d.decision_id, yday, rr ? Number(rr.ad_profit) : null, sc));
+      let rules = []; try { rules = JSON.parse(d.rules_json); } catch (e) {}
+      for (const ru of rules) { const b = (byRule[ru] = byRule[ru] || { n: 0, r: 0 }); b.n++; b.r += sc; }
+    }
+    /* trailing 30-day score per rule; a rule under the base rate is demoted to watch */
+    const base = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN ad_profit < 0 THEN 1 ELSE 0 END) AS neg FROM adtool_listing_day WHERE day = ?1 AND spend > 0").bind(yday).first();
+    const baseRate = base && Number(base.n) ? Number(base.neg) / Number(base.n) : 0.5;
+    const hist = (await env.DB.prepare("SELECT rules_json, outcome_score FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1").bind(adtAddDays(today, -30)).all()).results || [];
+    const roll = {}; for (const h of hist) { let rs = []; try { rs = JSON.parse(h.rules_json); } catch (e) {} for (const ru of rs) { const b = (roll[ru] = roll[ru] || { n: 0, r: 0 }); b.n++; b.r += Number(h.outcome_score); } }
+    for (const ru of Object.keys(roll)) { const b = roll[ru]; const score = b.n ? b.r / b.n : null; const trusted = !(b.n >= 10 && score != null && score < baseRate) ? 1 : 0; stmts.push(env.DB.prepare('INSERT INTO adtool_rule_scores (rule_id, scored_day, decisions, right_n, score, trusted) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(rule_id, scored_day) DO UPDATE SET decisions = ?3, right_n = ?4, score = ?5, trusted = ?6').bind(ru, today, b.n, b.r, score == null ? null : round2(score), trusted)); if (!trusted) { try { await queueNotify(env, 'management', 'Ads rule demoted', '🟠 Decision rule ' + ru + ' scored ' + Math.round(score * 100) + ' % over ' + b.n + ' decisions, under the ' + Math.round(baseRate * 100) + ' % base rate — it is now shown but never applied.', 'adtool:ruledemote:' + ru + ':' + today); } catch (e) {} } }
+    await adtBatch(env, stmts);
+    /* the 14-day shadow acceptance (spec §12 phase 6) */
+    const days = await env.DB.prepare("SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL").first();
+    const n14 = Number(days && days.n) || 0;
+    const tot = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1").bind(adtAddDays(today, -14)).first();
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_SHADOW_14D', 'decisions', ?1, '14 days of shadow scores', ?2, 0, ?3, 'shadow decisions scored against the realised day', ?4, '')")
+      .bind(new Date().toISOString(), String(n14) + ' days', n14 >= 14 ? 'PASS' : 'pending', n14 + ' of 14 days scored · last 14 days ' + (tot ? Number(tot.r) + ' right of ' + Number(tot.n) : '0 of 0') + ' · base rate ' + Math.round(baseRate * 100) + ' %').run();
+    await adtJobEnd(env, 'adtoolDecisionScore', t, stmts.length, 'ok', 'scored ' + scored + ' for ' + yday + ': ' + right + ' right (' + (scored ? Math.round(right / scored * 100) : 0) + ' %) · base rate ' + Math.round(baseRate * 100) + ' % · ' + n14 + '/14 days');
+  } catch (e) { await adtJobEnd(env, 'adtoolDecisionScore', t, 0, 'error', String(e && e.message || e)); throw e; }
+}
+async function adtoolCarry(env) {
+  if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
+  if (adtWeekdayOf(ukDate('')) !== 0) return;                    /* Mondays (spec §6.12) */
+  await ensureAdtoolPhase6Schema(env);
+  const t = await adtJobStart(env, 'adtoolCarry');
+  try {
+    const today = ukDate(''); const w1 = [adtAddDays(today, -28), adtAddDays(today, -15)], w2 = [adtAddDays(today, -14), adtAddDays(today, -1)];
+    const grab = async (a, b) => { const rows = (await env.DB.prepare('SELECT d.item_id, d.day, d.weekday, d.spend, d.attr_units, d.attr_revenue, d.ad_profit FROM adtool_listing_day d WHERE d.day >= ?1 AND d.day <= ?2').bind(a, b).all()).results || []; const by = {}; for (const r of rows) (by[r.item_id] = by[r.item_id] || []).push(r); return by; };
+    const A = await grab(w1[0], w1[1]), Bw = await grab(w2[0], w2[1]);
+    const L = {}; for (const r of ((await env.DB.prepare('SELECT item_id, breakeven_roas FROM adtool_listings').all()).results || [])) L[r.item_id] = r;
+    const sum = (rs, k, f) => (rs || []).filter(f || (() => true)).reduce((t2, r) => t2 + (Number(r[k]) || 0), 0);
+    const isTue = r => Number(r.weekday) === 1 || Number(r.weekday) === 3, isSun = r => Number(r.weekday) === 6;
+    const defs = {
+      S1: { sel: rs => sum(rs, 'ad_profit') < 0 && sum(rs, 'spend') >= 10, rep: rs => sum(rs, 'ad_profit') < 0 },
+      S2: { sel: rs => sum(rs, 'attr_units') === 0 && sum(rs, 'spend') >= 10, rep: rs => sum(rs, 'attr_units') === 0 },
+      S3: { sel: (rs, iid) => { const be = Number((L[iid] || {}).breakeven_roas) || 0; return be > 0 && sum(rs, 'spend') >= 10 && (sum(rs, 'attr_revenue') / Math.max(0.01, sum(rs, 'spend'))) < be; }, rep: (rs, iid) => { const be = Number((L[iid] || {}).breakeven_roas) || 0; return be > 0 && sum(rs, 'spend') > 0 && (sum(rs, 'attr_revenue') / Math.max(0.01, sum(rs, 'spend'))) < be; } },
+      R1_TueThu: { sel: rs => sum(rs, 'ad_profit', isTue) < 0 && sum(rs, 'spend', isTue) >= 1.5 && sum(rs, 'ad_profit', r => !isTue(r)) > 0, rep: rs => sum(rs, 'ad_profit', isTue) < 0 },
+      P2_Sunday: { sel: rs => sum(rs, 'ad_profit', isSun) > 0 && sum(rs, 'spend', isSun) >= 1 && sum(rs, 'attr_units', isSun) >= 1, rep: rs => sum(rs, 'ad_profit', isSun) > 0 },
+      LOSES_WEEK: { sel: rs => sum(rs, 'ad_profit') < 0 && sum(rs, 'spend') >= 1.5, rep: rs => sum(rs, 'ad_profit') < 0 },
+    };
+    const stmts = []; const results = {};
+    for (const rule of Object.keys(defs)) {
+      const d = defs[rule]; const listings = [];
+      for (const iid of Object.keys(A)) { const a = A[iid], b = Bw[iid]; const sel = !!d.sel(a, iid); const rep = b && b.length ? !!d.rep(b, iid) : null; listings.push({ item_id: iid, selected: sel, repeated: rep, spend: sum(a, 'spend') }); }
+      const r = adtCarryForward(listings); results[rule] = r;
+      stmts.push(env.DB.prepare('INSERT INTO adtool_carry (rule_id, run_day, selected, tested, rate, base_rate, trusted, spend, window_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(rule_id, run_day) DO UPDATE SET selected = ?3, tested = ?4, rate = ?5, base_rate = ?6, trusted = ?7, spend = ?8, window_json = ?9').bind(rule, today, r.selected, r.tested, r.rate, r.base_rate, r.trusted ? 1 : 0, r.spend, JSON.stringify({ w1, w2 })));
+    }
+    await adtBatch(env, stmts);
+    await adtJobEnd(env, 'adtoolCarry', t, stmts.length, 'ok', Object.keys(results).map(k => k + ' ' + results[k].rate + '% vs base ' + results[k].base_rate + '%' + (results[k].trusted ? '' : ' (not trusted)')).join(' · '));
+  } catch (e) { await adtJobEnd(env, 'adtoolCarry', t, 0, 'error', String(e && e.message || e)); throw e; }
+}
+const ADTOOL_ACTIONS_P6 = {
+  adtoolStopToday: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_stop'); const env = ctx.env; await ensureAdtoolPhase6Schema(env); const u = ctx.user || {};
+      if (p && p.op === 'note') { const iid = String(p.item_id || '').replace(/\D/g, ''); const note = String(p.note || '').slice(0, 500); if (!iid || !note) throw new Error('SAY: item id and a note are needed'); const L = await env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first(); await env.DB.prepare("INSERT INTO adtool_actions (account, item_id, type, note, by_email, at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))").bind(L ? L.account : '', iid, String(p.type || 'decision'), note, String(u.email || '')).run(); return { ok: true }; }
+      const today = ukDate(''), yday = adtAddDays(today, -1);
+      const day = String((p && p.day) || today);
+      const list = (await env.DB.prepare("SELECT d.*, l.title, l.price, l.margin_before_ads, l.breakeven_roas FROM adtool_decisions d LEFT JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = ?1 AND d.decision <> 'KEEP' ORDER BY CASE d.decision WHEN 'STOP' THEN 0 WHEN 'REDUCE' THEN 1 ELSE 2 END, d.confidence, d.expected_value").bind(day).all()).results || [];
+      const counts = (await env.DB.prepare('SELECT batch, decision, confidence, COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 GROUP BY batch, decision, confidence').bind(day).all()).results || [];
+      const ySc = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE day = ?1 AND outcome_score IS NOT NULL').bind(yday).first();
+      const rules = (await env.DB.prepare('SELECT rule_id, decisions, right_n, score, trusted, scored_day FROM adtool_rule_scores WHERE scored_day = (SELECT MAX(scored_day) FROM adtool_rule_scores) ORDER BY rule_id').all()).results || [];
+      const carry = (await env.DB.prepare('SELECT rule_id, run_day, selected, tested, rate, base_rate, trusted, spend FROM adtool_carry WHERE run_day = (SELECT MAX(run_day) FROM adtool_carry) ORDER BY rule_id').all()).results || [];
+      const days = (await env.DB.prepare('SELECT day, COUNT(*) AS n, SUM(CASE WHEN outcome_score IS NOT NULL THEN 1 ELSE 0 END) AS scored, SUM(outcome_score) AS right_n FROM adtool_decisions GROUP BY day ORDER BY day DESC LIMIT 30').all()).results || [];
+      const acc = await env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' ORDER BY ran_at DESC LIMIT 1").first();
+      const live = (await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live%'").all()).results || [];
+      const log = (await env.DB.prepare('SELECT a.account, a.item_id, a.type, a.note, a.by_email, a.at, l.title FROM adtool_actions a LEFT JOIN adtool_listings l ON l.item_id = a.item_id ORDER BY a.at DESC LIMIT 60').all()).results || [];
+      return { day, mode: 'shadow', decisions: list.map(d => { let r = [], i = {}; try { r = JSON.parse(d.rules_json); } catch (e) {} try { i = JSON.parse(d.inputs_json); } catch (e) {} return Object.assign(d, { rules: r, inputs: i, rules_json: undefined, inputs_json: undefined }); }), counts, yesterday_score: ySc, rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages' };
+    },
+  },
+};
+/* ADTOOL-P6-END ===================================================================================== */
+/* ADTOOL-P7-BEGIN ===================================================================================
+   Advertising Tool — Phase 7: the analyst pass (spec §3, §6.8). A daily job turns the day's COMPUTED NUMBERS
+   (never raw data) into plain English. Two writers: deterministic templates always, and — only when the
+   ANTHROPIC_API_KEY secret exists and adtool_analyst_model is on — a model rewrite of the same sentences.
+   A validator rejects any narrative containing a number that is not in its own inputs, so a narrative can
+   never invent a figure. Cost cap: one fleet call + one per account per day + on-demand per product (24 h cache). */
+/* ADTOOL-P7-PURE-BEGIN */
+function adtNumbersIn(text) {
+  /* every number a reader would see: 1,234.56 · £12 · 3.5× · 40 % · -£5 */
+  const out = []; const re = /-?\d[\d,]*(?:\.\d+)?/g; let m;
+  while ((m = re.exec(String(text || '')))) out.push(m[0].replace(/,/g, ''));
+  return out;
+}
+function adtValidateNarrative(text, inputs, opts) {
+  /* every number in the text must appear in the inputs (to the same rounding) or be one of the allowed
+     plain words. Returns {ok, unsourced[]}. Years and the numbers inside dates are allowed. */
+  const allow = new Set();
+  const add = v => { if (v == null) return; const n = Number(v); if (isNaN(n)) return; allow.add(String(n)); allow.add(String(Math.round(n))); allow.add(n.toFixed(1)); allow.add(n.toFixed(2)); allow.add(String(Math.abs(n))); allow.add(String(Math.round(Math.abs(n)))); allow.add(Math.abs(n).toFixed(1)); allow.add(Math.abs(n).toFixed(2)); allow.add(String(Math.round(n * 100))); };
+  const walk = v => { if (v == null) return; if (typeof v === 'number') { add(v); return; } if (typeof v === 'string') { for (const d of adtNumbersIn(v)) add(d); return; } if (Array.isArray(v)) { v.forEach(walk); return; } if (typeof v === 'object') { for (const k of Object.keys(v)) { walk(v[k]); if (/^\d+$/.test(k)) add(Number(k)); } } };
+  walk(inputs);
+  for (const d of (opts && opts.extra) || []) add(d);
+  const unsourced = [];
+  for (const num of adtNumbersIn(text)) { const n = Number(num); if (allow.has(num) || allow.has(String(n))) continue; if (/^(19|20)\d\d$/.test(num)) continue; if (Number.isInteger(n) && n >= 1 && n <= 31 && (opts && opts.allowDates !== false)) continue; unsourced.push(num); }
+  return { ok: unsourced.length === 0, unsourced };
+}
+function adtFleetNarrativeTemplate(N) {
+  /* deterministic English from the computed numbers — the fallback and the model's source text */
+  const money = v => (v == null ? '—' : (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2));
+  const s = [];
+  s.push('On ' + N.day + ' the fleet spent ' + money(N.spend) + ' on ads and eBay attributed ' + N.attr_units + ' sales worth ' + money(N.attr_revenue) + ', a return of ' + (N.roas == null ? 'nothing measurable' : N.roas + ' times the spend') + '.');
+  s.push('Estimated ad profit was ' + money(N.ad_profit) + (N.ad_profit_7d_per_day != null ? ', against ' + money(N.ad_profit_7d_per_day) + ' a day over the last week' : '') + '.');
+  if (N.orders != null) s.push('Across every channel the fleet took ' + N.orders + ' orders for ' + N.units + ' units, and the books put the actual profit at ' + money(N.actual_profit) + (N.pending ? ' with ' + N.pending + ' orders still waiting on their cost' : '') + '.');
+  if (N.best_account) s.push(N.best_account.account + ' did best on est. ad profit at ' + money(N.best_account.ad_profit) + '; ' + N.worst_account.account + ' did worst at ' + money(N.worst_account.ad_profit) + '.');
+  if (N.bullets && N.bullets.length) s.push('What stood out: ' + N.bullets.join('; ') + '.');
+  if (N.open_alerts != null) s.push('There ' + (N.open_alerts === 1 ? 'is one open alert' : 'are ' + N.open_alerts + ' open alerts') + (N.high_alerts ? ', ' + N.high_alerts + ' of them high' : '') + '.');
+  return s.join(' ');
+}
+function adtAccountNarrativeTemplate(N) {
+  const money = v => (v == null ? '—' : (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2));
+  const s = [];
+  s.push(N.account + ' spent ' + money(N.spend) + ' over the last 30 days for ' + N.attr_units + ' attributed sales at ' + (N.roas == null ? 'no measurable return' : N.roas + ' times') + ', an estimated ad profit of ' + money(N.ad_profit) + '.');
+  if (N.best_day) s.push('Its strongest weekday is ' + N.best_day + (N.best_day_profit != null ? ' at ' + money(N.best_day_profit) + ' a day' : '') + ' and its weakest is ' + N.worst_day + (N.worst_day_profit != null ? ' at ' + money(N.worst_day_profit) : '') + (N.weekday_p != null ? ', though the shuffle test puts that at p ' + N.weekday_p + (N.weekday_p < 0.05 ? ' — a real effect' : ' — inside the noise') : '') + '.');
+  if (N.loss_listings != null) s.push(N.loss_listings + ' of its listings lost money on ads over the window, together ' + money(N.loss_amount) + '; stopping those alone would move it from ' + N.roas + ' to ' + N.roas_after + ' times.');
+  if (N.stage_mix) s.push('Its stage mix is ' + Object.keys(N.stage_mix).map(k => N.stage_mix[k] + ' ' + k.toLowerCase()).join(', ') + '.');
+  return s.join(' ');
+}
+function adtProductNarrativeTemplate(N) {
+  const money = v => (v == null ? '—' : (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2));
+  const s = [];
+  s.push(N.title + ' (' + N.account + ') sells at ' + money(N.price) + ' with ' + money(N.margin) + ' of margin before ads, so it breaks even at ' + N.breakeven + ' times.');
+  s.push('Over 30 days it spent ' + money(N.spend) + ' and eBay attributed ' + N.attr_units + ' sales worth ' + money(N.attr_revenue) + ' — ' + (N.roas == null ? 'no measurable return' : N.roas + ' times') + ', an estimated ad profit of ' + money(N.ad_profit) + '.');
+  if (N.stage) s.push('The tool reads it as ' + N.stage.toLowerCase() + (N.confidence != null ? ' with ' + Math.round(N.confidence * 100) + ' per cent confidence' : '') + (N.slope28 != null ? ', its 28-day trend ' + (N.slope28 > 0 ? 'up ' : 'down ') + Math.abs(N.slope28) + ' per cent a day' : '') + '.');
+  if (N.best_day) s.push('It does best on ' + N.best_day + ' and worst on ' + N.worst_day + (N.weekday_p != null ? ' (p ' + N.weekday_p + (N.weekday_p < 0.05 ? ', a real weekday effect' : ', within noise') + ')' : '') + (N.top_slot ? ', and ' + Math.round(N.top_slot_share * 100) + ' per cent of its orders land in the ' + N.top_slot + ' slot' : '') + '.');
+  if (N.decision) s.push("Today's shadow decision is " + N.decision + (N.decision_rules ? ' on ' + N.decision_rules : '') + ': ' + N.decision_why + '.');
+  return s.join(' ');
+}
+/* ADTOOL-P7-PURE-END */
+
+let ADTOOL_P7_SCHEMA_OK = false;
+async function ensureAdtoolPhase7Schema(env) {
+  if (ADTOOL_P7_SCHEMA_OK) return;
+  await ensureAdtoolPhase6Schema(env);
+  await adtBatch(env, [
+    "CREATE TABLE IF NOT EXISTS adtool_narratives (scope TEXT, scope_id TEXT, day TEXT, text TEXT, inputs_json TEXT, model TEXT DEFAULT 'template', validated INTEGER DEFAULT 1, unsourced_json TEXT DEFAULT '[]', made_at TEXT, PRIMARY KEY (scope, scope_id, day))",
+    "CREATE TABLE IF NOT EXISTS adtool_analyst_calls (day TEXT, scope TEXT, scope_id TEXT, tokens_in INTEGER, tokens_out INTEGER, model TEXT, at TEXT, PRIMARY KEY (day, scope, scope_id))",
+  ].map(s => env.DB.prepare(s)));
+  await adtBatch(env, [['NARRATIVE', 'Plain-English narrative per scope per day', 'written from the computed numbers only: deterministic templates, optionally rewritten by the model with the same numbers; a validator rejects any number not present in the inputs', 'adtool_reports, adtool_listing_day, adtool_profiles, adtool_stages, adtool_decisions', 'adtoolAnalyst daily in the morning chain', 'zero narratives with unsourced numbers over 7 days (ADTOOL_NARRATIVE_CLEAN)']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 7, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 7").bind(r[0], r[1], r[2], r[3], r[4], r[5])));
+  ADTOOL_P7_SCHEMA_OK = true;
+}
+const ADTOOL_ANALYST_PROMPT = 'You rewrite an advertising summary for a UK eBay seller into clear plain English for a manager who is not an analyst. Rules you must follow exactly: use ONLY the numbers in the text you are given; never add, infer, round differently, or compute a new number; never add advice that the numbers do not state; keep every figure identical including the currency symbol and the times sign; British English; no headings, no bullet points, no emoji; at most four sentences; do not mention that you are a model.';
+async function adtAnalystRewrite(env, text, inputs, scope, scopeId, day) {
+  /* the model pass is optional: no key or flag off = the template stands. The validator runs either way. */
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key || (await adtFlag(env, 'adtool_analyst_model')) !== 'on') return { text, model: 'template' };
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 400, system: ADTOOL_ANALYST_PROMPT, messages: [{ role: 'user', content: text }] }) });
+    if (!r.ok) { await ctx_setSync(env, 'adtoolAnalyst', scope + ':' + scopeId, 'model ' + r.status + ': ' + (await r.text()).slice(0, 160)); return { text, model: 'template (model refused)' }; }
+    const j = await r.json();
+    const out = ((j.content || []).map(c => c.text || '').join(' ') || '').trim();
+    if (!out) return { text, model: 'template (model returned nothing)' };
+    const v = adtValidateNarrative(out, inputs, { extra: adtNumbersIn(text) });
+    await env.DB.prepare("INSERT INTO adtool_analyst_calls (day, scope, scope_id, tokens_in, tokens_out, model, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) ON CONFLICT(day, scope, scope_id) DO UPDATE SET tokens_in = ?4, tokens_out = ?5, at = datetime('now')").bind(day, scope, scopeId, Number((j.usage || {}).input_tokens) || 0, Number((j.usage || {}).output_tokens) || 0, String(j.model || 'claude')).run();
+    if (!v.ok) { await ctx_setSync(env, 'adtoolAnalyst', scope + ':' + scopeId, 'rejected, unsourced numbers: ' + v.unsourced.join(', ')); return { text, model: 'template (model rewrite rejected: ' + v.unsourced.join(', ') + ')' }; }
+    return { text: out, model: String(j.model || 'claude') };
+  } catch (e) { await ctx_setSync(env, 'adtoolAnalyst', scope + ':' + scopeId, String(e && e.message || e).slice(0, 160)); return { text, model: 'template (model error)' }; }
+}
+async function adtoolAnalyst(env) {
+  if ((await adtFlag(env, 'adtool_analyst')) !== 'on') return;
+  await ensureAdtoolPhase7Schema(env);
+  const t = await adtJobStart(env, 'adtoolAnalyst');
+  let rows = 0;
+  try {
+    const today = ukDate(''), yday = adtAddDays(today, -1);
+    const done = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_narratives WHERE day = ?1').bind(today).first();
+    if (done && Number(done.n) >= 7) { await adtJobEnd(env, 'adtoolAnalyst', t, 0, 'ok', 'narratives for ' + today + ' already written'); return; }
+    const stmts = []; const save = async (scope, id, tmplText, inputs) => {
+      const v0 = adtValidateNarrative(tmplText, inputs);
+      const w = await adtAnalystRewrite(env, tmplText, inputs, scope, id, today);
+      const v = adtValidateNarrative(w.text, inputs, { extra: adtNumbersIn(tmplText) });
+      stmts.push(env.DB.prepare("INSERT INTO adtool_narratives (scope, scope_id, day, text, inputs_json, model, validated, unsourced_json, made_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) ON CONFLICT(scope, scope_id, day) DO UPDATE SET text = ?4, inputs_json = ?5, model = ?6, validated = ?7, unsourced_json = ?8, made_at = datetime('now')").bind(scope, id, today, w.text, JSON.stringify(inputs), w.model, v.ok ? 1 : 0, JSON.stringify(v.unsourced)));
+      return v.ok && v0.ok;
+    };
+    /* fleet, from yesterday's report */
+    const rep = await env.DB.prepare('SELECT json FROM adtool_reports WHERE day = ?1').bind(yday).first();
+    let clean = true;
+    if (rep) {
+      const R = JSON.parse(rep.json), f = R.fleet;
+      const accs = (R.by_account || []).slice().sort((a, b) => Number(b.ad_profit) - Number(a.ad_profit));
+      const N = { day: R.day, spend: Number(f.spend), attr_units: Number(f.attr_units), attr_revenue: Number(f.attr_revenue), roas: f.roas, ad_profit: Number(f.ad_profit), ad_profit_7d_per_day: R.vs_7day ? Number(R.vs_7day.ad_profit) : null, orders: Number(f.orders), units: Number(f.units), actual_profit: Number(f.actual_profit), pending: Number(f.pending), best_account: accs[0] ? { account: accs[0].account, ad_profit: Number(accs[0].ad_profit) } : null, worst_account: accs.length > 1 ? { account: accs[accs.length - 1].account, ad_profit: Number(accs[accs.length - 1].ad_profit) } : null, bullets: R.what_changed, open_alerts: R.open_alerts ? Number(R.open_alerts.n) : null, high_alerts: R.open_alerts ? Number(R.open_alerts.high) : null };
+      clean = (await save('fleet', 'all', adtFleetNarrativeTemplate(N), N)) && clean;
+    }
+    /* accounts, from the ROAS computation and the profiles */
+    const roasRow = await env.DB.prepare('SELECT json FROM adtool_roas ORDER BY day DESC LIMIT 1').first();
+    const roasData = roasRow ? JSON.parse(roasRow.json) : null;
+    const wdP = await adtLatestProfiles(env, 'account', 'weekday');
+    const stageRows = (await env.DB.prepare('SELECT account, stage, COUNT(*) AS n FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages) GROUP BY account, stage').all()).results || [];
+    if (roasData) {
+      for (const a of Object.keys(roasData.accounts || {})) {
+        const x = roasData.accounts[a]; const prof = wdP.rows[a]; let best = null, worst = null, p = null;
+        if (prof && prof.rates) { const rr = prof.rates.map((r, i) => ({ d: ADTOOL_DOW[i], v: Number(r.rate) })); rr.sort((m, n2) => n2.v - m.v); best = rr[0].d; worst = rr[rr.length - 1].d; }
+        if (prof && prof.review_shuffle && best && prof.review_shuffle[best]) p = prof.review_shuffle[best].p;
+        const mix = {}; for (const s of stageRows) if (s.account === a) mix[s.stage] = Number(s.n);
+        const N = { account: a, spend: x.now.spend, attr_units: x.now.units, roas: x.now.roas, ad_profit: x.now.profit, best_day: best, worst_day: worst, weekday_p: p, loss_listings: null, roas_after: x.after_lever1.roas, stage_mix: Object.keys(mix).length ? mix : null };
+        clean = (await save('account', a, adtAccountNarrativeTemplate(N), N)) && clean;
+      }
+    }
+    await adtBatch(env, stmts); rows = stmts.length;
+    /* 7-day acceptance: no narrative in the last 7 days carries an unsourced number */
+    const bad = await env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_narratives WHERE validated = 0 AND day >= ?1").bind(adtAddDays(today, -7)).first();
+    const nDays = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM adtool_narratives').first();
+    const days = Number(nDays && nDays.n) || 0, badN = Number(bad && bad.n) || 0;
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_NARRATIVE_CLEAN', 'last 7 days', ?1, '0 unsourced numbers', ?2, 0, ?3, 'every number in a narrative must appear in its stored inputs', ?4, '')")
+      .bind(new Date().toISOString(), String(badN), badN ? 'FAIL' : (days >= 7 ? 'PASS' : 'pending'), badN + ' narratives with an unsourced number in the last 7 days · ' + days + ' of 7 days written').run();
+    await adtJobEnd(env, 'adtoolAnalyst', t, rows, badN ? 'FAIL' : 'ok', rows + ' narratives · ' + badN + ' with an unsourced number · ' + days + '/7 days');
+  } catch (e) { await adtJobEnd(env, 'adtoolAnalyst', t, rows, 'error', String(e && e.message || e)); throw e; }
+}
+const ADTOOL_ACTIONS_P7 = {
+  adtoolNarrative: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null); const env = ctx.env; await ensureAdtoolPhase7Schema(env);
+      const scope = String((p && p.scope) || 'fleet'), id = String((p && p.scope_id) || 'all');
+      if (scope === 'listing') {
+        /* on demand, cached 24 h */
+        const cached = await env.DB.prepare("SELECT text, model, validated, made_at, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 AND made_at > datetime('now', '-24 hours')").bind(id).first();
+        if (cached) return Object.assign({ cached: true }, cached);
+        const L = await env.DB.prepare('SELECT * FROM adtool_listings WHERE item_id = ?1').bind(id).first();
+        if (!L) throw new Error('SAY: the tool does not know that listing yet');
+        const today = ukDate('');
+        const w = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, ROUND(SUM(ad_profit), 2) AS ad_profit FROM adtool_listing_day WHERE item_id = ?1 AND day >= ?2').bind(id, adtAddDays(today, -30)).first();
+        const st = await env.DB.prepare('SELECT stage, label, confidence, slope28 FROM adtool_stages WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(id).first();
+        const ds = await env.DB.prepare('SELECT json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(id).first();
+        let d = {}; try { d = ds ? JSON.parse(ds.json) : {}; } catch (e) {}
+        const dec = await env.DB.prepare('SELECT decision, rules_json, why FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(id).first();
+        const SLOTS = ['night', 'morning', 'afternoon', 'evening'];
+        const N = { title: L.title, account: L.account, price: Number(L.price), margin: Number(L.margin_before_ads), breakeven: Number(L.breakeven_roas), spend: Number(w.spend), attr_units: Number(w.attr_units), attr_revenue: Number(w.attr_revenue), roas: Number(w.spend) > 0 ? round2(Number(w.attr_revenue) / Number(w.spend)) : null, ad_profit: Number(w.ad_profit), stage: st ? (st.label || st.stage) : null, confidence: st ? Number(st.confidence) : null, slope28: st ? Number(st.slope28) : null, best_day: d.weekday_best, worst_day: d.weekday_worst, weekday_p: d.weekday_p, top_slot: d.top_slot != null ? SLOTS[d.top_slot] : null, top_slot_share: d.top_slot_share, decision: dec ? dec.decision : null, decision_rules: dec ? (JSON.parse(dec.rules_json || '[]').join(', ') || null) : null, decision_why: dec ? dec.why : null };
+        const tmpl = adtProductNarrativeTemplate(N);
+        const rw = await adtAnalystRewrite(env, tmpl, N, 'listing', id, today);
+        const v = adtValidateNarrative(rw.text, N, { extra: adtNumbersIn(tmpl) });
+        await env.DB.prepare("INSERT INTO adtool_narratives (scope, scope_id, day, text, inputs_json, model, validated, unsourced_json, made_at) VALUES ('listing', ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) ON CONFLICT(scope, scope_id, day) DO UPDATE SET text = ?3, inputs_json = ?4, model = ?5, validated = ?6, unsourced_json = ?7, made_at = datetime('now')").bind(id, today, rw.text, JSON.stringify(N), rw.model, v.ok ? 1 : 0, JSON.stringify(v.unsourced)).run();
+        return { text: rw.text, model: rw.model, validated: v.ok ? 1 : 0, day: today, cached: false };
+      }
+      const row = await env.DB.prepare('SELECT text, model, validated, day, made_at, inputs_json FROM adtool_narratives WHERE scope = ?1 AND scope_id = ?2 ORDER BY day DESC LIMIT 1').bind(scope, id).first();
+      const all = (await env.DB.prepare('SELECT scope, scope_id, day, text, model, validated FROM adtool_narratives WHERE day = (SELECT MAX(day) FROM adtool_narratives) ORDER BY scope, scope_id').all()).results || [];
+      const acc = await env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_NARRATIVE_CLEAN' ORDER BY ran_at DESC LIMIT 1").first();
+      return { narrative: row || null, all, acceptance: acc || null, note: 'written from the numbers; a validator rejects any figure not in the inputs' };
+    },
+  },
+};
+/* ADTOOL-P7-END ===================================================================================== */
+/* ADTOOL-P8-BEGIN ===================================================================================
+   Advertising Tool — Phase 8: the live apply path (spec §6.11 "Apply path", §12 phase 8). Writes to eBay's
+   Marketing API — pausing an ad, changing a bid, changing a daily budget — and nothing else.
+
+   IT IS OFF. Every account's switch (portal_config adtool_apply_live_<account>) defaults to off and this build
+   ships with none of them on: with the switch off the job reads the decisions, writes what it WOULD have sent,
+   and sends nothing. The owner flips one account per night, STOP first (spec §13 answer 5).
+
+   Before any switch is flipped, run adtoolApplyPreflight: it is read-only. It asks eBay for one ad in one
+   campaign per account and records the exact response shape and the endpoint versions in sync_state, so the
+   endpoint names below are confirmed against the live API rather than trusted from documentation. */
+/* ADTOOL-P8-PURE-BEGIN */
+const ADTOOL_APPLY_ENDPOINTS = {
+  /* eBay Sell Marketing API v1. Confirmed by adtoolApplyPreflight before any write is enabled. */
+  ads_by_campaign: c => 'https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(c) + '/ad',
+  bulk_status_by_listing: c => 'https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(c) + '/bulk_update_ads_status_by_listing_id',
+  bulk_bid_by_listing: c => 'https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(c) + '/bulk_update_ads_bid_by_listing_id',
+  campaign_budget: c => 'https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(c) + '/update_campaign_budget',
+};
+function adtApplyCaps(state, action, ukHour) {
+  /* §6.11 hard caps. state: {account_actions_today, listing_bid_changes_week}. Returns {allowed, reason}. */
+  if (ukHour >= 22 || ukHour < 6) return { allowed: false, reason: 'no live action between 22:00 and 06:00 UK' };
+  if (Number(state.account_actions_today) >= 30) return { allowed: false, reason: 'the account has already had 30 live actions today' };
+  if ((action === 'bid' ) && Number(state.listing_bid_changes_week) >= 3) return { allowed: false, reason: 'this listing has already had 3 bid changes this week' };
+  return { allowed: true, reason: '' };
+}
+function adtApplyPlan(decision, inputs, membership) {
+  /* what a decision means in API terms, per campaign the listing sits in. Never ends a listing; never touches
+     a campaign that is not running; a bid or budget move is capped at 2× the current value. */
+  const out = [];
+  const live = (membership || []).filter(m => m.live);
+  if (!live.length) return out;
+  if (decision === 'STOP') { for (const m of live) out.push({ op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'PAUSED', undo: { op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'ACTIVE' }, why: 'pause the ad' }); return out; }
+  if (decision === 'REDUCE') {
+    if ((inputs.rules || []).indexOf('R1') >= 0) { for (const m of live) out.push({ op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'PAUSED', resume_at: inputs.resume_at || '', undo: { op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'ACTIVE' }, why: 'pause today only, resume tomorrow 00:05' }); return out; }
+    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) continue; const to = Math.max(2, Math.round(bid * 0.8 * 10) / 10); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid −20 %' }); }
+    return out;
+  }
+  if (decision === 'PUSH') {
+    if ((inputs.rules || []).indexOf('P1') >= 0) { const seen = {}; for (const m of live) { if (!m.budget || seen[m.campaign_id]) continue; seen[m.campaign_id] = 1; const b = Number(m.budget); const to = Math.round(Math.min(b * 1.3, b * 2) * 100) / 100; out.push({ op: 'budget', campaign_id: m.campaign_id, from: b, to, undo: { op: 'budget', campaign_id: m.campaign_id, to: b }, why: 'daily budget +30 %' }); } return out; }
+    const step = (inputs.rules || []).indexOf('P3') >= 0 ? 1.1 : 1.2;
+    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) continue; const to = Math.min(Math.round(bid * step * 10) / 10, bid * 2); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid +' + Math.round((step - 1) * 100) + ' %' }); }
+    return out;
+  }
+  return out;
+}
+/* ADTOOL-P8-PURE-END */
+
+let ADTOOL_P8_SCHEMA_OK = false;
+async function ensureAdtoolPhase8Schema(env) {
+  if (ADTOOL_P8_SCHEMA_OK) return;
+  await ensureAdtoolPhase7Schema(env);
+  await adtBatch(env, [
+    "CREATE TABLE IF NOT EXISTS adtool_apply_log (id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT, account TEXT, item_id TEXT DEFAULT '', campaign_id TEXT DEFAULT '', decision_id TEXT DEFAULT '', op TEXT, payload_json TEXT, mode TEXT, http_status INTEGER, response TEXT DEFAULT '', undo_json TEXT DEFAULT '', undone_at TEXT DEFAULT '', at TEXT)",
+    'CREATE INDEX IF NOT EXISTS idx_adtap_day ON adtool_apply_log(day, account)',
+  ].map(s => env.DB.prepare(s)));
+  await adtBatch(env, [['LIVE_APPLY', 'Live actions sent to eBay', '§6.11 apply path: ad pause/resume, bid change, daily budget change, only for confident decisions and only for an account whose own switch is on; caps 30 actions per account per day, 3 bid changes per listing per week, nothing between 22:00 and 06:00 UK; every call and response logged with an undo for 7 days', 'adtool_decisions, campaign_ads, campaigns, adtool_apply_log', 'adtoolApply after the morning batch (only with the account switch on)', 'the apply log against the eBay campaign screen on the first night']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 8, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 8").bind(r[0], r[1], r[2], r[3], r[4], r[5])));
+  ADTOOL_P8_SCHEMA_OK = true;
+}
+async function adtApplyMembership(env, iid) {
+  const rows = (await env.DB.prepare('SELECT ca.account, ca.campaign_id, ca.ad_id, ca.ad_status, ca.bid_pct, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1').bind(iid).all()).results || [];
+  return rows.map(r => ({ account: r.account, campaign_id: r.campaign_id, ad_id: r.ad_id, funding: r.funding_model, bid_pct: r.bid_pct || r.c_bid, budget: r.budget, live: r.c_status ? liveMembershipRow({ c_status: r.c_status, l_status: r.l_status, funding_model: r.funding_model, ad_status: r.ad_status }) : false }));
+}
+async function adtoolApplyPreflight(env) {
+  /* READ-ONLY. Confirms the live shape of the endpoints Phase 8 would use, per account, without writing. */
+  await ensureAdtoolPhase8Schema(env);
+  const t = await adtJobStart(env, 'adtoolApplyPreflight');
+  const notes = [];
+  try {
+    for (const acct of await apiAccounts(env)) {
+      try {
+        const tok = await ebayAccessToken(env, acct);
+        const c = await env.DB.prepare("SELECT campaign_id, name, funding_model FROM campaigns WHERE account = ?1 AND funding_model = 'COST_PER_CLICK' AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') LIMIT 1").bind(acct).first();
+        if (!c) { notes.push(acct + ': no running CPC campaign'); continue; }
+        const r = await fetch(ADTOOL_APPLY_ENDPOINTS.ads_by_campaign(c.campaign_id) + '?limit=1', { headers: { authorization: 'Bearer ' + tok } });
+        const body = (await r.text()).slice(0, 400);
+        let shape = ''; try { const j = JSON.parse(body); const ad = (j.ads || [])[0] || {}; shape = Object.keys(ad).join(','); } catch (e) { shape = 'unparsed'; }
+        notes.push(acct + ': ad GET ' + r.status + ' fields[' + shape + ']');
+        await ctx_setSync(env, 'adtoolApplyPreflight', acct, 'campaign ' + c.campaign_id + ' · ad GET ' + r.status + ' · fields ' + shape + ' · endpoints ' + Object.keys(ADTOOL_APPLY_ENDPOINTS).join(','));
+      } catch (e) { notes.push(acct + ': ' + String(e && e.message || e).slice(0, 80)); }
+    }
+    await adtJobEnd(env, 'adtoolApplyPreflight', t, notes.length, 'ok', notes.join(' | ').slice(0, 900));
+  } catch (e) { await adtJobEnd(env, 'adtoolApplyPreflight', t, 0, 'error', String(e && e.message || e)); throw e; }
+}
+async function adtoolApply(env) {
+  /* The only job in the tool that can write to eBay. It writes nothing unless an account's own switch is on. */
+  await ensureAdtoolPhase8Schema(env);
+  if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
+  const t = await adtJobStart(env, 'adtoolApply');
+  let rows = 0;
+  try {
+    const today = ukDate(''); const uk = adtUkParts(Date.now());
+    const decs = (await env.DB.prepare("SELECT decision_id, account, item_id, decision, rules_json, inputs_json, mode, applied_at FROM adtool_decisions WHERE day = ?1 AND batch = 'morning' AND decision <> 'KEEP' AND confidence = 'confident' AND applied_at = ''").bind(today).all()).results || [];
+    const perAcct = {}, bidWeek = {};
+    for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' GROUP BY account").bind(today).all()).results || [])) perAcct[r.account] = Number(r.n);
+    for (const r of ((await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM adtool_apply_log WHERE op = 'bid' AND mode = 'live' AND day >= ?1 GROUP BY item_id").bind(adtAddDays(today, -7)).all()).results || [])) bidWeek[r.item_id] = Number(r.n);
+    const switches = {}; for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live_%'").all()).results || [])) switches[r.key.replace('adtool_apply_live_', '')] = String(r.value) === 'on';
+    const stmts = []; let live = 0, shadow = 0, capped = 0;
+    for (const d of decs) {
+      let inputs = {}, rules = []; try { inputs = JSON.parse(d.inputs_json); } catch (e) {} try { rules = JSON.parse(d.rules_json); } catch (e) {}
+      const membership = await adtApplyMembership(env, d.item_id);
+      const plan = adtApplyPlan(d.decision, { item_id: d.item_id, rules, resume_at: adtAddDays(today, 1) + 'T00:05' }, membership);
+      if (!plan.length) continue;
+      const on = !!switches[d.account];
+      for (const step of plan) {
+        const cap = adtApplyCaps({ account_actions_today: perAcct[d.account] || 0, listing_bid_changes_week: bidWeek[d.item_id] || 0 }, step.op, uk.hour);
+        const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
+        let status = 0, resp = mode === 'live' ? '' : (cap.allowed ? 'account switch off — nothing sent' : cap.reason);
+        if (mode === 'live') {
+          try {
+            const tok = await ebayAccessToken(env, d.account);
+            let url = '', body = null;
+            if (step.op === 'status') { url = ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(step.campaign_id); body = { requests: [{ listingId: String(step.listing_id), adStatus: step.to }] }; }
+            else if (step.op === 'bid') { url = ADTOOL_APPLY_ENDPOINTS.bulk_bid_by_listing(step.campaign_id); body = { requests: [{ listingId: String(step.listing_id), bidPercentage: String(step.to) }] }; }
+            else if (step.op === 'budget') { url = ADTOOL_APPLY_ENDPOINTS.campaign_budget(step.campaign_id); body = { daily: { amount: { currency: 'GBP', value: String(step.to) } } }; }
+            const r = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+            status = r.status; resp = (await r.text()).slice(0, 400);
+            if (r.ok || r.status === 204) { live++; perAcct[d.account] = (perAcct[d.account] || 0) + 1; if (step.op === 'bid') bidWeek[d.item_id] = (bidWeek[d.item_id] || 0) + 1; }
+            await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('adtool (live apply)', 'ADTOOL_APPLY', ?1, ?2, ?3, datetime('now'))").bind(d.item_id + '|' + step.campaign_id, String(step.from == null ? '' : step.from), step.op + ' → ' + String(step.to) + ' (' + status + ')').run();
+          } catch (e) { status = 0; resp = String(e && e.message || e).slice(0, 200); }
+        } else if (mode === 'blocked') capped++; else shadow++;
+        stmts.push(env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))").bind(today, d.account, d.item_id, step.campaign_id || '', d.decision_id, step.op, JSON.stringify(step), mode, status, resp, JSON.stringify(step.undo || {})));
+      }
+      if (on) stmts.push(env.DB.prepare("UPDATE adtool_decisions SET mode = 'live', applied_at = datetime('now'), applied_by = 'adtool' WHERE decision_id = ?1").bind(d.decision_id));
+    }
+    await adtBatch(env, stmts); rows = stmts.length;
+    const accountsOn = Object.keys(switches).filter(k => switches[k]);
+    await adtJobEnd(env, 'adtoolApply', t, rows, 'ok', (accountsOn.length ? 'live for ' + accountsOn.join(', ') + ': ' + live + ' sent, ' + capped + ' held by a cap' : 'no account is switched on — ' + shadow + ' actions written as would-send, nothing sent to eBay'));
+  } catch (e) { await adtJobEnd(env, 'adtoolApply', t, rows, 'error', String(e && e.message || e)); throw e; }
+}
+async function adtoolResume(env) {
+  /* R1 pauses are for one day: resume anything paused yesterday by an R1 decision, at 00:05 UK */
+  await ensureAdtoolPhase8Schema(env);
+  if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
+  const t = await adtJobStart(env, 'adtoolResume');
+  try {
+    const yday = adtAddDays(ukDate(''), -1);
+    const rows = (await env.DB.prepare("SELECT id, account, item_id, campaign_id, payload_json FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' AND op = 'status' AND undone_at = '' AND payload_json LIKE '%resume_at%'").bind(yday).all()).results || [];
+    let n = 0;
+    for (const r of rows) {
+      try {
+        const tok = await ebayAccessToken(env, r.account);
+        const res = await fetch(ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(r.campaign_id), { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify({ requests: [{ listingId: String(r.item_id), adStatus: 'ACTIVE' }] }) });
+        await env.DB.prepare("UPDATE adtool_apply_log SET undone_at = datetime('now'), response = response || ' | resumed ' || ?2 WHERE id = ?1").bind(r.id, String(res.status)).run();
+        if (res.ok || res.status === 204) n++;
+      } catch (e) { /* recorded by the row's response */ }
+    }
+    await adtJobEnd(env, 'adtoolResume', t, n, 'ok', n + ' today-only pauses resumed');
+  } catch (e) { await adtJobEnd(env, 'adtoolResume', t, 0, 'error', String(e && e.message || e)); throw e; }
+}
+const ADTOOL_ACTIONS_P8 = {
+  adtoolApplyPage: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_stop'); const env = ctx.env; await ensureAdtoolPhase8Schema(env); const u = ctx.user || {};
+      if (p && p.op === 'switch') {
+        if (MGMT_ROLES.indexOf(String(u.role || '')) < 0 && !u.super) throw new AuthError('auth');
+        const a = String(p.account || ''); if (!a) throw new Error('SAY: name the account');
+        const key = 'adtool_apply_live_' + a; const v = p.on ? 'on' : 'off';
+        const pre = await env.DB.prepare("SELECT last_ok FROM sync_state WHERE job = 'adtoolApplyPreflight' AND account = ?1").bind(a).first();
+        if (p.on && !pre) throw new Error('SAY: run the preflight for ' + a + ' first — it confirms the endpoints against the live API without writing anything');
+        await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(key, v).run();
+        await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_APPLY_LIVE', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), a, v).run();
+        try { await queueNotify(env, 'management', 'Ads live apply', (p.on ? '🔴 Live apply switched ON for ' + a : '🟢 Live apply switched OFF for ' + a) + ' by ' + (u.email || '') + '.', 'adtool:live:' + a + ':' + Date.now()); } catch (e) {}
+        return { ok: true, account: a, value: v };
+      }
+      if (p && p.op === 'undo') {
+        if (MGMT_ROLES.indexOf(String(u.role || '')) < 0 && !u.super) throw new AuthError('auth');
+        const row = await env.DB.prepare("SELECT * FROM adtool_apply_log WHERE id = ?1 AND mode = 'live' AND undone_at = ''").bind(Number(p.id)).first();
+        if (!row) throw new Error('SAY: nothing to undo for that row');
+        if ((Date.now() - new Date(String(row.at).replace(' ', 'T') + 'Z').getTime()) > 7 * 86400000) throw new Error('SAY: an undo is available for 7 days');
+        let undo = {}; try { undo = JSON.parse(row.undo_json || '{}'); } catch (e) {}
+        const tok = await ebayAccessToken(env, row.account);
+        let url = '', body = null;
+        if (undo.op === 'status') { url = ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(undo.campaign_id); body = { requests: [{ listingId: String(undo.listing_id), adStatus: undo.to }] }; }
+        else if (undo.op === 'bid') { url = ADTOOL_APPLY_ENDPOINTS.bulk_bid_by_listing(undo.campaign_id); body = { requests: [{ listingId: String(undo.listing_id), bidPercentage: String(undo.to) }] }; }
+        else if (undo.op === 'budget') { url = ADTOOL_APPLY_ENDPOINTS.campaign_budget(undo.campaign_id); body = { daily: { amount: { currency: 'GBP', value: String(undo.to) } } }; }
+        else throw new Error('SAY: that row has no undo');
+        const r = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const txt = (await r.text()).slice(0, 300);
+        await env.DB.prepare("UPDATE adtool_apply_log SET undone_at = datetime('now'), response = response || ' | undo ' || ?2 WHERE id = ?1").bind(row.id, String(r.status) + ' ' + txt).run();
+        await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_APPLY_UNDO', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), row.item_id + '|' + row.campaign_id, undo.op + ' → ' + String(undo.to) + ' (' + r.status + ')').run();
+        return { ok: r.ok, status: r.status };
+      }
+      const today = ukDate('');
+      const switches = (await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_apply_live_%' ORDER BY key").all()).results || [];
+      const pre = (await env.DB.prepare("SELECT account, last_ok, cursor FROM sync_state WHERE job = 'adtoolApplyPreflight'").all()).results || [];
+      const log = (await env.DB.prepare('SELECT id, day, account, item_id, campaign_id, op, mode, http_status, substr(response, 1, 200) AS response, undone_at, at, payload_json FROM adtool_apply_log ORDER BY id DESC LIMIT 200').all()).results || [];
+      const counts = (await env.DB.prepare('SELECT mode, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 GROUP BY mode').bind(today).all()).results || [];
+      const accounts = await apiAccounts(env);
+      return { day: today, accounts, switches, preflight: pre, log: log.map(r => { let pl = {}; try { pl = JSON.parse(r.payload_json); } catch (e) {} return Object.assign(r, { payload: pl, payload_json: undefined }); }), counts, caps: { per_account_per_day: 30, bid_changes_per_listing_per_week: 3, quiet_hours: '22:00–06:00 UK' }, endpoints: Object.keys(ADTOOL_APPLY_ENDPOINTS), note: 'Nothing is sent for an account whose switch is off; those rows are written as would-send so the night can be rehearsed.', computed_at: new Date().toISOString() };
+    },
+  },
+};
+/* ADTOOL-P8-END ===================================================================================== */
 
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
    eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
@@ -12698,7 +13353,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -12800,3 +13455,6 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P2); /* ADTOOL Phase 2: campaign truth (rea
 Object.assign(ROUTES, ADTOOL_ACTIONS_P3); /* ADTOOL Phase 3: profiles, stages, the four analytics pages */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P4); /* ADTOOL Phase 4: forecast lab */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P5); /* ADTOOL Phase 5: command centre, alerts, report, ROAS target, data health */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P6); /* ADTOOL Phase 6: decisions in shadow */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P7); /* ADTOOL Phase 7: analyst narratives */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P8); /* ADTOOL Phase 8: live apply (off until an account's own switch is on) */
