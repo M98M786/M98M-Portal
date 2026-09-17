@@ -39,7 +39,8 @@
     'pause': ['advertising'],
     'day-4 verdict': ['advertising'],
     'move tier': ['advertising'],
-    'open case history': ['returns', 'cs']
+    'open case history': ['returns', 'cs'],
+    'open feedback desk': ['feedback', 'csDesk', 'cs']
   };
 
   /* A pinned card is a fact about yesterday: a minute-old copy is current, and 13 people reloading
@@ -134,6 +135,7 @@
     '.sig-hist{padding:6px 0;border-top:1px dashed rgba(120,132,152,.25);font-size:12px}.sig-hist:first-of-type{border-top:0}',
     '.sig-hist-note{color:var(--text-2);margin-top:2px}.sig-hist-none{color:var(--text-3);font-style:italic}',
     '.sig-dept-sum{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--text-2);margin:0 0 12px}',
+    '.sig-lines{margin-top:8px;width:100%}.sig-line{font-size:12.5px;padding:4px 0;border-top:1px dashed rgba(120,132,152,.25)}.sig-line:first-child{border-top:0}',
     '.sig-dept-head{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2);margin:8px 0 -4px;padding-left:2px}.sig-dept-head .num{margin-left:6px;color:var(--text-3)}',
     '@media(max-width:880px){',
     '.sig-hd,.sig-bd,.sig-acts,.sig-foot{padding-left:15px}',
@@ -283,6 +285,8 @@
     if (type === SG_NEGATIVE) { d = '<path d="M3 7.5 10 14l4-4 7 7"/><path d="M21 12v5h-5"/>'; }
     else if (type === SG_WORST_CPC) { d = '<path d="M4 10v4h3l6 4V6l-6 4H4z"/><path d="M17.5 9.6a4 4 0 0 1 0 4.8"/>'; }
     else if (type === SG_RETURNS) { d = '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'; }
+    else if (type === 'NEGATIVE FEEDBACK YESTERDAY') { d = '<path d="M4 5h16v10H9l-5 4V5z"/><path d="M8 9h8M8 12h5"/>'; }
+    else if (type === 'CASES OPENED YESTERDAY') { d = '<path d="M3 8l9-4 9 4-9 4-9-4z"/><path d="M3 8v8l9 4 9-4V8"/><path d="M12 12v8"/>'; }
     else { d = '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4M12 17.6h.01"/>'; }
     return '<svg viewBox="0 0 24 24">' + d + '</svg>';
   }
@@ -325,6 +329,30 @@
       if (excess !== null) { out += sgFig('loss', 'Spent over earned', sgGbp(excess)); }
       raw = sgField(rec, 'Actual Profit');
       if (raw !== null) { out += sgFig(raw < 0 ? 'loss' : '', 'Actual Profit', sgGbp(raw)); }
+      return out;
+    }
+
+    if (type === 'NEGATIVE FEEDBACK YESTERDAY' || type === 'CASES OPENED YESTERDAY') {
+      /* 18 Sept: the CS desk's own account-level cards — a count against the account's usual line,
+         then the actual lines (who said what / which cases) so the desk can act without leaving. */
+      var isFb = type === 'NEGATIVE FEEDBACK YESTERDAY', rows = (isFb ? rec.feedback : rec.cases) || [], r, k, line;
+      count = sgField(rec, 'value');
+      base = sgField(rec, 'baseline_per_day');
+      if (base === null) { base = sgField(rec, 'baseline'); }
+      days = sgField(rec, 'baseline_days');
+      if (count !== null) { out += sgFig('big loss', isFb ? 'Feedback' : 'Cases', sgNumText(count)); }
+      if (base !== null) { out += sgFig('', 'Its usual line', sgNumText(base) + ' a day' + (days !== null ? ' over ' + sgNumText(days) + ' days' : '')); }
+      if (rows.length) {
+        out += '<div class="sig-lines">';
+        for (k = 0; k < rows.length && k < 8; k++) {
+          r = rows[k] || {};
+          line = isFb
+            ? '<b>' + esc(sgStr(r.buyer)) + '</b> · ' + esc(sgStr(r.type)) + (sgStr(r.text) ? ' — “' + esc(sgStr(r.text)) + '”' : '')
+            : '<b>' + esc(sgStr(r.kind)) + '</b> · ' + esc(sgStr(r.buyer)) + (sgStr(r.order_id) ? ' · ' + esc(sgStr(r.order_id)) : '') + (sgStr(r.reason) ? ' — ' + esc(sgStr(r.reason)) : '');
+          out += '<div class="sig-line">' + line + '</div>';
+        }
+        out += '</div>';
+      }
       return out;
     }
 
