@@ -4825,13 +4825,20 @@ function adtListingAlerts(rows, L, ctx) {
   /* rows: this listing's listing_day rows (oldest → newest, up to yesterday); L: listing meta; ctx: {fleetMedianMarginByBand, today}.
      Returns [{rule, payload}] for the listing-level rules A01, A02, A03, A10. */
   const out = []; const n = rows.length; const r2 = v => Math.round(v * 100) / 100;
-  const last = k => rows.slice(Math.max(0, n - k));
+  /* WINDOWS ARE CALENDAR DAYS, NEVER ROW COUNTS. adtool_listing_day only carries a row for a day the listing
+     did something, so "the last 14 rows" can span a month — which is how A03 first fired on £1.24 of spend
+     while claiming the £10 its own rule requires. Every window below is cut by date from the last day present. */
+  const anchor = (ctx && ctx.anchor) || (n ? rows[n - 1].day : '');
+  const from = k => adtAddDays(anchor, -(k - 1));
+  const last = k => (anchor ? rows.filter(r => r.day >= from(k) && r.day <= anchor) : []);
   const sum = (arr, f) => arr.reduce((t, r) => t + (Number(r[f]) || 0), 0);
   const be = Number(L.breakeven_roas) || 0;
-  if (n >= 5 && be > 0) { const l5 = last(5); if (l5.every(r => Number(r.spend) >= 2 && (Number(r.attr_revenue) / Number(r.spend)) < be)) out.push({ rule: 'A01', payload: { days: 5, spend: r2(sum(l5, 'spend')), roas: r2(sum(l5, 'attr_revenue') / sum(l5, 'spend')), breakeven: be } }); }
-  if (n >= 7) { const p7 = sum(last(7), 'ad_profit'), p30 = sum(last(30), 'ad_profit'); if (p7 < -10 && p30 < 0) out.push({ rule: 'A02', payload: { profit_7d: r2(p7), profit_30d: r2(p30), spend_7d: r2(sum(last(7), 'spend')) } }); }
+  /* A01 wants five consecutive days, each spending ≥ £2 below break-even: a day with no row spent nothing,
+     so the window must hold five rows as well as five days. */
+  if (be > 0) { const l5 = last(5); if (l5.length === 5 && l5.every(r => Number(r.spend) >= 2 && (Number(r.attr_revenue) / Number(r.spend)) < be)) out.push({ rule: 'A01', payload: { days: 5, spend: r2(sum(l5, 'spend')), roas: r2(sum(l5, 'attr_revenue') / sum(l5, 'spend')), breakeven: be } }); }
+  { const p7 = sum(last(7), 'ad_profit'), p30 = sum(last(30), 'ad_profit'); if (p7 < -10 && p30 < 0) out.push({ rule: 'A02', payload: { profit_7d: r2(p7), profit_30d: r2(p30), spend_7d: r2(sum(last(7), 'spend')) } }); }
   { const l14 = last(14); const sp = sum(l14, 'spend'); if (sp >= 10 && sum(l14, 'attr_units') === 0) out.push({ rule: 'A03', payload: { spend_14d: r2(sp), clicks_14d: sum(l14, 'clicks') } }); }
-  if (n >= 14) { const w1 = last(7), w0 = rows.slice(Math.max(0, n - 14), n - 7); const u1 = sum(w1, 'attr_units'), u0 = sum(w0, 'attr_units'), s1 = sum(w1, 'spend'), s0 = sum(w0, 'spend'); if (u0 >= 4 && u1 < 0.5 * u0 && s1 >= s0 * 0.95) out.push({ rule: 'A10', payload: { units_this_week: u1, units_last_week: u0, spend_this_week: r2(s1), spend_last_week: r2(s0) } }); }
+  { const w1 = last(7), w0 = (anchor ? rows.filter(r => r.day >= from(14) && r.day < from(7)) : []); const u1 = sum(w1, 'attr_units'), u0 = sum(w0, 'attr_units'), s1 = sum(w1, 'spend'), s0 = sum(w0, 'spend'); if (u0 >= 4 && u1 < 0.5 * u0 && s1 >= s0 * 0.95) out.push({ rule: 'A10', payload: { units_this_week: u1, units_last_week: u0, spend_this_week: r2(s1), spend_last_week: r2(s0) } }); }
   if (ctx && ctx.medianByBand && L.margin_before_ads != null && ctx.adsRunning) { const band = Number(L.price) < 10 ? '<£10' : Number(L.price) < 20 ? '£10–20' : Number(L.price) < 30 ? '£20–30' : '£30+'; const med = ctx.medianByBand[band]; if (med > 0 && Number(L.margin_before_ads) < 0.4 * med) out.push({ rule: 'A09', payload: { margin: Number(L.margin_before_ads), band, fleet_median: r2(med) } }); }
   return out;
 }
@@ -5037,8 +5044,17 @@ async function adtoolReport(env) {
   const t = await adtJobStart(env, 'adtoolReport');
   try {
     const today = ukDate(''), day = adtAddDays(today, -1);
-    const exists = await env.DB.prepare('SELECT day FROM adtool_reports WHERE day = ?1').bind(day).first();
-    if (exists) { await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated'); return; }
+    /* eBay's report for `day` lands the next morning. Building the page before it does would freeze a day at
+       "£0 spend" for ever, because a generated report is never rebuilt. Wait for the report, and rebuild a
+       report that was generated before the spend arrived. */
+    const landed = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend FROM adtool_listing_day WHERE day = ?1').bind(day).first();
+    const spendIn = Number(landed && landed.spend) || 0;
+    const exists = await env.DB.prepare('SELECT day, json FROM adtool_reports WHERE day = ?1').bind(day).first();
+    if (!spendIn) { await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', "eBay's report for " + day + ' has not landed yet — nothing to write'); return; }
+    if (exists) {
+      let had = 0; try { had = Number(JSON.parse(exists.json).fleet.spend) || 0; } catch (e) {}
+      if (had > 0) { await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated'); return; }
+    }
     /* cap days for yesterday (A15 input) */
     const budgets = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN c.budget <> '' THEN CAST(c.budget AS REAL) ELSE 0 END) AS budget FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY ca.listing_id").all()).results || [])) budgets[r.listing_id] = Number(r.budget) || 0;
     const samp = (await env.DB.prepare('SELECT item_id, sampled_at, SUM(cum_spend) AS cum_spend, SUM(cum_clicks) AS cum_clicks FROM adtool_ads_intraday WHERE report_day = ?1 GROUP BY item_id, sampled_at ORDER BY item_id, sampled_at').bind(day).all()).results || [];
@@ -5333,7 +5349,11 @@ async function adtDecisionInputs(env, day) {
   const out = [];
   for (const iid of Object.keys(byItem)) {
     const m = L[iid]; if (!m) continue;
-    const rs = byItem[iid]; const sum = (k, n) => rs.slice(-n).reduce((t, r) => t + (Number(r[k]) || 0), 0);
+    /* the same calendar rule as the alerts: fill the missing days with zeros before any window is taken, or a
+       "last 7 rows" quietly becomes a fortnight for a listing that only sells twice a week */
+    const raw = byItem[iid]; const idx = {}; for (const r of raw) idx[r.day] = r;
+    const rs = []; for (let d = raw[0].day; d <= yday; d = adtAddDays(d, 1)) rs.push(idx[d] || { item_id: iid, day: d, weekday: adtWeekdayOf(d), spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0, units: 0, clicks: 0 });
+    const sum = (k, n) => rs.slice(-n).reduce((t, r) => t + (Number(r[k]) || 0), 0);
     const win = n => ({ spend: round2(sum('spend', n)), attr_units: sum('attr_units', n), attr_revenue: round2(sum('attr_revenue', n)), ad_profit: round2(sum('ad_profit', n)) });
     let y = rs.length && rs[rs.length - 1].day === yday ? { spend: Number(rs[rs.length - 1].spend), attr_units: Number(rs[rs.length - 1].attr_units), attr_revenue: Number(rs[rs.length - 1].attr_revenue), ad_profit: Number(rs[rs.length - 1].ad_profit) } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 };
     let ySource = 'report';
