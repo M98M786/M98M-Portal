@@ -1621,7 +1621,8 @@ async function adsSync(env) {
          truthfully show clicks against £0.00 — that is a fact about the campaign, not a bug, and
          the portal should be able to say so. */
       const funding = String((c.fundingStrategy && c.fundingStrategy.fundingModel) || '');
-      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget, funding };
+      live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget, funding,
+        bid: String((c.fundingStrategy && c.fundingStrategy.bidPercentage) || ''), start: String(c.startDate || ''), end: String(c.endDate || '') };   /* ADTOOL P2: read here, stored only behind the flag */
     }
     const prevRs = await env.DB.prepare('SELECT campaign_id, name, status, budget FROM campaigns WHERE account = ?1').bind(acct).all();
     const prev = {};
@@ -1688,8 +1689,15 @@ async function adsSync(env) {
         "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, synced_at=datetime('now')"
       ).bind(acct, id, l.name, l.status, l.budget, l.funding || '').run();
     }
+    /* ADTOOL P2 (Advertising Tool, flag adtool_campaign_truth): bid % and dates as nullable columns; a
+       campaign that left eBay's list is archived before its row goes, so its id still resolves. */
+    const adtP2 = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
+    if (adtP2) { try { await adtoolCampaignFieldsWrite(env, acct, live); } catch (e) { await ctx_setSync(env, 'adtoolCampaignFields', acct, String(e && e.message || e).slice(0, 200)); } }
     for (const id of Object.keys(prev)) {
-      if (!live[id]) await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
+      if (!live[id]) {
+        if (adtP2) { try { await adtoolCampaignArchiveWrite(env, acct, id, prev[id]); } catch (e) { await ctx_setSync(env, 'adtoolCampaignArchive', acct, String(e && e.message || e).slice(0, 200)); } }
+        await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
+      }
     }
 
   });
@@ -1753,9 +1761,9 @@ async function adsItems(env) {
         if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || ''),
           st: String(ad.adStatus || ''), grp: String(ad.adGroupId || '') };
       }
-      const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
-      const prev = {};
-      for (const row of (prevRs.results || [])) prev[row.listing_id] = String(row.bid_pct || '');
+      const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
+      const prev = {}, prevSt = {};
+      for (const row of (prevRs.results || [])) { prev[row.listing_id] = String(row.bid_pct || ''); prevSt[row.listing_id] = row.ad_status == null ? '' : String(row.ad_status); }
       const first = Object.keys(prev).length === 0;
 
       const added = Object.keys(now).filter(l => !(l in prev));
@@ -1797,6 +1805,11 @@ async function adsItems(env) {
         }
       }
 
+      /* ADTOOL P2: every change of an ad's state inside this campaign becomes an event (flag-gated; a
+         campaign's first-ever sync is a baseline, not a flood of 'added' events) */
+      if (!first && (await adtFlag(env, 'adtool_campaign_truth')) === 'on') {
+        try { await adtoolAdEventsWrite(env, acct, cid, prevSt, now); } catch (e) { await ctx_setSync(env, 'adtoolAdEvents', acct, String(e && e.message || e).slice(0, 200)); }
+      }
       const stmts = [];
       for (const lid of added) {
         stmts.push(env.DB.prepare(
@@ -3787,10 +3800,11 @@ const ADTOOL_ACTIONS = {
       for (const r of days) { const x = dom[r.dom - 1]; if (x) { x.dates++; x.units += r.units; } }
       for (const x of dom) x.units_day = x.dates ? round2(x.units / x.dates) : null;
       const camps = JSON.parse(L.campaigns_json || '[]');
+      let where = null; try { where = await adtWhereRows(env, iid); } catch (e) { where = null; }
       const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
       return {
         header: { item_id: iid, account: L.account, title: L.title, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null },
-        kpis, campaigns: camps, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
+        kpis, campaigns: camps, where, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
         hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
         computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Brain v17)', sample_size: days.length,
       };
@@ -3838,6 +3852,246 @@ const ADTOOL_ACTIONS = {
   },
 };
 /* ADTOOL-ENGINE-END ============================================================================ */
+/* ADTOOL-P2-BEGIN ===================================================================================
+   Advertising Tool — Phase 2: campaign truth (spec §4.1 campaigns / campaign_ads / ad-status events,
+   §7 "Where its ads sit right now" + Campaigns live, §12 phase 2). Every writer here is called by an
+   EXISTING job (adsSync, adsItems, adsReportPoll → ingestAdsReport, adsReportKick) and only while
+   portal_config.adtool_campaign_truth = 'on'; the page reads only while adtool_page_campaigns = 'on'.
+   Nothing here touches an eBay write endpoint. */
+/* ADTOOL-P2-PURE-BEGIN */
+function adtAdState(funding, adStatus) {
+  /* the label a person sees; the live/not-live rule itself stays the portal's liveMembershipRow */
+  const st = adStatus == null ? '' : String(adStatus);
+  if (String(funding) === 'COST_PER_CLICK') {
+    if (st === 'ACTIVE') return { state: 'ACTIVE', live: true };
+    if (st === 'PAUSED') return { state: 'PAUSED', live: false };
+    if (st === 'ARCHIVED') return { state: 'ARCHIVED', live: false };
+    return { state: 'ACTIVE (not yet stamped)', live: true };      // rows never re-synced since ad_status landed
+  }
+  if (st === 'ARCHIVED') return { state: 'archived', live: false };
+  return { state: 'exists (live)', live: true };                     // cost-per-sale ads carry no per-ad status on eBay
+}
+function adtAdEvents(prev, now) {
+  /* prev / now: item_id → ad status ('' for cost-per-sale). One event per change of state, none for a
+     first-ever sync of a campaign (the caller skips those). */
+  const ev = [];
+  for (const lid of Object.keys(now)) {
+    if (!(lid in prev)) ev.push({ item_id: lid, from: '', to: now[lid] || 'EXISTS' });
+    else if (String(prev[lid] || '') !== String(now[lid] || '')) ev.push({ item_id: lid, from: prev[lid] || 'EXISTS', to: now[lid] || 'EXISTS' });
+  }
+  for (const lid of Object.keys(prev)) if (!(lid in now)) ev.push({ item_id: lid, from: prev[lid] || 'EXISTS', to: 'REMOVED' });
+  return ev;
+}
+function parseAdsReportCampaignTsv(tsv) {
+  /* the same report adsReportPoll already ingests, read per listing × campaign instead of summed per listing */
+  const lines = String(tsv || '').split(/\r?\n/).filter(l => l.trim() !== '');
+  const hi = lines.findIndex(l => /listing/i.test(l) && l.indexOf('\t') >= 0);
+  if (hi < 0) return null;
+  const heads = lines[hi].split('\t').map(h => h.trim().toLowerCase());
+  const cL = heads.findIndex(h => /listing/.test(h));
+  const cCid = heads.findIndex(h => /campaign_id/.test(h));
+  if (cL < 0 || cCid < 0) return null;
+  const col = re => heads.map((h, i) => (re.test(h) && !/payout_currency/.test(h) ? i : -1)).filter(i => i >= 0);
+  const cS = col(/ad_fee/), cC = col(/^clicks$|^cpc_clicks$/), cU = col(/^sales$|^cpc_attributed_sales$/), cR = col(/sale_amount/), cI = col(/^impressions$|^cpc_impressions$/);
+  const cName = heads.findIndex(h => /campaign_name/.test(h));
+  const agg = {};
+  for (let i = hi + 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    const lid = String(cells[cL] || '').replace(/\D/g, '');
+    const cid = String(cells[cCid] || '').trim();
+    if (!lid || !cid) continue;
+    const num = idx => idx >= 0 ? (Number(String(cells[idx] || '').replace(/[^0-9.\-]/g, '')) || 0) : 0;
+    const sum = list => list.reduce((t, idx) => t + num(idx), 0);
+    const k = lid + '|' + cid;
+    const a = (agg[k] = agg[k] || { item_id: lid, campaign_id: cid, name: cName >= 0 ? String(cells[cName] || '').trim() : '', s: 0, c: 0, u: 0, r: 0, i: 0 });
+    a.s += sum(cS); a.c += sum(cC); a.u += sum(cU); a.r += sum(cR); a.i += sum(cI);
+  }
+  return agg;
+}
+/* ADTOOL-P2-PURE-END */
+
+let ADTOOL_P2_SCHEMA_OK = false;
+async function ensureAdtoolPhase2Schema(env) {
+  if (ADTOOL_P2_SCHEMA_OK) return;
+  await ensureAdtoolPhase1Schema(env);
+  /* nullable columns at the existing grain (owner's rule): what eBay returns for a campaign and the portal never stored */
+  for (const c of ['bid_pct TEXT', 'start_date TEXT', 'end_date TEXT']) { try { await env.DB.prepare('ALTER TABLE campaigns ADD COLUMN ' + c).run(); } catch (e) { /* already there */ } }
+  const ddl = [
+    "CREATE TABLE IF NOT EXISTS adtool_campaign_ad_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, campaign_id TEXT, item_id TEXT, from_status TEXT DEFAULT '', to_status TEXT DEFAULT '', seen_at TEXT, source TEXT DEFAULT 'sync')",
+    'CREATE INDEX IF NOT EXISTS idx_adtcae_item ON adtool_campaign_ad_events(item_id, seen_at)',
+    'CREATE INDEX IF NOT EXISTS idx_adtcae_camp ON adtool_campaign_ad_events(account, campaign_id, seen_at)',
+    "CREATE TABLE IF NOT EXISTS adtool_campaign_archive (account TEXT, campaign_id TEXT, name TEXT DEFAULT '', status_last TEXT DEFAULT '', funding TEXT DEFAULT '', budget TEXT DEFAULT '', gone_at TEXT, PRIMARY KEY (account, campaign_id))",
+    "CREATE TABLE IF NOT EXISTS adtool_ads_daily (account TEXT, item_id TEXT, campaign_id TEXT, day TEXT, family TEXT, spend REAL DEFAULT 0, clicks INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, impressions INTEGER DEFAULT 0, pulled_at TEXT, pulls INTEGER DEFAULT 1, PRIMARY KEY (account, item_id, campaign_id, day, family))",
+    'CREATE INDEX IF NOT EXISTS idx_adtad_camp_day ON adtool_ads_daily(account, campaign_id, day)',
+    'CREATE INDEX IF NOT EXISTS idx_adtad_item_day ON adtool_ads_daily(item_id, day)',
+    'CREATE TABLE IF NOT EXISTS adtool_ads_daily_vintage (account TEXT, item_id TEXT, campaign_id TEXT, day TEXT, family TEXT, pulled_at TEXT, spend REAL, clicks INTEGER, units INTEGER, revenue REAL, impressions INTEGER, PRIMARY KEY (account, item_id, campaign_id, day, family, pulled_at))',
+  ];
+  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtoolRegisterSeedP2(env);
+  ADTOOL_P2_SCHEMA_OK = true;
+}
+const ADTOOL_REGISTER_P2 = [
+  ['CAMPAIGN_BID_BUDGET_DATES', 'Campaign bid %, daily budget, start and end dates', 'campaigns.bid_pct / budget / start_date / end_date as eBay returns them (fundingStrategy.bidPercentage, budget.daily, startDate, endDate)', 'campaigns', 'adsSync every 5 min (dates and bid only while adtool_campaign_truth is on)', 'compare with Seller Hub campaign settings on 3 campaigns (owner)'],
+  ['AD_STATE_LABEL', 'This ad\'s state inside a campaign', 'CPC: campaign_ads.ad_status (ACTIVE / PAUSED / ARCHIVED, blank = not yet stamped, treated as live); cost-per-sale: exists (live) unless ARCHIVED — the portal\'s liveMembershipRow', 'campaign_ads, campaigns', 'adsItems every 15 min (2 running campaigns per account per tick)', 'Seller Hub → campaign → ad status on 3 listings (owner)'],
+  ['AD_STATUS_EVENTS', 'Every change of an ad\'s state inside a campaign', 'adsItems diff of the previous stamped state vs the ad list eBay returns: from → to with seen_at; added ads from blank, removed ads to REMOVED', 'adtool_campaign_ad_events', 'adsItems every 15 min', 'count of PAUSED events vs Seller Hub pause history on 1 listing (owner)'],
+  ['CAMPAIGN_ARCHIVE', 'Campaigns that left eBay\'s list', 'a campaign missing from ad_campaign?limit=100 is archived with its last name / status / budget before the portal deletes its row, so old campaign ids still resolve', 'adtool_campaign_archive', 'adsSync every 5 min', 'unresolved ids that now resolve, counted on the Campaigns page'],
+  ['CAMPAIGN_SPEND_DAY', 'Ad spend / clicks / units / revenue per listing × campaign × report day', 'the same eBay report the daily poll ingests, read per campaign_id instead of summed per listing; both billing families', 'adtool_ads_daily', 'adsReportPoll every 15 min (T+1 reports; back-filled days too)', 'per-day sum over campaigns equals ads_daily for the listing (spend, clicks, units)'],
+  ['AD_REPORT_VINTAGE', 'Every pull of a report day, kept', 'each ingest appends (pulled_at, numbers) for the listing × campaign × day; the latest is CAMPAIGN_SPEND_DAY; days inside the parity fixture window are not re-pulled', 'adtool_ads_daily_vintage', 'adsReportPoll; nightly re-pull of D-2..D-7 from adsReportKick (its own cap of 12 per account)', 'vintages for one day differ only by eBay\'s late attribution'],
+  ['ISSUE_UNRESOLVED_IDS', 'Campaign ids in the ad map the campaigns table cannot name', 'campaign_ads.campaign_id with no row in campaigns; listings touched; their 30-day spend; how many now resolve through the archive', 'campaign_ads, campaigns, adtool_campaign_archive, ads_daily', 'live on the Campaigns page', 'review baseline 73 ids / 119 listings / £3,563.74'],
+  ['ISSUE_DUAL_FUNDING', 'Listings live in a CPC and a cost-per-sale campaign at once', 'liveMembershipRow true in at least one COST_PER_CLICK and one COST_PER_SALE campaign', 'campaign_ads, campaigns, items_api', 'live on the Campaigns page', 'review baseline 123 (by campaign name)'],
+  ['ISSUE_ZERO_SALE_SPEND', 'Listings spending with no attributed sale', '30-day spend > 0 and 0 attributed units (both families); A03 variant: ≥ £10 in 14 days', 'ads_daily', 'live on the Campaigns page', 'review baseline 95 listings on £429'],
+  ['ISSUE_ENDED_STILL_SPENDING', 'Ended or sold-out listings that still carried spend', 'items_api.status ≠ ACTIVE or qty = 0, with spend in the last 7 days', 'ads_daily, items_api', 'live on the Campaigns page', 'review baseline 21 listings'],
+  ['ISSUE_CAMPAIGN_OFF_STILL_SPENDING', 'Paused or ended campaigns with spend in the last 2 days', 'campaigns.status not RUNNING and adtool_ads_daily spend > 0 on the last 2 report days', 'campaigns, adtool_ads_daily', 'live on the Campaigns page', 'A06 rule; needs CAMPAIGN_SPEND_DAY'],
+  ['ISSUE_PAUSED_LONG', 'CPC ads paused inside a campaign for more than 7 days', 'campaign_ads.ad_status = PAUSED and the last PAUSED event (or the stamp) older than 7 days', 'campaign_ads, adtool_campaign_ad_events', 'live on the Campaigns page', 'A13 rule'],
+];
+async function adtoolRegisterSeedP2(env) {
+  const stmts = ADTOOL_REGISTER_P2.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 2, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 2").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  return adtBatch(env, stmts);
+}
+
+/* ---- writers, each called by the existing job that already holds the data ---- */
+async function adtoolCampaignFieldsWrite(env, acct, live) {
+  await ensureAdtoolPhase2Schema(env);
+  const stmts = [];
+  for (const id of Object.keys(live)) {
+    const l = live[id];
+    stmts.push(env.DB.prepare('UPDATE campaigns SET bid_pct = ?3, start_date = ?4, end_date = ?5 WHERE account = ?1 AND campaign_id = ?2')
+      .bind(acct, id, l.bid == null ? '' : String(l.bid), String(l.start || ''), String(l.end || '')));
+  }
+  await adtBatch(env, stmts);
+  return stmts.length;
+}
+async function adtoolCampaignArchiveWrite(env, acct, id, prev) {
+  await ensureAdtoolPhase2Schema(env);
+  const row = await env.DB.prepare('SELECT name, status, budget, funding_model FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).first();
+  const r = row || prev || {};
+  await env.DB.prepare("INSERT INTO adtool_campaign_archive (account, campaign_id, name, status_last, funding, budget, gone_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) ON CONFLICT(account, campaign_id) DO UPDATE SET name = ?3, status_last = ?4, funding = ?5, budget = ?6, gone_at = datetime('now')")
+    .bind(acct, id, String(r.name || ''), String(r.status || ''), String(r.funding_model || ''), String(r.budget || '')).run();
+}
+async function adtoolAdEventsWrite(env, acct, cid, prevSt, now) {
+  await ensureAdtoolPhase2Schema(env);
+  const nowSt = {}; for (const lid of Object.keys(now)) nowSt[lid] = now[lid].st || '';
+  const ev = adtAdEvents(prevSt, nowSt);
+  if (!ev.length) return 0;
+  await adtBatch(env, ev.map(e => env.DB.prepare("INSERT INTO adtool_campaign_ad_events (account, campaign_id, item_id, from_status, to_status, seen_at, source) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), 'sync')").bind(acct, cid, e.item_id, e.from, e.to)));
+  return ev.length;
+}
+async function adtoolCampaignRowsWrite(env, acct, day, family, text) {
+  await ensureAdtoolPhase2Schema(env);
+  const agg = parseAdsReportCampaignTsv(text);
+  if (!agg) { await ctx_setSync(env, 'adtoolCampaignRows', acct, day + ' ' + family + ': report carries no campaign_id column'); return 0; }
+  const now = new Date().toISOString();
+  const stmts = [];
+  for (const k of Object.keys(agg)) {
+    const a = agg[k];
+    const sp = round2(a.s), cl = Math.round(a.c), un = Math.round(a.u), rv = round2(a.r), im = Math.round(a.i);
+    stmts.push(env.DB.prepare('INSERT INTO adtool_ads_daily (account, item_id, campaign_id, day, family, spend, clicks, units, revenue, impressions, pulled_at, pulls) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1) ON CONFLICT(account, item_id, campaign_id, day, family) DO UPDATE SET spend = ?6, clicks = ?7, units = ?8, revenue = ?9, impressions = ?10, pulled_at = ?11, pulls = pulls + 1')
+      .bind(acct, a.item_id, a.campaign_id, day, family, sp, cl, un, rv, im, now));
+    stmts.push(env.DB.prepare('INSERT OR IGNORE INTO adtool_ads_daily_vintage (account, item_id, campaign_id, day, family, pulled_at, spend, clicks, units, revenue, impressions) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)')
+      .bind(acct, a.item_id, a.campaign_id, day, family, now, sp, cl, un, rv, im));
+  }
+  await adtBatch(env, stmts);
+  return Object.keys(agg).length;
+}
+async function adtoolVintageKick(env, acct, tok, families) {
+  /* nightly re-pull of D-2..D-7 (both families) so late attribution is captured as a new vintage; its own cap
+     (12 creates per account per run, the owner's "raise the cap for the nightly kick only"); days inside the
+     parity fixture window are never re-pulled, so the review's numbers stay reproducible */
+  await ensureAdtoolPhase2Schema(env);
+  const meta = await env.DB.prepare("SELECT extra FROM adtool_fixture WHERE kind = 'meta' AND k1 = 'to'").first();
+  const frozenTo = String((meta && meta.extra) || '2026-09-15');
+  const already = {};
+  for (const r of ((await env.DB.prepare("SELECT report_date, family FROM ad_report_tasks WHERE account = ?1 AND created_at >= datetime('now', '-20 hours')").bind(acct).all()).results || [])) already[String(r.report_date) + '|' + String(r.family || 'std')] = true;
+  let kicked = 0; const problems = [];
+  for (let back = 2; back <= 7 && kicked < 12; back++) {
+    const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
+    if (day <= frozenTo) continue;
+    for (const fam of families) {
+      if (kicked >= 12) break;
+      if (already[day + '|' + fam.family]) continue;         // filed today already (the heal loop or an earlier run)
+      kicked++;
+      const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
+        method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+        body: JSON.stringify({ reportType: 'LISTING_PERFORMANCE_REPORT', reportFormat: 'TSV_GZIP', dateFrom: day + 'T00:00:00.000Z', dateTo: day + 'T23:59:59.000Z', fundingModels: [fam.model], dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
+      });
+      if (cr.status !== 202 && !cr.ok) { problems.push(fam.family + ' ' + day + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160)); continue; }
+      const loc = cr.headers.get('location') || '';
+      const taskId = loc.split('/').filter(Boolean).pop() || ('v' + Date.now() + fam.family + back);
+      await env.DB.prepare("INSERT INTO ad_report_tasks (account, task_id, report_date, status, error, created_at, family) VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) ON CONFLICT(account, task_id) DO NOTHING").bind(acct, taskId, day, fam.family).run();
+    }
+  }
+  await ctx_setSync(env, 'adtoolVintageKick', acct, 'kicked ' + kicked + (problems.length ? ' · refused: ' + problems.join(' | ') : '') + ' · frozen to ' + frozenTo);
+  return kicked;
+}
+
+/* ---- shared read: where a listing's ads sit right now ---- */
+async function adtWhereRows(env, iid) {
+  await ensureAdtoolPhase2Schema(env);
+  const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const d7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const rows = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid).all()).results || [];
+  const spend = {};
+  for (const r of ((await env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7).all()).results || [])) spend[r.campaign_id] = r;
+  const lastEv = {};
+  for (const r of ((await env.DB.prepare('SELECT campaign_id, MAX(seen_at) AS at FROM adtool_campaign_ad_events WHERE item_id = ?1 GROUP BY campaign_id').bind(iid).all()).results || [])) lastEv[r.campaign_id] = r.at;
+  const history = (await env.DB.prepare('SELECT e.campaign_id, e.from_status, e.to_status, e.seen_at, e.source, COALESCE(c.name, a.name, e.campaign_id) AS name FROM adtool_campaign_ad_events e LEFT JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = e.account AND a.campaign_id = e.campaign_id WHERE e.item_id = ?1 ORDER BY e.seen_at DESC LIMIT 20').bind(iid).all()).results || [];
+  const out = rows.map(r => {
+    const resolved = !!r.name; const archived = !resolved && !!r.a_name;
+    const funding = resolved ? r.funding_model : (archived ? r.a_funding : '');
+    const st = adtAdState(funding, r.ad_status);
+    const live = resolved ? liveMembershipRow({ c_status: r.c_status, l_status: r.l_status, funding_model: r.funding_model, ad_status: r.ad_status }) : false;
+    const s = spend[r.campaign_id] || {};
+    return { campaign_id: r.campaign_id, name: resolved ? r.name : (archived ? r.a_name + ' (gone from eBay ' + String(r.gone_at || '').slice(0, 10) + ')' : 'unresolved id ' + r.campaign_id), resolved, archived, funding, campaign_status: resolved ? r.c_status : (archived ? r.a_status + ' (archived)' : 'unknown'), ad_state: st.state, live, ad_bid: r.ad_bid || '', campaign_bid: r.c_bid || '', budget: r.budget == null ? null : Number(r.budget), start_date: r.start_date || '', end_date: r.end_date || '', spend_yesterday: s.sp_y == null ? null : round2(s.sp_y), units_yesterday: s.un_y == null ? null : Number(s.un_y), revenue_yesterday: s.rv_y == null ? null : round2(s.rv_y), spend_7d: s.sp_7 == null ? null : round2(s.sp_7), roas_7d: (s.sp_7 > 0) ? round2(s.rv_7 / s.sp_7) : null, units_7d: s.un_7 == null ? null : Number(s.un_7), campaign_rows_to: s.last_day || '', last_change: lastEv[r.campaign_id] || '', synced_at: r.synced_at };
+  });
+  return { rows: out, history, yesterday: yday, note: Object.keys(spend).length ? 'spend per campaign from the tool\'s campaign-level report rows' : 'per-campaign spend arrives with the next daily report ingest (campaign-level rows are new); family totals are on the P&L table' };
+}
+
+/* ---- actions ---- */
+const ADTOOL_ACTIONS_P2 = {
+  adtoolWhereIs: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_campaigns');
+      const iid = String((p && p.item_id) || '').replace(/\D/g, '');
+      if (!iid) throw new Error('SAY: give an item id');
+      const it = await ctx.env.DB.prepare('SELECT item_id, account, title, price, status, qty FROM items_api WHERE item_id = ?1').bind(iid).first();
+      const w = await adtWhereRows(ctx.env, iid);
+      return Object.assign({ item: it || { item_id: iid, title: '(not in the portal item list)' }, computed_at: new Date().toISOString(), source: 'campaigns, campaign_ads (adsItems), adtool_campaign_ad_events, adtool_ads_daily' }, w);
+    },
+  },
+  adtoolCampaigns: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_campaigns');
+      const env = ctx.env; await ensureAdtoolPhase2Schema(env);
+      const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10), d14 = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), d7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10), d2 = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+      const issues = {};
+      const unresolvedIds = (await env.DB.prepare('SELECT ca.campaign_id, ca.account, COUNT(*) AS listings, MAX(a.name) AS archived_name FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id WHERE c.campaign_id IS NULL GROUP BY ca.campaign_id, ca.account ORDER BY listings DESC').all()).results || [];
+      const unresolvedSpend = await env.DB.prepare('SELECT COUNT(DISTINCT ad.item_id) AS listings, ROUND(SUM(ad.spend + ad.cpc_spend), 2) AS spend FROM ads_daily ad WHERE ad.date >= ?1 AND ad.item_id IN (SELECT DISTINCT ca.listing_id FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE c.campaign_id IS NULL)').bind(d30).first();
+      issues.unresolved = { ids: unresolvedIds.length, resolved_by_archive: unresolvedIds.filter(x => x.archived_name).length, listings: unresolvedIds.reduce((t, x) => t + Number(x.listings), 0), listings_with_spend_30d: Number(unresolvedSpend && unresolvedSpend.listings) || 0, spend_30d: Number(unresolvedSpend && unresolvedSpend.spend) || 0, sample: unresolvedIds.slice(0, 12) };
+      const dual = (await env.DB.prepare("SELECT ca.listing_id AS item_id, ca.account, MAX(ia.title) AS title, GROUP_CONCAT(c.name, ' | ') AS campaigns FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED')) GROUP BY ca.listing_id, ca.account HAVING SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN c.funding_model = 'COST_PER_SALE' THEN 1 ELSE 0 END) > 0 ORDER BY ca.account").all()).results || [];
+      issues.dual_funding = { count: dual.length, sample: dual.slice(0, 20) };
+      const zero = (await env.DB.prepare('SELECT ad.item_id, ad.account, ROUND(SUM(ad.spend + ad.cpc_spend), 2) AS spend_30d, ROUND(SUM(CASE WHEN ad.date >= ?2 THEN ad.spend + ad.cpc_spend ELSE 0 END), 2) AS spend_14d, SUM(ad.clicks + ad.cpc_clicks) AS clicks FROM ads_daily ad WHERE ad.date >= ?1 GROUP BY ad.item_id, ad.account HAVING SUM(ad.spend + ad.cpc_spend) > 0 AND SUM(ad.sales + ad.cpc_sales) = 0 ORDER BY spend_30d DESC').bind(d30, d14).all()).results || [];
+      issues.zero_sale = { count: zero.length, spend_30d: round2(zero.reduce((t, x) => t + Number(x.spend_30d), 0)), a03_count: zero.filter(x => Number(x.spend_14d) >= 10).length, a03_spend_14d: round2(zero.filter(x => Number(x.spend_14d) >= 10).reduce((t, x) => t + Number(x.spend_14d), 0)), sample: zero.slice(0, 20) };
+      const ended = (await env.DB.prepare("SELECT ad.item_id, ad.account, ia.status, ia.qty, MAX(ia.title) AS title, ROUND(SUM(ad.spend + ad.cpc_spend), 2) AS spend_7d, MAX(ad.date) AS last_day FROM ads_daily ad JOIN items_api ia ON ia.item_id = ad.item_id WHERE ad.date >= ?1 AND (ia.status <> 'ACTIVE' OR ia.qty = 0) GROUP BY ad.item_id, ad.account HAVING SUM(ad.spend + ad.cpc_spend) > 0 ORDER BY spend_7d DESC").bind(d7).all()).results || [];
+      issues.ended_still_spending = { count: ended.length, spend_7d: round2(ended.reduce((t, x) => t + Number(x.spend_7d), 0)), sample: ended.slice(0, 20) };
+      const off = (await env.DB.prepare("SELECT c.account, c.campaign_id, c.name, c.status, ROUND(SUM(d.spend), 2) AS spend_2d, MAX(d.day) AS last_day FROM adtool_ads_daily d JOIN campaigns c ON c.account = d.account AND c.campaign_id = d.campaign_id WHERE d.day >= ?1 AND NOT (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY c.account, c.campaign_id HAVING SUM(d.spend) > 0 ORDER BY spend_2d DESC").bind(d2).all()).results || [];
+      const campRows = await env.DB.prepare('SELECT COUNT(*) AS n, MIN(day) AS mn, MAX(day) AS mx FROM adtool_ads_daily').first();
+      issues.campaign_off_still_spending = { count: off.length, sample: off.slice(0, 20), campaign_rows: campRows };
+      const pausedLong = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, c.name, COALESCE((SELECT MAX(seen_at) FROM adtool_campaign_ad_events e WHERE e.account = ca.account AND e.campaign_id = ca.campaign_id AND e.item_id = ca.listing_id AND e.to_status = 'PAUSED'), ca.synced_at) AS paused_since FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.ad_status = 'PAUSED' AND c.funding_model = 'COST_PER_CLICK' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON')").all()).results || [];
+      const old = pausedLong.filter(x => x.paused_since && (Date.now() - new Date(String(x.paused_since).replace(' ', 'T') + (String(x.paused_since).endsWith('Z') ? '' : 'Z')).getTime()) > 7 * 86400000);
+      issues.paused_long = { count: old.length, paused_total: pausedLong.length, sample: old.slice(0, 20), note: 'since the last PAUSED event, or the stamp time where no event exists yet (events start with this phase)' };
+      const campaigns = (await env.DB.prepare("SELECT c.account, c.campaign_id, c.name, c.status, c.funding_model, c.budget, c.bid_pct, c.start_date, c.end_date, c.synced_at, c.ads_synced_at, SUM(CASE WHEN ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads, SUM(CASE WHEN ca.ad_status = 'ACTIVE' OR (c.funding_model = 'COST_PER_SALE' AND ca.listing_id IS NOT NULL AND COALESCE(ca.ad_status, '') <> 'ARCHIVED') THEN 1 ELSE 0 END) AS ads_active, SUM(CASE WHEN ca.ad_status = 'PAUSED' THEN 1 ELSE 0 END) AS ads_paused, SUM(CASE WHEN ca.ad_status = 'ARCHIVED' THEN 1 ELSE 0 END) AS ads_archived, SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status IS NULL OR ca.ad_status = '') AND ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads_unstamped FROM campaigns c LEFT JOIN campaign_ads ca ON ca.account = c.account AND ca.campaign_id = c.campaign_id GROUP BY c.account, c.campaign_id ORDER BY c.account, c.status, c.name").all()).results || [];
+      const sp7 = {};
+      for (const r of ((await env.DB.prepare('SELECT account, campaign_id, ROUND(SUM(spend), 2) AS sp, ROUND(SUM(revenue), 2) AS rv, SUM(units) AS un FROM adtool_ads_daily WHERE day >= ?1 GROUP BY account, campaign_id').bind(d7).all()).results || [])) sp7[r.account + '|' + r.campaign_id] = r;
+      const lastChange = {};
+      for (const r of ((await env.DB.prepare("SELECT account, campaign, MAX(at) AS at FROM campaign_events WHERE change_type IN ('status', 'budget', 'items', 'cpc_rule', 'created') GROUP BY account, campaign").all()).results || [])) lastChange[r.account + '|' + r.campaign] = r.at;
+      for (const c of campaigns) { const s = sp7[c.account + '|' + c.campaign_id]; c.spend_7d = s ? Number(s.sp) : null; c.roas_7d = (s && Number(s.sp) > 0) ? round2(Number(s.rv) / Number(s.sp)) : null; c.units_7d = s ? Number(s.un) : null; c.last_change = lastChange[c.account + '|' + c.name] || ''; }
+      const archive = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_campaign_archive').first();
+      const events = await env.DB.prepare('SELECT COUNT(*) AS n, MIN(seen_at) AS first, MAX(seen_at) AS last FROM adtool_campaign_ad_events').first();
+      return { issues, campaigns, archive_count: Number(archive && archive.n) || 0, ad_events: events, computed_at: new Date().toISOString(), source: 'campaigns (adsSync), campaign_ads (adsItems), ads_daily (daily report), adtool_ads_daily (campaign-level rows), adtool_campaign_ad_events' };
+    },
+  },
+};
+/* ADTOOL-P2-END ===================================================================================== */
 
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
    eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
@@ -4276,6 +4530,10 @@ async function adsReportKick(env) {
         ).bind(acct, taskId, day, fam.family).run();
       }
     }
+    /* ADTOOL P2: nightly re-pull of D-2..D-7 as new vintages (its own cap; fixture-window days frozen) */
+    if ((await adtFlag(env, 'adtool_campaign_truth')) === 'on') {
+      try { await adtoolVintageKick(env, acct, tok, families); } catch (e) { await ctx_setSync(env, 'adtoolVintageKick', acct, 'error: ' + String(e && e.message || e).slice(0, 200)); }
+    }
     if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | ').slice(0, 1200));
   });
 }
@@ -4460,6 +4718,10 @@ async function ingestAdsReport(env, acct, day, text, family) {
     'INSERT INTO sales_daily (account, date, sold, oe, cost, ads, profit, ads_rev) VALUES (?1, ?2, 0, 0, 0, ?3, 0, ?4) ' +
     'ON CONFLICT(account, date) DO UPDATE SET ads = ?3, ads_rev = ?4'
   ).bind(acct, day, round2((dayTotal && dayTotal.ads) || 0), round2((dayTotal && dayTotal.rev) || 0)).run();
+  /* ADTOOL P2: the same report, kept per listing × campaign with a pull timestamp (flag-gated) */
+  if ((await adtFlag(env, 'adtool_campaign_truth')) === 'on') {
+    try { await adtoolCampaignRowsWrite(env, acct, day, family, text); } catch (e) { await ctx_setSync(env, 'adtoolCampaignRows', acct, String(e && e.message || e).slice(0, 200)); }
+  }
   return Object.keys(agg).length;
 }
 
@@ -11455,3 +11717,4 @@ const ROUTES = {
   },
 };
 Object.assign(ROUTES, ADTOOL_ACTIONS);   /* ADTOOL actions (read rollups only; role + preview-flag gated) */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P2); /* ADTOOL Phase 2: campaign truth (read-only; role + preview-flag gated) */
