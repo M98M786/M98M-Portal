@@ -8094,20 +8094,33 @@ async function truthTier3(env) {
     for (const acct of accounts) {
       const A = await metricMoney(env, acct, day, day);
       const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, day).all();
-      let t2 = 0, bad = 0, checked = 0, tot = null;
+      let t2 = 0, s2 = 0, bad = 0, checked = 0, tot = null, totS = null;
       for (const row of (rs.results || [])) {
         let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-        if (srIsTotalRow(v)) { tot = (tot || 0) + (Number(v['Raw Profit']) || 0); continue; }
+        if (srIsTotalRow(v)) {
+          tot = (tot || 0) + (Number(v['Raw Profit']) || 0);
+          totS = (totS || 0) + (Number(v['VAT to HMRC']) || 0);
+          continue;
+        }
         if (!srIsItemRow(v)) continue;
         checked++;
         const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
         if (Math.abs(T - (R - S)) > 0.011) bad++;
         t2 += T;
+        s2 += S;
       }
       if (tot !== null) { t2 = tot; }               // the tab's own totals row is the number
+      if (totS !== null) { s2 = totS; }
       out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + day, shown: A.ACTUAL_PROFIT, recomputed: round2(t2),
         delta: round2(Math.abs(round2(t2) - A.ACTUAL_PROFIT)), status: checked === 0 ? 'STALE' : (Math.abs(round2(t2) - A.ACTUAL_PROFIT) <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'),
         method: 'SHEET_RECOMPUTE', evidence: checked + ' rows, ' + bad + ' formula fails', next_run_at: next });
+      /* VAT had only ever been checked by tier1, on the single night the day was 'yesterday'.
+         When an account's day tab had not synced by then the check recorded STALE and no pass
+         ever came back for it — 57 days of a VAT-registered business's VAT unverified. Tier3
+         already re-reads those same rows; it now re-checks VAT with them. */
+      out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + day, shown: A.VAT_TO_HMRC, recomputed: round2(s2),
+        delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'),
+        method: 'SHEET_RECOMPUTE', evidence: checked + ' rows', next_run_at: next });
     }
   }
   await truthWrite(env, out);
@@ -9705,9 +9718,17 @@ const ROUTES = {
       const tail = await ctx.env.DB.prepare(
         'SELECT account, trigger_kind, buyer, body, due_at, status, detail FROM automsg_queue ORDER BY id DESC LIMIT 15'
       ).all();
+      /* The live flag reported here MUST be the one the sender obeys. 2849a91 made
+         portal_config.automsg_live the single authority for autoMsgSend but left this page
+         reading the retired AUTOMSG_LIVE env var, which is still armed 'true' in production —
+         so the Auto-messages page has been showing a green 'live' while the sender sends
+         nothing. Read the same row the sender reads, and keep the env var visible separately
+         rather than letting it speak for the switch. */
+      const liveRow = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'automsg_live'").first().catch(() => null);
       return { accounts: (accs.results || []).map(a => a.name), triggers: AUTOMSG_TRIGGERS,
         rows: rows.results || [], queue: tail.results || [],
-        live: String(ctx.env.AUTOMSG_LIVE) === 'true',
+        live: String((liveRow && liveRow.value) || 'off') === 'on',
+        env_force: String(ctx.env.AUTOMSG_LIVE) === 'true',
         note: "'ordered' fires right after the buyer pays (delay_min later) — the order-confirmation touch. 'shipped' fires when tracking goes up. 'arrived' fires when eBay's estimated delivery date passes (no carrier scans, so 'should have arrived by now')." };
     },
   },
