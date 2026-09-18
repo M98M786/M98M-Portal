@@ -5058,7 +5058,10 @@ async function adtoolAlerts(env) {
     for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await adtNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); await adtNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); } catch (e) { /* inbox is best effort */ } }
     if (highNew.length > 6) { try { await adtNotify(env, 'advertising', 'Ads alerts', '🟠 ' + (highNew.length - 6) + ' more high ads alerts this hour — open the Alerts page.', 'adtool:alertmore:' + today + ':' + ukNow.hour); } catch (e) {} }
     /* the §12 phase 5 acceptance, once a day: do the three cases the spec names still fire? */
-    try { const ran = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_ALERTS_FIXTURE' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first(); if (!ran || !Number(ran.n)) await adtoolAlertsFixtureCheck(env); } catch (e) { /* the check must never fail the hourly job */ }
+    /* Runs every hour, not once a day. It is three small queries, and a once-a-day guard means a verdict
+       written at 01:25 cannot be corrected until tomorrow however wrong it is — the same trap the forecast
+       acceptance was in. The check itself only writes a row when the answer changes. */
+    try { await adtoolAlertsFixtureCheck(env); } catch (e) { /* the check must never fail the hourly job */ }
     await adtJobEnd(env, 'adtoolAlerts', t, rows, 'ok', 'fired ' + fired + ' · open ' + kept + ' · cleared ' + cleared + ' · found ' + Object.keys(found).length);
   } catch (e) { await adtJobEnd(env, 'adtoolAlerts', t, rows, 'error', String(e && e.message || e)); throw e; }
 }
@@ -5105,8 +5108,11 @@ async function adtoolAlertsFixtureCheck(env) {
     + ' · A05 ' + (a05 ? 'confirmed by the billing — charged under both funding models on ' + Number(paid.days) + ' day(s), last ' + paid.last + ' (£' + paid.std_fees + ' cost-per-sale + £' + paid.cpc_fees + ' CPC)' : 'never charged under both funding models on one day')
     + ' · the live map today shows it ' + (a05live ? 'in both kinds of campaign' : 'not in both, which is a point-in-time fact and not evidence against the case')
     + ' · A07 ' + (a07 ? 'fires (9–10 Sep)' : 'correctly does not fire: 9 Sep ran £' + (a07day ? a07day.spend + ' against a 7-day average of £' + a07day.avg_7d + ', which is ' + a07ratio + ' %' : '—') + ', above the 50 % the rule defines as going dark — §12 expects this case to fire but §9 defines a threshold it does not cross, so the spec disagrees with itself here and the owner has to say which half is right');
+  const measured = JSON.stringify({ A03: a03, A07: a07, A07_pct_of_avg: a07ratio, A05: a05, A05_live_map: a05live });
+  const seen = await env.DB.prepare("SELECT status, recomputed FROM validation_runs WHERE metric_id = 'ADTOOL_ALERTS_FIXTURE' AND substr(ran_at, 1, 10) = ?1 ORDER BY ran_at DESC LIMIT 1").bind(new Date().toISOString().slice(0, 10)).first();
+  if (seen && String(seen.status) === status && String(seen.recomputed) === measured) return { a03, a07, a07ratio, a05, a05live, unchanged: true };
   await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'the three cases named in the spec', ?2, 0, ?3, 'A03 and A07 on the fixture window; A05 on the billing record, which does not move', ?4, '')")
-    .bind(new Date().toISOString(), JSON.stringify({ A03: a03, A07: a07, A07_pct_of_avg: a07ratio, A05: a05, A05_live_map: a05live }), status, ev).run();
+    .bind(new Date().toISOString(), measured, status, ev).run();
   return { a03, a07, a07ratio, a05, a05live, abrt: abrt.slice(-5) };
 }
 
