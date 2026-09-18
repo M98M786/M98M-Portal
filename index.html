@@ -728,7 +728,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260918-0339';
+var BUILD = '20260918-0341';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3043,7 +3043,7 @@ VIEWS.home = {
     if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>Behaviour descriptors' + src('profiles · ' + (ds.day || '')) + '</h3><div class="at-sub">Spec §6.4, last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'ratio ' + ds.weekday_ratio + ' · ' : '') + esc(ds.weekday_label || '')], ['Slot concentration', SLOTS[ds.top_slot] || '—', 'top share ' + Math.round((ds.top_slot_share || 0) * 100) + '% · HHI ' + ds.slot_hhi], ['Volatility', ds.volatility_cv28 == null ? '—' : 'CV ' + ds.volatility_cv28, 'zero-sale days ' + Math.round((ds.intermittency28 || 0) * 100) + '%'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'attributed ÷ all units'], ['Spend elasticity', ds.spend_elasticity == null ? 'not enough levels' : ds.spend_elasticity + ' units/£', ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
     /* §7: pattern changes — the regime history, what moved and when. The rows come from adtool_regimes, the
        same detections A17 fires on, so the page and the alert can never tell different stories. */
-    var rg = D.profile && D.profile.regime, rh = D.regime_history || [];
+    var rg = D.profile && D.profile.regime, rh = (D.profile && D.profile.regime_history) || [];
     h += '<div class="at-panel"><h3>Pattern changes' + src('regimes · §6.3a') + '</h3>'
       + '<div class="at-sub">' + (rg && rg.regime_change ? 'Today the shape of this listing\'s day has moved against its own prior 28 days.'
           : rg && rg.reason ? 'Nothing detected today — ' + esc(rg.reason) + '.'
