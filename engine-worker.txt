@@ -5137,7 +5137,21 @@ async function adtoolReport(env) {
     if (evs && Number(evs.n)) bullets.push(evs.n + ' ad status changes seen on eBay (' + evs.paused + ' paused, ' + evs.resumed + ' resumed)');
     if (capN) bullets.push(capN + ' listings hit 95 % of their running budget during the day');
     if (!bullets.length) bullets.push('nothing outside the usual range');
-    const report = { day, weekday: ADTOOL_DOW[wd], generated_at: new Date().toISOString(), fleet: Object.assign({ roas: roasY }, y), vs_7day: per(w7), vs_same_weekday_last_week: lw ? Object.assign({ roas: lw.spend > 0 ? round2(lw.attr_revenue / lw.spend) : null }, lw) : null, decisions: { applied: 0, scored: 0, note: 'decision engine arrives with Phase 6 (shadow)' }, by_account: byAcct, hours: hourRows, slots: slotZ, winners: win, losers: lose, what_changed: bullets, ad_status_changes: evs, open_alerts: alerts, capped_listings: capN, sources: ['eBay ads report (T+1)', 'orders', 'Brain v17', 'sampled hours (from 17 Sep)', 'fleet hour × weekday profile'] };
+    /* What the decision engine did for this day. This used to be hard-coded to say the engine "arrives with
+       Phase 6"; it has been here since Phase 6 shipped, so the report was telling the reader a built thing was
+       missing. Decisions are counted for the day they were made FOR, which is the day the report covers. */
+    const dRow = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN applied_at <> '' THEN 1 ELSE 0 END) AS applied, SUM(CASE WHEN outcome_day <> '' THEN 1 ELSE 0 END) AS scored, SUM(CASE WHEN mode = 'shadow' THEN 1 ELSE 0 END) AS shadow FROM adtool_decisions WHERE day = ?1").bind(day).first();
+    const dn = Number(dRow && dRow.n) || 0, dApplied = Number(dRow && dRow.applied) || 0, dScored = Number(dRow && dRow.scored) || 0, dShadow = Number(dRow && dRow.shadow) || 0;
+    const dKinds = (await env.DB.prepare('SELECT decision, COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 GROUP BY decision ORDER BY n DESC').bind(day).all()).results || [];
+    const decSummary = {
+      made: dn, applied: dApplied, scored: dScored, shadow: dShadow,
+      by_decision: dKinds.reduce((o, r) => { o[r.decision] = Number(r.n); return o; }, {}),
+      note: !dn ? 'no decisions were written for ' + day
+        : dn + (dn === 1 ? ' decision' : ' decisions') + ' (' + dKinds.map(r => Number(r.n) + ' ' + String(r.decision).toLowerCase()).join(', ') + ')'
+          + (dShadow === dn ? ' — all in shadow, nothing was sent to eBay' : ' — ' + dApplied + ' applied')
+          + (dScored ? ', ' + dScored + ' scored against what the listing actually did' : ', scored the next morning')
+    };
+    const report = { day, weekday: ADTOOL_DOW[wd], generated_at: new Date().toISOString(), fleet: Object.assign({ roas: roasY }, y), vs_7day: per(w7), vs_same_weekday_last_week: lw ? Object.assign({ roas: lw.spend > 0 ? round2(lw.attr_revenue / lw.spend) : null }, lw) : null, decisions: decSummary, by_account: byAcct, hours: hourRows, slots: slotZ, winners: win, losers: lose, what_changed: bullets, ad_status_changes: evs, open_alerts: alerts, capped_listings: capN, sources: ['eBay ads report (T+1)', 'orders', 'Brain v17', 'sampled hours (from 17 Sep)', 'fleet hour × weekday profile'] };
     await env.DB.prepare("INSERT INTO adtool_reports (day, generated_at, json, pdf_asset) VALUES (?1, ?2, ?3, '') ON CONFLICT(day) DO UPDATE SET generated_at = ?2, json = ?3").bind(day, report.generated_at, JSON.stringify(report)).run();
     const msg = '📊 Yesterday\'s ads report (' + day + '): £' + y.spend + ' spend · ' + y.attr_units + ' ad sales · ROAS ' + (roasY == null ? '—' : roasY + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + bullets[0];
     try { await adtNotify(env, 'advertising', "Yesterday's ads report", msg, 'adtool:report:' + day); await adtNotify(env, 'management', "Yesterday's ads report", msg, 'adtool:reportm:' + day); } catch (e) {}

@@ -728,7 +728,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260918-0018';
+var BUILD = '20260918-0306';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3022,7 +3022,7 @@ VIEWS.home = {
         C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign the map knows.</div>')) + '</div>';
     /* yesterday hour by hour + all-time daily */
     h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. Profile comparison arrives with Phase 3.</div><div id="atHour" class="at-chart"></div></div>' +
+      '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday\'s hour profile expected.</div><div id="atHour" class="at-chart"></div></div>' +
       '<div class="at-panel"><h3>Time slots, last 28 days' + src('orders') + '</h3><div class="at-sub">Orders landing in each UK slot; ad spend per hour joins as the sampled history grows.</div><table class="at-tbl"><thead><tr><th>Slot</th><th class="r">Share</th><th class="r">Orders / day</th><th class="r">Revenue / day</th></tr></thead><tbody>' +
       D.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + (s.share == null ? '—' : Math.round(s.share * 100) + '%') + '</td><td class="r">' + s.orders_day + '</td><td class="r">' + gbp(s.revenue_day) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
     h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units all channels (gold), 7-day average (white), ad-attributed units (dots), ad spend (bars, faint). Paused periods, budget-capped days and the forecast band arrive with Phases 2–4.</div><div id="atDaily" class="at-chart tall"></div></div>';
