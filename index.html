@@ -728,7 +728,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260918-0330';
+var BUILD = '20260918-0334';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3130,6 +3130,42 @@ VIEWS.home = {
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
   function src(t) { return '<span class="an-src">' + esc(t) + '</span>'; }
+
+  /* §7: the clock panel. The two batches are fixed in UTC by their crons, so what moves is the local time they
+     land at — and on 25 October the UK leaves BST, which shifts both against the working day and pulls the
+     boundary batch back onto the previous UK date. Printed from the real cron times rather than typed in, so it
+     cannot drift away from what the worker actually does. */
+  function clockPanel() {
+    var BATCHES = [
+      { name: 'Boundary batch', utc: [23, 30], what: 'writes tomorrow\'s decisions before the day starts; it never stops a listing, it holds those for the morning' },
+      { name: 'Morning batch', utc: [5, 55], what: 'scores yesterday, then decides today once eBay\'s report has landed' }
+    ];
+    var fmt = function (hm, tz, when) {
+      var d = new Date(Date.UTC(when.getUTCFullYear(), when.getUTCMonth(), when.getUTCDate(), hm[0], hm[1]));
+      var p = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' }).formatToParts(d);
+      var get = function (t) { return (p.filter(function (x) { return x.type === t; })[0] || {}).value || ''; };
+      return { time: get('hour') + ':' + get('minute'), day: get('weekday') };
+    };
+    var now = new Date();
+    var after = new Date(Date.UTC(2026, 10, 1));          /* any date once the UK is back on GMT */
+    var onBst = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', timeZoneName: 'short' }).format(now).indexOf('BST') >= 0;
+    var rows = BATCHES.map(function (b) {
+      var ukNow = fmt(b.utc, 'Europe/London', now), pkNow = fmt(b.utc, 'Asia/Karachi', now);
+      var ukLater = fmt(b.utc, 'Europe/London', after);
+      var moves = ukLater.time !== ukNow.time;
+      return '<tr><td><b>' + b.name + '</b><div class="an-sub" style="margin:2px 0 0">' + b.what + '</div></td>'
+        + '<td class="r">' + esc(String(b.utc[0]).padStart(2, '0') + ':' + String(b.utc[1]).padStart(2, '0')) + '</td>'
+        + '<td class="r">' + esc(ukNow.time) + (ukNow.day !== fmt([12, 0], 'Europe/London', now).day ? ' <span class="an-sub">(' + esc(ukNow.day) + ')</span>' : '') + '</td>'
+        + '<td class="r">' + esc(pkNow.time) + '</td>'
+        + '<td class="r">' + (moves ? esc(ukLater.time) : '<span class="an-sub">no change</span>') + '</td></tr>';
+    }).join('');
+    return '<div class="an-panel" style="margin-bottom:12px"><h3>When the batches run</h3>'
+      + '<div class="an-sub">The crons are fixed in UTC, so the local time is what moves. The UK is on <b>'
+      + (onBst ? 'BST' : 'GMT') + '</b> today; it returns to GMT on <b>25 October 2026</b>.</div>'
+      + '<table class="an-tbl"><thead><tr><th>Batch</th><th class="r">UTC</th><th class="r">UK now</th><th class="r">PKT now</th><th class="r">UK after 25 Oct</th></tr></thead><tbody>'
+      + rows + '</tbody></table></div>';
+  }
+
   VIEWS.adtoolStop = {
     label: 'Stop today (ads)', hidden: true, order: 93, roles: ROLES, icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6"/>',
     render: function () { return '<div class="an-wrap"><div class="hgroup enter d1"><h1>Stop today</h1><span class="sub">Advertising tool · preview · every decision in shadow, scored the next day against what happened</span></div><div id="stBody"><div class="an-empty">Loading…</div></div></div>'; },
@@ -3141,6 +3177,7 @@ VIEWS.home = {
       var ySc = D.yesterday_score || {};
       var h = '<div class="an-note" style="margin-bottom:12px"><b>Shadow mode.</b> Nothing on this page has been sent to eBay. Each decision is written, then scored the next morning against the day the listing actually had.' + (D.acceptance ? ' Acceptance: <b>' + esc(D.acceptance.status) + '</b> — ' + esc(D.acceptance.evidence) : '') + '</div>';
       h += '<div class="an-kpis">' + [['Stop', counts.STOP || 0, (counts['STOP|confident'] || 0) + ' confident'], ['Reduce', counts.REDUCE || 0, (counts['REDUCE|confident'] || 0) + ' confident'], ['Push', counts.PUSH || 0, (counts['PUSH|confident'] || 0) + ' confident'], ['Keep', counts.KEEP || 0, 'left alone'], ["Yesterday's score", (ySc.r == null ? '—' : ySc.r + ' of ' + ySc.n), ySc.n ? Math.round(Number(ySc.r) / Number(ySc.n) * 100) + ' % right' : 'nothing scored yet']].map(function (x) { return '<div class="an-kpi"><div class="k">' + esc(x[0]) + '</div><div class="v">' + x[1] + '</div><div class="d">' + esc(x[2]) + '</div></div>'; }).join('') + '</div>';
+      h += clockPanel();
       h += '<div class="an-filters">' + [['', 'All'], ['STOP', 'Stop'], ['REDUCE', 'Reduce'], ['PUSH', 'Push']].map(function (x) { return '<button class="' + (ST.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
       var rows = D.decisions.filter(function (d) { return !ST.filter || d.decision === ST.filter; });
       h += rows.length ? rows.map(function (d) {
