@@ -4806,7 +4806,7 @@ const ADTOOL_ALERT_RULES = {
   A02: { sev: 'high', cool: 3, text: '7-day est. ad profit below −£10 and 30-day below 0', action: 'stop' },
   A03: { sev: 'high', cool: 5, text: 'zero-sale spend ≥ £10 in 14 days', action: 'stop' },
   A04: { sev: 'high', cool: 1, text: 'listing ended or sold out while an ad is active', action: 'check' },
-  A05: { sev: 'medium', cool: 7, text: 'live in a CPC and a cost-per-sale campaign at once', action: 'check' },
+  A05: { sev: 'medium', cool: 7, text: 'charged by both a CPC and a cost-per-sale campaign — live in both now, or billed for both on the same day', action: 'check' },
   A06: { sev: 'high', cool: 2, text: 'campaign paused/ended but spend accrued in the last 2 days', action: 'check' },
   A07: { sev: 'high', cool: 3, text: 'daily spend under 50 % of the 7-day average for 2 days (went dark)', action: 'check' },
   A08: { sev: 'medium', cool: 2, text: 'daily spend over 200 % of the 7-day average', action: 'check' },
@@ -5017,6 +5017,8 @@ async function adtoolAlerts(env) {
     /* high alerts go to the portal inbox at once (advertising + management), capped per run */
     for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await adtNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); await adtNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); } catch (e) { /* inbox is best effort */ } }
     if (highNew.length > 6) { try { await adtNotify(env, 'advertising', 'Ads alerts', '🟠 ' + (highNew.length - 6) + ' more high ads alerts this hour — open the Alerts page.', 'adtool:alertmore:' + today + ':' + ukNow.hour); } catch (e) {} }
+    /* the §12 phase 5 acceptance, once a day: do the three cases the spec names still fire? */
+    try { const ran = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_ALERTS_FIXTURE' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first(); if (!ran || !Number(ran.n)) await adtoolAlertsFixtureCheck(env); } catch (e) { /* the check must never fail the hourly job */ }
     await adtJobEnd(env, 'adtoolAlerts', t, rows, 'ok', 'fired ' + fired + ' · open ' + kept + ' · cleared ' + cleared + ' · found ' + Object.keys(found).length);
   } catch (e) { await adtJobEnd(env, 'adtoolAlerts', t, rows, 'error', String(e && e.message || e)); throw e; }
 }
