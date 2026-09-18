@@ -16,7 +16,7 @@
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
-  function src(t) { return '<span class="an-src">' + esc(t) + '</span>'; }
+  function src(t) { return '<span class="an-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
 
   /* §7: the clock panel. The two batches are fixed in UTC by their crons, so what moves is the local time they
      land at — and on 25 October the UK leaves BST, which shifts both against the working day and pulls the

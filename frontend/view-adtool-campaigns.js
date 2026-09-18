@@ -32,7 +32,7 @@
   );
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
-  function src(t) { return '<span class="ac-src">' + esc(t) + '</span>'; }
+  function src(t) { return '<span class="ac-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
   function whenS(s) { return s ? esc(String(s).replace('T', ' ').slice(0, 16)) : '—'; }
 
   VIEWS.adtoolCampaigns = {

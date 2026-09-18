@@ -56,7 +56,7 @@
   function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'at-neg' : Number(v) > 0 ? 'at-pos' : ''); }
   function dfmt(d) { if (!d) return ''; var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return Number(d.slice(8, 10)) + ' ' + m[Number(d.slice(5, 7)) - 1]; }
-  function src(t, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '">' + esc(t) + '</span>'; }
+  function src(t, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
 
   function loadECharts() {
     if (window.echarts) return Promise.resolve(window.echarts);

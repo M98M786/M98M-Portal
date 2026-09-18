@@ -23,7 +23,7 @@
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
-  function src(t) { return '<span class="an-src">' + esc(t) + '</span>'; }
+  function src(t) { return '<span class="an-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
   function hg(t, s) { return '<div class="hgroup enter d1"><h1>' + esc(t) + '</h1><span class="sub">' + esc(s) + '</span></div>'; }
   function fail(id, e) { $(id).innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'failed') + '</div></div>'; }
   function kpi(k, v, d, c) { return '<div class="an-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }

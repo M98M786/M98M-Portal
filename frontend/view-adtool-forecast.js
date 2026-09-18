@@ -7,7 +7,7 @@
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
-  function src(t) { return '<span class="an-src">' + esc(t) + '</span>'; }
+  function src(t) { return '<span class="an-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
   function spark(pts) { if (!pts || !pts.length) return ''; var w = 70, h = 18, mx = Math.max.apply(null, pts.map(function (p) { return p[1]; })) || 1; var d = pts.map(function (p, i) { return (i ? 'L' : 'M') + (i / (pts.length - 1) * w).toFixed(1) + ',' + (h - p[1] / mx * h).toFixed(1); }).join(' '); return '<svg class="fl-spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"><path d="' + d + '" fill="none" stroke="' + GOLD + '" stroke-width="1.5"/></svg>'; }
   function loadECharts() { if (window.echarts) return Promise.resolve(window.echarts); return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = 'assets/echarts.min.js'; s.onload = function () { res(window.echarts); }; s.onerror = rej; document.head.appendChild(s); }); }
   VIEWS.adtoolForecast = {

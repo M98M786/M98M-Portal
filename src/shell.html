@@ -49,6 +49,17 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 input,select{font:inherit}
 ::selection{background:rgba(61,155,240,.3)}
 .hidden{display:none!important}
+[data-adtreg]{cursor:pointer;border-bottom:1px dotted var(--gold-line)}
+[data-adtreg]:hover{color:var(--gold-a)}
+#adtRegWrap{position:fixed;inset:0;background:rgba(4,6,10,.72);z-index:9000;display:flex;align-items:center;justify-content:center;padding:24px}
+#adtRegBox{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;max-width:820px;width:100%;max-height:82vh;overflow:auto;padding:20px 22px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+#adtRegBox h3{margin:0 0 4px;font-size:16px;font-weight:800;color:var(--text)}
+#adtRegBox .rg-sub{color:var(--text-2);font-size:12px;margin-bottom:14px}
+#adtRegBox .rg-e{border-top:1px solid var(--gold-line);padding:12px 0}
+#adtRegBox .rg-n{font-weight:800;color:var(--gold-a);font-size:13px}
+#adtRegBox .rg-f{color:var(--text);font-size:12px;margin:4px 0}
+#adtRegBox .rg-m{color:var(--text-3);font-size:11px}
+#adtRegBox .rg-x{float:right;background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;cursor:pointer;padding:4px 10px;font-size:12px}
 .goldtext{background:linear-gradient(110deg,var(--gold-c) 0%,var(--gold-a) 28%,var(--gold-b) 46%,#F8E39B 52%,var(--gold-b) 58%,var(--gold-c) 100%);
   background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:sheen 3s ease-in-out .4s 1 both}
 @keyframes sheen{from{background-position:120% 0}to{background-position:0% 0}}
@@ -1144,6 +1155,63 @@ $('pendingSignout').onclick=signOut;
 /* ---- App: view registry. Each view module registers VIEWS[key] = {label,icon,roles,order,render,init} ---- */
 var VIEWS = {};
 var VIEW_CSS = [];
+/* §7: every source tag on an Advertising tool panel opens the Number Register behind it — "how is this
+   computed". The tag names the source the panel's numbers come from, so the entries shown are the registered
+   definitions for that source; the box says so rather than implying it found the one number you clicked. */
+var ADT_REG_CACHE = null;
+var ADT_REG_MAP = [
+  [/ads report|billing|adsSync|adsItems|A18|modelled/i, ['ads_daily', 'adtool_listing_day']],
+  [/Brain/i, ['adtool_orders']],
+  [/^orders|actual: orders|A17/i, ['adtool_orders', 'adtool_listing_hour', 'adtool_listing_slot']],
+  [/stages/i, ['adtool_stages']],
+  [/profile|descriptors/i, ['adtool_profiles']],
+  [/sampled/i, ['adtool_ads_intraday']],
+  [/campaign map|adsSync|adsItems/i, ['campaign_ads', 'campaigns', 'adtool_campaign']],
+  [/regimes/i, ['adtool_regimes']],
+  [/backtest|forecast|vintage|next 30 days/i, ['adtool_model_scores', 'adtool_forecast', 'adtool_ads_daily_vintage']],
+  [/validation_runs/i, ['validation_runs']],
+  [/scored daily|Mondays/i, ['adtool_rule_scores', 'adtool_carry']],
+  [/items sync/i, ['items_api', 'items_facts']],
+  [/Phase 8/i, ['adtool_apply_log', 'adtool_decisions']]
+];
+function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
+function adtRegOpen(label){
+  var open = function(entries){
+    var keys = null;
+    for (var i = 0; i < ADT_REG_MAP.length; i++) { if (ADT_REG_MAP[i][0].test(label)) { keys = ADT_REG_MAP[i][1]; break; } }
+    var hit = keys ? entries.filter(function(e){
+      var st = String(e.source_tables || '');
+      for (var j = 0; j < keys.length; j++) if (st.indexOf(keys[j]) >= 0) return true;
+      return false;
+    }) : [];
+    var all = !hit.length;
+    if (all) hit = entries;
+    adtRegClose();
+    var w = document.createElement('div'); w.id = 'adtRegWrap';
+    w.innerHTML = '<div id="adtRegBox"><button class="rg-x" type="button">Close</button>'
+      + '<h3>How this is computed</h3>'
+      + '<div class="rg-sub">' + (all
+          ? 'No entry is registered specifically for &ldquo;' + esc(label) + '&rdquo;, so here is the whole register &mdash; ' + entries.length + ' numbers.'
+          : 'This panel&rsquo;s numbers come from <b>' + esc(label) + '</b>. These are the ' + hit.length + ' registered definitions behind that source.')
+        + '</div>'
+      + hit.map(function(e){
+          return '<div class="rg-e"><div class="rg-n">' + esc(e.name || e.metric_id) + '</div>'
+            + '<div class="rg-f">' + esc(e.formula || '') + '</div>'
+            + '<div class="rg-m">from ' + esc(e.source_tables || '') + ' &middot; recomputed by ' + esc(e.recompute || '') + ' &middot; rechecked: ' + esc(e.recheck || '') + '</div></div>';
+        }).join('')
+      + '</div>';
+    w.addEventListener('click', function(e){ if (e.target === w || e.target.className === 'rg-x') adtRegClose(); });
+    document.body.appendChild(w);
+  };
+  if (ADT_REG_CACHE) return open(ADT_REG_CACHE);
+  api('adtoolRegister', {}).then(function(r){ ADT_REG_CACHE = r.entries || []; open(ADT_REG_CACHE); })
+    .catch(function(){ toast('the Number Register could not be read'); });
+}
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') adtRegClose(); });
+document.addEventListener('click', function(e){
+  var t = e.target.closest ? e.target.closest('[data-adtreg]') : null;
+  if (t) adtRegOpen(t.getAttribute('data-adtreg'));
+});
 
 VIEWS.home = {
   label:'Home', order:0, roles:'*',

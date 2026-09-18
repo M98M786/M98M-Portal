@@ -26,7 +26,7 @@
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
-  function src(t, s) { return '<span class="an-src' + (s ? ' s' : '') + '">' + esc(t) + '</span>'; }
+  function src(t, s) { return '<span class="an-src' + (s ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
   function pct(v) { return v == null ? '—' : Math.round(Number(v) * 100) + '%'; }
   function heat(rows, cols, get, rowLab, colLab, title) {
     var mx = 0; rows.forEach(function (r) { cols.forEach(function (c) { mx = Math.max(mx, get(r, c) || 0); }); });
