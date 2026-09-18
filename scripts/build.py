@@ -151,7 +151,58 @@ def build_frontend():
     return views
 
 
+def build_ads():
+    """ads/index.html — the advertising portal, served at portal.m98mltd.co.uk/ads/.
+
+    The SAME shell as the main portal with only the adtool view files spliced in, plus a flag the
+    shell reads to un-hide those views, group them in its sidebar and land on the command centre.
+    Nothing about auth, sessions, engine calls or the theme is duplicated, so the two front doors
+    cannot drift apart or come to disagree about a number.
+
+    Two things have to be right for a page served from a subdirectory: every `assets/` reference
+    becomes absolute, because `/ads/assets/...` does not exist; and `version.txt` stays relative,
+    because the shell self-reloads stale tabs by comparing it and pointing it at the main portal's
+    stamp would reload this page for ever.
+    """
+    import time
+    with open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
+        shell = fh.read()
+    if MARKER not in shell:
+        sys.exit('ERROR: splice marker missing from the shell')
+    fdir = os.path.join(ROOT, 'frontend')
+    files = sorted(f for f in os.listdir(fdir) if f.startswith('view-adtool-') and f.endswith('.js'))
+    if not files:
+        sys.exit('ERROR: no view-adtool-*.js modules found')
+    blocks = ['window.M98M_ADS_ONLY = true;']
+    for name in files:
+        with open(os.path.join(fdir, name)) as fh:
+            blocks.append('/* ---------- %s ---------- */\n%s' % (name, fh.read().strip()))
+    page = shell.replace(MARKER, '\n\n'.join(blocks))
+
+    page = page.replace('<title>M98M Portal</title><!--ADS_TITLE-->', '<title>M98M Advertising</title>')
+    page = page.replace('<span id="brandSub">E-commerce</span>', '<span id="brandSub">Advertising</span>')
+    page = page.replace('"assets/', '"/assets/').replace("'assets/", "'/assets/")
+
+    stamp = time.strftime('%Y%m%d-%H%M', time.gmtime())
+    page = page.replace('__BUILD_STAMP__', stamp)
+
+    out = os.path.join(ROOT, 'ads')
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, 'index.html'), 'w') as fh:
+        fh.write(page)
+    with open(os.path.join(out, 'version.txt'), 'w') as fh:
+        fh.write(stamp + '\n')
+    views = sorted(v for v in set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)) if v.startswith('adtool'))
+    print('ads -> ads/index.html  %d bytes, modules: %d, advertising views: %d'
+          % (len(page), len(files), len(views)))
+    if len(views) != 13:
+        sys.exit('ERROR: expected 13 advertising views in the ads build, spliced %d (%s)'
+                 % (len(views), ', '.join(views)))
+    return views
+
+
 if __name__ == '__main__':
     print('Building M98M Portal...')
     build_backend()
     build_frontend()
+    build_ads()
