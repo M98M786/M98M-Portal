@@ -5901,7 +5901,7 @@ async function adtoolApply(env) {
     for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' GROUP BY account").bind(today).all()).results || [])) perAcct[r.account] = Number(r.n);
     for (const r of ((await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM adtool_apply_log WHERE op = 'bid' AND mode = 'live' AND day >= ?1 GROUP BY item_id").bind(adtAddDays(today, -7)).all()).results || [])) bidWeek[r.item_id] = Number(r.n);
     const switches = {}; for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live_%'").all()).results || [])) switches[r.key.replace('adtool_apply_live_', '')] = String(r.value) === 'on';
-    const stmts = []; let live = 0, shadow = 0, capped = 0;
+    const stmts = []; let live = 0, shadow = 0, capped = 0, blocked = 0;
     for (const d of decs) {
       let inputs = {}, rules = []; try { inputs = JSON.parse(d.inputs_json); } catch (e) {} try { rules = JSON.parse(d.rules_json); } catch (e) {}
       const membership = await adtApplyMembership(env, d.item_id);
@@ -5912,7 +5912,7 @@ async function adtoolApply(env) {
         if (step.blocked) {
           stmts.push(env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, op, mode, payload_json, undo_json, response, http_status, at, decision_id) VALUES (?1, ?2, ?3, ?4, ?5, 'blocked', ?6, '', ?7, 0, datetime('now'), ?8)")
             .bind(today, d.account, d.item_id, String(step.campaign_id || ''), step.op, JSON.stringify(step), step.blocked, d.decision_id));
-          capped++; continue;
+          blocked++; continue;
         }
         const cap = adtApplyCaps({ account_actions_today: perAcct[d.account] || 0, listing_bid_changes_week: bidWeek[d.item_id] || 0 }, step.op, uk.hour);
         const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
@@ -5936,7 +5936,7 @@ async function adtoolApply(env) {
     }
     await adtBatch(env, stmts); rows = stmts.length;
     const accountsOn = Object.keys(switches).filter(k => switches[k]);
-    await adtJobEnd(env, 'adtoolApply', t, rows, 'ok', (accountsOn.length ? 'live for ' + accountsOn.join(', ') + ': ' + live + ' sent, ' + capped + ' held by a cap' : 'no account is switched on — ' + shadow + ' actions written as would-send, nothing sent to eBay'));
+    await adtJobEnd(env, 'adtoolApply', t, rows, 'ok', (accountsOn.length ? 'live for ' + accountsOn.join(', ') + ': ' + live + ' sent, ' + capped + ' held by a cap' : 'no account is switched on — ' + shadow + ' actions written as would-send, nothing sent to eBay') + (blocked ? ' · ' + blocked + ' the tool cannot send (no bid percentage on a cost-per-click ad)' : ''));
   } catch (e) { await adtJobEnd(env, 'adtoolApply', t, rows, 'error', String(e && e.message || e)); throw e; }
 }
 async function adtoolResume(env) {
