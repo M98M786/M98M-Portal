@@ -5199,7 +5199,14 @@ const ADTOOL_ACTIONS_P5 = {
       if (p && p.set_target != null) { if (MGMT_ROLES.indexOf(String(u.role || '')) < 0 && !u.super) throw new AuthError('auth'); const key = p.account ? 'adtool_roas_target_' + String(p.account) : 'adtool_roas_target'; const v = String(Math.max(0.5, Math.min(20, Number(p.set_target) || 5))); await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(key, v).run(); await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_ROAS_TARGET', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), key, v).run(); return { ok: true }; }
       let row = await env.DB.prepare('SELECT day, json FROM adtool_roas ORDER BY day DESC LIMIT 1').first();
       let data = row ? JSON.parse(row.json) : null;
-      if (!data) { const today = ukDate(''); data = Object.assign(await adtoolRoasCompute(env, adtAddDays(today, -30), adtAddDays(today, -1)), { target: Number(await adtFlag(env, 'adtool_roas_target')) || 5, computed_day: today, live: true }); }
+      if (!data) {
+        /* the page can be opened before the nightly job has ever run; give it the same shape, computed now,
+           rather than a row of "undefined" where the gap and the checkpoint should be */
+        const today = ukDate(''), tg = Number(await adtFlag(env, 'adtool_roas_target')) || 5;
+        const live = await adtoolRoasCompute(env, adtAddDays(today, -30), adtAddDays(today, -1));
+        const bands = await adtLatestProfiles(env, 'fleet', 'dom');
+        data = Object.assign(live, { target: tg, gap: live.fleet.now.roas == null ? null : round2(tg - live.fleet.now.roas), weeks: [], month_bands: bands.rows.all ? bands.rows.all.bands : null, checkpoint: '2026-10-15', days_to_checkpoint: Math.round((new Date('2026-10-15T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000), computed_day: today, live: true });
+      }
       const meta = {}; for (const r of ((await env.DB.prepare("SELECT k1, extra FROM adtool_fixture WHERE kind = 'meta'").all()).results || [])) meta[r.k1] = r.extra;
       const review = await adtoolRoasCompute(env, meta.from || '2026-08-17', meta.to || '2026-09-15');
       const targets = {}; for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_roas_target%'").all()).results || [])) targets[r.key] = r.value;
