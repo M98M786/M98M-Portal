@@ -5863,7 +5863,11 @@ async function adtoolApplyPreflight(env) {
   /* READ-ONLY. Confirms the live shape of the endpoints Phase 8 would use, per account, without writing.
      It runs in the morning chain so a switch is never blocked on it, and re-checks an account at most weekly. */
   await ensureAdtoolPhase8Schema(env);
-  const fresh = await env.DB.prepare("SELECT COUNT(*) AS n FROM sync_state WHERE job = 'adtoolApplyPreflight' AND last_ok >= datetime('now', '-7 days')").first();
+  /* Count the ACCOUNT rows only. runJob writes its own row for this job with an empty account and takes an
+     '@lock' one, so counting everything means five good accounts plus the job's own row reaches six and the
+     sixth account is never retried — it would simply never get a preflight, and could then never be switched
+     on, with nothing anywhere saying why. */
+  const fresh = await env.DB.prepare("SELECT COUNT(*) AS n FROM sync_state WHERE job = 'adtoolApplyPreflight' AND account <> '' AND account <> '@lock' AND last_ok >= datetime('now', '-7 days')").first();
   const accts = await apiAccounts(env);
   if (fresh && Number(fresh.n) >= accts.length) return;
   const t = await adtJobStart(env, 'adtoolApplyPreflight');
@@ -5990,7 +5994,7 @@ const ADTOOL_ACTIONS_P8 = {
       }
       const today = ukDate('');
       const switches = (await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_apply_live_%' ORDER BY key").all()).results || [];
-      const pre = (await env.DB.prepare("SELECT account, last_ok, cursor FROM sync_state WHERE job = 'adtoolApplyPreflight'").all()).results || [];
+      const pre = (await env.DB.prepare("SELECT account, last_ok, cursor FROM sync_state WHERE job = 'adtoolApplyPreflight' AND account <> '' AND account <> '@lock' ORDER BY account").all()).results || [];
       const log = (await env.DB.prepare('SELECT id, day, account, item_id, campaign_id, op, mode, http_status, substr(response, 1, 200) AS response, undone_at, at, payload_json FROM adtool_apply_log ORDER BY id DESC LIMIT 200').all()).results || [];
       const counts = (await env.DB.prepare('SELECT mode, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 GROUP BY mode').bind(today).all()).results || [];
       const accounts = await apiAccounts(env);
