@@ -77,6 +77,16 @@ def main(path, prefix='adtool_'):
             t, al = a.group(1), a.group(2)
             if al.upper() in ('ON', 'WHERE', 'GROUP', 'ORDER', 'LEFT', 'INNER', 'JOIN', 'SET', 'VALUES', 'LIMIT', 'AS'): continue
             alias[al] = t
+        # INSERT INTO <table> (col, col, ...) — bare names, no alias to bind, and just as wrong when misspelt.
+        for ins in re.finditer(r'INSERT\s+(?:OR\s+\w+\s+)?INTO\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)', q, re.I):
+            t = ins.group(1)
+            if t not in known: continue
+            for col in [c.strip() for c in ins.group(2).split(',')]:
+                if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', col or ''): continue
+                checked += 1
+                if col not in known[t]:
+                    line = src[:m.start() + 1 + ins.start()].count('\n') + 1
+                    bad.append((line, t, col, ('INSERT INTO ' + t + ' (' + ins.group(2)[:70]).replace('\n', ' ')))
         for r in re.finditer(r'\b([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b', q):
             al, col = r.group(1), r.group(2)
             t = alias.get(al)

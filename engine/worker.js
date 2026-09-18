@@ -5812,6 +5812,16 @@ function adtApplyCaps(state, action, ukHour) {
   if ((action === 'bid' ) && Number(state.listing_bid_changes_week) >= 3) return { allowed: false, reason: 'this listing has already had 3 bid changes this week' };
   return { allowed: true, reason: '' };
 }
+/* A decision can say "bid −20 %" on an ad whose bid this tool does not know. eBay returns a bidPercentage for
+   cost-per-sale ads (Promoted Listings Standard) and not for cost-per-click ones, where the bid is a per-click
+   amount set elsewhere — so 1,416 of the 1,416 CPC ads have no percentage and 569 of 569 cost-per-sale ads do.
+   Skipping those in silence left the decision on screen with nothing in the apply log and no reason anywhere.
+   This marks the step blocked instead, so the page can say what it could not do and why. It is never sent:
+   adtoolApply refuses any step carrying `blocked`. */
+function adtNoBidStep(m, inputs) {
+  return { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: null, to: null,
+    blocked: 'eBay gives no bid percentage for a cost-per-click ad, so this tool cannot move its bid — pause, resume and campaign budget still work' };
+}
 function adtApplyPlan(decision, inputs, membership) {
   /* what a decision means in API terms, per campaign the listing sits in. Never ends a listing; never touches
      a campaign that is not running; a bid or budget move is capped at 2× the current value. */
@@ -5821,13 +5831,13 @@ function adtApplyPlan(decision, inputs, membership) {
   if (decision === 'STOP') { for (const m of live) out.push({ op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'PAUSED', undo: { op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'ACTIVE' }, why: 'pause the ad' }); return out; }
   if (decision === 'REDUCE') {
     if ((inputs.rules || []).indexOf('R1') >= 0) { for (const m of live) out.push({ op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'PAUSED', resume_at: inputs.resume_at || '', undo: { op: 'status', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: 'ACTIVE' }, why: 'pause today only, resume tomorrow 00:05' }); return out; }
-    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) continue; const to = Math.max(2, Math.round(bid * 0.8 * 10) / 10); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid −20 %' }); }
+    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) { out.push(adtNoBidStep(m, inputs)); continue; } const to = Math.max(2, Math.round(bid * 0.8 * 10) / 10); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid −20 %' }); }
     return out;
   }
   if (decision === 'PUSH') {
     if ((inputs.rules || []).indexOf('P1') >= 0) { const seen = {}; for (const m of live) { if (!m.budget || seen[m.campaign_id]) continue; seen[m.campaign_id] = 1; const b = Number(m.budget); const to = Math.round(Math.min(b * 1.3, b * 2) * 100) / 100; out.push({ op: 'budget', campaign_id: m.campaign_id, from: b, to, undo: { op: 'budget', campaign_id: m.campaign_id, to: b }, why: 'daily budget +30 %' }); } return out; }
     const step = (inputs.rules || []).indexOf('P3') >= 0 ? 1.1 : 1.2;
-    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) continue; const to = Math.min(Math.round(bid * step * 10) / 10, bid * 2); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid +' + Math.round((step - 1) * 100) + ' %' }); }
+    for (const m of live) { const bid = Number(m.bid_pct); if (!bid) { out.push(adtNoBidStep(m, inputs)); continue; } const to = Math.min(Math.round(bid * step * 10) / 10, bid * 2); out.push({ op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, from: bid, to, undo: { op: 'bid', campaign_id: m.campaign_id, listing_id: inputs.item_id, to: bid }, why: 'bid +' + Math.round((step - 1) * 100) + ' %' }); }
     return out;
   }
   return out;
@@ -5895,6 +5905,11 @@ async function adtoolApply(env) {
       if (!plan.length) continue;
       const on = !!switches[d.account];
       for (const step of plan) {
+        if (step.blocked) {
+          stmts.push(env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, op, mode, payload_json, undo_json, response, http_status, at, decision_id) VALUES (?1, ?2, ?3, ?4, ?5, 'blocked', ?6, '', ?7, 0, datetime('now'), ?8)")
+            .bind(today, d.account, d.item_id, String(step.campaign_id || ''), step.op, JSON.stringify(step), step.blocked, d.decision_id));
+          capped++; continue;
+        }
         const cap = adtApplyCaps({ account_actions_today: perAcct[d.account] || 0, listing_bid_changes_week: bidWeek[d.item_id] || 0 }, step.op, uk.hour);
         const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
         let status = 0, resp = mode === 'live' ? '' : (cap.allowed ? 'account switch off — nothing sent' : cap.reason);
