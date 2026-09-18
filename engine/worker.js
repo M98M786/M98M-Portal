@@ -3550,8 +3550,10 @@ async function adtoolRollups(env) {
     }
     /* Phase 4: forecasts follow the same catch-up once today's profiles are complete */
     if (cursor >= adtAddDays(today, -1) && (await adtFlag(env, 'adtool_forecast')) === 'on' && String(await adtFlag(env, 'adtool_profiles_cursor') || '') === today + '|done') {
-      const fc = String(await adtFlag(env, 'adtool_forecast_cursor') || '');
-      if (fc !== today + '|done' && Date.now() - t0 < 200000) { try { await adtoolForecast(env); } catch (e) { /* recorded by the job */ } }
+      /* Called whether or not the cursor says done. When it is done the job returns almost immediately, but it
+         now evaluates the acceptance on the way out — and that is the only thing that lets a verdict written
+         early in the morning be corrected the same day rather than standing until tomorrow. */
+      if (Date.now() - t0 < 200000) { try { await adtoolForecast(env); } catch (e) { /* recorded by the job */ } }
     }
     /* Phase 6: a boundary batch that was missed (a deploy in that minute, a cron that did not fire) is still
        worth having while the report day is young — it is the weekday work for the day that has just started. */
