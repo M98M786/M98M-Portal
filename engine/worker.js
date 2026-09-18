@@ -4743,10 +4743,25 @@ async function adtoolForecast(env) {
       /* keep 30 vintages; acceptance: MASE < 1 for ≥ 70 % of listings with ≥ 20 units in 28 days */
       await env.DB.prepare('DELETE FROM adtool_forecast WHERE made_day < ?1').bind(adtAddDays(today, -30)).run();
       const acc = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20").bind(today).first();
-      const n = Number(acc && acc.n) || 0, good = Number(acc && acc.good) || 0; const share = n ? good / n : null; const ok = share != null && share >= 0.7;
-      await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_FORECAST_MASE', 'listings ≥ 20 units/28d', ?1, '0.70', ?2, ?3, ?4, 'rolling-origin backtest, 8 folds, horizon 14, MASE vs seasonal naive', ?5, '')")
-        .bind(new Date().toISOString(), share == null ? '' : String(Math.round(share * 1000) / 1000), share == null ? 0 : round2(share - 0.7), ok ? 'PASS' : (n ? 'FAIL' : 'skipped'), good + ' of ' + n + ' listings with ≥ 20 units in 28 days have MASE < 1 on the chosen model').run();
-      note += ' · MASE < 1 for ' + good + '/' + n + ' (' + (share == null ? '—' : Math.round(share * 100) + '%') + ') → ' + (ok ? 'PASS' : 'FAIL');
+      const n = Number(acc && acc.n) || 0, good = Number(acc && acc.good) || 0; const share = n ? good / n : null;
+      /* The test the spec designs is a rolling origin over the last 8 weeks. An origin needs 21 days of training
+         behind it, so eight of them need 77 days of history; today there are far fewer and most listings get two.
+         A share measured on two noisy folds is not the specified test, so it is reported as pending with the date
+         it becomes answerable rather than passed or failed on evidence that cannot carry it. */
+      const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_listing_day').first();
+      const days = Number(hist && hist.d) || 0, firstDay = (hist && hist.first) || today;
+      const foldRow = await env.DB.prepare("SELECT AVG(CAST(json_extract(params_json, '$.folds') AS REAL)) AS f FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1").bind(today).first();
+      const folds = Math.round((Number(foldRow && foldRow.f) || 0) * 10) / 10;
+      const evaluable = days >= 77;
+      const ok = share != null && share >= 0.7;
+      /* the diagnosis worth keeping: how the chosen models do when a model is chosen at all */
+      const split = (await env.DB.prepare("SELECT CASE WHEN model = 'naive' THEN 'fell back to the benchmark' ELSE 'a model was chosen' END AS grp, COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20 GROUP BY grp").bind(today).all()).results || [];
+      const splitTxt = split.map(x => x.grp + ' ' + x.good + '/' + x.n).join(' · ');
+      const when = adtAddDays(firstDay, 77);
+      const ev = good + ' of ' + n + ' listings with ≥ 20 units in 28 days beat the benchmark (' + (share == null ? '—' : Math.round(share * 100) + ' %') + ') · ' + splitTxt + ' · the backtest ran ' + folds + ' origins per listing where the spec designs for 8, which needs 77 days of history (from ' + when + ')';
+      await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_FORECAST_MASE', 'listings ≥ 20 units/28d', ?1, '0.70', ?2, ?3, ?4, 'rolling-origin backtest, horizon 14, MASE vs seasonal naive', ?5, ?6)")
+        .bind(new Date().toISOString(), share == null ? '' : String(Math.round(share * 1000) / 1000), share == null ? 0 : round2(share - 0.7), !n ? 'skipped' : (evaluable ? (ok ? 'PASS' : 'FAIL') : 'pending'), ev, when).run();
+      note += ' · beat the benchmark ' + good + '/' + n + ' (' + (share == null ? '—' : Math.round(share * 100) + '%') + ') → ' + (!n ? 'skipped' : (evaluable ? (ok ? 'PASS' : 'FAIL') : 'pending until ' + when)) + ' · ' + splitTxt;
     }
     await adtJobEnd(env, 'adtoolForecast', t, rows, 'ok', note);
   } catch (e) { await adtJobEnd(env, 'adtoolForecast', t, rows, 'error', String(e && e.message || e)); throw e; }
