@@ -5556,6 +5556,25 @@ async function adtoolDecisions(env, batch) {
   } catch (e) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'error', String(e && e.message || e)); throw e; }
 }
 async function adtoolDecisionsBoundary(env) { return adtoolDecisions(env, 'boundary'); }
+/* The 14-day shadow gate counts days on which decisions were scored. It lived after the job's "nothing to
+   score" return, so on a day with nothing to score no row was written at all — and since the very first such
+   day was today, the gate the notes promised to track had never once appeared. Pulled out so it is evaluated
+   on both exits: a gate reading "0 of 14 days" is information; a gate that is simply absent is not. */
+async function adtShadowAcceptance(env, today, baseRate) {
+  try {
+    const days = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL').first();
+    const n14 = Number(days && days.n) || 0;
+    const tot = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1').bind(adtAddDays(today, -14)).first();
+    const status = n14 >= 14 ? 'PASS' : 'pending';
+    const ev = n14 + ' of 14 days scored · last 14 days ' + (tot ? Number(tot.r || 0) + ' right of ' + Number(tot.n || 0) : '0 of 0') + ' · base rate ' + Math.round((baseRate || 0) * 100) + ' %';
+    const seen = await env.DB.prepare("SELECT status, recomputed FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' AND substr(ran_at, 1, 10) = ?1 ORDER BY ran_at DESC LIMIT 1").bind(today).first();
+    if (seen && String(seen.status) === status && String(seen.recomputed) === String(n14) + ' days') return n14;
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_SHADOW_14D', 'decisions', ?1, '14 days of shadow scores', ?2, 0, ?3, 'shadow decisions scored against the realised day', ?4, '')")
+      .bind(new Date().toISOString(), String(n14) + ' days', status, ev).run();
+    return n14;
+  } catch (e) { return 0; }
+}
+
 async function adtoolDecisionScore(env) {
   if ((await adtFlag(env, 'adtool_decisions')) !== 'on') return;
   await ensureAdtoolPhase6Schema(env);
@@ -5563,7 +5582,7 @@ async function adtoolDecisionScore(env) {
   try {
     const today = ukDate(''), yday = adtAddDays(today, -1);
     const dec = (await env.DB.prepare("SELECT decision_id, item_id, decision, rules_json, inputs_json FROM adtool_decisions WHERE day = ?1 AND outcome_score IS NULL").bind(yday).all()).results || [];
-    if (!dec.length) { await adtJobEnd(env, 'adtoolDecisionScore', t, 0, 'ok', 'nothing to score for ' + yday); return; }
+    if (!dec.length) { const nd = await adtShadowAcceptance(env, today, 0); await adtJobEnd(env, 'adtoolDecisionScore', t, 0, 'ok', 'nothing to score for ' + yday + ' · ' + nd + '/14 days'); return; }
     const real = {}; for (const r of ((await env.DB.prepare('SELECT item_id, spend, attr_revenue, ad_profit FROM adtool_listing_day WHERE day = ?1').bind(yday).all()).results || [])) real[r.item_id] = r;
     const stmts = []; const byRule = {}; let right = 0, scored = 0;
     for (const d of dec) {
@@ -5583,11 +5602,7 @@ async function adtoolDecisionScore(env) {
     for (const ru of Object.keys(roll)) { const b = roll[ru]; const score = b.n ? b.r / b.n : null; const trusted = !(b.n >= 10 && score != null && score < baseRate) ? 1 : 0; stmts.push(env.DB.prepare('INSERT INTO adtool_rule_scores (rule_id, scored_day, decisions, right_n, score, trusted) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(rule_id, scored_day) DO UPDATE SET decisions = ?3, right_n = ?4, score = ?5, trusted = ?6').bind(ru, today, b.n, b.r, score == null ? null : round2(score), trusted)); if (!trusted) { try { await adtNotify(env, 'management', 'Ads rule demoted', '🟠 Decision rule ' + ru + ' scored ' + Math.round(score * 100) + ' % over ' + b.n + ' decisions, under the ' + Math.round(baseRate * 100) + ' % base rate — it is now shown but never applied.', 'adtool:ruledemote:' + ru + ':' + today); } catch (e) {} } }
     await adtBatch(env, stmts);
     /* the 14-day shadow acceptance (spec §12 phase 6) */
-    const days = await env.DB.prepare("SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL").first();
-    const n14 = Number(days && days.n) || 0;
-    const tot = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1").bind(adtAddDays(today, -14)).first();
-    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_SHADOW_14D', 'decisions', ?1, '14 days of shadow scores', ?2, 0, ?3, 'shadow decisions scored against the realised day', ?4, '')")
-      .bind(new Date().toISOString(), String(n14) + ' days', n14 >= 14 ? 'PASS' : 'pending', n14 + ' of 14 days scored · last 14 days ' + (tot ? Number(tot.r) + ' right of ' + Number(tot.n) : '0 of 0') + ' · base rate ' + Math.round(baseRate * 100) + ' %').run();
+    const n14 = await adtShadowAcceptance(env, today, baseRate);
     await adtJobEnd(env, 'adtoolDecisionScore', t, stmts.length, 'ok', 'scored ' + scored + ' for ' + yday + ': ' + right + ' right (' + (scored ? Math.round(right / scored * 100) : 0) + ' %) · base rate ' + Math.round(baseRate * 100) + ' % · ' + n14 + '/14 days');
   } catch (e) { await adtJobEnd(env, 'adtoolDecisionScore', t, 0, 'error', String(e && e.message || e)); throw e; }
 }
