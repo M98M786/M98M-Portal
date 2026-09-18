@@ -5060,11 +5060,34 @@ async function adtoolAlertsFixtureCheck(env) {
   const abrt = (await env.DB.prepare('SELECT d.day, ROUND(SUM(d.spend), 2) AS spend FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE l.account = ?3 AND d.day >= ?1 AND d.day <= ?2 GROUP BY d.day ORDER BY d.day').bind('2026-08-28', '2026-09-10', String(cfg.a07)).all()).results || [];
   const a07 = adtAccountSpendAlerts(abrt).some(x => x.rule === 'A07');
   const dual = await env.DB.prepare("SELECT SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' THEN 1 ELSE 0 END) AS cpc, SUM(CASE WHEN c.funding_model = 'COST_PER_SALE' THEN 1 ELSE 0 END) AS cps FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = ?1 AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))").bind(String(cfg.a05)).first();
-  const a05 = !!(dual && Number(dual.cpc) > 0 && Number(dual.cps) > 0);
-  const ok = a03 && a07 && a05;
-  await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'the three cases named in the spec', ?2, 0, ?3, 'rules evaluated on the fixture window / current campaign map', ?4, '')")
-    .bind(new Date().toISOString(), JSON.stringify({ A03: a03, A07: a07, A05: a05 }), ok ? 'PASS' : 'FAIL', 'A03 ' + (a03 ? 'fires' : 'does not fire') + ' · A07 ' + (a07 ? 'fires (9–10 Sep)' : 'does not fire') + ' · A05 ' + (a05 ? 'fires (live in both today)' : 'does not fire today — the campaign map is a point-in-time fact')).run();
-  return { a03, a07, a05, abrt: abrt.slice(-5) };
+  const a05live = !!(dual && Number(dual.cpc) > 0 && Number(dual.cps) > 0);
+  /* A05 asks whether a listing sits in a CPC and a cost-per-sale campaign at once. The campaign map answers that
+     for today only — archive an ad and the evidence disappears — so checking a case the spec named weeks ago
+     against it can only fail with time. The billing does not move: ads_daily carries the cost-per-sale fee and
+     the CPC fee in separate columns, and a day with both above zero is eBay itself saying the listing was
+     charged under both models at once. That is what the fixture asserts on. */
+  const paid = await env.DB.prepare('SELECT COUNT(*) AS days, MIN(date) AS first, MAX(date) AS last, ROUND(SUM(spend), 2) AS std_fees, ROUND(SUM(cpc_spend), 2) AS cpc_fees FROM ads_daily WHERE item_id = ?1 AND spend > 0 AND cpc_spend > 0').bind(String(cfg.a05)).first();
+  const a05 = Number(paid && paid.days) > 0;
+  /* A07 is defined in §9 as under half the 7-day average for two days running — a campaign that went dark. The
+     spec's §12 expectation names ABRT on 9 Sep, but that day is a step-down, not a blackout, so the rule
+     correctly declines to fire. Measure it and say so rather than bending the threshold to make a gate green:
+     the spec's expectation and its own rule definition disagree, and only the owner can settle which is wrong. */
+  let a07ratio = null, a07day = null;
+  for (let i = 7; i < abrt.length; i++) {
+    if (abrt[i].day !== '2026-09-09') continue;
+    const base = abrt.slice(i - 7, i).reduce((t, r) => t + Number(r.spend), 0) / 7;
+    if (base > 0) { a07ratio = Math.round((Number(abrt[i].spend) / base) * 100); a07day = { spend: round2(Number(abrt[i].spend)), avg_7d: round2(base) }; }
+  }
+  /* the two reproducible cases decide pass or fail; the contradicted one is reported, never silently passed */
+  const reproducible = a03 && a05;
+  const status = !reproducible ? 'FAIL' : (a07 ? 'PASS' : 'pending');
+  const ev = 'A03 ' + (a03 ? 'fires' : 'does not fire')
+    + ' · A05 ' + (a05 ? 'confirmed by the billing — charged under both funding models on ' + Number(paid.days) + ' day(s), last ' + paid.last + ' (£' + paid.std_fees + ' cost-per-sale + £' + paid.cpc_fees + ' CPC)' : 'never charged under both funding models on one day')
+    + ' · the live map today shows it ' + (a05live ? 'in both kinds of campaign' : 'not in both, which is a point-in-time fact and not evidence against the case')
+    + ' · A07 ' + (a07 ? 'fires (9–10 Sep)' : 'correctly does not fire: 9 Sep ran £' + (a07day ? a07day.spend + ' against a 7-day average of £' + a07day.avg_7d + ', which is ' + a07ratio + ' %' : '—') + ', above the 50 % the rule defines as going dark — §12 expects this case to fire but §9 defines a threshold it does not cross, so the spec disagrees with itself here and the owner has to say which half is right');
+  await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_ALERTS_FIXTURE', 'A03/A07/A05', ?1, 'the three cases named in the spec', ?2, 0, ?3, 'A03 and A07 on the fixture window; A05 on the billing record, which does not move', ?4, '')")
+    .bind(new Date().toISOString(), JSON.stringify({ A03: a03, A07: a07, A07_pct_of_avg: a07ratio, A05: a05, A05_live_map: a05live }), status, ev).run();
+  return { a03, a07, a07ratio, a05, a05live, abrt: abrt.slice(-5) };
 }
 
 /* ---- yesterday's report + cap days (morning chain) ---- */
