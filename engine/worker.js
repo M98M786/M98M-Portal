@@ -170,7 +170,7 @@ export default {
       '20 5 * * *': [adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas],
       /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
          then the apply job (which sends nothing unless an account's own switch is on) */
-      '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApply],
+      '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApplyPreflight, adtoolApply],
       /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything */
       '30 23 * * *': [adtoolDecisionsBoundary],
       /* today-only pauses come back at 00:05 UK */
@@ -5750,8 +5750,12 @@ async function adtApplyMembership(env, iid) {
   return rows.map(r => ({ account: r.account, campaign_id: r.campaign_id, ad_id: r.ad_id, funding: r.funding_model, bid_pct: r.bid_pct || r.c_bid, budget: r.budget, live: r.c_status ? liveMembershipRow({ c_status: r.c_status, l_status: r.l_status, funding_model: r.funding_model, ad_status: r.ad_status }) : false }));
 }
 async function adtoolApplyPreflight(env) {
-  /* READ-ONLY. Confirms the live shape of the endpoints Phase 8 would use, per account, without writing. */
+  /* READ-ONLY. Confirms the live shape of the endpoints Phase 8 would use, per account, without writing.
+     It runs in the morning chain so a switch is never blocked on it, and re-checks an account at most weekly. */
   await ensureAdtoolPhase8Schema(env);
+  const fresh = await env.DB.prepare("SELECT COUNT(*) AS n FROM sync_state WHERE job = 'adtoolApplyPreflight' AND last_ok >= datetime('now', '-7 days')").first();
+  const accts = await apiAccounts(env);
+  if (fresh && Number(fresh.n) >= accts.length) return;
   const t = await adtJobStart(env, 'adtoolApplyPreflight');
   const notes = [];
   try {
