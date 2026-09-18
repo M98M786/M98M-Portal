@@ -5119,6 +5119,29 @@ async function adtoolAlertsFixtureCheck(env) {
 }
 
 /* ---- yesterday's report + cap days (morning chain) ---- */
+/* §12 phase 5 asks for the report to be generated three consecutive mornings without help. Nothing was
+   measuring it — the date was written in the notes and no row was ever produced, which is the difference
+   between tracking something and intending to. Evaluated on every exit of the report job, including the two
+   that do no work, so a verdict is never stranded for a day. The job runs on cron, so "without help" means
+   nobody asked it to; a day whose report a person deleted and let rebuild still counts as generated, and the
+   evidence names the days so that is visible rather than assumed. */
+async function adtReportAcceptance(env, today) {
+  try {
+    const want = [adtAddDays(today, -3), adtAddDays(today, -2), adtAddDays(today, -1)];
+    const got = (await env.DB.prepare('SELECT day FROM adtool_reports WHERE day >= ?1 AND day <= ?2 ORDER BY day').bind(want[0], want[2]).all()).results || [];
+    const have = got.map(r => r.day);
+    const n = want.filter(d => have.indexOf(d) >= 0).length;
+    const status = n >= 3 ? 'PASS' : 'pending';
+    const ev = n + ' of the last 3 report days have a report (' + (have.length ? have.join(', ') : 'none yet') + ')'
+      + (n >= 3 ? '' : ' — the first report day is ' + (have.length ? have[0] : 'not written yet') + ', so this answers three mornings after it');
+    const seen = await env.DB.prepare("SELECT status, recomputed FROM validation_runs WHERE metric_id = 'ADTOOL_REPORT_3_MORNINGS' AND substr(ran_at, 1, 10) = ?1 ORDER BY ran_at DESC LIMIT 1").bind(today).first();
+    if (seen && String(seen.status) === status && String(seen.recomputed) === String(n)) return '';
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_REPORT_3_MORNINGS', 'consecutive mornings', ?1, '3', ?2, ?3, ?4, 'a report row exists for each of the last three report days; the job runs on cron', ?5, '')")
+      .bind(new Date().toISOString(), String(n), n - 3, status, ev).run();
+    return ' · ' + n + '/3 mornings';
+  } catch (e) { return ''; }
+}
+
 async function adtoolReport(env) {
   if ((await adtFlag(env, 'adtool_report')) !== 'on') return;
   await ensureAdtoolPhase5Schema(env);
@@ -5131,10 +5154,10 @@ async function adtoolReport(env) {
     const landed = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend FROM adtool_listing_day WHERE day = ?1').bind(day).first();
     const spendIn = Number(landed && landed.spend) || 0;
     const exists = await env.DB.prepare('SELECT day, json FROM adtool_reports WHERE day = ?1').bind(day).first();
-    if (!spendIn) { await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', "eBay's report for " + day + ' has not landed yet — nothing to write'); return; }
+    if (!spendIn) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', "eBay's report for " + day + ' has not landed yet — nothing to write' + a); return; }
     if (exists) {
       let had = 0; try { had = Number(JSON.parse(exists.json).fleet.spend) || 0; } catch (e) {}
-      if (had > 0) { await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated'); return; }
+      if (had > 0) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated' + a); return; }
     }
     /* cap days for yesterday (A15 input) */
     const budgets = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN c.budget <> '' THEN CAST(c.budget AS REAL) ELSE 0 END) AS budget FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY ca.listing_id").all()).results || [])) budgets[r.listing_id] = Number(r.budget) || 0;
@@ -5183,7 +5206,8 @@ async function adtoolReport(env) {
     await env.DB.prepare("INSERT INTO adtool_reports (day, generated_at, json, pdf_asset) VALUES (?1, ?2, ?3, '') ON CONFLICT(day) DO UPDATE SET generated_at = ?2, json = ?3").bind(day, report.generated_at, JSON.stringify(report)).run();
     const msg = '📊 Yesterday\'s ads report (' + day + '): £' + y.spend + ' spend · ' + y.attr_units + ' ad sales · ROAS ' + (roasY == null ? '—' : roasY + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + bullets[0];
     try { await adtNotify(env, 'advertising', "Yesterday's ads report", msg, 'adtool:report:' + day); await adtNotify(env, 'management', "Yesterday's ads report", msg, 'adtool:reportm:' + day); } catch (e) {}
-    await adtJobEnd(env, 'adtoolReport', t, 1 + capStmts.length, 'ok', 'report ' + day + ' · ' + capN + ' capped listings · ' + bullets.length + ' bullets');
+    const acc = await adtReportAcceptance(env, today);
+    await adtJobEnd(env, 'adtoolReport', t, 1 + capStmts.length, 'ok', 'report ' + day + ' · ' + capN + ' capped listings · ' + bullets.length + ' bullets' + acc);
   } catch (e) { await adtJobEnd(env, 'adtoolReport', t, 0, 'error', String(e && e.message || e)); throw e; }
 }
 /* ---- ROAS target (morning chain) ---- */
