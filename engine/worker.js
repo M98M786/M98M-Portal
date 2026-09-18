@@ -4757,7 +4757,7 @@ async function adtoolForecast(env) {
       /* the diagnosis worth keeping: how the chosen models do when a model is chosen at all */
       const split = (await env.DB.prepare("SELECT CASE WHEN model = 'naive' THEN 'fell back to the benchmark' ELSE 'a model was chosen' END AS grp, COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20 GROUP BY grp").bind(today).all()).results || [];
       const splitTxt = split.map(x => x.grp + ' ' + x.good + '/' + x.n).join(' · ');
-      const when = adtAddDays(firstDay, 77);
+      const when = adtAddDays(firstDay, 76);   /* the first day is day 1, so the 77th day is 76 days after it */
       /* Where the guard fell back to the benchmark, would a model actually have done better? Recorded because the
          obvious reading of a low share — that the guard is throwing away good models — is the wrong one, and the
          comparison is the only thing that settles it. */
