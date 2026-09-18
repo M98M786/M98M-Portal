@@ -279,6 +279,16 @@ function run(argv) {
   const planP1 = F.adtApplyPlan('PUSH', { item_id: '123', rules: ['P1'] }, mem);
   t('apply: P1 raises the daily budget by 30 % and never past double', planP1[0].op === 'budget' && near(planP1[0].to, 26) && planP1[0].to <= 40, planP1);
   t('apply: nothing is planned when no campaign is live', F.adtApplyPlan('STOP', { item_id: '123', rules: ['S1'] }, [{ campaign_id: 'c1', live: false }]).length === 0, null);
+  /* eBay gives no bid percentage for a cost-per-click ad. Such a step must never be dropped in silence, and
+     must never be sendable: the apply job refuses anything carrying `blocked` before the caps are consulted. */
+  const memNoBid = [{ campaign_id: 'c1', live: true, bid_pct: '', budget: '20', funding: 'COST_PER_CLICK' }];
+  const planNoBidR = F.adtApplyPlan('REDUCE', { item_id: '123', rules: ['R2'] }, memNoBid);
+  t('apply: a reduce on an ad with no bid percentage is blocked, not silently dropped',
+    planNoBidR.length === 1 && planNoBidR[0].op === 'bid' && planNoBidR[0].to === null && /cost-per-click/.test(planNoBidR[0].blocked || ''), planNoBidR);
+  const planNoBidP = F.adtApplyPlan('PUSH', { item_id: '123', rules: ['P2'] }, memNoBid);
+  t('apply: a push on an ad with no bid percentage is blocked too', 
+    planNoBidP.length === 1 && !!planNoBidP[0].blocked && planNoBidP[0].to === null, planNoBidP);
+  t('apply: a blocked step carries no value to send', [planNoBidR[0], planNoBidP[0]].every(x => x && x.to === null && x.from === null), [planNoBidR[0], planNoBidP[0]]);
   t('apply: the night is quiet — no live action between 22:00 and 06:00 UK', F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 23).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 3).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 10).allowed === true, null);
   t('apply: 30 actions an account a day and 3 bid changes a listing a week are hard caps', F.adtApplyCaps({ account_actions_today: 30, listing_bid_changes_week: 0 }, 'status', 10).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 3 }, 'bid', 10).allowed === false, null);
   t('apply: every endpoint used is a Sell Marketing v1 ad_campaign URL', Object.keys(F.ADTOOL_APPLY_ENDPOINTS).every(k => /^https:\/\/api\.ebay\.com\/sell\/marketing\/v1\/ad_campaign\//.test(F.ADTOOL_APPLY_ENDPOINTS[k]('X'))), Object.keys(F.ADTOOL_APPLY_ENDPOINTS).map(k => F.ADTOOL_APPLY_ENDPOINTS[k]('X')));
