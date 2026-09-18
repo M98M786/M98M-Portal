@@ -4552,6 +4552,9 @@ async function adtListingProfileBundle(env, iid) {
   const d = await env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid).first();
   if (d) { try { out.descriptors = Object.assign(JSON.parse(d.json), { day: d.day }); } catch (e) {} }
   out.stage_history = (await env.DB.prepare('SELECT day, stage, confidence FROM adtool_stages WHERE item_id = ?1 ORDER BY day').bind(iid).all()).results || [];
+  /* §7 wants the pattern-change history on this page: what moved and when, not just whether today looks odd.
+     adtool_regimes already holds it with a readable note per detection, and A17 fires off the same rows. */
+  out.regime_history = (await env.DB.prepare("SELECT detected_day, kind, note FROM adtool_regimes WHERE scope = 'listing' AND scope_id = ?1 ORDER BY detected_day DESC, kind").bind(iid).all()).results || [];
   return out;
 }
 /* ADTOOL-P3-ACTIONS-END ============================================================================== */
