@@ -4697,6 +4697,47 @@ async function adtoolRegisterSeedP4(env) {
   return adtBatch(env, stmts);
 }
 const ADTOOL_FORECAST_BATCH = 300;
+
+/* The forecast job short-circuits once the day is complete, and the acceptance used to sit inside that work —
+   so a gate written early in the day could never be corrected until tomorrow. It reads only the stored scores,
+   so it is evaluated whenever the job runs, complete or not. */
+async function adtForecastAcceptance(env, today) {
+  try {
+    const acc = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20").bind(today).first();
+    const n = Number(acc && acc.n) || 0, good = Number(acc && acc.good) || 0; const share = n ? good / n : null;
+    /* The test the spec designs is a rolling origin over the last 8 weeks. An origin needs 21 days of training
+       behind it, so eight of them need 77 days of history; today there are far fewer and most listings get two.
+       A share measured on two noisy folds is not the specified test, so it is reported as pending with the date
+       it becomes answerable rather than passed or failed on evidence that cannot carry it. */
+    const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_listing_day').first();
+    const days = Number(hist && hist.d) || 0, firstDay = (hist && hist.first) || today;
+    const foldRow = await env.DB.prepare("SELECT AVG(CAST(json_extract(params_json, '$.folds') AS REAL)) AS f FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1").bind(today).first();
+    const folds = Math.round((Number(foldRow && foldRow.f) || 0) * 10) / 10;
+    const evaluable = days >= 77;
+    const ok = share != null && share >= 0.7;
+    /* the diagnosis worth keeping: how the chosen models do when a model is chosen at all */
+    const split = (await env.DB.prepare("SELECT CASE WHEN model = 'naive' THEN 'fell back to the benchmark' ELSE 'a model was chosen' END AS grp, COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20 GROUP BY grp").bind(today).all()).results || [];
+    const splitTxt = split.map(x => x.grp + ' ' + x.good + '/' + x.n).join(' · ');
+    const when = adtAddDays(firstDay, 76);   /* the first day is day 1, so the 77th day is 76 days after it */
+    /* Where the guard fell back to the benchmark, would a model actually have done better? Recorded because the
+       obvious reading of a low share — that the guard is throwing away good models — is the wrong one, and the
+       comparison is the only thing that settles it. */
+    const g = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN b.best < a.mase THEN 1 ELSE 0 END) AS better, ROUND(AVG(a.mase),3) AS naive_mase, ROUND(AVG(b.best),3) AS model_mase FROM adtool_model_scores a JOIN (SELECT item_id, MIN(mase) AS best FROM adtool_model_scores WHERE scored_day = ?1 AND model <> 'naive' GROUP BY item_id) b ON b.item_id = a.item_id WHERE a.scored_day = ?1 AND a.chosen = 1 AND a.model = 'naive' AND CAST(json_extract(a.params_json, '$.units28') AS INTEGER) >= 20").bind(today).first();
+    const guardTxt = g && Number(g.n) ? ' · where it fell back, a model would have been better on only ' + (Number(g.better) || 0) + ' of ' + Number(g.n) + ' (mean MASE ' + g.model_mase + ' for the best model vs ' + g.naive_mase + ' for the benchmark), so the fallback is not what costs the share' : '';
+    const ev = good + ' of ' + n + ' listings with ≥ 20 units in 28 days beat the benchmark (' + (share == null ? '—' : Math.round(share * 100) + ' %') + ') · ' + splitTxt + guardTxt + ' · the backtest ran ' + folds + ' origins per listing where the spec designs for 8, which needs 77 days of history (from ' + when + ')';
+    /* The job can fire several times a day (the chain, plus the rollups catch-up). Re-writing an identical row
+       each time would bury the real history in duplicates, so today's row is only added when it actually says
+       something different from the last one — which still lets a stale verdict be corrected the same day. */
+    const status = !n ? 'skipped' : (evaluable ? (ok ? 'PASS' : 'FAIL') : 'pending');
+    const shareTxt = share == null ? '' : String(Math.round(share * 1000) / 1000);
+    const last = await env.DB.prepare("SELECT status, recomputed FROM validation_runs WHERE metric_id = 'ADTOOL_FORECAST_MASE' AND substr(ran_at, 1, 10) = ?1 ORDER BY ran_at DESC LIMIT 1").bind(today).first();
+    if (last && String(last.status) === status && String(last.recomputed) === shareTxt) return '';
+    await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_FORECAST_MASE', 'listings ≥ 20 units/28d', ?1, '0.70', ?2, ?3, ?4, 'rolling-origin backtest, horizon 14, MASE vs seasonal naive', ?5, ?6)")
+      .bind(new Date().toISOString(), shareTxt, share == null ? 0 : round2(share - 0.7), status, ev, when).run();
+    return ' · beat the benchmark ' + good + '/' + n + ' (' + (share == null ? '—' : Math.round(share * 100) + '%') + ') → ' + (status === 'pending' ? 'pending until ' + when : status) + ' · ' + splitTxt;
+  } catch (e) { return ''; }
+}
+
 async function adtoolForecast(env) {
   if ((await adtFlag(env, 'adtool_forecast')) !== 'on') return;
   await ensureAdtoolPhase4Schema(env);
@@ -4705,7 +4746,7 @@ async function adtoolForecast(env) {
   try {
     const today = ukDate('');
     const cur = String(await adtFlag(env, 'adtool_forecast_cursor') || ''); const [curDay, curAfter] = cur.split('|');
-    if (curDay === today && curAfter === 'done') { await adtJobEnd(env, 'adtoolForecast', t, 0, 'ok', 'already complete for ' + today); return; }
+    if (curDay === today && curAfter === 'done') { const ev = await adtForecastAcceptance(env, today); await adtJobEnd(env, 'adtoolForecast', t, 0, 'ok', 'already complete for ' + today + ev); return; }
     const resume = curDay === today && curAfter;
     const L = {}; for (const r of ((await env.DB.prepare('SELECT item_id, account, price, margin_before_ads FROM adtool_listings').all()).results || [])) L[r.item_id] = r;
     const dayRows = (await env.DB.prepare('SELECT item_id, day, weekday, units, attr_units, spend FROM adtool_listing_day WHERE day >= ?1 AND day < ?2 ORDER BY item_id, day').bind(adtAddDays(today, -120), today).all()).results || [];
@@ -4745,31 +4786,7 @@ async function adtoolForecast(env) {
     if (reached) {
       /* keep 30 vintages; acceptance: MASE < 1 for ≥ 70 % of listings with ≥ 20 units in 28 days */
       await env.DB.prepare('DELETE FROM adtool_forecast WHERE made_day < ?1').bind(adtAddDays(today, -30)).run();
-      const acc = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20").bind(today).first();
-      const n = Number(acc && acc.n) || 0, good = Number(acc && acc.good) || 0; const share = n ? good / n : null;
-      /* The test the spec designs is a rolling origin over the last 8 weeks. An origin needs 21 days of training
-         behind it, so eight of them need 77 days of history; today there are far fewer and most listings get two.
-         A share measured on two noisy folds is not the specified test, so it is reported as pending with the date
-         it becomes answerable rather than passed or failed on evidence that cannot carry it. */
-      const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_listing_day').first();
-      const days = Number(hist && hist.d) || 0, firstDay = (hist && hist.first) || today;
-      const foldRow = await env.DB.prepare("SELECT AVG(CAST(json_extract(params_json, '$.folds') AS REAL)) AS f FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1").bind(today).first();
-      const folds = Math.round((Number(foldRow && foldRow.f) || 0) * 10) / 10;
-      const evaluable = days >= 77;
-      const ok = share != null && share >= 0.7;
-      /* the diagnosis worth keeping: how the chosen models do when a model is chosen at all */
-      const split = (await env.DB.prepare("SELECT CASE WHEN model = 'naive' THEN 'fell back to the benchmark' ELSE 'a model was chosen' END AS grp, COUNT(*) AS n, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS good FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 AND CAST(json_extract(params_json, '$.units28') AS INTEGER) >= 20 GROUP BY grp").bind(today).all()).results || [];
-      const splitTxt = split.map(x => x.grp + ' ' + x.good + '/' + x.n).join(' · ');
-      const when = adtAddDays(firstDay, 76);   /* the first day is day 1, so the 77th day is 76 days after it */
-      /* Where the guard fell back to the benchmark, would a model actually have done better? Recorded because the
-         obvious reading of a low share — that the guard is throwing away good models — is the wrong one, and the
-         comparison is the only thing that settles it. */
-      const g = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN b.best < a.mase THEN 1 ELSE 0 END) AS better, ROUND(AVG(a.mase),3) AS naive_mase, ROUND(AVG(b.best),3) AS model_mase FROM adtool_model_scores a JOIN (SELECT item_id, MIN(mase) AS best FROM adtool_model_scores WHERE scored_day = ?1 AND model <> 'naive' GROUP BY item_id) b ON b.item_id = a.item_id WHERE a.scored_day = ?1 AND a.chosen = 1 AND a.model = 'naive' AND CAST(json_extract(a.params_json, '$.units28') AS INTEGER) >= 20").bind(today).first();
-      const guardTxt = g && Number(g.n) ? ' · where it fell back, a model would have been better on only ' + (Number(g.better) || 0) + ' of ' + Number(g.n) + ' (mean MASE ' + g.model_mase + ' for the best model vs ' + g.naive_mase + ' for the benchmark), so the fallback is not what costs the share' : '';
-      const ev = good + ' of ' + n + ' listings with ≥ 20 units in 28 days beat the benchmark (' + (share == null ? '—' : Math.round(share * 100) + ' %') + ') · ' + splitTxt + guardTxt + ' · the backtest ran ' + folds + ' origins per listing where the spec designs for 8, which needs 77 days of history (from ' + when + ')';
-      await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_FORECAST_MASE', 'listings ≥ 20 units/28d', ?1, '0.70', ?2, ?3, ?4, 'rolling-origin backtest, horizon 14, MASE vs seasonal naive', ?5, ?6)")
-        .bind(new Date().toISOString(), share == null ? '' : String(Math.round(share * 1000) / 1000), share == null ? 0 : round2(share - 0.7), !n ? 'skipped' : (evaluable ? (ok ? 'PASS' : 'FAIL') : 'pending'), ev, when).run();
-      note += ' · beat the benchmark ' + good + '/' + n + ' (' + (share == null ? '—' : Math.round(share * 100) + '%') + ') → ' + (!n ? 'skipped' : (evaluable ? (ok ? 'PASS' : 'FAIL') : 'pending until ' + when)) + ' · ' + splitTxt;
+      note += await adtForecastAcceptance(env, today);
     }
     await adtJobEnd(env, 'adtoolForecast', t, rows, 'ok', note);
   } catch (e) { await adtJobEnd(env, 'adtoolForecast', t, rows, 'error', String(e && e.message || e)); throw e; }
