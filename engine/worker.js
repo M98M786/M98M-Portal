@@ -6085,7 +6085,10 @@ async function adsIntraday(env) {
           dimensions: F.dims.map(d => ({ dimensionKey: d })), metricKeys: F.keys }),
       });
       if (cr.status !== 202 && !cr.ok) {
-        if (adtoolOn) { try { await ctx_setSync(env, 'adtoolIntradayKick', acct, fam + ' ' + kd + ' HTTP ' + cr.status + ' ' + (await cr.text()).slice(0, 220) + ' @' + new Date().toISOString()); } catch (e) {} }
+        /* keep eBay's own words, not the first 220 characters of its XML preamble: the refusal that matters
+           ("errorId 35103 on $.dateFrom") was being cut off mid-sentence, which is the one thing this row exists
+           to avoid. Pull out the id, the field and the message and store those. */
+        if (adtoolOn) { try { const bd = (await cr.text()); const pick = (t) => { const m = bd.match(new RegExp('<' + t + '[^>]*>([^<]*)</' + t + '>')); return m ? m[1] : ''; }; const said = [pick('errorId') && ('errorId ' + pick('errorId')), pick('inputRefIds') && ('field ' + pick('inputRefIds')), pick('message'), pick('longMessage')].filter(Boolean).join(' · ') || bd.replace(/\s+/g, ' ').slice(0, 300); await ctx_setSync(env, 'adtoolIntradayKick', acct, fam + ' ' + kd + ' HTTP ' + cr.status + ' — ' + said.slice(0, 400) + ' @' + new Date().toISOString()); } catch (e) {} }
         continue;
       }
       const loc = cr.headers.get('location') || '';
