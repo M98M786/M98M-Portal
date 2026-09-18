@@ -5928,6 +5928,11 @@ async function adtoolIntradayOn(env) {
 }
 /* UTC calendar day = eBay's report day (spec §2.2: the report is requested as a UTC day). */
 function utcDate(d) { return (d || new Date()).toISOString().slice(0, 10); }
+/* eBay judges a report task's dateFrom against ITS OWN clock, which is Pacific. Asking for the UTC day before
+   Pacific has reached it is refused with errorId 35103 "The date cannot be in future" — which is the whole
+   reason no same-day task exists between 00:00 and 07:00 UTC, and why the old code burned ~500 futile creates
+   a night there. Intl handles the PDT/PST switch, so this needs no maintenance in November. */
+function pacificDate(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d || new Date()); }
 /* Same parse as ingestAdsToday, kept as one function so both writers read one report identically.
    Adds revenue (sale_amount) and impressions, which ads_today never stored. */
 function parseAdsReportTsv(tsv) {
@@ -6088,7 +6093,12 @@ async function adsIntraday(env) {
         if (!closed || String(closed.cursor) !== prev) { kickDays.push(prev); await ctx_setSync(env, 'adtoolIntradayClose', acct, prev); }
       }
     }
+    const pac = pacificDate();
     for (const kd of kickDays) for (const fam of Object.keys(ADS_FAMILIES)) {
+      if (kd > pac) {   /* eBay would refuse it as "in future"; say so once an hour rather than 12 times */
+        if (adtoolOn) { const mins = new Date().getUTCMinutes(); if (mins < 5) { try { await ctx_setSync(env, 'adtoolIntradayKick', acct, fam + ' ' + kd + ' not asked — eBay dates a report task in Pacific time and it is still ' + pac + ' there; the first same-day task is possible at 07:00 UTC (08:00 UK in BST) @' + new Date().toISOString()); } catch (e) {} } }
+        continue;
+      }
       const F = ADS_FAMILIES[fam];
       const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
         method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
