@@ -1424,7 +1424,12 @@ function enterApp(user){
     /* Exactly the thirteen advertising pages and nothing else. `home` is defined in this shell
        rather than in a view file, so it comes along with the splice and would otherwise land in a
        stray "More" group linking to desks this portal does not carry. */
-    Object.keys(VIEWS).forEach(function (k) { VIEWS[k].hidden = (k.indexOf('adtool') !== 0); });
+    Object.keys(VIEWS).forEach(function (k) {
+      VIEWS[k].hidden = (k.indexOf('adtool') !== 0);
+      /* "(ads)" existed to tell these apart from the company portal's own advertising screens.
+         In a portal that is nothing but advertising it is noise on every line of the sidebar. */
+      if (k.indexOf('adtool') === 0 && VIEWS[k].label) { VIEWS[k].label = VIEWS[k].label.replace(/\s*\(ads\)\s*$/, ''); }
+    });
     NAV_DEPTS = [
       { name: 'Every morning', keys: ['adtoolCommand', 'adtoolStop', 'adtoolAlerts', 'adtoolReport'] },
       { name: 'Products',      keys: ['adtoolProduct', 'adtoolForecast'] },
