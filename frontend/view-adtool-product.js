@@ -68,6 +68,13 @@
     });
     return AT.loading;
   }
+  /* Every other graph in the portal shows its figures on the chart; these showed a shape and hid the
+     number in a tooltip. ECharts drops any label that would collide with its neighbour, so a dense
+     series thins itself instead of smearing — the same trick chartValueDots plays with minGap. */
+  var PILL = { show: true, position: 'top', fontSize: 9, fontWeight: 800, color: '#1c1200',
+    backgroundColor: GOLD, borderRadius: 7, padding: [2, 5, 1, 5] };
+  var LAYOUT = { hideOverlap: true };
+  function pillInt(o) { return o.value == null || o.value === 0 ? '' : Math.round(o.value); }
   function chartBase(extra) {
     return Object.assign({ backgroundColor: 'transparent', textStyle: { color: '#9aa4b1', fontFamily: 'Instrument Sans, system-ui, sans-serif' }, animation: false,
       grid: { left: 44, right: 14, top: 26, bottom: 28 },
@@ -231,7 +238,7 @@
     var hrs = D.hours.filter(function (x) { return x.day === yday; });
     var ord = new Array(24).fill(0), sp = new Array(24).fill(0), anyS = false;
     hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; if (v) { sp[x.hour] = v; anyS = true; } });
-    var series = [{ name: 'Units', type: 'bar', data: ord, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
+    var series = [{ name: 'Units', type: 'bar', data: ord, label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
     if (D.profile && D.profile.hour_weekday && D.profile.hour_weekday.shares && yday) { var wdi = dowOf(yday); var tot = ord.reduce(function (t, v) { return t + v; }, 0); var rowShares = D.profile.hour_weekday.shares.slice(wdi * 24, wdi * 24 + 24); var rs = rowShares.reduce(function (t, v) { return t + v; }, 0) || 1; series.push({ name: 'Profile (expected share × yesterday\'s total)', type: 'line', data: rowShares.map(function (v) { return Math.round(v / rs * tot * 100) / 100; }), lineStyle: { color: 'rgba(255,255,255,.35)', width: 1.5, type: 'dashed' }, symbol: 'none' }); }
     var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }];
     if (anyS) { y.push({ type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend (sampled)', nameTextStyle: { color: '#66707c' } }); series.push({ name: 'Ad spend (sampled)', type: 'line', yAxisIndex: 1, data: sp.map(function (v) { return Math.round(v * 100) / 100; }), lineStyle: { color: WHITE55, width: 2 }, itemStyle: { color: WHITE55 }, symbolSize: 5, smooth: false }); }
@@ -252,7 +259,7 @@
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';
     mount('atWM', chartBase({ xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Ad sales', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Est. ad profit £', type: 'line', data: rows.map(function (r) { return r.ad_profit; }), lineStyle: { color: LOSS, width: 2 }, itemStyle: { color: LOSS }, symbolSize: 5 }] }));
+      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Ad sales', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Est. ad profit £', type: 'line', data: rows.map(function (r) { return r.ad_profit; }), lineStyle: { color: LOSS, width: 2 }, itemStyle: { color: LOSS }, symbolSize: 5 }] }));
   }
   function drawWd() {
     var wd = AT.data.weekday;

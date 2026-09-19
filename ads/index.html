@@ -775,7 +775,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260919-2001';
+var BUILD = '20260919-2003';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1662,13 +1662,20 @@ window.M98M_ADS_ONLY = true;
     $('flBody').innerHTML = h;
     var csv = $('flCsv'); if (csv) csv.onclick = function (e) { e.preventDefault(); var lines = [['item_id', 'account', 'title', 'model', 'mase', 'next7', 'next30', 'lo30', 'hi30', 'ad_profit30']].concat(D.table.map(function (r) { return [r.item_id, r.account, String(r.title || '').replace(/"/g, "'"), r.model, r.mase, r.next7, r.next30, r.lo30, r.hi30, r.ad_profit30]; })).map(function (row) { return row.map(function (v) { return '"' + String(v == null ? '' : v) + '"'; }).join(','); }).join('\n'); var w = window.open('', '_blank'); if (w) { w.document.write('<pre>' + esc(lines) + '</pre>'); w.document.title = 'adtool-forecast-' + (D.made_day || '') + '.csv'; } else { toast('Pop-up blocked — allow pop-ups to export'); } };
     if (!window.echarts) return;
+    /* Numbers ON the chart, the way every other graph in the portal shows them. ECharts hides a label
+       that would collide with its neighbour, so a dense series thins itself out instead of turning into
+       a smear — the same effect chartValueDots gets with minGap. */
+    var PILL = { show: true, position: 'top', fontSize: 9, fontWeight: 800, color: '#1c1200',
+      backgroundColor: GOLD, borderRadius: 7, padding: [2, 5, 1, 5] };
+    var pill = function (fmt) { return Object.assign({}, PILL, { formatter: fmt }); };
+    var LAYOUT = { hideOverlap: true };
     var base = { backgroundColor: 'transparent', textStyle: { color: '#9aa4b1', fontFamily: 'Instrument Sans, system-ui, sans-serif' }, animation: false, grid: { left: 44, right: 14, top: 26, bottom: 28 }, tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, yAxis: { type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 } } };
     var days = D.actual.map(function (r) { return r.day.slice(5); }).concat(D.next.map(function (r) { return r.target_day.slice(5); }));
     var act = D.actual.map(function (r) { return r.units; }).concat(D.next.map(function () { return null; }));
     var fc = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.units; }));
     var lo = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.lo; })), hi = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.hi - r.lo; }));
-    var c1 = window.echarts.init($('flFleet')); c1.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'band low', type: 'line', data: lo, stack: 'b', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '10–90 % band', type: 'line', data: hi, stack: 'b', lineStyle: { opacity: 0 }, areaStyle: { color: BAND }, symbol: 'none' }, { name: 'Units (actual)', type: 'line', data: act, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 3 }, { name: 'Forecast', type: 'line', data: fc, lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, itemStyle: { color: WHITE55 }, symbolSize: 3 }] }));
-    if (D.realised.length) { var c2 = window.echarts.init($('flReal')); c2.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: D.realised.map(function (r) { return r.day.slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: D.realised.map(function (r) { return r.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: D.realised.map(function (r) { return r.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD } }, { name: 'Miss', type: 'bar', data: D.realised.map(function (r) { return r.actual == null ? null : Math.round((r.actual - r.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] })); } else { $('flReal').innerHTML = '<div class="an-empty">Nothing to compare yet.</div>'; }
+    var c1 = window.echarts.init($('flFleet')); c1.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'band low', type: 'line', data: lo, stack: 'b', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '10–90 % band', type: 'line', data: hi, stack: 'b', lineStyle: { opacity: 0 }, areaStyle: { color: BAND }, symbol: 'none' }, { name: 'Units (actual)', type: 'line', data: act, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 3, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Forecast', type: 'line', data: fc, lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, itemStyle: { color: WHITE55 }, symbolSize: 3, label: Object.assign({}, PILL, { backgroundColor: 'rgba(255,255,255,.55)', formatter: function (o) { return o.value == null ? '' : Math.round(o.value); } }), labelLayout: LAYOUT }] }));
+    if (D.realised.length) { var c2 = window.echarts.init($('flReal')); c2.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: D.realised.map(function (r) { return r.day.slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: D.realised.map(function (r) { return r.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: D.realised.map(function (r) { return r.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: D.realised.map(function (r) { return r.actual == null ? null : Math.round((r.actual - r.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] })); } else { $('flReal').innerHTML = '<div class="an-empty">Nothing to compare yet.</div>'; }
   }
 })();
 
@@ -2169,6 +2176,13 @@ window.M98M_ADS_ONLY = true;
     });
     return AT.loading;
   }
+  /* Every other graph in the portal shows its figures on the chart; these showed a shape and hid the
+     number in a tooltip. ECharts drops any label that would collide with its neighbour, so a dense
+     series thins itself instead of smearing — the same trick chartValueDots plays with minGap. */
+  var PILL = { show: true, position: 'top', fontSize: 9, fontWeight: 800, color: '#1c1200',
+    backgroundColor: GOLD, borderRadius: 7, padding: [2, 5, 1, 5] };
+  var LAYOUT = { hideOverlap: true };
+  function pillInt(o) { return o.value == null || o.value === 0 ? '' : Math.round(o.value); }
   function chartBase(extra) {
     return Object.assign({ backgroundColor: 'transparent', textStyle: { color: '#9aa4b1', fontFamily: 'Instrument Sans, system-ui, sans-serif' }, animation: false,
       grid: { left: 44, right: 14, top: 26, bottom: 28 },
@@ -2332,7 +2346,7 @@ window.M98M_ADS_ONLY = true;
     var hrs = D.hours.filter(function (x) { return x.day === yday; });
     var ord = new Array(24).fill(0), sp = new Array(24).fill(0), anyS = false;
     hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; if (v) { sp[x.hour] = v; anyS = true; } });
-    var series = [{ name: 'Units', type: 'bar', data: ord, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
+    var series = [{ name: 'Units', type: 'bar', data: ord, label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
     if (D.profile && D.profile.hour_weekday && D.profile.hour_weekday.shares && yday) { var wdi = dowOf(yday); var tot = ord.reduce(function (t, v) { return t + v; }, 0); var rowShares = D.profile.hour_weekday.shares.slice(wdi * 24, wdi * 24 + 24); var rs = rowShares.reduce(function (t, v) { return t + v; }, 0) || 1; series.push({ name: 'Profile (expected share × yesterday\'s total)', type: 'line', data: rowShares.map(function (v) { return Math.round(v / rs * tot * 100) / 100; }), lineStyle: { color: 'rgba(255,255,255,.35)', width: 1.5, type: 'dashed' }, symbol: 'none' }); }
     var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }];
     if (anyS) { y.push({ type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend (sampled)', nameTextStyle: { color: '#66707c' } }); series.push({ name: 'Ad spend (sampled)', type: 'line', yAxisIndex: 1, data: sp.map(function (v) { return Math.round(v * 100) / 100; }), lineStyle: { color: WHITE55, width: 2 }, itemStyle: { color: WHITE55 }, symbolSize: 5, smooth: false }); }
@@ -2353,7 +2367,7 @@ window.M98M_ADS_ONLY = true;
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';
     mount('atWM', chartBase({ xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Ad sales', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Est. ad profit £', type: 'line', data: rows.map(function (r) { return r.ad_profit; }), lineStyle: { color: LOSS, width: 2 }, itemStyle: { color: LOSS }, symbolSize: 5 }] }));
+      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Ad sales', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Est. ad profit £', type: 'line', data: rows.map(function (r) { return r.ad_profit; }), lineStyle: { color: LOSS, width: 2 }, itemStyle: { color: LOSS }, symbolSize: 5 }] }));
   }
   function drawWd() {
     var wd = AT.data.weekday;
