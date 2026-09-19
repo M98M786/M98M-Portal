@@ -8249,6 +8249,20 @@ async function truthTier1(env) {
     status: tpfN === 0 ? 'PASS' : 'INFO', method: 'D1_RECOMPUTE',
     evidence: tpfN === 0 ? 'every tracking push accepted' : tpfN + ' tracking push(es) rejected by eBay and never retried, oldest ' + String((tpf && tpf.oldest) || '') + ' — the order shows no tracking to the buyer',
     next_run_at: next });
+  /* The board alone was not enough: a STALE money row has been sitting on Truth Check for days at
+     a time and only a person reading it found the gap. One bell a day to Management, guarded by
+     the same day-cursor darkAccountWatch uses (notif_live has no unique ref index, so the guard
+     IS the dedupe), says the account and the orders it is missing. */
+  if (booksMissing.length) {
+    const seen = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'bookMissingBell' AND account = ''").first();
+    if (!seen || String(seen.cursor) !== y) {
+      await notifyRole(env, 'Management', 'Day book not written: ' + y,
+        booksMissing.join(', ') + ' — eBay recorded orders on ' + y + ' but the day tab does not exist, so profit, ' +
+        'VAT and the margin for that day rest on nothing. Until the tab is written the truth board can only ' +
+        'report the day as unverified.', 'engine:bookmissing:' + y);
+      await ctx_setSync(env, 'bookMissingBell', '', y);
+    }
+  }
   await truthWrite(env, out);
   return out.length;
 }
