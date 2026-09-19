@@ -2296,7 +2296,11 @@ async function marketingSync(env) {
     let details = 0;
     const freshRs = await env.DB.prepare(
       "SELECT promo_id FROM promotions WHERE account = ?1 AND synced_at >= datetime('now', '-20 hours') " +
-      "AND (item_n > 0 OR status NOT LIKE '%RUNNING%')"
+      "AND (item_n > 0 OR status NOT LIKE '%RUNNING%') " +
+      /* a promotion whose criterion kind we have never recorded is NOT fresh, however recently it
+         was seen — otherwise the new columns would stay empty for ever on exactly the promotions
+         that need them, which is every sale built by rule. */
+      "AND COALESCE(criterion_type, '') <> ''"
     ).bind(acct).all();
     const fresh = {};
     for (const f of (freshRs.results || [])) fresh[String(f.promo_id)] = 1;
@@ -2308,6 +2312,13 @@ async function marketingSync(env) {
       /* member listings: markdown sales and item promotions carry them in different envelopes */
       let listingIds = [];
       let discount = '';
+      /* eBay picks the items in a promotion one of three ways (inventoryCriterionType): by an explicit
+         list of listingIds, BY RULE (a category / price / brand filter), or ANY meaning the whole shop.
+         Only the first carries listingIds, so a rule-built sale stored nothing and its membership read
+         as zero — which is why nobody could answer "which listings are in a sale". Record which kind it
+         is and the rule itself, so the answer is at least knowable. */
+      let criterionType = '';
+      let ruleJson = '';
       const wantDetail = !fresh[pid] && details < 8;
       try {
         if (!wantDetail) throw { skip: true };
@@ -2322,12 +2333,18 @@ async function marketingSync(env) {
         }
         if (dr.ok) {
           const det = await dr.json();
-          const topIds = ((det.inventoryCriterion || {}).listingIds) || [];
+          const crit = det.inventoryCriterion || {};
+          const topIds = crit.listingIds || [];
           listingIds = listingIds.concat(topIds.map(String));
+          if (crit.inventoryCriterionType) criterionType = String(crit.inventoryCriterionType);
+          if (crit.ruleCriteria) { try { ruleJson = JSON.stringify(crit.ruleCriteria).slice(0, 4000); } catch (e) {} }
           const sel = det.selectedInventoryDiscounts || [];
           for (const s of sel) {
-            const ids = ((s.inventoryCriterion || {}).listingIds) || [];
+            const sc = s.inventoryCriterion || {};
+            const ids = sc.listingIds || [];
             listingIds = listingIds.concat(ids.map(String));
+            if (!criterionType && sc.inventoryCriterionType) criterionType = String(sc.inventoryCriterionType);
+            if (!ruleJson && sc.ruleCriteria) { try { ruleJson = JSON.stringify(sc.ruleCriteria).slice(0, 4000); } catch (e) {} }
             const b = s.discountBenefit || {};
             if (!discount) discount = b.percentageOffItem ? b.percentageOffItem + '% off' : b.amountOffItem ? '£' + (b.amountOffItem.value || '?') + ' off' : '';
           }
@@ -2347,15 +2364,17 @@ async function marketingSync(env) {
         for (let i = 0; i < mstmts.length; i += 50) await env.DB.batch(mstmts.slice(i, i + 50));
       }
       await env.DB.prepare(
-        'INSERT INTO promotions (account, promo_id, name, type, status, start_at, end_at, discount, item_n, listing_ids, synced_at) ' +
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) " +
+        'INSERT INTO promotions (account, promo_id, name, type, status, start_at, end_at, discount, item_n, listing_ids, criterion_type, rule_json, synced_at) ' +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now')) " +
         'ON CONFLICT(account, promo_id) DO UPDATE SET name=?3, type=?4, status=?5, start_at=?6, end_at=?7, ' +
         "discount = CASE WHEN ?8 != '' THEN ?8 ELSE discount END, " +
         'item_n = CASE WHEN ?9 > 0 THEN ?9 ELSE item_n END, ' +
-        "listing_ids = CASE WHEN ?10 != '' THEN ?10 ELSE listing_ids END, synced_at=datetime('now')"
+        "listing_ids = CASE WHEN ?10 != '' THEN ?10 ELSE listing_ids END, " +
+        "criterion_type = CASE WHEN ?11 != '' THEN ?11 ELSE criterion_type END, " +
+        "rule_json = CASE WHEN ?12 != '' THEN ?12 ELSE rule_json END, synced_at=datetime('now')"
       ).bind(acct, pid, String(p0.name || '').slice(0, 120), String(p0.promotionType || ''), String(p0.promotionStatus || ''),
         String(p0.startDate || ''), String(p0.endDate || ''), discount,
-        listingIds.length, listingIds.join(',').slice(0, 40000)).run();
+        listingIds.length, listingIds.join(',').slice(0, 40000), criterionType, ruleJson).run();
 
       /* the 2-day ending bell — once per (promotion, end date) */
       if (/RUNNING/i.test(String(p0.promotionStatus || '')) && p0.endDate) {
@@ -8172,6 +8191,7 @@ async function truthTier1(env) {
   } catch (e) { /* recovery tables appear with the truth schema */ }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
+  const booksMissing = [];
   for (const acct of accounts) {
     const A = await metricMoney(env, acct, y, y);
     const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, y).all();
@@ -8203,6 +8223,8 @@ async function truthTier1(env) {
     const dT = Math.abs(round2(bT) - A.ACTUAL_PROFIT);
     out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + y, shown: A.ACTUAL_PROFIT, recomputed: round2(bT), delta: round2(dT), status: checked === 0 ? 'STALE' : (dT <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s), ' + bad + ' formula fail(s)' + (ts2 !== null ? ', totals row used' : ''), next_run_at: next });
     out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + y, shown: A.VAT_TO_HMRC, recomputed: round2(bS), delta: round2(Math.abs(round2(bS) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(bS) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s)', next_run_at: next });
+    const bm1 = bookMissingRow(acct, y, A, checked, next);
+    if (bm1) { out.push(bm1); booksMissing.push(acct + ' (' + bm1.recomputed + ' order(s))'); }
     /* the sheet disagreeing with itself is REPORTED, never silently resolved (owner's 92 case) */
     if (ts2 !== null && Math.abs(round2(tt2) - round2(t2)) > 0.05) {
       out.push({ metric_id: 'TOTALS_VS_ITEMS', scope_key: acct + ':' + y, shown: round2(tt2), recomputed: round2(t2),
@@ -8245,6 +8267,21 @@ async function truthTier3Gate(env) {
    backfill below can re-check a day the rolling window has already passed: tier3 only ever looks
    at days -2..-7, so a metric that started being emitted today is never filled in for the days
    before it — which is exactly how 4-11 Sept ended up with verified profit and unverified VAT. */
+/* A missing day book and a genuinely quiet day both recompute to zero rows, so both recorded the
+   same mute STALE — which is how Amna Baji's 17 Sept sat unnoticed until a person went looking.
+   The orders table is the engine's OWN eBay truth and owes nothing to the sheets, so it settles
+   which is which: no rows AND real orders means the book was never written, and that is a
+   different sentence from "nothing happened that day". */
+function bookMissingRow(acct, day, A, checked, next) {
+  const orders = (A.ROWS_COVERAGE && Number(A.ROWS_COVERAGE.orders)) || 0;
+  if (checked !== 0 || orders <= 0) return null;
+  return { metric_id: 'BOOK_MISSING', scope_key: acct + ':' + day, shown: 0, recomputed: orders, delta: orders,
+    status: 'INFO', method: 'D1_RECOMPUTE',
+    evidence: 'no day tab for ' + day + ' — eBay shows ' + orders + ' order(s) that day, the book has 0 row(s); '
+      + 'profit and VAT for the day rest on nothing until someone writes it',
+    next_run_at: next };
+}
+
 async function truthRecheckDay(env, accounts, day, out) {
   const next = new Date(Date.now() + 86400000).toISOString();
   for (const acct of accounts) {
@@ -8277,6 +8314,8 @@ async function truthRecheckDay(env, accounts, day, out) {
     out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + day, shown: A.VAT_TO_HMRC, recomputed: round2(s2),
       delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'),
       method: 'SHEET_RECOMPUTE', evidence: checked + ' rows', next_run_at: next });
+    const bm = bookMissingRow(acct, day, A, checked, next);
+    if (bm) out.push(bm);
   }
   return out.length;
 }
