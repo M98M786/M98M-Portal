@@ -2,6 +2,9 @@
 # Everything that can be checked without a database, in one command.
 #
 # Run this before every deploy. Each of the three has caught a real fault in this build:
+#   NOTE the checker lives in scripts/ now. It used to be /tmp/jxa_check.js and something
+#        overwrote it with a stub; a syntax checker that silently stops checking is worse than
+#        none, because you keep trusting it.
 #   syntax   — an apostrophe escaped as \\' closed a string early and would have broken a whole view.
 #              Cloudflare validates the worker at upload; nothing validates the frontend files.
 #   tests    — the pure functions: the rules, the models, the money.
@@ -13,7 +16,7 @@ fail=0
 
 echo "== syntax =="
 for f in engine/worker.js frontend/view-adtool-*.js; do
-  out=$(osascript -l JavaScript /tmp/jxa_check.js "$PWD/$f" 2>&1)
+  out=$(osascript -l JavaScript scripts/jxa-syntax.js "$PWD/$f" 2>&1)
   case "$out" in
     *"SYNTAX OK"*) printf '  ok    %s\n' "$(basename "$f")" ;;
     *) printf '  FAIL  %s — %s\n' "$(basename "$f")" "$out"; fail=1 ;;

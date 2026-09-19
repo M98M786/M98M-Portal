@@ -6048,6 +6048,132 @@ const ADTOOL_ACTIONS_P8 = {
 };
 /* ADTOOL-P8-END ===================================================================================== */
 
+/* ADTOOL-P9-BEGIN =================================================================================
+   The war room. Every other page answers "what happened". This one answers "what do I do today",
+   and it only ever says a thing it can show the arithmetic for.
+
+   The spine is one question: ranked by its own return, how far down the list is it worth spending?
+   Walk the listings best-first, accumulate spend and profit, and the curve has a peak. Spending past
+   that peak buys revenue you lose money on; stopping short of it leaves profit on the table. The
+   owner's 6x target is marked on the same curve so the trade is visible rather than argued about.
+*/
+/* ADTOOL-P9-PURE-BEGIN */
+function adtPlanCurve(rows) {
+  /* rows: [{item_id, spend, rev, profit}] — one row per listing over the window.
+     Returns the cumulative curve walking best-return-first, the profit peak, and the point where
+     each ROAS target is first met. Everything downstream reads off this. */
+  const live = rows.filter(r => Number(r.spend) > 0)
+    .map(r => ({ item_id: r.item_id, s: Number(r.spend), v: Number(r.rev) || 0, p: Number(r.profit) || 0 }))
+    .map(r => Object.assign(r, { roas: r.v / r.s }))
+    .sort((a, b) => b.roas - a.roas);
+  const curve = []; const marks = {};
+  let s = 0, v = 0, p = 0, peak = null;
+  for (let i = 0; i < live.length; i++) {
+    const r = live[i];
+    s += r.s; v += r.v; p += r.p;
+    const roas = s > 0 ? v / s : 0;
+    const point = { keep: i + 1, spend: round2(s), revenue: round2(v), profit: round2(p), roas: Math.round(roas * 100) / 100, cut_at_roas: Math.round(r.roas * 100) / 100 };
+    curve.push(point);
+    if (!peak || p > peak.profit) peak = point;
+    for (const t of [6, 5.5, 5, 4.5, 4, 3.5]) { if (roas >= t) marks[String(t)] = point; }
+  }
+  const all = curve.length ? curve[curve.length - 1] : null;
+  return { curve, peak, marks, all, ranked: live };
+}
+function adtPlanVerdict(peak, all) {
+  /* what the curve is telling the owner, in one line he can act on */
+  if (!peak || !all) return { move: 'nothing to say yet', detail: 'no listing has spend in the window' };
+  const drop = all.keep - peak.keep;
+  if (drop <= 0) return { move: 'keep everything running', detail: 'profit is still rising at the last listing, so nothing is worth switching off' };
+  return {
+    move: 'switch off ' + drop + ' listing' + (drop === 1 ? '' : 's'),
+    detail: 'profit peaks at ' + peak.keep + ' listings on ' + gbpPlain(peak.spend) + ' spend; the ' + drop + ' below that line cost more than they bring',
+    gain: round2(peak.profit - all.profit)
+  };
+}
+function gbpPlain(n) { const v = Number(n) || 0; return '£' + (Math.round(v * 100) / 100).toFixed(2); }
+function adtPlanWeekdayVerdict(rows) {
+  /* rows: [{weekday, spend, revenue, profit}] 0=Mon. Names the day worth changing, if any. */
+  const n = rows.length; if (n < 7) return null;
+  const prof = rows.map(r => Number(r.profit) || 0);
+  const mean = prof.reduce((t, x) => t + x, 0) / n;
+  let worst = 0, best = 0;
+  for (let i = 1; i < n; i++) { if (prof[i] < prof[worst]) worst = i; if (prof[i] > prof[best]) best = i; }
+  const w = rows[worst], b = rows[best];
+  const wSpend = Number(w.spend) || 0, wProfit = Number(w.profit) || 0;
+  /* only call a day weak when it is clearly below the others, not merely lowest */
+  const weak = mean > 0 && wProfit < mean * 0.7 && wSpend > 0;
+  return {
+    worst: { weekday: w.weekday, profit: round2(wProfit), spend: round2(wSpend), roas: wSpend > 0 ? Math.round((Number(w.revenue) || 0) / wSpend * 100) / 100 : null },
+    best: { weekday: b.weekday, profit: round2(Number(b.profit) || 0) },
+    mean_profit: round2(mean),
+    weak_day: weak,
+    shortfall: weak ? round2(mean - wProfit) : 0
+  };
+}
+/* ADTOOL-P9-PURE-END */
+
+const ADTOOL_ACTIONS_P9 = {
+  adtoolPlan: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_plan');
+      const env = ctx.env;
+      const today = ukDate(''), from = adtAddDays(today, -30), to = adtAddDays(today, -1);
+      const acct = String((p && p.account) || '').trim();
+      const bind = [from, to]; let where = '';
+      if (acct) { where = ' AND l.account = ?3'; bind.push(acct); }
+      const rows = (await env.DB.prepare(
+        'SELECT d.item_id, l.account, l.title, l.price, ROUND(l.breakeven_roas, 2) AS breakeven, ' +
+        'ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS rev, SUM(d.attr_units) AS units, ' +
+        'ROUND(SUM(d.ad_profit), 2) AS profit ' +
+        'FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id ' +
+        'WHERE d.day >= ?1 AND d.day <= ?2' + where + ' GROUP BY d.item_id HAVING SUM(d.spend) > 0'
+      ).bind(...bind).all()).results || [];
+      const C = adtPlanCurve(rows);
+      const byId = {}; for (const r of rows) byId[r.item_id] = r;
+      const keepN = C.peak ? C.peak.keep : C.ranked.length;
+      const cut = C.ranked.slice(keepN).map(r => Object.assign({}, byId[r.item_id], { roas: Math.round(r.roas * 100) / 100 }))
+        .sort((a, b) => Number(a.profit) - Number(b.profit));
+      const keepers = C.ranked.slice(0, keepN);
+      /* worth more money: already well clear of its own break-even and earning, so more spend on it
+         is the least speculative bet on the board */
+      const push = keepers.map(r => byId[r.item_id])
+        .filter(r => Number(r.profit) > 0 && Number(r.breakeven) > 0 && (Number(r.rev) / Number(r.spend)) >= Number(r.breakeven) * 1.5)
+        .sort((a, b) => Number(b.profit) - Number(a.profit)).slice(0, 25);
+      const wdRows = (await env.DB.prepare(
+        'SELECT d.weekday, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS revenue, ROUND(SUM(d.ad_profit), 2) AS profit ' +
+        'FROM adtool_listing_day d' + (acct ? ' JOIN adtool_listings l ON l.item_id = d.item_id' : '') +
+        ' WHERE d.day >= ?1 AND d.day <= ?2' + (acct ? ' AND l.account = ?3' : '') + ' GROUP BY d.weekday ORDER BY d.weekday'
+      ).bind(...bind).all()).results || [];
+      /* per-day figures divide by the days that actually carry data, not the calendar span — a
+         missing report day would otherwise quietly flatter every per-day number on this page */
+      const dayRow = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2').bind(from, to).first();
+      const days = Math.max(1, Number(dayRow && dayRow.n) || 0);
+      const perDay = x => x == null ? null : round2(Number(x) / days);
+      const shape = pt => pt ? { keep: pt.keep, roas: pt.roas, spend_day: perDay(pt.spend), revenue_day: perDay(pt.revenue), profit_day: perDay(pt.profit), cut_below_roas: pt.cut_at_roas } : null;
+      return {
+        window: { from, to, days },
+        account: acct || 'all',
+        now: shape(C.all),
+        peak: shape(C.peak),
+        targets: Object.keys(C.marks).sort((a, b) => Number(b) - Number(a)).map(k => Object.assign({ target: Number(k) }, shape(C.marks[k]))),
+        verdict: adtPlanVerdict(C.peak, C.all),
+        cut: cut.slice(0, 60),
+        cut_total: cut.length,
+        cut_frees: round2(cut.reduce((t, r) => t + Number(r.spend), 0)),
+        cut_costs_now: round2(cut.reduce((t, r) => t + Number(r.profit), 0)),
+        push,
+        weekday: wdRows.map(r => Object.assign({}, r, { roas: Number(r.spend) > 0 ? Math.round(Number(r.revenue) / Number(r.spend) * 100) / 100 : null })),
+        weekday_verdict: adtPlanWeekdayVerdict(wdRows),
+        computed_at: new Date().toISOString(),
+        source: 'adtool_listing_day over the last 30 report days · eBay ads report, orders, Brain v17'
+      };
+    },
+  },
+};
+/* ADTOOL-P9-END =================================================================================== */
+
+
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
    eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
    total. adsIntraday has polled that total every ~5 minutes since August and OVERWRITTEN it in
@@ -13906,3 +14032,4 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P5); /* ADTOOL Phase 5: command centre, ale
 Object.assign(ROUTES, ADTOOL_ACTIONS_P6); /* ADTOOL Phase 6: decisions in shadow */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P7); /* ADTOOL Phase 7: analyst narratives */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P8); /* ADTOOL Phase 8: live apply (off until an account's own switch is on) */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P9); /* ADTOOL war room: what to do today, with the arithmetic behind it */
