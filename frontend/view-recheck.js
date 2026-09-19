@@ -246,6 +246,8 @@
     in_transit: 'In transit', delivered: 'Delivered', settled: 'Settled' };
 
   function rcMoney(n) { return '£' + rcNum(n).toFixed(2); }
+  /** 'these 1 order(s)' is how a machine writes; staff read this screen all day. */
+  function rcPlural(n, one, many) { return rcNum(n) + ' ' + (rcNum(n) === 1 ? one : (many || one + 's')); }
 
   function rcOrderLink(id) {
     return '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(rcStr(id)) +
@@ -291,7 +293,7 @@
     var body;
     if (open.length) {
       body = rcCpTable(open) +
-        (rcNum(c.open_value) ? '<div class="rc-sub" style="margin-top:6px">' + rcMoney(c.open_value) + ' of stock sits behind these ' + open.length + ' order(s).</div>' : '');
+        (rcNum(c.open_value) ? '<div class="rc-sub" style="margin-top:6px">' + rcMoney(c.open_value) + ' of stock sits behind ' + (open.length === 1 ? 'this order' : 'these ' + open.length + ' orders') + '.</div>' : '');
     } else {
       body = '<div class="rc-box rc-blue"><span class="k">Nothing late</span>No buyer is chasing and every order on this day carries a tracking number.</div>';
     }
@@ -302,7 +304,7 @@
         return '<span class="pill rc-p-open">' + esc(rcStr(a.account)) + ' ' + rcNum(a.confirm) + '</span>';
       }).join(' ');
       confirm = '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;font-weight:800;color:var(--blue-2)">' +
-        rcNum(counts.unconfirmed) + ' tracked order(s) past the estimate with no news — confirm and tick off</summary>' +
+        rcPlural(counts.unconfirmed, 'tracked order', 'tracked orders') + ' past the estimate with no news — confirm and tick off</summary>' +
         (chips ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + chips + '</div>' : '') +
         (conf.length ? rcCpTable(conf) : '') +
         (rcNum(c.confirm_more) ? '<div class="rc-sub" style="margin-top:6px">…and ' + rcNum(c.confirm_more) + ' more like these.</div>' : '') +
@@ -319,7 +321,7 @@
       '<div class="rc-cp-hd"><span class="rc-cp-who">' + esc(rcStr(c.owner)) + '</span>' +
         '<span class="pill rc-p-off">day ' + rcNum(c.days) + '</span>' +
         '<span class="rc-cp-ask">' + esc(rcStr(c.asks)) + '</span>' +
-        '<span class="rc-cp-when">orders placed ' + esc(rcStr(c.order_date_nice) || rcNice(rcStr(c.order_date))) + ' · ' + rcNum(c.total) + ' order(s)</span></div>' +
+        '<span class="rc-cp-when">orders placed ' + esc(rcStr(c.order_date_nice) || rcNice(rcStr(c.order_date))) + ' · ' + rcPlural(c.total, 'order') + '</span></div>' +
       '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + '</div>';
   }
 
@@ -338,7 +340,7 @@
       var late = 0;
       cps.forEach(function (c) { late += rcNum(c.needs_you); });
       box.innerHTML = (late
-          ? '<div class="rc-dis" style="margin-top:0;margin-bottom:12px"><b>' + late + ' order(s) need a person today.</b> Each row below says who, what and why — everything else on these days is proven delivered, still inside the estimate, or settled.</div>'
+          ? '<div class="rc-dis" style="margin-top:0;margin-bottom:12px"><b>' + rcPlural(late, 'order') + ' need' + (late === 1 ? 's' : '') + ' a person today.</b> Each row below says who, what and why — everything else on these days is proven delivered, still inside the estimate, or settled.</div>'
           : '<div class="rc-box rc-blue" style="margin-top:0;margin-bottom:12px"><span class="k">All three days are clean</span>No buyer is chasing and nothing is missing a tracking number.</div>') +
         cps.map(rcCpCard).join('') +
         '<div class="rc-sub" style="margin-top:4px">' + esc(rcStr(d && d.note)) + '</div>';
