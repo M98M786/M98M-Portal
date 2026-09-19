@@ -310,6 +310,11 @@ function run(argv) {
   const PV = F.adtPlanVerdict(PC.peak, PC.curve[PC.curve.length - 1]);
   t('war room: the verdict names how many to switch off and what it is worth',
     /switch off 2 listings/.test(PV.move) && near(PV.gain, 10), PV);
+  /* the curve carries WINDOW totals; the sentence has to speak per day, or the headline overstates
+     by the length of the window — it read "£1,872 a day" for a £62 a day gain before this */
+  const PV30 = F.adtPlanVerdict(PC.peak, PC.curve[PC.curve.length - 1], function (x) { return x / 30; });
+  t('war room: the verdict converts the window total to a daily figure',
+    near(PV30.gain, 10 / 30) && /a day/.test(PV30.detail), PV30);
   t('war room: nothing is switched off when profit never turns down',
     /keep everything/.test(F.adtPlanVerdict(PC.curve[3], PC.curve[3]).move), null);
   /* a weekday is only called weak when it is clearly below the rest, not merely the lowest */

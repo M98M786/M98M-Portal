@@ -740,7 +740,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260919-1604';
+var BUILD = '20260919-1606';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2998,6 +2998,8 @@ VIEWS.home = {
     h += '<div class="wr-hero"><h2>' + esc(String(v.move || '').replace(/^./, function (c) { return c.toUpperCase(); })) + '</h2>' +
       '<div class="wr-sub">' + esc(v.detail || '') +
       (gain > 0 ? ' <b style="color:var(--gold-a)">That is ' + gbp(gain) + ' a day, about ' + gbp0(gain * 30) + ' a month.</b>' : '') +
+      '<div class="wr-sub" style="margin-top:8px;font-size:12px">Cutting a listing does not take its sales to zero — some would have come without the ad. ' +
+      'So this is the floor on what switching them off is worth, not the ceiling.</div>' +
       '</div></div>';
 
     /* ---- where you are, where the money peaks, and what the 6x target really costs ---- */

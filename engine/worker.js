@@ -6080,15 +6080,21 @@ function adtPlanCurve(rows) {
   const all = curve.length ? curve[curve.length - 1] : null;
   return { curve, peak, marks, all, ranked: live };
 }
-function adtPlanVerdict(peak, all) {
-  /* what the curve is telling the owner, in one line he can act on */
+function adtPlanVerdict(peak, all, perDay) {
+  /* What the curve is telling the owner, in one line he can act on.
+     `perDay` converts a window total into a daily figure. It is a parameter rather than a constant
+     because the curve carries window totals: without it this sentence said "£1,872 a day, about
+     £56,178 a month" when the true answer was £62 a day — a thirty-fold overstatement on the one
+     number the page leads with. Defaults to identity so the maths can be tested on its own. */
+  const d = typeof perDay === 'function' ? perDay : function (x) { return x; };
   if (!peak || !all) return { move: 'nothing to say yet', detail: 'no listing has spend in the window' };
   const drop = all.keep - peak.keep;
   if (drop <= 0) return { move: 'keep everything running', detail: 'profit is still rising at the last listing, so nothing is worth switching off' };
   return {
     move: 'switch off ' + drop + ' listing' + (drop === 1 ? '' : 's'),
-    detail: 'profit peaks at ' + peak.keep + ' listings on ' + gbpPlain(peak.spend) + ' spend; the ' + drop + ' below that line cost more than they bring',
-    gain: round2(peak.profit - all.profit)
+    detail: 'profit peaks at ' + peak.keep + ' listings on ' + gbpPlain(d(peak.spend)) + ' of spend a day; the ' + drop + ' below that line cost more than they bring',
+    gain: round2(d(peak.profit) - d(all.profit)),
+    gain_is_per_day: true
   };
 }
 function gbpPlain(n) { const v = Number(n) || 0; return '£' + (Math.round(v * 100) / 100).toFixed(2); }
@@ -6171,7 +6177,7 @@ const ADTOOL_ACTIONS_P9 = {
         now: shape(C.all),
         peak: shape(C.peak),
         targets: Object.keys(C.marks).sort((a, b) => Number(b) - Number(a)).map(k => Object.assign({ target: Number(k) }, shape(C.marks[k]))),
-        verdict: adtPlanVerdict(C.peak, C.all),
+        verdict: adtPlanVerdict(C.peak, C.all, perDay),
         cut: cut.slice(0, 60),
         cut_total: cut.length,
         cut_frees: round2(cut.reduce((t, r) => t + Number(r.spend), 0)),

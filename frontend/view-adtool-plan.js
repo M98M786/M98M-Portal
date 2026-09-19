@@ -71,6 +71,8 @@
     h += '<div class="wr-hero"><h2>' + esc(String(v.move || '').replace(/^./, function (c) { return c.toUpperCase(); })) + '</h2>' +
       '<div class="wr-sub">' + esc(v.detail || '') +
       (gain > 0 ? ' <b style="color:var(--gold-a)">That is ' + gbp(gain) + ' a day, about ' + gbp0(gain * 30) + ' a month.</b>' : '') +
+      '<div class="wr-sub" style="margin-top:8px;font-size:12px">Cutting a listing does not take its sales to zero — some would have come without the ad. ' +
+      'So this is the floor on what switching them off is worth, not the ceiling.</div>' +
       '</div></div>';
 
     /* ---- where you are, where the money peaks, and what the 6x target really costs ---- */
