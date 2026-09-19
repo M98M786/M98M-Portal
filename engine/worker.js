@@ -8068,6 +8068,19 @@ async function truthTier1(env) {
   const T2 = await metricTasks(env);
   const q = await env.DB.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status = 'Submitted — awaiting approval'").first();
   out.push({ metric_id: 'WAITING_ON_ME', scope_key: 'all', shown: T2.WAITING_ON_ME, recomputed: Number(q && q.n) || 0, delta: T2.WAITING_ON_ME - (Number(q && q.n) || 0), status: T2.WAITING_ON_ME === (Number(q && q.n) || 0) ? 'PASS' : 'FAIL', method: 'D1_RECOMPUTE', next_run_at: next });
+  /* A tracking push eBay rejected is invisible to everything downstream: the row keeps the
+     tracking number, so trackingBackfill's 'has no tracking' filter skips it for good and no
+     sweep ever looks at push_status again. Seven orders had been sitting like that since
+     25 Aug. Counted here so the board shows them; INFO, not FAIL, because the number is not
+     wrong — the push failed, and re-pushing to eBay is a buyer-facing act someone must choose. */
+  const tpf = await env.DB.prepare(
+    "SELECT COUNT(*) AS n, MIN(pushed_at) AS oldest FROM trackings WHERE push_status LIKE 'FAIL%'"
+  ).first().catch(() => null);
+  const tpfN = Number(tpf && tpf.n) || 0;
+  out.push({ metric_id: 'TRACKING_PUSH_FAILED', scope_key: 'all', shown: 0, recomputed: tpfN, delta: tpfN,
+    status: tpfN === 0 ? 'PASS' : 'INFO', method: 'D1_RECOMPUTE',
+    evidence: tpfN === 0 ? 'every tracking push accepted' : tpfN + ' tracking push(es) rejected by eBay and never retried, oldest ' + String((tpf && tpf.oldest) || '') + ' — the order shows no tracking to the buyer',
+    next_run_at: next });
   await truthWrite(env, out);
   return out.length;
 }
