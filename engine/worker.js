@@ -8082,47 +8082,53 @@ async function truthTier3Gate(env) {
   await ctx_setSync(env, 'truthTier3', '', today);
 }
 
+/* One day, every account, re-read from the money-book mirror. Lifted out of truthTier3 so the
+   backfill below can re-check a day the rolling window has already passed: tier3 only ever looks
+   at days -2..-7, so a metric that started being emitted today is never filled in for the days
+   before it — which is exactly how 4-11 Sept ended up with verified profit and unverified VAT. */
+async function truthRecheckDay(env, accounts, day, out) {
+  const next = new Date(Date.now() + 86400000).toISOString();
+  for (const acct of accounts) {
+    const A = await metricMoney(env, acct, day, day);
+    const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, day).all();
+    let t2 = 0, s2 = 0, bad = 0, checked = 0, tot = null, totS = null;
+    for (const row of (rs.results || [])) {
+      let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
+      if (srIsTotalRow(v)) {
+        tot = (tot || 0) + (Number(v['Raw Profit']) || 0);
+        totS = (totS || 0) + (Number(v['VAT to HMRC']) || 0);
+        continue;
+      }
+      if (!srIsItemRow(v)) continue;
+      checked++;
+      const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
+      if (Math.abs(T - (R - S)) > 0.011) bad++;
+      t2 += T;
+      s2 += S;
+    }
+    if (tot !== null) { t2 = tot; }               // the tab's own totals row is the number
+    if (totS !== null) { s2 = totS; }
+    out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + day, shown: A.ACTUAL_PROFIT, recomputed: round2(t2),
+      delta: round2(Math.abs(round2(t2) - A.ACTUAL_PROFIT)), status: checked === 0 ? 'STALE' : (Math.abs(round2(t2) - A.ACTUAL_PROFIT) <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'),
+      method: 'SHEET_RECOMPUTE', evidence: checked + ' rows, ' + bad + ' formula fails', next_run_at: next });
+    /* VAT had only ever been checked by tier1, on the single night the day was 'yesterday'.
+       When an account's day tab had not synced by then the check recorded STALE and no pass
+       ever came back for it — 57 days of a VAT-registered business's VAT unverified. Tier3
+       already re-reads those same rows; it now re-checks VAT with them. */
+    out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + day, shown: A.VAT_TO_HMRC, recomputed: round2(s2),
+      delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'),
+      method: 'SHEET_RECOMPUTE', evidence: checked + ' rows', next_run_at: next });
+  }
+  return out.length;
+}
+
 async function truthTier3(env) {
   /* penny audit: every row of yesterday, every account (already inside tier1's per-row loop for
      yesterday; tier3 extends to the last 7 closed days) */
   await ensureTruthSchema(env);
-  const next = new Date(Date.now() + 86400000).toISOString();
   const out = [];
   const accounts = await apiAccounts(env);
-  for (let k = 2; k <= 7; k++) {
-    const day = pkToday(-k);
-    for (const acct of accounts) {
-      const A = await metricMoney(env, acct, day, day);
-      const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, day).all();
-      let t2 = 0, s2 = 0, bad = 0, checked = 0, tot = null, totS = null;
-      for (const row of (rs.results || [])) {
-        let v; try { v = JSON.parse(row.vals || '{}'); } catch (e) { continue; }
-        if (srIsTotalRow(v)) {
-          tot = (tot || 0) + (Number(v['Raw Profit']) || 0);
-          totS = (totS || 0) + (Number(v['VAT to HMRC']) || 0);
-          continue;
-        }
-        if (!srIsItemRow(v)) continue;
-        checked++;
-        const R = Number(v['True Order Earning']) || 0, S = Number(v['VAT to HMRC']) || 0, T = Number(v['Raw Profit']) || 0;
-        if (Math.abs(T - (R - S)) > 0.011) bad++;
-        t2 += T;
-        s2 += S;
-      }
-      if (tot !== null) { t2 = tot; }               // the tab's own totals row is the number
-      if (totS !== null) { s2 = totS; }
-      out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + day, shown: A.ACTUAL_PROFIT, recomputed: round2(t2),
-        delta: round2(Math.abs(round2(t2) - A.ACTUAL_PROFIT)), status: checked === 0 ? 'STALE' : (Math.abs(round2(t2) - A.ACTUAL_PROFIT) <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'),
-        method: 'SHEET_RECOMPUTE', evidence: checked + ' rows, ' + bad + ' formula fails', next_run_at: next });
-      /* VAT had only ever been checked by tier1, on the single night the day was 'yesterday'.
-         When an account's day tab had not synced by then the check recorded STALE and no pass
-         ever came back for it — 57 days of a VAT-registered business's VAT unverified. Tier3
-         already re-reads those same rows; it now re-checks VAT with them. */
-      out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + day, shown: A.VAT_TO_HMRC, recomputed: round2(s2),
-        delta: round2(Math.abs(round2(s2) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(s2) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'),
-        method: 'SHEET_RECOMPUTE', evidence: checked + ' rows', next_run_at: next });
-    }
-  }
+  for (let k = 2; k <= 7; k++) await truthRecheckDay(env, accounts, pkToday(-k), out);
   await truthWrite(env, out);
   /* prune old runs */
   await env.DB.prepare("DELETE FROM validation_runs WHERE ran_at < datetime('now', '-14 day')").run().catch(() => {});
@@ -12688,6 +12694,42 @@ const ROUTES = {
           rows_filled: lagRowsFilled, orders_expected: lagOrders, estimates_used: estUsed,
           ratio_window: RB.window, actual_ratio_fleet: Math.round(RB.fleet.ap * 1000) / 10 }, 'lag', 'sheet vs orders'),
       } };
+    },
+  },
+
+  /* A metric that starts being emitted today leaves every earlier day unverified for good:
+     tier3's window is the last six closed days and it never comes back. That is how the VAT
+     re-check added on 18 Sept left 4-11 Sept verified for profit and blank for VAT, on a
+     VAT-registered business — and the 14-day prune then deletes the STALE rows, so the hole
+     erases its own evidence. This re-runs the same day-check over an explicit window.
+     Read-only against the books: it recomputes from the sheet_rows mirror and writes nothing
+     but the truth ledger. Capped at 7 days a call so one invocation cannot blow the subrequest
+     budget; call again with an earlier window to keep going. */
+  truthBackfill: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+      const from = ymd(p.from), to = ymd(p.to);
+      if (!from || !to) throw new Error('SAY: pass from and to as YYYY-MM-DD');
+      if (from > to) throw new Error('SAY: from is after to');
+      const days = [];
+      for (let d = new Date(from + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+        days.push(d.toISOString().slice(0, 10));
+      }
+      if (days.length > 7) throw new Error('SAY: at most 7 days a call — you asked for ' + days.length);
+      /* never re-check a day the books may still be filling: yesterday and today belong to tier1 */
+      const floor = pkToday(-2);
+      const late = days.filter((d) => d > floor);
+      if (late.length) throw new Error('SAY: ' + late.join(', ') + ' is not a closed day yet (tier1 owns it)');
+      await ensureTruthSchema(ctx.env);
+      const accounts = await apiAccounts(ctx.env);
+      const out = [];
+      for (const day of days) await truthRecheckDay(ctx.env, accounts, day, out);
+      await truthWrite(ctx.env, out);
+      const counts = {};
+      for (const r of out) counts[r.status] = (counts[r.status] || 0) + 1;
+      return { days, accounts: accounts.length, written: out.length, counts,
+        fails: out.filter((r) => r.status === 'FAIL').map((r) => ({ metric: r.metric_id, scope: r.scope_key, shown: r.shown, recomputed: r.recomputed, delta: r.delta })),
+        stale: out.filter((r) => r.status === 'STALE').map((r) => r.metric_id + ' ' + r.scope_key) };
     },
   },
 
