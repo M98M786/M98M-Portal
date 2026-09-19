@@ -118,7 +118,7 @@
         '<div class="ld-mid"><div class="ld-title"><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' + esc(String(r.title || r.item_id).slice(0, 90)) + '</a></div>' +
           '<div class="ld-badges">' +
             (dd != null ? '<span class="ld-b age' + (hot ? ' hot' : '') + '">' + dd + ' days live</span>' : '') +
-            (ldSold(r) ? '<span class="ld-b sold">' + ldSold(r) + ' sold since</span>' : '<span class="ld-b zero">0 sold</span>') +
+            (ldSold(r) ? '<span class="ld-b sold">' + ldSold(r) + ' sold</span>' : '<span class="ld-b zero">0 sold</span>') +
             '<span class="ld-b">£' + ldNum(r.price).toFixed(2) + '</span>' +
             (!ldLive(r) ? '<span class="ld-b gone">no longer live on eBay</span>'
               : (r.stock != null && r.stock !== '' ? '<span class="ld-b">' + ldNum(r.stock) + ' in stock</span>' : '')) +
@@ -135,7 +135,7 @@
           '<button class="minibtn" data-ld-v="KEEP">Keep</button></div>';
       } else if (!isPend) {
         var bySystem = String(r.decided_by || '') === 'system';
-        var word = r.status === 'SOLD' ? 'SOLD SINCE' : r.status === 'ENDED' ? 'ENDED ON EBAY' : String(r.status);
+        var word = r.status === 'SOLD' ? 'SOLD' : r.status === 'ENDED' ? 'ENDED ON EBAY' : String(r.status);
         h += '<div class="ld-acts"><span class="ld-done ' + esc(String(r.status)) + '">' + esc(word) + '</span>' +
           '<span class="ld-meta">' + (bySystem ? 'closed by the system' : 'by ' + esc(String(r.decided_by || '').split('@')[0])) +
           ' · ' + esc(String(r.decided_at || '').slice(0, 16)) +
