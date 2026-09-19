@@ -3290,6 +3290,12 @@ async function ensureAdtoolPhase1Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_orders (account TEXT NOT NULL, order_id TEXT NOT NULL, item_id TEXT DEFAULT '', created_utc TEXT, created_local TEXT, local_date TEXT, local_hour INTEGER, slot INTEGER, weekday INTEGER, qty INTEGER DEFAULT 1, sale_price REAL DEFAULT 0, status TEXT DEFAULT '', refunded REAL DEFAULT 0, ali_cost REAL DEFAULT 0, ebay_fees REAL DEFAULT 0, order_earning REAL DEFAULT 0, vat_ex_ads REAL DEFAULT 0, raw_ex_ads REAL DEFAULT 0, cost_pending INTEGER DEFAULT 0, ad_attributed INTEGER, updated_at TEXT, PRIMARY KEY (account, order_id))",
     "CREATE INDEX IF NOT EXISTS idx_adto_item_day ON adtool_orders(item_id, local_date)",
     "CREATE INDEX IF NOT EXISTS idx_adto_day ON adtool_orders(local_date, account)",
+    /* One row per active listing per day, so "how long has this been at the same price" becomes a
+       fact rather than a guess. eBay only lets a listing into a sale event after 14 days at the SAME
+       PRICE, and the only thing we had was items_api.last_revised — which moves for a title edit as
+       readily as a price cut, and says 823 of 881 listings are disqualified. That is almost certainly
+       too harsh, but without this table there is no way to know. Costs one small write a day. */
+    "CREATE TABLE IF NOT EXISTS adtool_price_day (item_id TEXT NOT NULL, day TEXT NOT NULL, price REAL, PRIMARY KEY (item_id, day))",
     "CREATE TABLE IF NOT EXISTS adtool_listings (item_id TEXT PRIMARY KEY, account TEXT, title TEXT DEFAULT '', ebay_category_id TEXT DEFAULT '', ebay_category_path TEXT DEFAULT '', m98m_category TEXT DEFAULT '', category_source TEXT DEFAULT 'rule', is_case INTEGER DEFAULT 0, case_type TEXT DEFAULT '', case_type_source TEXT DEFAULT 'rule', price REAL DEFAULT 0, margin_before_ads REAL, margin_source TEXT DEFAULT '', breakeven_roas REAL, start_time TEXT DEFAULT '', quantity INTEGER DEFAULT 0, status TEXT DEFAULT '', first_ad_day TEXT DEFAULT '', first_order_day TEXT DEFAULT '', last_ad_day TEXT DEFAULT '', campaigns_json TEXT DEFAULT '[]', synced_at TEXT)",
     "CREATE TABLE IF NOT EXISTS adtool_listing_day (account TEXT NOT NULL, item_id TEXT NOT NULL, day TEXT NOT NULL, weekday INTEGER, dom INTEGER, orders INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, actual_profit REAL, pending_cost_orders INTEGER DEFAULT 0, refunds REAL DEFAULT 0, impressions INTEGER, clicks INTEGER DEFAULT 0, spend REAL DEFAULT 0, cpc_spend REAL DEFAULT 0, attr_units INTEGER DEFAULT 0, attr_revenue REAL DEFAULT 0, roas REAL, ad_profit REAL, budget_capped INTEGER DEFAULT 0, ad_active_campaigns INTEGER DEFAULT 0, ad_paused_campaigns INTEGER DEFAULT 0, PRIMARY KEY (account, item_id, day))",
     "CREATE INDEX IF NOT EXISTS idx_adtld_day ON adtool_listing_day(day, account)",
@@ -3530,6 +3536,15 @@ async function adtoolRollups(env) {
   let rows = 0, note = '';
   try {
     const today = ukDate('');
+    /* today's price for every active listing — INSERT OR IGNORE, so the first write of the day wins
+       and the other 23 runs cost nothing. The history this builds is what makes the sale-event
+       eligibility clock real; until it has 14 days in it, that clock can only be estimated. */
+    try {
+      await env.DB.prepare(
+        'INSERT OR IGNORE INTO adtool_price_day (item_id, day, price) ' +
+        "SELECT item_id, ?1, price FROM items_api WHERE status = 'ACTIVE' AND price > 0"
+      ).bind(today).run();
+    } catch (e) { /* never let a snapshot stop the rollups */ }
     const t0 = Date.now(), BUDGET_MS = 240000;   // one cron invocation may keep building chunks for up to 4 minutes
     let cursor = await adtFlag(env, 'adtool_rollup_cursor');       // last fully built day, or 'off'
     const notes = [];
