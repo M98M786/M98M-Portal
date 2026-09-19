@@ -45,6 +45,19 @@
     var D = SV.data, h = '';
     h += '<div class="sv-rules">' + (D.rules || []).map(function (r) { return '<span class="sv-rule">' + esc(r) + '</span>'; }).join('') + '</div>';
 
+    /* The single most important fact on the page: are the running events set to the whole shop? */
+    var anyCover = D.covers_whole_shop || [];
+    if (anyCover.length) {
+      h += '<div class="sv-panel" style="border-color:var(--gold-b)"><h3>You already have this</h3>' +
+        '<div class="sv-note">All ' + anyCover.length + ' running sale events are set to <b>ALL INVENTORY</b> — the whole shop, ' +
+        'not a chosen list. eBay returns no listing list for those, which is why the item count reads zero: it means ' +
+        '<b>not enumerated</b>, never empty. eBay puts each listing into the sale itself the moment it qualifies and takes ' +
+        'it out again when it stops. <b>So your rule of a sale always running with at least half the listings in it is ' +
+        'already met, and beaten</b> — the target is every eligible listing, not half. No cohort schedule is needed and ' +
+        'this page no longer proposes one. What limits coverage is the 14-day price rule below, which is a revision ' +
+        'problem and not a scheduling one.</div></div>';
+    }
+
     /* the honest health warning comes first, not buried */
     if (!D.clock_is_real) {
       h += '<div class="sv-warn"><b>The qualifying clock is an estimate until ' +
@@ -68,8 +81,8 @@
           '<td>' + (a.meets_half ? '<span class="sv-ok">can run one now</span>' : '<span class="sv-no">short by ' + (a.half - a.eligible) + '</span>') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
 
-    /* the rotation itself */
-    h += '<div class="sv-panel"><h3>The rotation that never stops</h3>' +
+    /* the rotation, kept only for the case where an event is built from a chosen list instead */
+    if (!anyCover.length) h += '<div class="sv-panel"><h3>The rotation that never stops</h3>' +
       '<div class="sv-note">Split the qualifying listings in two and alternate them every 14 days. While one half is in a sale the ' +
       'other half is serving the 14-day cooldown eBay requires, so there is always an event running and every listing is always ' +
       'either selling at a discount or earning back its eligibility. Cohort A holds <b>' + D.cohorts.a + '</b> listings, B holds <b>' +

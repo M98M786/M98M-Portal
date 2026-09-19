@@ -6305,6 +6305,12 @@ const ADTOOL_ACTIONS_P10 = {
         "SELECT account, name, status, discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
         "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%' ORDER BY account"
       ).all()).results || [];
+      /* INVENTORY_ANY means the event covers the WHOLE SHOP — eBay does not return a listing list
+         because there is no list, and it adds each listing itself the moment that listing qualifies.
+         An item count of zero on such an event means "not enumerated", never "empty". Getting this
+         backwards would have had the owner building a rotation he does not need. */
+      const anyCover = live.filter(r => String(r.criterion) === 'INVENTORY_ANY').map(r => r.account);
+      const covered = {}; for (const a of anyCover) covered[a] = true;
       return {
         today,
         rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
@@ -6321,6 +6327,8 @@ const ADTOOL_ACTIONS_P10 = {
         blocked_sample: items.filter(i => !i.eligible).slice(0, 40),
         eligible_sample: items.filter(i => i.eligible).slice(0, 40),
         running: live,
+        covers_whole_shop: anyCover,
+        rotation_needed: anyCover.length < (Object.keys(byAcct).length || 1),
         computed_at: new Date().toISOString(),
         source: 'items_api + adtool_price_day · eBay sale-event rules, Seller Centre'
       };
