@@ -6154,6 +6154,20 @@ const ADTOOL_ACTIONS_P9 = {
       return {
         window: { from, to, days },
         account: acct || 'all',
+        /* ~70 points along the curve so the page can draw the shape rather than a few anchors.
+           The peak and every ROAS mark are forced in, so the turn is never sampled away. */
+        curve_points: (function () {
+          const n = C.curve.length; if (!n) return [];
+          const want = {}; if (C.peak) want[C.peak.keep] = 'peak'; want[n] = 'now';
+          for (const k of Object.keys(C.marks)) want[C.marks[k].keep] = k + '×';
+          const step = Math.max(1, Math.floor(n / 70)); const out = [];
+          for (let i = 0; i < n; i++) {
+            const pt = C.curve[i];
+            if (i % step !== 0 && !want[pt.keep] && i !== n - 1) continue;
+            out.push({ keep: pt.keep, x: perDay(pt.spend), y: perDay(pt.profit), roas: pt.roas, tag: want[pt.keep] || '' });
+          }
+          return out;
+        })(),
         now: shape(C.all),
         peak: shape(C.peak),
         targets: Object.keys(C.marks).sort((a, b) => Number(b) - Number(a)).map(k => Object.assign({ target: Number(k) }, shape(C.marks[k]))),
