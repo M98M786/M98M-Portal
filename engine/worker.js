@@ -13372,12 +13372,16 @@ const ROUTES = {
      99.4% of them already delivered. The value of this desk is SUPPRESSION, so each order is now
      judged against real evidence and only what survives is put in front of a person:
 
-       chasing      the buyer opened a case and has not since left feedback — it has NOT arrived
+       chasing      an OPEN item-not-received case or money claim — the buyer says it is not here
        no_tracking  no tracking number at all, and the order was never cancelled
        unconfirmed  tracked, the estimate has passed, and nothing says either way — confirm it
        in_transit   tracked and still inside the estimate — nothing to do
-       delivered    the buyer left feedback after the order — proof it arrived
-       settled      cancelled or refunded — closed, nobody chases it
+       delivered    the buyer left feedback, or opened a RETURN — either way the parcel reached them
+       settled      cancelled, refunded, or a not-received case somebody already closed
+
+     Only an item-not-received case means "not delivered". A return means the opposite: the buyer
+     is holding the item and wants to send it back, so it belongs with the proof, not the chase —
+     counting returns as late was what put three of Wahab's five and both of Zeeshan's on the list.
 
      eBay returns a BLANK order_id on every item-not-received case, so a case is matched to its
      order by the buyer and the item they bought; feedback is matched the same way. Both proofs are
@@ -13455,17 +13459,26 @@ const ROUTES = {
           const cancelled = /CANCEL/i.test(String(r.status || ''));
           const refunded = Number(r.refunded) > 0;
 
+          const kind = cs ? String(cs.kind || '') : '';
+          const caseOpen = !!cs && !/CLOSED/i.test(String(cs.status || ''));
+          const notReceived = kind === 'INR' || kind === 'CASE';   // CASE = an escalated money claim
           let state, why;
           if (cancelled || refunded) {
             state = 'settled';
             why = cancelled ? 'cancelled' + (refunded ? ' and refunded' : '') : 'refunded — closed';
-          } else if (cs && (!fb || String(fb.at) < String(cs.opened_at))) {
+          } else if (notReceived && caseOpen) {
             state = 'chasing';
-            why = 'the buyer opened ' + (String(cs.kind) === 'INR' ? 'an item-not-received case' : String(cs.kind) === 'RETURN' ? 'a return' : 'a case') +
-              ' on ' + nice(cs.opened_at) + (String(cs.status || '') ? ' (' + String(cs.status).toLowerCase().replace(/_/g, ' ') + ')' : '');
+            why = 'the buyer opened ' + (kind === 'INR' ? 'an item-not-received case' : 'a money claim') + ' on ' + nice(cs.opened_at) +
+              ' and it is still ' + String(cs.status || 'open').toLowerCase().replace(/_/g, ' ');
           } else if (fb) {
             state = 'delivered';
             why = 'the buyer left feedback on ' + nice(fb.at) + ' — it arrived';
+          } else if (kind === 'RETURN') {
+            state = 'delivered';
+            why = 'the buyer opened a return on ' + nice(cs.opened_at) + ' — they have the item';
+          } else if (notReceived) {
+            state = 'settled';
+            why = 'an item-not-received case was opened on ' + nice(cs.opened_at) + ' and has been closed';
           } else if (!r.tracking) {
             state = 'no_tracking';
             why = 'no tracking number ' + o.days + ' days after the order';
@@ -13513,10 +13526,10 @@ const ROUTES = {
       }
 
       return { day, source, checkpoints: out,
-        legend: { chasing: 'the buyer says it has not arrived', no_tracking: 'no tracking number at all',
+        legend: { chasing: 'an open item-not-received case — the buyer says it is not here', no_tracking: 'no tracking number at all',
           unconfirmed: 'tracked, estimate passed, no news either way', in_transit: 'tracked and inside the estimate',
-          delivered: 'the buyer left feedback — it arrived', settled: 'cancelled or refunded' },
-        note: 'A case and a feedback are matched to an order by buyer + item, because eBay returns a blank order id on item-not-received cases. "Needs you" is only the buyer-chasing and no-tracking orders; everything else is either proven delivered, still inside the estimate, settled, or waiting to be confirmed.' };
+          delivered: 'the buyer left feedback or opened a return — the parcel reached them', settled: 'cancelled, refunded, or a closed not-received case' },
+        note: 'Cases and feedback are matched to an order by buyer + item, because eBay returns a blank order id on item-not-received cases. Only an OPEN item-not-received case counts as late; a return proves the opposite, because the buyer is holding the item. Everything outside "needs you" is proven delivered, still inside the estimate, settled, or waiting to be confirmed.' };
     },
   },
 
