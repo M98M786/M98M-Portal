@@ -1160,6 +1160,31 @@ async function darkAccountWatch(env) {
 }
 
 async function zeroSaleScan(env) {
+  /* 19 Sept (owner: "listing decisions page is showing all wrong numbers & not updating on time").
+     A row was INSERTed once and never looked at again, so the board kept asking for a decision on
+     listings that had since sold or been ended — five of twenty had sold, two no longer existed on
+     eBay, and the screen still printed "0 sold" and a stock count for them. Reality answers most of
+     these rows by itself, so answer them here before anyone is asked to. */
+  const healed = { sold: 0, ended: 0 };
+  const soldFix = await env.DB.prepare(
+    "UPDATE listing_decisions SET status = 'SOLD', decided_by = 'system', decided_at = datetime('now'), " +
+    "  note = note || ' · closed by the system: it has sold since it was flagged' " +
+    "WHERE status = 'PENDING' AND (EXISTS (SELECT 1 FROM orders o WHERE o.item_id = listing_decisions.item_id) " +
+    "  OR EXISTS (SELECT 1 FROM items_api i WHERE i.item_id = listing_decisions.item_id AND COALESCE(i.sold_qty, 0) > 0))"
+  ).run().catch(() => null);
+  healed.sold = (soldFix && soldFix.meta && soldFix.meta.changes) || 0;
+  const endFix = await env.DB.prepare(
+    "UPDATE listing_decisions SET status = 'ENDED', decided_by = 'system', decided_at = datetime('now'), " +
+    "  note = note || ' · closed by the system: the listing is no longer active on eBay' " +
+    "WHERE status = 'PENDING' AND EXISTS (SELECT 1 FROM items_api i WHERE i.item_id = listing_decisions.item_id AND i.status != 'ACTIVE')"
+  ).run().catch(() => null);
+  healed.ended = (endFix && endFix.meta && endFix.meta.changes) || 0;
+
+  /* The intake used to stop at 21 days, so a listing that aged past three weeks before the scan
+     reached it was never queued at all — 41 live zero-sale listings were sitting outside the board
+     on 19 Sept, the oldest from January. The floor is still 7 days; the ceiling is now wide enough
+     that nothing falls out of the back, and eBay's own lifetime sold count joins the order history
+     in deciding what counts as "no sale". */
   const rs = await env.DB.prepare(
     "SELECT i.item_id, i.account, i.title, i.price, " +
     "  CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END AS born, " +
@@ -1167,10 +1192,11 @@ async function zeroSaleScan(env) {
     "FROM items_api i " +
     "WHERE i.status = 'ACTIVE' AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) != '' " +
     "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) <= datetime('now', '-7 day') " +
-    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-21 day') " +
+    "  AND (CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END) >= datetime('now', '-120 day') " +
+    "  AND COALESCE(i.sold_qty, 0) = 0 " +
     "  AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.item_id = i.item_id) " +
     "  AND NOT EXISTS (SELECT 1 FROM listing_decisions d WHERE d.item_id = i.item_id) " +
-    'LIMIT 25'
+    'ORDER BY (CASE WHEN i.start_time != \'\' THEN i.start_time ELSE i.first_seen END) ASC LIMIT 60'
   ).all();
   const rows = rs.results || [];
   /* R7-6 (Hasib): "any account item with no orders in 7 days → product revision task with
@@ -1182,6 +1208,10 @@ async function zeroSaleScan(env) {
     return days + ' days live (' + r.clock + ' ' + String(r.born).slice(0, 10) + '), £' +
       (Number(r.price) || 0).toFixed(2) + ', 0 orders — revise the title, main image, price or campaign, or end it.';
   };
+  if (!rows.length && (healed.sold || healed.ended)) {
+    await ctx_setSync(env, 'zeroSaleScan', '', ukDate(''));
+    return 'zeroSaleScan: closed ' + healed.sold + ' sold and ' + healed.ended + ' ended, nothing new';
+  }
   const ins = rows.map((r) => env.DB.prepare(
     "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note) " +
     "VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), 'PENDING', '', '', '', ?7)"
@@ -9217,9 +9247,13 @@ const ROUTES = {
       const rs = await ctx.env.DB.prepare(
         'SELECT d.item_id, d.account, d.title, d.price, d.born, d.clock, d.flagged_at, d.status, d.decided_by, d.decided_at, d.assignee, d.note, ' +
         'p.hunter_email, p.lister_email, ia.qty AS stock, ia.image, ia.sold_qty, ia.start_time, ' +
+        'ia.status AS live_status, ' +
+        '(SELECT COUNT(*) FROM orders o WHERE o.item_id = d.item_id) AS orders_n, ' +
         '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.listing_id = d.item_id) AS ad_n, ' +
         '(SELECT c.funding_model FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = d.item_id LIMIT 1) AS ad_model ' +
-        'FROM listing_decisions d LEFT JOIN provenance p ON p.item_id = d.item_id LEFT JOIN items_api ia ON ia.item_id = d.item_id ' + (mgmt ? '' : 'WHERE d.assignee = ?1 ') +
+        'FROM listing_decisions d LEFT JOIN provenance p ON p.item_id = d.item_id LEFT JOIN items_api ia ON ia.item_id = d.item_id ' +
+        /* the board is about what is waiting: a decision older than three weeks is history, not work */
+        "WHERE (d.status = 'PENDING' OR d.decided_at >= datetime('now', '-21 day')) " + (mgmt ? '' : 'AND d.assignee = ?1 ') +
         'ORDER BY CASE d.status WHEN \'PENDING\' THEN 0 ELSE 1 END, d.flagged_at DESC LIMIT 200'
       ).bind(...(mgmt ? [] : [ctx.user.email])).all();
       let listers = [];
@@ -9232,8 +9266,27 @@ const ROUTES = {
       /* Seeing the queue and deciding it are different powers: the Team Lead reads everything
          but only Management/Ops Head get live buttons — the screen keys off canDecide. */
       const canDecide = ['Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || !!ctx.user.super;
+      /* The tiles are counted here, over the WHOLE table, so a capped list can never make the
+         headline numbers disagree with the queue. "Today" is the office day in Pakistan. */
+      const pkDay = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+      const sum = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS pending, " +
+        "  SUM(CASE WHEN (SELECT COUNT(*) FROM campaign_ads ca WHERE ca.listing_id = d.item_id) = 0 THEN 1 ELSE 0 END) AS never_advertised " +
+        "FROM listing_decisions d WHERE d.status = 'PENDING'"
+      ).first().catch(() => null);
+      const today = await ctx.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM listing_decisions WHERE status != 'PENDING' AND decided_by != 'system' " +
+        "  AND substr(datetime(decided_at, '+5 hours'), 1, 10) = ?1"
+      ).bind(pkDay).first().catch(() => null);
+      const auto = await ctx.env.DB.prepare(
+        "SELECT SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold, SUM(CASE WHEN status = 'ENDED' THEN 1 ELSE 0 END) AS ended " +
+        "FROM listing_decisions WHERE decided_by = 'system' AND decided_at >= datetime('now', '-7 day')"
+      ).first().catch(() => null);
       return { rows: rs.results || [], mgmt, canDecide, listers,
-        note: 'A listing enters this queue once, when it passes 7 days with no sale (eBay’s StartTime where the sync has it, portal first-seen otherwise, and each row names its clock).' };
+        counts: { pending: Number(sum && sum.pending) || 0, never_advertised: Number(sum && sum.never_advertised) || 0,
+          decided_today: Number(today && today.n) || 0,
+          auto_sold: Number(auto && auto.sold) || 0, auto_ended: Number(auto && auto.ended) || 0 },
+        note: 'A listing enters this queue when it passes 7 days with no sale (eBay’s StartTime where the sync has it, portal first-seen otherwise, and each row names its clock). It leaves on its own the moment it sells or is ended on eBay — those rows are marked closed by the system, not by a person.' };
     },
   },
   /* The decide lever: END lands with the Team Lead, REVISE with the chosen listing manager,

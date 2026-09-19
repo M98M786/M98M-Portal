@@ -6,7 +6,7 @@
 (function () {
 
   var LD_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Listing Manager', 'Item Lister'];
-  var LD = { listers: [], rows: [], sort: 'old', canDecide: false, note: '' };
+  var LD = { listers: [], rows: [], sort: 'old', canDecide: false, note: '', counts: null };
   var LD_ICON = { case: '📱', phone: '📱', light: '💡', lamp: '💡', led: '💡', charger: '🔌', usb: '🔌',
     wallet: '👛', sock: '🧦', wipe: '🧻', towel: '🧻', watch: '⌚', torch: '🔦', cable: '🔌', def: '📦' };
 
@@ -35,6 +35,8 @@
     '.ld-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}' +
     '.ld-done{font-size:11px;font-weight:800}' +
     '.ld-done.END{color:var(--bad)}.ld-done.REVISE{color:var(--gold-a)}.ld-done.KEEP{color:var(--ok,#5fbf7a)}' +
+    '.ld-done.SOLD{color:var(--ok,#5fbf7a)}.ld-done.ENDED{color:var(--text-3)}' +
+    '.ld-b.sold{color:#5fbf7a;border-color:rgba(79,192,141,.4)}.ld-b.gone{color:var(--text-3)}' +
     '@media(max-width:720px){.ld-row{grid-template-columns:48px 1fr}.ld-acts{grid-column:1/-1;justify-content:flex-start}}'
   );
 
@@ -50,6 +52,12 @@
     var k = Object.keys(LD_ICON).filter(function (x) { return x !== 'def' && t.indexOf(x) >= 0; })[0];
     return LD_ICON[k] || LD_ICON.def;
   }
+  /* The board used to print a hard-coded "0 sold" on every row, so a listing that had sold twice
+     since it was flagged still read as a dead listing (owner, 19 Sept). Count it from eBay's own
+     lifetime figure and the portal's order history, whichever knows more. */
+  function ldSold(r) { return Math.max(ldNum(r.orders_n), ldNum(r.sold_qty)); }
+  function ldLive(r) { var st = String(r.live_status || '').toUpperCase(); return !st || st === 'ACTIVE'; }
+
   function ldAds(r) {
     if (ldNum(r.ad_n) <= 0) { return ['noads', 'No ads — never promoted']; }
     return ['ads', /COST_PER_CLICK/i.test(String(r.ad_model || '')) ? 'CPC advertised' : 'General campaign'];
@@ -64,11 +72,18 @@
     var oldest = 0, neverAd = 0, decidedToday = 0, today = (new Date()).toISOString().slice(0, 10);
     pend.forEach(function (r) { var dd = ldDays(r); if (dd != null && dd > oldest) { oldest = dd; } if (ldNum(r.ad_n) <= 0) { neverAd++; } });
     rows.forEach(function (r) { if (r.status !== 'PENDING' && String(r.decided_at || '').slice(0, 10) === today) { decidedToday++; } });
+    /* The server counts the whole queue; this list is capped, so its numbers are only the fallback. */
+    var C = LD.counts || {}, nPend = (C.pending !== undefined ? ldNum(C.pending) : pend.length);
+    if (C.never_advertised !== undefined) { neverAd = ldNum(C.never_advertised); }
+    if (C.decided_today !== undefined) { decidedToday = ldNum(C.decided_today); }
+    var autoN = ldNum(C.auto_sold) + ldNum(C.auto_ended);
     var summary = '<div class="ld-summary">' +
-      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + pend.length + '</div><div class="s">7 days, no sale</div></div>' +
+      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + nPend + '</div><div class="s">7 days, no sale</div></div>' +
       '<div class="ld-st" style="--tone:var(--bad)"><div class="l">Oldest waiting</div><div class="v">' + (oldest || '—') + (oldest ? ' days' : '') + '</div><div class="s">every extra day costs fees</div></div>' +
       '<div class="ld-st" style="--tone:#e8a15a"><div class="l">Never advertised</div><div class="v">' + neverAd + '</div><div class="s">try ads before ending</div></div>' +
-      '<div class="ld-st" style="--tone:var(--ok,#5fbf7a)"><div class="l">Decided today</div><div class="v">' + decidedToday + '</div><div class="s">end · revise · keep</div></div></div>';
+      '<div class="ld-st" style="--tone:var(--ok,#5fbf7a)"><div class="l">Decided today</div><div class="v">' + decidedToday + '</div><div class="s">end · revise · keep</div></div>' +
+      (autoN ? '<div class="ld-st" style="--tone:#8dc6f2"><div class="l">Closed by itself</div><div class="v">' + autoN + '</div><div class="s">' +
+        ldNum(C.auto_sold) + ' sold · ' + ldNum(C.auto_ended) + ' ended on eBay, last 7 days</div></div>' : '') + '</div>';
 
     if (!pend.length && !rows.length) {
       box.innerHTML = summary + '<div style="color:var(--text-2);font-weight:700;padding:10px 0">Nothing waiting — no active listing has passed 7 days without a sale.' +
@@ -103,9 +118,10 @@
         '<div class="ld-mid"><div class="ld-title"><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' + esc(String(r.title || r.item_id).slice(0, 90)) + '</a></div>' +
           '<div class="ld-badges">' +
             (dd != null ? '<span class="ld-b age' + (hot ? ' hot' : '') + '">' + dd + ' days live</span>' : '') +
-            '<span class="ld-b zero">0 sold</span>' +
+            (ldSold(r) ? '<span class="ld-b sold">' + ldSold(r) + ' sold since</span>' : '<span class="ld-b zero">0 sold</span>') +
             '<span class="ld-b">£' + ldNum(r.price).toFixed(2) + '</span>' +
-            (r.stock != null && r.stock !== '' ? '<span class="ld-b">' + ldNum(r.stock) + ' in stock</span>' : '') +
+            (!ldLive(r) ? '<span class="ld-b gone">no longer live on eBay</span>'
+              : (r.stock != null && r.stock !== '' ? '<span class="ld-b">' + ldNum(r.stock) + ' in stock</span>' : '')) +
             '<span class="ld-b ' + ad[0] + '">' + ad[1] + '</span>' +
           '</div>' +
           '<div class="ld-meta">' + esc(String(r.account)) + ' · ' + esc(String(r.item_id)) + ' · listed ' + esc(String(r.born || r.start_time || '').slice(0, 10)) + ' (' + esc(String(r.clock || 'eBay')) + ')' +
@@ -118,8 +134,11 @@
           '<select class="alx-sel" data-ld-a>' + selOpts + '</select>' +
           '<button class="minibtn" data-ld-v="KEEP">Keep</button></div>';
       } else if (!isPend) {
-        h += '<div class="ld-acts"><span class="ld-done ' + esc(String(r.status)) + '">' + esc(String(r.status)) + '</span>' +
-          '<span class="ld-meta">by ' + esc(String(r.decided_by || '').split('@')[0]) + ' · ' + esc(String(r.decided_at || '').slice(0, 16)) +
+        var bySystem = String(r.decided_by || '') === 'system';
+        var word = r.status === 'SOLD' ? 'SOLD SINCE' : r.status === 'ENDED' ? 'ENDED ON EBAY' : String(r.status);
+        h += '<div class="ld-acts"><span class="ld-done ' + esc(String(r.status)) + '">' + esc(word) + '</span>' +
+          '<span class="ld-meta">' + (bySystem ? 'closed by the system' : 'by ' + esc(String(r.decided_by || '').split('@')[0])) +
+          ' · ' + esc(String(r.decided_at || '').slice(0, 16)) +
           (r.assignee ? ' → ' + esc(String(r.assignee).split('@')[0]) : '') + '</span></div>';
       } else {
         h += '<div class="ld-acts"><span class="ld-meta">Waiting on Management</span></div>';
@@ -165,6 +184,7 @@
       LD.listers = d.listers || [];
       LD.rows = d.rows || [];
       LD.canDecide = (d.canDecide !== undefined) ? d.canDecide : d.mgmt;
+      LD.counts = d.counts || null;
       LD.note = d.note || '';
       ldRender();
     }).catch(function (e) {
