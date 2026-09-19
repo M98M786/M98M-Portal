@@ -436,6 +436,41 @@ function chartLineSeries(pts, opt){
   return '<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="' + (opt.width || 2.6) +
     '" stroke-linejoin="round" stroke-linecap="round"/>' + chartValueDots(pts, opt);
 }
+/* A bar chart in one call, with the same number pills as the line kit — because a bar you cannot
+   read the value of is decoration. pts = [{label, value, title?, strong?}]. opt: {height, fmt,
+   color, strongColor, everyNth} — fmt turns a value into the pill text (chartMoney by default).
+   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. */
+function chartBars(pts, opt){
+  opt = opt || {}; if (!pts || !pts.length) { return ''; }
+  var H = opt.height || 150, W = 980, L = 46, R = 12, T = 22, B = 26;
+  var fmt = opt.fmt || chartMoney;
+  var col = opt.color || 'var(--gold-b)', strong = opt.strongColor || '#ffd27a';
+  var vals = pts.map(function(p){ return Number(p.value) || 0; });
+  var mx = Math.max.apply(null, vals.map(Math.abs)) || 1;
+  var zero = vals.some(function(v){ return v < 0; }) ? (T + (H - T - B) / 2) : (H - B);
+  var scale = (zero - T) / mx;
+  var bw = (W - L - R) / pts.length;
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
+  out += '<line x1="' + L + '" y1="' + zero.toFixed(1) + '" x2="' + (W - R) + '" y2="' + zero.toFixed(1) +
+         '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
+  var dots = [];
+  for (var i = 0; i < pts.length; i++){
+    var p = pts[i], v = Number(p.value) || 0;
+    var hgt = Math.max(1.5, Math.abs(v) * scale);
+    var x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
+    var y = v >= 0 ? zero - hgt : zero;
+    out += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) +
+           '" rx="2.5" fill="' + (p.strong ? strong : col) + '">' +
+           (p.title ? '<title>' + esc(p.title) + '</title>' : '') + '</rect>';
+    if (p.label != null && p.label !== '' && (!opt.everyNth || i % opt.everyNth === 0 || i === pts.length - 1)) {
+      out += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' +
+             esc(String(p.label)) + '</text>';
+    }
+    dots.push({ x: x + w / 2, y: (v >= 0 ? y : zero + hgt) + (v >= 0 ? -10 : 12), label: fmt(v), title: p.title || '' });
+  }
+  out += chartValueDots(dots, { color: opt.pillColor || 'var(--gold-a)', ink: '#1c1200', fontSize: 9.5, minGap: opt.minGap != null ? opt.minGap : 44 });
+  return out + '</svg>';
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */

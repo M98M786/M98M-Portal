@@ -436,6 +436,41 @@ function chartLineSeries(pts, opt){
   return '<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="' + (opt.width || 2.6) +
     '" stroke-linejoin="round" stroke-linecap="round"/>' + chartValueDots(pts, opt);
 }
+/* A bar chart in one call, with the same number pills as the line kit — because a bar you cannot
+   read the value of is decoration. pts = [{label, value, title?, strong?}]. opt: {height, fmt,
+   color, strongColor, everyNth} — fmt turns a value into the pill text (chartMoney by default).
+   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. */
+function chartBars(pts, opt){
+  opt = opt || {}; if (!pts || !pts.length) { return ''; }
+  var H = opt.height || 150, W = 980, L = 46, R = 12, T = 22, B = 26;
+  var fmt = opt.fmt || chartMoney;
+  var col = opt.color || 'var(--gold-b)', strong = opt.strongColor || '#ffd27a';
+  var vals = pts.map(function(p){ return Number(p.value) || 0; });
+  var mx = Math.max.apply(null, vals.map(Math.abs)) || 1;
+  var zero = vals.some(function(v){ return v < 0; }) ? (T + (H - T - B) / 2) : (H - B);
+  var scale = (zero - T) / mx;
+  var bw = (W - L - R) / pts.length;
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
+  out += '<line x1="' + L + '" y1="' + zero.toFixed(1) + '" x2="' + (W - R) + '" y2="' + zero.toFixed(1) +
+         '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
+  var dots = [];
+  for (var i = 0; i < pts.length; i++){
+    var p = pts[i], v = Number(p.value) || 0;
+    var hgt = Math.max(1.5, Math.abs(v) * scale);
+    var x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
+    var y = v >= 0 ? zero - hgt : zero;
+    out += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) +
+           '" rx="2.5" fill="' + (p.strong ? strong : col) + '">' +
+           (p.title ? '<title>' + esc(p.title) + '</title>' : '') + '</rect>';
+    if (p.label != null && p.label !== '' && (!opt.everyNth || i % opt.everyNth === 0 || i === pts.length - 1)) {
+      out += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' +
+             esc(String(p.label)) + '</text>';
+    }
+    dots.push({ x: x + w / 2, y: (v >= 0 ? y : zero + hgt) + (v >= 0 ? -10 : 12), label: fmt(v), title: p.title || '' });
+  }
+  out += chartValueDots(dots, { color: opt.pillColor || 'var(--gold-a)', ink: '#1c1200', fontSize: 9.5, minGap: opt.minGap != null ? opt.minGap : 44 });
+  return out + '</svg>';
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -740,7 +775,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260919-1756';
+var BUILD = '20260919-2001';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2804,12 +2839,23 @@ VIEWS.home = {
       api('adtoolCommand', {}).then(function (D) {
         var y = D.yesterday;
         var h = '<div class="an-kpis">' + kpi('Spend yesterday', gbp(y.spend, 0), esc(y.day) + ' · ' + (y.attr_units || 0) + ' ad sales') + kpi('ROAS', roas(y.roas), gbp(y.attr_revenue, 0) + ' attributed') + kpi('Est. ad profit', pm(y.ad_profit, 0), 'attributed × margin − spend', cls(y.ad_profit)) + kpi('Orders, all channels', String(y.orders || 0), (y.units || 0) + ' units') + kpi('Actual profit (Brain v17)', pm(y.actual_profit, 0), (y.pending || 0) + ' orders pending cost', cls(y.actual_profit)) + kpi('Open alerts', String((D.alerts && D.alerts.n) || 0), ((D.alerts && D.alerts.high) || 0) + ' high', (D.alerts && D.alerts.high) ? 'an-neg' : '') + kpi('Decisions waiting', String(D.decisions_waiting || 0), 'shadow mode') + '</div>';
-        if (D.report_hours) { var mx = Math.max.apply(null, D.report_hours.map(function (x) { return Math.max(x.units, x.expected || 0); })) || 1; h += '<div class="an-panel"><h3>Yesterday hour by hour' + src('orders') + src('fleet profile') + '</h3><div class="an-sub">Gold = units sold; red = an hour that came in more than 2σ under its expected share of the day.</div><div class="mo-hours">' + D.report_hours.map(function (x) { return '<div class="h' + (x.z != null && x.z <= -2 ? ' under' : '') + '" style="height:' + Math.max(1, Math.round(x.units / mx * 88)) + 'px" title="' + x.hour + ':00 — ' + x.units + ' units' + (x.expected != null ? ', expected ' + x.expected + (x.z != null ? ' (z ' + x.z + ')' : '') : '') + '"></div>'; }).join('') + '</div><div class="mo-hours">' + D.report_hours.map(function (x) { return '<div class="lab">' + (x.hour % 3 === 0 ? x.hour : '') + '</div>'; }).join('') + '</div></div>'; }
+        /* Bars you can read the value off, using the portal's own pill kit — the old version was heights
+           and a tooltip, which is a shape rather than a number. */
+        if (D.report_hours) { h += '<div class="an-panel"><h3>Yesterday hour by hour' + src('orders') + src('fleet profile') + '</h3>' +
+          '<div class="an-sub">Gold = units sold. Red = an hour that came in more than 2 sigma under the share of the day it usually takes.</div>' +
+          chartBars(D.report_hours.map(function (x) {
+            return { label: (x.hour < 10 ? '0' : '') + x.hour, value: Number(x.units) || 0, strong: (x.z != null && x.z <= -2),
+              title: x.hour + ':00 — ' + x.units + ' units' + (x.expected != null ? ', expected ' + x.expected : '') + (x.z != null ? ' (z ' + x.z + ')' : '') };
+          }), { height: 170, everyNth: 3, minGap: 32, strongColor: '#e0563f', fmt: function (v) { return String(Math.round(v)); } }) + '</div>'; }
         var tot = D.today_slots.reduce(function (t, s) { return t + Number(s.units); }, 0);
         h += '<div class="an-grid2"><div class="an-panel"><h3>Today so far by slot' + src('orders') + '</h3><div class="an-sub">Against the fleet\'s shrunk slot profile.</div><table class="an-tbl"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Share</th><th class="r">Profile</th></tr></thead><tbody>' + SLOTS.map(function (s, i) { var r = D.today_slots.filter(function (x) { return Number(x.slot) === i; })[0]; var u = r ? Number(r.units) : 0; var p = D.slot_profile && D.slot_profile.shares ? D.slot_profile.shares[i] : null; return '<tr><td>' + s + '</td><td class="r">' + u + '</td><td class="r">' + (tot ? Math.round(u / tot * 100) + '%' : '—') + '</td><td class="r">' + (p == null ? '—' : Math.round(p * 100) + '%') + '</td></tr>'; }).join('') + '</tbody></table></div>';
         h += '<div class="an-panel"><h3>Accounts, last 30 days' + src('eBay ads report') + '</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Est. ad profit</th></tr></thead><tbody>' + D.accounts.map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend, 0) + '</td><td class="r">' + a.attr_units + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : '—') + '</td><td class="r ' + cls(a.ad_profit) + '">' + pm(a.ad_profit, 0) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
-        var mxp = Math.max.apply(null, D.by_date.map(function (d) { return Math.abs(Number(d.ad_profit)); })) || 1;
-        h += '<div class="an-panel"><h3>Fleet est. ad profit by date' + src('eBay ads report') + '</h3><div class="an-sub">Sundays in light gold.</div><div style="display:flex;align-items:center;gap:3px;height:120px">' + D.by_date.map(function (d) { var v = Number(d.ad_profit); var hgt = Math.max(2, Math.round(Math.abs(v) / mxp * 55)); return '<div style="flex:1;display:flex;flex-direction:column;justify-content:center;height:100%" title="' + esc(d.day) + ' — ' + pm(v) + '"><div style="height:60px;display:flex;align-items:flex-end"><div style="width:100%;height:' + (v > 0 ? hgt : 0) + 'px;background:' + (Number(d.weekday) === 6 ? '#ffd27a' : 'var(--gold-b)') + ';border-radius:2px 2px 0 0"></div></div><div style="height:60px"><div style="width:100%;height:' + (v < 0 ? hgt : 0) + 'px;background:#e0563f;border-radius:0 0 2px 2px"></div></div></div>'; }).join('') + '</div><div style="display:flex;gap:3px;font-size:9px;color:var(--text-3)">' + D.by_date.map(function (d, i) { return '<div style="flex:1;text-align:center">' + (i % 5 === 0 ? esc(d.day.slice(8)) : '') + '</div>'; }).join('') + '</div></div>';
+        h += '<div class="an-panel"><h3>Fleet est. ad profit by date' + src('eBay ads report') + '</h3>' +
+          '<div class="an-sub">Sundays in light gold. Loss days point down in red.</div>' +
+          chartBars(D.by_date.map(function (d) {
+            return { label: String(d.day).slice(8), value: Number(d.ad_profit) || 0, strong: Number(d.weekday) === 6,
+              title: d.day + ' — ' + pm(Number(d.ad_profit)) };
+          }), { height: 180, everyNth: 3, minGap: 46 }) + '</div>';
         var f = D.freshness;
         h += '<div class="an-panel"><h3>Data freshness</h3><div>' + [['Orders synced', ago(f.orders && f.orders.t)], ['Ads report ingested to', (f.ads_report_day && f.ads_report_day.d) || '—'], ['Last intraday sample', ago(f.last_sample && f.last_sample.t)], ['Rollups', ago(f.rollup && f.rollup.t)], ['Profiles', esc(f.profiles || 'not run')], ['Forecast', esc(f.forecast || 'not run')]].map(function (x) { return '<span class="mo-chip">' + esc(x[0]) + ': <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div></div>';
         h += '<div class="an-note">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + '</div>';
