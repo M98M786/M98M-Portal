@@ -13362,36 +13362,161 @@ const ROUTES = {
      Wahab after 10 — either item is delivered or not." Each person's list = the orders created
      exactly that many days ago, still standing (not cancelled), with what the engine can prove:
      dispatched or not, and whether eBay's delivery estimate has already passed. */
+  /* ORDER RECHECKING — the three delivery checkpoints (owner, 19 Sept: "properly present the data
+     of the orders that are late" + "adding third check which is of Wahab after 12 days — he will
+     check if the order has been delivered or not").
+
+     The old version called an order late when it was "not dispatched OR past eBay's delivery
+     estimate". Twelve days after the order EVERY estimate has passed, so that rule painted all 236
+     orders red and the checker had no list at all — the sampling done for the Cainiao study found
+     99.4% of them already delivered. The value of this desk is SUPPRESSION, so each order is now
+     judged against real evidence and only what survives is put in front of a person:
+
+       chasing      the buyer opened a case and has not since left feedback — it has NOT arrived
+       no_tracking  no tracking number at all, and the order was never cancelled
+       unconfirmed  tracked, the estimate has passed, and nothing says either way — confirm it
+       in_transit   tracked and still inside the estimate — nothing to do
+       delivered    the buyer left feedback after the order — proof it arrived
+       settled      cancelled or refunded — closed, nobody chases it
+
+     eBay returns a BLANK order_id on every item-not-received case, so a case is matched to its
+     order by the buyer and the item they bought; feedback is matched the same way. Both proofs are
+     read once for the oldest checkpoint and shared, not re-queried per checker. */
   deliveryCheckpoints: {
     auth: 'any', fn: async (p, ctx) => {
       const day = ukDate('');
-      const owners = [{ days: 4, owner: 'Noman' }, { days: 7, owner: 'Zeeshan' }, { days: 10, owner: 'Wahab' }];
-      const shift = (ymd, days) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - days); return d.toISOString().slice(0, 10); };
-      const out = [];
-      for (const o of owners) {
-        const ref = shift(day, o.days);
-        const rs = await ctx.env.DB.prepare(
-          'SELECT o.order_id, o.account, o.item_id, o.sold, o.status, o.est_delivery, i.title ' +
-          'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
-          "WHERE o.status NOT IN ('CANCELLED','NOT_FOUND') AND substr(o.created_at, 1, 10) = ?1 " +
-          'ORDER BY o.account, o.order_id LIMIT 250'
-        ).bind(ref).all();
-        const rows = (rs.results || []).map(r => ({
-          order_id: r.order_id, account: r.account, item_id: r.item_id, sold: r.sold,
-          title: r.title || '', dispatched: r.status === 'FULFILLED',
-          est_delivery: String(r.est_delivery || '').slice(0, 10),
-          est_passed: !!(r.est_delivery && String(r.est_delivery) < new Date().toISOString()),
-        }));
-        const byAcct = {};
-        for (const r of rows) {
-          const a = (byAcct[r.account] = byAcct[r.account] || { account: r.account, n: 0, undispatched: 0, est_passed: 0 });
-          a.n++; if (!r.dispatched) a.undispatched++; if (r.est_passed) a.est_passed++;
-        }
-        out.push({ owner: o.owner, days: o.days, order_date: ref, total: rows.length,
-          accounts: Object.values(byAcct), focus: rows.filter(r => !r.dispatched || r.est_passed).slice(0, 60) });
+      const DAY_MS = 86400000;
+      /* The checkpoints live in CONFIG so Management can move a day or a name without a deploy —
+         portal_config.recheck_checkpoints = [{"days":4,"owner":"Noman","asks":"..."}, …]. */
+      const DEFAULTS = [
+        { days: 4, owner: 'Noman', asks: 'Did the order leave China?' },
+        { days: 7, owner: 'Zeeshan', asks: 'Is it with a UK courier?' },
+        { days: 12, owner: 'Wahab', asks: 'Has it been delivered?' },
+      ];
+      let owners = DEFAULTS, source = 'default';
+      const cfg = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'recheck_checkpoints'").first().catch(() => null);
+      if (cfg && String(cfg.value || '').trim()) {
+        try {
+          const parsed = JSON.parse(cfg.value);
+          const clean = (Array.isArray(parsed) ? parsed : []).map((o) => ({
+            days: Math.max(0, Math.round(Number(o && o.days) || 0)),
+            owner: String((o && o.owner) || '').slice(0, 40),
+            asks: String((o && o.asks) || '').slice(0, 120),
+          })).filter((o) => o.owner);
+          if (clean.length) { owners = clean; source = 'config'; }
+        } catch (e) { /* a broken CONFIG row must never take the desk down */ }
       }
-      return { day, checkpoints: out,
-        note: 'the focus list = not yet dispatched OR past eBay’s delivery estimate — exactly what the checker must confirm delivered' };
+      owners = owners.slice(0, 6).sort((a, b) => a.days - b.days);
+
+      const shift = (ymd, days) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - days); return d.toISOString().slice(0, 10); };
+      const refs = owners.map((o) => shift(day, o.days));
+      const oldest = refs.reduce((a, b) => (a < b ? a : b), refs.length ? refs[0] : day);
+
+      /* The two proofs, read once. Feedback after the order = it arrived. A case = the buyer says
+         it did not — unless they later left feedback, which settles it the other way. */
+      const fbBy = {}, caseBy = {};
+      const fbRs = await ctx.env.DB.prepare("SELECT buyer, item_id, type, at FROM feedback WHERE substr(at, 1, 10) >= ?1").bind(oldest).all().catch(() => ({ results: [] }));
+      for (const f of (fbRs.results || [])) {
+        const k = String(f.buyer || '') + '|' + String(f.item_id || '');
+        if (!fbBy[k] || String(f.at) > String(fbBy[k].at)) fbBy[k] = f;
+      }
+      const csRs = await ctx.env.DB.prepare("SELECT buyer, item_id, kind, status, reason, opened_at, closed_at FROM cases WHERE substr(opened_at, 1, 10) >= ?1").bind(oldest).all().catch(() => ({ results: [] }));
+      for (const c of (csRs.results || [])) {
+        const k = String(c.buyer || '') + '|' + String(c.item_id || '');
+        if (!caseBy[k] || String(c.opened_at) > String(caseBy[k].opened_at)) caseBy[k] = c;
+      }
+
+      const nice = (ymd) => { const d = new Date(String(ymd || '').slice(0, 10) + 'T12:00:00Z'); return isNaN(d) ? String(ymd || '') : d.getUTCDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]; };
+      const out = [];
+      for (let ci = 0; ci < owners.length; ci++) {
+        const o = owners[ci], ref = refs[ci];
+        const rs = await ctx.env.DB.prepare(
+          'SELECT o.order_id, o.account, o.buyer, o.buyer_name, o.item_id, o.sold, o.qty, o.status, o.created_at, ' +
+          'o.est_delivery, o.refunded, i.title, t.tracking, t.courier_ebay, t.pushed_at ' +
+          'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id ' +
+          "LEFT JOIN trackings t ON t.order_id = o.order_id AND t.tracking != '' " +
+          "WHERE o.status != 'NOT_FOUND' AND substr(o.created_at, 1, 10) = ?1 " +
+          'ORDER BY o.account, o.order_id LIMIT 500'
+        ).bind(ref).all().catch(() => ({ results: [] }));
+
+        const counts = { chasing: 0, no_tracking: 0, unconfirmed: 0, in_transit: 0, delivered: 0, settled: 0 };
+        const byAcct = {};
+        const open = [], confirm = [];
+        let openValue = 0;
+
+        for (const r of (rs.results || [])) {
+          const key = String(r.buyer || '') + '|' + String(r.item_id || '');
+          const fb = fbBy[key] || null, cs = caseBy[key] || null;
+          const createdMs = Date.parse(r.created_at) || 0;
+          const est = String(r.est_delivery || '').slice(0, 10);
+          const estPassed = !!(est && est < day);
+          const daysPastEst = est ? Math.round((Date.parse(day + 'T12:00:00Z') - Date.parse(est + 'T12:00:00Z')) / DAY_MS) : null;
+          const trackDays = (r.pushed_at && createdMs) ? Math.round(((Date.parse(r.pushed_at) || 0) - createdMs) / DAY_MS * 10) / 10 : null;
+          const cancelled = /CANCEL/i.test(String(r.status || ''));
+          const refunded = Number(r.refunded) > 0;
+
+          let state, why;
+          if (cancelled || refunded) {
+            state = 'settled';
+            why = cancelled ? 'cancelled' + (refunded ? ' and refunded' : '') : 'refunded — closed';
+          } else if (cs && (!fb || String(fb.at) < String(cs.opened_at))) {
+            state = 'chasing';
+            why = 'the buyer opened ' + (String(cs.kind) === 'INR' ? 'an item-not-received case' : String(cs.kind) === 'RETURN' ? 'a return' : 'a case') +
+              ' on ' + nice(cs.opened_at) + (String(cs.status || '') ? ' (' + String(cs.status).toLowerCase().replace(/_/g, ' ') + ')' : '');
+          } else if (fb) {
+            state = 'delivered';
+            why = 'the buyer left feedback on ' + nice(fb.at) + ' — it arrived';
+          } else if (!r.tracking) {
+            state = 'no_tracking';
+            why = 'no tracking number ' + o.days + ' days after the order';
+          } else if (estPassed) {
+            state = 'unconfirmed';
+            why = 'eBay’s estimate passed ' + daysPastEst + ' day' + (daysPastEst === 1 ? '' : 's') + ' ago and nothing says either way';
+          } else {
+            state = 'in_transit';
+            why = est ? 'tracked, due ' + nice(est) : 'tracked and moving';
+          }
+          counts[state]++;
+
+          const a = (byAcct[r.account] = byAcct[r.account] || { account: r.account, total: 0, open: 0, confirm: 0, clear: 0 });
+          a.total++;
+          if (state === 'chasing' || state === 'no_tracking') a.open++;
+          else if (state === 'unconfirmed') a.confirm++;
+          else a.clear++;
+
+          if (state === 'chasing' || state === 'no_tracking' || state === 'unconfirmed') {
+            const row = {
+              order_id: r.order_id, account: r.account, buyer: r.buyer_name || r.buyer, buyer_id: r.buyer,
+              item_id: r.item_id, title: String(r.title || '').slice(0, 90),
+              sold: Number(r.sold) || 0, qty: Number(r.qty) || 1, status: r.status,
+              placed: String(r.created_at || '').slice(0, 10),
+              age_days: createdMs ? Math.floor((Date.now() - createdMs) / DAY_MS) : null,
+              est_delivery: est, days_past_est: estPassed ? daysPastEst : null,
+              tracking: r.tracking || '', carrier: r.courier_ebay || '',
+              tracking_days: trackDays, slow_dispatch: trackDays !== null && trackDays > 3,
+              state, why,
+            };
+            if (state === 'unconfirmed') { if (confirm.length < 30) confirm.push(row); }
+            else { open.push(row); openValue += row.sold; }
+          }
+        }
+
+        open.sort((x, y) => (x.state === y.state ? (y.sold - x.sold) : (x.state === 'chasing' ? -1 : 1)));
+        out.push({
+          owner: o.owner, days: o.days, asks: o.asks, order_date: ref, order_date_nice: nice(ref),
+          total: (rs.results || []).length, counts,
+          needs_you: counts.chasing + counts.no_tracking,
+          open, open_value: Math.round(openValue * 100) / 100,
+          confirm_sample: confirm, confirm_more: Math.max(0, counts.unconfirmed - confirm.length),
+          accounts: Object.values(byAcct).sort((x, y) => (y.open - x.open) || (y.confirm - x.confirm) || (x.account < y.account ? -1 : 1)),
+        });
+      }
+
+      return { day, source, checkpoints: out,
+        legend: { chasing: 'the buyer says it has not arrived', no_tracking: 'no tracking number at all',
+          unconfirmed: 'tracked, estimate passed, no news either way', in_transit: 'tracked and inside the estimate',
+          delivered: 'the buyer left feedback — it arrived', settled: 'cancelled or refunded' },
+        note: 'A case and a feedback are matched to an order by buyer + item, because eBay returns a blank order id on item-not-received cases. "Needs you" is only the buyer-chasing and no-tracking orders; everything else is either proven delivered, still inside the estimate, settled, or waiting to be confirmed.' };
     },
   },
 

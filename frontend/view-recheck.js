@@ -111,6 +111,20 @@
     '.pill.rc-p-open{background:var(--blue-soft);color:var(--blue-2)}' +
     '.pill.rc-p-off{background:rgba(120,132,152,.16);color:var(--text-3)}' +
     '.pill.rc-p-warn{background:var(--warn-soft);color:var(--warn)}' +
+    '.pill.rc-p-ok{background:var(--ok-soft);color:var(--ok)}' +
+    '.pill.rc-p-bad{background:var(--bad-soft,rgba(240,79,79,.14));color:var(--bad)}' +
+    '.rc-cp{border:1px solid var(--gold-line);border-radius:12px;padding:13px 14px;margin-bottom:12px}' +
+    '.rc-cp+.rc-cp{margin-top:0}' +
+    '.rc-cp.rc-hot{border-color:rgba(240,79,79,.42);background:linear-gradient(135deg,rgba(240,79,79,.07),transparent)}' +
+    '.rc-cp-hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:10px}' +
+    '.rc-cp-who{font-size:15px;font-weight:800;letter-spacing:-.01em}' +
+    '.rc-cp-ask{font-size:12.5px;font-weight:700;color:var(--text-2)}' +
+    '.rc-cp-when{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--text-3)}' +
+    '.rc-scroll{overflow-x:auto;margin-top:10px}' +
+    '.rc-tbl td.rc-tight{white-space:nowrap}' +
+    '.rc-why{display:block;font-size:11.5px;font-weight:700;color:var(--text-3);margin-top:2px}' +
+    '.rc-item{display:block;font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:2px;max-width:260px}' +
+    '.rc-clear{margin-top:10px;font-size:12px;font-weight:700;color:var(--text-2);display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
     '@media (max-width:880px){.rc-grid,.rc-acc{grid-template-columns:1fr}.rc-flow{gap:8px}.rc-fd{width:100%}}'
   );
 
@@ -196,12 +210,12 @@
     badge: function () { return (STATE.counts && STATE.counts.recheck) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Order rechecking</h1>' +
-          '<span class="sub">Your three checkers — Noman day 4 · Zeeshan day 7 · Wahab day 10 — plus the workbook stages below</span>' +
+          '<span class="sub" id="rcWho">Your delivery checkers, then the workbook stages below</span>' +
           '<input class="rc-in rc-date" id="rcDate" type="date" style="width:auto;margin-left:auto" value="' + rcAttr(rcToday()) + '">' +
           '<button class="minibtn" id="rcRefresh">Refresh</button>' +
         '</div>' +
-        '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — three people ' +
-          '<span class="hint">delivered or not — the engine\u2019s own list per checker, refreshed live</span></div>' +
+        '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — who is late ' +
+          '<span class="hint">judged on real evidence: a buyer chasing, no tracking, or nothing either way</span></div>' +
           '<div class="bd" id="rcOwners"><div class="spinner"></div></div></div>' +
         '<div class="card enter d1"><div class="hd">Why today’s list holds these orders ' +
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
@@ -211,36 +225,127 @@
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
-      (function rcOwnersLoad() {
-        var box = $('rcOwners');
-        if (!box) { return; }
-        api('deliveryCheckpoints', {}).then(function (d) {
-          var h = '';
-          ((d && d.checkpoints) || []).forEach(function (c) {
-            var accs = (c.accounts || []).map(function (a) {
-              var flags = [];
-              if (a.undispatched) { flags.push('<b style="color:var(--bad)">' + a.undispatched + ' not dispatched</b>'); }
-              if (a.est_passed) { flags.push('<b style="color:var(--warn)">' + a.est_passed + ' past delivery estimate</b>'); }
-              return '<span class="minibtn" style="cursor:default">' + esc(String(a.account)) + ' ' + a.n + (flags.length ? ' \u00b7 ' + flags.join(' \u00b7 ') : '') + '</span>';
-            }).join(' ');
-            var focus = (c.focus || []).slice(0, 12).map(function (r) {
-              return '<div class="tl-row"><span class="k"><a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(String(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline dotted">' + esc(String(r.order_id)) + '</a> \u00b7 ' + esc(String(r.account)) + '</span>' +
-                '<span style="color:var(--text-3);font-weight:600">' + (r.dispatched ? 'dispatched' : '<b style="color:var(--bad)">NOT DISPATCHED</b>') +
-                (r.est_passed ? ' \u00b7 <b style="color:var(--warn)">est ' + esc(String(r.est_delivery)) + ' passed — confirm delivered</b>' : (r.est_delivery ? ' \u00b7 est ' + esc(String(r.est_delivery)) : '')) + '</span></div>';
-            }).join('');
-            h += '<div style="margin-bottom:12px"><div style="font-weight:800;margin-bottom:4px">' + esc(String(c.owner)) + ' — day ' + c.days + ' <span style="color:var(--text-3);font-weight:600">\u00b7 orders from ' + esc(String(c.order_date)) + ' \u00b7 ' + c.total + ' order(s)</span></div>' +
-              '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + (accs || '<span class="empty">no orders that day</span>') + '</div>' + focus + '</div>';
-          });
-          box.innerHTML = h || '<div class="empty">No checkpoints to show.</div>';
-        }).catch(function (e) { box.innerHTML = '<div class="empty">Checkpoints did not answer \u2014 ' + esc(e.message) + '</div>'; });
-      })();
+      rcOwnersLoad();
 
-      $('rcRefresh').onclick = function () { rcLoad(); };
+      $('rcRefresh').onclick = function () { rcOwnersLoad(); rcLoad(); };
       $('rcDate').onchange = function () { rcLoad(); };
       enhanceDate($('rcDate'), { kind: 'day' });
       rcLoad();
     }
   };
+
+  /* ---------- delivery checkpoints (owner, 19 Sept) ----------
+     "Properly present the data of the orders that are late." The engine now judges every order on
+     the day's cohort against real evidence and returns the reason in words; this paints the ones a
+     person must act on as a table with the order, the buyer, the money and the reason, and keeps
+     the proven-delivered and still-in-transit majority out of the way. The checkers, their days and
+     their questions all arrive from the server — CONFIG owns them, not this file. */
+  var RC_STATE_PILL = { chasing: 'rc-p-bad', no_tracking: 'rc-p-warn', unconfirmed: 'rc-p-open',
+    in_transit: 'rc-p-off', delivered: 'rc-p-done', settled: 'rc-p-off' };
+  var RC_STATE_WORD = { chasing: 'Buyer chasing', no_tracking: 'No tracking', unconfirmed: 'Confirm',
+    in_transit: 'In transit', delivered: 'Delivered', settled: 'Settled' };
+
+  function rcMoney(n) { return '£' + rcNum(n).toFixed(2); }
+
+  function rcOrderLink(id) {
+    return '<a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(rcStr(id)) +
+      '" target="_blank" rel="noopener noreferrer" class="mono" style="color:inherit;text-decoration:underline dotted">' + esc(rcStr(id)) + '</a>';
+  }
+
+  function rcCpRow(r) {
+    var track = rcStr(r.tracking)
+      ? '<span class="mono">' + esc(rcStr(r.tracking)) + '</span>' + (rcStr(r.carrier) ? '<span class="rc-why">' + esc(rcStr(r.carrier)) +
+          (r.tracking_days !== null && r.tracking_days !== undefined ? ' · ' + r.tracking_days + 'd after the order' : '') + '</span>' : '')
+      : '<b style="color:var(--bad)">none</b>';
+    return '<tr>' +
+      '<td class="rc-c1">' + rcOrderLink(r.order_id) +
+        (rcStr(r.title) ? '<span class="rc-item">' + esc(rcStr(r.title)) + '</span>' : '') + '</td>' +
+      '<td class="rc-tight">' + esc(rcStr(r.account)) + '</td>' +
+      '<td>' + esc(rcStr(r.buyer) || rcStr(r.buyer_id)) + '</td>' +
+      '<td class="rc-tight num">' + rcMoney(r.sold) + '</td>' +
+      '<td class="rc-tight num">' + (r.age_days === null || r.age_days === undefined ? '—' : r.age_days + 'd') + '</td>' +
+      '<td>' + track + '</td>' +
+      '<td><span class="pill ' + (RC_STATE_PILL[rcStr(r.state)] || 'rc-p-off') + '">' + esc(RC_STATE_WORD[rcStr(r.state)] || rcStr(r.state)) + '</span>' +
+        '<span class="rc-why">' + esc(rcStr(r.why)) + '</span></td>' +
+      '</tr>';
+  }
+
+  function rcCpTable(rows) {
+    return '<div class="rc-scroll"><table class="rc-tbl"><thead><tr>' +
+      '<th>Order</th><th>Account</th><th>Buyer</th><th>Value</th><th>Age</th><th>Tracking</th><th>What is wrong</th>' +
+      '</tr></thead><tbody>' + rows.map(rcCpRow).join('') + '</tbody></table></div>';
+  }
+
+  function rcCpCard(c) {
+    var counts = c.counts || {}, needs = rcNum(c.needs_you), open = c.open || [], conf = c.confirm_sample || [];
+    var tiles = [
+      { k: 'Needs you', v: needs, gold: needs > 0 },
+      { k: 'To confirm', v: rcNum(counts.unconfirmed) },
+      { k: 'Delivered', v: rcNum(counts.delivered) },
+      { k: 'In transit', v: rcNum(counts.in_transit) },
+      { k: 'Settled', v: rcNum(counts.settled) }
+    ].map(function (t) {
+      return '<div class="rc-tile' + (t.gold ? ' rc-gold' : '') + '"><span class="k">' + esc(t.k) + '</span><b class="num">' + t.v + '</b></div>';
+    }).join('');
+
+    var body;
+    if (open.length) {
+      body = rcCpTable(open) +
+        (rcNum(c.open_value) ? '<div class="rc-sub" style="margin-top:6px">' + rcMoney(c.open_value) + ' of stock sits behind these ' + open.length + ' order(s).</div>' : '');
+    } else {
+      body = '<div class="rc-box rc-blue"><span class="k">Nothing late</span>No buyer is chasing and every order on this day carries a tracking number.</div>';
+    }
+
+    var confirm = '';
+    if (rcNum(counts.unconfirmed)) {
+      var chips = (c.accounts || []).filter(function (a) { return rcNum(a.confirm); }).map(function (a) {
+        return '<span class="pill rc-p-open">' + esc(rcStr(a.account)) + ' ' + rcNum(a.confirm) + '</span>';
+      }).join(' ');
+      confirm = '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;font-weight:800;color:var(--blue-2)">' +
+        rcNum(counts.unconfirmed) + ' tracked order(s) past the estimate with no news — confirm and tick off</summary>' +
+        (chips ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + chips + '</div>' : '') +
+        (conf.length ? rcCpTable(conf) : '') +
+        (rcNum(c.confirm_more) ? '<div class="rc-sub" style="margin-top:6px">…and ' + rcNum(c.confirm_more) + ' more like these.</div>' : '') +
+        '</details>';
+    }
+
+    var clear = rcNum(counts.delivered) + rcNum(counts.in_transit) + rcNum(counts.settled);
+    var clearLine = clear ? '<div class="rc-clear"><span>Kept out of your way:</span>' +
+      (rcNum(counts.delivered) ? '<span class="pill rc-p-done">' + rcNum(counts.delivered) + ' delivered — the buyer left feedback</span>' : '') +
+      (rcNum(counts.in_transit) ? '<span class="pill rc-p-off">' + rcNum(counts.in_transit) + ' still inside the estimate</span>' : '') +
+      (rcNum(counts.settled) ? '<span class="pill rc-p-off">' + rcNum(counts.settled) + ' cancelled or refunded</span>' : '') + '</div>' : '';
+
+    return '<div class="rc-cp' + (needs ? ' rc-hot' : '') + '">' +
+      '<div class="rc-cp-hd"><span class="rc-cp-who">' + esc(rcStr(c.owner)) + '</span>' +
+        '<span class="pill rc-p-off">day ' + rcNum(c.days) + '</span>' +
+        '<span class="rc-cp-ask">' + esc(rcStr(c.asks)) + '</span>' +
+        '<span class="rc-cp-when">orders placed ' + esc(rcStr(c.order_date_nice) || rcNice(rcStr(c.order_date))) + ' · ' + rcNum(c.total) + ' order(s)</span></div>' +
+      '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + '</div>';
+  }
+
+  function rcOwnersLoad() {
+    var box = $('rcOwners');
+    if (!box) { return; }
+    api('deliveryCheckpoints', {}).then(function (d) {
+      var cps = (d && d.checkpoints) || [];
+      var who = $('rcWho');
+      if (who && cps.length) {
+        who.innerHTML = 'Your checkers — ' + cps.map(function (c) {
+          return esc(rcStr(c.owner)) + ' day ' + rcNum(c.days);
+        }).join(' · ') + ' — then the workbook stages below';
+      }
+      if (!cps.length) { box.innerHTML = '<div class="rc-empty">No checkpoints are configured.<span>CONFIG key recheck_checkpoints holds the list.</span></div>'; return; }
+      var late = 0;
+      cps.forEach(function (c) { late += rcNum(c.needs_you); });
+      box.innerHTML = (late
+          ? '<div class="rc-dis" style="margin-top:0;margin-bottom:12px"><b>' + late + ' order(s) need a person today.</b> Each row below says who, what and why — everything else on these days is proven delivered, still inside the estimate, or settled.</div>'
+          : '<div class="rc-box rc-blue" style="margin-top:0;margin-bottom:12px"><span class="k">All three days are clean</span>No buyer is chasing and nothing is missing a tracking number.</div>') +
+        cps.map(rcCpCard).join('') +
+        '<div class="rc-sub" style="margin-top:4px">' + esc(rcStr(d && d.note)) + '</div>';
+    }).catch(function (e) {
+      box.innerHTML = '<div class="rc-empty">Checkpoints did not answer.<span>' + esc(e.message) + '</span></div>';
+    });
+  }
 
   function rcLoad() {
     var box = $('rcStages'), why = $('rcWhy'), want = rcStr($('rcDate') ? $('rcDate').value : '');
