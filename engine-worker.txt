@@ -6227,6 +6227,109 @@ const ADTOOL_ACTIONS_P9 = {
 };
 /* ADTOOL-P9-END =================================================================================== */
 
+/* ADTOOL-P10-BEGIN ================================================================================
+   Sale events. The owner wants a sale running on every account at all times with at least half the
+   active listings in it. eBay's rules (Seller Centre, checked 19 Sep 2026) make that a scheduling
+   problem rather than a wish:
+     · a listing joins only after 14 days AT THE SAME PRICE
+     · and only if it has not been in another sale in the previous 14 days
+     · an event runs 1 to 45 days
+   Two cohorts of half the listings each, alternating 14 days on and 14 days off, satisfies all three
+   for ever: while A runs, B serves its cooldown, and vice versa. That is the whole schedule.
+*/
+/* ADTOOL-P10-PURE-BEGIN */
+function adtSaleCohorts(items, anchorDay, addDays) {
+  /* Split eligible listings into two halves that alternate. Deterministic — the same listing lands
+     in the same cohort every run, so the schedule does not reshuffle itself overnight. Sorted by id
+     and dealt alternately, which also spreads any one account evenly across both. */
+  const elig = items.filter(i => i.eligible).map(i => i.item_id).sort();
+  const A = [], B = [];
+  for (let i = 0; i < elig.length; i++) (i % 2 === 0 ? A : B).push(elig[i]);
+  const cycle = 14;
+  const plan = [];
+  for (let k = 0; k < 4; k++) {
+    const start = addDays(anchorDay, k * cycle);
+    plan.push({ cohort: k % 2 === 0 ? 'A' : 'B', starts: start, ends: addDays(start, cycle - 1), listings: (k % 2 === 0 ? A : B).length });
+  }
+  return { A, B, plan, cycle, eligible: elig.length };
+}
+function adtSaleEligibility(row, today, daysBetween) {
+  /* One listing against eBay's two clocks. `steady_days` is how long the price has actually held
+     when a price history exists, and how long since ANY revision when it does not — the second is
+     the pessimistic reading, and which one was used is returned so the page can say so. */
+  const priceDays = row.price_steady_days == null ? null : Number(row.price_steady_days);
+  const revDays = row.last_revised ? daysBetween(String(row.last_revised).slice(0, 10), today) : null;
+  const basis = priceDays != null ? 'price' : (revDays != null ? 'revision' : 'unknown');
+  const steady = priceDays != null ? priceDays : (revDays != null ? revDays : null);
+  const ageDays = row.start_time ? daysBetween(String(row.start_time).slice(0, 10), today) : null;
+  const reasons = [];
+  if (ageDays != null && ageDays < 14) reasons.push('listed ' + ageDays + ' days ago, needs 14');
+  if (steady != null && steady < 14) reasons.push(basis === 'price' ? 'price changed ' + steady + ' days ago, needs 14' : 'revised ' + steady + ' days ago, needs 14');
+  if (steady == null && ageDays == null) reasons.push('no listing dates');
+  const eligible = reasons.length === 0;
+  return {
+    eligible, basis, steady_days: steady, age_days: ageDays,
+    why: reasons.join(' · '),
+    eligible_on: eligible ? today : null
+  };
+}
+/* ADTOOL-P10-PURE-END */
+
+const ADTOOL_ACTIONS_P10 = {
+  adtoolSales: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_sales');
+      const env = ctx.env, today = ukDate('');
+      const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+      /* how long has the price actually held? only answerable where the snapshot has history */
+      const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_price_day').first();
+      const priceDays = Number(hist && hist.d) || 0;
+      const rows = (await env.DB.prepare(
+        'SELECT i.item_id, i.account, i.title, i.price, i.start_time, i.last_revised, ' +
+        '(SELECT MIN(pd.day) FROM adtool_price_day pd WHERE pd.item_id = i.item_id AND pd.price = i.price ' +
+        '   AND pd.day > COALESCE((SELECT MAX(p2.day) FROM adtool_price_day p2 WHERE p2.item_id = i.item_id AND p2.price <> i.price), "")) AS price_since ' +
+        "FROM items_api i WHERE i.status = 'ACTIVE' ORDER BY i.account, i.item_id"
+      ).all()).results || [];
+      const items = rows.map(r => {
+        const steadyFromPrice = (priceDays >= 14 && r.price_since) ? daysBetween(String(r.price_since), today) : null;
+        const e = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
+        return Object.assign({ item_id: r.item_id, account: r.account, title: r.title, price: r.price }, e);
+      });
+      const C = adtSaleCohorts(items, today, adtAddDays);
+      const byAcct = {};
+      for (const i of items) {
+        const a = byAcct[i.account] = byAcct[i.account] || { account: i.account, active: 0, eligible: 0, blocked: 0 };
+        a.active++; if (i.eligible) a.eligible++; else a.blocked++;
+      }
+      const live = (await env.DB.prepare(
+        "SELECT account, name, status, discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
+        "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%' ORDER BY account"
+      ).all()).results || [];
+      return {
+        today,
+        rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
+        price_history_days: priceDays,
+        clock_is_real: priceDays >= 14,
+        by_account: Object.keys(byAcct).map(k => Object.assign(byAcct[k], {
+          half: Math.ceil(byAcct[k].active / 2),
+          meets_half: byAcct[k].eligible >= Math.ceil(byAcct[k].active / 2)
+        })),
+        eligible_total: C.eligible,
+        active_total: items.length,
+        cohorts: { a: C.A.length, b: C.B.length, cycle: C.cycle },
+        schedule: C.plan,
+        blocked_sample: items.filter(i => !i.eligible).slice(0, 40),
+        eligible_sample: items.filter(i => i.eligible).slice(0, 40),
+        running: live,
+        computed_at: new Date().toISOString(),
+        source: 'items_api + adtool_price_day · eBay sale-event rules, Seller Centre'
+      };
+    },
+  },
+};
+/* ADTOOL-P10-END ================================================================================== */
+
+
 
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
    eBay publishes no hourly ad figures, but its same-day LISTING_PERFORMANCE report is a running
@@ -14121,3 +14224,4 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P6); /* ADTOOL Phase 6: decisions in shadow
 Object.assign(ROUTES, ADTOOL_ACTIONS_P7); /* ADTOOL Phase 7: analyst narratives */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P8); /* ADTOOL Phase 8: live apply (off until an account's own switch is on) */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P9); /* ADTOOL war room: what to do today, with the arithmetic behind it */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P10); /* ADTOOL sale events: who qualifies, and the rotation that keeps one running */
