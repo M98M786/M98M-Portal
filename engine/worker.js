@@ -6248,6 +6248,33 @@ const ADTOOL_ACTIONS_P9 = {
         cut_costs_now: round2(cut.reduce((t, r) => t + Number(r.profit), 0)),
         push,
         weekday: wdRows.map(r => Object.assign({}, r, { roas: Number(r.spend) > 0 ? Math.round(Number(r.revenue) / Number(r.spend) * 100) / 100 : null })),
+        /* Budget: which listings actually run out of money, at what hour, and — the part that matters —
+           whether the one that ran out deserved more. The instinct is "capped means raise it"; on this
+           fleet most capped listings are losing money, so the cap is doing the owner a favour. */
+        budget: await (async () => {
+          const caps = (await env.DB.prepare(
+            'SELECT c.item_id, l.account, l.title, COUNT(*) AS capped_days, MIN(c.cap_hour) AS earliest_hour, ' +
+            'ROUND(AVG(c.budget), 2) AS budget, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS rev, ' +
+            'ROUND(SUM(d.ad_profit), 2) AS profit ' +
+            'FROM adtool_cap_days c JOIN adtool_listing_day d ON d.item_id = c.item_id AND d.day = c.day ' +
+            'LEFT JOIN adtool_listings l ON l.item_id = c.item_id ' +
+            'WHERE c.day >= ?1 GROUP BY c.item_id ORDER BY SUM(d.ad_profit) DESC'
+          ).bind(from).all()).results || [];
+          const span = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d FROM adtool_cap_days WHERE day >= ?1').bind(from).first();
+          const earning = caps.filter(r => Number(r.profit) > 0);
+          const losing = caps.filter(r => Number(r.profit) <= 0);
+          return {
+            days_observed: Number(span && span.d) || 0,
+            capped: caps.length,
+            deserve_more: earning,
+            cap_is_helping: losing.length,
+            losing_sample: losing.slice(0, 12),
+            verdict: !caps.length ? 'No listing has hit its daily budget in the window — budget is not what is holding this fleet back.'
+              : earning.length
+                ? earning.length + ' of the ' + caps.length + ' listings that ran out of money were earning when they did. Those are the only ones worth more budget; the other ' + losing.length + ' were losing, so the cap saved you money.'
+                : 'All ' + caps.length + ' listings that hit their budget were losing money at the time. Raising any of them would buy more loss — the cap is doing the work.'
+          };
+        })(),
         weekday_verdict: adtPlanWeekdayVerdict(wdRows),
         computed_at: new Date().toISOString(),
         source: 'adtool_listing_day over the last 30 report days · eBay ads report, orders, Brain v17'

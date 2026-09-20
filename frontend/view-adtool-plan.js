@@ -111,6 +111,9 @@
     h += weekPanel(D);
 
     /* ---- the actual list of things to switch off ---- */
+    /* budget: the lever that actually steers most of this fleet */
+    h += budgetPanel(D);
+
     h += cutPanel(D);
 
     /* ---- and the ones worth more money ---- */
@@ -212,6 +215,42 @@
     s += '</svg>';
     return '<div class="wr-panel"><h3>Which day to change' + src('eBay ads report') + '</h3>' +
       '<div class="wr-note">' + head + '</div>' + s + '</div>';
+  }
+
+  /* Cost-per-click campaigns — most of the fleet — are steered by daily budget, not by a bid; eBay
+     exposes no bid percentage for them at all. So "when to raise budget on which listing" is the real
+     question, and on this fleet the answer is not the obvious one. */
+  function budgetPanel(D) {
+    var B = D.budget; if (!B) return '';
+    var earn = B.deserve_more || [], lose = B.losing_sample || [];
+    var out = '<div class="wr-panel"><h3>Budget — who actually ran out of money' + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note"><b>' + esc(B.verdict) + '</b></div>';
+    if (!B.capped) return out + '<div class="wr-empty">Nothing hit its cap in the window.</div></div>';
+    out += '<div class="wr-note">Seen over ' + B.days_observed + ' day' + (B.days_observed === 1 ? '' : 's') +
+      ' of cap data, so read the lists as a direction rather than a verdict.</div>';
+    if (earn.length) {
+      out += '<table class="wr-tbl"><thead><tr><th>Raise these</th><th>Account</th><th class="r">Budget</th>' +
+        '<th class="r">Ran out at</th><th class="r">Days</th><th class="r">Profit</th></tr></thead><tbody>' +
+        earn.map(function (r) {
+          return '<tr class="pick"><td>' + esc(r.item_id) + ' ' + esc(String(r.title || '').slice(0, 34)) + '</td>' +
+            '<td>' + esc(r.account || '') + '</td><td class="r">£' + (Number(r.budget) || 0).toFixed(2) + '</td>' +
+            '<td class="r">' + (Number(r.earliest_hour) === 0 ? 'straight away' : String(r.earliest_hour) + ':00') + '</td>' +
+            '<td class="r">' + r.capped_days + '</td><td class="r wr-pos">' + gbp(r.profit) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    if (lose.length) {
+      out += '<div class="wr-note" style="margin-top:12px">These also ran out, and were losing money when they did. ' +
+        'Leave them capped — most are on the switch-off list below.</div>' +
+        '<table class="wr-tbl"><thead><tr><th>Leave capped</th><th class="r">Budget</th><th class="r">Ran out at</th>' +
+        '<th class="r">Spend</th><th class="r">Profit</th></tr></thead><tbody>' +
+        lose.map(function (r) {
+          return '<tr><td>' + esc(r.item_id) + ' ' + esc(String(r.title || '').slice(0, 34)) + '</td>' +
+            '<td class="r">£' + (Number(r.budget) || 0).toFixed(2) + '</td>' +
+            '<td class="r">' + (Number(r.earliest_hour) === 0 ? 'straight away' : String(r.earliest_hour) + ':00') + '</td>' +
+            '<td class="r">' + gbp(r.spend) + '</td><td class="r wr-neg">' + gbp(r.profit) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    return out + '</div>';
   }
 
   function cutPanel(D) {
