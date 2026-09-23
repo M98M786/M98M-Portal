@@ -15,6 +15,11 @@
     '.tr-bar{flex:1;background:linear-gradient(180deg,var(--blue,#4f7cd9),var(--blue-2,#33549c));border-radius:3px 3px 0 0;min-width:6px;position:relative}' +
     '.tr-bar:hover{opacity:.85}' +
     '.tr-bar span{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text-3);font-weight:700;white-space:nowrap;display:none}' +
+    '.tr-bar.tr-part{background:repeating-linear-gradient(135deg,rgba(233,169,60,.42),rgba(233,169,60,.42) 5px,transparent 5px,transparent 10px);border:1px dashed rgba(233,169,60,.6)}' +
+    '.tr-warn{margin:0 0 12px;padding:10px 13px;border-radius:10px;border:1px solid rgba(255,159,67,.45);background:var(--warn-soft);font-size:12.5px;font-weight:600;color:var(--text-2);line-height:1.55}' +
+    '.tr-warn b{color:var(--warn)}' +
+    '.tr-sofar{display:flex;gap:9px;flex-wrap:wrap;align-items:baseline;margin:-6px 0 14px;font-size:12px;font-weight:700;color:var(--text-3)}' +
+    '.tr-sofar b{color:var(--text-2)}' +
     '.tr-bar:hover span{display:block}' +
     '.tr-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:760px}' +
     '.tr-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800}' +
@@ -23,7 +28,18 @@
     '.tr-tbl td:first-child{text-align:left;min-width:240px;white-space:normal}'
   );
 
-  function trN(v) { var n = Number(v) || 0; return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+  function trN(v) { var n = Number(v) || 0; return n >= 1000000 ? (n / 1000000).toFixed(2) + 'M' : n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+  function trShift(ymd, n) {
+    var t = Date.parse(String(ymd) + 'T12:00:00Z');
+    return isFinite(t) ? new Date(t + n * 86400000).toISOString().slice(0, 10) : String(ymd);
+  }
+
+  /* 23 Sept (owner: "traffic page not working, it's stale"). Nothing was stale — trafficSync had
+     run fourteen minutes earlier and all six accounts were current. eBay reports the CURRENT day
+     many hours behind, and this screen presented that half-filled day as a finished one: 59.6k
+     impressions against a normal Wednesday's ~325k, which reads as a collapse in traffic rather
+     than as a day eBay has not finished counting. A day still filling is now named, kept out of
+     the totals it would drag down, drawn hatched, and put beside the last full day for scale. */
 
   function trLoad() {
     var box = $('trBody');
@@ -31,7 +47,7 @@
     box.innerHTML = '<div class="spinner"></div>';
     var payload = { range: TR.range };
     if (TR.account) { payload.account = TR.account; }
-    if (TR.mode === 'today') { payload.from = ukToday(); payload.to = ukToday(); }
+    if (TR.mode === 'today') { payload.from = trShift(ukToday(), -6); payload.to = ukToday(); }
     else if (TR.mode === 'custom' && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
     api('trafficBoard', payload).then(function (d) {
       d = d || {};
@@ -45,15 +61,36 @@
         o.transactions += Number(r.transactions) || 0;
       });
       var series = Object.values(byDay).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-      var bounded = TR.mode === 'today' || TR.mode === 'custom';
-      var win = bounded ? series : series.slice(-TR.range);
-      var winLbl = TR.mode === 'today' ? 'today' : TR.mode === 'custom' ? (TR.from + ' \u2192 ' + TR.to) : TR.range + 'd';
+      var today = String(d.today || ukToday());
+      var win;
+      if (TR.mode === 'today') { win = series.filter(function (r) { return r.date === today; }); }
+      else if (TR.mode === 'custom') { win = series; }
+      else { win = series.slice(-TR.range); }
+
+      /* eBay finishes a day overnight, so only TODAY is ever unfinished. */
+      var partial = null, settled = [];
+      win.forEach(function (r) { if (r.date === today) { partial = r; } else { settled.push(r); } });
+      var lastFull = null;
+      series.forEach(function (r) { if (r.date !== today) { lastFull = r; } });
+
+      // the tiles describe finished days; today gets its own line so it cannot drag them down
+      var showing = (TR.mode === 'today') ? (partial ? [partial] : []) : settled;
+      var winLbl = TR.mode === 'today' ? 'so far today'
+        : TR.mode === 'custom' ? (TR.from + ' \u2192 ' + TR.to)
+        : (settled.length ? settled.length + ' full day' + (settled.length === 1 ? '' : 's') + ' to ' + settled[settled.length - 1].date.slice(5) : TR.range + 'd');
       var tot = { impressions: 0, views: 0, transactions: 0 };
-      win.forEach(function (r) { tot.impressions += r.impressions; tot.views += r.views; tot.transactions += r.transactions; });
+      showing.forEach(function (r) { tot.impressions += r.impressions; tot.views += r.views; tot.transactions += r.transactions; });
       var ctr = tot.impressions ? (tot.views / tot.impressions * 100) : 0;
       var cvr = tot.views ? (tot.transactions / tot.views * 100) : 0;
 
-      var h = '<div class="tr-tiles">' +
+      var h = '';
+      if (TR.mode === 'today') {
+        h += '<div class="tr-warn"><b>eBay has not finished reporting today.</b> These figures keep rising through the evening, so this is not a finished day and does not compare with the days below.' +
+          (lastFull ? ' The last full day, ' + esc(lastFull.date.slice(5)) + ', finished on <b>' + trN(lastFull.impressions) + '</b> impressions, ' + trN(lastFull.views) + ' views and ' + lastFull.transactions + ' sold.' : '') + '</div>';
+      } else if (partial) {
+        h += '<div class="tr-warn">Today is still being counted by eBay, so it is left out of the totals below and drawn hatched in the chart.</div>';
+      }
+      h += '<div class="tr-tiles">' +
         '<div class="tr-tile"><div class="k">Impressions · ' + esc(winLbl) + '</div><div class="v">' + trN(tot.impressions) + '</div></div>' +
         '<div class="tr-tile"><div class="k">Listing views</div><div class="v">' + trN(tot.views) + '</div></div>' +
         '<div class="tr-tile"><div class="k">Transactions</div><div class="v">' + trN(tot.transactions) + '</div></div>' +
@@ -61,20 +98,30 @@
         '<div class="tr-tile"><div class="k">Conversion</div><div class="v">' + cvr.toFixed(2) + '%</div></div>' +
       '</div>';
 
-      var max = Math.max.apply(null, win.map(function (r) { return r.impressions; }).concat([1]));
-      h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin-bottom:2px">Impressions by day</div>' +
-        '<div class="tr-bars">' + win.map(function (r) {
-          return '<div class="tr-bar" style="height:' + Math.max(4, Math.round(r.impressions / max * 100)) + '%">' +
-            '<span>' + esc(r.date.slice(5)) + ' · ' + trN(r.impressions) + ' imp · ' + trN(r.views) + ' views · ' + r.transactions + ' sold</span></div>';
+      if (partial && TR.mode !== 'today') {
+        h += '<div class="tr-sofar"><span>So far today (' + esc(today.slice(5)) + ', still counting):</span>' +
+          '<b>' + trN(partial.impressions) + '</b> impressions <b>' + trN(partial.views) + '</b> views <b>' + partial.transactions + '</b> sold</div>';
+      }
+
+      /* One lone bar tells a person nothing, so the Today view keeps the week behind it for
+         scale and simply hatches the day eBay is still counting. */
+      var chartDays = (TR.mode === 'today') ? series.slice(-7) : win;
+      var max = Math.max.apply(null, chartDays.map(function (r) { return r.impressions; }).concat([1]));
+      h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin-bottom:2px">Impressions by day' +
+        (TR.mode === 'today' ? ' · the week behind today' : '') + '</div>' +
+        '<div class="tr-bars">' + chartDays.map(function (r) {
+          var isPart = r.date === today;
+          return '<div class="tr-bar' + (isPart ? ' tr-part' : '') + '" style="height:' + Math.max(4, Math.round(r.impressions / max * 100)) + '%">' +
+            '<span>' + esc(r.date.slice(5)) + ' · ' + trN(r.impressions) + ' imp · ' + trN(r.views) + ' views · ' + r.transactions + ' sold' +
+            (isPart ? ' · still counting' : '') + '</span></div>';
         }).join('') + '</div>';
 
       /* review 3: account-to-account, day by day */
       if (!TR.account) {
-        var byAcct = {};
+        var byAcct = {}, showDates = {};
+        showing.forEach(function (w) { showDates[w.date] = 1; });
         (d.days || []).forEach(function (r) {
-          if (bounded || win.some(function (w) { return w.date === r.date; })) {
-            (byAcct[r.account] = byAcct[r.account] || []).push(r);
-          }
+          if (showDates[r.date]) { (byAcct[r.account] = byAcct[r.account] || []).push(r); }
         });
         var accts = Object.keys(byAcct);
         if (accts.length > 1) {

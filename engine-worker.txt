@@ -8919,9 +8919,13 @@ const ROUTES = {
         .filter(l => l.cvr_l < 1)
         .sort((a, b) => b.views - a.views)
         .slice(0, 25);
+      /* 23 Sept: the screen must know which day is still being counted, and it must learn it
+         from the server rather than the viewer's clock — eBay's traffic report runs many hours
+         behind for the CURRENT day, so today's row is always a part-day that would otherwise be
+         read as a collapse in traffic. Yesterday and earlier are settled. */
       return { days: days.results || [], listings: listings.results || [], range,
-        from: dFrom, to: dTo, low_conversion: lows,
-        note: 'eBay refreshes traffic data on its own clock (up to a day behind); the portal re-reads it hourly' };
+        from: dFrom, to: dTo, low_conversion: lows, today: ukDate(''),
+        note: 'eBay counts the current day many hours behind, so today is always a part-day here and is kept out of the totals; every earlier day is settled. The portal re-reads the report hourly, and the per-listing table four times a day.' };
     },
   },
 
