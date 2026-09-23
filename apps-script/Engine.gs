@@ -240,9 +240,15 @@ function actionEngineSheetWrite_(payload) {
   if (bad.length) throw new Error('SAY: column not writable for this workflow: ' + bad.join(', '));
   if (!account || !matchValue || !Object.keys(values).length) throw new Error('SAY: account, match_value and values are all needed');
   const wbSpec = { scope: spec.scope, account: account, kind: spec.kind, tab: tab || undefined };
-  const res = bridgeUpdateRow_(wbSpec, String(payload.match_header || 'Order number'), matchValue, values, spec.cols, 'engine@worker');
-  logActivity_('system', 'ENGINE_SHEET_WRITE', spec.kind + '!' + account, '', JSON.stringify(values).slice(0, 180), res.shadow ? 'shadow' : 'written');
-  return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '' };
+  const onlyIfEmpty = !!payload.only_if_empty;
+  const res = bridgeUpdateRow_(wbSpec, String(payload.match_header || 'Order number'), matchValue, values, spec.cols, 'engine@worker',
+    { onlyIfEmpty: onlyIfEmpty });
+  logActivity_('system', 'ENGINE_SHEET_WRITE', spec.kind + '!' + account, '', JSON.stringify(values).slice(0, 180),
+    (res.shadow ? 'shadow' : 'written') + ((res.kept || []).length ? ' · kept ' + res.kept.join(', ') : ''));
+  /* `guard` tells the caller this deployment honours only_if_empty; the engine refuses to send
+     suggestions to a sheet until it sees it, so an un-deployed guard can never overwrite anyone. */
+  return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '',
+    written: res.written || [], kept: res.kept || [], guard: onlyIfEmpty ? 'only_if_empty' : '' };
 }
 
 /* Run one background job on demand, key-gated (19 Aug). Apps Script's Run button and its trigger

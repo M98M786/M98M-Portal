@@ -373,7 +373,11 @@ function bridgeAppendRow_(spec, values, whitelist, actor) {
 /** Matches by header value, not by position. Multi-line orders repeat the same order number on
  * consecutive rows, so an ambiguous match refuses to write and hands the rows back; spec.row
  * targets one of them explicitly. */
-function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, actor) {
+/* 23 Sept (owner: the order sheet must receive the AliExpress link on the first order): the
+ * portal may now SUGGEST a supplier link into a day-tab cell, so it needs a way to fill only
+ * what is blank. opts.onlyIfEmpty makes every cell in this write a suggestion: a cell a person
+ * has already filled is left exactly as it is and reported back in `kept`. */
+function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, actor, opts) {
   spec = spec || {};
   values = values || {};
   bridgeAssertWhitelist_(values, whitelist);
@@ -397,8 +401,9 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
     return bridgeShadow_(actor, id, tabName, String(preview.row), values, plan);
   }
 
+  const onlyIfEmpty = !!(opts && opts.onlyIfEmpty);
   const lock = LockService.getScriptLock();
-  const changed = [], unchanged = [], logs = [];
+  const changed = [], unchanged = [], kept = [], logs = [];
   let row = 0;
   try {
     lock.waitLock(10000);
@@ -408,6 +413,8 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
     plan.cells.forEach(function (c) {
       const cell = open.sheet.getRange(row, c.col);
       const old = cell.getValue();
+      // a suggestion never overwrites what a person typed
+      if (onlyIfEmpty && String(old === null || old === undefined ? '' : old).trim() !== '') { kept.push(c.header); return; }
       if (bridgeMatchKey_(old) === bridgeMatchKey_(c.value)) { unchanged.push(c.header); return; }
       cell.setValue(c.value);
       changed.push(c.header);
@@ -421,7 +428,7 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
   });
   return {
     ok: true, shadow: false, spreadsheetId: id, tab: tabName, row: row,
-    written: changed, unchanged: unchanged, skippedMissing: plan.skippedMissing,
+    written: changed, unchanged: unchanged, kept: kept, skippedMissing: plan.skippedMissing,
   };
 }
 

@@ -151,7 +151,7 @@ export default {
          and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
          accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
          fresh budget; watcher fan-outs are capped inside the watchers themselves. */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, nightlyCatchup, standardsSync],
+      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, nightlyCatchup, standardsSync],
       /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
          budget died with the upgrade. Each heavy family still keeps its own invocation. */
       '40 * * * *': [listingSync, trafficSync],
@@ -617,6 +617,82 @@ async function markEndedListings(env) {
    in any of the item's three supplier columns — is a dispatch stall waiting to happen. The
    Order Processors get the letter, one per item ever (alert_log is the memory), and the link
    lands via the order screen's own add-link box. */
+/* THE FIRST ORDER MUST ARRIVE WITH ITS BUYING LINK (owner, 23 Sept: "order sheet is not
+   receiving aliexpress link on arrival of first order on any item … if there is no aliexpress
+   link there on first order then there is absolutely no point to keep the archive of the item
+   listing").
+
+   The archive was never the problem. Every one of the 431 hunt records carries the supplier link
+   under 'Product Link 1 Main supplier', and provenance ties each item to its hunt. What was
+   missing was anything that CARRIED that link to the order. The go-live record was meant to:
+   enterItemId posts goliveRecord with the hunt's link — but it reads that link out of the task's
+   `details` field, which holds human-readable lines while the parser demands JSON, so it resolved
+   to '' every time. All 149 go-live rows stored an empty link and a first order had nothing to
+   inherit; the processor had to go and find the product again.
+
+   This closes it from the engine, where the hunt rows already live. For a recent order with no
+   link, take the first one the portal knows — what a processor used for this item before, the
+   Sourcing page, the Central Main Sheet, the go-live record, then the hunt itself — put it on the
+   order, remember it for the item, heal the go-live record, and write it into the day tab's own
+   'Ali Express Link' column. The sheet write is a SUGGESTION: it fills a blank cell and never
+   touches one a person has typed in, and it is not sent at all until the Apps Script side answers
+   that it honours that guard. */
+async function supplierLinkFill(env) {
+  const rs = await env.DB.prepare(
+    'SELECT o.order_id, o.account, o.item_id, ' +
+    "  COALESCE(NULLIF(il.ali_link,''), NULLIF(s.s1,''), NULLIF(f.sup1_link,''), NULLIF(g.ali_link,''), " +
+    '           NULLIF(json_extract(h.vals, \'$."Product Link 1 Main supplier"\'), \'\'), \'\') AS link, ' +
+    "  CASE WHEN COALESCE(g.ali_link,'') = '' THEN 1 ELSE 0 END AS golive_blank " +
+    'FROM orders o ' +
+    'LEFT JOIN item_links il ON il.item_id = o.item_id ' +
+    'LEFT JOIN sourcing s ON s.item_id = o.item_id ' +
+    'LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
+    'LEFT JOIN golive g ON g.item_id = o.item_id ' +
+    'LEFT JOIN provenance p ON p.item_id = o.item_id ' +
+    'LEFT JOIN hunt_rows h ON h.hunt_id = p.hunt_id ' +
+    "WHERE o.status NOT IN ('CANCELLED','NOT_FOUND') AND o.item_id != '' " +
+    "  AND COALESCE(o.ali_link,'') = '' AND o.created_at >= datetime('now','-10 day') " +
+    'ORDER BY o.created_at DESC LIMIT 25'
+  ).all().catch(() => ({ results: [] }));
+  const rows = (rs.results || []).filter((r) => /^https?:\/\//i.test(String(r.link || '')));
+  if (!rows.length) { await ctx_setSync(env, 'supplierLinkFill', '', ukDate('')); return 'supplierLinkFill: nothing to fill'; }
+
+  const key = await secret(env, 'SYNC_KEY');
+  let known = 0, onSheet = 0, kept = 0, missed = 0, guarded = true;
+  for (const r of rows) {
+    const link = String(r.link).slice(0, 500);
+    await env.DB.prepare('UPDATE orders SET ali_link = ?2 WHERE order_id = ?1').bind(r.order_id, link).run().catch(() => {});
+    await env.DB.prepare(
+      "INSERT INTO item_links (item_id, ali_link, last_ali_order, updated_at) VALUES (?1, ?2, '', datetime('now')) " +
+      "ON CONFLICT(item_id) DO UPDATE SET ali_link = CASE WHEN COALESCE(item_links.ali_link,'') = '' THEN ?2 ELSE item_links.ali_link END, updated_at = datetime('now')"
+    ).bind(String(r.item_id), link).run().catch(() => {});
+    if (Number(r.golive_blank)) {
+      await env.DB.prepare("UPDATE golive SET ali_link = ?2 WHERE item_id = ?1 AND COALESCE(ali_link,'') = ''")
+        .bind(String(r.item_id), link).run().catch(() => {});
+    }
+    known++;
+    if (!guarded) continue;                       // the guard is not deployed — never risk a sheet
+    try {
+      const resp = await fetch(env.AS_URL, {
+        method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'engineSheetWrite', payload: {
+          key, whitelist: 'orders_day', account: r.account, match_header: 'Order number',
+          match_value: r.order_id, only_if_empty: true, values: { 'Ali Express Link': link } } }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const body = await resp.json().catch(() => ({}));
+      const d = (body && body.data) || {};
+      if (d.guard !== 'only_if_empty') { guarded = false; continue; }
+      if (body.ok && d.ok !== false) { if ((d.kept || []).length) kept++; else onSheet++; } else missed++;
+    } catch (e) { missed++; }
+  }
+  await ctx_setSync(env, 'supplierLinkFill', '', ukDate(''));
+  return 'supplierLinkFill: ' + known + ' order(s) given a link' +
+    (guarded ? ', ' + onSheet + ' written to the sheet' + (kept ? ', ' + kept + ' left alone (a person had filled it)' : '') +
+      (missed ? ', ' + missed + ' sheet write(s) missed' : '')
+      : ' — sheet writes held back: the Apps Script blank-cell guard is not deployed yet');
+}
+
 async function noSupplierScan(env) {
   const rs = await env.DB.prepare(
     "SELECT o.item_id, MIN(o.order_id) AS order_id, o.account, COUNT(*) AS n, MAX(i.title) AS title " +
@@ -11343,15 +11419,26 @@ const ROUTES = {
       }
       const id = String(p.item_id || '').replace(/\D/g, '');
       if (!/^\d{9,15}$/.test(id)) throw new Error('SAY: item id looks wrong');
+      /* 23 Sept: the caller reads this link out of a task field that holds prose, not JSON, so it
+         has always arrived empty — every go-live row stored '' and first orders inherited nothing.
+         The hunt record has it; take it from there rather than trusting the caller. */
+      let link = String(p.ali_link || '').slice(0, 500);
+      if (!link) {
+        const hit = await ctx.env.DB.prepare(
+          'SELECT COALESCE(NULLIF(json_extract(h.vals, \'$."Product Link 1 Main supplier"\'), \'\'), \'\') AS link ' +
+          'FROM provenance pr LEFT JOIN hunt_rows h ON h.hunt_id = pr.hunt_id WHERE pr.item_id = ?1'
+        ).bind(id).first().catch(() => null);
+        if (hit && hit.link) link = String(hit.link).slice(0, 500);
+      }
       await ctx.env.DB.prepare(
         'INSERT INTO golive (item_id, account, title, ali_link, lister, published_by, live_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
         "ON CONFLICT(item_id) DO UPDATE SET account = ?2, title = CASE WHEN ?3 != '' THEN ?3 ELSE title END, " +
         "ali_link = CASE WHEN ?4 != '' THEN ?4 ELSE ali_link END, lister = CASE WHEN ?5 != '' THEN ?5 ELSE lister END, " +
         'published_by = ?6, live_at = ?7'
       ).bind(id, String(p.account || ''), String(p.title || '').slice(0, 160),
-        String(p.ali_link || '').slice(0, 500), String(p.lister || ''), String(p.by || ''),
+        link, String(p.lister || ''), String(p.by || ''),
         String(p.at || new Date().toISOString())).run();
-      return { ok: true, item_id: id };
+      return { ok: true, item_id: id, ali_link: link ? 'stored' : 'none known yet' };
     },
   },
 
@@ -13374,7 +13461,7 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll,
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
-        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan,
+        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep };
       const fn = jobs[String(p.job || '')];
@@ -14210,7 +14297,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

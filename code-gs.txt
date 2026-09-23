@@ -1697,7 +1697,11 @@ function bridgeAppendRow_(spec, values, whitelist, actor) {
 /** Matches by header value, not by position. Multi-line orders repeat the same order number on
  * consecutive rows, so an ambiguous match refuses to write and hands the rows back; spec.row
  * targets one of them explicitly. */
-function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, actor) {
+/* 23 Sept (owner: the order sheet must receive the AliExpress link on the first order): the
+ * portal may now SUGGEST a supplier link into a day-tab cell, so it needs a way to fill only
+ * what is blank. opts.onlyIfEmpty makes every cell in this write a suggestion: a cell a person
+ * has already filled is left exactly as it is and reported back in `kept`. */
+function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, actor, opts) {
   spec = spec || {};
   values = values || {};
   bridgeAssertWhitelist_(values, whitelist);
@@ -1721,8 +1725,9 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
     return bridgeShadow_(actor, id, tabName, String(preview.row), values, plan);
   }
 
+  const onlyIfEmpty = !!(opts && opts.onlyIfEmpty);
   const lock = LockService.getScriptLock();
-  const changed = [], unchanged = [], logs = [];
+  const changed = [], unchanged = [], kept = [], logs = [];
   let row = 0;
   try {
     lock.waitLock(10000);
@@ -1732,6 +1737,8 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
     plan.cells.forEach(function (c) {
       const cell = open.sheet.getRange(row, c.col);
       const old = cell.getValue();
+      // a suggestion never overwrites what a person typed
+      if (onlyIfEmpty && String(old === null || old === undefined ? '' : old).trim() !== '') { kept.push(c.header); return; }
       if (bridgeMatchKey_(old) === bridgeMatchKey_(c.value)) { unchanged.push(c.header); return; }
       cell.setValue(c.value);
       changed.push(c.header);
@@ -1745,7 +1752,7 @@ function bridgeUpdateRow_(spec, matchHeader, matchValue, values, whitelist, acto
   });
   return {
     ok: true, shadow: false, spreadsheetId: id, tab: tabName, row: row,
-    written: changed, unchanged: unchanged, skippedMissing: plan.skippedMissing,
+    written: changed, unchanged: unchanged, kept: kept, skippedMissing: plan.skippedMissing,
   };
 }
 
@@ -23163,9 +23170,15 @@ function actionEngineSheetWrite_(payload) {
   if (bad.length) throw new Error('SAY: column not writable for this workflow: ' + bad.join(', '));
   if (!account || !matchValue || !Object.keys(values).length) throw new Error('SAY: account, match_value and values are all needed');
   const wbSpec = { scope: spec.scope, account: account, kind: spec.kind, tab: tab || undefined };
-  const res = bridgeUpdateRow_(wbSpec, String(payload.match_header || 'Order number'), matchValue, values, spec.cols, 'engine@worker');
-  logActivity_('system', 'ENGINE_SHEET_WRITE', spec.kind + '!' + account, '', JSON.stringify(values).slice(0, 180), res.shadow ? 'shadow' : 'written');
-  return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '' };
+  const onlyIfEmpty = !!payload.only_if_empty;
+  const res = bridgeUpdateRow_(wbSpec, String(payload.match_header || 'Order number'), matchValue, values, spec.cols, 'engine@worker',
+    { onlyIfEmpty: onlyIfEmpty });
+  logActivity_('system', 'ENGINE_SHEET_WRITE', spec.kind + '!' + account, '', JSON.stringify(values).slice(0, 180),
+    (res.shadow ? 'shadow' : 'written') + ((res.kept || []).length ? ' · kept ' + res.kept.join(', ') : ''));
+  /* `guard` tells the caller this deployment honours only_if_empty; the engine refuses to send
+     suggestions to a sheet until it sees it, so an un-deployed guard can never overwrite anyone. */
+  return { ok: res.ok !== false, shadow: !!res.shadow, reason: res.reason || '',
+    written: res.written || [], kept: res.kept || [], guard: onlyIfEmpty ? 'only_if_empty' : '' };
 }
 
 /* Run one background job on demand, key-gated (19 Aug). Apps Script's Run button and its trigger
