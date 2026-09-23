@@ -174,9 +174,12 @@ def build_ads():
     if not files:
         sys.exit('ERROR: no view-adtool-*.js modules found')
     blocks = ['window.M98M_ADS_ONLY = true;']
+    declared = set()
     for name in files:
         with open(os.path.join(fdir, name)) as fh:
-            blocks.append('/* ---------- %s ---------- */\n%s' % (name, fh.read().strip()))
+            body = fh.read().strip()
+        declared.update(v for v in re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', body) if v.startswith('adtool'))
+        blocks.append('/* ---------- %s ---------- */\n%s' % (name, body))
     page = shell.replace(MARKER, '\n\n'.join(blocks))
 
     page = page.replace('<title>M98M Portal</title><!--ADS_TITLE-->', '<title>M98M Advertising</title>')
@@ -195,9 +198,13 @@ def build_ads():
     views = sorted(v for v in set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)) if v.startswith('adtool'))
     print('ads -> ads/index.html  %d bytes, modules: %d, advertising views: %d'
           % (len(page), len(files), len(views)))
-    if len(views) != 13:
-        sys.exit('ERROR: expected 13 advertising views in the ads build, spliced %d (%s)'
-                 % (len(views), ', '.join(views)))
+    # The tripwire is "the splice dropped nothing", not a fixed number. It used to assert 13 and
+    # went stale the day a fourteenth page landed, so from 18 Sept every build exited 1 after
+    # writing correct artifacts -- a guard that always fires can never warn about anything.
+    missing = sorted(declared - set(views))
+    if missing:
+        sys.exit('ERROR: the ads build dropped %d advertising view(s) the modules declare: %s'
+                 % (len(missing), ', '.join(missing)))
     return views
 
 
