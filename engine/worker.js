@@ -1001,10 +1001,25 @@ async function selfTestRun(env) {
   } catch (e) { add('P&L law recomputes (0.8 × (OE − Ali))', false, e.message); }
 
   try { // 6. ads continuity: each of the last 2 full days has ad rows in the daily books
+    /* YESTERDAY has a second witness, and needs one. eBay's official daily report for a day is
+       only ASKED for by adsReportKick in this same 02:10 slot and takes its own time to build,
+       so ads_daily is legitimately empty for yesterday when the battery runs minutes later —
+       this check therefore letters Management a 🔴 every single night (24 nights running, 1–24
+       Sept, no gaps), and an alarm that is wrong every night cannot warn about anything. The
+       intraday pipeline records each dying day's closing spend at rollover (adsIntradayFinal);
+       a real closing total is independent proof the ads kept running. Only when BOTH are empty
+       did the ads actually go dark. The day-before-yesterday keeps the strict test, so a report
+       that never lands is still caught — one night later. */
+    const finR = await one("SELECT cursor FROM sync_state WHERE job = 'adsIntradayFinal' AND account = ''");
+    const finM = String((finR && finR.cursor) || '').match(/^(\d{4}-\d{2}-\d{2}):([0-9.]+)$/);
     for (let back = 1; back <= 2; back++) {
       const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
       const r = await one('SELECT ROUND(COALESCE(SUM(spend + cpc_spend), 0), 2) AS sp, COUNT(*) AS n FROM ads_daily WHERE date = ?1', day);
-      add('ad books present for ' + day, Number(r.n) > 0, '£' + r.sp + ' across ' + r.n + ' rows' + (Number(r.n) === 0 ? ' — the daily report may not have landed yet' : ''));
+      const inFlight = back === 1 && !!finM && finM[1] === day && Number(finM[2]) > 0;
+      add('ad books present for ' + day, Number(r.n) > 0 || inFlight,
+        Number(r.n) > 0 ? '£' + r.sp + ' across ' + r.n + ' rows'
+          : inFlight ? 'official report still in flight — intraday closed the day at £' + Number(finM[2]).toFixed(2)
+          : '£0 across 0 rows — no ad books and no intraday total for the day');
     }
   } catch (e) { add('ad books present', false, e.message); }
 
