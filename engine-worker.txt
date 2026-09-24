@@ -5290,23 +5290,32 @@ async function adtoolReport(env) {
   await ensureAdtoolPhase5Schema(env);
   const t = await adtJobStart(env, 'adtoolReport');
   try {
-    const today = ukDate(''), day = adtAddDays(today, -1);
-    /* eBay's report for `day` lands the next morning. Building the page before it does would freeze a day at
-       "£0 spend" for ever, because a generated report is never rebuilt. Wait for the report, and rebuild a
-       report that was generated before the spend arrived. */
-    const landed = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend FROM adtool_listing_day WHERE day = ?1').bind(day).first();
-    const spendIn = Number(landed && landed.spend) || 0;
-    const exists = await env.DB.prepare('SELECT day, json FROM adtool_reports WHERE day = ?1').bind(day).first();
-    if (!spendIn) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', "eBay's report for " + day + ' has not landed yet — nothing to write' + a); return; }
-    if (exists) {
-      let had = 0; try { had = Number(JSON.parse(exists.json).fleet.spend) || 0; } catch (e) {}
-      /* eBay delivers a day in pieces. On 23 Sep the 02:23 run caught £39.01 of what became £520.90,
-         and the old guard — "spend above zero means the report is done" — froze the sliver as the day's
-         report for ever. A report is only final once the rollup has stopped moving past it: rebuild
-         whenever the day's rollup differs from what the report froze by more than 2 % or £1. */
-      const settled = had > 0 && Math.abs(spendIn - had) <= Math.max(1, spendIn * 0.02);
-      if (settled) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated' + a); return; }
-      if (had > 0) { /* partial — fall through and rebuild on the fuller day */ }
+    const today = ukDate('');
+    /* Build the most recent of the last four report days that still needs it — missing, or frozen on a
+       partial delivery. It was hard-wired to yesterday, so the moment a bad day stopped being yesterday
+       nothing would ever build it again: deleting the £39.01 sliver for 22 Sep would have left that day
+       with no report at all. One day per run; the hourly slot clears any backlog, and a day eBay has not
+       delivered at all is simply skipped until it lands. */
+    let day = '', spendIn = 0;
+    const notes = [];
+    for (let k = 1; k <= 4; k++) {
+      const d = adtAddDays(today, -k);
+      const landed = await env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend FROM adtool_listing_day WHERE day = ?1').bind(d).first();
+      const sp = Number(landed && landed.spend) || 0;
+      if (!sp) { if (k === 1) notes.push("eBay's report for " + d + ' has not landed yet'); continue; }
+      const ex = await env.DB.prepare('SELECT day, json FROM adtool_reports WHERE day = ?1').bind(d).first();
+      if (ex) {
+        let had = 0; try { had = Number(JSON.parse(ex.json).fleet.spend) || 0; } catch (e) {}
+        /* final only once the rollup has stopped moving past it — eBay delivers a day in pieces, and the
+           old "spend above zero means done" froze £39.01 of a £520.90 day as its report for ever */
+        if (had > 0 && Math.abs(sp - had) <= Math.max(1, sp * 0.02)) continue;
+      }
+      day = d; spendIn = sp; break;
+    }
+    if (!day) {
+      const a = await adtReportAcceptance(env, today);
+      await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', (notes.length ? notes.join(' · ') + ' — other recent days settled' : 'all recent reports are settled') + a);
+      return;
     }
     /* cap days for yesterday (A15 input) */
     const budgets = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN c.budget <> '' THEN CAST(c.budget AS REAL) ELSE 0 END) AS budget FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY ca.listing_id").all()).results || [])) budgets[r.listing_id] = Number(r.budget) || 0;
