@@ -775,7 +775,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260923-1709';
+var BUILD = '20260924-0024';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2912,7 +2912,18 @@ VIEWS.home = {
     api('adtoolReport', RP.day ? { day: RP.day } : {}).then(function (D) {
       if (!D.report) { $('moRp').innerHTML = '<div class="an-panel"><h3>No report yet</h3><div class="an-sub">The report job runs in the morning chain and catches up hourly. The first one covers yesterday.</div></div>'; return; }
       var R = D.report, y = R.fleet;
-      var h = '<div class="an-filters">' + D.days.slice(0, 14).map(function (d) { return '<button class="' + (d.day === D.day ? 'on' : '') + '" data-d="' + esc(d.day) + '">' + esc(d.day) + '</button>'; }).join('') + '</div>';
+      /* Never show an older day in silence. The owner opened this page, saw Sunday where he expected
+         yesterday, and rightly asked what the hell he was looking at — the page knew and did not say. */
+      var h = '';
+      if (D.yesterday && D.day !== D.yesterday) {
+        h += '<div class="an-note" style="border:1px solid rgba(224,86,63,.5);background:rgba(224,86,63,.08);color:#ffb3a6;margin-bottom:12px">' +
+          '<b>This is not yesterday.</b> You are looking at <b>' + esc(D.day) + '</b>. ' +
+          (D.yesterday_missing
+            ? 'eBay has not delivered its report for ' + esc(D.yesterday) + ' yet — it arrives during the morning (kick 02:10 UTC), and this page moves to it on its own when it lands.'
+            : 'Yesterday (' + esc(D.yesterday) + ') is in the day picker below.') +
+          '</div>';
+      }
+      h += '<div class="an-filters">' + D.days.slice(0, 14).map(function (d) { return '<button class="' + (d.day === D.day ? 'on' : '') + '" data-d="' + esc(d.day) + '">' + esc(d.day) + '</button>'; }).join('') + '</div>';
       h += '<div class="an-panel"><h3>' + esc(R.day) + ' · ' + esc(R.weekday) + src('generated ' + String(R.generated_at).slice(11, 16) + ' UTC') + '</h3><div class="an-sub">' + esc(R.sources.join(' · ')) + '</div><div class="an-kpis">' + kpi('Spend', gbp(y.spend), (y.attr_units || 0) + ' ad sales') + kpi('ROAS', roas(y.roas), gbp(y.attr_revenue, 0) + ' attributed') + kpi('Est. ad profit', pm(y.ad_profit), 'vs 7-day ' + (R.vs_7day ? pm(R.vs_7day.ad_profit) + '/day' : '—'), cls(y.ad_profit)) + kpi('Orders', String(y.orders || 0), (y.units || 0) + ' units · ' + gbp(y.revenue, 0)) + kpi('Actual profit', pm(y.actual_profit), (y.pending || 0) + ' pending cost', cls(y.actual_profit)) + '</div>' +
         '<div class="an-sub">Against the 7-day average per day: spend ' + (R.vs_7day ? gbp(R.vs_7day.spend) : '—') + ' · ROAS ' + (R.vs_7day ? roas(R.vs_7day.roas) : '—') + ' · est. ad profit ' + (R.vs_7day ? pm(R.vs_7day.ad_profit) : '—') + '. Same weekday last week: spend ' + (R.vs_same_weekday_last_week ? gbp(R.vs_same_weekday_last_week.spend) : '—') + ' · ROAS ' + (R.vs_same_weekday_last_week ? roas(R.vs_same_weekday_last_week.roas) : '—') + ' · est. ad profit ' + (R.vs_same_weekday_last_week ? pm(R.vs_same_weekday_last_week.ad_profit) : '—') + '. ' + esc(R.decisions.note) + '.</div>' +
         '<button class="an-btn" id="moPdf">Download PDF</button> <button class="an-btn" id="moSend" style="background:transparent;border:1px solid var(--gold-line);color:var(--text-2)">Send to inbox</button></div>';

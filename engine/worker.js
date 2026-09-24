@@ -5300,7 +5300,13 @@ async function adtoolReport(env) {
     if (!spendIn) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', "eBay's report for " + day + ' has not landed yet — nothing to write' + a); return; }
     if (exists) {
       let had = 0; try { had = Number(JSON.parse(exists.json).fleet.spend) || 0; } catch (e) {}
-      if (had > 0) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated' + a); return; }
+      /* eBay delivers a day in pieces. On 23 Sep the 02:23 run caught £39.01 of what became £520.90,
+         and the old guard — "spend above zero means the report is done" — froze the sliver as the day's
+         report for ever. A report is only final once the rollup has stopped moving past it: rebuild
+         whenever the day's rollup differs from what the report froze by more than 2 % or £1. */
+      const settled = had > 0 && Math.abs(spendIn - had) <= Math.max(1, spendIn * 0.02);
+      if (settled) { const a = await adtReportAcceptance(env, today); await adtJobEnd(env, 'adtoolReport', t, 0, 'ok', 'report for ' + day + ' already generated' + a); return; }
+      if (had > 0) { /* partial — fall through and rebuild on the fuller day */ }
     }
     /* cap days for yesterday (A15 input) */
     const budgets = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN c.budget <> '' THEN CAST(c.budget AS REAL) ELSE 0 END) AS budget FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY ca.listing_id").all()).results || [])) budgets[r.listing_id] = Number(r.budget) || 0;
@@ -5425,6 +5431,7 @@ const ADTOOL_ACTIONS_P5 = {
       await adtGate(ctx, 'adtool_page_report'); const env = ctx.env; await ensureAdtoolPhase5Schema(env);
       const days = (await env.DB.prepare('SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60').all()).results || [];
       const day = String((p && p.day) || (days[0] && days[0].day) || '');
+      const ukYesterday = adtAddDays(ukDate(''), -1);
       const row = day ? await env.DB.prepare('SELECT json, generated_at FROM adtool_reports WHERE day = ?1').bind(day).first() : null;
       const report = row ? JSON.parse(row.json) : null;
       if (p && p.pdf && report) {
@@ -5442,7 +5449,7 @@ const ADTOOL_ACTIONS_P5 = {
         return { day, pdf_base64: adtPdf(L), filename: 'ads-report-' + day + '.pdf' };
       }
       if (p && p.send && report) { const u = ctx.user || {}; const y = report.fleet; try { await adtNotify(env, 'management', "Yesterday's ads report", '📊 Ads report ' + day + ' sent by ' + (u.email || '') + ': £' + y.spend + ' spend · ROAS ' + (y.roas == null ? '—' : y.roas + '×') + ' · est. ad profit £' + y.ad_profit + ' · ' + report.what_changed[0], 'adtool:reportsend:' + day + ':' + Date.now()); } catch (e) {} return { ok: true }; }
-      return { day, report, days, computed_at: new Date().toISOString() };
+      return { day, yesterday: ukYesterday, yesterday_missing: !days.some(d => d.day === ukYesterday), report, days, computed_at: new Date().toISOString() };
     },
   },
   adtoolRoasTarget: {
