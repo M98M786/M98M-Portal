@@ -775,7 +775,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260924-0024';
+var BUILD = '20260924-0314';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -26193,6 +26193,12 @@ function saveSchedule() {
   var TK_COMPLETED = 'Completed';
   var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'sourcing_link'];
   var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'sourcing_link'];
+  /* A loss review is the one type the server closes on an EXACT string: Tasks.gs rejects any
+     submission note that is not one of these three, verbatim. My tasks only ever offered the
+     free-text box every other type uses, so every loss review submitted since the type shipped
+     was refused and 80 of them sat open while the advertising alert re-rang every 5 minutes.
+     The three live here so the desk can only ever send a note the server accepts. */
+  var TK_LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management \u2014 keep same'];
   var TK_CREATE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager'];       // §4.3 + §4.4
   var TK_APPROVE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'Listing Manager'];
   var TK_OPEN = [TK_PENDING, TK_WORKING, TK_UPDATED];
@@ -26931,6 +26937,20 @@ function saveSchedule() {
 
   function tkSubmitForm(t, id, type) {
     var wantsItem = tkHas(TK_ITEM_TYPES, type);
+    if (type === 'loss_review') {
+      return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
+        '<div class="field"><label>How was this loss resolved? Pick one \u2014 that is the whole submission.</label>' +
+          '<div style="display:flex;flex-direction:column;gap:7px;margin-top:6px">' +
+          TK_LOSS_RESOLUTIONS.map(function (r) {
+            return '<label style="display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:12.5px;cursor:pointer">' +
+              '<input type="radio" name="tkloss-' + tkAttr(id) + '" data-loss="' + tkAttr(id) + '" value="' + tkAttr(r) + '"> ' + esc(r) + '</label>';
+          }).join('') + '</div>' +
+          '<div class="tk-sub" style="margin-top:7px">The advertising alert for this item re-rings every 5 minutes until one of these three is recorded.</div></div>' +
+        '<div class="tk-btns"><button class="minibtn" data-act="send" data-id="' + tkAttr(id) + '">Submit for approval</button>' +
+          '<button class="minibtn" data-act="cancel" data-id="' + tkAttr(id) + '">Cancel</button>' +
+          '<span class="tk-sub">It moves to ' + esc(TK_SUBMITTED) + '.</span></div>' +
+      '</div>';
+    }
     return '<div class="tk-form hidden" data-form="' + tkAttr(id) + '">' +
       (type === 'listing_revision' ? '<div class="field"><label>What did you change? (tick all that apply)</label>' +
         '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px">' +
@@ -27072,6 +27092,24 @@ function saveSchedule() {
     if (act === 'send') {
       note = tkPick(box, 'data-note', id);
       item = tkPick(box, 'data-item', id);
+      /* loss_review carries a picked resolution, never typed prose: the server matches the note
+         against its three strings exactly, so nothing may be prefixed or appended to it. */
+      var lossPick = form ? form.querySelector('input[data-loss]:checked') : null;
+      var isLoss = !!(form && form.querySelector('input[data-loss]'));
+      if (isLoss) {
+        if (!lossPick) { toast('Pick how the loss was resolved — one of the three.'); return; }
+        btn.disabled = true; btn.textContent = 'Sent \u2713';
+        if (form) { form.classList.add('hidden'); }
+        toast('Sent for approval.');
+        api('submitTask', { task_id: id, submission_note: tkStr(lossPick.value) })
+          .then(function () { tkLoadTasks(); })
+          ['catch'](function (e) {
+            btn.disabled = false; btn.textContent = 'Send for approval';
+            if (form) { form.classList.remove('hidden'); }
+            toast('NOT submitted — ' + String((e && e.message) || ''));
+          });
+        return;
+      }
       payload = { task_id: id, submission_note: note ? tkStr(note.value) : '' };
       if (!payload.submission_note) { toast('Add a submission note — the approver needs it.'); if (note) { note.focus(); } return; }
       // revision "what changed" ticks ride the note the approver reads
