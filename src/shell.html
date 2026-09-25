@@ -1879,6 +1879,16 @@ var smooth = function(t){ t = clamp(t,0,1); return t*t*(3-2*t); };
 var range = function(p,a,b){ return smooth((p-a)/(b-a)); };
 var gauss = function(){ var u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
 var rand = function(a,b){ return a + Math.random()*(b-a); };
+/* 26 Sept (owner: "galaxy does some issues when we zoom in or zoom out") — zoom fires a burst
+   of resize events (Safari's pinch fires only visualViewport), and it also CHANGES
+   devicePixelRatio, which the canvases sized themselves by at load. Every engine now refits
+   through one debounced handler, registered on both resize channels. */
+var gxDebounce = function(fn){ var t = 0; return function(){ clearTimeout(t); t = setTimeout(fn, 160); }; };
+var gxOnRefit = function(fn){
+  var d = gxDebounce(fn);
+  addEventListener('resize', d);
+  if (window.visualViewport) { try { visualViewport.addEventListener('resize', d); } catch(e){} }
+};
 
 /* ---------------- starfield (ported: 10fps twinkle, hidden-tab aware) ---------------- */
 var starsC, starsCtx, stars = [], sw = 0, sh = 0;
@@ -1888,7 +1898,7 @@ function starsBuild(){
   starsC.width = sw*dpr; starsC.height = sh*dpr; starsCtx.setTransform(dpr,0,0,dpr,0,0);
   starsC.style.width = sw+'px'; starsC.style.height = sh+'px';
   stars = [];
-  for (var i = 0; i < Math.round(sw*sh/5200); i++){
+  for (var i = 0, nStars = Math.min(900, Math.round(sw*sh/5200)); i < nStars; i++){
     stars.push({ x:Math.random()*sw, y:Math.random()*sh, r:Math.pow(Math.random(),2.2)*1.4+.3,
                  a:.2+Math.random()*.7, ph:Math.random()*6.28, sp:.4+Math.random()*1.2,
                  col: Math.random()<.18 ? '255,200,150' : Math.random()<.5 ? '200,215,255' : '255,255,255' });
@@ -1941,8 +1951,8 @@ function starsLoop(t){ if (root.dataset.theme !== 'galaxy') return; requestAnima
     const mat = f => new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: f, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
     const soft = mat(fragSoft), gem = mat(fragGem);
     group.add(new THREE.Points(layer(22000,'dust',.9,1.6,0), soft)); group.add(new THREE.Points(layer(9000,'arm2',1.2,2.2,0), soft)); group.add(new THREE.Points(layer(7000,'arm',1.8,3.2,.3), soft)); group.add(new THREE.Points(layer(5000,'core',1.6,3,0), soft)); group.add(new THREE.Points(layer(220,'gem',7,14,1), gem));
-    function resize(){ const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w/h; camera.position.z = 4.3*Math.max(1, 1/camera.aspect); camera.updateProjectionMatrix(); }
-    resize(); addEventListener('resize', resize);
+    function resize(){ const w = innerWidth, h = innerHeight; renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(w, h, false); camera.aspect = w/h; camera.position.z = 4.3*Math.max(1, 1/camera.aspect); camera.updateProjectionMatrix(); }
+    resize(); gxOnRefit(resize);
     let mx = 0, my = 0; addEventListener('pointermove', e => { mx = (e.clientX/innerWidth - .5)*2; my = (e.clientY/innerHeight - .5)*2; }, { passive: true });
     const cur = { tilt: .16, scale: 1, y: 0 }, tgt = { tilt: .16, scale: 1, y: 0 };
     let mode = 'idle', t0 = 0, raf = 0, spin = 0, last = performance.now();
@@ -2011,7 +2021,7 @@ function build2D(canvas){
     cost += performance.now()-f0; n++;
     if (n >= 120){ if (cost/n > 9 && !degraded){ degraded = true; still = true; } cost = 0; n = 0; }
   }
-  size(); addEventListener('resize', size);
+  size(); gxOnRefit(size);
   function setMode(mm){ mode = mm; t0 = performance.now(); }
   function reset(){ scale = 1; tilt = .55; rise = 0; op = 1; }
   var api = {
@@ -2112,7 +2122,7 @@ function init(){
   buildWords();
   starsBuild(); starsDraw(0);
   if (!still) requestAnimationFrame(starsLoop);
-  addEventListener('resize', function(){ starsBuild(); starsDraw(starsLast); });
+  gxOnRefit(function(){ starsBuild(); starsDraw(starsLast); });
 
   mode = computeMode();
   applyAuthClass();
