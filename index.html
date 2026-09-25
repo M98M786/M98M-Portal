@@ -775,7 +775,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260925-0207';
+var BUILD = '20260925-0211';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1322,7 +1322,7 @@ VIEWS.home = {
     })();
     /* Team today (owner, 6 Sept: "update home page with staff attendance and staff working
        reports"). Management sees, at a glance, who is working / not concluded / late, and how many
-       people have filed their 2-hourly reports — each a click from its full page. Both feeds fail
+       people have filed their 4-hourly reports — each a click from its full page. Both feeds fail
        into plain words, never a stuck spinner. */
     (function(){
       var u=STATE.user||{};
@@ -1330,7 +1330,7 @@ VIEWS.home = {
       var host=$('hmTeam');
       if(!mgmt || !host){ return; }
       host.innerHTML='<div class="card enter d2" style="margin-top:16px"><div class="hd">Team today '+
-        '<span class="hint">attendance &amp; 2-hourly reports · PKT</span></div><div class="bd"><div class="grid g-2">'+
+        '<span class="hint">attendance &amp; 4-hourly reports · PKT</span></div><div class="bd"><div class="grid g-2">'+
         '<div id="hmAtt"><div class="spinner"></div></div><div id="hmRep"><div class="spinner"></div></div></div></div></div>';
       var first=function(n){ return String(n||'').split(' ')[0]||n; };
       var chip=function(l,v,tone){ return '<span style="display:inline-flex;gap:6px;align-items:baseline;border:1px solid var(--gold-line);border-radius:99px;padding:3px 11px;font-size:12px;font-weight:700;margin:0 6px 7px 0'+(tone?';color:var(--'+tone+')':'')+'">'+l+' <b>'+v+'</b></span>'; };
@@ -1347,7 +1347,7 @@ VIEWS.home = {
       api('staffReportsDay',{date:pkDayStr(0)}).then(function(d){
         if(!$('hmRep')){ return; }
         var ppl=(d&&d.people)||[], full=ppl.filter(function(p){return p.done>=p.total&&p.total;}).length, none=ppl.filter(function(p){return !p.done;}).length;
-        var h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-size:11px;font-weight:800;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">2-hourly reports</span>'+
+        var h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font-size:11px;font-weight:800;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">4-hourly reports</span>'+
           '<a href="#staffReports" data-hm-nav2="staffReports" style="margin-left:auto;font-size:11.5px;font-weight:700;color:var(--gold-a)">Open ↗</a></div>'+
           '<div style="font-size:23px;font-weight:800;font-variant-numeric:tabular-nums">'+full+' <span style="font-size:14px;color:var(--text-3);font-weight:700">/ '+ppl.length+' all in</span></div>'+
           (none?'<div style="margin-top:5px;font-size:12px;color:var(--bad);font-weight:700">'+none+' with nothing submitted yet</div>':'')+
@@ -21730,7 +21730,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 })();
 
 /* ---------- view-reports.js ---------- */
-/* §5 2-hourly reporting · §28.2 Daily Productivity Report · §25.4 the golden shift line.
+/* §5 4-hourly reporting (2-hourly until 25 Sept) · §28.2 Daily Productivity Report · §25.4 the golden shift line.
  * Backend actions: myCheckpoints, submitReport, reportsGrid. All labels (count fields, the
  * value-addition prompt, the grid legend) come from the backend payload — never hardcoded here. */
 (function () {
@@ -21851,7 +21851,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function pct(n) { return (isFinite(n) ? n : 0).toFixed(2); }
   function clamp(n, lo, hi) { return n < lo ? lo : (n > hi ? hi : n); }
 
-  /* ---------- VIEW: my 2-hourly reports ---------- */
+  /* ---------- VIEW: my 4-hourly reports ---------- */
 
   var busy = false;
   var ticker = null;
@@ -22148,7 +22148,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     order: 30,
     render: function () {
       return '<div class="hgroup enter d1"><h1>My <span class="goldtext">checkpoints</span></h1>' +
-        '<span class="sub" id="rpSub">2-hourly reporting</span></div>' +
+        '<span class="sub" id="rpSub">4-hourly reporting</span></div>' +
         '<div class="card enter d2"><div class="hd">Today’s shift line <span class="hint" id="rpHint">Loading…</span></div>' +
         '<div class="bd scroll" id="rpRail"><div class="spinner"></div></div></div>' +
         '<div class="grid g-2" style="margin-top:16px">' +
@@ -23413,7 +23413,7 @@ function openEditor(rec) {
       '</div>' +
       '<div class="field"><label>Working days</label><div class="rt-days" id="rtDays">' + dayBtns + '</div></div>' +
       '<div class="rl-meta" style="margin-top:12px">' + esc(stamp) + '</div>' +
-      '<div class="rl-meta">Checkpoints follow automatically: every 2 hours from work start, skipping the break, final report at work end.</div>' +
+      '<div class="rl-meta">Checkpoints follow automatically: every 4 hours from work start, skipping the break, final report at work end.</div>' +
       '<div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">' +
         '<button class="btn-gold" id="rtSave">Save timetable</button>' +
         '<button class="btn-ghost" id="rtCancel">Cancel</button>' +
@@ -26215,7 +26215,7 @@ function saveSchedule() {
     order: 35.5,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Staff <span class="goldtext">reports</span></h1>' +
-        '<span class="sub">every person’s 2-hourly reports, checkpoint by checkpoint — pick a day, open anyone’s archive</span></div>' +
+        '<span class="sub">every person’s 4-hourly reports, checkpoint by checkpoint — pick a day, open anyone’s archive</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
         '<div class="sr-bar">' +
           '<div class="field" style="margin-top:0;min-width:168px"><label>Day</label><input type="date" id="srDate"></div>' +
@@ -31053,7 +31053,7 @@ function enterApp(user){
   $('acctChip').textContent=(user.accounts&&user.accounts!=='ALL'?user.accounts:'All accounts');
   $('slMeta').innerHTML='<b>'+esc(user.shift||'Shift')+'</b>';
   $('streakLabel').textContent='Welcome, '+esc((user.name||'').split(' ')[0]);
-  /* the 2-hour report gate arms at sign-in and re-checks every 5 minutes */
+  /* the 4-hour report gate arms at sign-in and re-checks every 5 minutes */
   try{ gateCheck(); if(!GATE.timer){ GATE.timer=setInterval(gateCheck, 300000); } }catch(e){}
   $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
     '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>'+
@@ -31305,7 +31305,7 @@ function authSelfHeal(){
 }
 function signOut(){ try{ if(STATE.session){ api('sessionEnd', { session: STATE.session }).catch(function(){}); } }catch(e){} try{ google.accounts.id.disableAutoSelect(); }catch(e){} try{ localStorage.removeItem('m98m:knows'); }catch(e){} cacheClearAll(); sessClear(); psessClear(); STATE.idToken=null; STATE.session=null; STATE.user=null; show('loginScreen'); $('loginStatus').textContent=''; }
 
-/* ---- THE 2-HOUR REPORT GATE (owner, 10 Sept: "if a staff member has not added his 2-hourly
+/* ---- THE REPORT GATE (owner, 10 Sept — 4-hourly since 25 Sept: "if a staff member has not added his
    report within a 20-minute margin of the checkpoint, stop giving him his portal and alert him
    that it opens again once the report is added") ----
    myCheckpoints already computes 'missed' = checkpoint + late_threshold_min (20) passed with no
@@ -31322,8 +31322,8 @@ function gateOverlay(show){
     el.innerHTML='<div style="max-width:540px;text-align:center;border:1px solid var(--gold-line-hi);border-radius:16px;padding:34px 30px;background:var(--panel-2)">'+
       '<div style="font-size:34px">\u23F1\uFE0F</div>'+
       '<h2 style="margin:12px 0 8px">Your portal is paused</h2>'+
-      '<p style="color:var(--text-2);font-weight:600;line-height:1.55;margin:0 0 18px">A 2-hour report is overdue past the 20-minute margin. Your portal will not be available until you add your 2-hourly working report \u2014 it opens again the moment it is submitted.</p>'+
-      '<button class="btn-gold" id="gateGo" style="font-size:14px;padding:12px 22px">Add my 2-hour report now</button></div>';
+      '<p style="color:var(--text-2);font-weight:600;line-height:1.55;margin:0 0 18px">A 4-hour report is overdue past the 20-minute margin. Your portal will not be available until you add your 4-hourly working report \u2014 it opens again the moment it is submitted.</p>'+
+      '<button class="btn-gold" id="gateGo" style="font-size:14px;padding:12px 22px">Add my 4-hour report now</button></div>';
     document.body.appendChild(el);
     el.querySelector('#gateGo').onclick=function(){ el.style.display='none'; location.hash='reports'; try{ renderView('reports'); }catch(e){} };
   }
@@ -31344,7 +31344,7 @@ function gateCheck(){
       if(GATE.locked){
         var onReports = location.hash.replace('#','')==='reports';
         gateOverlay(!onReports);
-        if(!was){ try{ toast('Portal paused \u2014 a 2-hour report is overdue. Add it to continue.'); }catch(e){} }
+        if(!was){ try{ toast('Portal paused \u2014 a 4-hour report is overdue. Add it to continue.'); }catch(e){} }
       } else {
         gateOverlay(false);
         if(was){ try{ toast('Report received \u2014 portal unlocked. Thank you.'); }catch(e){} }

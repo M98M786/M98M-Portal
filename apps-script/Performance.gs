@@ -53,7 +53,7 @@ const PERF_METRICS = [
     source: 'TASKS — on-time share of approved tasks' },
   { key: 'avg_time_taken_min', label: 'avg time-taken', unit: 'minutes', better: 'down', scope: 'all',
     source: 'TASKS time_taken_min — the employee clock, stopped at submission (§8.0b)' },
-  { key: 'report_compliance_pct', label: '2-hourly report compliance', unit: 'percent', better: 'up', scope: 'all',
+  { key: 'report_compliance_pct', label: '4-hourly report compliance', unit: 'percent', better: 'up', scope: 'all',
     source: 'REPORTS_2H against the checkpoints the assigned schedule derives (§5)' },
   { key: 'hunts', label: 'hunts', unit: 'count', better: 'up', scope: 'Hunting',
     source: 'HUNTING_DB' },

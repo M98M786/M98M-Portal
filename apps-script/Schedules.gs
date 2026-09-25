@@ -5,7 +5,7 @@
 
 const SCHEDULE_SHIFT_LABELS = ['Shift 1', 'Shift 2', 'Custom'];
 const SCHEDULE_DAY_CODES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const SCHEDULE_INTERVAL_MIN = 120;
+const SCHEDULE_INTERVAL_MIN = 240;   // 25 Sept (owner): "update my reports to after 4 hours" — was 120
 /** A candidate landing less than this before work_end is absorbed into the end-of-shift
  * checkpoint — the final report (§5) must not be shadowed by one raised minutes earlier. */
 const SCHEDULE_TAIL_MERGE_MIN = 60;
@@ -66,17 +66,17 @@ function schedDayIndex_(dateStr) {
 function schedDayCode_(dateStr) { return SCHEDULE_DAY_CODES[schedDayIndex_(dateStr)]; }
 
 // ---------- checkpoint derivation (§5) ----------
-/** §5: every 2 hours from work_start, skipping the break window, final checkpoint at work_end.
+/** §5 re-paced 25 Sept (owner: "update my reports to after 4 hours, earlier it was 2 hours"):
+ * every 4 hours from work_start, skipping the break window, final checkpoint at work_end.
  * Verified against the two documented shifts:
  *   Shift 1 · 14:15-23:15 · break 17:30-18:30
- *     +2h = 16:15 · +2h = 18:15 falls inside the break so it moves to 18:30 · +2h = 20:30 ·
- *     +2h = 22:30 sits only 45 min before the end so it merges into the final checkpoint
- *     => 16:15, 18:30, 20:30, 23:15  ✅ exactly as documented.
+ *     +4h = 18:15 falls inside the break so it moves to 18:30 · +4h = 22:30 sits only 45 min
+ *     before the end so it merges into the final checkpoint => 18:30, 23:15  ✅
  *   Shift 2 · 21:00-06:00 · break 00:00-01:00
- *     derivation yields 23:00, 01:00, 03:00, 06:00 — NOT the documented 04:00 third checkpoint.
- *     That shift's times therefore come from the CONFIG override checkpoints_shift2
- *     ("per-shift overrides in CONFIG", §5), applied in schedCheckpoints_ below; derivation is
- *     the fallback for Custom shifts. => 23:00, 01:00, 04:00, 06:00  ✅ */
+ *     +4h = 01:00 (the break has just ended) · +4h = 05:00 sits exactly the merge margin
+ *     before the end so it merges into the final checkpoint => 01:00, 06:00  ✅
+ * The CONFIG overrides (checkpoints_shift1/2, updated to the same pairs) still win for the two
+ * named shifts; derivation is the fallback for Custom shifts. */
 function deriveCheckpoints_(schedule) {
   if (!schedule) return [];
   const start = schedMin_(schedule.work_start), end = schedMin_(schedule.work_end);

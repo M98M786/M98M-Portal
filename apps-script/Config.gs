@@ -79,8 +79,10 @@ const ROLE_PREFILL = {
 
 // §5 defaults (CONFIG-overridable; [OPEN-4]).
 const CONFIG_DEFAULTS = {
-  checkpoints_shift1: '16:15,18:30,20:30,23:15',
-  checkpoints_shift2: '23:00,01:00,04:00,06:00',
+  /* 25 Sept (owner): reports every 4 hours now, not 2 — first report ~4h into the shift
+     (moved past the break), final report at shift end. */
+  checkpoints_shift1: '18:30,23:15',
+  checkpoints_shift2: '01:00,06:00',
   shift1_hours: '14:15-23:15', shift1_break: '17:30-18:30',
   shift2_hours: '21:00-06:00', shift2_break: '00:00-01:00',
   late_threshold_min: '20',

@@ -186,7 +186,7 @@
     order: 35.5,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Staff <span class="goldtext">reports</span></h1>' +
-        '<span class="sub">every person’s 2-hourly reports, checkpoint by checkpoint — pick a day, open anyone’s archive</span></div>' +
+        '<span class="sub">every person’s 4-hourly reports, checkpoint by checkpoint — pick a day, open anyone’s archive</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
         '<div class="sr-bar">' +
           '<div class="field" style="margin-top:0;min-width:168px"><label>Day</label><input type="date" id="srDate"></div>' +

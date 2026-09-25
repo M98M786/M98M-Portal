@@ -1,4 +1,4 @@
-/* §5 2-hourly reporting · §28.2 Daily Productivity Report · §25.4 the golden shift line.
+/* §5 4-hourly reporting (2-hourly until 25 Sept) · §28.2 Daily Productivity Report · §25.4 the golden shift line.
  * Backend actions: myCheckpoints, submitReport, reportsGrid. All labels (count fields, the
  * value-addition prompt, the grid legend) come from the backend payload — never hardcoded here. */
 (function () {
@@ -119,7 +119,7 @@
   function pct(n) { return (isFinite(n) ? n : 0).toFixed(2); }
   function clamp(n, lo, hi) { return n < lo ? lo : (n > hi ? hi : n); }
 
-  /* ---------- VIEW: my 2-hourly reports ---------- */
+  /* ---------- VIEW: my 4-hourly reports ---------- */
 
   var busy = false;
   var ticker = null;
@@ -416,7 +416,7 @@
     order: 30,
     render: function () {
       return '<div class="hgroup enter d1"><h1>My <span class="goldtext">checkpoints</span></h1>' +
-        '<span class="sub" id="rpSub">2-hourly reporting</span></div>' +
+        '<span class="sub" id="rpSub">4-hourly reporting</span></div>' +
         '<div class="card enter d2"><div class="hd">Today’s shift line <span class="hint" id="rpHint">Loading…</span></div>' +
         '<div class="bd scroll" id="rpRail"><div class="spinner"></div></div></div>' +
         '<div class="grid g-2" style="margin-top:16px">' +

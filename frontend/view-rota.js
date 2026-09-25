@@ -556,7 +556,7 @@ function openEditor(rec) {
       '</div>' +
       '<div class="field"><label>Working days</label><div class="rt-days" id="rtDays">' + dayBtns + '</div></div>' +
       '<div class="rl-meta" style="margin-top:12px">' + esc(stamp) + '</div>' +
-      '<div class="rl-meta">Checkpoints follow automatically: every 2 hours from work start, skipping the break, final report at work end.</div>' +
+      '<div class="rl-meta">Checkpoints follow automatically: every 4 hours from work start, skipping the break, final report at work end.</div>' +
       '<div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">' +
         '<button class="btn-gold" id="rtSave">Save timetable</button>' +
         '<button class="btn-ghost" id="rtCancel">Cancel</button>' +

@@ -1,4 +1,4 @@
-/** §5 — 2-hourly reporting. Checkpoints come from the assigned schedule (Schedules.gs);
+/** §5 — 4-hourly reporting (2-hourly until 25 Sept; the tab keeps its REPORTS_2H name). Checkpoints come from the assigned schedule (Schedules.gs);
  * a report >late_threshold_min past its checkpoint is `late`; a checkpoint with no report by
  * the time the NEXT checkpoint arrives is `missed` (§5, notified per §14). The final checkpoint
  * of a shift is the Daily Productivity Report and requires "Value addition today" (§28.2). */
