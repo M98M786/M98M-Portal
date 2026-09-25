@@ -70,43 +70,103 @@
   /* The 24 columns a hunter fills. The other nine of the 33 are portal-owned (Selected By,
      Approval Status, Comments, Date Added, Account Selected, Listing Status, IMAGE, Our Profit,
      ROI) — submitHunt throws if the form sends any of them, so they are absent by design. */
+  /* 25 Sept (owner): the data-taking follows the 37-column workflow, stage by stage, and every
+     box carries bullet points on HOW to gather that data — written where the hunter types it.
+     Portal-owned columns (Date Added, Selected By, Account Selected, Approval Status, Comments,
+     Our Profit, ROI, IMAGE) are noted in the stage hints, never asked for. */
   var HU_SECTIONS = [
-    { title: 'Selection', hint: 'what this item is and how you would run it', fields: [
-      { col: 'Main Keyword Terapeak link', req: true, wide: true,
-        hint: 'The main keyword as plain text — on the live sheet this column holds no URLs; the Terapeak screenshot goes below.' },
-      { col: 'Seasonal', label: 'Item type', type: 'select', req: true, opts: ['Consistent', 'Seasonal'],
-        hint: 'Chosen at the start: Consistent = sells all year; Seasonal = holiday/weather-driven. Sorts it into the right approval queue.' },
+    { title: '1 · Product Discovery', hint: 'Date Added and Selected By are stamped by the portal', fields: [
+      { col: 'Main Keyword Terapeak link', label: 'Main Keyword', wide: true,
+        how: ['The 2–4 word phrase a buyer actually types — "milk frother", not a whole title.',
+          'Take it from the best-selling competitor\'s title on eBay UK.',
+          'Use this exact phrase for Terapeak, Zik and the competitor counts below.'] },
+      { col: 'Title', label: 'Product / Title', wide: true,
+        how: ['The intended eBay listing title — up to 80 characters, main keyword first.',
+          'Build it from the top three competitors\' titles; never a brand name on an unbranded item.',
+          'The lister lists under this title and the duplicate check runs on it.'] }
+    ] },
+    { title: '2 · Initial Screening', hint: 'Account Selected is chosen by Management at approval', fields: [
+      { col: 'Category', type: 'area',
+        how: ['The eBay category breadcrumb of the prime competitor — one level per line.',
+          'Open the prime competitor\'s listing and copy the breadcrumb above the title.',
+          'The category decides the fee rate the profit projection uses.'] }
+    ] },
+    { title: '3 · Market Research', hint: 'the evidence someone else can re-check', fields: [
+      { col: 'Terapeak overview', label: 'Terapeak Main Page Link',
+        how: ['Seller Hub → Research → Terapeak product research → the main keyword · UK · last 30 days.',
+          'Screenshot the overview with the totals visible — kommodo.ai link.'] },
+      { col: 'Terapeak Second Page',
+        how: ['Terapeak\'s second page for the same keyword — the sold-listings detail.',
+          'Screenshot it the same way so the reviewer can check page 1 against page 2.'] },
+      { col: 'Image Link of Zik analytics', label: 'Zik Analytics Graph Link',
+        how: ['Zik → product research → this item\'s sales graph.',
+          'The screenshot must show the 30-day trend line.'] },
+      { col: 'Image Link of avg sold price', label: 'Image – Average Sold Price',
+        how: ['Screenshot of the average sold price (Terapeak or Zik).',
+          'The reviewer holds it against your proposed selling price.'] },
+      { col: 'Total Competitors on main keyword', label: 'Total Competitors – Main Keyword',
+        how: ['Search the main keyword on eBay UK and copy the results count — "9,500+ results for milk frother".',
+          'Under 20,000 for a General item; under 100,000 for a Priority/CPC item.'] },
+      { col: 'Sell Through',
+        how: ['Terapeak: the sell-through rate for this keyword, last 30 days.',
+          'Higher is better — it is sales against live listings.'] },
+      { col: 'Sold Unit ANALYSIS', label: 'Sold Unit Analysis',
+        how: ['From Terapeak sold listings: how many units the market moves in 30 days and how they spread.',
+          'One line is enough — "top 10 sellers move ~600/mo, spread evenly".'] },
+      { col: 'Price Range ANALYSIS', label: 'Price Range Analysis',
+        how: ['The real sold-price spread — "£7.99 – £14.99, most at £10.99".',
+          'Shows where our proposed price sits in the market.'] },
+      { col: 'TOP THREE SALES', label: 'Top Three Sales – Competitors',
+        how: ['Terapeak sorted by total sold: the 30-day counts of the top three sellers — "330 / 229 / 212".',
+          'Over 200 combined passes the criteria; over 400 combined and the system suggests CPC below.'] }
+    ] },
+    { title: '4 · Competition Analysis', hint: 'who we are up against, floor to ceiling', fields: [
+      { col: 'Ebay Link', label: 'Prime eBay Link',
+        how: ['The best-selling UK competitor for this exact item — the listing we model ours on.',
+          'For a DUPLICATED item: paste OUR existing live listing here instead.'] },
+      { col: 'Prime Competitor Selling Price',
+        how: ['That prime competitor\'s current price — "10.99".'] },
+      { col: 'High Price Link', label: 'High Price Competitor Link',
+        how: ['The dearest competitor still making sales — it proves the price ceiling.'] },
+      { col: 'Competitor High Selling Price',
+        how: ['That dear competitor\'s price — the ceiling the market actually pays.'] },
+      { col: 'Competitors',
+        how: ['How many serious sellers offer this exact item — count the first result pages, not the keyword total above.'] }
+    ] },
+    { title: '5 · Supplier Research', hint: 'where the item actually comes from', fields: [
+      { col: 'Temu Link',
+        how: ['Optional in every department — add it when Temu beats AliExpress on price or stock.'] },
+      { col: 'Product Link 1 Main supplier', label: 'Product Link 1 – Main Supplier',
+        how: ['The AliExpress listing we would actually order from — Choice / fast UK delivery preferred.',
+          'Check the seller: rating 95%+, photo reviews, real stock.',
+          'Also added in the supplier sheet.'] },
+      { col: 'Product Link 2',
+        how: ['A backup supplier for the same item — the order desk switches to it when link 1 dies or runs dry.'] },
+      { col: 'Product Link 3',
+        how: ['A second backup — three working links is the standard for a new item.'] },
+      { col: 'Source Price',
+        how: ['The real landed cost from the main supplier — a range is fine ("3.02 - 3.30"), the higher end is used.',
+          'Include any shipping the supplier charges to us.'] }
+    ] },
+    { title: '6 · Pricing & Profitability', hint: 'Our Profit and ROI are computed by the portal from your two prices', fields: [
+      { col: 'E-Bey Caluclator + £4', label: 'Proposed Selling Price',
+        how: ['What we would sell at on eBay UK — price against the prime competitor, not the cheapest seller.',
+          'Ranges like "8.99 - 11.99" are welcome for variation items.',
+          'The projection card below recalculates as you type.'] },
       { col: 'CPC Selling Chance', type: 'select', opts: HU_ADV_TYPES,
-        hint: 'Leave blank if unsure — Management sets it at approval.' }
+        how: ['Leave blank if unsure — Management sets the advertising type at approval.',
+          'Choosing a CPC type adds the £2 click allowance to the projection.'] }
     ] },
-    { title: 'Evidence links', hint: 'the screenshots and sources someone else can check', fields: [
-      { col: 'Image Link of avg sold price', hint: 'kommodo.ai screenshot' },
-      { col: 'Image Link of Zik analytics', hint: 'kommodo.ai screenshot' },
-      { col: 'Terapeak overview', hint: 'kommodo.ai screenshot' },
-      { col: 'Temu Link' },
-      { col: 'Product Link 1 Main supplier', req: true, hint: 'Also added in the supplier sheet.' },
-      { col: 'Product Link 2' },
-      { col: 'Product Link 3' },
-      { col: 'Ebay Link', label: 'Prime Ebay Link' }
+    { title: '7 · Listing Creation', hint: 'what the lister needs to publish it', fields: [
+      { col: 'Image Link',
+        how: ['A clean main-image link (supplier or competitor CDN) — the sheet builds its own preview from it.'] },
+      { col: 'DESCRIPTION', label: 'Description', type: 'area', wide: true,
+        how: ['Write it from the top competitors\' descriptions — bullet the selling points, sizes, what is in the box.',
+          'No brand names, no medical or safety claims — that is what gets listings removed (see the violation archive below).'] }
     ] },
-    { title: 'Product', hint: 'what gets listed', fields: [
-      { col: 'Title', req: true, wide: true },
-      { col: 'Image Link', hint: 'The sheet builds its own preview from this link.' },
-      { col: 'Category', hint: 'The eBay breadcrumb, one level per line.', type: 'area' },
-      { col: 'DESCRIPTION', type: 'area', wide: true }
-    ] },
-    { title: 'Pricing', hint: 'the two figures the calculator below follows', fields: [
-      { col: 'Source Price', req: true, hint: 'A range is fine — "3.02 - 3.30". The higher end is used.' },
-      { col: 'E-Bey Caluclator + £4', label: 'Selling Price', req: true, hint: 'The intended eBay sell price — ranges like 8.99 - 11.99 are welcome for variation items.' }
-    ] },
-    { title: 'Analysis', hint: 'the numbers Management reads before deciding', fields: [
-      { col: 'Sell Through' },
-      { col: 'Competitors' },
-      { col: 'TOP THREE SALES', hint: 'As on the sheet — "330 / 229 / 212".' },
-      { col: 'Total Competitors on main keyword', hint: 'As on the sheet — "9,500+ results for milk frother".' },
-      { col: 'Price Range ANALYSIS' },
-      { col: 'Sold Unit ANALYSIS' },
-      { col: 'Comment', type: 'area', wide: true, hint: 'Anything the reviewer should know — packaging, pack size, a screenshot link.' }
+    { title: '8 · Approval', hint: 'Approval Status, the account, the lister and comments come back from Management here', fields: [
+      { col: 'Comment', label: 'Your note to the reviewer', type: 'area', wide: true,
+        how: ['Anything the reviewer should know — pack size, variations, a season window, extra proof links.'] }
     ] }
   ];
 
@@ -114,13 +174,61 @@
     'Source Price', 'E-Bey Caluclator + £4'];
   var HU_PRICE_COLS = ['Source Price', 'E-Bey Caluclator + £4'];
 
+  /* 25 Sept (owner): three departments inside Product Hunting. The choice is written into the
+     existing 'Seasonal' column — Consistent IS the New-item department (its historical name).
+     New and Seasonal items must carry the FULL set (everything except the Temu link); only a
+     Duplicated item — already live on one of our accounts, copied to another — travels light. */
+  var HU_DEPTS = [
+    { key: 'Consistent', label: 'New item', bullets: [
+      'A brand-new product for us — not live on any of our accounts yet.',
+      'Every field is compulsory except the Temu link.',
+      'Full research: Terapeak both pages, Zik graph, competitor links and prices, three supplier links.'] },
+    { key: 'Duplicated', label: 'Duplicated item', bullets: [
+      'Already live on one of our accounts — being duplicated to another account.',
+      'Allowed to travel light: the five core fields are enough (keyword, title, supplier link, both prices).',
+      'Paste OUR existing listing as the Prime eBay Link so Management sees the original.'] },
+    { key: 'Seasonal', label: 'Seasonal item', bullets: [
+      'Holiday- or weather-driven — it sells in a window.',
+      'All data compulsory except the Temu link — the same bar as a new item.',
+      'Write the season window in your note so approval and listing can time it.'] }
+  ];
+  var HU_DEPT = 'Consistent';
+  var HU_OPTIONAL_ALWAYS = ['Temu Link', 'CPC Selling Chance', 'Comment'];
+  function huRequiredCols() {
+    if (HU_DEPT === 'Duplicated') { return HU_REQUIRED.slice(); }
+    return HU_FLAT.map(function (f) { return f.col; })
+      .filter(function (c) { return HU_OPTIONAL_ALWAYS.indexOf(c) < 0; });
+  }
+  function huDeptDef() {
+    for (var i = 0; i < HU_DEPTS.length; i++) { if (HU_DEPTS[i].key === HU_DEPT) { return HU_DEPTS[i]; } }
+    return HU_DEPTS[0];
+  }
+
+  /* "if top three sellers have more than 400 sales in last 30 days the system will give a
+     suggestion to add this item to cpc — the system's suggestion and our selection." Derived
+     live from the TOP THREE SALES box, and again on the approval card — never stored. */
+  function huTop3Sum(v) {
+    var m = String(v == null ? '' : v).replace(/[£$,]/g, '').match(/\d+(?:\.\d+)?/g);
+    if (!m || !m.length) { return null; }
+    return m.slice(0, 3).map(Number).reduce(function (a, b) { return a + b; }, 0);
+  }
+  function huCpcSuggestHtml(v) {
+    var sum = huTop3Sum(v);
+    if (sum === null || sum <= 400) { return ''; }
+    return '<div class="hu-box hu-sug"><div class="k">⚡ System suggestion — add to CPC</div>' +
+      '<div class="hu-txt">The top three sellers sold <b class="num">' + esc(String(Math.round(sum))) +
+      '</b> units in the last 30 days (over 400). Management makes the final selection at approval.</div></div>';
+  }
+
   /* Evidence columns on a review card, in reading order. 'Main Keyword Terapeak link' is plain
      text in practice, so every one of these goes through the same link-or-text renderer. */
   var HU_EVIDENCE = ['Main Keyword Terapeak link', 'Image Link of avg sold price',
-    'Image Link of Zik analytics', 'Terapeak overview', 'Temu Link', 'Product Link 1 Main supplier',
-    'Product Link 2', 'Product Link 3', 'Ebay Link', 'Image Link'];
+    'Image Link of Zik analytics', 'Terapeak overview', 'Terapeak Second Page', 'Temu Link',
+    'Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3', 'Ebay Link',
+    'High Price Link', 'Image Link'];
   var HU_NUMBERS = ['Source Price', 'E-Bey Caluclator + £4', 'Sell Through', 'Competitors',
-    'TOP THREE SALES', 'Total Competitors on main keyword', 'Price Range ANALYSIS', 'Sold Unit ANALYSIS'];
+    'TOP THREE SALES', 'Total Competitors on main keyword', 'Price Range ANALYSIS', 'Sold Unit ANALYSIS',
+    'Prime Competitor Selling Price', 'Competitor High Selling Price'];
 
   var HU_FLAT = [];
   (function () {
@@ -141,6 +249,17 @@
     '.minibtn{padding:6px 12px;border:1px solid rgba(120,132,152,.35);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);transition:all .15s}' +
     '.minibtn:hover{border-color:var(--blue);color:var(--blue-2);box-shadow:var(--glow-blue)}' +
     '.minibtn[disabled]{opacity:.4;cursor:default;box-shadow:none}' +
+    '.hu-dept{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:14px}' +
+    '.hu-dcard{text-align:left;padding:12px 14px;border-radius:12px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text);font:inherit;cursor:pointer;transition:border-color .15s,box-shadow .15s}' +
+    '.hu-dcard:hover{border-color:var(--gold-line-hi)}' +
+    '.hu-dcard.on{border-color:var(--gold-a);box-shadow:0 0 0 1px var(--gold-a) inset;background:rgba(212,175,55,.06)}' +
+    '.hu-dcard b{display:block;font-size:13.5px;font-weight:800;color:var(--gold-a)}' +
+    '.hu-dcard ul{margin:7px 0 0;padding-left:16px}' +
+    '.hu-dcard li{font-size:11px;color:var(--text-2);font-weight:600;line-height:1.5;margin-top:3px}' +
+    '.hu-how{margin:5px 0 0;padding-left:16px}' +
+    '.hu-how li{font-size:11px;color:var(--text-3);font-weight:600;line-height:1.5;margin-top:2px}' +
+    '.hu-box.hu-sug{background:linear-gradient(135deg,rgba(233,169,60,.14),rgba(233,169,60,.04));border-color:var(--gold-line-hi)}' +
+    '.hu-box.hu-sug .k{color:var(--gold-a)}' +
     '.hu-sec{padding:16px 0}.hu-sec+.hu-sec{border-top:1px solid var(--gold-line)}' +
     '.hu-sec:first-child{padding-top:2px}' +
     '.hu-sec-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}' +
@@ -338,8 +457,15 @@
           '<span class="sub">Every hunt goes to Management — an account, a lister and a deadline come back with the decision</span>' +
         '</div>' +
         '<div class="card enter d1"><div class="hd">New hunt ' +
-          '<span class="hint">Five fields are required · everything else strengthens the case</span></div>' +
-          '<div class="bd"><div id="huRevBand" style="display:none"></div>' + HU_SECTIONS.map(huSection).join('') +
+          '<span class="hint" id="huReqHint">Everything is compulsory except the Temu link</span></div>' +
+          '<div class="bd"><div id="huRevBand" style="display:none"></div>' +
+            '<div class="hu-sec" style="padding-top:2px"><div class="hu-sec-h"><b>Department</b>' +
+              '<span>choose what kind of hunt this is — it sets what is compulsory</span></div>' +
+              '<div class="hu-dept" id="huDeptBox">' + HU_DEPTS.map(function (d) {
+                return '<button type="button" class="hu-dcard" data-dept="' + huAttr(d.key) + '"><b>' + esc(d.label) + '</b>' +
+                  '<ul>' + d.bullets.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></button>';
+              }).join('') + '</div></div>' +
+            '<div id="huPvBand" style="display:none;margin:10px 0"></div>' + HU_SECTIONS.map(huSection).join('') +
             '<div id="huDupBand" style="display:none;margin:10px 0"></div>' +
             '<div class="hu-btns"><button class="btn-gold" id="huSend">Submit hunt</button>' +
               '<button class="minibtn" id="huDupBtn">Check for duplicates</button>' +
@@ -367,11 +493,13 @@
             '<option value="APPROVED">Approved</option><option value="NOT APPROVED">Not approved</option>' +
           '</select></div>' +
           '<div class="bd" id="huMineBody"><div class="spinner"></div></div>' +
-        '</div>';
+        '</div>' + huPvArchCard('d4');
     },
     init: function () {
       huWireForm();
+      huApplyDept();
       huLoadMine();
+      huPvArchLoad();
       if (huHas(HU_QUEUE_ROLES, huRole())) {
         api('huntQueue').then(function (d) {
           var hs = (d && d.hunts) || [];
@@ -412,8 +540,31 @@
       body = '<input class="hu-in" id="' + huAttr(f.id) + '" type="text" autocomplete="off">';
     }
     return '<div class="field' + (f.wide ? ' hu-wide' : '') + '">' +
-      '<label>' + esc(f.label || f.col) + (f.req ? ' <span class="hu-req">required</span>' : '') + '</label>' + body +
-      (f.hint ? '<div class="hu-hint">' + esc(f.hint) + '</div>' : '') + '</div>';
+      '<label>' + esc(f.label || f.col) + ' <span class="hu-req" data-reqmark="' + huAttr(f.col) + '" style="display:none">required</span></label>' + body +
+      (f.how && f.how.length ? '<ul class="hu-how">' + f.how.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>' : '') +
+      (f.hint ? '<div class="hu-hint">' + esc(f.hint) + '</div>' : '') +
+      (f.col === 'TOP THREE SALES' ? '<div id="huCpcSug"></div>' : '') + '</div>';
+  }
+
+  /* the department choice repaints the compulsory marks and the header line — nothing else moves */
+  function huApplyDept() {
+    var box = huEl('huDeptBox');
+    if (box) {
+      box.querySelectorAll('.hu-dcard').forEach(function (b) {
+        b.classList.toggle('on', b.getAttribute('data-dept') === HU_DEPT);
+      });
+    }
+    var need = {};
+    huRequiredCols().forEach(function (c) { need[c] = true; });
+    document.querySelectorAll('[data-reqmark]').forEach(function (s) {
+      s.style.display = need[s.getAttribute('data-reqmark')] ? '' : 'none';
+    });
+    var hint = huEl('huReqHint');
+    if (hint) {
+      hint.textContent = HU_DEPT === 'Duplicated'
+        ? 'Duplicated item — the five core fields are enough; paste our existing listing as the Prime eBay Link'
+        : (huDeptDef().label + ' — everything is compulsory except the Temu link');
+    }
   }
 
   function huFieldFor(col) {
@@ -439,6 +590,26 @@
     }
     el = huEl('huShip');
     if (el) { el.oninput = huCalcSoon; }
+    var db = huEl('huDeptBox');
+    if (db) {
+      db.querySelectorAll('.hu-dcard').forEach(function (b) {
+        b.onclick = function () { HU_DEPT = b.getAttribute('data-dept') || 'Consistent'; huApplyDept(); };
+      });
+    }
+    (function () {
+      var f = huFieldFor('TOP THREE SALES'), el2 = f ? huEl(f.id) : null;
+      if (el2) {
+        el2.oninput = function () {
+          var slot = huEl('huCpcSug');
+          if (slot) { slot.innerHTML = huCpcSuggestHtml(el2.value); }
+        };
+      }
+    })();
+    /* the policy-violation warning rides the same blur moments as the duplicate check */
+    ['Title', 'Main Keyword Terapeak link'].forEach(function (col) {
+      var f = huFieldFor(col), el3 = f ? huEl(f.id) : null;
+      if (el3) { el3.addEventListener('blur', function () { huRunPolicyCheck(true); }); }
+    });
     huCalcIdle('Type a source price and an intended sell price — the projection appears here.');
     huEl('huClear').onclick = function () { huSetRevise(null); huResetForm(); huCalcIdle('Cleared. The projection follows your next price.'); };
     huEl('huSend').onclick = huSubmit;
@@ -455,6 +626,9 @@
     var i, el;
     for (i = 0; i < HU_FLAT.length; i++) { el = huEl(HU_FLAT[i].id); if (el) { el.value = ''; } }
     el = huEl('huShip'); if (el) { el.value = ''; }
+    el = huEl('huPvBand'); if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+    el = huEl('huCpcSug'); if (el) { el.innerHTML = ''; }
+    HU_PV_ACK = '';
   }
 
   // ---------- the live calculator (§4.2 allowed exception) ----------
@@ -567,15 +741,53 @@
     }).catch(function () { if (done) { done(0); } });
   }
 
-  function huSubmit() {
-    var btn = this, payload = { columns: {} }, i, col, v, ship;
-    for (i = 0; i < HU_REQUIRED.length; i++) {
-      if (!huValue(HU_REQUIRED[i])) {
-        toast(HU_REQUIRED[i] + ' is required.');
-        var miss = huFieldFor(HU_REQUIRED[i]);
-        if (miss && huEl(miss.id)) { huEl(miss.id).focus(); }
+  /* 25 Sept (owner): "if a product hunter is selecting that kind of item with those keywords
+     again then give a warning" — the engine matches what is typed against the policy-violation
+     archive (policyCheck). Same soft-gate shape as the duplicate check: the first Submit after a
+     match shows the history and asks for a second, deliberate click. */
+  var HU_PV_ACK = '';
+  function huPvSig() { return huNorm(huValue('Title')) + '|' + huNorm(huValue('Main Keyword Terapeak link')); }
+  function huRunPolicyCheck(silent, done) {
+    var band = huEl('huPvBand');
+    var title = huValue('Title'), kw = huValue('Main Keyword Terapeak link');
+    if (!band || (!title && !kw)) { if (done) { done(0); } return; }
+    api('policyCheck', { title: title, keyword: kw }).then(function (d) {
+      if (!huEl('huPvBand')) { if (done) { done(0); } return; }
+      var m = (d && d.matches) || [];
+      if (!d || !d.checked || !m.length) {
+        band.style.display = 'none';
+        if (done) { done(0); }
         return;
       }
+      band.style.display = 'block';
+      band.innerHTML = '<div style="border:1px solid var(--bad);border-radius:10px;padding:10px 13px;background:var(--bad-soft,rgba(255,90,90,.08))">' +
+        '<div style="font-weight:800;font-size:13px;color:var(--bad)">🚫 POLICY WARNING — this kind of item has been removed by eBay before</div>' +
+        '<div style="margin-top:6px">' + m.map(function (x) {
+          return '<div style="font-size:12px;padding:4px 0;border-top:1px solid var(--gold-line)"><b>' + esc(x.policy) + '</b>' +
+            ' · ' + esc(x.account) + (x.received_at ? ' · ' + esc(String(x.received_at).slice(0, 10)) : '') +
+            '<div style="color:var(--text-2)">' + esc(x.title) + '</div>' +
+            (x.shared ? '<div style="color:var(--text-3);font-size:11px">matched on: ' + esc(x.shared) + '</div>' : '') + '</div>';
+        }).join('') + '</div>' +
+        '<div class="hu-hint" style="margin:8px 0 0">Check the violation archive below before hunting this again. ' +
+          'If yours is genuinely different (different material, no brand, policy-safe wording), Submit again to proceed.</div></div>';
+      if (done) { done(m.length); }
+    }).catch(function () { if (done) { done(0); } });
+  }
+
+  function huSubmit() {
+    var btn = this, payload = { columns: {} }, i, col, v, ship;
+    var needCols = huRequiredCols();
+    var missing = [];
+    for (i = 0; i < needCols.length; i++) { if (!huValue(needCols[i])) { missing.push(needCols[i]); } }
+    if (missing.length) {
+      toast(HU_DEPT === 'Duplicated'
+        ? missing[0] + ' is required.'
+        : 'A ' + huDeptDef().label.toLowerCase() + ' needs the full research — still empty: ' +
+          missing.slice(0, 3).join(', ') + (missing.length > 3 ? ' + ' + (missing.length - 3) + ' more' : '') +
+          '. Only the Temu link is optional.');
+      var miss = huFieldFor(missing[0]);
+      if (miss && huEl(miss.id)) { huEl(miss.id).focus(); }
+      return;
     }
     for (i = 0; i < HU_PRICE_COLS.length; i++) {
       if (huFirstNumber(huValue(HU_PRICE_COLS[i])) === null) {
@@ -593,11 +805,22 @@
       });
       return;
     }
+    /* soft policy gate: a kind of item eBay removed before needs a second, deliberate click */
+    if (huPvSig() !== HU_PV_ACK) {
+      var self2 = this;
+      huRunPolicyCheck(false, function (n) {
+        HU_PV_ACK = huPvSig();
+        if (n > 0) { toast('⚠ This kind of item had a POLICY VIOLATION before — read the warning, then Submit again if yours is safe.'); }
+        else { huSubmit.call(self2); }   // clear — go straight through
+      });
+      return;
+    }
     for (i = 0; i < HU_FLAT.length; i++) {
       col = HU_FLAT[i].col;
       v = huValue(col);
       if (v) { payload.columns[col] = v; }
     }
+    payload.columns['Seasonal'] = HU_DEPT;   // the department rides the existing column
     ship = huStr(huEl('huShip') ? huEl('huShip').value : '');
     if (ship) { payload.shipping = ship; }
 
@@ -723,6 +946,9 @@
   function huStartRevise(id) {
     var rec = HU_MINE[id];
     if (!rec) { toast('That hunt is not on this list any more — refresh and try again.'); return; }
+    var k = huStr(rec['Seasonal']).toLowerCase();
+    HU_DEPT = k.indexOf('season') >= 0 ? 'Seasonal' : (k.indexOf('dup') >= 0 ? 'Duplicated' : 'Consistent');
+    huApplyDept();
     huFillFromRec(rec, false);
     var el = huEl('huShip'); if (el) { el.value = ''; }
     huSetRevise(id, huStr(rec['Title']));
@@ -808,6 +1034,63 @@
     '</div>';
   }
 
+  // ---------- the Item Policy Violation email archive (owner, 25 Sept) ----------
+  /* "Email Archive of items policy violation … based on all accounts data … show all the items
+     there." Built by the engine's policyScan out of eBay's own notices; this card renders it on
+     the hunting page (the hunters' warning ground) and on Hunt approvals (Management's view). */
+  function huPvArchCard(delay) {
+    return '<div class="card enter ' + esc(delay || 'd3') + '" style="margin-top:16px"><div class="hd">' +
+      'Item policy violations — email archive ' +
+      '<span class="hint">every item eBay hid or removed · all accounts · from eBay\'s own messages</span></div>' +
+      '<div class="bd" id="huPvArch"><div class="spinner"></div></div></div>';
+  }
+  function huPvArchLoad() {
+    var box = huEl('huPvArch');
+    if (!box) { return; }
+    api('policyArchive', {}).then(function (d) {
+      var b2 = huEl('huPvArch');
+      if (!b2) { return; }
+      var rows = (d && d.rows) || [];
+      var c = (d && d.counts) || {};
+      if (!rows.length) {
+        b2.innerHTML = '<div class="hu-empty">No policy violation on record yet.<span>The engine reads eBay\'s own ' +
+          'notices every hour ("We hid some of your listings…", "Your listing has been removed…") and files every ' +
+          'affected item here, across all accounts.</span></div>';
+        return;
+      }
+      var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
+        '<div class="hu-tile"><span class="k">Notices from eBay</span><b class="num">' + Number(c.notices || 0) + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Items affected</span><b class="num" style="color:var(--bad)">' + Number(c.items || 0) + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Accounts hit</span><b class="num">' + Number(c.accounts || 0) + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Last 30 days</span><b class="num" style="color:var(--warn)">' + Number(c.last30 || 0) + '</b></div>' +
+        '</div>' +
+        '<div class="hu-hint" style="margin:0 0 10px">Hunting anything like these again trips a warning on the form — ' +
+          'same kind of item, same keywords. If a warning fires, pick a different angle or make it policy-safe first.</div>';
+      var cap = 200, shown = rows.slice(0, cap);
+      h += '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+        '<th style="text-align:left">When</th><th style="text-align:left">Account</th>' +
+        '<th style="text-align:left">Policy</th><th style="text-align:left">Item</th>' +
+        '<th style="text-align:left">Hunted by</th></tr></thead><tbody>' +
+        shown.map(function (r) {
+          var it = huStr(r.item_id);
+          var title = huStr(r.title) || huStr(r.subject);
+          return '<tr><td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' +
+              esc(String(r.received_at || '').slice(0, 10)) + '</td>' +
+            '<td style="text-align:left">' + esc(huStr(r.account)) + '</td>' +
+            '<td style="text-align:left;font-weight:700;color:var(--bad)">' + esc(huStr(r.policy)) + '</td>' +
+            '<td style="text-align:left;max-width:330px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + huAttr(title) + '">' + esc(title || '—') + '</div>' +
+              (it ? '<a class="hu-link" style="font-size:10.5px" href="https://www.ebay.co.uk/itm/' + huAttr(it) + '" target="_blank" rel="noopener noreferrer">' + esc(it) + '</a>' : '') + '</td>' +
+            '<td style="text-align:left;font-size:11.5px">' + esc(huStr(r.hunter).split('@')[0] || '—') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        (rows.length > cap ? '<div class="hu-hint">Showing the newest ' + cap + ' of ' + rows.length + ' rows.</div>' : '');
+      b2.innerHTML = h;
+    }).catch(function (e) {
+      var b3 = huEl('huPvArch');
+      if (!b3) { return; }
+      b3.innerHTML = '<div class="hu-hint" style="margin-top:0">The archive could not load: ' + esc(e.message) + '</div>';
+    });
+  }
+
   // ============================== HUNT APPROVALS ==============================
   VIEWS.huntQueue = {
     label: 'Hunt approvals',
@@ -840,7 +1123,7 @@
           '<input class="hu-in" id="huQRecFind" placeholder="Search title · hunter · reason · account" ' +
             'style="width:min(340px,50%);margin-left:auto;padding:7px 11px;font-size:12.5px"></div>' +
           '<div class="bd" id="huQRecords"><div class="spinner"></div></div>' +
-        '</div>' +
+        '</div>' + huPvArchCard('d3') +
         '<datalist id="huAccList"></datalist>' +
         '<datalist id="huListerList"></datalist>';
     },
@@ -850,6 +1133,7 @@
       huLoadPickers();
       huLoadQueue();
       huLoadQueueStats();
+      huPvArchLoad();
     }
   };
 
@@ -1016,8 +1300,13 @@
   function huKindOf(rec) {
     var v = huStr(rec['Seasonal']).toLowerCase();
     if (v.indexOf('season') >= 0) { return 'Seasonal'; }
-    if (v.indexOf('consist') >= 0) { return 'Consistent'; }
+    if (v.indexOf('dup') >= 0) { return 'Duplicated'; }
+    if (v.indexOf('consist') >= 0 || v.indexOf('new') >= 0) { return 'Consistent'; }
     return 'Unsorted';
+  }
+  function huKindLabel(k) {
+    if (k === 'Consistent') { return 'New (Consistent)'; }
+    return k + ' items';
   }
   /* Owner (9 Sept): "make a separate page for revisions here" — the decision desk splits in two.
      A hunt that was sent back and then REVISED comes back carrying the "(revised ...)" marker
@@ -1041,12 +1330,12 @@
     huCount('huntQueue', fresh.length);
     huCount('huntRevised', returned.length);
 
-    var counts = { all: all.length, Seasonal: 0, Consistent: 0, Unsorted: 0 };
+    var counts = { all: all.length, Seasonal: 0, Consistent: 0, Duplicated: 0, Unsorted: 0 };
     all.forEach(function (r) { counts[huKindOf(r)]++; });
     var tabDefs = [['all', 'All']];
-    (d && d.hunt_kinds && d.hunt_kinds.length ? d.hunt_kinds : ['Seasonal', 'Consistent']).forEach(function (k) { tabDefs.push([k, k + ' items']); });
+    (d && d.hunt_kinds && d.hunt_kinds.length ? d.hunt_kinds : ['Seasonal', 'Consistent', 'Duplicated']).forEach(function (k) { tabDefs.push([k, huKindLabel(k)]); });
     if (counts.Unsorted) { tabDefs.push(['Unsorted', 'Unsorted']); }
-    if (['all', 'Seasonal', 'Consistent', 'Unsorted'].indexOf(HU_QK) < 0) { HU_QK = 'all'; }
+    if (['all', 'Seasonal', 'Consistent', 'Duplicated', 'Unsorted'].indexOf(HU_QK) < 0) { HU_QK = 'all'; }
 
     var approvedChip = (d && d.approved_today !== undefined)
       ? '<span class="pill hu-ok" style="margin-left:auto" title="listing tasks born from today\u2019s approvals">Approved today: ' + Number(d.approved_today) + '</span>'
@@ -1130,6 +1419,7 @@
         esc(fmtPkt(rec.ts, true) || huStr(rec['Date Added'])) + '</div>' +
 
       huFlags(rec.criteria_flags) +
+      huCpcSuggestHtml(rec['TOP THREE SALES']) +
 
       '<div class="hu-box"><div class="k">Evidence</div><div class="hu-lg">' +
         HU_EVIDENCE.map(function (c) {

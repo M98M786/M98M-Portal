@@ -160,7 +160,7 @@ export default {
          :00 AS trigger AND peak top-of-hour /exec traffic. :50 is clear of the :00/:15/:30/:45
          mirror ticks and off-peak. Both jobs are idempotent + time-budgeted, so nothing changes but
          the timing. */
-      '50 * * * *': [marketingSync, feedbackSync, alertsPull],
+      '50 * * * *': [marketingSync, feedbackSync, alertsPull, policyScan],
       /* ADTOOL (Advertising Tool): its own invocations so its D1 work can never starve a sync slot.
          :20 hourly = rollups (spec §10); 05:20 UTC = the morning chain (06:20 BST): truth check now,
          profiles / forecast / report / decisions / analyst as their phases land. Every job is
@@ -691,6 +691,162 @@ async function supplierLinkFill(env) {
     (guarded ? ', ' + onSheet + ' written to the sheet' + (kept ? ', ' + kept + ' left alone (a person had filled it)' : '') +
       (missed ? ', ' + missed + ' sheet write(s) missed' : '')
       : ' — sheet writes held back: the Apps Script blank-cell guard is not deployed yet');
+}
+
+/* ---------------- Item policy violations — the email archive (owner, 25 Sept) ----------------
+   "Email Archive of items policy violation … based on all accounts data … take it from
+   messages. Build data from zero, and show all the items there. And if a product hunter is
+   selecting that kind of item with those keywords again then give a warning to the hunter."
+   eBay's own notices ("We hid some of your listings: Counterfeit policy", "Your listing has
+   been removed", MC011 …) arrive in the SAME inbox csSync already mirrors into buyer_messages
+   (sender 'eBay', headers only). This job (1) pages DEEPER into GetMyMessages history than
+   csSync's newest-100 window — one page of 200 per account per run until eBay's history is
+   exhausted, which is the "build data from zero"; (2) picks the violation notices out of
+   buyer_messages by subject; (3) fetches their BODIES ten at a time (ReturnMessages) and reads
+   the item numbers out of them; (4) files one policy_violations row per item, with the
+   listing's own title from items_api and who hunted it from provenance. Every step is capped
+   so the archive fills across runs without starving the slot; the hunter warning and the
+   archive page read the finished table (policyCheck / policyArchive). */
+const PV_SCHEMA = 'CREATE TABLE IF NOT EXISTS policy_violations (pv_id TEXT PRIMARY KEY, msg_id TEXT, ' +
+  "account TEXT, received_at TEXT, policy TEXT, subject TEXT, item_id TEXT DEFAULT '', title TEXT DEFAULT '', " +
+  "keywords TEXT DEFAULT '', hunter TEXT DEFAULT '', body_snippet TEXT DEFAULT '', created_at TEXT)";
+const PV_SUBJECT = /(we hid some of your listings|listing.{0,40}(removed|taken down|blocked|hidden)|(removed|blocked).{0,30}listings?\b|didn.{0,2}t follow|wasn.{0,2}t allowed|not allowed on ebay|\bMC0\d\d\b|policy (violation|breach)|intellectual property|\bvero\b|counterfeit|prohibited item|restricted item|product safety)/i;
+/* NOT violations: seller-tool mail that merely contains "removal"/"policy" — feedback and late-
+   shipment removal requests, the return-policy nag, the education programme call notes. */
+const PV_NOT = /(feedback removal|feedback remova|late shipment removal|defect removal|update your return policy|policy education|cancellation|second chance|resolved|bid retraction)/i;
+
+function pvPolicyName(subject) {
+  const s = String(subject || '');
+  let m = s.match(/listings?\s*[:—-]\s*(.{3,70})$/i);   // "We hid some of your listings: Item location policy"
+  if (m) return m[1].trim().slice(0, 60);
+  m = s.match(/\b(counterfeit|item location|product safety|prohibited|restricted|trademark|copyright|intellectual property|vero|search manipulation|duplicate listing|outside of ebay|links? policy|offensive|weapons?|medical|drugs?|adult)\b/i);
+  if (m) return (m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() + ' policy').replace(' policy policy', ' policy');
+  if (/\bMC0\d\d\b/.test(s)) return 'Listing removed (' + s.match(/\bMC0\d\d\b/)[0] + ')';
+  return 'Policy violation';
+}
+function pvTokens(s) {
+  const STOP = { the:1, and:1, for:1, with:1, from:1, this:1, that:1, your:1, our:1, new:1, set:1, pcs:1, pack:1,
+    item:1, items:1, listing:1, free:1, fast:1, top:1, best:1, quality:1, hot:1, sale:1, gift:1, mini:1, large:1,
+    small:1, big:1, black:1, white:1, blue:1, red:1, pink:1, grey:1, green:1, gold:1, silver:1, colour:1, color:1 };
+  return String(s || '').toLowerCase().replace(/&[a-z#0-9]+;/g, ' ').replace(/[^a-z0-9]+/g, ' ')
+    .split(' ').filter((w) => w.length >= 3 && !STOP[w] && !/^\d+$/.test(w)).slice(0, 40);
+}
+
+async function policyScan(env) {
+  await env.DB.prepare(PV_SCHEMA).run();
+  let deep = 0, found = 0, notices = 0;
+  await perAccount(env, 'policyScan', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const H = { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetMyMessages',
+      'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' };
+
+    /* 1 — one deeper header page per run (page 1 belongs to csSync's hourly sweep). -1 = done. */
+    const pkey = 'pv_page:' + acct;
+    const prow = await env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(pkey).first();
+    let page = prow ? Number(prow.value) : 2;
+    if (page >= 2 && page <= 10) {
+      const hb = '<?xml version="1.0" encoding="utf-8"?><GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+        '<DetailLevel>ReturnHeaders</DetailLevel><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>' + page +
+        '</PageNumber></Pagination></GetMyMessagesRequest>';
+      const hr = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: H, body: hb });
+      const hx = await hr.text();
+      if (hr.ok && hx.indexOf('<Ack>Failure</Ack>') < 0) {
+        const msgs = hx.match(/<Message>[\s\S]*?<\/Message>/g) || [];
+        const stmts = [];
+        for (const mm of msgs) {
+          const id = xmlTag(mm, 'MessageID');
+          if (!id) continue;
+          stmts.push(env.DB.prepare(
+            'INSERT INTO buyer_messages (msg_id, account, buyer, text, received_at, answered, item_id) ' +
+            'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(msg_id) DO NOTHING'
+          ).bind(id, acct, xmlTag(mm, 'Sender'), xmlTag(mm, 'Subject').slice(0, 300),
+            xmlTag(mm, 'ReceiveDate'), /<Read>true<\/Read>/.test(mm) ? 1 : 0, xmlTag(mm, 'ItemID')));
+        }
+        for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+        deep += msgs.length;
+        page = msgs.length < 200 ? -1 : page + 1;
+        await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) " +
+          "ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(pkey, String(page)).run();
+      }
+    }
+
+    /* 2 — violation notices with no archive row yet, newest first */
+    const cand = await env.DB.prepare(
+      "SELECT msg_id, text, received_at FROM buyer_messages WHERE account = ?1 AND buyer = 'eBay' " +
+      'AND NOT EXISTS (SELECT 1 FROM policy_violations v WHERE v.msg_id = buyer_messages.msg_id) ' +
+      'ORDER BY received_at DESC LIMIT 600'
+    ).bind(acct).all();
+    const hits = (cand.results || []).filter((r) =>
+      PV_SUBJECT.test(String(r.text || '')) && !PV_NOT.test(String(r.text || ''))).slice(0, 60);
+
+    /* 3 — bodies, ten per call (the Trading API's own MessageIDs cap) */
+    for (let c = 0; c < hits.length; c += 10) {
+      const grp = hits.slice(c, c + 10);
+      const bb = '<?xml version="1.0" encoding="utf-8"?><GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+        '<MessageIDs>' + grp.map((g) => '<MessageID>' + g.msg_id + '</MessageID>').join('') + '</MessageIDs>' +
+        '<DetailLevel>ReturnMessages</DetailLevel></GetMyMessagesRequest>';
+      const br = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: H, body: bb });
+      const bx = await br.text();
+      if (!br.ok || bx.indexOf('<Ack>Failure</Ack>') >= 0) break;
+      const bodies = bx.match(/<Message>[\s\S]*?<\/Message>/g) || [];
+      for (const bm of bodies) {
+        const id = xmlTag(bm, 'MessageID');
+        if (!id) continue;
+        const meta = grp.find((g) => String(g.msg_id) === String(id)) || {};
+        const subject = String(meta.text || xmlTag(bm, 'Subject') || '');
+        const policy = pvPolicyName(subject);
+        let body = xmlTag(bm, 'Text') || '';
+        body = body.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          .replace(/&#0?39;/g, "'").replace(/&amp;/g, '&');
+        /* the item numbers, from the notice's own links and text */
+        const ids = {};
+        let m;
+        const re = /(?:itm\/(?:[^"'\s<>]*\/)?|item[=\/]|item(?:%20|\s)?(?:id|number)\D{0,6})(\d{9,13})/gi;
+        while ((m = re.exec(body))) ids[m[1]] = 1;
+        const re2 = /\b(\d{12})\b/g;
+        while ((m = re2.exec(body))) ids[m[1]] = 1;
+        const list = Object.keys(ids).slice(0, 30);
+        const snippet = body.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ').trim().slice(0, 700);
+        const rows = list.length ? list : [''];
+        for (const itemId of rows) {
+          let title = '', hunter = '';
+          if (itemId) {
+            const ia = await env.DB.prepare('SELECT title FROM items_api WHERE item_id = ?1').bind(itemId).first();
+            if (ia && ia.title) title = String(ia.title);
+            if (!title) {
+              /* best-effort: the anchor text the notice itself wraps around the item link */
+              const t = body.match(new RegExp('>\\s*([^<>]{12,140}?)\\s*<[^]{0,500}?' + itemId)) ||
+                body.match(new RegExp(itemId + '[^]{0,500}?>\\s*([^<>]{12,140}?)\\s*<'));
+              if (t && !/^https?:/.test(t[1])) title = t[1].replace(/\s+/g, ' ').trim();
+            }
+            try {
+              const pv = await env.DB.prepare('SELECT hunter_email FROM provenance WHERE item_id = ?1').bind(itemId).first();
+              if (pv && pv.hunter_email) hunter = String(pv.hunter_email);
+            } catch (e) {}
+          }
+          await env.DB.prepare(
+            'INSERT INTO policy_violations (pv_id, msg_id, account, received_at, policy, subject, item_id, title, ' +
+            "keywords, hunter, body_snippet, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now')) " +
+            'ON CONFLICT(pv_id) DO NOTHING'
+          ).bind(String(id) + ':' + (itemId || '0'), String(id), acct,
+            String(meta.received_at || xmlTag(bm, 'ReceiveDate') || ''), policy, subject.slice(0, 300),
+            itemId, title.slice(0, 300), pvTokens(title).join(' ').slice(0, 300), hunter, snippet).run();
+          found++;
+        }
+        notices++;
+        /* the bell — fresh notices only, so the from-zero backfill cannot ring history at management */
+        const age = Date.parse(String(meta.received_at || '')) || 0;
+        if (age && Date.now() - age < 7 * 86400000) {
+          await queueNotify(env, 'management', 'Listing policy violation',
+            '🚫 POLICY VIOLATION · ' + acct + ' · ' + policy + (list.length ? ' · ' + list.length + ' item(s)' : '') +
+            ' — "' + subject.slice(0, 110) + '". The archive is on the Product hunting page.', 'engine:policy:' + id);
+        }
+      }
+    }
+  });
+  return 'policyScan: ' + notices + ' notice(s) read, ' + found + ' archive row(s) written' +
+    (deep ? ', ' + deep + ' older message header(s) backfilled' : '');
 }
 
 async function noSupplierScan(env) {
@@ -11703,7 +11859,55 @@ const ROUTES = {
       ).bind(todayPkt).first();
       return { approved_today: Number(at && at.n) || 0, hunts, count: hunts.length, can_decide: mgmt,
         advertising_types: ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN', '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'],
-        hunt_kinds: ['Seasonal', 'Consistent'] };
+        hunt_kinds: ['Seasonal', 'Consistent', 'Duplicated'] };
+    },
+  },
+
+  /* The Item Policy Violation email archive (owner, 25 Sept) — every item eBay hid or removed,
+     across all accounts, read out of eBay's own notices by policyScan. Titles and policy names
+     only — no money — so every portal role may read it; the card lives on the hunting pages. */
+  policyArchive: {
+    auth: 'any', fn: async (p, ctx) => {
+      try { await ctx.env.DB.prepare(PV_SCHEMA).run(); } catch (e) {}
+      const rs = await ctx.env.DB.prepare(
+        'SELECT v.msg_id, v.account, v.received_at, v.policy, v.subject, v.item_id, ' +
+        "COALESCE(NULLIF(v.title, ''), ia.title, '') AS title, v.hunter, COALESCE(ia.status, '') AS live_status " +
+        'FROM policy_violations v LEFT JOIN items_api ia ON ia.item_id = v.item_id ' +
+        'ORDER BY v.received_at DESC LIMIT 500').all();
+      const c = await ctx.env.DB.prepare(
+        'SELECT COUNT(*) AS rows_n, COUNT(DISTINCT msg_id) AS notices, COUNT(DISTINCT account) AS accounts, ' +
+        "COUNT(DISTINCT CASE WHEN item_id != '' THEN item_id END) AS items, " +
+        "SUM(CASE WHEN received_at >= datetime('now', '-30 day') THEN 1 ELSE 0 END) AS last30 " +
+        'FROM policy_violations').first();
+      return { rows: rs.results || [], counts: c || {} };
+    },
+  },
+  /* The hunter warning: "if a product hunter is selecting that kind of item with those keywords
+     again then give a warning". Token overlap between what the hunter is typing and the archived
+     titles — two shared meaningful words is the same kind of item; one long specific word counts. */
+  policyCheck: {
+    auth: 'any', fn: async (p, ctx) => {
+      const want = pvTokens(String(p.title || '') + ' ' + String(p.keyword || ''));
+      if (!want.length) return { checked: false, matches: [] };
+      try { await ctx.env.DB.prepare(PV_SCHEMA).run(); } catch (e) {}
+      const rs = await ctx.env.DB.prepare(
+        "SELECT policy, account, received_at, item_id, title, keywords FROM policy_violations " +
+        "WHERE keywords != '' ORDER BY received_at DESC LIMIT 800").all();
+      const wset = {};
+      want.forEach((w) => { wset[w] = 1; });
+      const seen = {};
+      const out = [];
+      for (const r of (rs.results || [])) {
+        const shared = String(r.keywords || '').split(' ').filter((t) => wset[t]);
+        if (!(shared.length >= 2 || (shared.length === 1 && shared[0].length >= 8))) continue;
+        const key = String(r.title).toLowerCase();
+        if (seen[key]) continue;
+        seen[key] = 1;
+        out.push({ policy: r.policy, account: r.account, received_at: r.received_at,
+          item_id: r.item_id, title: r.title, shared: shared.slice(0, 6).join(', ') });
+        if (out.length >= 5) break;
+      }
+      return { checked: true, matches: out };
     },
   },
 
@@ -13494,7 +13698,7 @@ const ROUTES = {
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
         trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
-        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep };
+        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -14328,7 +14532,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

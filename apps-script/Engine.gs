@@ -271,6 +271,7 @@ const ENGINE_RUNNABLE = {
   driveFind: function (args) { return driveFind(args); },
   connectionLink: function (args) { return connectionLink(args); },
   pushEngineSync: function () { return pushEngineSync(); },
+  huntAddSecondTerapeakCol: function () { return huntAddSecondTerapeakCol(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   applyOwnerBatch: function () { return typeof applyOwnerBatch_ === 'function' ? JSON.stringify(applyOwnerBatch_()) : 'absent'; },
