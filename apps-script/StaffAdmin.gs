@@ -319,7 +319,7 @@ function actionAddStaff_(payload, ctx) {
     ? schedule.shift_label + ' · ' + schedule.work_start + '–' + schedule.work_end +
       (checkpoints.length ? ' · checkpoints ' + checkpoints.join(', ') : '')
     : 'Management will set your timetable on the rota screen';
-  notify_(email, 'Welcome to the M98M Portal',
+  notify_(email, 'Welcome to the M98M Operations Intelligence System',
     'You are set up as ' + role + '. Timetable: ' + timetable + '. ' +
     (sops.length ? 'Your SOPs (open the SOPs screen to read them in full): ' + sops.join(' · ') + '.'
                  : 'Your SOPs appear on the SOPs screen.'),
@@ -508,7 +508,7 @@ function actionDeactivateStaff_(payload, ctx) {
   // Written even though they can no longer sign in: NOTIFICATIONS is part of the audit trail
   // §4.1b preserves, and it records that the removal was communicated.
   notify_(person.email, 'Your portal access has ended',
-    'Your M98M Portal access was removed on ' + stamp + '.' + (reason ? ' Reason: ' + reason : ''), 'staff:' + target);
+    'Your M98M Operations Intelligence System access was removed on ' + stamp + '.' + (reason ? ' Reason: ' + reason : ''), 'staff:' + target);
   notifyManagement_('Staff removed', person.name + ' (' + person.email + ', ' + person.role + ') was removed by ' + ctx.ident.email,
     'staff:' + target);
 

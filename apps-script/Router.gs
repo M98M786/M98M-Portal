@@ -100,7 +100,7 @@ function doPost(e) {
     return out_({ ok: false, error: shown }, null, req);
   }
 }
-function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: true, service: 'M98M Portal', ts: now_() })).setMimeType(ContentService.MimeType.JSON); }
+function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: true, service: 'M98M Operations Intelligence System', ts: now_() })).setMimeType(ContentService.MimeType.JSON); }
 
 /* ---------- hot-read memo (27 Aug — "everything is stuck") ----------
    Six staff screens poll the same heavy reads every 20s, all as the one web-app user; the
@@ -354,7 +354,7 @@ function out_(obj, logMsg, req) {
   if (logMsg) logActivity_('router', logMsg, (req && req.action) || '', '', '', '');
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
-function actionPing_() { return { service: 'M98M Portal', phase: 2, ts: now_() }; }
+function actionPing_() { return { service: 'M98M Operations Intelligence System', phase: 2, ts: now_() }; }
 function actionImportRegistry_(payload, ctx) { return importRegistry(String(payload.registryId || ''), ctx.ident.email); }
 function actionConnectionHealth_(payload, ctx) { return connectionHealth(); }
 

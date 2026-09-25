@@ -42,7 +42,7 @@ function stripForRole_(records, role, email) {
 
 // ---------- public ----------
 function actionGetPublicConfig_() {
-  return { oauth_client_id: getConfig('oauth_client_id'), roles: ROLES, service: 'M98M Portal', phase: 2,
+  return { oauth_client_id: getConfig('oauth_client_id'), roles: ROLES, service: 'M98M Operations Intelligence System', phase: 2,
     engine_url: getConfig('engine_url') || '' };
 }
 
@@ -162,7 +162,7 @@ function actionApproveUser_(payload, ctx) {
       sh.getRange(i + 1, 6).setValue('approved');
       sh.getRange(i + 1, 8).setValue(ctx.ident.email);
       logActivity_(ctx.ident.email, 'APPROVE_USER', rows[i][0], old[5], 'approved', payload.role || rows[i][2]);
-      notify_(rows[i][0], 'Welcome to the M98M Portal', 'Your access is approved. Role: ' + (payload.role || rows[i][2]) + '.', 'approved');
+      notify_(rows[i][0], 'Welcome to the M98M Operations Intelligence System', 'Your access is approved. Role: ' + (payload.role || rows[i][2]) + '.', 'approved');
       return { ok: true, email: rows[i][0] };
     }
   }

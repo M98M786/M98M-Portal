@@ -8844,7 +8844,7 @@ const ROUTES = {
      Engine alone; Apps Script becomes a data backend, not a front door. */
   getPublicConfig: {
     auth: 'public', fn: async (p, ctx) => ({
-      service: 'M98M Portal', phase: 2,
+      service: 'M98M Operations Intelligence System', phase: 2,
       engine_url: 'https://m98m-engine.m98m786.workers.dev/',
       oauth_client_id: '1054155928251-ehfifr8bgd8bfaqa28uqm3bs225pkikr.apps.googleusercontent.com',
       roles: ['Management', 'Ops Head', 'Team Lead', 'Listing Manager', 'Advertising Manager', 'CS', 'Product Hunter', 'Item Lister', 'Order Processor', 'Pricing'],

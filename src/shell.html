@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com https://*.workers.dev; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
-<title>M98M Portal</title><!--ADS_TITLE-->
+<title>M98M Operations Intelligence System</title><!--ADS_TITLE-->
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -98,7 +98,7 @@ input,select{font:inherit}
 .brand{display:flex; align-items:center; gap:11px; padding:2px 6px 18px}
 .brand img{width:40px;height:40px;border-radius:10px;flex:none}
 .brand-text b{display:block; color:#F4F7F9; font-size:15px; letter-spacing:.03em}
-.brand-text span{font-size:11px; color:var(--text-3); letter-spacing:.14em; text-transform:uppercase}
+.brand-text span{display:block; font-size:9.5px; color:var(--text-3); letter-spacing:.08em; text-transform:uppercase; line-height:1.45; max-width:172px}
 .nav{display:flex; flex-direction:column; gap:3px}
 .nav a{display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; color:#9AA6B6; text-decoration:none; font-weight:600; font-size:13.5px; position:relative; transition:all .18s ease; cursor:pointer}
 .nav-dept{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#6b7687;padding:14px 12px 5px;border-top:1px solid rgba(233,169,60,.08);margin-top:6px}
@@ -265,7 +265,7 @@ input,select{font:inherit}
 <div id="loginScreen" class="screen">
   <div class="card-auth enter">
     <img class="logo-auth" src="assets/logo.png" alt="M98M">
-    <h1>The <span class="goldtext">M98M Portal</span></h1>
+    <h1><span class="goldtext">M98M</span> Operations Intelligence System</h1>
     <div class="tag">Synchronized working · Task giving · Database · Business overview</div>
     <div class="gbtn-wrap" id="gbtn"></div>
     <div class="auth-status info" id="loginStatus"></div>
@@ -310,7 +310,7 @@ input,select{font:inherit}
 <!-- ============ APP SHELL ============ -->
 <div id="appShell" class="shell hidden">
   <aside class="side">
-    <div class="brand"><img src="assets/logo.png" alt="M98M"><div class="brand-text"><b>M98M LTD</b><span id="brandSub">E-commerce</span></div></div>
+    <div class="brand"><img src="assets/logo.png" alt="M98M"><div class="brand-text"><b>M98M LTD</b><span id="brandSub">Operations Intelligence System</span></div></div>
     <nav class="nav" id="nav"></nav>
     <div class="foot" id="shiftFoot"></div>
   </aside>
@@ -335,7 +335,7 @@ input,select{font:inherit}
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-/* ============ M98M Portal — client. Knows ONLY the backend URL (RL-9). ============ */
+/* ============ M98M Operations Intelligence System — client. Knows ONLY the backend URL (RL-9). ============ */
 var BACKEND = "https://script.google.com/macros/s/AKfycbx1_6VpJUMVEJeifbwq79DIhNwhZgzHmPxRuC2oj6my3b1Kl2mpowSGjNMAM8D3bLP1wg/exec";
 var STATE = { idToken:null, session:null, user:null, config:null, counts:{} };
 var $ = function(id){ return document.getElementById(id); };
@@ -2033,7 +2033,7 @@ function build2D(canvas){
 var wordsBox, words = [];
 function buildWords(){
   wordsBox = doc.createElement('div'); wordsBox.className = 'gx-words'; wordsBox.setAttribute('aria-hidden','true');
-  ['M98M','Portal'].forEach(function(txt){
+  ['M98M','Operations','Intelligence','System'].forEach(function(txt){
     var wEl = doc.createElement('div'); wEl.className = 'word';
     txt.split('').forEach(function(ch){ var sp = doc.createElement('span'); sp.textContent = ch; wEl.appendChild(sp); });
     wordsBox.appendChild(wEl); words.push(wEl);

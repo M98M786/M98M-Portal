@@ -220,7 +220,7 @@ function bootstrapApproveSeededStaff() {
       approved.push(email + ' -> ' + role);
       if (!String(rows[i][3] || '').trim()) noShift.push(email);
       logActivity_('setup', 'BULK_APPROVE', email, 'pending', 'approved', role);
-      notify_(email, 'Welcome to the M98M Portal',
+      notify_(email, 'Welcome to the M98M Operations Intelligence System',
         'Your access is approved. Role: ' + role + '. Your timetable is set by Management in the Rota screen.', 'approved');
     }
     SpreadsheetApp.flush();

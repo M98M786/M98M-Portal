@@ -182,7 +182,7 @@ def build_ads():
         blocks.append('/* ---------- %s ---------- */\n%s' % (name, body))
     page = shell.replace(MARKER, '\n\n'.join(blocks))
 
-    page = page.replace('<title>M98M Portal</title><!--ADS_TITLE-->', '<title>M98M Advertising</title>')
+    page = page.replace('<title>M98M Operations Intelligence System</title><!--ADS_TITLE-->', '<title>M98M Advertising</title>')
     page = page.replace('<span id="brandSub">E-commerce</span>', '<span id="brandSub">Advertising</span>')
     page = page.replace('"assets/', '"/assets/').replace("'assets/", "'/assets/")
 
