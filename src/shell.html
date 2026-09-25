@@ -266,7 +266,6 @@ input,select{font:inherit}
   <div class="card-auth enter">
     <img class="logo-auth" src="assets/logo.png" alt="M98M">
     <h1><span class="goldtext">M98M</span> Operations Intelligence System</h1>
-    <div class="tag">Synchronized working · Task giving · Database · Business overview</div>
     <div class="gbtn-wrap" id="gbtn"></div>
     <div class="auth-status info" id="loginStatus"></div>
     <div class="auth-note">Sign in with your <b>M98M company Google account</b>. New here? Signing in starts your registration — Management approves before access.</div>
@@ -2033,7 +2032,9 @@ function build2D(canvas){
 var wordsBox, words = [];
 function buildWords(){
   wordsBox = doc.createElement('div'); wordsBox.className = 'gx-words'; wordsBox.setAttribute('aria-hidden','true');
-  ['M98M','Operations','Intelligence','System'].forEach(function(txt){
+  /* 26 Sept (owner): the hero words are RETIRED — with the renamed four-word product they
+     typed the whole name across the sign-in card instead of sitting quietly beside it. */
+  [].forEach(function(txt){
     var wEl = doc.createElement('div'); wEl.className = 'word';
     txt.split('').forEach(function(ch){ var sp = doc.createElement('span'); sp.textContent = ch; wEl.appendChild(sp); });
     wordsBox.appendChild(wEl); words.push(wEl);
