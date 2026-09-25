@@ -1017,6 +1017,7 @@ function huntAddSecondTerapeakCol() {
   const head = huntHeaders_(db);
   if (head.indexOf(NEW_COL) < 0) {
     db.getRange(1, head.length + 1).setValue(NEW_COL);
+    SpreadsheetApp.flush();
     out.push('HUNTING_DB: added at column ' + (head.length + 1));
   } else out.push('HUNTING_DB: already present');
   try {
@@ -1026,7 +1027,14 @@ function huntAddSecondTerapeakCol() {
     if (!open) { out.push('live workbook: tab not found'); return out.join(' · '); }
     const have = open.headers.map(function (h) { return String(h).trim(); });
     if (have.indexOf(NEW_COL) < 0) {
-      open.sheet.getRange(open.headerRowIndex, open.headers.length + 1).setValue(NEW_COL);
+      /* first run failed HERE: the sheet's spare columns carry a dropdown data-validation
+         ("Campaign category, Bundle Deal, …") that rejects any other text — and the refusal
+         surfaced at the end-of-run auto-flush, OUTSIDE this try. Clear the validation on the
+         one header cell first, and flush INSIDE the try so a refusal is caught and reported. */
+      const cell = open.sheet.getRange(open.headerRowIndex, open.headers.length + 1);
+      cell.setDataValidation(null);
+      cell.setValue(NEW_COL);
+      SpreadsheetApp.flush();
       out.push('live workbook: added at column ' + (open.headers.length + 1) + ' of ' + open.sheet.getName());
     } else out.push('live workbook: already present');
   } catch (e) { out.push('live workbook: ' + String(e && e.message || e).slice(0, 120)); }
