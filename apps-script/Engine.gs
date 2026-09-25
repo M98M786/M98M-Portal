@@ -272,6 +272,7 @@ const ENGINE_RUNNABLE = {
   connectionLink: function (args) { return connectionLink(args); },
   pushEngineSync: function () { return pushEngineSync(); },
   huntAddSecondTerapeakCol: function () { return huntAddSecondTerapeakCol(); },
+  applyReportCadence4h: function () { return applyReportCadence4h(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   applyOwnerBatch: function () { return typeof applyOwnerBatch_ === 'function' ? JSON.stringify(applyOwnerBatch_()) : 'absent'; },

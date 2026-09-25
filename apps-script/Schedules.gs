@@ -65,6 +65,41 @@ function schedDayIndex_(dateStr) {
 }
 function schedDayCode_(dateStr) { return SCHEDULE_DAY_CODES[schedDayIndex_(dateStr)]; }
 
+/* 25 Sept (owner): "update my reports to after 4 hours" — the CONFIG rows override the defaults
+ * for the two named shifts, so the cadence change must land in the sheet itself. Purpose-built
+ * and argument-free ON PURPOSE: run through the key-gated runnable route it can only apply THIS
+ * one decision — it cannot be bent into a general config writer. Idempotent. */
+function applyReportCadence4h() {
+  const WANT = { checkpoints_shift1: '18:30,23:15', checkpoints_shift2: '01:00,06:00' };
+  const sh = getPortalDb_(false).getSheetByName('CONFIG');
+  const rows = sh.getDataRange().getValues();
+  const out = [];
+  Object.keys(WANT).forEach(function (key) {
+    let row = 0;
+    for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === key) { row = i + 1; break; }
+    if (!row) {
+      sh.appendRow([key, WANT[key], 'owner', now_()]);
+      out.push(key + ': created');
+    } else {
+      const old = String(rows[row - 1][1]);
+      if (old === WANT[key]) { out.push(key + ': already 4-hourly'); }
+      else {
+        sh.getRange(row, 2).setValue(WANT[key]);
+        sh.getRange(row, 3).setValue('owner');
+        sh.getRange(row, 4).setValue(now_());
+        out.push(key + ': ' + old + ' → ' + WANT[key]);
+      }
+    }
+    try { CacheService.getScriptCache().remove('cfg_' + key); } catch (e) {}
+  });
+  SpreadsheetApp.flush();
+  try {
+    enginePost_('syncConfig', { rows: Object.keys(WANT).map(function (k) { return { key: k, value: WANT[k] }; }) });
+  } catch (e) { out.push('engine sync: ' + String(e && e.message || e).slice(0, 80)); }
+  logActivity_('owner', 'REPORT_CADENCE_4H', 'CONFIG', '', Object.keys(WANT).join(','), out.join(' · ').slice(0, 220));
+  return out.join(' · ');
+}
+
 // ---------- checkpoint derivation (§5) ----------
 /** §5 re-paced 25 Sept (owner: "update my reports to after 4 hours, earlier it was 2 hours"):
  * every 4 hours from work_start, skipping the break window, final checkpoint at work_end.

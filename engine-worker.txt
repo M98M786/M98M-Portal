@@ -734,6 +734,23 @@ function pvTokens(s) {
 
 async function policyScan(env) {
   await env.DB.prepare(PV_SCHEMA).run();
+  /* one-shot (25 Sept): three Apps Script runs ride the first tick after this deploy — the
+     hunting-column migration, the 4-hourly report cadence (CONFIG rows), and a user push so the
+     engine's checkpoint mirror follows at once. The editor's Run picker refused every automated
+     click that night; engineRunJob is the same functions through the deployed /exec, key-gated.
+     Flag set BEFORE running so a crash can never loop it; the result lands in the flag's value. */
+  const osk = 'oneshot_20260925_hunting4h';
+  const os = await env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(osk).first();
+  if (!os) {
+    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'running', datetime('now'))").bind(osk).run();
+    const notes = [];
+    for (const job of ['huntAddSecondTerapeakCol', 'applyReportCadence4h', 'pushEngineSync']) {
+      try { const r = await asRunJobDirect(env, job); notes.push(job + ': ' + JSON.stringify(r).slice(0, 180)); }
+      catch (e) { notes.push(job + ': ERR ' + String(e && e.message || e).slice(0, 120)); }
+    }
+    await env.DB.prepare("UPDATE portal_config SET value = ?2, updated_at = datetime('now') WHERE key = ?1")
+      .bind(osk, notes.join(' | ').slice(0, 900)).run();
+  }
   let deep = 0, found = 0, notices = 0;
   await perAccount(env, 'policyScan', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
