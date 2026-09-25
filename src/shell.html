@@ -876,7 +876,7 @@ var DRAFT = (function(){
 function draftClear(view){ DRAFT.clear(view); }
 function draftRestore(view){ return DRAFT.restore(view); }
 function versionWatch(){
-  var deferToastShown = false;
+  var deferToastShown = false, pendingStamp = '', deferTimer = null;
   function busyTyping(){
     if(Date.now() - LAST_TYPED_AT < 10*60*1000) return true;
     var a = document.activeElement;
@@ -885,14 +885,22 @@ function versionWatch(){
   function safeReload(){
     if(busyTyping()){
       /* Drafts make even a lost reload safe, but the polite thing is to not interrupt at all:
-         keep checking every 2 minutes and go only after a 10-minute quiet spell. */
+         keep checking every 2 minutes and go only after a 10-minute quiet spell. The "seen"
+         guard is deliberately NOT set here — only when a reload actually fires below — so if
+         this deferred timer is ever lost (a phone freezes the backgrounded tab, a laptop sleeps
+         for hours), the next check() on wake re-arms the reload instead of finding the stamp
+         already "seen" and giving up. (25 Sept: Sir Hasib's Product hunting page sat on the old
+         build for exactly that reason — the guard was set before the defer, so the killed timer
+         was the only path left and it was gone.) One live timer at a time, never a stack. */
       if(!deferToastShown){ deferToastShown = true; try{ toast('Portal update ready — it will apply when you pause.'); }catch(e){} }
-      setTimeout(safeReload, 2*60*1000);
+      if(!deferTimer){ deferTimer = setTimeout(function(){ deferTimer = null; safeReload(); }, 2*60*1000); }
       return;
     }
+    /* committed to reloading NOW: mark the stamp so the reloaded page — which may still be the
+       OLD build for ~10 min of GitHub CDN lag — does not reload again in a loop. */
+    try{ if(pendingStamp) sessionStorage.setItem('m98m:reloadedFor', pendingStamp); }catch(e){}
     /* GitHub Pages caches index.html (~10 min), so a plain location.reload() can re-serve the SAME
-       stale build — the tab then sticks on old code and the "already reloaded for this stamp" guard
-       gives up. Force a genuinely fresh document with a one-time cache-busting query (5 Sept). */
+       stale build. Force a genuinely fresh document with a one-time cache-busting query (5 Sept). */
     try{ location.replace(location.pathname + '?v=' + Date.now() + location.hash); }
     catch(e){ try{ location.reload(true); }catch(e2){ location.reload(); } }
   }
@@ -905,7 +913,7 @@ function versionWatch(){
         var seen = null;
         try{ seen = sessionStorage.getItem('m98m:reloadedFor'); }catch(e){}
         if(seen === v) return; /* already reloaded for this stamp and still old = CDN lag, not a loop */
-        try{ sessionStorage.setItem('m98m:reloadedFor', v); }catch(e){}
+        pendingStamp = v;
         safeReload();
       }).catch(function(){});
   }
