@@ -751,6 +751,17 @@ async function policyScan(env) {
     await env.DB.prepare("UPDATE portal_config SET value = ?2, updated_at = datetime('now') WHERE key = ?1")
       .bind(osk, notes.join(' | ').slice(0, 900)).run();
   }
+  /* parser v2 (same night): v1's bare 12-digit fallback read eBay's own tracking/content ids
+     out of every notice as "items" and dressed them in boilerplate titles ("Learn more:",
+     "What to do next"). On a version bump the archive is rebuilt from zero — buyer_messages
+     still holds every header, so one run re-fetches the ~8 bodies per account and refiles. */
+  const PV_PARSER_V = '2';
+  const pvv = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'pv_parser_v'").first();
+  if (!pvv || String(pvv.value) !== PV_PARSER_V) {
+    await env.DB.prepare('DELETE FROM policy_violations').run();
+    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('pv_parser_v', ?1, datetime('now')) " +
+      "ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(PV_PARSER_V).run();
+  }
   let deep = 0, found = 0, notices = 0;
   await perAccount(env, 'policyScan', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
@@ -815,13 +826,15 @@ async function policyScan(env) {
         let body = xmlTag(bm, 'Text') || '';
         body = body.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
           .replace(/&#0?39;/g, "'").replace(/&amp;/g, '&');
-        /* the item numbers, from the notice's own links and text */
+        /* the item numbers — ONLY from listing links (/itm/…) and explicit "Item number:"
+           wording. No bare-number fallback: the notices carry 12-digit tracking/content ids
+           that are not items (v1's junk rows). */
         const ids = {};
         let m;
-        const re = /(?:itm\/(?:[^"'\s<>]*\/)?|item[=\/]|item(?:%20|\s)?(?:id|number)\D{0,6})(\d{9,13})/gi;
+        const re = /itm\/(?:[^"'\s<>]*?\/)?(\d{9,13})\b/gi;
         while ((m = re.exec(body))) ids[m[1]] = 1;
-        const re2 = /\b(\d{12})\b/g;
-        while ((m = re2.exec(body))) ids[m[1]] = 1;
+        const reN = /item\s*(?:id|number)\s*[:#]?\s*(\d{9,13})\b/gi;
+        while ((m = reN.exec(body))) ids[m[1]] = 1;
         const list = Object.keys(ids).slice(0, 30);
         const snippet = body.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ').trim().slice(0, 700);
@@ -832,10 +845,13 @@ async function policyScan(env) {
             const ia = await env.DB.prepare('SELECT title FROM items_api WHERE item_id = ?1').bind(itemId).first();
             if (ia && ia.title) title = String(ia.title);
             if (!title) {
-              /* best-effort: the anchor text the notice itself wraps around the item link */
+              /* best-effort: the anchor text the notice itself wraps around the item link —
+                 but never the notice's own boilerplate lines */
               const t = body.match(new RegExp('>\\s*([^<>]{12,140}?)\\s*<[^]{0,500}?' + itemId)) ||
                 body.match(new RegExp(itemId + '[^]{0,500}?>\\s*([^<>]{12,140}?)\\s*<'));
               if (t && !/^https?:/.test(t[1])) title = t[1].replace(/\s+/g, ' ').trim();
+              if (/^(learn more|what (to do|happened)|this (determination|policy)|why |how |item location|product safety|manipulating search|counterfeit|intellectual property|knives|policy\b)/i.test(title) ||
+                  /policy$/i.test(title)) title = '';
             }
             try {
               const pv = await env.DB.prepare('SELECT hunter_email FROM provenance WHERE item_id = ?1').bind(itemId).first();
