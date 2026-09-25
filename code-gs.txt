@@ -39,7 +39,7 @@ const DB_TABS = {
 };
 
 // The 33 real hunting columns, verbatim from the live workbook (header row 1, A–AG).
-const HUNTING_COLS = ['Selected By','Approval Status','Comments','Date Added','Account Selected','Listing Status','Seasonal','Main Keyword Terapeak link','Image Link of avg sold price','Image Link of Zik analytics','Terapeak overview','Temu Link','Product Link 1 Main supplier','Product Link 2','Product Link 3','Ebay Link','Title','Image Link','IMAGE','DESCRIPTION','Category','Source Price','E-Bey Caluclator + £4','CPC Selling Chance','Sell Through','Competitors','TOP THREE SALES','Total Competitors on main keyword','Price Range ANALYSIS','Sold Unit ANALYSIS','Our Profit','ROI','Comment','Comments given by','High Price Link','Prime Competitor Selling Price','Competitor High Selling Price','Campaign category'];
+const HUNTING_COLS = ['Selected By','Approval Status','Comments','Date Added','Account Selected','Listing Status','Seasonal','Main Keyword Terapeak link','Image Link of avg sold price','Image Link of Zik analytics','Terapeak overview','Temu Link','Product Link 1 Main supplier','Product Link 2','Product Link 3','Ebay Link','Title','Image Link','IMAGE','DESCRIPTION','Category','Source Price','E-Bey Caluclator + £4','CPC Selling Chance','Sell Through','Competitors','TOP THREE SALES','Total Competitors on main keyword','Price Range ANALYSIS','Sold Unit ANALYSIS','Our Profit','ROI','Comment','Comments given by','High Price Link','Prime Competitor Selling Price','Competitor High Selling Price','Campaign category','Terapeak Second Page'];
 
 const ROLES = ['Management','Ops Head','Team Lead','Sales Operations','Listing Manager','Advertising Manager','CS','Product Hunter','Item Lister','Order Processor','Pricing'];
 
@@ -6135,6 +6135,15 @@ const HC_COMMENT = 'Comment';                     // column AG — the hunter's 
 const HUNT_PORTAL_OWNED = [HC_SELECTED_BY, HC_APPROVAL, HC_COMMENTS, HC_DATE_ADDED, HC_ACCOUNT,
   HC_LISTING_STATUS, HC_IMAGE, HC_PROFIT, HC_ROI];
 const HUNT_REQUIRED = [HC_TITLE, HC_KEYWORD, HC_SUPPLIER_1, HC_SOURCE_PRICE, HC_CALC_PRICE];
+/* 25 Sept (owner): "it is compulsory to add all the data other than Temu link" for New and
+   Seasonal items; only a Duplicated item may travel light (the five core fields above). The
+   hunter's own Comment and the CPC choice stay optional — the CPC type is Management's call at
+   approval, and always was. */
+const HUNT_FULL_SET = [HC_KEYWORD, HC_TITLE, HC_CATEGORY, 'Terapeak overview', 'Terapeak Second Page',
+  'Image Link of Zik analytics', 'Image Link of avg sold price', HC_KEYWORD_COMPETITORS, 'Sell Through',
+  'Sold Unit ANALYSIS', 'Price Range ANALYSIS', HC_TOP_THREE, 'Ebay Link', 'Prime Competitor Selling Price',
+  'High Price Link', 'Competitor High Selling Price', 'Competitors', HC_SUPPLIER_1, 'Product Link 2',
+  'Product Link 3', HC_SOURCE_PRICE, HC_CALC_PRICE, 'Image Link', 'DESCRIPTION'];
 // RL-6 column ownership: the only HUNTING_DB columns written after a submission lands.
 const HUNT_DECISION_COLS = [HC_APPROVAL, HC_COMMENTS, HC_ACCOUNT, HC_LISTING_STATUS, HC_CPC];
 
@@ -6155,7 +6164,7 @@ const HUNT_SHEET_HEADERS = ['Selected By ', 'Approval Status', 'Comments', 'Date
   "Total Competitors on main keyword's search bar", 'Price Range ANALYSIS', 'Sold Unit  ANALYSIS   ',
   'Our Profit', 'ROI', 'Comment',
   'Comments given by ', 'High Price Link', 'Prime Competitor Selling Price',
-  'Competitor High  Selling Price', 'Campaign category'];
+  'Competitor High  Selling Price', 'Campaign category', 'Terapeak Second Page'];
 const HUNT_SHEET_TABS = ['Main Sheet'];
 // 'IMAGE ' is the workbook's only formula column — writing it would delete =IMAGE(R{n}).
 const HUNT_MIRROR_WHITELIST = HUNT_SHEET_HEADERS.filter(function (h) { return h !== 'IMAGE '; });
@@ -6181,15 +6190,18 @@ const HUNT_LISTER_WHITELIST = HUNT_LIMITED_MAP.map(function (p) { return p[0]; }
 /* 26 Aug (owner): "Hunting will be of two types — seasonal item or consistent item. He will
    select at the start of the item." Stored in the existing 'Seasonal' column; approvals split by
    it into a Seasonal tray and a Consistent tray. Required at submit so nothing lands untyped. */
-const HUNT_KINDS = ['Seasonal', 'Consistent'];
+/* 25 Sept (owner): "make three departments — New items, Duplicated items, Seasonal items". The
+   same column carries all three: Consistent IS the New-item department (its historical name),
+   Duplicated is an item already live on one of our accounts being copied to another. */
+const HUNT_KINDS = ['Seasonal', 'Consistent', 'Duplicated'];
 const HC_KIND = 'Seasonal';
 function huntKind_(value, required) {
   const s = String(value === null || value === undefined ? '' : value).trim();
-  if (!s) { if (required) throw new Error(SAFE_ERROR_PREFIX + 'choose Seasonal or Consistent'); return ''; }
+  if (!s) { if (required) throw new Error(SAFE_ERROR_PREFIX + 'choose the hunting department: New (Consistent), Seasonal or Duplicated'); return ''; }
   for (let i = 0; i < HUNT_KINDS.length; i++) {
     if (huntNormKey_(HUNT_KINDS[i]) === huntNormKey_(s)) return HUNT_KINDS[i];
   }
-  throw new Error(SAFE_ERROR_PREFIX + 'the item type must be Seasonal or Consistent');
+  throw new Error(SAFE_ERROR_PREFIX + 'the item type must be Consistent (new), Seasonal or Duplicated');
 }
 const HUNT_ADVERTISING_TYPES = ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
   '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'];
@@ -6256,7 +6268,21 @@ function actionSubmitHunt_(payload, ctx) {
   // no digit at all is not a price and would silently cost the calculator its only inputs.
   if (huntFirstNumber_(cols[HC_CALC_PRICE]) === null) throw new Error('a numeric price is required: ' + HC_CALC_PRICE);
   if (huntFirstNumber_(cols[HC_SOURCE_PRICE]) === null) throw new Error('a numeric price is required: ' + HC_SOURCE_PRICE);
-  cols[HC_KIND] = huntKind_(cols[HC_KIND], true);   // Seasonal | Consistent — required at submit
+  cols[HC_KIND] = huntKind_(cols[HC_KIND], true);   // the department — required at submit
+
+  /* 25 Sept (owner): New (Consistent) and Seasonal items carry the FULL research set — every
+     field except the Temu link; Duplicated items may skip. Management with an override note can
+     still push a partial row through (the same override that clears a duplicate). */
+  if (cols[HC_KIND] !== 'Duplicated' &&
+      !(String(payload.override_note || '').trim() && isMgmt_(ctx.user.role, ctx.ident.email))) {
+    const fsMissing = HUNT_FULL_SET.filter(function (c) { return String(cols[c] || '').trim() === ''; });
+    if (fsMissing.length) {
+      throw new Error(SAFE_ERROR_PREFIX + 'a ' + (cols[HC_KIND] === 'Seasonal' ? 'Seasonal' : 'New') +
+        ' item needs the full research — still empty: ' + fsMissing.slice(0, 5).join(', ') +
+        (fsMissing.length > 5 ? ' + ' + (fsMissing.length - 5) + ' more' : '') +
+        '. Only the Temu link is optional; a Duplicated item may travel light.');
+    }
+  }
 
   /* TRUTH v2 WO-11 §4: the duplicate check runs AT SUBMIT on the ali item ids of every supplier
      link. A duplicate blocks the hunt unless Management overrides with a note — logged. */
@@ -7045,6 +7071,34 @@ function huntCriteriaFlags_(cols) {
     flags.push({ rule: c.topThreeRule, value: 'could not be read automatically', criteria: c.label });
   }
   return flags;
+}
+
+/* 25 Sept migration — the one genuinely NEW column the owner's 37-column workflow needs:
+ * 'Terapeak Second Page' (#9, Market Research). Appends the header to the Portal DB HUNTING_DB
+ * tab and to the live hunting workbook's own header row; both reads are header-addressed, so
+ * the cell is all either side needs. Run once from the editor; idempotent. */
+function huntAddSecondTerapeakCol() {
+  const out = [];
+  const NEW_COL = 'Terapeak Second Page';
+  const db = huntSheet_();
+  const head = huntHeaders_(db);
+  if (head.indexOf(NEW_COL) < 0) {
+    db.getRange(1, head.length + 1).setValue(NEW_COL);
+    out.push('HUNTING_DB: added at column ' + (head.length + 1));
+  } else out.push('HUNTING_DB: already present');
+  try {
+    const id = bridgeResolveSheetId_('global', '', 'hunting');
+    if (!id) { out.push('live workbook: not connected'); return out.join(' · '); }
+    const open = bridgeOpenTab_(id, HUNT_SHEET_TABS, HUNT_SHEET_HEADERS);
+    if (!open) { out.push('live workbook: tab not found'); return out.join(' · '); }
+    const have = open.headers.map(function (h) { return String(h).trim(); });
+    if (have.indexOf(NEW_COL) < 0) {
+      open.sheet.getRange(open.headerRowIndex, open.headers.length + 1).setValue(NEW_COL);
+      out.push('live workbook: added at column ' + (open.headers.length + 1) + ' of ' + open.sheet.getName());
+    } else out.push('live workbook: already present');
+  } catch (e) { out.push('live workbook: ' + String(e && e.message || e).slice(0, 120)); }
+  logActivity_('system', 'HUNT_COL_ADD', 'Terapeak Second Page', '', '', out.join(' · ').slice(0, 200));
+  return out.join(' · ');
 }
 
 function huntFirstNumber_(v) {
@@ -23201,6 +23255,7 @@ const ENGINE_RUNNABLE = {
   driveFind: function (args) { return driveFind(args); },
   connectionLink: function (args) { return connectionLink(args); },
   pushEngineSync: function () { return pushEngineSync(); },
+  huntAddSecondTerapeakCol: function () { return huntAddSecondTerapeakCol(); },
   pushEngineCosts: function () { return pushEngineCosts(); },
   pushEngineTasks: function () { return typeof pushEngineTasks === 'function' ? String(pushEngineTasks()) : 'absent'; },
   applyOwnerBatch: function () { return typeof applyOwnerBatch_ === 'function' ? JSON.stringify(applyOwnerBatch_()) : 'absent'; },
