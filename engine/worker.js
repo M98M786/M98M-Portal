@@ -751,11 +751,14 @@ async function policyScan(env) {
     await env.DB.prepare("UPDATE portal_config SET value = ?2, updated_at = datetime('now') WHERE key = ?1")
       .bind(osk, notes.join(' | ').slice(0, 900)).run();
   }
-  /* parser v2 (same night): v1's bare 12-digit fallback read eBay's own tracking/content ids
-     out of every notice as "items" and dressed them in boilerplate titles ("Learn more:",
-     "What to do next"). On a version bump the archive is rebuilt from zero — buyer_messages
-     still holds every header, so one run re-fetches the ~8 bodies per account and refiles. */
-  const PV_PARSER_V = '2';
+  /* parser v3 (same night). v1's bare 12-digit fallback read eBay's own tracking/content ids
+     out of every notice as "items" ("Learn more:" rows); v2 allowed only /itm/ links and found
+     NOTHING — the notices reference items by query param, not path. v3 takes every explicit
+     item-link/param/"Item number" form, and accepts a bare 12-digit number ONLY when items_api
+     knows it — our listings (ENDED included) are in the mirror, eBay's content ids never are.
+     On a version bump the archive rebuilds from zero: buyer_messages still holds every header,
+     so one run re-fetches the ~8 bodies per account and refiles. */
+  const PV_PARSER_V = '3';
   const pvv = await env.DB.prepare("SELECT value FROM portal_config WHERE key = 'pv_parser_v'").first();
   if (!pvv || String(pvv.value) !== PV_PARSER_V) {
     await env.DB.prepare('DELETE FROM policy_violations').run();
@@ -826,15 +829,19 @@ async function policyScan(env) {
         let body = xmlTag(bm, 'Text') || '';
         body = body.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
           .replace(/&#0?39;/g, "'").replace(/&amp;/g, '&');
-        /* the item numbers — ONLY from listing links (/itm/…) and explicit "Item number:"
-           wording. No bare-number fallback: the notices carry 12-digit tracking/content ids
-           that are not items (v1's junk rows). */
+        /* the item numbers: every explicit item-link/param/"Item number" form, plus bare
+           12-digit numbers that the item mirror can vouch for */
         const ids = {};
         let m;
-        const re = /itm\/(?:[^"'\s<>]*?\/)?(\d{9,13})\b/gi;
-        while ((m = re.exec(body))) ids[m[1]] = 1;
-        const reN = /item\s*(?:id|number)\s*[:#]?\s*(\d{9,13})\b/gi;
-        while ((m = reN.exec(body))) ids[m[1]] = 1;
+        const reLink = /(?:itm[\/=](?:[^"'\s<>]*?\/)?|[?&;]item_?(?:id)?=|item\s*(?:id|number)\s*[:#]?\s*)(\d{9,13})\b/gi;
+        while ((m = reLink.exec(body))) ids[m[1]] = 1;
+        const reBare = /\b(\d{12})\b/g;
+        const bare = {};
+        while ((m = reBare.exec(body))) { if (!ids[m[1]]) bare[m[1]] = 1; }
+        for (const cand of Object.keys(bare).slice(0, 40)) {
+          const known = await env.DB.prepare('SELECT 1 AS x FROM items_api WHERE item_id = ?1').bind(cand).first();
+          if (known) ids[cand] = 1;
+        }
         const list = Object.keys(ids).slice(0, 30);
         const snippet = body.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ').trim().slice(0, 700);
