@@ -269,7 +269,6 @@ input,select{font:inherit}
     <div class="gbtn-wrap" id="gbtn"></div>
     <div class="auth-status info" id="loginStatus"></div>
     <div class="auth-note">Sign in with your <b>M98M company Google account</b>. New here? Signing in starts your registration — Management approves before access.</div>
-    <div style="font-size:10px;color:var(--text-3);margin-top:14px;line-height:1.6;opacity:.8">Designed, logiced &amp; made by <b>Zaid Kaleem</b> · Sales analysis logic by <b>Sir Hasib Ullah</b> &amp; <b>Ubaid Kaleem</b></div>
   </div>
 </div>
 
@@ -774,7 +773,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260925-2319';
+var BUILD = '20260925-2320';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2706,8 +2705,7 @@ function enterApp(user){
   /* the 4-hour report gate arms at sign-in and re-checks every 5 minutes */
   try{ gateCheck(); if(!GATE.timer){ GATE.timer=setInterval(gateCheck, 300000); } }catch(e){}
   $('shiftFoot').innerHTML=(user.shift ? ('Shift · <b>'+esc(user.shift)+'</b>') : 'Timetable set by Management')+
-    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>'+
-    '<div style="font-size:9.5px;color:var(--text-3);margin-top:6px;line-height:1.5;opacity:.85">Designed, logiced &amp; made by <b>Zaid Kaleem</b><br>Sales analysis logic by <b>Sir Hasib Ullah</b> &amp; <b>Ubaid Kaleem</b></div>';
+    '<div style="font-size:10px;color:var(--text-3);margin-top:3px">build ' + BUILD + '</div>';
   if(VIEW_CSS.length){ var st=document.createElement('style'); st.textContent=VIEW_CSS.join('\n'); document.head.appendChild(st); VIEW_CSS.length=0; }
   /* Management lands on the live Business overview, not the generic home — the screen that
      answers "how is the business right now" should be the first thing the owner sees. */
