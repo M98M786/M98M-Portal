@@ -1,7 +1,8 @@
 /* view-adtool-stop.js — Advertising Tool · Stop today (spec §7, Phases 6 and 8). Hidden; flag adtool_page_stop.
  * Every decision is SHADOW: it is written, scored the next day against what actually happened, and shown with
  * its score. The live-apply panel at the foot is the only place anything can reach eBay, and every account's
- * switch is off until Management turns it on after a read-only preflight. */
+ * switch is off until Management turns it on after a read-only preflight.
+ * 27 Sep (Phase 2): each card also carries the hour-band strip and the lever line when the engine sends them. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var ST = { day: '', filter: '' };
@@ -76,6 +77,10 @@
           '<div style="margin:6px 0 4px">' + adtProductCell({ item_id: d.item_id, account: d.account, title: d.title || i.title || '', image: d.image }) + '</div>' +
           '<div class="m">' + esc(d.action) + ' — ' + esc(d.why) + '</div>' +
           '<div class="r">rules ' + esc((d.rules || []).join(', ') || '—') + ' · EV ' + pm(d.expected_value) + ' · 30-day profit (Sales Analysis law) ' + adtProfitCell(lawD30, d30.pending_cost_orders, d30.pending_fee_orders) + ' on ' + gbp(d30.spend, 0) + ' spend · break-even ' + (i.be ? Number(i.be).toFixed(1) + '×' : '—') + ' · ' + (i.campaigns || 0) + ' live campaign' + ((i.campaigns || 0) === 1 ? '' : 's') + (i.blocked ? ' · <b>blocked:</b> ' + esc(i.blocked) : '') + (d.outcome_score != null ? ' · scored <b>' + (d.outcome_score ? 'right' : 'wrong') + '</b>' + (d.outcome_actual_profit != null ? ' (' + adtProfitCell(d.outcome_actual_profit, 0, 0) + ' on the day)' : '') : '') + '</div>' +
+          /* Phase 2: which hours to run and not to run (advisory — eBay cannot schedule by the hour), and the
+             one lever a hand can move; both only when the engine sends them for this decision */
+          (d.hour_bands ? '<div class="r" style="margin-top:6px"><span class="an-src">hours today</span></div><div style="margin-top:4px">' + adtHourStrip(d.hour_bands) + '</div>' : '') +
+          (d.lever || d.who ? '<div style="margin-top:6px">' + adtLeverLine(d.lever, d.who) + '</div>' : '') +
           '<div class="mo-alert" style="border:0;padding:6px 0 0;margin:0;background:transparent"><div class="btns"><button data-open="' + esc(d.item_id) + '">Open listing</button><button data-note="' + esc(d.item_id) + '">Log what was done</button></div></div></div>';
       }).join('') : '<div class="an-empty">No decisions for ' + esc(D.day) + ' in this filter.</div>';
       h += '<div class="an-grid2"><div class="an-panel"><h3>Rule scores, trailing 30 days' + src('scored daily') + '</h3><div class="an-sub">A rule that falls under the base rate is shown but never applied.</div><table class="an-tbl"><thead><tr><th>Rule</th><th class="r">Decisions</th><th class="r">Right</th><th class="r">Score</th><th>Trusted</th></tr></thead><tbody>' + (D.rule_scores.length ? D.rule_scores.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td class="r">' + r.decisions + '</td><td class="r">' + r.right_n + '</td><td class="r">' + (r.score == null ? '—' : Math.round(r.score * 100) + '%') + '</td><td class="' + (r.trusted ? 'an-pos' : 'an-neg') + '">' + (r.trusted ? 'yes' : 'no') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">the first scores land the morning after the first decisions</td></tr>') + '</tbody></table></div>';

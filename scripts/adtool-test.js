@@ -25,7 +25,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtPlanCurve, adtPlanVerdict, adtPlanWeekdayVerdict, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -302,37 +302,88 @@ function run(argv) {
   t('apply: a blocked step carries no value to send', [planNoBidR[0], planNoBidP[0]].every(x => x && x.to === null && x.from === null), [planNoBidR[0], planNoBidP[0]]);
   t('apply: the night is quiet — no live action between 22:00 and 06:00 UK', F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 23).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 3).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 10).allowed === true, null);
   t('apply: 30 actions an account a day and 3 bid changes a listing a week are hard caps', F.adtApplyCaps({ account_actions_today: 30, listing_bid_changes_week: 0 }, 'status', 10).allowed === false && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 3 }, 'bid', 10).allowed === false, null);
-  /* 16. The war room: the curve everything on that page is read off. */
-  const planRows = [
-    { item_id: 'a', spend: 10, rev: 100, profit: 30 },   /* 10x, the best */
-    { item_id: 'b', spend: 10, rev: 50,  profit: 10 },   /* 5x  */
-    { item_id: 'c', spend: 10, rev: 20,  profit: -2 },   /* 2x, loses money */
-    { item_id: 'd', spend: 10, rev: 5,   profit: -8 }    /* 0.5x, loses more */
+  /* 16. The war room (Phase 2, 27 Sep 2026): the frontier, the verdict sentence, the Running today rules, the hour
+     bands, the weekday sentence, the lever. All pure; every rule is the one the register row states. */
+  const fr = [
+    { item_id: 'a', title: 'A', account: 'X', spend: 30, attr_revenue: 300, actual_profit: 90, breakeven_roas: 2.5, margin_source: 'portal' },      /* 10× */
+    { item_id: 'b', title: 'B', account: 'X', spend: 30, attr_revenue: 150, actual_profit: 30, breakeven_roas: 2.5, margin_source: 'orders' },      /* 5×  */
+    { item_id: 'c', title: 'C', account: 'Y', spend: 30, attr_revenue: 60,  actual_profit: -6, breakeven_roas: 2.5, margin_source: 'estimate' },    /* 2×, losing, but the margin is a guess → judged against 1× */
+    { item_id: 'd', title: 'D', account: 'Y', spend: 30, attr_revenue: 45,  actual_profit: -9, breakeven_roas: 2.5, margin_source: 'ali cost' },    /* 1.5×, losing, real break-even 2.5× → the mark */
+    { item_id: 'e', title: 'E', account: 'Y', spend: 30, attr_revenue: 15,  actual_profit: -20, breakeven_roas: 2.5, margin_source: 'portal' },     /* 0.5× */
+    { item_id: 'z', title: 'Z', account: 'Y', spend: 0,  attr_revenue: 0,   actual_profit: 0, breakeven_roas: 2.5, margin_source: 'portal' }        /* no spend: not on the frontier */
   ];
-  const PC = F.adtPlanCurve(planRows);
-  t('war room: listings are walked best-return-first', PC.ranked.map(r => r.item_id).join('') === 'abcd', PC.ranked.map(r => r.item_id));
-  t('war room: the curve is cumulative', PC.curve.length === 4 && near(PC.curve[1].spend, 20) && near(PC.curve[1].revenue, 150), PC.curve[1]);
-  t('war room: profit peaks before the losers are added', PC.peak.keep === 2 && near(PC.peak.profit, 40), PC.peak);
-  /* the mark is the FURTHEST you can spend and still hold the target, not the first point to reach
-     it — three listings run at 5.67x here, four drop to 4.38x, so five-times stops at three. */
-  t('war room: a ROAS target marks the furthest point that still holds it',
-    PC.marks['5'] && PC.marks['5'].keep === 3 && PC.marks['5'].roas >= 5 && PC.curve[3].roas < 5, PC.marks['5']);
-  const PV = F.adtPlanVerdict(PC.peak, PC.curve[PC.curve.length - 1]);
-  t('war room: the verdict names how many to switch off and what it is worth',
-    /switch off 2 listings/.test(PV.move) && near(PV.gain, 10), PV);
-  /* the curve carries WINDOW totals; the sentence has to speak per day, or the headline overstates
-     by the length of the window — it read "£1,872 a day" for a £62 a day gain before this */
-  const PV30 = F.adtPlanVerdict(PC.peak, PC.curve[PC.curve.length - 1], function (x) { return x / 30; });
-  t('war room: the verdict converts the window total to a daily figure',
-    near(PV30.gain, 10 / 30) && /a day/.test(PV30.detail), PV30);
-  t('war room: nothing is switched off when profit never turns down',
-    /keep everything/.test(F.adtPlanVerdict(PC.curve[3], PC.curve[3]).move), null);
-  /* a weekday is only called weak when it is clearly below the rest, not merely the lowest */
-  const evenWeek = [0,1,2,3,4,5,6].map(function (d) { return { weekday: d, spend: 100, revenue: 350, profit: 100 - d }; });
-  t('war room: a nearly level week has no weak day', F.adtPlanWeekdayVerdict(evenWeek).weak_day === false, F.adtPlanWeekdayVerdict(evenWeek));
-  const badSat = evenWeek.map(function (r) { return r.weekday === 5 ? { weekday: 5, spend: 100, revenue: 200, profit: 20 } : r; });
-  const WV = F.adtPlanWeekdayVerdict(badSat);
-  t('war room: a genuinely weak day is named with its shortfall', WV.weak_day === true && WV.worst.weekday === 5 && WV.shortfall > 0, WV);
+  const FR = F.adtFrontier(fr, 30);
+  t('frontier: listings with spend are ranked by their own ROAS, best first; no-spend rows are absent', FR.points.map(p => p.item_id).join('') === 'abcde', FR.points.map(p => p.item_id));
+  t('frontier: own ROAS and the cumulative ROAS both fall monotonically along the walk', FR.points.every((p, i) => i === 0 || (p.own_roas <= FR.points[i - 1].own_roas && p.cum_roas <= FR.points[i - 1].cum_roas)), FR.points.map(p => [p.own_roas, p.cum_roas]));
+  t('frontier: points are per day (window totals ÷ days) and carry spend, revenue and ROAS only', near(FR.points[1].cum_spend_day, 2) && near(FR.points[1].cum_revenue_day, 15) && near(FR.points[1].cum_roas, 7.5), FR.points[1]);
+  /* cumulative: 10 → 7.5 → 5.67 → 4.63 → 3.8: six-times holds at 2 (falls at 3), five at 3 (falls at 4), four at 4 (falls at 5), 3.5 never falls */
+  const mk = {}; FR.marks.forEach(m => mk[String(m.roas)] = m);
+  t('frontier: a mark is the last n that still holds the target and names the first n below it', mk['6'].n === 2 && mk['6'].falls_at === 3 && mk['5'].n === 3 && mk['5'].falls_at === 4 && mk['4'].n === 4 && mk['4'].falls_at === 5 && mk['3.5'].n === 5 && mk['3.5'].falls_at === null, FR.marks);
+  t('frontier: the mark carries the cumulative spend and revenue per day at its n', near(mk['5'].cum_spend_day, 3) && near(mk['5'].cum_revenue_day, 17), mk['5']);
+  t('frontier: break-even = the first losing listing under its own real break-even; an estimated margin is judged against 1× (c at 2× is passed over, d at 1.5× < 2.5× is the mark)', FR.breakeven.n === 4 && FR.breakeven.item_id === 'd' && FR.breakeven.threshold === 2.5 && /break-even/.test(FR.breakeven.threshold_source), FR.breakeven);
+  const frEst = F.adtFrontier([{ item_id: 'c', spend: 30, attr_revenue: 24, actual_profit: -6, breakeven_roas: 2.5, margin_source: 'estimate' }], 30);
+  t('frontier: an estimated margin listing under 1× is the mark on the 1× rule', frEst.breakeven.n === 1 && frEst.breakeven.threshold === 1, frEst.breakeven);
+  t('frontier: nothing losing under break-even → no mark, rule still stated', F.adtFrontier(fr.slice(0, 2), 30).breakeven.n === null && /own ROAS/.test(F.adtFrontier(fr.slice(0, 2), 30).breakeven.rule), F.adtFrontier(fr.slice(0, 2), 30).breakeven);
+  const keysDeep = (v, acc) => { if (Array.isArray(v)) v.forEach(x => keysDeep(x, acc)); else if (v && typeof v === 'object') Object.keys(v).forEach(k => { acc.push(k); keysDeep(v[k], acc); }); return acc; };
+  t('frontier: no key anywhere on the frontier matches /profit/i — nothing collective is summed', !keysDeep(FR, []).some(k => /profit/i.test(k)), keysDeep(FR, []).filter(k => /profit/i.test(k)));
+  t('frontier: a mark never reached is n = 0 at £0', F.adtFrontier([{ item_id: 'e', spend: 30, attr_revenue: 15, actual_profit: -20, breakeven_roas: 2.5, margin_source: 'portal' }], 30).marks[0].n === 0 && F.adtFrontier([{ item_id: 'e', spend: 30, attr_revenue: 15, actual_profit: -20, breakeven_roas: 2.5, margin_source: 'portal' }], 30).marks[0].falls_at === 1, null);
+  const V2 = F.adtPlanVerdict2({ cut_n: 3, improving_n: 2, spend_freed_day: 12.345, withheld_unpriced: 1, from: '2026-08-28', to: '2026-09-26', label: 'Last 30 days (to yesterday)', days: 30, listings: 40 });
+  t('verdict: names the count, the window and the spend freed per day; improving and withheld rows are said, not hidden', /^Switch off 3 listings$/.test(V2.headline) && /Last 30 days \(to yesterday\) \(2026-08-28 → 2026-09-26, 30 days\)/.test(V2.detail) && /£12\.35 of spend a day/.test(V2.detail) && /2 listings lost over the window but earned over the last 7 days/.test(V2.detail) && /1 losing row withheld/.test(V2.detail) && V2.cut_n === 3 && V2.improving_n === 2 && V2.withheld_unpriced === 1 && near(V2.spend_freed_day, 12.35), V2);
+  t('verdict: keep everything when nothing lost; nothing to say when nothing spent', /^Keep everything running$/.test(F.adtPlanVerdict2({ cut_n: 0, listings: 5, from: 'a', to: 'b', label: 'Today', days: 1 }).headline) && /^Nothing to say yet$/.test(F.adtPlanVerdict2({ cut_n: 0, listings: 0, from: 'a', to: 'b', label: 'Today', days: 1 }).headline), null);
+  /* Running today: the verdict rules */
+  const wdh = (profits, spends, unp) => profits.map((p, i) => ({ day: 'd' + i, spend: spends ? spends[i] : 5, attr_units: p > 0 ? 1 : 0, actual_profit: p, unpriced: !!(unp && unp[i]) }));
+  const RV = (h, d7, extra) => F.adtRunVerdict(Object.assign({ weekday: 'Sat', weekday_history: h, d7, breakeven_roas: 2.5, margin_source: 'portal', weekday_profile: { index: 1, p: 0.5, confident: false } }, extra || {}));
+  t('run verdict: stop = negative on 3 of the last 4 Saturdays with ≥ £2 spend each AND a negative last 7 days', RV(wdh([-3, -2, 4, -1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }).verdict === 'stop', RV(wdh([-3, -2, 4, -1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }));
+  t('run verdict: the same weekdays with a positive last 7 days are not a stop', RV(wdh([-3, -2, 4, -1]), { actual_profit: 2, spend: 20, attr_revenue: 20 }).verdict !== 'stop', RV(wdh([-3, -2, 4, -1]), { actual_profit: 2, spend: 20, attr_revenue: 20 }));
+  t('run verdict: a losing Saturday under £2 of spend does not count toward the three', RV(wdh([-3, -2, 4, -1], [5, 5, 5, 1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }).verdict === 'watch', RV(wdh([-3, -2, 4, -1], [5, 5, 5, 1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }));
+  t('run verdict: an unpriced Saturday is excluded — two priced losses are not three', RV(wdh([-3, -2, 4, -1], null, [0, 0, 0, 1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }).verdict === 'watch', RV(wdh([-3, -2, 4, -1], null, [0, 0, 0, 1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }));
+  t('run verdict: fewer than 2 priced Saturdays → watch, and the sentence says why', /watch/.test(RV(wdh([-3, -2, 4, -1], null, [1, 1, 1, 0]), { actual_profit: -50, spend: 20, attr_revenue: 0 }).verdict) && /fully priced/.test(RV(wdh([-3, -2, 4, -1], null, [1, 1, 1, 0]), { actual_profit: -50, spend: 20, attr_revenue: 0 }).why), RV(wdh([-3, -2, 4, -1], null, [1, 1, 1, 0]), { actual_profit: -50, spend: 20, attr_revenue: 0 }));
+  t('run verdict: run = positive on 3 of 4 with a confident weekday index ≥ 1.1', RV(wdh([3, 2, -1, 4]), { actual_profit: -1, spend: 20, attr_revenue: 10 }, { weekday_profile: { index: 1.3, p: 0.01, confident: true } }).verdict === 'run', RV(wdh([3, 2, -1, 4]), { actual_profit: -1, spend: 20, attr_revenue: 10 }, { weekday_profile: { index: 1.3, p: 0.01, confident: true } }));
+  t('run verdict: the same 3 of 4 with p = 0.3 (not confident) or index 1.05 is not a run on that rule', RV(wdh([3, 2, -1, 4]), { actual_profit: -1, spend: 20, attr_revenue: 10 }, { weekday_profile: { index: 1.3, p: 0.3, confident: false } }).verdict === 'watch' && RV(wdh([3, 2, -1, 4]), { actual_profit: -1, spend: 20, attr_revenue: 10 }, { weekday_profile: { index: 1.05, p: 0.01, confident: true } }).verdict === 'watch', null);
+  t('run verdict: run = last 7 days positive with own ROAS at or above break-even', RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 25 }).verdict === 'run' && RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 24 }).verdict === 'watch', [RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 25 }), RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 24 })]);
+  t('run verdict: an estimated margin is judged against 1×, never against its guessed break-even', RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 12 }, { margin_source: 'estimate' }).verdict === 'run' && RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 12 }).verdict === 'watch', null);
+  t('run verdict: every answer names its rule and a why', ['stop', 'run', 'watch'].every(v => { const r = { stop: RV(wdh([-3, -2, 4, -1]), { actual_profit: -5, spend: 20, attr_revenue: 20 }), run: RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 25 }), watch: RV(wdh([1, -1, 1, -1]), { actual_profit: 0, spend: 0, attr_revenue: 0 }) }[v]; return r.verdict === v && r.rule && r.why.length > 10; }), null);
+  /* the 7-day leg while an order in it is unpriced: the figure is an unpriced sale, not a loss */
+  const P7 = RV(wdh([-3, -2, 4, -1]), { actual_profit: -13.33, spend: 20, attr_revenue: 60, pending_cost_orders: 3, pending_fee_orders: 0 });
+  t('run verdict: 3 losing Saturdays with a negative 7 days that still holds unpriced orders is watch, and says so', P7.verdict === 'watch' && /not fully priced/.test(P7.why) && /3 orders/.test(P7.why) && /unpriced sale, not a loss/.test(P7.why), P7);
+  t('run verdict: the same 7 days with every order priced is the stop, and the why says every order is priced', RV(wdh([-3, -2, 4, -1]), { actual_profit: -13.33, spend: 20, attr_revenue: 60, pending_cost_orders: 0, pending_fee_orders: 0 }).verdict === 'stop' && /every order priced/.test(RV(wdh([-3, -2, 4, -1]), { actual_profit: -13.33, spend: 20, attr_revenue: 60 }).why), null);
+  t('run verdict: a pending order in the 7 days never blocks a run on a positive 7 days (understated is still positive)', RV(wdh([0, 0, 0, 0]), { actual_profit: 4, spend: 10, attr_revenue: 25, pending_cost_orders: 2 }).verdict === 'run', null);
+  /* a weekday with no row at all is not a priced weekday */
+  const NR = wdh([0, 0, 0, 0]).map((h, i) => Object.assign(h, { has_row: i === 0, spend: i === 0 ? 5 : 0 }));
+  t('run verdict: three Saturdays with no row leave one priced Saturday — watch, insufficient, and the why counts the rows missing', RV(NR, { actual_profit: -5, spend: 20, attr_revenue: 20 }).verdict === 'watch' && RV(NR, { actual_profit: -5, spend: 20, attr_revenue: 20 }).rule === 'insufficient' && /3 with no row/.test(RV(NR, { actual_profit: -5, spend: 20, attr_revenue: 20 }).why), RV(NR, { actual_profit: -5, spend: 20, attr_revenue: 20 }));
+  const WS3 = F.adtWeekdaySentence({ weekday: 'Sat', weekday_history: [0, 1, 2, 3].map(i => ({ day: 'd' + i, has_row: false, spend: 0, attr_units: 0, actual_profit: 0, unpriced: false })), last_week_same_day: { has_row: false, spend: 0, actual_profit: 0, unpriced: false }, today: { spend: 1, attr_units: 0, orders: 0 } });
+  t('weekday sentence: four Saturdays without a row read as no history, never as "spent £0.00 and made £0.00"', /^No Saturday history yet; last Saturday no ad or order row; today so far £1\.00 spend/.test(WS3) && !/£0\.00 and made/.test(WS3), WS3);
+  /* hour bands */
+  const hrs = [
+    { hour: 8, spend: 4, units: 0 }, { hour: 9, spend: 2, units: 1 }, { hour: 10, spend: 2, units: 2 }, { hour: 11, spend: 1, units: 1 },
+    { hour: 12, spend: 0.2, units: 0 },   /* under the £0.50 floor: not judged */
+    { hour: 14, spend: 0.3, units: 0 }, { hour: 20, spend: 1, units: 0 }, { hour: 21, spend: 3, units: 0 }, { hour: 22, spend: 1, units: 2 }
+  ];
+  const HB = F.adtHourBands(hrs, {});
+  /* judged hours: 8, 9, 10, 11, 20, 21, 22 → mean £2; units/£: 0, .5, 1, 1, 0, 0, 2 → median 0.5 */
+  t('hour bands: hours under £0.50 are not judged; the mean and median are over the judged hours; per-hour detail does not travel on the row', HB.hours_judged === 7 && HB.hours === undefined && near(HB.mean_hour_spend, 2) && near(HB.median_units_per_pound, 0.5), HB);
+  t('hour bands: avoid = no unit and spend ≥ 15 % of the mean hour (8, 20, 21 → bands [8,8] and [20,21])', JSON.stringify(HB.avoid) === '[[8,8],[20,21]]', HB.avoid);
+  t('hour bands: run = units per £ at or above the median with at least one unit, merged (9–11 and 22)', JSON.stringify(HB.run) === '[[9,11],[22,22]]', HB.run);
+  t('hour bands: the basis and the carry-hour exclusion are always printed', HB.basis === F.ADTOOL_HOUR_BASIS && /hour 8 excluded for days before 2026-09-27/.test(HB.excluded_note), [HB.basis, HB.excluded_note]);
+  t('hour bands: a listing with nothing over £0.50 says so and has no bands', F.adtHourBands([{ hour: 9, spend: 0.4, units: 1 }], {}).run.length === 0 && /£0\.50/.test(F.adtHourBands([{ hour: 9, spend: 0.4, units: 1 }], {}).note), F.adtHourBands([{ hour: 9, spend: 0.4, units: 1 }], {}));
+  t('hour bands: a zero-unit hour just under 15 % of the mean is neither avoided nor run', F.adtHourBands([{ hour: 9, spend: 10, units: 1 }, { hour: 15, spend: 0.8, units: 0 }], {}).avoid.length === 0, F.adtHourBands([{ hour: 9, spend: 10, units: 1 }, { hour: 15, spend: 0.8, units: 0 }], {}));
+  t('hour bands: contiguous hours merge, a gap splits, order does not matter', JSON.stringify(F.adtHourBandMerge([22, 9, 10, 11, 23, 3])) === '[[3,3],[9,11],[22,23]]', F.adtHourBandMerge([22, 9, 10, 11, 23, 3]));
+  /* the weekday sentence */
+  const WS = F.adtWeekdaySentence({ weekday: 'Sat', weekday_history: [{ spend: 4, attr_units: 1, actual_profit: 2.5, unpriced: false }, { spend: 3, attr_units: 0, actual_profit: -3, unpriced: false }, { spend: 5, attr_units: 2, actual_profit: 6, unpriced: false }, { spend: 2, attr_units: 0, actual_profit: -2, unpriced: true }], last_week_same_day: { spend: 4, attr_units: 1, actual_profit: 2.5, unpriced: false }, today: { spend: 1.2, attr_units: 1, orders: 2 } });
+  t('weekday sentence: last 4 Saturdays (priced ones summed, the unpriced one named), last Saturday, today so far', /On the last 3 priced Saturdays it spent £12\.00 and made £5\.50 real profit on 3 attributed units \(1 Saturday with an unpriced order excluded\)/.test(WS) && /last Saturday £4\.00 spend \/ £2\.50 profit, 1 unit/.test(WS) && /today so far £1\.20 spend, 1 attributed unit, 2 orders\./.test(WS), WS);
+  const WS2 = F.adtWeekdaySentence({ weekday: 'Sat', weekday_history: [{ spend: 2, attr_units: 0, actual_profit: -2, unpriced: false }], last_week_same_day: { spend: 2, attr_units: 0, actual_profit: -2, unpriced: false }, today: { spend: null, attr_units: null, orders: 0 } });
+  t('weekday sentence: a loss reads as −£, and no sample today says so instead of £0.00', /made −£2\.00 real profit/.test(WS2) && /today: no ad sample yet\./.test(WS2), WS2);
+  /* the lever */
+  const LV = F.adtLever([{ campaign_id: '1', name: 'CPC one', funding_model: 'COST_PER_CLICK', budget: '12.50', bid_pct: null, c_bid: null }, { campaign_id: '2', name: 'PLS', funding_model: 'COST_PER_SALE', budget: '', bid_pct: '7.5', c_bid: '5' }]);
+  t('lever: a cost-per-click campaign gives the daily budget (TEXT → number) and says eBay returns no bid', LV.kind === 'budget' && LV.campaign_id === '1' && LV.budget === 12.5 && LV.bid_pct === null && /no bid/.test(LV.note), LV);
+  const LV2 = F.adtLever([{ campaign_id: '2', name: 'PLS', funding_model: 'COST_PER_SALE', budget: '', bid_pct: '', c_bid: '5' }]);
+  t('lever: cost-per-sale gives the ad rate (the ad\'s own, else the campaign\'s)', LV2.kind === 'ad_rate' && LV2.bid_pct === 5 && LV2.budget === null && F.adtLever([{ campaign_id: '2', funding_model: 'COST_PER_SALE', bid_pct: '7.5', c_bid: '5' }]).bid_pct === 7.5, LV2);
+  t('lever: no running campaign → none, with a note', F.adtLever([]).kind === 'none' && F.adtLever([]).campaign_id === null && /no running campaign/.test(F.adtLever([]).note), F.adtLever([]));
+  /* the weekday index */
+  const WI = F.adtWeekdayIndex({ rates: [1, 1, 1, 1, 1, 2.2, 1].map((r, i) => ({ day: F.ADTOOL_DOW[i], rate: r })), spread: { p: 0.02 } }, 5);
+  t('weekday index: today\'s rate ÷ the mean of the seven, confident under p < 0.05', near(WI.index, 2.2 / (8.2 / 7), 0.01) && WI.confident === true && WI.weekday === 'Sat' && F.adtWeekdayIndex({ rates: [1, 1, 1, 1, 1, 2.2, 1].map(r => ({ rate: r })), spread: { p: 0.3 } }, 5).confident === false && F.adtWeekdayIndex(null, 5).index === null, WI);
+  t('weekday names: the short profile name reads long in every sentence', F.adtWeekdayLong('Sat') === 'Saturday' && F.adtWeekdayLong('Mon') === 'Monday' && F.adtWeekdayLong('') === 'weekday', null);
+  t('real margin: portal, capped, orders and ali cost are real; estimate, none and blank are not', ['portal', 'portal (capped)', 'orders', 'ali cost'].every(F.adtRealMargin) && !['estimate', 'none', '', null].some(F.adtRealMargin), null);
 
   t('apply: every endpoint used is a Sell Marketing v1 ad_campaign URL', Object.keys(F.ADTOOL_APPLY_ENDPOINTS).every(k => /^https:\/\/api\.ebay\.com\/sell\/marketing\/v1\/ad_campaign\//.test(F.ADTOOL_APPLY_ENDPOINTS[k]('X'))), Object.keys(F.ADTOOL_APPLY_ENDPOINTS).map(k => F.ADTOOL_APPLY_ENDPOINTS[k]('X')));
 
@@ -457,6 +508,9 @@ function run(argv) {
   /* BST 23:00–07:05 UTC: the UK day has turned (28 Sep) while the newest samples still carry report_day 27 Sep */
   const holeLatest = [{ account: 'A', item_id: '1', family: 'cpc', report_day: '2026-09-27', sampled_at: '2026-09-27T23:55:00Z', cum_spend: 40, cum_clicks: 100, cum_units: 3, cum_revenue: 30, cum_impressions: 900 }];
   const holeOrders = [{ account: 'A', item_id: '1', sold: 9.99, fees: 1.7, cost: 4, refunded: 0, qty: 1, status: '' }];
+  const split = F.adtTodayRows({ latest: [{ account: 'A', item_id: '1', report_day: '2026-09-26', family: 'cpc', cum_spend: 10, cum_clicks: 5, cum_units: 1, cum_revenue: 8, sampled_at: '2026-09-26T23:20:00Z' }],
+    orders: [{ account: 'A', item_id: '1', status: '', qty: 1, sold: 9, ebay_fees: 1.2, cost: 3, refunded: 0 }], todayUtc: '2026-09-26', ukDay: '2026-09-27' });
+  t('today grain: after UK midnight but before 00:00 UTC the ads are yesterday\'s eBay day and the orders today\'s — profit is not netted (null), ads and orders both kept', split.length === 1 && split[0].actual_profit === null && near(split[0].spend, 10) && split[0].orders === 1 && split[0].uk_day === '2026-09-27' && split[0].report_day === '2026-09-26', split[0]);
   const hole = F.adtTodayRows({ latest: holeLatest, orders: holeOrders, todayUtc: '2026-09-28', ukDay: '2026-09-28' });
   t('today rows at 01:30 UK: yesterday\'s report day is not a sample for today — ad columns NULL, profit over the priced order alone', hole.length === 1 && hole[0].spend === null && hole[0].cpc_spend === null && hole[0].report_day === '2026-09-28' && near(hole[0].actual_profit, 0.8 * 4.29), hole[0]);
   const staleRow = { report_day: '2026-09-27', spend: 40, cpc_spend: 40, clicks: 100, impressions: 900, attr_units: 3, attr_revenue: 30, raw_priced_sum: 4.29, refunds: 0, actual_profit: round2(0.8 * 4.29 - 0.96 * 40), sampled_at: '2026-09-27T23:55:00Z' };

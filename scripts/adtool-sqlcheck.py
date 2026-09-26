@@ -79,7 +79,14 @@ BASE_COLUMNS = {
                'fh_count', 'open_seen_at'},
     'ads_daily': {'account', 'item_id', 'date', 'spend', 'clicks', 'sales', 'cpq', 'sale_amount', 'cpc_spend',
                   'cpc_clicks', 'cpc_sales', 'cpc_sale_amount'},
+    # Phase 2 (27 Sep 2026): the lever reads the campaign map. Columns from the INSERTs in campaignSync / adsItems
+    # plus the ALTERs (bid_pct, start_date, end_date on campaigns; ad_status, ad_group on campaign_ads).
+    'campaigns': {'account', 'campaign_id', 'name', 'status', 'budget', 'funding_model', 'synced_at', 'bid_pct',
+                  'start_date', 'end_date'},
+    'campaign_ads': {'account', 'campaign_id', 'listing_id', 'ad_id', 'bid_pct', 'ad_status', 'ad_group', 'synced_at'},
 }
+# A literal is scanned when it names an adtool_ table — or the campaign map, whose columns are listed above.
+SCAN_MARKERS = ('campaign_ads',)
 BASE_FROM_CREATE = ('sheet_rows', 'validation_runs')
 
 def main(path, prefix='adtool_'):
@@ -94,7 +101,7 @@ def main(path, prefix='adtool_'):
     bad, checked, skipped = [], 0, 0
     for m in re.finditer(r"'((?:[^'\\]|\\.){20,})'|\"((?:[^\"\\]|\\.){20,})\"", src):
         q = m.group(1) or m.group(2)
-        if not SQL_START.search(q) or prefix not in q: continue
+        if not SQL_START.search(q) or (prefix not in q and not any(mk in q for mk in SCAN_MARKERS)): continue
         qstart = m.start() + 1   # past the opening quote; newlines survive join_literals, so offsets stay true
         alias = {}
         for a in re.finditer(r'\b(?:FROM|JOIN)\s+([A-Za-z0-9_]+)\s+(?:AS\s+)?([A-Za-z][A-Za-z0-9_]*)', q, re.I):

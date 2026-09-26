@@ -66,6 +66,21 @@ a.adt-pc-t:hover{color:var(--gold-a)}
 .adt-pf{font-variant-numeric:tabular-nums;font-weight:700}
 .adt-pf.neg{color:#e0563f}
 .adt-pf-p{font-size:10.5px;color:var(--text-3);font-weight:600;white-space:nowrap}
+/* Hour-band strip (adtHourStrip): 24 UK hours, gold = run, #e0563f = avoid, faint = no verdict */
+.adt-hs{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;min-width:168px;max-width:360px}
+.adt-hs .c{height:14px;border-radius:3px;background:rgba(255,255,255,.07)}
+.adt-hs .c.run{background:var(--gold-b)}.adt-hs .c.avoid{background:#e0563f}
+.adt-hs .l{font-size:8.5px;color:var(--text-3);text-align:center;line-height:1.2;font-weight:700}
+.adt-hs-t{font-size:10.5px;color:var(--text-2);margin-top:3px;line-height:1.35}
+.adt-hs-t b.run{color:var(--gold-a)}.adt-hs-t b.avoid{color:#ffb3a6}
+/* Verdict pill (adtVerdictPill): run = gold, stop = the loss colour, watch = muted */
+.adt-vp{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap;vertical-align:middle}
+.adt-vp.run{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}
+.adt-vp.stop{color:#fff;background:#e0563f;border-color:#e0563f}
+.adt-vp.improving{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.1)}
+/* Lever line (adtLeverLine): the one thing a hand can move on eBay for this listing, and whose hand */
+.adt-lv{font-size:11.5px;color:var(--text-2);line-height:1.45}
+.adt-lv b{color:var(--text)}.adt-lv .who{color:var(--gold-a);font-weight:700}
 /* Advertising period bar (adtPeriodBar) — the main portal's range chips, in galaxy tokens */
 .adt-pbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 14px;background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:9px 11px}
 .adt-pbar button{padding:6px 12px;border:1px solid var(--gold-line);border-radius:8px;font-weight:800;font-size:12px;color:var(--text-2);background:transparent;transition:all .15s}
@@ -669,7 +684,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck'];
+var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -1256,7 +1271,12 @@ var ADT_REG_MAP = [
   [/validation_runs/i, ['validation_runs']],
   [/scored daily|Mondays/i, ['adtool_rule_scores', 'adtool_carry']],
   [/items sync/i, ['items_api', 'items_facts']],
-  [/Phase 8/i, ['adtool_apply_log', 'adtool_decisions']]
+  [/Phase 8/i, ['adtool_apply_log', 'adtool_decisions']],
+  /* Phase 2 panels: the metric ids are matched too, so a register row named for the panel is found
+     even when its source tables are shared with older rows */
+  [/frontier/i, ['FRONTIER', 'adtool_listing_day', 'adtool_listings']],
+  [/run today|running today|RUN_TODAY/i, ['RUN_TODAY_VERDICT', 'adtool_listing_today']],
+  [/hour band/i, ['HOUR_BANDS', 'adtool_listing_hour']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label){
@@ -1264,8 +1284,8 @@ function adtRegOpen(label){
     var keys = null;
     for (var i = 0; i < ADT_REG_MAP.length; i++) { if (ADT_REG_MAP[i][0].test(label)) { keys = ADT_REG_MAP[i][1]; break; } }
     var hit = keys ? entries.filter(function(e){
-      var st = String(e.source_tables || '');
-      for (var j = 0; j < keys.length; j++) if (st.indexOf(keys[j]) >= 0) return true;
+      var st = String(e.source_tables || ''), id = String(e.metric_id || '');
+      for (var j = 0; j < keys.length; j++) if (st.indexOf(keys[j]) >= 0 || (id && id === keys[j])) return true;
       return false;
     }) : [];
     var all = !hit.length;
@@ -1503,7 +1523,7 @@ function enterApp(user){
      portal's own code — so the two can never drift apart or disagree about a number, which is the
      whole reason this is a second front door and not a second tool. */
   if (window.M98M_ADS_ONLY) {
-    /* Exactly the thirteen advertising pages and nothing else. `home` is defined in this shell
+    /* Exactly the advertising pages and nothing else. `home` is defined in this shell
        rather than in a view file, so it comes along with the splice and would otherwise land in a
        stray "More" group linking to desks this portal does not carry. */
     Object.keys(VIEWS).forEach(function (k) {
@@ -1513,7 +1533,7 @@ function enterApp(user){
       if (k.indexOf('adtool') === 0 && VIEWS[k].label) { VIEWS[k].label = VIEWS[k].label.replace(/\s*\(ads\)\s*$/, ''); }
     });
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolStop', 'adtoolAlerts', 'adtoolReport'] },
+      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolStop', 'adtoolRunToday', 'adtoolAlerts', 'adtoolReport'] },
       { name: 'Products',      keys: ['adtoolProduct', 'adtoolForecast'] },
       { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
       { name: 'Campaigns',     keys: ['adtoolCampaigns', 'adtoolRoas', 'adtoolSales'] },
@@ -1712,6 +1732,55 @@ function adtProfitCell(v, pendingCost, pendingFee, unpriced){
   else { var x = Number(v); body = '<span class="adt-pf' + (x < 0 ? ' neg' : '') + '">' + (x < 0 ? '−£' : '£') + Math.abs(x).toFixed(2) + '</span>'; }
   if (n > 0) { body += '<span class="adt-pf-p" title="' + esc((floor ? 'at least ' : '') + n + ' orders unpriced — ' + pc + ' without a cost, ' + pf + ' without fees') + '"> · ' + (floor ? '≥ ' : '') + n + ' unpriced</span>'; }
   return body;
+}
+/* ── Phase 2 shared pieces: hour-band strip, verdict pill, lever line ──────────────────────
+   hb = {run:[[h0,h1]…], avoid:[[h0,h1]…], basis, excluded_note} from adtoolRunToday / adtoolStopToday /
+   adtoolPlan. Bands are UK hours, h0..h1 inclusive. opts: {labels:false} drops the hour row,
+   {text:false} drops the sentence under the strip. Rendered as 24 cells because a band list reads
+   as prose and a strip reads at a glance. */
+function adtHourBandText(hb){
+  var f = function (b) { return (b || []).map(function (p) { return Array.isArray(p) && p.length >= 2 ? String(p[0]).padStart(2, '0') + '–' + String(Number(p[1]) + 1).padStart(2, '0') : ''; }).filter(Boolean).join(', '); };
+  return { run: f(hb && hb.run), avoid: f(hb && hb.avoid) };
+}
+function adtHourStrip(hb, opts){
+  opts = opts || {};
+  if (!hb || typeof hb !== 'object' || (!(hb.run && hb.run.length) && !(hb.avoid && hb.avoid.length))) {
+    return '<div class="adt-hs-t">no hour verdict yet — too little sampled spend' + (hb && hb.excluded_note ? ' <span class="adt-pf-p">· ' + esc(String(hb.excluded_note)) + '</span>' : '') + '</div>';
+  }
+  var cls = [], i, j, b;
+  for (i = 0; i < 24; i++) cls[i] = '';
+  var mark = function (bands, c) { for (j = 0; j < (bands || []).length; j++) { b = bands[j]; if (!Array.isArray(b) || b.length < 2) continue; for (i = Math.max(0, Number(b[0]) | 0); i <= Math.min(23, Number(b[1]) | 0); i++) cls[i] = c; } };
+  mark(hb.run, 'run'); mark(hb.avoid, 'avoid');          /* avoid wins a tie: a doubt is a reason not to spend */
+  var h = '<div class="adt-hs" title="' + esc('UK hours · ' + (hb.basis || '')) + '">';
+  for (i = 0; i < 24; i++) h += '<div class="c ' + cls[i] + '" title="' + esc(String(i).padStart(2, '0') + ':00 UK' + (cls[i] ? ' · ' + cls[i] : '')) + '"></div>';
+  if (opts.labels !== false) for (i = 0; i < 24; i++) h += '<div class="l">' + (i % 6 === 0 ? i : '') + '</div>';
+  h += '</div>';
+  if (opts.text !== false) {
+    var t = adtHourBandText(hb);
+    h += '<div class="adt-hs-t">' + (t.run ? '<b class="run">run</b> ' + esc(t.run) : '') + (t.run && t.avoid ? ' · ' : '') + (t.avoid ? '<b class="avoid">avoid</b> ' + esc(t.avoid) : '') +
+      (hb.basis ? ' <span class="adt-pf-p">· ' + esc(String(hb.basis)) + '</span>' : '') + (hb.excluded_note ? ' <span class="adt-pf-p" title="' + esc(String(hb.excluded_note)) + '">· ' + esc(String(hb.excluded_note)) + '</span>' : '') + '</div>';
+  }
+  return h;
+}
+/* v = 'run' | 'stop' | 'watch' (anything else is printed muted) */
+function adtVerdictPill(v){
+  v = String(v || '').toLowerCase();
+  var c = v === 'run' || v === 'stop' || v === 'improving' ? v : '';
+  return '<span class="adt-vp ' + c + '">' + esc(v || '—') + '</span>';
+}
+/* lever = {kind:'budget'|'ad_rate'|'none', campaign_id, budget, bid_pct, note}; who = {desk}. eBay
+   exposes no bid for cost-per-click ads, so the lever is the campaign's daily budget, or the ad rate
+   on a cost-per-sale campaign; 'none' says why in its note. */
+function adtLeverLine(lever, who){
+  var L = lever && typeof lever === 'object' ? lever : null, W = who && typeof who === 'object' ? who : null;
+  var h = '<div class="adt-lv">';
+  if (!L) { h += 'lever: <b>—</b>'; }
+  else if (L.kind === 'budget') { h += 'lever: <b>daily budget' + (L.budget != null && L.budget !== '' && !isNaN(Number(L.budget)) ? ' £' + Number(L.budget).toFixed(2) : '') + '</b>' + (L.campaign_id ? ' on campaign ' + esc(String(L.campaign_id)) : ''); }
+  else if (L.kind === 'ad_rate') { h += 'lever: <b>ad rate' + (L.bid_pct != null && L.bid_pct !== '' && !isNaN(Number(L.bid_pct)) ? ' ' + Number(L.bid_pct) + ' %' : '') + '</b> (cost-per-sale)' + (L.campaign_id ? ' on campaign ' + esc(String(L.campaign_id)) : ''); }
+  else { h += 'lever: <b>none</b>'; }
+  if (L && L.note) h += ' — ' + esc(String(L.note));
+  if (W && W.desk) h += ' · <span class="who">' + esc(String(W.desk)) + '</span>';
+  return h + '</div>';
 }
 /* ── Advertising period bar + freshness tag (Phase 1B) ─────────────────────────────────────
    One bar for every advertising page: the same chips, the same keys the engine's adtPeriod()

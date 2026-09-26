@@ -90,7 +90,9 @@ export default {
            are deliberately absent: acting then seeing a stale page reads as broken. */
         adtoolCommand: 60000, adtoolToday: 60000, adtoolAccounts: 180000, adtoolCategories: 180000, adtoolCases: 180000,
         adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000,
-        adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000 };
+        adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000,
+        /* Running today is a read page (the note op lives on adtoolStopToday, which stays uncached) */
+        adtoolRunToday: 60000 };
       /* Phase 1B: the advertising reads use a KV-backed memo instead (adtKvMemo) — the in-isolate map misses on
          every fresh isolate, and the 5-minute job pre-warms the today / Command centre payloads into KV. Same TTLs,
          same write-intent skip; a page that includes today is 60 s. */
@@ -3751,7 +3753,9 @@ function adtTodayRows(x) {
       account: r.account, item_id: r.item_id, report_day: r.report_day, uk_day: r.uk_day,
       spend: r.spend == null ? null : round2(r.spend), cpc_spend: r.spend == null ? null : round2(r.cpc_spend || 0), clicks: r.clicks, impressions: r.impressions, attr_units: r.attr_units, attr_revenue: r.attr_revenue == null ? null : round2(r.attr_revenue),
       orders: r.orders, units: r.units, revenue: round2(r.revenue), raw_priced_sum: law.raw_priced_sum, refunds: law.refunds, pending_cost_orders: law.pending_cost_orders, pending_fee_orders: law.pending_fee_orders, unpriced_orders: law.unpriced_orders,
-      actual_profit: adtSheetLawProfit({ raw_priced_sum: law.raw_priced_sum, cpc_spend: r.cpc_spend || 0, refunds: law.refunds }),
+      /* between UK midnight and 00:00 UTC (BST only) the UK day has rolled while eBay's ad day has not: the orders
+         are today's and the ads are yesterday's, and no single day's profit can be netted from the two */
+      actual_profit: r.uk_day !== r.report_day ? null : adtSheetLawProfit({ raw_priced_sum: law.raw_priced_sum, cpc_spend: r.cpc_spend || 0, refunds: law.refunds }),
       sampled_at: r.sampled_at,
     });
   }
@@ -4746,7 +4750,7 @@ async function adtoolTodayPrewarm(env, rebuild) {
   if (rebuild && !rebuild.skipped) { try { await ctx_setSync(env, 'adtoolToday', '', JSON.stringify(Object.assign({}, rebuild, { prewarm: out.join('+'), prewarm_ms: Date.now() - t0 }))); } catch (e) { /* the note is best effort */ } }
   return out;
 }
-const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000 };
+const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -6816,7 +6820,10 @@ const ADTOOL_ACTIONS_P6 = {
          outcome_actual_profit (the day under the law) is what the card prints as "on the day" */
       const decisions = list.map(d => { let r = [], i = {}; try { r = JSON.parse(d.rules_json); } catch (e) {} try { i = JSON.parse(d.inputs_json); } catch (e) {} return Object.assign(d, { rules: r, inputs: i, rules_json: undefined, inputs_json: undefined, outcome_ad_profit: undefined }); });
       await adtProductCells(env, decisions.concat(log));
-      return { day, mode: 'shadow', decisions, counts, yesterday_score: ySc, rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages' };
+      /* Phase 2: hours to run / not to run and the lever on every card, from the same helpers as Running today */
+      const bl = await adtBandsAndLevers(env, decisions.map(d => String(d.item_id)), today, '');
+      for (const d of decisions) { const id = String(d.item_id); d.hour_bands = bl.bands[id]; d.lever = bl.levers[id]; d.who = adtWho(d.account); }
+      return { day, period: adtPeriod({ period: 'today' }, today), fresh: await adtFresh(env, 'today'), mode: 'shadow', decisions, counts, yesterday_score: ySc, rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, hour_basis: ADTOOL_HOUR_BASIS, hour_excluded_note: ADTOOL_HOUR_EXCLUDED_NOTE, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages, adtool_listing_hour (' + ADTOOL_HOUR_BASIS + '), campaigns + campaign_ads' };
     },
   },
 };
@@ -7209,175 +7216,384 @@ const ADTOOL_ACTIONS_P8 = {
 /* ADTOOL-P8-END ===================================================================================== */
 
 /* ADTOOL-P9-BEGIN =================================================================================
-   The war room. Every other page answers "what happened". This one answers "what do I do today",
-   and it only ever says a thing it can show the arithmetic for.
-
-   The spine is one question: ranked by its own return, how far down the list is it worth spending?
-   Walk the listings best-first, accumulate spend and profit, and the curve has a peak. Spending past
-   that peak buys revenue you lose money on; stopping short of it leaves profit on the table. The
-   owner's 6x target is marked on the same curve so the trade is visible rather than argued about.
+   The war room and Running today (Phase 2 of the owner's 27 Sep 2026 brief). Every other page answers
+   "what happened". These two answer "what do I do today", and only ever say a thing they can show the
+   arithmetic for. The war room's spine is the frontier: listings ranked by their own ROAS, cumulative
+   spend and attributed revenue per day walked best-first, the owner's 6× / 5× / 4× / 3.5× marks and a
+   break-even mark on the same walk. No collective profit is summed anywhere on it — the break-even mark
+   reads each listing's own law profit against its own break-even, never a fleet total. Running today
+   judges each advertised listing on its own last four same weekdays, its last 7 days and today's sample.
 */
 /* ADTOOL-P9-PURE-BEGIN */
-function adtPlanCurve(rows) {
-  /* rows: [{item_id, spend, rev, profit}] — one row per listing over the window.
-     Returns the cumulative curve walking best-return-first, the profit peak, and the point where
-     each ROAS target is first met. Everything downstream reads off this. */
-  const live = rows.filter(r => Number(r.spend) > 0)
-    .map(r => ({ item_id: r.item_id, s: Number(r.spend), v: Number(r.rev) || 0, p: Number(r.profit) || 0 }))
-    .map(r => Object.assign(r, { roas: r.v / r.s }))
-    .sort((a, b) => b.roas - a.roas);
-  const curve = []; const marks = {};
-  let s = 0, v = 0, p = 0, peak = null;
+const ADTOOL_FRONTIER_MARKS = [6, 5, 4, 3.5];
+const ADTOOL_REAL_MARGIN_SOURCES = ['portal', 'portal (capped)', 'orders', 'ali cost'];
+const ADTOOL_CARRY_FIX_DAY = '2026-09-27';   // adtool_listing_hour rows rolled before this day still carry the first sample's spike inside UK hour 8
+const ADTOOL_HOUR_BASIS = '28 d sampled hours';
+const ADTOOL_HOUR_EXCLUDED_NOTE = 'UK hour 8 excluded for days before ' + ADTOOL_CARRY_FIX_DAY + ' (the first sample\'s carry sat inside that hour until then); the carry column is never read';
+const ADTOOL_DOW_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+function adtWeekdayLong(name) { const i = ADTOOL_DOW.indexOf(String(name || '').slice(0, 3)); return i < 0 ? String(name || 'weekday') : ADTOOL_DOW_LONG[i]; }
+function gbpPlain(n) { const v = Number(n) || 0; return (v < 0 ? '−£' : '£') + Math.abs(Math.round(v * 100) / 100).toFixed(2); }
+function adtRealMargin(source) { return ADTOOL_REAL_MARGIN_SOURCES.indexOf(String(source || '')) >= 0; }
+function adtFrontier(rows, days) {
+  /* rows: one per listing over the window {item_id, title, image, account, spend, attr_revenue, actual_profit,
+     breakeven_roas, margin_source}; days = the days the window actually carries. Listings with spend are ranked by
+     their OWN ROAS, best first; point n is the cumulative spend and attributed revenue per day of the first n.
+     A mark is the last n at which the cumulative ROAS still holds the target (falls_at = the first n below it).
+     The break-even mark is the first listing whose own law profit per day is negative AND whose own ROAS is under
+     its own break-even (a real margin source) or under 1× (an estimated one). Nothing here sums profit. */
+  const n = Math.max(1, Number(days) || 1);
+  const live = (rows || []).filter(r => Number(r.spend) > 0).map(r => {
+    const real = adtRealMargin(r.margin_source) && Number(r.breakeven_roas) > 0;
+    return { item_id: String(r.item_id), title: String(r.title || ''), image: r.image ? String(r.image) : null, account: String(r.account || ''),
+      spend: Number(r.spend) || 0, rev: Number(r.attr_revenue) || 0, profit_day: (Number(r.actual_profit) || 0) / n,
+      threshold: real ? Number(r.breakeven_roas) : 1, threshold_source: real ? 'break-even' : 'estimate → 1×' };
+  }).map(r => Object.assign(r, { own_roas: r.rev / r.spend })).sort((a, b) => b.own_roas - a.own_roas || b.spend - a.spend);
+  const points = [], cum = []; let s = 0, v = 0, be = null;
   for (let i = 0; i < live.length; i++) {
-    const r = live[i];
-    s += r.s; v += r.v; p += r.p;
-    const roas = s > 0 ? v / s : 0;
-    const point = { keep: i + 1, spend: round2(s), revenue: round2(v), profit: round2(p), roas: Math.round(roas * 100) / 100, cut_at_roas: Math.round(r.roas * 100) / 100 };
-    curve.push(point);
-    if (!peak || p > peak.profit) peak = point;
-    for (const t of [6, 5.5, 5, 4.5, 4, 3.5]) { if (roas >= t) marks[String(t)] = point; }
+    const r = live[i]; s += r.spend; v += r.rev; cum.push(v / s);
+    const p = { n: i + 1, item_id: r.item_id, title: r.title, image: r.image, account: r.account, own_roas: round2(r.own_roas), spend_day: round2(r.spend / n), cum_spend_day: round2(s / n), cum_revenue_day: round2(v / n), cum_roas: round2(v / s) };
+    points.push(p);
+    if (!be && r.profit_day < 0 && r.own_roas < r.threshold) be = { n: p.n, item_id: r.item_id, title: r.title, account: r.account, own_roas: p.own_roas, threshold: round2(r.threshold), threshold_source: r.threshold_source, cum_spend_day: p.cum_spend_day, cum_revenue_day: p.cum_revenue_day };
   }
-  const all = curve.length ? curve[curve.length - 1] : null;
-  return { curve, peak, marks, all, ranked: live };
+  const at = k => k > 0 ? points[k - 1] : { cum_spend_day: 0, cum_revenue_day: 0 };
+  const marks = ADTOOL_FRONTIER_MARKS.map(m => {
+    let falls = null; for (let i = 0; i < cum.length; i++) { if (cum[i] < m) { falls = i + 1; break; } }
+    const k = falls == null ? points.length : falls - 1;
+    return { roas: m, n: k, falls_at: falls, cum_spend_day: at(k).cum_spend_day, cum_revenue_day: at(k).cum_revenue_day };
+  });
+  const rule = 'first listing, walking best own-ROAS first, whose own Sales Analysis law profit per day is negative and whose own ROAS is under its break-even (real margin source) or under 1× (estimated margin)';
+  return { points, marks, breakeven: be ? Object.assign(be, { rule }) : { n: null, rule }, days: n, ranked_by: 'own ROAS (attributed revenue ÷ spend), best first' };
 }
-function adtPlanVerdict(peak, all, perDay) {
-  /* What the curve is telling the owner, in one line he can act on.
-     `perDay` converts a window total into a daily figure. It is a parameter rather than a constant
-     because the curve carries window totals: without it this sentence said "£1,872 a day, about
-     £56,178 a month" when the true answer was £62 a day — a thirty-fold overstatement on the one
-     number the page leads with. Defaults to identity so the maths can be tested on its own. */
-  const d = typeof perDay === 'function' ? perDay : function (x) { return x; };
-  if (!peak || !all) return { move: 'nothing to say yet', detail: 'no listing has spend in the window' };
-  const drop = all.keep - peak.keep;
-  if (drop <= 0) return { move: 'keep everything running', detail: 'profit is still rising at the last listing, so nothing is worth switching off' };
-  return {
-    move: 'switch off ' + drop + ' listing' + (drop === 1 ? '' : 's'),
-    detail: 'profit peaks at ' + peak.keep + ' listings on ' + gbpPlain(d(peak.spend)) + ' of spend a day; the ' + drop + ' below that line cost more than they bring',
-    gain: round2(d(peak.profit) - d(all.profit)),
-    gain_is_per_day: true
-  };
+function adtPlanVerdict2(x) {
+  /* the war room's one sentence, naming the window it stands on; every number in it is a count or a spend */
+  const cut = Number(x.cut_n) || 0, imp = Number(x.improving_n) || 0, wh = Number(x.withheld_unpriced) || 0, listings = Number(x.listings) || 0, days = Number(x.days) || 0;
+  const win = String(x.label || '') + ' (' + x.from + ' → ' + x.to + ', ' + days + ' day' + (days === 1 ? '' : 's') + ')';
+  const pl = (k, w) => k + ' ' + w + (k === 1 ? '' : 's');
+  let headline, detail;
+  if (!listings) { headline = 'Nothing to say yet'; detail = 'No listing has ad spend over ' + win + '.'; }
+  else if (!cut) { headline = 'Keep everything running'; detail = 'No listing with spend over ' + win + ' lost money on its own priced numbers.'; }
+  else { headline = 'Switch off ' + pl(cut, 'listing'); detail = pl(cut, 'listing') + ' lost money on ' + (cut === 1 ? 'its' : 'their') + ' own priced numbers over ' + win + '; stopping ' + (cut === 1 ? 'it' : 'them') + ' frees ' + gbpPlain(x.spend_freed_day) + ' of spend a day.'; }
+  if (imp) detail += ' ' + pl(imp, 'listing') + ' lost over the window but earned over the last 7 days on at least £5 of spend — improving, keep ' + (imp === 1 ? 'it' : 'them') + ' running.';
+  if (wh) detail += ' ' + pl(wh, 'losing row') + ' withheld: an order in the window is not priced yet (today\'s never are), so the loss is not ' + (wh === 1 ? 'its' : 'theirs') + ' to carry.';
+  return { headline, detail, spend_freed_day: round2(x.spend_freed_day), cut_n: cut, improving_n: imp, withheld_unpriced: wh, window: win };
 }
-function gbpPlain(n) { const v = Number(n) || 0; return '£' + (Math.round(v * 100) / 100).toFixed(2); }
-function adtPlanWeekdayVerdict(rows) {
-  /* rows: [{weekday, spend, revenue, profit}] 0=Mon. Names the day worth changing, if any. */
-  const n = rows.length; if (n < 7) return null;
-  const prof = rows.map(r => Number(r.profit) || 0);
-  const mean = prof.reduce((t, x) => t + x, 0) / n;
-  let worst = 0, best = 0;
-  for (let i = 1; i < n; i++) { if (prof[i] < prof[worst]) worst = i; if (prof[i] > prof[best]) best = i; }
-  const w = rows[worst], b = rows[best];
-  const wSpend = Number(w.spend) || 0, wProfit = Number(w.profit) || 0;
-  /* only call a day weak when it is clearly below the others, not merely lowest */
-  const weak = mean > 0 && wProfit < mean * 0.7 && wSpend > 0;
-  return {
-    worst: { weekday: w.weekday, profit: round2(wProfit), spend: round2(wSpend), roas: wSpend > 0 ? Math.round((Number(w.revenue) || 0) / wSpend * 100) / 100 : null },
-    best: { weekday: b.weekday, profit: round2(Number(b.profit) || 0) },
-    mean_profit: round2(mean),
-    weak_day: weak,
-    shortfall: weak ? round2(mean - wProfit) : 0
-  };
+function adtWeekdayIndex(profile, wd) {
+  /* today's weekday against the listing's own shrunk weekday profile: its rate ÷ the mean of the seven rates
+     (1 = an average day); p from the permutation spread test; confident only under p < 0.05 */
+  const w = Math.max(0, Math.min(6, Number(wd) || 0));
+  const rates = profile && Array.isArray(profile.rates) && profile.rates.length === 7 ? profile.rates.map(r => Number(r && r.rate) || 0) : null;
+  if (!rates) return { index: null, p: null, confident: false, weekday: ADTOOL_DOW[w], rate: null };
+  const mean = rates.reduce((t, x) => t + x, 0) / 7;
+  const p = profile.spread && profile.spread.p != null ? Number(profile.spread.p) : null;
+  return { index: mean > 0 ? round2(rates[w] / mean) : null, p, confident: p != null && p < 0.05, weekday: ADTOOL_DOW[w], rate: round2(rates[w]) };
+}
+function adtRunVerdict(row) {
+  /* stop = law profit < 0 on ≥ 3 of the last 4 same weekdays with ≥ £2 spend each AND the last 7 days < 0;
+     run = law profit > 0 on ≥ 3 of 4 with a confident weekday index ≥ 1.1, OR last-7-day profit > 0 with own 7-day
+     ROAS ≥ break-even (1× when the margin is an estimate); else watch. A weekday with an unpriced order, or with
+     no row at all (has_row === false), is not a priced weekday; under 2 priced weekdays the answer is watch. The
+     7-day leg is understated while an order in it is unpriced (its sale counts nothing, its clicks count in full),
+     so a negative 7 days with pending orders cannot make a stop — it is watch until the costs land. */
+  const hist = row.weekday_history || [], priced = hist.filter(h => !h.unpriced && h.has_row !== false), wd = adtWeekdayLong(row.weekday), unp = hist.filter(h => h.unpriced).length, none = hist.filter(h => !h.unpriced && h.has_row === false).length;
+  const d7 = row.d7 || {}, p7 = Number(d7.actual_profit) || 0, s7 = Number(d7.spend) || 0, roas7 = s7 > 0 ? (Number(d7.attr_revenue) || 0) / s7 : null;
+  const pend7 = (Number(d7.pending_cost_orders) || 0) + (Number(d7.pending_fee_orders) || 0);
+  const be = adtRealMargin(row.margin_source) && Number(row.breakeven_roas) > 0 ? Number(row.breakeven_roas) : 1;
+  const wp = row.weekday_profile || {};
+  if (priced.length < 2) return { verdict: 'watch', rule: 'insufficient', why: 'only ' + priced.length + ' of the last ' + hist.length + ' ' + wd + 's ' + (priced.length === 1 ? 'is' : 'are') + ' fully priced' + (unp ? ' (' + unp + ' with an unpriced order' + (none ? ', ' + none + ' with no row' : '') + ')' : (none ? ' (' + none + ' with no row)' : '')) + ' — not enough to judge the day' };
+  const losing = priced.filter(h => Number(h.spend) >= 2 && Number(h.actual_profit) < 0).length;
+  const winning = priced.filter(h => Number(h.actual_profit) > 0).length;
+  if (losing >= 3 && p7 < 0 && pend7 > 0) return { verdict: 'watch', rule: 'watch: 7 days not fully priced', why: 'lost money on ' + losing + ' of the last ' + priced.length + ' priced ' + wd + 's (≥ £2 spend each), but the last 7 days are not fully priced (' + pend7 + ' order' + (pend7 === 1 ? '' : 's') + ' without a cost or fees yet) — the ' + gbpPlain(p7) + ' shown is an unpriced sale, not a loss; judge again when the costs land' };
+  if (losing >= 3 && p7 < 0) return { verdict: 'stop', rule: 'stop: 3 of 4 weekdays + 7 days', why: 'lost money on ' + losing + ' of the last ' + priced.length + ' priced ' + wd + 's (≥ £2 spend each) and over the last 7 days (' + gbpPlain(p7) + ', every order priced)' };
+  const conf = wp.p != null && Number(wp.p) < 0.05 && Number(wp.index) >= 1.1;
+  if (winning >= 3 && conf) return { verdict: 'run', rule: 'run: 3 of 4 weekdays + weekday index', why: 'earned on ' + winning + ' of the last ' + priced.length + ' priced ' + wd + 's and ' + wd + ' is a real strong day for it (index ' + wp.index + '×, p ' + wp.p + ')' };
+  if (p7 > 0 && roas7 != null && roas7 >= be) return { verdict: 'run', rule: 'run: 7 days + own ROAS ≥ break-even', why: 'earned ' + gbpPlain(p7) + ' over the last 7 days at ' + round2(roas7) + '× against a break-even of ' + round2(be) + '×' };
+  const bits = [];
+  bits.push(losing ? 'lost on ' + losing + ' of ' + priced.length + ' priced ' + wd + 's' : (winning ? 'earned on ' + winning + ' of ' + priced.length + ' priced ' + wd + 's' : 'no ' + wd + ' earned or lost clearly'));
+  bits.push(s7 > 0 ? 'last 7 days ' + gbpPlain(p7) + (roas7 != null ? ' at ' + round2(roas7) + '× vs break-even ' + round2(be) + '×' : '') + (pend7 ? ' (' + pend7 + ' order' + (pend7 === 1 ? '' : 's') + ' not priced yet)' : '') : 'no spend in the last 7 days');
+  if (wp.index != null) bits.push(wd + ' index ' + wp.index + '×' + (wp.confident ? '' : ' (not confident)'));
+  return { verdict: 'watch', rule: 'watch', why: bits.join('; ') + ' — neither rule fires' };
+}
+function adtHourBandMerge(list) { const hs = list.slice().sort((a, b) => a - b); const out = []; for (const h of hs) { const last = out[out.length - 1]; if (last && h === last[1] + 1) last[1] = h; else out.push([h, h]); } return out; }
+function adtHourBands(hours, opts) {
+  /* hours: [{hour (UK), spend, units}] summed over the window, carry excluded by the caller. Only hours with ≥ £0.50
+     are judged. mean = Σ spend ÷ judged hours; avoid = no attributed unit and spend ≥ 15 % of the mean; run = units
+     per £ ≥ the listing's median over the judged hours and at least one unit — with more zero hours than not the
+     median is 0 and every hour would otherwise qualify. Contiguous hours merge into [first, last]. Advisory only:
+     eBay cannot schedule ads by hour. */
+  const o = opts || {};
+  const H = (hours || []).map(h => ({ hour: Number(h.hour), spend: Number(h.spend) || 0, units: Number(h.units) || 0 })).filter(h => h.hour >= 0 && h.hour <= 23 && h.spend >= 0.5).sort((a, b) => a.hour - b.hour);
+  /* only the bands travel on the row — the per-hour detail would ride every listing of every 5-minute poll */
+  const base = { basis: o.basis || ADTOOL_HOUR_BASIS, excluded_note: o.excluded_note || ADTOOL_HOUR_EXCLUDED_NOTE, hours_judged: H.length };
+  if (!H.length) return Object.assign(base, { run: [], avoid: [], mean_hour_spend: 0, median_units_per_pound: null, note: 'no hour reached £0.50 of sampled spend over the window' });
+  const mean = H.reduce((t, h) => t + h.spend, 0) / H.length;
+  const upl = H.map(h => h.units / h.spend).sort((a, b) => a - b);
+  const med = upl.length % 2 ? upl[(upl.length - 1) / 2] : (upl[upl.length / 2 - 1] + upl[upl.length / 2]) / 2;
+  const avoid = H.filter(h => h.units === 0 && h.spend >= 0.15 * mean).map(h => h.hour);
+  const run = H.filter(h => h.units > 0 && h.units / h.spend >= med && avoid.indexOf(h.hour) < 0).map(h => h.hour);
+  return Object.assign(base, { run: adtHourBandMerge(run), avoid: adtHourBandMerge(avoid), mean_hour_spend: round2(mean), median_units_per_pound: round2(med), note: null });
+}
+function adtWeekdaySentence(row) {
+  /* "On the last 4 Saturdays it spent £a and made £b real profit; last Saturday £c / £d; today so far £e spend, n units" */
+  const wd = adtWeekdayLong(row.weekday), hist = (row.weekday_history || []).filter(h => h && h.has_row !== false), priced = hist.filter(h => !h.unpriced), unp = hist.length - priced.length;
+  const sp = priced.reduce((t, h) => t + (Number(h.spend) || 0), 0), pr = priced.reduce((t, h) => t + (Number(h.actual_profit) || 0), 0), un = priced.reduce((t, h) => t + (Number(h.attr_units) || 0), 0);
+  let s = hist.length
+    ? 'On the last ' + priced.length + (unp ? ' priced' : '') + ' ' + wd + (priced.length === 1 ? '' : 's') + ' it spent ' + gbpPlain(sp) + ' and made ' + gbpPlain(pr) + ' real profit' + (un ? ' on ' + un + ' attributed unit' + (un === 1 ? '' : 's') : '') + (unp ? ' (' + unp + ' ' + wd + (unp === 1 ? '' : 's') + ' with an unpriced order excluded)' : '')
+    : 'No ' + wd + ' history yet';
+  const lw = row.last_week_same_day;
+  if (lw && lw.has_row !== false) s += '; last ' + wd + ' ' + gbpPlain(lw.spend) + ' spend / ' + (lw.unpriced ? 'profit not priced yet' : gbpPlain(lw.actual_profit) + ' profit') + (Number(lw.attr_units) ? ', ' + lw.attr_units + ' unit' + (Number(lw.attr_units) === 1 ? '' : 's') : '');
+  else if (lw) s += '; last ' + wd + ' no ad or order row';
+  const td = row.today || {}, ord = Number(td.orders) || 0, tu = Number(td.attr_units) || 0;
+  s += td.spend != null ? '; today so far ' + gbpPlain(td.spend) + ' spend, ' + tu + ' attributed unit' + (tu === 1 ? '' : 's') : '; today: no ad sample yet';
+  if (ord) s += ', ' + ord + ' order' + (ord === 1 ? '' : 's');
+  return s + '.';
+}
+function adtLever(camps) {
+  /* the one thing a person can move for this listing: the campaign's daily budget for cost-per-click (eBay returns no
+     bid for CPC ads — 0 of 1,416 in the live check), the ad rate for cost-per-sale, nothing when no running campaign
+     carries it. campaigns.budget is TEXT in D1 and is read as a number here. */
+  const rows = camps || [];
+  const cpc = rows.find(c => String(c.funding_model) === 'COST_PER_CLICK'), cps = rows.find(c => String(c.funding_model) === 'COST_PER_SALE');
+  if (cpc) {
+    const b = Number(cpc.budget), name = String(cpc.name || cpc.campaign_id || '');
+    return { kind: 'budget', campaign_id: String(cpc.campaign_id || ''), campaign: name, budget: isNaN(b) || b <= 0 ? null : round2(b), bid_pct: null, note: 'daily budget ' + (isNaN(b) || b <= 0 ? 'not set' : gbpPlain(b)) + ' on "' + name + '" (cost-per-click) — eBay returns no bid for these ads, so the budget is the lever; pause or resume is done in Seller Hub' };
+  }
+  if (cps) {
+    const raw = cps.bid_pct != null && cps.bid_pct !== '' ? cps.bid_pct : cps.c_bid, r = Number(raw), name = String(cps.name || cps.campaign_id || '');
+    return { kind: 'ad_rate', campaign_id: String(cps.campaign_id || ''), campaign: name, budget: null, bid_pct: isNaN(r) || r <= 0 ? null : round2(r), note: 'ad rate ' + (isNaN(r) || r <= 0 ? 'not set' : round2(r) + ' %') + ' on "' + name + '" (cost-per-sale) — the rate is the lever' };
+  }
+  return { kind: 'none', campaign_id: null, campaign: '', budget: null, bid_pct: null, note: 'no running campaign carries this listing — nothing to adjust' };
 }
 /* ADTOOL-P9-PURE-END */
+
+const ADTOOL_REGISTER_P9 = [
+  ['FRONTIER', 'The war room frontier', 'listings with spend over the window ranked by their own ROAS (attributed revenue ÷ spend), best first; point n = cumulative spend per day and cumulative attributed revenue per day of the first n listings, cumulative ROAS = their ratio; marks 6× / 5× / 4× / 3.5× = the last n at which the cumulative ROAS still holds the target (falls_at = the first n below it); break-even mark = the first listing whose own Sales Analysis law profit per day < 0 AND own ROAS < its breakeven_roas (margin_source portal / portal (capped) / orders / ali cost) or < 1× when the margin is an estimate; per day = ÷ the days carrying data; no profit is summed anywhere on the frontier', 'adtool_listing_day, adtool_listing_today, adtool_listings, items_api', 'per request (adtoolPlan; KV page cache 180 s)', 'unit tests: ranking monotone, marks at the first n where the cumulative ROAS falls below the target, break-even by the stated rule, no profit key on any point'],
+  ['RUN_TODAY_VERDICT', 'Run / stop / watch per advertised listing today', 'weekday history = the listing\'s adtool_listing_day rows on the last 4 calendar occurrences of today\'s weekday (today − 7, 14, 21, 28); a day with an unpriced order is excluded; stop = law profit < 0 on ≥ 3 of the last 4 priced same weekdays with spend ≥ £2 each AND last-7-day law profit < 0 with every order in those 7 days priced (a negative 7 days that still holds an order without a cost or fees is watch, not stop — an unpriced sale counts nothing while its clicks count in full); run = law profit > 0 on ≥ 3 of 4 AND a confident weekday index ≥ 1.1 (index = the profile rate for today\'s weekday ÷ the mean of its seven rates; confident = permutation p < 0.05), OR last-7-day law profit > 0 AND own 7-day ROAS ≥ breakeven_roas (1× when the margin is an estimate); a weekday with no adtool_listing_day row is not a priced weekday; fewer than 2 priced weekdays → watch; otherwise watch. Advertised = spend in the last 7 days, spend today, or a cost-per-click ad (ACTIVE, or status not yet stamped) in a RUNNING campaign on an ACTIVE listing — the same membership rule as liveMembershipRow. Ads by eBay report day (UTC), orders by UK day', 'adtool_listing_day, adtool_listing_today, adtool_profiles, adtool_listings, adtool_listing_week, adtool_decisions, campaigns, campaign_ads', 'per request (adtoolRunToday; KV page cache 60 s); the war room prints the first 8 of each list', 'unit tests on every branch; the morning decision (shadow) is printed beside the verdict, never merged into it'],
+  ['HOUR_BANDS', 'Hours to run / not to run per listing', 'UK hour × listing over the last 28 days to yesterday from adtool_listing_hour (spend_r when reconciled, else spend_s; carry_spend is never read; UK hour 8 excluded for days before 27 Sep 2026, where the first sample\'s carry still sits inside the hour); hours with ≥ £0.50 in total are judged; mean = Σ spend ÷ judged hours; avoid = 0 attributed units and spend ≥ 15 % of the mean; run = attributed units per £ ≥ the listing\'s median over the judged hours and ≥ 1 unit; contiguous hours merge into [first, last]; advisory — eBay cannot schedule ads by hour', 'adtool_listing_hour, adtool_ads_intraday (sampled)', 'per request (adtoolRunToday, adtoolStopToday)', 'unit tests: the avoid and run thresholds, band merging, the £0.50 floor'],
+];
+let ADTOOL_P9_REG_OK = false;
+async function ensureAdtoolPhase9Register(env) {
+  if (ADTOOL_P9_REG_OK) return;
+  const stmts = ADTOOL_REGISTER_P9.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 9, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 9").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* the Running today page flag is born ON (a read-only page); a manager can still switch it off in Flags */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_runtoday', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  ADTOOL_P9_REG_OK = true;
+}
+
+/* ---- batched reads shared by the war room, Running today and Stop today (IN chunks ≤ 90, one round trip per 50) ---- */
+/* the SQL twin of liveMembershipRow (WO-08): a RUNNING / ENDING_SOON campaign, an ACTIVE listing, and for cost-per-click
+   an ad whose status is ACTIVE or not yet stamped (NULL / '' — rows not re-synced since the ad_status column landed keep
+   their pre-WO-08 meaning until adsItems stamps them), for cost-per-sale any ad not ARCHIVED */
+const ADTOOL_LIVE_AD_SQL = "SELECT ca.listing_id AS item_id, ca.campaign_id, c.account, c.name, c.funding_model, c.budget, ca.ad_status, ca.bid_pct, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ia.status = 'ACTIVE' AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))";
+function adtChunks(ids, n) { const size = n || 90; const list = Array.from(new Set((ids || []).map(x => String(x)).filter(Boolean))); const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out; }
+function adtInList(ch, offset) { return '(' + ch.map((_, i) => '?' + (i + 1 + (offset || 0))).join(',') + ')'; }
+async function adtBatchRead(env, stmts) {
+  const out = [];
+  for (let i = 0; i < stmts.length; i += 50) { const rs = await env.DB.batch(stmts.slice(i, i + 50)); for (const r of rs) out.push((r && r.results) || []); }
+  return out;
+}
+function adtHourStmt(env, ch, today) {
+  /* UK hour × listing over the last 28 days to yesterday: spend_r when reconciled, else spend_s (both hold within-hour
+     spend since the carry column landed); UK hour 8 dropped for days before ADTOOL_CARRY_FIX_DAY */
+  return env.DB.prepare('SELECT h.item_id, h.hour, ROUND(SUM(COALESCE(h.spend_r, h.spend_s)), 2) AS spend, SUM(COALESCE(h.attr_units_r, h.attr_units_s)) AS units, COUNT(DISTINCT h.day) AS days FROM adtool_listing_hour h WHERE h.day >= ?1 AND h.day <= ?2 AND h.samples > 0 AND NOT (h.day < ?3 AND h.hour = 8) AND h.item_id IN ' + adtInList(ch, 3) + ' GROUP BY h.item_id, h.hour').bind(adtAddDays(today, -28), adtAddDays(today, -1), ADTOOL_CARRY_FIX_DAY, ...ch);
+}
+function adtCampaignStmt(env, ch, acct) {
+  return env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '') + ' AND ca.listing_id IN ' + adtInList(ch, acct ? 1 : 0)).bind(...(acct ? [acct] : []).concat(ch));
+}
+async function adtBandsAndLevers(env, ids, today, acct) {
+  /* hour bands + the lever for a set of listings, one round trip */
+  const stmts = [], kinds = [];
+  for (const ch of adtChunks(ids)) { stmts.push(adtHourStmt(env, ch, today)); kinds.push('hour'); stmts.push(adtCampaignStmt(env, ch, acct)); kinds.push('camp'); }
+  const HR = {}, C = {};
+  (await adtBatchRead(env, stmts)).forEach((rows, i) => { for (const r of rows) { const id = String(r.item_id); if (kinds[i] === 'hour') (HR[id] = HR[id] || []).push({ hour: Number(r.hour), spend: Number(r.spend) || 0, units: Number(r.units) || 0, days: Number(r.days) || 0 }); else (C[id] = C[id] || []).push(r); } });
+  const bands = {}, levers = {};
+  for (const id of Array.from(new Set((ids || []).map(String)))) { bands[id] = adtHourBands(HR[id] || [], {}); levers[id] = adtLever(C[id] || []); }
+  return { bands, levers, campaigns: C };
+}
+function adtWho(account) { return { desk: 'Advertising Manager', account: String(account || ''), note: 'the account\'s advertising desk by role (plan §7.1 default)' }; }
+
+async function adtoolRunTodayCompute(env, acct) {
+  /* Running today: one row per advertised listing, judged on its own last four same weekdays (calendar-cut), its
+     last 7 days and today's sample. Every read is an aggregate or an IN chunk; nothing is asked per listing. */
+  await ensureAdtoolPhase6Schema(env); await ensureAdtoolPhase9Register(env);
+  const today = ukDate(''), todayUtc = utcDate(), yday = adtAddDays(today, -1), wd = adtWeekdayOf(today), wdName = ADTOOL_DOW[wd];
+  const wdays = [7, 14, 21, 28].map(n => adtAddDays(today, -n));
+  const d7from = adtAddDays(today, -7), d28from = adtAddDays(today, -28);
+  const fld = ['spend', 'attr_units', 'attr_revenue', 'actual_profit'];
+  const wdCols = wdays.map((d, i) => fld.map(f => 'SUM(CASE WHEN d.day = ?' + (i + 3) + ' THEN d.' + f + ' ELSE 0 END) AS w' + i + '_' + f)
+    .concat(['SUM(CASE WHEN d.day = ?' + (i + 3) + ' THEN d.pending_cost_orders + COALESCE(d.pending_fee_orders, 0) ELSE 0 END) AS w' + i + '_unpriced', 'MAX(CASE WHEN d.day = ?' + (i + 3) + ' THEN 1 ELSE 0 END) AS w' + i + '_seen']).join(', ')).join(', ');
+  const B0 = await env.DB.batch([
+    env.DB.prepare('SELECT d.item_id, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.spend ELSE 0 END), 2) AS spend_d7, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.attr_revenue ELSE 0 END), 2) AS attr_revenue_d7, SUM(CASE WHEN d.day >= ?1 THEN d.attr_units ELSE 0 END) AS attr_units_d7, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.actual_profit ELSE 0 END), 2) AS actual_profit_d7, SUM(CASE WHEN d.day >= ?1 THEN d.pending_cost_orders ELSE 0 END) AS pending_cost_orders_d7, SUM(CASE WHEN d.day >= ?1 THEN COALESCE(d.pending_fee_orders, 0) ELSE 0 END) AS pending_fee_orders_d7, ROUND(SUM(d.spend), 2) AS spend_d28, ' + wdCols +
+      ' FROM adtool_listing_day d' + (acct ? ' JOIN adtool_listings l ON l.item_id = d.item_id' : '') + ' WHERE d.day >= ?2 AND d.day <= ?7' + (acct ? ' AND l.account = ?8' : '') + ' GROUP BY d.item_id HAVING SUM(d.spend) > 0').bind(...[d7from, d28from].concat(wdays, [yday], acct ? [acct] : [])),
+    env.DB.prepare('SELECT t.account, t.item_id, t.report_day, t.spend, t.cpc_spend, t.clicks, t.attr_units, t.attr_revenue, t.orders, t.units, t.raw_priced_sum, t.refunds, t.actual_profit, t.pending_cost_orders, t.pending_fee_orders, t.unpriced_orders, t.sampled_at FROM adtool_listing_today t WHERE t.uk_day = ?1' + (acct ? ' AND t.account = ?2' : '')).bind(...[today].concat(acct ? [acct] : [])),
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    env.DB.prepare('SELECT item_id, account, decision, action, why, confidence, batch FROM adtool_decisions WHERE day = ?1' + (acct ? ' AND account = ?2' : '') + ' ORDER BY batch').bind(...[today].concat(acct ? [acct] : [])),
+    env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account"),
+  ]);
+  const accounts = (B0[4].results || []).map(r => String(r.account));
+  const H = {}; for (const r of (B0[0].results || [])) H[String(r.item_id)] = r;
+  const T = {}; for (const r of (B0[1].results || [])) { adtTodayRowHonest(r, todayUtc); T[String(r.item_id)] = r; }
+  const C = {}; for (const r of (B0[2].results || [])) (C[String(r.item_id)] = C[String(r.item_id)] || []).push(r);
+  const D = {}; for (const r of (B0[3].results || [])) { const id = String(r.item_id); if (!D[id] || String(r.batch) === 'morning') D[id] = r; }
+  /* advertised = spent in the last 7 days, spending today, or a cost-per-click ad live under liveMembershipRow's rule
+     (ADTOOL_LIVE_AD_SQL: running campaign, ACTIVE listing, ad ACTIVE or not yet stamped) */
+  const ids = {};
+  for (const k of Object.keys(H)) if (Number(H[k].spend_d7) > 0) ids[k] = 1;
+  for (const k of Object.keys(T)) if (Number(T[k].spend) > 0) ids[k] = 1;
+  for (const k of Object.keys(C)) if (C[k].some(c => String(c.funding_model) === 'COST_PER_CLICK')) ids[k] = 1;
+  const list = Object.keys(ids);
+  const stmts = [], kinds = [];
+  for (const ch of adtChunks(list)) {
+    stmts.push(env.DB.prepare('SELECT l.item_id, l.account, l.title, i.image, l.breakeven_roas, l.margin_source, l.status FROM adtool_listings l LEFT JOIN items_api i ON i.item_id = l.item_id WHERE l.item_id IN ' + adtInList(ch)).bind(...ch)); kinds.push('meta');
+    stmts.push(env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages) AND s.item_id IN ' + adtInList(ch)).bind(...ch)); kinds.push('stage');
+    stmts.push(env.DB.prepare("SELECT scope_id AS item_id, json FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday' AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday') AND scope_id IN " + adtInList(ch)).bind(...ch)); kinds.push('profile');
+    /* SQLite carries the bare columns of the row that holds MAX(): the best week by law profit in one aggregate */
+    stmts.push(env.DB.prepare('SELECT w.item_id, w.iso_week, w.spend, w.attr_revenue, MAX(w.actual_profit) AS actual_profit, w.pending_cost_orders, w.pending_fee_orders FROM adtool_listing_week w WHERE w.item_id IN ' + adtInList(ch) + ' GROUP BY w.item_id').bind(...ch)); kinds.push('week');
+    stmts.push(adtHourStmt(env, ch, today)); kinds.push('hour');
+  }
+  const M = {}, S = {}, P = {}, W = {}, HR = {};
+  (await adtBatchRead(env, stmts)).forEach((rows, i) => {
+    const k = kinds[i];
+    for (const r of rows) {
+      const id = String(r.item_id);
+      if (k === 'meta') M[id] = r; else if (k === 'stage') S[id] = r; else if (k === 'week') W[id] = r;
+      else if (k === 'profile') { try { P[id] = JSON.parse(r.json); } catch (e) { P[id] = null; } }
+      else if (k === 'hour') (HR[id] = HR[id] || []).push({ hour: Number(r.hour), spend: Number(r.spend) || 0, units: Number(r.units) || 0, days: Number(r.days) || 0 });
+    }
+  });
+  const rows = list.map(id => {
+    const m = M[id] || {}, h = H[id] || {}, t = T[id] || null;
+    const history = wdays.map((d, i) => ({ day: d, weekday: wdName, has_row: !!Number(h['w' + i + '_seen']), spend: round2(h['w' + i + '_spend']), attr_units: Number(h['w' + i + '_attr_units']) || 0, attr_revenue: round2(h['w' + i + '_attr_revenue']), actual_profit: round2(h['w' + i + '_actual_profit']), unpriced: (Number(h['w' + i + '_unpriced']) || 0) > 0, unpriced_orders: Number(h['w' + i + '_unpriced']) || 0 }));
+    const d7 = { from: d7from, to: yday, spend: round2(h.spend_d7), attr_revenue: round2(h.attr_revenue_d7), attr_units: Number(h.attr_units_d7) || 0, actual_profit: round2(h.actual_profit_d7), pending_cost_orders: Number(h.pending_cost_orders_d7) || 0, pending_fee_orders: Number(h.pending_fee_orders_d7) || 0 };
+    d7.roas = d7.spend > 0 ? round2(d7.attr_revenue / d7.spend) : null;
+    const td = t
+      ? { spend: t.spend == null ? null : round2(t.spend), clicks: t.clicks == null ? null : Number(t.clicks), attr_units: t.attr_units == null ? null : Number(t.attr_units), attr_revenue: t.attr_revenue == null ? null : round2(t.attr_revenue), orders: Number(t.orders) || 0, units: Number(t.units) || 0, actual_profit: t.actual_profit == null ? null : round2(t.actual_profit), unpriced: t.unpriced_orders != null ? Number(t.unpriced_orders) : Math.max(Number(t.pending_cost_orders) || 0, Number(t.pending_fee_orders) || 0), sampled_at: t.sampled_at ? String(t.sampled_at) : null }
+      : { spend: null, clicks: null, attr_units: null, attr_revenue: null, orders: 0, units: 0, actual_profit: null, unpriced: 0, sampled_at: null };
+    td.roas = td.spend > 0 && td.attr_revenue != null ? round2(td.attr_revenue / td.spend) : null;
+    const wp = adtWeekdayIndex(P[id], wd);
+    const v = adtRunVerdict({ weekday: wdName, weekday_history: history, d7, breakeven_roas: m.breakeven_roas, margin_source: m.margin_source, weekday_profile: wp });
+    const camps = C[id] || [], wk = W[id], dec = D[id];
+    return {
+      item_id: id, account: String(m.account || (t && t.account) || (camps[0] && camps[0].account) || ''), title: String(m.title || ''), image: m.image ? String(m.image) : null,
+      verdict: v.verdict, rule: v.rule, why: v.why,
+      sentence: adtWeekdaySentence({ weekday: wdName, weekday_history: history, last_week_same_day: history[0], today: td }),
+      weekday: wdName, weekday_history: history, last_week_same_day: history[0], today: td, d7,
+      weekday_profile: wp,
+      hour_bands: adtHourBands(HR[id] || [], {}),
+      best_week: wk && wk.iso_week ? { week: String(wk.iso_week), spend: round2(wk.spend), attr_revenue: round2(wk.attr_revenue), actual_profit: wk.actual_profit == null ? null : round2(wk.actual_profit), pending_cost_orders: Number(wk.pending_cost_orders) || 0, pending_fee_orders: Number(wk.pending_fee_orders) || 0 } : null,
+      morning_decision: dec ? { decision: String(dec.decision || ''), action: String(dec.action || ''), why: String(dec.why || ''), confidence: String(dec.confidence || ''), batch: String(dec.batch || '') } : null,
+      lever: adtLever(camps), who: adtWho(m.account || (t && t.account) || ''),
+      stage: S[id] ? String(S[id].stage || '') : '', stage_label: S[id] ? String(S[id].label || '') : '',
+      breakeven_roas: m.breakeven_roas == null ? null : round2(m.breakeven_roas), margin_source: String(m.margin_source || ''),
+      live_cpc: camps.some(c => String(c.funding_model) === 'COST_PER_CLICK'), live_ads: camps.length,
+    };
+  });
+  const order = { stop: 0, run: 1, watch: 2 };
+  rows.sort((a, b) => order[a.verdict] - order[b.verdict] || (Number(b.today.spend) || 0) - (Number(a.today.spend) || 0) || (Number(b.d7.spend) || 0) - (Number(a.d7.spend) || 0));
+  const counts = { run: 0, stop: 0, watch: 0 }; for (const r of rows) counts[r.verdict]++;
+  return {
+    period: adtPeriod({ period: 'today' }, today), fresh: await adtFresh(env, 'today'), account: acct || 'all', accounts, day: today, weekday: wdName, weekday_days: wdays, d7: { from: d7from, to: yday },
+    rows, counts, listings: rows.length,
+    rules: { stop: 'law profit < 0 on ≥ 3 of the last 4 priced ' + adtWeekdayLong(wdName) + 's with ≥ £2 spend each AND the last 7 days < 0 with every order in them priced (a negative 7 days holding an unpriced order is watch until the costs land)', run: 'law profit > 0 on ≥ 3 of 4 with a confident ' + adtWeekdayLong(wdName) + ' index ≥ 1.1, OR the last 7 days > 0 with own ROAS ≥ break-even (1× when the margin is an estimate)', watch: 'everything else, and any listing with fewer than 2 priced ' + adtWeekdayLong(wdName) + 's (a ' + adtWeekdayLong(wdName) + ' with no row does not count as priced)', advertised: 'spend in the last 7 days, spend today, or a cost-per-click ad (ACTIVE, or status not yet stamped) in a RUNNING campaign on an ACTIVE listing — liveMembershipRow\'s rule', hours: 'over ' + ADTOOL_HOUR_BASIS + ' (carry excluded; ' + ADTOOL_HOUR_EXCLUDED_NOTE + '): avoid = no unit and spend ≥ 15 % of the mean hour; run = units per £ ≥ the listing\'s median' },
+    profit_label: 'Profit (Sales Analysis law)', note: 'ads by eBay report day (UTC), orders by UK day; today\'s figures are sampled and provisional; hour bands are advisory — eBay cannot schedule ads by hour',
+    computed_at: new Date().toISOString(), source: 'adtool_listing_day (last 4 ' + adtWeekdayLong(wdName) + 's, last 7 days), adtool_listing_today (sampled, provisional), adtool_profiles (weekday index + p), adtool_listing_hour (' + ADTOOL_HOUR_BASIS + '), adtool_listing_week, adtool_decisions, campaigns + campaign_ads, adtool_listings',
+  };
+}
 
 const ADTOOL_ACTIONS_P9 = {
   adtoolPlan: {
     auth: 'any', fn: async (p, ctx) => {
       await adtGate(ctx, 'adtool_page_plan');
       const env = ctx.env;
-      await ensureAdtoolPhase1Schema(env);
-      const today = ukDate('');
-      /* Phase 1B: p.period / p.from / p.to choose the window (default: the last 30 days to yesterday, as before); a
-         window that includes today reads the today grain for today, never listing_day's empty-ads today row */
-      const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, utcDate());
+      await ensureAdtoolPhase1Schema(env); await ensureAdtoolPhase9Register(env);
+      const today = ukDate(''), yday = adtAddDays(today, -1), todayUtc = utcDate();
+      const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
       const acct = String((p && p.account) || '').trim();
-      const bind = [from, to]; let where = '';
-      if (acct) { where = ' AND l.account = ?3'; bind.push(acct); }
-      const accounts = ((await env.DB.prepare('SELECT DISTINCT account FROM adtool_listings WHERE account <> \'\' ORDER BY account').all()).results || []).map(r => String(r.account));
-      /* Phase 1A: every per-item row carries its own profit under the law (30 days, and the last 7 so the page can
-         mark a listing on the mend) and the product cell; no collective profit figure (peak, "at 6×", difference,
-         weekday profit) leaves here — the curve panels are gone until Phase 2's frontier; the honest hero is spend,
-         attributed sales and ROAS for the window, and the cut list. */
-      const rows = (await env.DB.prepare(
-        'SELECT d.item_id, l.account, l.title, i.image AS image, l.price, ROUND(l.breakeven_roas, 2) AS breakeven, ' +
-        'ROUND(SUM(d.spend), 2) AS spend, SUM(d.clicks) AS clicks, ROUND(SUM(d.attr_revenue), 2) AS rev, SUM(d.attr_units) AS units, ' +
-        'SUM(d.orders) AS orders, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders, ' +
-        'ROUND(SUM(CASE WHEN d.day >= ?' + (bind.length + 1) + ' THEN d.spend ELSE 0 END), 2) AS spend_d7, ROUND(SUM(CASE WHEN d.day >= ?' + (bind.length + 1) + ' THEN d.actual_profit ELSE 0 END), 2) AS actual_profit_d7, ' +
-        'SUM(CASE WHEN d.day >= ?' + (bind.length + 1) + ' THEN d.pending_cost_orders ELSE 0 END) AS pending_cost_orders_d7, SUM(CASE WHEN d.day >= ?' + (bind.length + 1) + ' THEN COALESCE(d.pending_fee_orders, 0) ELSE 0 END) AS pending_fee_orders_d7, ' +
-        '(SELECT s.stage FROM adtool_stages s WHERE s.item_id = d.item_id ORDER BY s.day DESC LIMIT 1) AS stage ' +
-        'FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id LEFT JOIN items_api i ON i.item_id = d.item_id ' +
-        'WHERE d.day >= ?1 AND d.day <= ?2' + where + ' GROUP BY d.item_id HAVING SUM(d.spend) > 0'
-      ).bind(...bind.concat([adtAddDays(today, -7)])).all()).results || [];
-      const ownRoas = r => Number(r.spend) > 0 ? Math.round(Number(r.rev) / Number(r.spend) * 100) / 100 : null;
-      /* the cut list is what its sentence says: listings that lost money on their own numbers over the window, worst
-         first (the peak of a cumulative curve along a ROAS ranking put earners below the line and left losers above it) */
-      const cutPool = adtWithheldUnpriced(rows.filter(r => Number(r.actual_profit) < 0), w);
-      const cut = cutPool.rows.map(r => Object.assign({}, r, { roas: ownRoas(r) }))
-        .sort((a, b) => Number(a.actual_profit) - Number(b.actual_profit));
-      /* worth more money: already well clear of its own break-even and earning, so more spend on it
-         is the least speculative bet on the board */
-      const push = rows
-        .filter(r => Number(r.actual_profit) > 0 && Number(r.pending_cost_orders) + Number(r.pending_fee_orders) === 0 && Number(r.breakeven) > 0 && ownRoas(r) >= Number(r.breakeven) * 1.5)
-        .map(r => Object.assign({}, r, { roas: ownRoas(r) }))
-        .sort((a, b) => Number(b.actual_profit) - Number(a.actual_profit)).slice(0, 25);
-      const wdRows = (await env.DB.prepare(
-        'SELECT d.weekday, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS revenue, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS attr_units ' +
-        'FROM ' + src + ' d' + (acct ? ' JOIN adtool_listings l ON l.item_id = d.item_id' : '') +
-        ' WHERE d.day >= ?1 AND d.day <= ?2' + (acct ? ' AND l.account = ?3' : '') + ' GROUP BY d.weekday ORDER BY d.weekday'
-      ).bind(...bind).all()).results || [];
-      /* per-day figures divide by the days that actually carry data, not the calendar span — a
-         missing report day would otherwise quietly flatter every per-day number on this page */
-      const dayRow = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM ' + src + ' WHERE day >= ?1 AND day <= ?2').bind(from, to).first();
-      const days = Math.max(1, Number(dayRow && dayRow.n) || 0);
+      /* the last 7 full days to yesterday ride the same aggregate as the window (a listing losing over the window
+         but earning over them is improving, not a cut) */
+      const d7from = adtAddDays(today, -7), lo = from < d7from ? from : d7from, hi = to > yday ? to : yday;
+      const inW = 'd.day >= ?1 AND d.day <= ?2', in7 = 'd.day >= ?3 AND d.day <= ?4';
+      const sumW = (f, r) => (r ? 'ROUND(' : '') + 'SUM(CASE WHEN ' + inW + ' THEN ' + f + ' ELSE 0 END)' + (r ? ', 2)' : '');
+      const sum7 = (f, r) => (r ? 'ROUND(' : '') + 'SUM(CASE WHEN ' + in7 + ' THEN ' + f + ' ELSE 0 END)' + (r ? ', 2)' : '');
+      const bindW = acct ? [from, to, acct] : [from, to], awW = acct ? ' AND l.account = ?3' : '', joinL = acct ? ' JOIN adtool_listings l ON l.item_id = d.item_id' : '';
+      const B = await env.DB.batch([
+        env.DB.prepare('SELECT d.item_id, l.account, l.title, i.image AS image, l.margin_source, ROUND(l.breakeven_roas, 2) AS breakeven_roas, ' +
+          sumW('d.spend', 1) + ' AS spend, ' + sumW('d.clicks') + ' AS clicks, ' + sumW('d.attr_revenue', 1) + ' AS attr_revenue, ' + sumW('d.attr_units') + ' AS attr_units, ' + sumW('d.orders') + ' AS orders, ' + sumW('d.units') + ' AS units, ' +
+          sumW('d.actual_profit', 1) + ' AS actual_profit, ' + sumW('d.pending_cost_orders') + ' AS pending_cost_orders, ' + sumW('COALESCE(d.pending_fee_orders, 0)') + ' AS pending_fee_orders, ' +
+          sum7('d.spend', 1) + ' AS spend_d7, ' + sum7('d.attr_revenue', 1) + ' AS attr_revenue_d7, ' + sum7('d.actual_profit', 1) + ' AS actual_profit_d7, ' + sum7('d.pending_cost_orders') + ' AS pending_cost_orders_d7, ' + sum7('COALESCE(d.pending_fee_orders, 0)') + ' AS pending_fee_orders_d7 ' +
+          'FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id LEFT JOIN items_api i ON i.item_id = d.item_id ' +
+          'WHERE d.day >= ?5 AND d.day <= ?6' + (acct ? ' AND l.account = ?7' : '') + ' GROUP BY d.item_id HAVING ' + sumW('d.spend') + ' > 0'
+        ).bind(...[from, to, d7from, yday, lo, hi].concat(acct ? [acct] : [])),
+        env.DB.prepare('SELECT l.account, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.units) AS units, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id WHERE ' + inW + awW + ' GROUP BY l.account ORDER BY SUM(d.spend) DESC').bind(...bindW),
+        env.DB.prepare('SELECT d.day, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.clicks) AS clicks FROM ' + src + ' d' + joinL + ' WHERE ' + inW + awW + ' GROUP BY d.day ORDER BY d.day').bind(...bindW),
+        env.DB.prepare('SELECT d.weekday, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.orders) AS orders, SUM(d.attr_units) AS attr_units, SUM(d.clicks) AS clicks, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d' + joinL + ' WHERE ' + inW + awW + ' GROUP BY d.weekday ORDER BY d.weekday').bind(...bindW),
+        env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account"),
+        /* Budget: which listings ran out of money in the window, and whether the one that did deserved more — on this
+           fleet most capped listings are losing, so the cap is doing the owner a favour */
+        env.DB.prepare('SELECT c.item_id, l.account, l.title, i.image AS image, l.margin_source, ROUND(l.breakeven_roas, 2) AS breakeven_roas, COUNT(*) AS capped_days, MIN(c.cap_hour) AS earliest_hour, ROUND(AVG(c.budget), 2) AS budget_capped, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders FROM adtool_cap_days c JOIN adtool_listing_day d ON d.item_id = c.item_id AND d.day = c.day LEFT JOIN adtool_listings l ON l.item_id = c.item_id LEFT JOIN items_api i ON i.item_id = c.item_id WHERE c.day >= ?1 AND c.day <= ?2' + awW + ' GROUP BY c.item_id ORDER BY SUM(d.actual_profit) DESC').bind(...bindW),
+        env.DB.prepare('SELECT COUNT(DISTINCT day) AS d FROM adtool_cap_days WHERE day >= ?1 AND day <= ?2').bind(from, to),
+      ]);
+      const rows = B[0].results || [], byAcctRaw = B[1].results || [], byDayRaw = B[2].results || [], wdRaw = B[3].results || [];
+      const accounts = (B[4].results || []).map(r => String(r.account));
+      const caps = B[5].results || [], capSpan = (B[6].results || [])[0] || null;
+      /* per-day figures divide by the days that actually carry data, not the calendar span — a missing report day
+         would otherwise quietly flatter every per-day number on this page */
+      const days = Math.max(1, byDayRaw.length);
       const perDay = x => x == null ? null : round2(Number(x) / days);
-      const tot = rows.reduce((t, r) => { t.spend += Number(r.spend) || 0; t.rev += Number(r.rev) || 0; t.clicks += Number(r.clicks) || 0; t.units += Number(r.units) || 0; t.orders += Number(r.orders) || 0; return t; }, { spend: 0, rev: 0, clicks: 0, units: 0, orders: 0 });
-      const roasAll = tot.spend > 0 ? round2(tot.rev / tot.spend) : null;
-      const withheldTxt = cutPool.withheld ? ' · ' + cutPool.withheld + ' losing row' + (cutPool.withheld === 1 ? '' : 's') + ' withheld: an order in the window is not priced yet (today\'s orders never are), so the loss is not theirs to carry' : '';
+      const ratio = a => { a.spend = round2(a.spend); a.attr_revenue = round2(a.attr_revenue); a.roas = a.spend > 0 ? round2(a.attr_revenue / a.spend) : null; a.cpc = a.clicks > 0 ? round2(a.spend / a.clicks) : null; a.cvr = a.clicks > 0 ? round2(a.attr_units / a.clicks) : null; return a; };
+      const tot = byAcctRaw.reduce((t, r) => { t.spend += Number(r.spend) || 0; t.attr_revenue += Number(r.attr_revenue) || 0; t.clicks += Number(r.clicks) || 0; t.attr_units += Number(r.attr_units) || 0; t.orders += Number(r.orders) || 0; t.units += Number(r.units) || 0; return t; }, { spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0 });
+      const hero = Object.assign(ratio(tot), { spend_day: perDay(tot.spend), attr_revenue_day: perDay(tot.attr_revenue), listings: rows.length, days });
+      const by_account = byAcctRaw.map(r => Object.assign(ratio({ account: String(r.account), spend: Number(r.spend) || 0, attr_revenue: Number(r.attr_revenue) || 0, clicks: Number(r.clicks) || 0, attr_units: Number(r.attr_units) || 0, orders: Number(r.orders) || 0, units: Number(r.units) || 0 }), { spend_day: perDay(r.spend), days: Number(r.days) || 0, share: hero.spend > 0 ? round2((Number(r.spend) || 0) / hero.spend) : null }));
+      const by_day = byDayRaw.map(r => ({ day: String(r.day), weekday: ADTOOL_DOW[adtWeekdayOf(String(r.day))], spend: round2(r.spend), attr_revenue: round2(r.attr_revenue), roas: Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null, attr_units: Number(r.attr_units) || 0, orders: Number(r.orders) || 0, clicks: Number(r.clicks) || 0, provisional: String(r.day) === today }));
+      const weekday = wdRaw.map(r => ({ weekday: Number(r.weekday), name: ADTOOL_DOW[Number(r.weekday)] || '', spend: round2(r.spend), attr_revenue: round2(r.attr_revenue), roas: Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null, orders: Number(r.orders) || 0, attr_units: Number(r.attr_units) || 0, cpc: Number(r.clicks) > 0 ? round2(Number(r.spend) / Number(r.clicks)) : null, cvr: Number(r.clicks) > 0 ? round2(Number(r.attr_units) / Number(r.clicks)) : null, days: Number(r.days) || 0, spend_day: Number(r.days) > 0 ? round2(Number(r.spend) / Number(r.days)) : null }));
+      const ownRoas = r => Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null;
+      const frontier = adtFrontier(rows, days);
+      /* the cut list is what its sentence says: listings that lost money on their own numbers over the window, worst
+         first; a loser that earned over the last 7 days on ≥ £5 of spend is improving and is listed apart */
+      const pool = adtWithheldUnpriced(rows.filter(r => Number(r.actual_profit) < 0), w);
+      const isImproving = r => Number(r.actual_profit_d7) >= 0 && Number(r.spend_d7) >= 5;
+      const cut = pool.rows.filter(r => !isImproving(r)).sort((a, b) => Number(a.actual_profit) - Number(b.actual_profit));
+      const improving = pool.rows.filter(isImproving).sort((a, b) => Number(b.actual_profit_d7) - Number(a.actual_profit_d7));
+      /* worth more money: already well clear of its own break-even and earning with every order priced */
+      const push = rows.filter(r => Number(r.actual_profit) > 0 && (Number(r.pending_cost_orders) || 0) + (Number(r.pending_fee_orders) || 0) === 0 && Number(r.breakeven_roas) > 0 && ownRoas(r) >= Number(r.breakeven_roas) * 1.5).sort((a, b) => Number(b.actual_profit) - Number(a.actual_profit)).slice(0, 25);
+      const earning = caps.filter(r => Number(r.actual_profit) > 0), losing = caps.filter(r => !(Number(r.actual_profit) > 0));
+      /* the budget rows carry the same last-7-day law figures as every other item row, read off the window
+         aggregate (a capped listing spent in the window, so it is in `rows`), never re-queried */
+      const byId = {}; for (const r of rows) byId[String(r.item_id)] = r;
+      const budget = earning.concat(losing.slice(0, 12)).map(r => { const w7 = byId[String(r.item_id)] || {}; return Object.assign(r, { deserves_more: Number(r.actual_profit) > 0, spend_d7: w7.spend_d7 == null ? null : round2(w7.spend_d7), attr_revenue_d7: w7.attr_revenue_d7 == null ? null : round2(w7.attr_revenue_d7), actual_profit_d7: w7.actual_profit_d7 == null ? null : round2(w7.actual_profit_d7), pending_cost_orders_d7: Number(w7.pending_cost_orders_d7) || 0, pending_fee_orders_d7: Number(w7.pending_fee_orders_d7) || 0 }); });
+      const cutTop = cut.slice(0, 60);
+      /* stage + lever on every listed item row: two chunked reads, never one per row */
+      const listed = [].concat(cutTop, improving, push, budget), listedIds = listed.map(r => String(r.item_id));
+      const S = {};
+      for (const rs of await adtBatchRead(env, adtChunks(listedIds).map(ch => env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages) AND s.item_id IN ' + adtInList(ch)).bind(...ch)))) for (const r of rs) S[String(r.item_id)] = r;
+      const bl = await adtBandsAndLevers(env, listedIds, today, acct);
+      for (const r of listed) { const id = String(r.item_id); r.roas = ownRoas(r); r.stage = S[id] ? String(S[id].stage || '') : ''; r.stage_label = S[id] ? String(S[id].label || '') : ''; r.lever = bl.levers[id]; r.who = adtWho(r.account); r.image = r.image ? String(r.image) : null; r.window = { from, to, days }; }
+      const verdict = adtPlanVerdict2({ cut_n: cut.length, improving_n: improving.length, spend_freed_day: cut.reduce((t, r) => t + (Number(r.spend) || 0), 0) / days, withheld_unpriced: pool.withheld, from, to, label: w.label, days, listings: rows.length });
+      /* the run / stop lists are the same code the Running today page runs, first 8 rows each */
+      let runToday = { enabled: false, run_today_top: [], stop_today_top: [], counts: null };
+      if ((await adtFlag(env, 'adtool_page_runtoday')) === 'on') { const rt = await adtKvMemo(env, 'adtoolRunToday', 'p', { account: acct }, ADTOOL_KV_TTL_MS.adtoolRunToday, () => adtoolRunTodayCompute(env, acct), (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null); runToday = { enabled: true, run_today_top: rt.rows.filter(r => r.verdict === 'run').slice(0, 8), stop_today_top: rt.rows.filter(r => r.verdict === 'stop').slice(0, 8), counts: rt.counts, day: rt.day, weekday: rt.weekday, rules: rt.rules }; }
       return Object.assign({
         window: { from, to, days, key: w.key, label: w.label, includes_today: w.includes_today },
         period: w,
         fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'),
-        account: acct || 'all',
-        accounts,
-        hero: { listings: rows.length, spend: round2(tot.spend), attr_revenue: round2(tot.rev), roas: roasAll, clicks: tot.clicks, cpc: tot.clicks > 0 ? round2(tot.spend / tot.clicks) : null, cvr: tot.clicks > 0 ? round2(tot.units / tot.clicks) : null, attr_units: tot.units, orders: tot.orders, spend_day: perDay(tot.spend), attr_revenue_day: perDay(tot.rev) },
-        now: rows.length ? { keep: rows.length, roas: roasAll, spend_day: perDay(tot.spend), revenue_day: perDay(tot.rev) } : null,
-        verdict: { move: cut.length ? 'switch off ' + cut.length + ' listing' + (cut.length === 1 ? '' : 's') : (rows.length ? 'keep everything running' : 'nothing to say yet'), detail: (cut.length ? cut.length + ' listing' + (cut.length === 1 ? '' : 's') + ' lost money on ' + (cut.length === 1 ? 'its' : 'their') + ' own numbers over ' + from + ' → ' + to + '; stopping them frees £' + round2(cut.reduce((t, r) => t + Number(r.spend), 0) / days) + ' of spend a day (a row that earned over the last 7 days is marked improving — leave it running)' : (rows.length ? 'no listing with spend in the window lost money on its own priced numbers' : 'no listing has spend in the window')) + withheldTxt },
-        cut: cut.slice(0, 60),
-        cut_total: cut.length,
-        cut_withheld_unpriced: cutPool.withheld,
-        cut_frees: round2(cut.reduce((t, r) => t + Number(r.spend), 0)),
-        push,
+        account: acct || 'all', accounts,
+        hero, by_account, by_day, weekday,
+        frontier: Object.assign(frontier, { note: w.includes_today ? 'today\'s rows are sampled and provisional; an order placed today is unpriced until its fees and cost land' : null }),
+        verdict,
+        cut: cutTop, cut_total: cut.length, improving, push, budget,
+        budget_note: { days_observed: Number(capSpan && capSpan.d) || 0, capped: caps.length, earning_n: earning.length, losing_n: losing.length, verdict: !caps.length ? 'No listing hit its daily budget in the window — budget is not what is holding this fleet back.' : earning.length ? earning.length + ' of the ' + caps.length + ' listings that ran out of money were earning when they did. Those are the only ones worth more budget; the other ' + losing.length + ' were losing, so the cap saved money.' : 'All ' + caps.length + ' listings that hit their budget were losing money at the time. Raising any of them would buy more loss — the cap is doing the work.' },
+        run_today: runToday, run_today_top: runToday.run_today_top, stop_today_top: runToday.stop_today_top,
         profit_label: 'Profit (Sales Analysis law)',
-        weekday: wdRows.map(r => Object.assign({}, r, { roas: Number(r.spend) > 0 ? Math.round(Number(r.revenue) / Number(r.spend) * 100) / 100 : null, cpc: Number(r.clicks) > 0 ? round2(Number(r.spend) / Number(r.clicks)) : null, cvr: Number(r.clicks) > 0 ? round2(Number(r.attr_units) / Number(r.clicks)) : null })),
-        /* Budget: which listings actually run out of money, at what hour, and — the part that matters —
-           whether the one that ran out deserved more. The instinct is "capped means raise it"; on this
-           fleet most capped listings are losing money, so the cap is doing the owner a favour. */
-        budget: await (async () => {
-          const caps = (await env.DB.prepare(
-            'SELECT c.item_id, l.account, l.title, i.image AS image, COUNT(*) AS capped_days, MIN(c.cap_hour) AS earliest_hour, ' +
-            'ROUND(AVG(c.budget), 2) AS budget, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS rev, ' +
-            'ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders ' +
-            'FROM adtool_cap_days c JOIN adtool_listing_day d ON d.item_id = c.item_id AND d.day = c.day ' +
-            'LEFT JOIN adtool_listings l ON l.item_id = c.item_id LEFT JOIN items_api i ON i.item_id = c.item_id ' +
-            'WHERE c.day >= ?1 GROUP BY c.item_id ORDER BY SUM(d.actual_profit) DESC'
-          ).bind(from).all()).results || [];
-          const span = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d FROM adtool_cap_days WHERE day >= ?1').bind(from).first();
-          const earning = caps.filter(r => Number(r.actual_profit) > 0);
-          const losing = caps.filter(r => !(Number(r.actual_profit) > 0));
-          return {
-            days_observed: Number(span && span.d) || 0,
-            capped: caps.length,
-            deserve_more: earning,
-            cap_is_helping: losing.length,
-            losing_sample: losing.slice(0, 12),
-            verdict: !caps.length ? 'No listing has hit its daily budget in the window — budget is not what is holding this fleet back.'
-              : earning.length
-                ? earning.length + ' of the ' + caps.length + ' listings that ran out of money were earning when they did. Those are the only ones worth more budget; the other ' + losing.length + ' were losing, so the cap saved you money.'
-                : 'All ' + caps.length + ' listings that hit their budget were losing money at the time. Raising any of them would buy more loss — the cap is doing the work.'
-          };
-        })(),
         computed_at: new Date().toISOString(),
-        source: (w.includes_today ? 'adtool_listing_day + adtool_listing_today (today sampled, provisional) over ' : 'adtool_listing_day over ') + w.label.toLowerCase() + ' · eBay ads report, orders, Sales Analysis law'
+        source: (w.includes_today ? 'adtool_listing_day + adtool_listing_today (today sampled, provisional) over ' : 'adtool_listing_day over ') + w.label.toLowerCase() + ' · eBay ads report, orders, Sales Analysis law; frontier ranked by own ROAS; run / stop lists from adtoolRunToday'
       }, await adtPeriodExtras(env, w));
+    },
+  },
+  adtoolRunToday: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureAdtoolPhase9Register(ctx.env);   // seeds the page flag ON before the gate reads it
+      await adtGate(ctx, 'adtool_page_runtoday');
+      return adtoolRunTodayCompute(ctx.env, String((p && p.account) || '').trim());
     },
   },
 };
