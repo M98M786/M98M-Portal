@@ -83,12 +83,33 @@ export default {
         accountListEngine: 300000, assignableStaffEngine: 300000,
         teamPerformanceEngine: 60000, mgmtPendingEngine2: 20000,
         csPlaybook: 120000,
-        dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000 };
+        dispatchLive: 20000, csDesk: 30000, inboxPeople: 300000, accountHealth: 60000,
+        /* Advertising portal: the pure dashboards ride the same in-isolate memo the heavy portal
+           pages use — a repeat open inside the TTL costs zero D1 hops. Pages a person ACTS on
+           (Stop today, Alerts, live apply, the listing page with its action log, Data health)
+           are deliberately absent: acting then seeing a stale page reads as broken. */
+        adtoolCommand: 45000, adtoolAccounts: 180000, adtoolCategories: 180000, adtoolCases: 180000,
+        adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000,
+        adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000 };
       const rcTtl = ROUTE_CACHE_MS[action] || 0;
       const data = rcTtl
         ? await memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2))
         : await route.fn(body.payload || {}, ctx2);
       console.log('t', action, Date.now() - t0, 'ms');       // §9: server time per action, in the CF log
+      /* Field evidence for "the pages are slow": any advertising action over 1.5 s server-side
+         writes its worst time into sync_state, which the key-authed backupDump can read — so the
+         slowness can be measured from outside without a dashboard session. One extra write, and
+         only on calls that were already slow. */
+      const msTaken = Date.now() - t0;
+      if (msTaken > 1500 && action.indexOf('adtool') === 0) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adtoolSlow', ?1, ?2, datetime('now'), '') " +
+            'ON CONFLICT(job, account) DO UPDATE SET cursor = CASE WHEN CAST(?2 AS INTEGER) > CAST(cursor AS INTEGER) THEN ?2 ELSE cursor END, ' +
+            "last_ok = datetime('now')"
+          ).bind(action, String(msTaken)).run();
+        } catch (e) { /* never let telemetry fail the page */ }
+      }
       return json({ ok: true, data }, 200, cors);
     } catch (e) {
       /* daily security telemetry: every refused call ticks a counter the nightly
@@ -6014,15 +6035,29 @@ const ADTOOL_ACTIONS_P6 = {
       if (p && p.op === 'note') { const iid = String(p.item_id || '').replace(/\D/g, ''); const note = String(p.note || '').slice(0, 500); if (!iid || !note) throw new Error('SAY: item id and a note are needed'); const L = await env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first(); await env.DB.prepare("INSERT INTO adtool_actions (account, item_id, type, note, by_email, at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))").bind(L ? L.account : '', iid, String(p.type || 'decision'), note, String(u.email || '')).run(); return { ok: true }; }
       const today = ukDate(''), yday = adtAddDays(today, -1);
       const day = String((p && p.day) || today);
-      const list = (await env.DB.prepare("SELECT d.*, l.title, l.price, l.margin_before_ads, l.breakeven_roas FROM adtool_decisions d LEFT JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = ?1 AND d.decision <> 'KEEP' ORDER BY CASE d.decision WHEN 'STOP' THEN 0 WHEN 'REDUCE' THEN 1 ELSE 2 END, d.confidence, d.expected_value").bind(day).all()).results || [];
-      const counts = (await env.DB.prepare('SELECT batch, decision, confidence, COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 GROUP BY batch, decision, confidence').bind(day).all()).results || [];
-      const ySc = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE day = ?1 AND outcome_score IS NOT NULL').bind(yday).first();
-      const rules = (await env.DB.prepare('SELECT rule_id, decisions, right_n, score, trusted, scored_day FROM adtool_rule_scores WHERE scored_day = (SELECT MAX(scored_day) FROM adtool_rule_scores) ORDER BY rule_id').all()).results || [];
-      const carry = (await env.DB.prepare('SELECT rule_id, run_day, selected, tested, rate, base_rate, trusted, spend FROM adtool_carry WHERE run_day = (SELECT MAX(run_day) FROM adtool_carry) ORDER BY rule_id').all()).results || [];
-      const days = (await env.DB.prepare('SELECT day, COUNT(*) AS n, SUM(CASE WHEN outcome_score IS NOT NULL THEN 1 ELSE 0 END) AS scored, SUM(outcome_score) AS right_n FROM adtool_decisions GROUP BY day ORDER BY day DESC LIMIT 30').all()).results || [];
-      const acc = await env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' ORDER BY ran_at DESC LIMIT 1").first();
-      const live = (await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live%'").all()).results || [];
-      const log = (await env.DB.prepare('SELECT a.account, a.item_id, a.type, a.note, a.by_email, a.at, l.title FROM adtool_actions a LEFT JOIN adtool_listings l ON l.item_id = a.item_id ORDER BY a.at DESC LIMIT 60').all()).results || [];
+      /* One round trip instead of nine. Every read below is independent of the others, and each
+         used to travel to D1 on its own — the page paid ~10 sequential network hops before it could
+         draw, which is most of why it felt slow, and why the note button's call sat behind them. */
+      const B = await env.DB.batch([
+        env.DB.prepare("SELECT d.*, l.title, l.price, l.margin_before_ads, l.breakeven_roas FROM adtool_decisions d LEFT JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = ?1 AND d.decision <> 'KEEP' ORDER BY CASE d.decision WHEN 'STOP' THEN 0 WHEN 'REDUCE' THEN 1 ELSE 2 END, d.confidence, d.expected_value").bind(day),
+        env.DB.prepare('SELECT batch, decision, confidence, COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 GROUP BY batch, decision, confidence').bind(day),
+        env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE day = ?1 AND outcome_score IS NOT NULL').bind(yday),
+        env.DB.prepare('SELECT rule_id, decisions, right_n, score, trusted, scored_day FROM adtool_rule_scores WHERE scored_day = (SELECT MAX(scored_day) FROM adtool_rule_scores) ORDER BY rule_id'),
+        env.DB.prepare('SELECT rule_id, run_day, selected, tested, rate, base_rate, trusted, spend FROM adtool_carry WHERE run_day = (SELECT MAX(run_day) FROM adtool_carry) ORDER BY rule_id'),
+        env.DB.prepare('SELECT day, COUNT(*) AS n, SUM(CASE WHEN outcome_score IS NOT NULL THEN 1 ELSE 0 END) AS scored, SUM(outcome_score) AS right_n FROM adtool_decisions GROUP BY day ORDER BY day DESC LIMIT 30'),
+        env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' ORDER BY ran_at DESC LIMIT 1"),
+        env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live%'"),
+        env.DB.prepare('SELECT a.account, a.item_id, a.type, a.note, a.by_email, a.at, l.title FROM adtool_actions a LEFT JOIN adtool_listings l ON l.item_id = a.item_id ORDER BY a.at DESC LIMIT 60')
+      ]);
+      const list = B[0].results || [];
+      const counts = B[1].results || [];
+      const ySc = (B[2].results || [])[0] || null;
+      const rules = B[3].results || [];
+      const carry = B[4].results || [];
+      const days = B[5].results || [];
+      const acc = (B[6].results || [])[0] || null;
+      const live = B[7].results || [];
+      const log = B[8].results || [];
       return { day, mode: 'shadow', decisions: list.map(d => { let r = [], i = {}; try { r = JSON.parse(d.rules_json); } catch (e) {} try { i = JSON.parse(d.inputs_json); } catch (e) {} return Object.assign(d, { rules: r, inputs: i, rules_json: undefined, inputs_json: undefined }); }), counts, yesterday_score: ySc, rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages' };
     },
   },
