@@ -395,17 +395,37 @@
     });
   }
 
-  /* Keeps an idle screen honest as a checkpoint falls due; never refreshes over typed input. */
+  /* Keeps an idle screen honest as a checkpoint falls due; never refreshes over typed input.
+     26 Sept: this ticker used to swallow EVERY error and keep going — and, uniquely, it had no
+     document.hidden guard (every other poller in the portal has one). A backgrounded My-reports
+     tab whose session had lapsed therefore fired one doomed 'auth' call a minute, all night:
+     22:08→06:07 in the activity log, ~480 wasted Apps Script calls that also buried the real
+     staff lines the nightly audit reads. An expired session is permanent until re-login, so the
+     ticker now stops on it and hands over to the shell's self-heal; a hidden tab simply waits. */
   function startTicker() {
     if (ticker) { clearInterval(ticker); }
+    var fails = 0;
     ticker = setInterval(function () {
       if (!$('rpRail')) { clearInterval(ticker); ticker = null; return; }
-      if (busy) { return; }
+      if (busy || document.hidden) { return; }
       api('myCheckpoints').then(function (d) {
+        fails = 0;
         if (!$('rpRail') || busy) { return; }
         if (touched(d || {}, pickTarget(d || {}))) { return; }
         paint(d || {});
-      }).catch(function () {});
+      }).catch(function (e) {
+        var m = String((e && e.message) || '');
+        /* a refusal is an answer, not an outage: stop asking and say so */
+        if (m === 'auth') {
+          clearInterval(ticker); ticker = null;
+          var form = $('rpForm');
+          if (form) { form.innerHTML = '<div class="rp-note">Your sign-in expired — please sign in again.</div>'; }
+          if (typeof authSelfHeal === 'function') { try { authSelfHeal(); } catch (x) {} }
+          return;
+        }
+        /* anything else that fails ten ticks running is not going to fix itself on the eleventh */
+        if (++fails >= 10) { clearInterval(ticker); ticker = null; }
+      });
     }, TICK_MS);
   }
 

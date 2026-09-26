@@ -584,13 +584,25 @@ function apiSend(action, payload, timeoutMs){
           function(e){ clearTimeout(t); apiFinished(); throw (e && e.name === 'AbortError' ? new Error('the sheet backend is overloaded right now — it will retry on the next refresh') : e); });
 }
 
+/* 26 Sept: the ENGINE path has always self-healed an expired session (engineApi: "if(j.error==='auth'
+   && STATE.session){ authSelfHeal(); }"), but the SHEET path never did — it just rejected. Any action
+   pinned to Apps Script (ENGINE_MISSING, or simply not engine-backed) therefore kept a dead session
+   alive on screen: an idle My-reports tab spent 22:08→06:07 firing one 'auth' failure a minute, 8
+   hours of wasted backend and a rail frozen on stale slots with nothing telling the person why.
+   Both transports now end an expired session the same way; authSelfHeal is capped at once per
+   10 minutes, so this can never become a reload loop. */
+function sheetReject(c, msg){
+  if(String(msg||'') === 'auth' && STATE.session){ try{ authSelfHeal(); }catch(e){} }
+  c.reject(new Error(msg || 'request failed'));
+}
+
 function apiFlush(){
   var batch = apiQueue; apiQueue = []; apiTimer = null;
   if(!batch.length) return;
   if(batch.length === 1){
     var one = batch[0];
     apiSend(one.action, one.payload)
-      .then(function(j){ if(!j.ok){ one.reject(new Error(j.error||'request failed')); } else { one.resolve(j.data); } })
+      .then(function(j){ if(!j.ok){ sheetReject(one, j.error); } else { one.resolve(j.data); } })
       .catch(function(e){ one.reject(e); });
     return;
   }
@@ -604,7 +616,7 @@ function apiFlush(){
       batch.forEach(function(c, i){
         var r = results[i];
         if(!r){ c.reject(new Error('request failed')); }
-        else if(!r.ok){ c.reject(new Error(r.error||'request failed')); }
+        else if(!r.ok){ sheetReject(c, r.error); }
         else { c.resolve(r.data); }
       });
     })
@@ -619,7 +631,7 @@ function apiRetrySingly(batch){
       return;
     }
     apiSend(c.action, c.payload)
-      .then(function(j){ if(!j.ok){ c.reject(new Error(j.error||'request failed')); } else { c.resolve(j.data); } })
+      .then(function(j){ if(!j.ok){ sheetReject(c, j.error); } else { c.resolve(j.data); } })
       .catch(function(e){ c.reject(e); });
   });
 }
