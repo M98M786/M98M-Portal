@@ -2,10 +2,14 @@
  * (spec §7 in spirit, owner 19 Sep: "i need exactly what strategy required for what time, what
  * actions needs to be taken on which listing ... you are just presenting data and doing no data
  * analysis".) Every other page reports. This one decides, and shows the arithmetic it decided on.
- * Galaxy tokens, gold the only accent, #e0563f for a loss. Charts use the portal's own value-dot
- * kit so they read like every other graph in the building. */
+ * 27 Sep (owner's big-update brief, Phase 1A): the curve, "Running now / Best it can be / At 6× /
+ * Difference / What each target costs / Which day to change" are gone — they stood on est. ad profit,
+ * which overstated every account by half or more. Until Phase 2 rebuilds the frontier this page is
+ * an honest hero (spend, attributed sales, ROAS over the stated window), the cut list, the push list
+ * and the budget panel. Profit appears only per item, under the Sales Analysis law.
+ * Galaxy tokens, gold the only accent, #e0563f for a loss. */
 (function () {
-  var GOLD = '#f2b035', GOLD_A = '#ffd27a', LOSS = '#e0563f', INK = '#1c1200';
+  var LOSS = '#e0563f';
 
   VIEW_CSS.push([
     '.wr-hero{background:linear-gradient(180deg,rgba(242,176,53,.16),rgba(242,176,53,.04));border:1px solid var(--gold-line);border-radius:14px;padding:18px 20px;margin-bottom:14px}',
@@ -13,7 +17,6 @@
     '.wr-hero .wr-sub{color:var(--text-2);font-size:13px;line-height:1.55}',
     '.wr-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:14px 0}',
     '.wr-k{background:linear-gradient(var(--panel),var(--panel)),var(--bg0);border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px}',
-    '.wr-k.on{border-color:var(--gold-b);box-shadow:0 0 0 1px rgba(242,176,53,.35)}',
     '.wr-k .l{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);font-weight:700}',
     '.wr-k .v{font-size:23px;font-weight:800;margin-top:3px;color:var(--text)}',
     '.wr-k .v.pos{color:var(--gold-a)} .wr-k .v.neg{color:' + LOSS + '}',
@@ -23,7 +26,7 @@
     '.wr-panel .wr-note{color:var(--text-2);font-size:12px;margin-bottom:10px;line-height:1.5}',
     '.wr-tbl{width:100%;border-collapse:collapse;font-size:12px}',
     '.wr-tbl th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--gold-line)}',
-    '.wr-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text)}',
+    '.wr-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
     '.wr-tbl td.r,.wr-tbl th.r{text-align:right}',
     '.wr-tbl tr.pick td{background:rgba(242,176,53,.1)}',
     '.wr-tbl tr.pick td:first-child{box-shadow:inset 3px 0 0 var(--gold-b)}',
@@ -31,16 +34,18 @@
     '.wr-tag{display:inline-block;font-size:9px;letter-spacing:.07em;text-transform:uppercase;font-weight:800;padding:2px 7px;border-radius:99px;margin-left:6px}',
     '.wr-tag.cut{background:rgba(224,86,63,.18);color:#ffb3a6}',
     '.wr-tag.push{background:rgba(242,176,53,.2);color:var(--gold-a)}',
-    '.wr-chart{width:100%;height:auto;display:block;margin-top:6px}',
+    '.wr-tag.keep{background:rgba(255,255,255,.08);color:var(--text-2)}',
+    '.wr-scroll{overflow-x:auto}',
     '.wr-empty{color:var(--text-3);font-size:12px;padding:10px 0}',
     '.wr-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
   ].join(''));
 
   var WR = { data: null, account: '' };
 
-  function gbp(n) { var v = Number(n) || 0; return (v < 0 ? '-£' : '£') + Math.abs(v).toFixed(2); }
-  function gbp0(n) { var v = Number(n) || 0; return (v < 0 ? '-£' : '£') + Math.round(Math.abs(v)); }
-  var DOW = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  function gbp(n) { if (n == null || n === '' || isNaN(Number(n))) return '—'; var v = Number(n); return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function gbp0(n) { if (n == null || n === '' || isNaN(Number(n))) return '—'; var v = Number(n); return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)); }
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
 
   VIEWS.adtoolPlan = {
     label: 'War room (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
@@ -60,161 +65,78 @@
     }
   };
 
+  /* The window the whole page stands on. The engine names it; the page never assumes 30. */
+  function windowText(D) {
+    var w = D.window || {};
+    var days = num(w.days);
+    return 'last ' + (days != null ? days : 30) + ' days to yesterday' + (w.from && w.to ? ' (' + esc(w.from) + ' → ' + esc(w.to) + ')' : '');
+  }
+  function windowDays(D) { var d = num(D.window && D.window.days); return d && d > 0 ? d : 30; }
+
+  /* Item profit under the law. Reads only the contract keys, with the d30/d7 pair when the engine
+     sends it and the plain figure otherwise; never a key from the estimated-profit era. */
+  function lawD30(r) { return r.actual_profit_d30 !== undefined ? num(r.actual_profit_d30) : num(r.actual_profit); }
+  function lawD7(r) { return r.actual_profit_d7 !== undefined ? num(r.actual_profit_d7) : null; }
+  function hasD7(rows) { return rows.some(function (r) { return r && r.actual_profit_d7 !== undefined; }); }
+  function hasStage(rows) { return rows.some(function (r) { return r && r.stage; }); }
+  function perDay(r, key, days) {
+    if (r[key + '_day'] !== undefined) return num(r[key + '_day']);
+    var v = num(r[key]); return v == null ? null : Math.round(v / days * 100) / 100;
+  }
+  function ownRoas(r) {
+    if (r.roas != null && r.roas !== '') return num(r.roas);
+    var s = num(r.spend), v = num(r.rev != null ? r.rev : r.attr_revenue);
+    return s && s > 0 && v != null ? Math.round(v / s * 100) / 100 : null;
+  }
+  function pending(r) { return [num(r.pending_cost_orders) || 0, num(r.pending_fee_orders) || 0]; }
+
   function draw() {
     var D = WR.data, h = '';
-    if (!D || !D.now) { $('wrBody').innerHTML = '<div class="wr-empty">No listing has ad spend in the last 30 days.</div>'; return; }
-    var now = D.now, peak = D.peak, v = D.verdict || {};
-    var six = (D.targets || []).filter(function (t) { return t.target === 6; })[0];
-    var gain = Number(v.gain) || 0;
+    if (!D) { $('wrBody').innerHTML = '<div class="wr-empty">No listing has ad spend in the window.</div>'; return; }
 
-    /* ---- the order of the day, in words, before any chart ---- */
-    h += '<div class="wr-hero"><h2>' + esc(String(v.move || '').replace(/^./, function (c) { return c.toUpperCase(); })) + '</h2>' +
-      '<div class="wr-sub">' + esc(v.detail || '') +
-      (gain > 0 ? ' <b style="color:var(--gold-a)">That is ' + gbp(gain) + ' a day, about ' + gbp0(gain * 30) + ' a month.</b>' : '') +
-      '<div class="wr-sub" style="margin-top:8px;font-size:12px">Cutting a listing does not take its sales to zero — some would have come without the ad. ' +
-      'So this is the floor on what switching them off is worth, not the ceiling.</div>' +
-      '</div></div>';
-
-    /* ---- where you are, where the money peaks, and what the 6x target really costs ---- */
-    h += '<div class="wr-kpis">' +
-      kpi('Running now', gbp0(now.profit_day) + '/day', now.keep + ' listings · ' + gbp0(now.spend_day) + ' spend · ' + now.roas + '×', 'pos') +
-      kpi('Best it can be', gbp0(peak.profit_day) + '/day', peak.keep + ' listings · ' + gbp0(peak.spend_day) + ' spend · ' + peak.roas + '×', 'pos', true) +
-      (six ? kpi('At 6× return', gbp0(six.profit_day) + '/day', six.keep + ' listings · ' + gbp0(six.spend_day) + ' spend · ' + gbp0(six.revenue_day) + ' sales',
-        (Number(six.profit_day) < Number(peak.profit_day) ? 'neg' : 'pos')) : '') +
-      kpi('Difference', (Number(peak.profit_day) - Number(now.profit_day) >= 0 ? '+' : '') + gbp0(peak.profit_day - now.profit_day) + '/day',
-        'moving from where you are to the peak', 'pos') +
-      '</div>';
-
-    /* ---- THE graph: spend against profit, with the turn marked ---- */
-    h += '<div class="wr-panel"><h3>How far it is worth spending' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Every listing ranked by its own return, then added one at a time. The line climbs while each ' +
-      'new listing still earns, and turns down once it costs more than it brings. <b>The gold dot is the top of the hill.</b></div>' +
-      curveChart(D) + '</div>';
-
-    /* ---- the same thing as a table, because a number is easier to argue with ---- */
-    h += '<div class="wr-panel"><h3>What each target costs you</h3>' +
-      '<div class="wr-note">The furthest you can spend and still hold each return. Profit is what you keep, not what you sell.</div>' +
-      '<table class="wr-tbl"><thead><tr><th>Target</th><th class="r">Listings</th><th class="r">Spend / day</th>' +
-      '<th class="r">Sales / day</th><th class="r">Profit / day</th><th class="r">vs the peak</th></tr></thead><tbody>' +
-      [{ target: 'Everything on', p: now, mark: '' }]
-        .concat((D.targets || []).map(function (t) { return { target: t.target + '× or better', p: t, mark: '' }; }))
-        .map(function (row) {
-          var p = row.p, d = Number(p.profit_day) - Number(peak.profit_day);
-          var isPeak = p.keep === peak.keep;
-          return '<tr class="' + (isPeak ? 'pick' : '') + '"><td>' + esc(row.target) + (isPeak ? '<span class="wr-tag push">best</span>' : '') + '</td>' +
-            '<td class="r">' + p.keep + '</td><td class="r">' + gbp0(p.spend_day) + '</td><td class="r">' + gbp0(p.revenue_day) + '</td>' +
-            '<td class="r ' + (Number(p.profit_day) >= 0 ? 'wr-pos' : 'wr-neg') + '">' + gbp0(p.profit_day) + '</td>' +
-            '<td class="r ' + (d < 0 ? 'wr-neg' : '') + '">' + (d >= 0 ? '—' : gbp0(d)) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-
-    /* ---- the week, and whether any day is genuinely worth changing ---- */
-    h += weekPanel(D);
-
-    /* ---- the actual list of things to switch off ---- */
-    /* budget: the lever that actually steers most of this fleet */
+    h += heroPanel(D);
     h += budgetPanel(D);
-
     h += cutPanel(D);
-
-    /* ---- and the ones worth more money ---- */
     h += pushPanel(D);
 
-    h += '<div class="wr-note" style="margin-top:6px">' + esc(D.source) + ' · ' + esc(D.window.from) + ' to ' + esc(D.window.to) +
-      ' (' + D.window.days + ' days) · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC</div>';
+    h += '<div class="wr-note" style="margin-top:6px">' + esc(D.source || '') + (D.window ? ' · ' + esc(D.window.from || '') + ' to ' + esc(D.window.to || '') +
+      ' (' + (num(D.window.days) != null ? D.window.days : '?') + ' days)' : '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
 
     $('wrBody').innerHTML = h;
   }
 
-  function kpi(label, value, sub, cls, on) {
-    return '<div class="wr-k' + (on ? ' on' : '') + '"><div class="l">' + esc(label) + '</div>' +
+  function kpi(label, value, sub, cls) {
+    return '<div class="wr-k"><div class="l">' + esc(label) + '</div>' +
       '<div class="v ' + (cls || '') + '">' + esc(value) + '</div><div class="s">' + esc(sub) + '</div></div>';
   }
   function src(t) { return '<span class="wr-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
 
-  /* The curve: x is cumulative spend a day, y is cumulative profit a day. Drawn with the portal's
-     own value-dot kit, so it reads like the graphs on Business overview rather than a new dialect. */
-  function curveChart(D) {
-    var pts = (D.curve_points || []).slice();
-    if (!pts.length) {
-      /* rebuild a readable sample from the targets + the two anchors we always have */
-      var anchors = [];
-      (D.targets || []).forEach(function (t) { anchors.push({ keep: t.keep, x: Number(t.spend_day), y: Number(t.profit_day), tag: t.target + '×' }); });
-      anchors.push({ keep: D.peak.keep, x: Number(D.peak.spend_day), y: Number(D.peak.profit_day), tag: 'peak' });
-      anchors.push({ keep: D.now.keep, x: Number(D.now.spend_day), y: Number(D.now.profit_day), tag: 'now' });
-      pts = anchors.sort(function (a, b) { return a.x - b.x; });
+  /* Temporary honest hero until Phase 2 brings the frontier: what the fleet spent and got back
+     over the stated window. Reads `hero` when the engine sends one, else the old `now` point's
+     spend/revenue/listing fields (never its profit), else adds up the lists it has. */
+  function heroPanel(D) {
+    var H = D.hero || D.summary || null, N = D.now || null, days = windowDays(D);
+    var spendDay = null, salesDay = null, roas = null, listings = null;
+    if (H) { spendDay = num(H.spend_day); salesDay = num(H.attr_revenue_day != null ? H.attr_revenue_day : H.revenue_day); roas = num(H.roas); listings = num(H.listings != null ? H.listings : H.keep); }
+    else if (N) { spendDay = num(N.spend_day); salesDay = num(N.revenue_day); roas = num(N.roas); listings = num(N.keep); }
+    if (spendDay == null && (D.cut || D.push)) {
+      var rows = (D.cut || []).concat(D.push || []), s = 0, v = 0;
+      rows.forEach(function (r) { s += num(r.spend) || 0; v += num(r.rev != null ? r.rev : r.attr_revenue) || 0; });
+      if (s > 0) { spendDay = Math.round(s / days * 100) / 100; salesDay = Math.round(v / days * 100) / 100; roas = Math.round(v / s * 100) / 100; listings = rows.length; }
     }
-    if (pts.length < 2) return '<div class="wr-empty">Not enough points to draw the curve yet.</div>';
-    var W = 980, H = 300, L = 54, R = 18, T = 18, B = 34;
-    var xs = pts.map(function (p) { return p.x; }), ys = pts.map(function (p) { return p.y; });
-    var x0 = 0, x1 = Math.max.apply(null, xs) * 1.04;
-    var y0 = Math.min(0, Math.min.apply(null, ys)), y1 = Math.max.apply(null, ys) * 1.14;
-    var px = function (x) { return L + (x - x0) / (x1 - x0 || 1) * (W - L - R); };
-    var py = function (y) { return H - B - (y - y0) / (y1 - y0 || 1) * (H - T - B); };
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="wr-chart" preserveAspectRatio="none" role="img">';
-    /* gridlines + y labels in money */
-    for (var g = 0; g <= 4; g++) {
-      var yv = y0 + (y1 - y0) * g / 4, yy = py(yv);
-      s += '<line x1="' + L + '" y1="' + yy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + yy.toFixed(1) +
-        '" stroke="rgba(255,255,255,.07)" stroke-width="1"/>' +
-        '<text x="' + (L - 8) + '" y="' + (yy + 3.5).toFixed(1) + '" text-anchor="end" font-size="10" fill="#66707c">' + chartMoney(yv) + '</text>';
-    }
-    /* x labels: spend a day */
-    for (var k = 0; k <= 4; k++) {
-      var xv = x0 + (x1 - x0) * k / 4;
-      s += '<text x="' + px(xv).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#66707c">' + chartMoney(xv) + '</text>';
-    }
-    s += '<text x="' + (L - 8) + '" y="' + (T + 2) + '" text-anchor="end" font-size="9" fill="#66707c">profit/day</text>' +
-      '<text x="' + (W - R) + '" y="' + (H - 12) + '" text-anchor="end" font-size="9" fill="#66707c">ad spend/day →</text>';
-    /* the line itself, with a money pill on the marked points only */
-    var line = pts.map(function (p) {
-      return { x: px(p.x), y: py(p.y), label: p.tag ? chartMoney(p.y) : '', title: p.tag ? (p.tag + ' · ' + p.keep + ' listings · ' + gbp0(p.x) + ' spend → ' + gbp0(p.y) + ' profit') : '' };
-    });
-    s += chartLineSeries(line, { color: GOLD, ink: INK, minGap: 64, fontSize: 10, width: 2.6 });
-    /* the peak, unmissable */
-    var pk = { x: px(Number(D.peak.spend_day)), y: py(Number(D.peak.profit_day)) };
-    s += '<circle cx="' + pk.x.toFixed(1) + '" cy="' + pk.y.toFixed(1) + '" r="6.5" fill="' + GOLD_A + '" stroke="' + INK + '" stroke-width="1.5"/>';
-    s += '<line x1="' + pk.x.toFixed(1) + '" y1="' + (T) + '" x2="' + pk.x.toFixed(1) + '" y2="' + (H - B) +
-      '" stroke="rgba(242,176,53,.45)" stroke-dasharray="4 4" stroke-width="1"/>';
-    /* where you actually are today */
-    var nx = px(Number(D.now.spend_day)), ny = py(Number(D.now.profit_day));
-    s += '<circle cx="' + nx.toFixed(1) + '" cy="' + ny.toFixed(1) + '" r="5" fill="none" stroke="' + LOSS + '" stroke-width="2"/>' +
-      '<text x="' + nx.toFixed(1) + '" y="' + (ny - 12).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#ffb3a6">you are here</text>';
-    s += '</svg>';
-    return s;
-  }
-
-  function weekPanel(D) {
-    var wd = D.weekday || [], wv = D.weekday_verdict;
-    if (!wd.length) return '';
-    var head = wv && wv.weak_day
-      ? '<b style="color:#ffb3a6">' + esc(DOW[wv.worst.weekday]) + ' is costing you ' + gbp(wv.shortfall) + ' against an average day.</b> ' +
-        'Same spend as the rest of the week, ' + wv.worst.roas + '× against the others. Cut its budget, or move that money to ' + esc(DOW[wv.best.weekday]) + '.'
-      : 'No day is far enough from the others to be worth changing on its own.';
-    var W = 980, H = 190, L = 54, R = 18, T = 16, B = 30;
-    var ys = wd.map(function (r) { return Number(r.profit) || 0; });
-    var y0 = Math.min(0, Math.min.apply(null, ys)), y1 = Math.max.apply(null, ys) * 1.2 || 1;
-    var bw = (W - L - R) / wd.length;
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="wr-chart" preserveAspectRatio="none" role="img">';
-    var py = function (y) { return H - B - (y - y0) / (y1 - y0 || 1) * (H - T - B); };
-    for (var g = 0; g <= 3; g++) {
-      var yv = y0 + (y1 - y0) * g / 3, yy = py(yv);
-      s += '<line x1="' + L + '" y1="' + yy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + yy.toFixed(1) + '" stroke="rgba(255,255,255,.07)"/>' +
-        '<text x="' + (L - 8) + '" y="' + (yy + 3.5).toFixed(1) + '" text-anchor="end" font-size="10" fill="#66707c">' + chartMoney(yv) + '</text>';
-    }
-    wd.forEach(function (r, i) {
-      var isWeak = wv && wv.weak_day && r.weekday === wv.worst.weekday;
-      var p = Number(r.profit) || 0, x = L + i * bw + bw * 0.18, w = bw * 0.64;
-      var yTop = py(Math.max(p, 0)), yBase = py(0);
-      s += '<rect x="' + x.toFixed(1) + '" y="' + Math.min(yTop, yBase).toFixed(1) + '" width="' + w.toFixed(1) +
-        '" height="' + Math.max(2, Math.abs(yBase - yTop)).toFixed(1) + '" rx="3" fill="' + (isWeak ? LOSS : GOLD) + '"/>' +
-        '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="' +
-          (isWeak ? '#ffb3a6' : '#9aa4b1') + '" font-weight="' + (isWeak ? '800' : '600') + '">' + esc(DOW[r.weekday].slice(0, 3)) + '</text>';
-      s += chartValueDots([{ x: x + w / 2, y: Math.min(yTop, yBase) - 11, label: chartMoney(p), title: DOW[r.weekday] + ' · ' + gbp(p) + ' profit on ' + gbp(r.spend) + ' at ' + r.roas + '×' }],
-        { color: isWeak ? LOSS : GOLD, ink: isWeak ? '#fff' : INK, fontSize: 10, minGap: 0 });
-    });
-    s += '</svg>';
-    return '<div class="wr-panel"><h3>Which day to change' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">' + head + '</div>' + s + '</div>';
+    if (roas == null && spendDay && salesDay != null) roas = Math.round(salesDay / spendDay * 100) / 100;
+    var acct = D.account && D.account !== 'all' ? D.account : 'all accounts';
+    var h = '<div class="wr-hero"><h2>Advertising, ' + windowText(D) + '</h2>' +
+      '<div class="wr-sub">' + esc(acct) + ' · spend and attributed sales per report day, ROAS = attributed revenue ÷ spend. ' +
+      'The old profit curve is gone: it stood on est. ad profit, which the Sales Analysis check showed overstating every account. ' +
+      'Profit on this page is per listing only, under the Sales Analysis law; the frontier that replaces the curve lands with the next phase.</div>' +
+      '<div class="wr-kpis">' +
+      kpi('Spend / day', gbp0(spendDay), spendDay != null ? 'about ' + gbp0(spendDay * days) + ' over the window' : 'no report row in the window') +
+      kpi('Attributed sales / day', gbp0(salesDay), 'revenue eBay credits to the ads', 'pos') +
+      kpi('ROAS', roasTxt(roas), 'attributed revenue ÷ spend', roas != null && roas < 1 ? 'neg' : (roas != null ? 'pos' : '')) +
+      kpi('Listings advertised', listings != null ? String(listings) : '—', 'with spend in the window') +
+      '</div></div>';
+    return h;
   }
 
   /* Cost-per-click campaigns — most of the fleet — are steered by daily budget, not by a bid; eBay
@@ -224,69 +146,74 @@
     var B = D.budget; if (!B) return '';
     var earn = B.deserve_more || [], lose = B.losing_sample || [];
     var out = '<div class="wr-panel"><h3>Budget — who actually ran out of money' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note"><b>' + esc(B.verdict) + '</b></div>';
+      '<div class="wr-note"><b>' + esc(B.verdict || '') + '</b></div>';
     if (!B.capped) return out + '<div class="wr-empty">Nothing hit its cap in the window.</div></div>';
-    out += '<div class="wr-note">Seen over ' + B.days_observed + ' day' + (B.days_observed === 1 ? '' : 's') +
-      ' of cap data, so read the lists as a direction rather than a verdict.</div>';
+    out += '<div class="wr-note">Seen over ' + (B.days_observed || 0) + ' day' + (B.days_observed === 1 ? '' : 's') +
+      ' of cap data, so read the lists as a direction rather than a verdict. Profit is the listing\'s own, under the Sales Analysis law.</div>';
+    var row = function (r, pick) {
+      var p = pending(r);
+      return '<tr' + (pick ? ' class="pick"' : '') + '><td>' + adtProductCell(r) + '</td>' +
+        '<td class="r">' + (num(r.budget) != null ? gbp(r.budget) : '—') + '</td>' +
+        '<td class="r">' + (num(r.earliest_hour) === 0 ? 'straight away' : (num(r.earliest_hour) != null ? String(r.earliest_hour) + ':00' : '—')) + '</td>' +
+        '<td class="r">' + (r.capped_days != null ? esc(String(r.capped_days)) : '—') + '</td>' +
+        '<td class="r">' + gbp(r.spend) + '</td>' +
+        '<td class="r">' + adtProfitCell(lawD30(r), p[0], p[1]) + '</td></tr>';
+    };
     if (earn.length) {
-      out += '<table class="wr-tbl"><thead><tr><th>Raise these</th><th>Account</th><th class="r">Budget</th>' +
-        '<th class="r">Ran out at</th><th class="r">Days</th><th class="r">Profit</th></tr></thead><tbody>' +
-        earn.map(function (r) {
-          return '<tr class="pick"><td>' + esc(r.item_id) + ' ' + esc(String(r.title || '').slice(0, 34)) + '</td>' +
-            '<td>' + esc(r.account || '') + '</td><td class="r">£' + (Number(r.budget) || 0).toFixed(2) + '</td>' +
-            '<td class="r">' + (Number(r.earliest_hour) === 0 ? 'straight away' : String(r.earliest_hour) + ':00') + '</td>' +
-            '<td class="r">' + r.capped_days + '</td><td class="r wr-pos">' + gbp(r.profit) + '</td></tr>';
-        }).join('') + '</tbody></table>';
+      out += '<div class="wr-scroll"><table class="wr-tbl"><thead><tr><th>Raise these</th><th class="r">Budget</th>' +
+        '<th class="r">Ran out at</th><th class="r">Days</th><th class="r">Spend</th><th class="r">Profit (Sales Analysis law)</th></tr></thead><tbody>' +
+        earn.map(function (r) { return row(r, true); }).join('') + '</tbody></table></div>';
     }
     if (lose.length) {
       out += '<div class="wr-note" style="margin-top:12px">These also ran out, and were losing money when they did. ' +
         'Leave them capped — most are on the switch-off list below.</div>' +
-        '<table class="wr-tbl"><thead><tr><th>Leave capped</th><th class="r">Budget</th><th class="r">Ran out at</th>' +
-        '<th class="r">Spend</th><th class="r">Profit</th></tr></thead><tbody>' +
-        lose.map(function (r) {
-          return '<tr><td>' + esc(r.item_id) + ' ' + esc(String(r.title || '').slice(0, 34)) + '</td>' +
-            '<td class="r">£' + (Number(r.budget) || 0).toFixed(2) + '</td>' +
-            '<td class="r">' + (Number(r.earliest_hour) === 0 ? 'straight away' : String(r.earliest_hour) + ':00') + '</td>' +
-            '<td class="r">' + gbp(r.spend) + '</td><td class="r wr-neg">' + gbp(r.profit) + '</td></tr>';
-        }).join('') + '</tbody></table>';
+        '<div class="wr-scroll"><table class="wr-tbl"><thead><tr><th>Leave capped</th><th class="r">Budget</th><th class="r">Ran out at</th>' +
+        '<th class="r">Days</th><th class="r">Spend</th><th class="r">Profit (Sales Analysis law)</th></tr></thead><tbody>' +
+        lose.map(function (r) { return row(r, false); }).join('') + '</tbody></table></div>';
     }
     return out + '</div>';
   }
 
+  function listHead(rows, first) {
+    return '<thead><tr><th>' + first + '</th><th class="r">Spend / day</th><th class="r">Attributed sales / day</th>' +
+      '<th class="r">Own ROAS</th><th class="r">Break-even</th><th class="r">Profit (Sales Analysis law) · 30 d</th>' +
+      (hasD7(rows) ? '<th class="r">· 7 d</th>' : '') + (hasStage(rows) ? '<th>Stage</th>' : '') + '</tr></thead>';
+  }
+  function listRow(rows, r, days, tag) {
+    var p = pending(r), d30 = lawD30(r), d7 = lawD7(r), be = num(r.breakeven), ro = ownRoas(r);
+    /* 30-day bad but 7-day good is a listing on the mend, not one to switch off (owner, 27 Sep) */
+    var improving = tag === 'cut' && d30 != null && d30 < 0 && d7 != null && d7 >= 0 && (num(r.spend_d7) == null || num(r.spend_d7) >= 5);
+    return '<tr><td>' + adtProductCell(r) + (improving ? '<span class="wr-tag keep">improving — keep</span>' : '') + '</td>' +
+      '<td class="r">' + gbp(perDay(r, 'spend', days)) + '</td>' +
+      '<td class="r">' + gbp(perDay(r, r.rev != null ? 'rev' : 'attr_revenue', days)) + '</td>' +
+      '<td class="r ' + (ro != null && be != null ? (ro < be ? 'wr-neg' : 'wr-pos') : '') + '">' + roasTxt(ro) + '</td>' +
+      '<td class="r">' + (be ? be.toFixed(2) + '×' : '—') + '</td>' +
+      '<td class="r">' + adtProfitCell(d30, p[0], p[1]) + '</td>' +
+      (hasD7(rows) ? '<td class="r">' + adtProfitCell(d7, num(r.pending_cost_orders_d7) || 0, num(r.pending_fee_orders_d7) || 0) + '</td>' : '') +
+      (hasStage(rows) ? '<td>' + esc(r.stage || '—') + '</td>' : '') + '</tr>';
+  }
+
   function cutPanel(D) {
-    var cut = D.cut || [];
+    var cut = D.cut || [], days = windowDays(D);
     if (!cut.length) return '<div class="wr-panel"><h3>Switch off</h3><div class="wr-note">Nothing is losing enough to be worth switching off.</div></div>';
-    return '<div class="wr-panel"><h3>Switch off — ' + D.cut_total + ' listings' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Worst first. Together they spend <b>' + gbp(D.cut_frees) + '</b> over 30 days and return <b class="' +
-      (Number(D.cut_costs_now) < 0 ? 'wr-neg' : '') + '">' + gbp(D.cut_costs_now) + '</b>. ' +
-      'Turning them off is the whole of the gain above. Showing the ' + Math.min(60, cut.length) + ' worst.</div>' +
-      '<table class="wr-tbl"><thead><tr><th>Item</th><th>Account</th><th class="r">Spend 30 d</th><th class="r">Sales</th>' +
-      '<th class="r">ROAS</th><th class="r">Break-even</th><th class="r">Profit</th></tr></thead><tbody>' +
-      cut.map(function (r) {
-        return '<tr><td><a href="#adtoolProduct" data-item="' + esc(r.item_id) + '">' + esc(r.item_id) + '</a> ' +
-          esc(String(r.title || '').slice(0, 40)) + '</td><td>' + esc(r.account) + '</td>' +
-          '<td class="r">' + gbp(r.spend) + '</td><td class="r">' + gbp(r.rev) + '</td>' +
-          '<td class="r">' + (r.roas == null ? '—' : r.roas + '×') + '</td>' +
-          '<td class="r">' + (r.breakeven ? r.breakeven + '×' : '—') + '</td>' +
-          '<td class="r ' + (Number(r.profit) < 0 ? 'wr-neg' : '') + '">' + gbp(r.profit) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+    var total = num(D.cut_total) != null ? D.cut_total : cut.length;
+    return '<div class="wr-panel"><h3>Switch off — ' + esc(String(total)) + ' listings, ' + windowText(D) + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note">Worst first, on the listing\'s own profit under the Sales Analysis law over the window stated above' +
+      (num(D.cut_frees) != null ? '. Together they spent <b>' + gbp(D.cut_frees) + '</b> in the window' : '') + '. ' +
+      'A row marked <b>improving</b> lost over 30 days but earned over the last 7 — leave it running and look again next week. ' +
+      'Cutting a listing does not take its sales to zero — some would have come without the ad — so this is the floor on what switching off is worth, not the ceiling. ' +
+      'Showing the ' + Math.min(60, cut.length) + ' worst.</div>' +
+      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(cut, 'Listing') + '<tbody>' +
+      cut.map(function (r) { return listRow(cut, r, days, 'cut'); }).join('') + '</tbody></table></div></div>';
   }
 
   function pushPanel(D) {
-    var push = D.push || [];
+    var push = D.push || [], days = windowDays(D);
     if (!push.length) return '';
-    return '<div class="wr-panel"><h3>Worth more money — ' + push.length + ' listings' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Already earning and running at least half again above their own break-even, so more spend on these is the ' +
+    return '<div class="wr-panel"><h3>Worth more money — ' + push.length + ' listings, ' + windowText(D) + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note">Already earning under the Sales Analysis law and running at least half again above their own break-even, so more spend on these is the ' +
       'least speculative bet on the board. Raise the budget on their campaign before you raise a bid anywhere else.</div>' +
-      '<table class="wr-tbl"><thead><tr><th>Item</th><th>Account</th><th class="r">Spend 30 d</th><th class="r">ROAS</th>' +
-      '<th class="r">Break-even</th><th class="r">Profit</th></tr></thead><tbody>' +
-      push.map(function (r) {
-        var roas = Number(r.spend) > 0 ? Math.round(Number(r.rev) / Number(r.spend) * 100) / 100 : null;
-        return '<tr><td><a href="#adtoolProduct" data-item="' + esc(r.item_id) + '">' + esc(r.item_id) + '</a> ' +
-          esc(String(r.title || '').slice(0, 40)) + '</td><td>' + esc(r.account) + '</td>' +
-          '<td class="r">' + gbp(r.spend) + '</td><td class="r wr-pos">' + (roas == null ? '—' : roas + '×') + '</td>' +
-          '<td class="r">' + (r.breakeven ? r.breakeven + '×' : '—') + '</td>' +
-          '<td class="r wr-pos">' + gbp(r.profit) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(push, 'Listing') + '<tbody>' +
+      push.map(function (r) { return listRow(push, r, days, 'push'); }).join('') + '</tbody></table></div></div>';
   }
 })();

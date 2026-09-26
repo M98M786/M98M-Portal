@@ -62,11 +62,31 @@ def tables(src):
 
 SQL_START = re.compile(r'\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b', re.I)
 
+# Base tables the adtool queries lean on whose CREATE TABLE lives elsewhere (Apps Script migrations, the
+# older engine blocks). Their columns are listed by hand from the INSERTs and SELECTs in the engine, so a
+# join to items_api.img or a read of orders.sale_price is caught here and not on the page. Only queries that
+# also mention an adtool_ table are scanned, so the false positives that widening the prefix produced are
+# not let back in; a base table whose CREATE is in this file (sheet_rows, validation_runs) is judged from it.
+BASE_COLUMNS = {
+    'items_api': {'item_id', 'account', 'title', 'price', 'qty', 'status', 'image', 'api_synced_at', 'start_time',
+                  'first_seen', 'sold_qty', 'last_revised', 'primary_category'},
+    'orders': {'order_id', 'account', 'item_id', 'sold', 'cost', 'ebay_fees', 'refunded', 'status', 'buyer',
+               'buyer_name', 'created_at', 'qty', 'est_delivery', 'ship_by', 'payment_status', 'cancel_state',
+               'fh_count', 'open_seen_at'},
+    'ads_daily': {'account', 'item_id', 'date', 'spend', 'clicks', 'sales', 'cpq', 'sale_amount', 'cpc_spend',
+                  'cpc_clicks', 'cpc_sales', 'cpc_sale_amount'},
+}
+BASE_FROM_CREATE = ('sheet_rows', 'validation_runs')
+
 def main(path, prefix='adtool_'):
     raw = open(path, encoding='utf-8').read()
     src = join_literals(raw)
     tbl = tables(src)
     known = {t: c for t, c in tbl.items() if t.startswith(prefix)}
+    for t, cols in BASE_COLUMNS.items():
+        known[t] = set(cols) | tbl.get(t, set())
+    for t in BASE_FROM_CREATE:
+        if t in tbl: known[t] = tbl[t]
     bad, checked, skipped = [], 0, 0
     for m in re.finditer(r"'((?:[^'\\]|\\.){20,})'|\"((?:[^\"\\]|\\.){20,})\"", src):
         q = m.group(1) or m.group(2)
@@ -97,7 +117,7 @@ def main(path, prefix='adtool_'):
                 line = src[:qstart + r.start()].count('\n') + 1
                 near = q[max(0, r.start() - 55):r.start() + 45].replace('\n', ' ')
                 bad.append((line, t, al + '.' + col, near))
-    print('tables read from CREATE TABLE : %d (%d with the %s prefix)' % (len(tbl), len(known), prefix))
+    print('tables read from CREATE TABLE : %d (%d judged: the %s prefix + %d base tables)' % (len(tbl), len(known), prefix, len(BASE_COLUMNS) + len(BASE_FROM_CREATE)))
     print('column references checked     : %d' % checked)
     print('references skipped (alias not tied to a known table): %d' % skipped)
     if bad:

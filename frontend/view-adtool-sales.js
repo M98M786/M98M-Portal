@@ -110,10 +110,10 @@
     if ((D.blocked_sample || []).length) {
       h += '<div class="sv-panel"><h3>Why listings are blocked — ' + (D.active_total - D.eligible_total) + ' of them</h3>' +
         '<div class="sv-note">Each one names its own clock and when it runs out. Showing ' + D.blocked_sample.length + '.</div>' +
-        '<table class="sv-tbl"><thead><tr><th>Item</th><th>Account</th><th class="r">Price</th><th class="r">Days steady</th>' +
+        '<table class="sv-tbl"><thead><tr><th>Listing</th><th class="r">Price</th><th class="r">Days steady</th>' +
         '<th>Measured on</th><th>Why not yet</th></tr></thead><tbody>' +
         D.blocked_sample.map(function (r) {
-          return '<tr><td>' + esc(r.item_id) + ' ' + esc(String(r.title || '').slice(0, 34)) + '</td><td>' + esc(r.account) + '</td>' +
+          return '<tr><td>' + adtProductCell(r) + '</td>' +
             '<td class="r">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
             '<td class="r">' + (r.steady_days == null ? '—' : r.steady_days) + '</td>' +
             '<td>' + esc(r.basis === 'price' ? 'price history' : 'last revision') + '</td>' +

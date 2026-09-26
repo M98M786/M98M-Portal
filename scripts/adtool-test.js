@@ -25,7 +25,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtPlanCurve, adtPlanVerdict, adtPlanWeekdayVerdict, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtPlanCurve, adtPlanVerdict, adtPlanWeekdayVerdict, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -188,7 +188,7 @@ function run(argv) {
   t('forecast: coverage counts hits inside the band', F.adtCoverage([1, 2, 3], [0, 3, 2], [2, 4, 4]) === 2 / 3, null);
 
   /* 12. Phase 5: alert rules, lever arithmetic, PDF */
-  const mkDays = (n, f) => { const out = []; for (let i = 0; i < n; i++) { const d = F.adtAddDays('2026-08-10', i); out.push(Object.assign({ day: d, weekday: F.adtWeekdayOf(d), spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0, clicks: 0 }, f(i, d))); } return out; };
+  const mkDays = (n, f) => { const out = []; for (let i = 0; i < n; i++) { const d = F.adtAddDays('2026-08-10', i); out.push(Object.assign({ day: d, weekday: F.adtWeekdayOf(d), spend: 0, attr_units: 0, attr_revenue: 0, actual_profit: 0, pending_cost_orders: 0, clicks: 0 }, f(i, d))); } return out; };
   const a01 = F.adtListingAlerts(mkDays(30, () => ({ spend: 3, attr_units: 1, attr_revenue: 4, ad_profit: -1, clicks: 10 })), { breakeven_roas: 3 }, null);
   t('alerts: A01 fires when ROAS is under break-even on 5 days with ≥ £2/day', a01.some(x => x.rule === 'A01'), a01.map(x => x.rule));
   const a01no = F.adtListingAlerts(mkDays(30, () => ({ spend: 3, attr_units: 3, attr_revenue: 30, ad_profit: 5, clicks: 10 })), { breakeven_roas: 3 }, null);
@@ -206,8 +206,14 @@ function run(argv) {
   t('alerts: A01 needs five consecutive spending days, not five scattered rows', !F.adtListingAlerts(gappy, { breakeven_roas: 3 }, null).some(x => x.rule === 'A01'), F.adtListingAlerts(gappy, { breakeven_roas: 3 }, null).map(x => x.rule));
   const tight = []; for (let i = 0; i < 6; i++) { const d = F.adtAddDays('2026-09-10', i); tight.push({ day: d, weekday: F.adtWeekdayOf(d), spend: 3, attr_units: 0, attr_revenue: 0, ad_profit: -3, clicks: 9, units: 0 }); }
   t('alerts: A01 does fire when the five days really are consecutive', F.adtListingAlerts(tight, { breakeven_roas: 3 }, null).some(x => x.rule === 'A01'), F.adtListingAlerts(tight, { breakeven_roas: 3 }, null).map(x => x.rule));
-  const a02 = F.adtListingAlerts(mkDays(30, () => ({ spend: 3, ad_profit: -2, clicks: 8 })), { breakeven_roas: 2 }, null);
-  t('alerts: A02 fires when the 7-day loss is over £10 and the 30-day is negative', a02.some(x => x.rule === 'A02'), a02.map(x => x.rule));
+  const a02 = F.adtListingAlerts(mkDays(30, () => ({ spend: 3, actual_profit: -2, clicks: 8 })), { breakeven_roas: 2 }, null);
+  t('alerts: A02 fires on item profit under the law when the 7-day loss is over £10 and the 30-day is negative', a02.some(x => x.rule === 'A02') && near(a02.find(x => x.rule === 'A02').payload.profit_7d, -14) && /Sales Analysis/.test(a02.find(x => x.rule === 'A02').payload.basis), a02.map(x => x.rule));
+  const a02p = F.adtListingAlerts(mkDays(30, (i) => ({ spend: 3, actual_profit: -2, clicks: 8, pending_cost_orders: i === 20 ? 1 : 0 })), { breakeven_roas: 2 }, null);
+  t('alerts: A02 is skipped while any order in the 30 days is unpriced (a missing cost reads as zero profit)', !a02p.some(x => x.rule === 'A02'), a02p.map(x => x.rule));
+  const a02f = F.adtListingAlerts(mkDays(30, (i) => ({ spend: 3, actual_profit: -2, clicks: 8, pending_fee_orders: i === 20 ? 1 : 0 })), { breakeven_roas: 2 }, null);
+  t('alerts: A02 is skipped while any order in the 30 days waits for its eBay fees (its sale is left out of the sum, its clicks are not)', !a02f.some(x => x.rule === 'A02'), a02f.map(x => x.rule));
+  t('alerts: A02 carries the unpriced counts beside its profit figures', a02.find(x => x.rule === 'A02').payload.pending_cost_orders === 0 && a02.find(x => x.rule === 'A02').payload.pending_fee_orders === 0, a02.find(x => x.rule === 'A02').payload);
+  t('alerts: A02 no longer judges on the old estimate', !F.adtListingAlerts(mkDays(30, () => ({ spend: 3, ad_profit: -2, clicks: 8 })), { breakeven_roas: 2 }, null).some(x => x.rule === 'A02') && /Sales Analysis/.test(F.ADTOOL_ALERT_RULES.A02.text), F.ADTOOL_ALERT_RULES.A02.text);
   const a10 = F.adtListingAlerts(mkDays(28, (i) => ({ spend: 2, attr_units: i < 21 ? 2 : 0, attr_revenue: i < 21 ? 20 : 0, ad_profit: i < 21 ? 4 : -2 })), { breakeven_roas: 2 }, null);
   t('alerts: A10 fires when attributed units halve week on week with spend flat', a10.some(x => x.rule === 'A10'), a10.map(x => x.rule));
   const dark = []; for (let i = 0; i < 10; i++) dark.push({ day: F.adtAddDays('2026-09-01', i), spend: i < 8 ? 20 : 3 });
@@ -331,6 +337,41 @@ function run(argv) {
   t('report tasks: at 00:17 UTC the UTC day is still tomorrow in Pacific, so eBay refuses it', pacOf(Date.parse('2026-09-18T00:17:00Z')) === '2026-09-17', pacOf(Date.parse('2026-09-18T00:17:00Z')));
   t('report tasks: at 07:01 UTC Pacific has reached the same day and eBay can accept it', pacOf(Date.parse('2026-09-18T07:01:00Z')) === '2026-09-18', pacOf(Date.parse('2026-09-18T07:01:00Z')));
   t('report tasks: after the November clock change the gate moves to 08:00 UTC on its own', pacOf(Date.parse('2026-11-10T07:30:00Z')) === '2026-11-09' && pacOf(Date.parse('2026-11-10T08:30:00Z')) === '2026-11-10', [pacOf(Date.parse('2026-11-10T07:30:00Z')), pacOf(Date.parse('2026-11-10T08:30:00Z'))]);
+
+  /* 17. Phase 1A: the Sales Analysis law — the ONE profit figure the ads portal shows — and the rule that no
+     collective profit leaves the engine. The live fixture is Saif Bhai, 22 Sep 2026 (plan §0): the workbook's own
+     Actual Profit for the day was £77.31. */
+  const lawDay = F.adtSheetLawOrders([{ sold: 520.53, fees: 87.61, cost: 197.56, refunded: 0 }]);
+  t('law: sold 520.53, fees 87.61, ali 197.56, cpc 115.61, no refunds → 77.30', near(F.adtSheetLawProfit({ raw_priced_sum: lawDay.raw_priced_sum, cpc_spend: 115.61, refunds: lawDay.refunds }), 77.30) && lawDay.pending_cost_orders === 0 && lawDay.pending_fee_orders === 0, F.adtSheetLawProfit({ raw_priced_sum: lawDay.raw_priced_sum, cpc_spend: 115.61, refunds: 0 }));
+  t('law: 0.96 × CPC — the workbook charges Priority at 1.2× and takes 20 % VAT off the line', near(F.adtSheetLawProfit({ raw_priced_sum: 100, cpc_spend: 10, refunds: 0 }), 80 - 9.6), F.adtSheetLawProfit({ raw_priced_sum: 100, cpc_spend: 10, refunds: 0 }));
+  t('law: a refund comes off after the 0.8', near(F.adtSheetLawProfit({ raw_priced_sum: 100, cpc_spend: 0, refunds: 12.5 }), 67.5), null);
+  const lawPend = F.adtSheetLawOrders([{ sold: 20, fees: 3.4, cost: 8, refunded: 0 }, { sold: 15, fees: 2.5, cost: 0, refunded: 0 }]);
+  t('law: an order whose Ali cost is not typed is excluded from the sum and counted', near(lawPend.raw_priced_sum, 20 - 3.4 - 8) && lawPend.pending_cost_orders === 1 && lawPend.pending_fee_orders === 0, lawPend);
+  const lawFee = F.adtSheetLawOrders([{ sold: 20, fees: 3.4, cost: 8, refunded: 1.5 }, { sold: 15, fees: 0, cost: 6, refunded: 2 }]);
+  t('law: an order whose eBay fees have not landed is excluded and counted as fee-pending; its refund is excluded with it', near(lawFee.raw_priced_sum, 8.6) && lawFee.pending_fee_orders === 1 && lawFee.pending_cost_orders === 0 && near(lawFee.refunds, 1.5), lawFee);
+  const lawRefUnpriced = F.adtSheetLawOrders([{ sold: 20, fees: 3.4, cost: 0, refunded: 20 }]);
+  t('law: a refunded order whose cost was never typed is not a loss — it contributes nothing and is counted', near(lawRefUnpriced.raw_priced_sum, 0) && near(lawRefUnpriced.refunds, 0) && lawRefUnpriced.pending_cost_orders === 1 && near(F.adtSheetLawProfit({ raw_priced_sum: 0, cpc_spend: 0, refunds: lawRefUnpriced.refunds }), 0), lawRefUnpriced);
+  t('law: the marker the rollups rebuild history against is sheet-v1', F.ADTOOL_PROFIT_LAW === 'sheet-v1', F.ADTOOL_PROFIT_LAW);
+  /* the strip: a fixture response shaped like the real actions — account, fleet and weekday rows with profit sums,
+     item rows with their own profit and the old estimate */
+  const mkResp = () => ({
+    kpi: { spend: 100, actual_profit: 40, ad_profit: 30, pending: 2 },
+    by_account: [{ account: 'A', spend: 50, actual_profit: 20, ad_profit: 10, roas: 4 }, { account: 'B', spend: 50, profit_day: 3 }],
+    weekday: [{ weekday: 0, spend: 10, profit: 2 }],
+    now: { keep: 12, profit_day: 9, spend_day: 30 },
+    winners: [{ item_id: '1', account: 'A', title: 't', image: null, actual_profit: 12, ad_profit: 9, pending_cost_orders: 0 }],
+    listing: { item_id: '2', kpis: { d7: { actual: 3, actual_profit: 3, profit_day: 1 } }, weekday: [{ day: 'Mon', actual_profit: 1, ad_profit_day: 2 }] },
+    text: 'profit is a word, not a key',
+    profit_label: 'Profit (Sales Analysis law)',
+  });
+  const stripped = F.adtStripCollectiveProfit(mkResp(), { keepCollective: false });
+  t('strip: profit keys leave account, fleet and weekday rows', !('actual_profit' in stripped.kpi) && !('ad_profit' in stripped.kpi) && stripped.kpi.spend === 100 && stripped.kpi.pending === 2 && !('actual_profit' in stripped.by_account[0]) && !('profit_day' in stripped.by_account[1]) && stripped.by_account[0].roas === 4 && !('profit' in stripped.weekday[0]) && !('profit_day' in stripped.now) && stripped.now.keep === 12, stripped);
+  t('strip: item rows keep their own profit and lose only the old estimate', stripped.winners[0].actual_profit === 12 && !('ad_profit' in stripped.winners[0]) && stripped.winners[0].pending_cost_orders === 0, stripped.winners[0]);
+  t('strip: everything under an item-keyed object is that item\'s (a listing page)', stripped.listing.kpis.d7.actual_profit === 3 && stripped.listing.kpis.d7.profit_day === 1 && stripped.listing.weekday[0].actual_profit === 1 && !('ad_profit_day' in stripped.listing.weekday[0]) && stripped.text.indexOf('profit') >= 0, stripped.listing);
+  const kept = F.adtStripCollectiveProfit(mkResp(), { keepCollective: true });
+  t('strip: a profit role keeps collective figures, but never the old estimate', kept.kpi.actual_profit === 40 && !('ad_profit' in kept.kpi) && kept.by_account[0].actual_profit === 20 && !('ad_profit' in kept.by_account[0]) && !('ad_profit' in kept.winners[0]), kept.kpi);
+  t('strip: null and scalar answers pass through', F.adtStripCollectiveProfit(null, {}) === null && F.adtStripCollectiveProfit('ok', {}) === 'ok', null);
+  t('strip: a label under a profit key is text, not a figure, and reaches every role', stripped.profit_label === 'Profit (Sales Analysis law)' && kept.profit_label === 'Profit (Sales Analysis law)', stripped.profit_label);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
