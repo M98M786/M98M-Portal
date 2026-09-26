@@ -66,7 +66,10 @@ function parseAccessCsv_(s) {
   return String(s == null ? '' : s).split(',').map(function (x) { return x.trim(); })
     .filter(function (x) { return x !== ''; });
 }
-const PROFIT_ROLES = ['Management','Ops Head','Team Lead','Advertising Manager','CS'];       // §4.2
+// §4.2 — 27 Sept: 'Team Lead' removed. It had been here since Phase 1, so canSeeProfit_('Team Lead')
+// was true and stripForRole_ (the RL-4 middleware behind all 55 of its call sites) stripped nothing
+// for them — against the standing rule that a Team Lead gets loss alerts and never real earnings.
+const PROFIT_ROLES = ['Management','Ops Head','Advertising Manager','CS'];       // §4.2
 const SUPER_ADMINS = ['mrhasibullah91@googlemail.com','zaidkaleem987@gmail.com'];
 
 // §4.1 role prefill for USERS seeding (matched on normalized email).

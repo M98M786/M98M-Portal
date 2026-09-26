@@ -91,7 +91,13 @@ export default {
         adtoolCommand: 45000, adtoolAccounts: 180000, adtoolCategories: 180000, adtoolCases: 180000,
         adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000,
         adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000 };
-      const rcTtl = ROUTE_CACHE_MS[action] || 0;
+      /* 27 Sept (Night Watch): three of the cached adtool actions also WRITE on certain payloads
+         (adtoolRoasTarget set_target, adtoolCases set, adtoolReport send). memo() returns the
+         stored answer WITHOUT running fn, so a repeated identical write inside the TTL silently
+         never happened while the screen still said OK — set the ROAS target 5, then 8, then 5
+         again inside three minutes and it stayed on 8. A payload carrying write intent now skips
+         the cache entirely; the pure reads these TTLs were added for are untouched. */
+      const rcTtl = hasWriteIntent(body.payload) ? 0 : (ROUTE_CACHE_MS[action] || 0);
       const data = rcTtl
         ? await memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2))
         : await route.fn(body.payload || {}, ctx2);
@@ -204,7 +210,11 @@ export default {
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
-      '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, selfTestJob, securitySweep],
+      /* 27 Sept: truthAlertSweep was written as the remedy for letter build-up and then left on
+         NO cron slot — an on-demand lever nobody pulled, while the backlog grew ~90 letters a
+         week. It is idempotent and only ever closes stale event/snapshot letters, so it belongs
+         on the nightly slot; it runs BEFORE selfTestJob so the battery counts the tidied total. */
+      '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, truthAlertSweep, selfTestJob, securitySweep],
     };
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
@@ -243,6 +253,29 @@ async function memo(key, ttlMs, fn) {
   HOTMEM.set(key, { v, at: Date.now() });
   if (HOTMEM.size > 600) { HOTMEM.clear(); }               // crude bound; isolates recycle anyway
   return v;
+}
+/* A payload key that means "do something", not "show me something". Kept deliberately broad:
+   a new write branch on a cached action is then safe by default, and the cost of a false
+   positive is one uncached read. */
+const WRITE_INTENT_KEYS = ['op', 'set', 'set_target', 'send', 'apply', 'save', 'refresh', 'reset', 'clear', 'delete', 'decide'];
+function hasWriteIntent(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  for (const k of WRITE_INTENT_KEYS) {
+    const v = payload[k];
+    if (v !== undefined && v !== null && v !== false && v !== '') return true;
+  }
+  return false;
+}
+/* Bound the sessions table per person. Ordered by created_at with the token as a tiebreak so
+   the ordering is total (two sign-ins inside the same second must not make the survivor random). */
+const SESSION_CAP_PER_EMAIL = 10;
+async function capSessions(env, email) {
+  try {
+    await env.DB.prepare(
+      'DELETE FROM sessions WHERE email = ?1 AND token NOT IN ' +
+      '(SELECT token FROM sessions WHERE email = ?1 ORDER BY created_at DESC, token DESC LIMIT ?2)'
+    ).bind(String(email || '').toLowerCase(), SESSION_CAP_PER_EMAIL).run();
+  } catch (e) { /* a cap that fails must never stop someone signing in */ }
 }
 function json(obj, status, extra) {
   return new Response(JSON.stringify(obj), { status, headers: { ...JSON_HEADERS, ...(extra || {}) } });
@@ -1418,9 +1451,27 @@ async function truthAlertSweep(env) {
     "WHERE resolved_at = '' AND (type LIKE '%CPC%' OR type LIKE '%ampaign%' OR type LIKE '%aste%') AND created_at < datetime('now', '-7 days')"
   ).bind(nowIso).run().catch(() => null);
   closed += (c && c.meta && c.meta.changes) || 0;
+  /* 27 Sept (Night Watch): the Alerts centre had reached 5,617 open staff-facing letters and had
+     stopped being a signal. Two families are DAILY SNAPSHOTS of a live state, re-issued for as
+     long as the condition holds, so every copy but the newest is noise by construction:
+       · 'Account sleeping'  ref engine:sleep:<account>:<day>:<hours>  — re-lettered per account
+         per day per tier by sleepWatch; if the account is still quiet today's letter says so.
+       · the ack-SLA family   ref engine:acksla:day:<day> (and the older engine:acksla:<id>) — a
+         digest of the letters chased THAT day; the current chase list is today's digest.
+     14 days is deliberately generous: a fortnight after the fact neither can still be the thing
+     that tells someone something new. Fee drift is NOT here — its ref is per ORDER, not per day,
+     so those rows are unreconciled transactions, not a repeating state. Nothing is deleted;
+     clearing resolved_at brings any letter straight back. */
+  const d = await env.DB.prepare(
+    "UPDATE alert_log SET resolved_at = ?1, resolved_by = 'superseded by a newer daily letter' " +
+    "WHERE resolved_at = '' AND created_at < datetime('now', '-14 days') " +
+    "AND (ref LIKE 'engine:sleep:%' OR ref LIKE 'engine:acksla:%')"
+  ).bind(nowIso).run().catch(() => null);
+  closed += (d && d.meta && d.meta.changes) || 0;
   const left = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND created_at >= '2026-08-23 04:00:00' AND (type LIKE '%rice%' OR type LIKE '%CPC%' OR type LIKE '%ampaign%' OR type LIKE '%aste%')"
+    "SELECT COUNT(*) AS n FROM alert_log WHERE resolved_at = '' AND type != 'ack-sla-marker'"
   ).first().catch(() => null);
+  await ctx_setSync(env, 'truthAlertSweep', '', 'closed ' + closed + ', still open ' + (left ? Number(left.n) : '?'));
   return { closed, still_open: left ? Number(left.n) : null };
 }
 
@@ -2844,8 +2895,14 @@ async function securitySweep(env) {
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
   const bad = await env.DB.prepare('SELECT COUNT(*) AS n FROM sessions WHERE length(token) != 64').first();
   if (Number(bad && bad.n)) findings.push('🔴 ' + bad.n + ' malformed session token(s) in the sessions table');
-  const flood = await env.DB.prepare('SELECT email, COUNT(*) AS n FROM sessions GROUP BY email HAVING COUNT(*) > 15').all();
-  for (const r of (flood.results || [])) findings.push('🟠 session flood: ' + r.email + ' holds ' + r.n + ' live sessions (possible token leak)');
+  /* 27 Sept: the sweep used to only REPORT a flood, so the same two names were lettered every
+     night for a week with nothing draining them. It now applies the same cap sessionMint applies
+     and reports what it retired — a flood that is already capped needs no letter. */
+  const flood = await env.DB.prepare('SELECT email, COUNT(*) AS n FROM sessions GROUP BY email HAVING COUNT(*) > ?1').bind(SESSION_CAP_PER_EMAIL).all();
+  for (const r of (flood.results || [])) {
+    await capSessions(env, r.email);
+    findings.push('🟠 session flood trimmed: ' + r.email + ' held ' + r.n + ' live sessions, kept the newest ' + SESSION_CAP_PER_EMAIL);
+  }
 
   const SUPER_ALLOW = ['mrhasibullah91@googlemail.com', 'zaidkaleem987@gmail.com', 'm98m786@gmail.com'];
   const sup = await env.DB.prepare('SELECT email FROM users WHERE super = 1').all();
@@ -9504,6 +9561,13 @@ const ROUTES = {
       await ctx.env.DB.prepare(
         "INSERT INTO sessions (token, email, created_at, expires_at, last_seen) VALUES (?1, ?2, datetime('now'), datetime('now', '+7 day'), datetime('now'))"
       ).bind(token, ctx.email).run();
+      /* 27 Sept (Night Watch): nothing ever bounded this table per person, so a 7-day token was
+         minted on every fresh sign-in and simply accumulated — m98mtwo reached 44 live sessions
+         and m98meight 20, which the nightly sweep had been reporting as a possible token leak for
+         a week. A signed-in person legitimately holds a handful (phone, laptop, office desktop,
+         a second browser); SESSION_CAP_PER_EMAIL keeps the newest that many and retires the rest,
+         so the flood can never build again and the just-minted token is never the one dropped. */
+      await capSessions(ctx.env, ctx.email);
       const u = ctx.user;
       return { session: token, user: { email: u.email, name: u.name, role: u.role, status: u.status, modules: u.modules, tools: u.tools, super: u.super } };
     },
@@ -13850,7 +13914,13 @@ const ROUTES = {
       const role = String(ctx.user.role || '');
       const me = normEmail(ctx.user.email);
       const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
-      const profit = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'].indexOf(role) >= 0;
+      /* 27 Sept (Night Watch): this line used to carry its own inline copy of the APPS SCRIPT
+         profit list — Team Lead included — so a Team Lead kept Our Profit / ROI / Order Earning /
+         Raw Profit / Actual Profit / margin on every signal card, against the standing rule that
+         Team Lead sees loss alerts and never real earnings. The engine's own constants are the
+         only truth: PROFIT_ROLES is Management + Ops Head, ITEM_PROFIT_ROLES adds Advertising
+         Manager + CS, and a signal card is per-item money — so the item list is the right gate. */
+      const profit = ITEM_PROFIT_ROLES.indexOf(role) >= 0 || PROFIT_ROLES.indexOf(role) >= 0 || !!ctx.user.super;
       /* the session row carries no account scope — read it (users.accounts mirrors the sheet's
          accounts_access column); an empty scope means every account, exactly as on Apps Script */
       const urow = await ctx.env.DB.prepare('SELECT accounts FROM users WHERE email = ?1').bind(String(ctx.user.email || '').toLowerCase()).first().catch(() => null);

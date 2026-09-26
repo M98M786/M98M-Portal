@@ -24,9 +24,13 @@ const DASH_TZ_PKT = 'Asia/Karachi';
  * are UK. */
 const DASH_TZ_UK = 'Europe/London';
 
-// ---------- who sees this (§4.3 "Business dashboard (all accounts)": Mgmt ✅ TL ✅ Adv ads view
+// ---------- who sees this (§4.3 "Business dashboard (all accounts)": Mgmt ✅ Adv ads view
 // CS ✅ · Hunter/Lister/OrdProc ❌; Ops Head per §4.4 gets all dashboards incl. profit) ----------
-const DASH_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+// 27 Sept: Team Lead removed. The frontend was already fixed at review 4 (view-dashboard.js
+// DB_VIEW_ROLES, "no sales analysis for Team Lead") but this backend list never followed, so a
+// hidden screen was the only gate — the exact inversion of SECURITY.md's "roles are enforced
+// server-side; the screen is a viewer, not a gate". This list now matches DB_VIEW_ROLES exactly.
+const DASH_VIEW_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 
 // ---------- the workbook's own vocabulary — verbatim, never invented ----------
 // Monthly Sheet headers, row 1, cols A–P. The '(B) (H) (I) (N) (T) (U) (V)' parentheticals are
