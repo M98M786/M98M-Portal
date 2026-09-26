@@ -15445,6 +15445,43 @@ const ROUTES = {
     },
   },
 
+  /* 27 Sept (Hasib): eBay UK now refuses 'Model' as a variation-specific name, and the listing
+     form's only "rename" is delete-and-recreate — blocked once units have sold. The one in-place
+     cure is Trading ReviseFixedPriceItem with Variations.ModifyNameList, which keeps the item
+     number and every sold/watch/search figure. This lets the build session drive that flow with
+     the engine's own token — the token itself never leaves the worker (the same stance that keeps
+     oauth_ref out of backupDump). GetItem + ReviseFixedPriceItem only, UK site, plus the read-only
+     taxonomy aspect probe that proves the new name is custom, not one eBay has reserved. */
+  ebayTradeCall: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const call = String(p.call || '');
+      if (call === 'taxonomyAspects') {
+        const appId = await secret(ctx.env, 'EBAY_APP_ID'), cert = await secret(ctx.env, 'EBAY_CERT_ID');
+        const tr = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+          method: 'POST',
+          headers: { authorization: 'Basic ' + btoa(appId + ':' + cert), 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
+        });
+        if (!tr.ok) throw new Error('SAY: eBay refused the app token — ' + tr.status);
+        const tok = (await tr.json()).access_token;
+        const r = await fetch('https://api.ebay.com/commerce/taxonomy/v1/category_tree/3/get_item_aspects_for_category?category_id=' + encodeURIComponent(String(p.category || '')),
+          { headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } });
+        return { status: r.status, body: await r.text() };
+      }
+      if (call !== 'GetItem' && call !== 'ReviseFixedPriceItem') {
+        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem or taxonomyAspects');
+      }
+      const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
+      const r = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1477', 'X-EBAY-API-CALL-NAME': call,
+          'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+        body: String(p.xml || ''),
+      });
+      return { status: r.status, xml: await r.text() };
+    },
+  },
+
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
