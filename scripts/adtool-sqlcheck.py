@@ -31,6 +31,10 @@ def join_literals(src):
     line in the real file. A checker that sends you to the wrong line wastes the time it just saved.
     """
     keep = lambda m: '\n' * m.group(0).count('\n')
+    # Phase 1B: a window that may include today reads `FROM ' + src + ' d` where src is adtDaySrc() — either the
+    # adtool_listing_day table or a UNION ALL of it with adtool_listing_today exposing the SAME columns. Reading it
+    # as adtool_listing_day keeps every `d.column` in those queries under judgement instead of silently skipped.
+    src = re.sub(r"(['\"])[ \t]*\+[ \t]*src[ \t]*\+[ \t]*\1", 'adtool_listing_day', src)
     prev = None
     while prev != src:
         prev = src

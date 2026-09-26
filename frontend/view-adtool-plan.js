@@ -37,10 +37,13 @@
     '.wr-tag.keep{background:rgba(255,255,255,.08);color:var(--text-2)}',
     '.wr-scroll{overflow-x:auto}',
     '.wr-empty{color:var(--text-3);font-size:12px;padding:10px 0}',
-    '.wr-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
+    '.wr-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
+    '.wr-acct{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.wr-acct button{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}',
+    '.wr-acct button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}'
   ].join(''));
 
-  var WR = { data: null, account: '' };
+  var WR = { data: null, account: '', period: null, accounts: ['AZHAR ABRT', 'Amna Baji', 'Azhar Bhai', 'HAFIZA BHAJI', 'Saif Bhai', 'Sir Hasib'] };
 
   function gbp(n) { if (n == null || n === '' || isNaN(Number(n))) return '—'; var v = Number(n); return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
   function gbp0(n) { if (n == null || n === '' || isNaN(Number(n))) return '—'; var v = Number(n); return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)); }
@@ -51,27 +54,49 @@
     label: 'War room (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
     icon: '<path d="M3 3v18h18"/><path d="m7 14 4-5 4 3 5-8"/><circle cx="11" cy="9" r="1.6"/>',
     render: function () {
-      return '<div class="hgroup enter d1"><h1>War room</h1>' +
-        '<span class="sub">what to change today, and the arithmetic it is based on</span></div>' +
-        '<div id="wrBody"><div class="wr-empty">Reading the last 30 report days…</div></div>';
+      return adtHgroup('War room', 'what to change today, and the arithmetic it is based on', 'wrFresh') +
+        '<div id="wrBar"></div><div id="wrAcct" class="wr-acct"></div>' +
+        '<div id="wrBody"><div class="wr-empty">Reading the window…</div></div>';
     },
     init: function () {
-      api('adtoolPlan', WR.account ? { account: WR.account } : {}).then(function (d) {
-        WR.data = d; draw();
-      }).catch(function (e) {
-        $('wrBody').innerHTML = '<div class="wr-panel"><div class="wr-note">' +
-          esc(e && e.message ? e.message : 'the war room could not be read') + '</div></div>';
-      });
+      /* Phase 1B: the window and the account are the reader's choice; the engine echoes what it used */
+      WR.period = adtPeriodBar('wrBar', { page: 'adtoolPlan', def: 'd30', onChange: function (v) { WR.period = v; load(false); } });
+      acctChips();
+      load(false).catch(function () {});
     }
   };
+  function acctChips() {
+    var el = $('wrAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (WR.account ? '' : 'on') + '" data-a="">All accounts</button>' + WR.accounts.map(function (a) { return '<button class="' + (WR.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { WR.account = this.getAttribute('data-a'); acctChips(); load(false); };
+  }
+  function load(quiet) {
+    var p = adtPeriodParams(WR.period); if (WR.account) p.account = WR.account;
+    return api('adtoolPlan', p).then(function (d) {
+      WR.data = d;
+      if (d && d.accounts && d.accounts.length) { WR.accounts = d.accounts.map(function (a) { return typeof a === 'string' ? a : a.account; }).filter(Boolean); acctChips(); }
+      if (!$('wrBody')) return;
+      draw();
+      adtPeriodEcho('wrBar', d.period); adtFreshShow('wrFresh', d.fresh);
+      /* a window that reaches into today moves every 5 minutes; a finished window does not */
+      if (adtIncludesToday(d.period, WR.period)) { adtPoll('wrBody', 300000, function () { return load(true); }); } else { adtPollStop('wrBody'); }
+    }).catch(function (e) {
+      if (!quiet && $('wrBody')) $('wrBody').innerHTML = '<div class="wr-panel"><div class="wr-note">' +
+        esc(e && e.message ? e.message : 'the war room could not be read') + '</div></div>';
+      throw e;
+    });
+  }
 
-  /* The window the whole page stands on. The engine names it; the page never assumes 30. */
+  /* The window the whole page stands on. The engine names it (`period` since Phase 1B, `window`
+     before); the page never assumes 30. */
   function windowText(D) {
+    var P = D.period;
+    if (P && (P.label || P.from)) return esc(adtPeriodText(P)).replace(/^./, function (c) { return c.toLowerCase(); });
     var w = D.window || {};
     var days = num(w.days);
     return 'last ' + (days != null ? days : 30) + ' days to yesterday' + (w.from && w.to ? ' (' + esc(w.from) + ' → ' + esc(w.to) + ')' : '');
   }
-  function windowDays(D) { var d = num(D.window && D.window.days); return d && d > 0 ? d : 30; }
+  function windowDays(D) { var d = num(D.period && D.period.days); if (d == null) d = num(D.window && D.window.days); return d && d > 0 ? d : 30; }
 
   /* Item profit under the law. Reads only the contract keys, with the d30/d7 pair when the engine
      sends it and the plain figure otherwise; never a key from the estimated-profit era. */
@@ -99,8 +124,9 @@
     h += cutPanel(D);
     h += pushPanel(D);
 
-    h += '<div class="wr-note" style="margin-top:6px">' + esc(D.source || '') + (D.window ? ' · ' + esc(D.window.from || '') + ' to ' + esc(D.window.to || '') +
-      ' (' + (num(D.window.days) != null ? D.window.days : '?') + ' days)' : '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
+    var W = D.period && D.period.from ? D.period : D.window;
+    h += '<div class="wr-note" style="margin-top:6px">' + esc(D.source || '') + (W ? ' · ' + esc(W.from || '') + ' to ' + esc(W.to || '') +
+      ' (' + (num(W.days) != null ? W.days : '?') + ' days' + (W.includes_today ? ', includes today — sampled, provisional, refreshed every 5 min' : '') + ')' : '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
 
     $('wrBody').innerHTML = h;
   }
@@ -174,10 +200,13 @@
     return out + '</div>';
   }
 
-  function listHead(rows, first) {
+  /* the profit column is the CHOSEN window's sum (the engine names it in `period`), the 7-day column the last 7
+     days inside it — never a hard-coded "30 d" */
+  function winShort(D) { var P = D.period; if (P && P.label) return String(P.label).replace(/ \(.*\)$/, ''); var w = D.window || {}; return 'last ' + (num(w.days) != null ? w.days : 30) + ' days'; }
+  function listHead(rows, first, D) {
     return '<thead><tr><th>' + first + '</th><th class="r">Spend / day</th><th class="r">Attributed sales / day</th>' +
-      '<th class="r">Own ROAS</th><th class="r">Break-even</th><th class="r">Profit (Sales Analysis law) · 30 d</th>' +
-      (hasD7(rows) ? '<th class="r">· 7 d</th>' : '') + (hasStage(rows) ? '<th>Stage</th>' : '') + '</tr></thead>';
+      '<th class="r">Own ROAS</th><th class="r">Break-even</th><th class="r">Profit (Sales Analysis law) · ' + esc(winShort(D)) + '</th>' +
+      (hasD7(rows) ? '<th class="r">· last 7 d in window</th>' : '') + (hasStage(rows) ? '<th>Stage</th>' : '') + '</tr></thead>';
   }
   function listRow(rows, r, days, tag) {
     var p = pending(r), d30 = lawD30(r), d7 = lawD7(r), be = num(r.breakeven), ro = ownRoas(r);
@@ -194,16 +223,17 @@
   }
 
   function cutPanel(D) {
-    var cut = D.cut || [], days = windowDays(D);
-    if (!cut.length) return '<div class="wr-panel"><h3>Switch off</h3><div class="wr-note">Nothing is losing enough to be worth switching off.</div></div>';
+    var cut = D.cut || [], days = windowDays(D), withheld = num(D.cut_withheld_unpriced) || 0;
+    var withheldTxt = withheld ? ' ' + withheld + ' losing row' + (withheld === 1 ? ' is' : 's are') + ' withheld: an order in the window is not priced yet (today\'s never are), so the loss is not ' + (withheld === 1 ? 'its' : 'theirs') + ' to carry.' : '';
+    if (!cut.length) return '<div class="wr-panel"><h3>Switch off</h3><div class="wr-note">Nothing is losing enough on priced numbers to be worth switching off.' + esc(withheldTxt) + '</div></div>';
     var total = num(D.cut_total) != null ? D.cut_total : cut.length;
     return '<div class="wr-panel"><h3>Switch off — ' + esc(String(total)) + ' listings, ' + windowText(D) + src('eBay ads report') + '</h3>' +
       '<div class="wr-note">Worst first, on the listing\'s own profit under the Sales Analysis law over the window stated above' +
       (num(D.cut_frees) != null ? '. Together they spent <b>' + gbp(D.cut_frees) + '</b> in the window' : '') + '. ' +
-      'A row marked <b>improving</b> lost over 30 days but earned over the last 7 — leave it running and look again next week. ' +
+      (hasD7(cut) ? 'A row marked <b>improving</b> lost over the window but earned over its last 7 days — leave it running and look again next week. ' : '') +
       'Cutting a listing does not take its sales to zero — some would have come without the ad — so this is the floor on what switching off is worth, not the ceiling. ' +
-      'Showing the ' + Math.min(60, cut.length) + ' worst.</div>' +
-      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(cut, 'Listing') + '<tbody>' +
+      'Showing the ' + Math.min(60, cut.length) + ' worst.' + esc(withheldTxt) + '</div>' +
+      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(cut, 'Listing', D) + '<tbody>' +
       cut.map(function (r) { return listRow(cut, r, days, 'cut'); }).join('') + '</tbody></table></div></div>';
   }
 
@@ -213,7 +243,7 @@
     return '<div class="wr-panel"><h3>Worth more money — ' + push.length + ' listings, ' + windowText(D) + src('eBay ads report') + '</h3>' +
       '<div class="wr-note">Already earning under the Sales Analysis law and running at least half again above their own break-even, so more spend on these is the ' +
       'least speculative bet on the board. Raise the budget on their campaign before you raise a bid anywhere else.</div>' +
-      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(push, 'Listing') + '<tbody>' +
+      '<div class="wr-scroll"><table class="wr-tbl">' + listHead(push, 'Listing', D) + '<tbody>' +
       push.map(function (r) { return listRow(push, r, days, 'push'); }).join('') + '</tbody></table></div></div>';
   }
 })();

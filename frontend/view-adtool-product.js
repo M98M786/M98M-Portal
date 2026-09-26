@@ -93,7 +93,7 @@
     icon: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/>',
     render: function () {
       return '<div class="at-wrap">' +
-        '<div class="hgroup enter d1"><h1>Product history</h1><span class="sub">Advertising tool · preview · every number from the engine\'s own rollups (eBay ads report · orders · profit under the Sales Analysis law)</span></div>' +
+        adtHgroup('Product history', 'Advertising tool · every number from the engine\'s own rollups (eBay ads report · orders · profit under the Sales Analysis law)', 'atFresh') +
         '<div class="at-search"><input id="atQ" type="search" placeholder="Item id or title — press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
         '<div class="at-recent" id="atRecent"></div>' +
         '<div id="atBody"><div class="at-empty">Type an item id or part of a title. Recent advertised listings appear above once the rollup has run.</div></div>' +
@@ -142,7 +142,8 @@
   function kpi(k, v, d, c) { return '<div class="at-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
 
   function draw() {
-    var D = AT.data, H = D.header, K = D.kpis;
+    var D = AT.data, H = D.header, K = D.kpis || {};
+    adtFreshShow('atFresh', D.fresh);
     var h = '';
     /* header */
     h += '<div class="at-panel"><div class="at-head"><div style="flex:1 1 420px"><div style="font-size:15px">' + adtProductCell({ item_id: H.item_id, account: H.account, title: H.title, image: H.image }, { open: false }) + '</div>' +
@@ -160,7 +161,9 @@
        `pending` / `pending_fee` count the orders it could not price */
     var law = function (s) { return s ? adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending, s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) : '—'; };
     var w = [['Yesterday', K.yesterday || {}], ['Last 7 days', K.d7 || {}], ['Last 30 days', K.d30 || {}], ['All time (from 13 Aug)', K.all || {}]];
-    h += '<div class="at-kpis">' + w.map(function (x) { var s = x[1]; return kpi(x[0], (s.attr_units || 0) + ' ad sales', gbp(s.spend, 0) + ' spend · ROAS ' + roas(s.roas) + ' · profit (Sales Analysis law) ' + law(s)); }).join('') +
+    /* Phase 1B: the 5-minute today grain, when the engine sends it — ad figures sampled and provisional */
+    if (K.today && typeof K.today === 'object') w.unshift(['Today so far', K.today]);
+    h += '<div class="at-kpis">' + w.map(function (x) { var s = x[1]; return kpi(x[0], (s.attr_units || 0) + ' ad sales', gbp(s.spend, 0) + ' spend · ROAS ' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + ' · profit (Sales Analysis law) ' + law(s) + (x[0] === 'Today so far' ? '<div class="at-src s" style="margin-top:3px">sampled, provisional</div>' : '')); }).join('') +
       kpi('Orders, all channels · 30d', String((K.d30 && K.d30.orders) || 0), Math.max(0, ((K.d30 && K.d30.units) || 0) - ((K.d30 && K.d30.attr_units) || 0)) + ' units not from ads') + '</div>';
     /* where its ads sit — live rows when the campaign-truth phase has them, the refresh's snapshot otherwise */
     var Wr = D.where && D.where.rows ? D.where.rows : null; var C = D.campaigns || [];

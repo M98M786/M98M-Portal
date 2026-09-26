@@ -25,7 +25,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtPlanCurve, adtPlanVerdict, adtPlanWeekdayVerdict, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtPlanCurve, adtPlanVerdict, adtPlanWeekdayVerdict, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -87,13 +87,17 @@ function run(argv) {
   ];
   const d = F.adtDeltas(samples);
   const h10 = d.hours.find(h => h.hour === 10), h11 = d.hours.find(h => h.hour === 11), h12 = d.hours.find(h => h.hour === 12);   // UK hours (BST = Z + 1)
-  t('deltas: first sample books its cumulative into its own UK hour (09:10Z = 10 UK)', h10 && near(h10.spend, 1.50) && h10.clicks === 8 && h10.units === 1, h10);
+  /* Phase 1B: the first sample's spend is the CARRY of its hour (everything since 00:00 UTC), not the hour's own spend */
+  t('deltas: first sample books its cumulative spend as carry_spend of its UK hour (09:10Z = 10 UK); the hour keeps only the increase', h10 && near(h10.carry_spend, 1.00) && near(h10.spend, 0.50) && h10.clicks === 8 && h10.units === 1, h10);
+  t('deltas: later hours carry nothing', h11 && near(h11.carry_spend, 0) && h12 && near(h12.carry_spend, 0), [h11, h12]);
   t('deltas: second hour gets the increase only', h11 && near(h11.spend, 1.00) && h11.clicks === 4 && h11.units === 0, h11);
   t('deltas: a fall is a correction, not negative spend, and re-bases', d.corrections === 1 && h12 && near(h12.spend, 0.80) && h12.clicks === 3 && h12.units === 1, [d.corrections, h12]);
   t('deltas: sample count', d.samples === 5, d.samples);
   const rec = F.adtReconcile([{ hour: 10, spend: 4, clicks: 10, units: 2 }, { hour: 11, spend: 4, clicks: 10, units: 2 }], 10, 15, 3);
   t('reconcile: hours scale to the final report', near(rec[0].spend_r, 5) && rec[0].clicks_r === 8 && rec[1].clicks_r === 8 && near(rec[0].spend_r + rec[1].spend_r, 10), rec);
   t('reconcile: no sampled mass leaves zero', F.adtReconcile([{ hour: 9, spend: 0, clicks: 0, units: 0 }], 5, 5, 1)[0].spend_r === 0, F.adtReconcile([{ hour: 9, spend: 0, clicks: 0, units: 0 }], 5, 5, 1));
+  const recC = F.adtReconcile([{ hour: 8, spend: 0.5, carry_spend: 1, clicks: 0, units: 0 }, { hour: 9, spend: 1, clicks: 0, units: 0 }], 5, 0, 0);
+  t('reconcile: the carry is inside the day\'s factor (2.5 sampled → 5 final = ×2) but only within-hour spend is scaled out', near(recC[0].spend_r, 1) && near(recC[1].spend_r, 2), recC);
   const capS = [
     { sampled_at: '2026-09-17T08:00:00Z', cum_spend: 3, cum_clicks: 10 }, { sampled_at: '2026-09-17T12:00:00Z', cum_spend: 9.6, cum_clicks: 40 },
     { sampled_at: '2026-09-17T14:00:00Z', cum_spend: 9.7, cum_clicks: 41 }, { sampled_at: '2026-09-17T16:00:00Z', cum_spend: 9.7, cum_clicks: 41 },
@@ -372,6 +376,107 @@ function run(argv) {
   t('strip: a profit role keeps collective figures, but never the old estimate', kept.kpi.actual_profit === 40 && !('ad_profit' in kept.kpi) && kept.by_account[0].actual_profit === 20 && !('ad_profit' in kept.by_account[0]) && !('ad_profit' in kept.winners[0]), kept.kpi);
   t('strip: null and scalar answers pass through', F.adtStripCollectiveProfit(null, {}) === null && F.adtStripCollectiveProfit('ok', {}) === 'ok', null);
   t('strip: a label under a profit key is text, not a figure, and reaches every role', stripped.profit_label === 'Profit (Sales Analysis law)' && kept.profit_label === 'Profit (Sales Analysis law)', stripped.profit_label);
+
+  /* 18. Phase 1B: the period helper, the today grain, the carry hour and the splice. 27 Sep 2026 is a Sunday. */
+  const T = '2026-09-27';
+  const P = k => F.adtPeriod({ period: k }, T);
+  const eq = (o, from, to, days, inc, pf, pt) => o.from === from && o.to === to && o.days === days && o.includes_today === inc && o.prev_from === pf && o.prev_to === pt;
+  t('period: today', eq(P('today'), T, T, 1, true, '2026-09-26', '2026-09-26') && P('today').key === 'today', P('today'));
+  t('period: yesterday', eq(P('yesterday'), '2026-09-26', '2026-09-26', 1, false, '2026-09-25', '2026-09-25'), P('yesterday'));
+  t('period: d7 = the 7 full days to yesterday, previous = the 7 before', eq(P('d7'), '2026-09-20', '2026-09-26', 7, false, '2026-09-13', '2026-09-19'), P('d7'));
+  t('period: d14 / d30 / d90 lengths', P('d14').days === 14 && P('d30').days === 30 && P('d30').from === '2026-08-28' && P('d90').days === 90 && P('d90').to === '2026-09-26', [P('d14'), P('d30'), P('d90')].map(x => x.from));
+  t('period: this_week starts Monday (21 Sep) and includes today', eq(P('this_week'), '2026-09-21', T, 7, true, '2026-09-14', '2026-09-20'), P('this_week'));
+  t('period: last_week is Mon → Sun', eq(P('last_week'), '2026-09-14', '2026-09-20', 7, false, '2026-09-07', '2026-09-13'), P('last_week'));
+  t('period: this_month 1st → today, previous = last month whole', eq(P('this_month'), '2026-09-01', T, 27, true, '2026-08-01', '2026-08-31'), P('this_month'));
+  t('period: last_month whole, previous = the month before', eq(P('last_month'), '2026-08-01', '2026-08-31', 31, false, '2026-07-01', '2026-07-31'), P('last_month'));
+  const mon = F.adtPeriod({ period: 'this_week' }, '2026-09-28');
+  t('period: on a Monday this_week is one day and last_week is the week just ended', mon.from === '2026-09-28' && mon.days === 1 && F.adtPeriod({ period: 'last_week' }, '2026-09-28').from === '2026-09-21' && F.adtPeriod({ period: 'last_week' }, '2026-09-28').to === '2026-09-27', mon);
+  const oct1 = F.adtPeriod({ period: 'this_month' }, '2026-10-01'), sepLast = F.adtPeriod({ period: 'last_month' }, '2026-10-01');
+  t('period: on the 1st this_month is one day; last_month is 1–30 Sep with August before it', oct1.days === 1 && oct1.from === '2026-10-01' && sepLast.from === '2026-09-01' && sepLast.to === '2026-09-30' && sepLast.prev_from === '2026-08-01' && sepLast.prev_to === '2026-08-31', [oct1, sepLast]);
+  const cu = F.adtPeriod({ from: '2026-09-01', to: '2026-09-10' }, T);
+  t('period: custom from / to (key inferred), previous = same length before it', cu.key === 'custom' && eq(cu, '2026-09-01', '2026-09-10', 10, false, '2026-08-22', '2026-08-31'), cu);
+  const one = F.adtPeriod({ period: 'custom', from: '2026-09-25', to: '2026-09-25' }, T);
+  t('period: a single custom day is day-to-day', one.days === 1 && one.label === '2026-09-25' && one.prev_from === '2026-09-24' && one.prev_to === '2026-09-24', one);
+  const clamp = F.adtPeriod({ period: 'custom', from: '2026-09-20', to: '2026-10-05' }, T);
+  t('period: a custom range past today is clamped to today and includes it', clamp.to === T && clamp.includes_today === true && clamp.days === 8, clamp);
+  let err = ''; try { F.adtPeriod({ period: 'custom', from: '2026-01-01', to: '2026-09-01' }, T); } catch (e) { err = String(e.message); }
+  t('period: a custom range over 120 days is refused with a SAY', /^SAY: .*120 days/.test(err), err);
+  err = ''; try { F.adtPeriod({ period: 'custom', from: '2026-09-10', to: '2026-09-01' }, T); } catch (e) { err = String(e.message); }
+  t('period: a custom range that ends before it starts is refused', /^SAY: /.test(err), err);
+  err = ''; try { F.adtPeriod({ period: 'custom', from: 'yesterday' }, T); } catch (e) { err = String(e.message); }
+  t('period: a custom range without dates is refused', /^SAY: /.test(err) && /YYYY-MM-DD/.test(err), err);
+  err = ''; try { F.adtPeriod({ period: 'fortnight' }, T); } catch (e) { err = String(e.message); }
+  t('period: an unknown key is refused', /^SAY: unknown period/.test(err), err);
+  t('period: no period at all = d30 (the pages\' old window), and adtPeriodOr keeps a page\'s own default', F.adtPeriod({}, T).key === 'd30' && F.adtPeriodOr(null, T, 'd28').days === 28 && F.adtPeriodOr({ period: 'today' }, T, 'd28').key === 'today', F.adtPeriodOr(null, T, 'd28'));
+  t('period: every listed key resolves and echoes itself', F.ADTOOL_PERIOD_KEYS.filter(k => k !== 'custom').every(k => P(k).key === k && P(k).label) && F.ADTOOL_PERIOD_KEYS.length === 11, F.ADTOOL_PERIOD_KEYS);
+  /* the today grain */
+  const latest = [
+    { account: 'A', item_id: '1', family: 'cpc', report_day: T, sampled_at: '2026-09-27T10:00:00Z', cum_spend: 2.5, cum_clicks: 10, cum_units: 1, cum_revenue: 9.99, cum_impressions: 100 },
+    { account: 'A', item_id: '1', family: 'std', report_day: T, sampled_at: '2026-09-27T10:02:00Z', cum_spend: 0.5, cum_clicks: 2, cum_units: 0, cum_revenue: 0, cum_impressions: 50 },
+    { account: 'A', item_id: '2', family: 'cpc', report_day: '2026-09-26', sampled_at: '2026-09-26T22:00:00Z', cum_spend: 9, cum_clicks: 30, cum_units: 2, cum_revenue: 20, cum_impressions: 900 },
+    { account: 'B', item_id: '3', family: 'cpc', report_day: T, sampled_at: '2026-09-27T10:00:00Z', cum_spend: 1, cum_clicks: 4, cum_units: 0, cum_revenue: 0, cum_impressions: 40 },
+  ];
+  const todOrders = [
+    { account: 'A', item_id: '1', sold: 9.99, fees: 1.7, cost: 4, refunded: 0, qty: 1, status: '' },
+    { account: 'A', item_id: '1', sold: 9.99, fees: 0, cost: 4, refunded: 0, qty: 1, status: '' },
+    { account: 'A', item_id: '4', sold: 20, fees: 3, cost: 8, refunded: 0, qty: 2, status: 'DISPATCHED' },
+    { account: 'B', item_id: '3', sold: 5, fees: 1, cost: 2, refunded: 0, qty: 1, status: 'CANCELLED' },
+  ];
+  const TR = F.adtTodayRows({ latest, orders: todOrders, todayUtc: T, ukDay: T });
+  const tr1 = TR.find(r => r.account === 'A' && r.item_id === '1'), tr4 = TR.find(r => r.item_id === '4'), tr3 = TR.find(r => r.item_id === '3');
+  t('today rows: ads summed over both families, cpc_spend from the cpc family only, orders merged on (account, item)', tr1 && near(tr1.spend, 3) && near(tr1.cpc_spend, 2.5) && tr1.clicks === 12 && tr1.impressions === 150 && tr1.attr_units === 1 && near(tr1.attr_revenue, 9.99) && tr1.orders === 2 && tr1.units === 2 && near(tr1.revenue, 19.98) && tr1.sampled_at === '2026-09-27T10:02:00Z', tr1);
+  t('today rows: profit only over priced orders (one order waits for its fees) with today\'s cpc spend', tr1 && near(tr1.raw_priced_sum, 4.29) && tr1.pending_fee_orders === 1 && tr1.pending_cost_orders === 0 && near(tr1.actual_profit, round2(0.8 * 4.29 - 0.96 * 2.5)), tr1);
+  t('today rows: an order-only listing has NULL ad columns (no same-day sample) and law profit over its orders', tr4 && tr4.spend === null && tr4.cpc_spend === null && tr4.clicks === null && tr4.orders === 1 && tr4.units === 2 && near(tr4.actual_profit, 7.2), tr4);
+  t('today rows: an ads-only listing shows the cpc leg as its loss; a cancelled order is not an order', tr3 && near(tr3.spend, 1) && tr3.orders === 0 && near(tr3.actual_profit, -0.96), tr3);
+  t('today rows: yesterday\'s report day is not today; rows with neither ads nor orders do not exist (so the writer deletes them)', !TR.some(r => r.item_id === '2') && TR.length === 3 && TR.map(r => r.account + r.item_id).join(',') === 'A1,A4,B3', TR.map(r => r.account + r.item_id));
+  t('today rows: the change-only tuple is stable for equal numbers, moves with a number, and keeps NULL apart from 0', F.adtTodayTuple(tr1) === F.adtTodayTuple(Object.assign({}, tr1, { sampled_at: 'x', orders_at: 'y' })) && F.adtTodayTuple(tr1) !== F.adtTodayTuple(Object.assign({}, tr1, { spend: 3.01 })) && F.adtTodayTuple(tr4) !== F.adtTodayTuple(Object.assign({}, tr4, { spend: 0 })), F.adtTodayTuple(tr4));
+  /* the carry hour on the curve */
+  const HC = F.adtHourCurve([
+    { hour_utc: '2026-09-27T07', spend: 0.4, attr_units: 0, carry_spend: 12.5, carry_units: 3, samples: 40 },
+    { hour_utc: '2026-09-27T08', spend: 3.2, attr_units: 2, carry_spend: 0, carry_units: 0, samples: 55 },
+    { hour_utc: '2026-09-27T09', spend: 1.1, attr_units: 1, carry_spend: 0.3, carry_units: 0, samples: 50 },
+  ]);
+  t('hour curve: UTC buckets land on UK hours (07Z = 08 UK in BST) and the carry is excluded from the hour\'s spend', HC.hour_curve.length === 3 && HC.hour_curve[0].hour_uk === 8 && near(HC.hour_curve[0].spend, 0.4) && HC.hour_curve[1].hour_uk === 9 && near(HC.hour_curve[1].spend, 3.2) && HC.hour_curve[1].attr_units === 2, HC.hour_curve);
+  t('hour curve: the carry is reported apart, with its hour (a listing whose first sample came later adds to it)', near(HC.carry_spend, 12.8) && HC.carry_units === 3 && HC.carry_hour_uk === 8, [HC.carry_spend, HC.carry_hour_uk]);
+  /* the splice: today from the today grain, never listing_day's own today row */
+  const srcY = F.adtDaySrc(P('d7'), T), srcT = F.adtDaySrc(P('today'), T), srcW = F.adtDaySrc(P('this_week'), T);
+  t('splice: a window ending yesterday reads adtool_listing_day alone', srcY === 'adtool_listing_day', srcY);
+  t('splice: a window that includes today unions listing_day BEFORE today with the today grain for today', /adtool_listing_day WHERE day < '2026-09-27'/.test(srcT) && /UNION ALL/.test(srcT) && /adtool_listing_today WHERE uk_day = '2026-09-27'/.test(srcT) && srcW === srcT, srcT);
+  t('splice: the today half carries today\'s weekday (Sun = 6) and day-of-month, and NULL ad columns read as 0 in sums', / 6 AS weekday, 27 AS dom/.test(srcT) && /COALESCE\(spend, 0\)/.test(srcT), srcT.slice(srcT.indexOf('UNION')));
+
+  /* 19. Review fixes (27 Sep 2026): the gate before the cache, the sampling window from Pacific midnight, the
+     23:00–07:05 UTC BST hole, the cut list under a window that includes today, the period caps, unpriced counts. */
+  /* the route handler refuses a role outside ADTOOL_ROLES before the KV page cache is consulted: a CS session against
+     a pre-warmed key gets 'auth', never the payload */
+  t('gate: CS, Lister, Hunter and an empty role are refused before the cache; the three advertising roles and super pass', !F.adtRoleAllowed({ role: 'CS' }) && !F.adtRoleAllowed({ role: 'Lister' }) && !F.adtRoleAllowed({ role: 'Hunter' }) && !F.adtRoleAllowed({}) && !F.adtRoleAllowed(null) && F.ADTOOL_ROLES.every(r => F.adtRoleAllowed({ role: r })) && F.adtRoleAllowed({ role: 'CS', super: true }), F.ADTOOL_ROLES);
+  /* the sampling window moves with the US clock: Pacific midnight is 07:00 UTC in PDT and 08:00 UTC in PST */
+  const winSummer = new Date('2026-09-27T07:20:00Z'), winWinter = new Date('2026-11-02T07:20:00Z'), winWinterOk = new Date('2026-11-02T08:20:00Z');
+  t('sampling window: 27 Sep (PDT) opens at 07:05 UTC and 07:20 is inside it', F.adtPacificOffsetMin(winSummer) === 420 && F.adtSamplingFromMin(winSummer) === 425 && F.adtInSamplingWindow(winSummer) && F.adtSamplingFromText(winSummer) === '07:05 UTC' && F.adtSamplingWindowText(winSummer) === '07:05–23:59 UTC', [F.adtPacificOffsetMin(winSummer), F.adtSamplingFromText(winSummer)]);
+  t('sampling window: 2 Nov 07:20 UTC (PST) is OUTSIDE the window — the freshness row reads PASS, not FAIL — and 08:20 is inside', F.adtPacificOffsetMin(winWinter) === 480 && F.adtSamplingFromMin(winWinter) === 485 && !F.adtInSamplingWindow(winWinter) && F.adtInSamplingWindow(winWinterOk) && F.adtSamplingFromText(winWinter) === '08:05 UTC', [F.adtPacificOffsetMin(winWinter), F.adtSamplingFromText(winWinter)]);
+  t('sampling window: 23:30 UTC is inside, 00:10 UTC is not', F.adtInSamplingWindow(new Date('2026-09-27T23:30:00Z')) && !F.adtInSamplingWindow(new Date('2026-09-28T00:10:00Z')), null);
+  /* BST 23:00–07:05 UTC: the UK day has turned (28 Sep) while the newest samples still carry report_day 27 Sep */
+  const holeLatest = [{ account: 'A', item_id: '1', family: 'cpc', report_day: '2026-09-27', sampled_at: '2026-09-27T23:55:00Z', cum_spend: 40, cum_clicks: 100, cum_units: 3, cum_revenue: 30, cum_impressions: 900 }];
+  const holeOrders = [{ account: 'A', item_id: '1', sold: 9.99, fees: 1.7, cost: 4, refunded: 0, qty: 1, status: '' }];
+  const hole = F.adtTodayRows({ latest: holeLatest, orders: holeOrders, todayUtc: '2026-09-28', ukDay: '2026-09-28' });
+  t('today rows at 01:30 UK: yesterday\'s report day is not a sample for today — ad columns NULL, profit over the priced order alone', hole.length === 1 && hole[0].spend === null && hole[0].cpc_spend === null && hole[0].report_day === '2026-09-28' && near(hole[0].actual_profit, 0.8 * 4.29), hole[0]);
+  const staleRow = { report_day: '2026-09-27', spend: 40, cpc_spend: 40, clicks: 100, impressions: 900, attr_units: 3, attr_revenue: 30, raw_priced_sum: 4.29, refunds: 0, actual_profit: round2(0.8 * 4.29 - 0.96 * 40), sampled_at: '2026-09-27T23:55:00Z' };
+  const honest = F.adtTodayRowHonest(Object.assign({}, staleRow), '2026-09-28');
+  t('today reader: a stored row still on yesterday\'s report day reads as unsampled — no £38 of Sunday cpc as today\'s loss', honest.spend === null && honest.clicks === null && honest.sampled_at === null && near(honest.actual_profit, 0.8 * 4.29) && F.adtTodayRowHonest(Object.assign({}, staleRow), '2026-09-27').spend === 40, honest);
+  const srcHole = F.adtDaySrc(F.adtPeriod({ period: 'today' }, '2026-09-28'), '2026-09-28', '2026-09-28');
+  t('splice: the today half guards every ad column and the cpc leg of profit on report_day = the UTC day', (srcHole.match(/report_day = '2026-09-28'/g) || []).length >= 7 && /ELSE ROUND\(0\.8 \* COALESCE\(raw_priced_sum, 0\) - COALESCE\(refunds, 0\), 2\) END AS actual_profit/.test(srcHole) && /uk_day = '2026-09-28'/.test(srcHole), srcHole.slice(srcHole.indexOf('UNION')));
+  /* period caps and the inverted custom window */
+  err = ''; try { F.adtPeriod({ period: 'd999' }, T); } catch (e) { err = String(e.message); }
+  t('period: dN past 120 days is refused (d999 would scan the table from 2023)', /^SAY: .*120 days/.test(err) && F.adtPeriod({ period: 'd120' }, T).days === 120, err);
+  err = ''; try { F.adtPeriod({ period: 'custom', from: '2026-10-01', to: '2026-10-05' }, T); } catch (e) { err = String(e.message); }
+  t('period: a custom range that starts after today is refused, never echoed as −3 days', /^SAY: .*starts after today/.test(err), err);
+  const lone = F.adtPeriod({ from: '2026-09-25' }, T);
+  t('period: a lone from is a one-day custom range, not a silent d30', lone.key === 'custom' && lone.days === 1 && lone.from === '2026-09-25' && lone.to === '2026-09-25', lone);
+  /* unpriced orders are counted once, not once per missing field */
+  const unp = F.adtSheetLawOrders([{ sold: 10, fees: 0, cost: 0 }, { sold: 10, fees: 0, cost: 0 }, { sold: 10, fees: 0, cost: 0 }]);
+  t('law: three orders lacking both fees and cost are 3 unpriced (both buckets say 3 — the sum would say 6)', unp.unpriced_orders === 3 && unp.pending_cost_orders === 3 && unp.pending_fee_orders === 3, unp);
+  const unp2 = F.adtSheetLawOrders([{ sold: 10, fees: 1, cost: 0 }, { sold: 10, fees: 0, cost: 3 }, { sold: 10, fees: 1, cost: 3 }]);
+  t('law: one order without cost and one without fees are 2 unpriced; the priced one is in the sum', unp2.unpriced_orders === 2 && near(unp2.raw_priced_sum, 6) && tr1.unpriced_orders === 1 && tr4.unpriced_orders === 0, unp2);
+  t('today rows: the change-only tuple moves when the unpriced count moves', F.adtTodayTuple(tr1) !== F.adtTodayTuple(Object.assign({}, tr1, { unpriced_orders: 2 })), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
