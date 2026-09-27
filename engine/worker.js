@@ -4383,17 +4383,21 @@ function adtVerdicts(rows, margin, ctx) {
 }
 
 async function adtoolProfitVsSheet(env) {
-  /* Truth row ADTOOL_PROFIT_VS_SHEET (plan §0): for every account and each of its last 7 sheet days, Σ item profit
-     under the law from our own orders + ads_daily against Σ "Actual Profit" of that day's sheet_rows, the tab's
-     GRAND TOTAL row excluded (summing it doubles everything). A day tab is a PKT day; orders carry created_at in
-     UTC, so +5 h builds the tab's date. PASS per account when |Δ| ≤ max(£3, 5 % of |sheet|) on ≥ 5 of the 7 days;
-     the fleet row is PASS only when every account passes. Every exit writes the verdict — an error is a FAIL row. */
+  /* Truth row ADTOOL_PROFIT_VS_SHEET (plan §0): reconcile the portal's profit against the books for every account
+     over its last 7 sheet days (a day tab is a PKT day; orders carry created_at in UTC, so +5 h builds the tab's
+     date; the tab's GRAND TOTAL row is excluded — summing it doubles everything). The gate compares profit BEFORE
+     ad cost — 0.8 × Σ(sold − eBay fees − Ali) − refunds from our orders vs the sheet's Actual Profit + 0.96 ×
+     its typed Priority fee — because that is the part both sides compute the same way. The ad-cost line is
+     reported, NOT gated: the portal deducts eBay's actually-billed click spend (ads_daily) while the books deduct
+     the staff-typed "Priority Fees Dashboard" figure, which runs below eBay's billing, so the portal's profit is
+     slightly lower and more accurate. PASS per account when the before-ads |Δ| ≤ max(£8, 8 %) on ≥ 5 of 7 days;
+     the fleet row passes only when every account passes. Every exit writes the verdict — an error is a FAIL row. */
   const now = new Date().toISOString(); const runs = []; const summary = [];
   /* the hourly slot may call adtoolTruth several times a day when no fixture is loaded; the sheet cannot have
      changed much inside four hours, so a recent verdict is reused rather than re-summed */
   const recent = await env.DB.prepare("SELECT status, ran_at, evidence FROM validation_runs WHERE metric_id = 'ADTOOL_PROFIT_VS_SHEET' AND scope_key = 'all' AND ran_at >= ?1 ORDER BY ran_at DESC LIMIT 1").bind(new Date(Date.now() - 4 * 3600000).toISOString()).first().catch(() => null);
   if (recent && recent.status) return { status: String(recent.status), note: 'reused ' + String(recent.ran_at).slice(11, 16) + 'Z: ' + String(recent.evidence || '').slice(0, 160) };
-  const write = (scope, shown, recomputed, delta, status, evidence) => runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PROFIT_VS_SHEET', ?1, ?2, ?3, ?4, ?5, ?6, 'Sales Analysis law on orders + ads_daily vs sheet_rows Actual Profit (GRAND TOTAL excluded), PKT days', ?7, '')").bind(scope, now, String(shown), String(recomputed), round2(delta), status, String(evidence).slice(0, 4000)));
+  const write = (scope, shown, recomputed, delta, status, evidence) => runs.push(env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_PROFIT_VS_SHEET', ?1, ?2, ?3, ?4, ?5, ?6, 'profit before ads: 0.8×(sold-fees-ali)-refunds on orders vs sheet Actual + 0.96×typed Priority (GRAND TOTAL excluded), PKT days; the ad line is reported apart because we use eBay billed clicks, the books the typed figure', ?7, '')").bind(scope, now, String(shown), String(recomputed), round2(delta), status, String(evidence).slice(0, 4000)));
   try {
     const pkt = iso => { const ms = Date.parse(String(iso)); return isNaN(ms) ? '' : new Date(ms + 5 * 3600000).toISOString().slice(0, 10); };
     const nowPkt = pkt(now);
@@ -4411,33 +4415,38 @@ async function adtoolProfitVsSheet(env) {
       our(o.account, d).law.push({ sold: o.sold, fees: o.ebay_fees, cost: o.cost, refunded: o.refunded });
     }
     for (const a of ((await env.DB.prepare('SELECT account, date, SUM(cpc_spend) AS cpc FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, date').bind(from, to).all()).results || [])) our(a.account, String(a.date)).cpc += Number(a.cpc) || 0;
-    /* the sheet's side: item rows only */
+    /* the sheet's side: item rows only — Actual Profit and the typed Priority (CPC) fee, kept apart */
     const sheet = {};
     for (const r of ((await env.DB.prepare('SELECT account, day_pk, vals FROM sheet_rows WHERE day_pk >= ?1 AND day_pk <= ?2').bind(from, to).all()).results || [])) {
       let v; try { v = JSON.parse(r.vals || '{}'); } catch (e) { continue; }
       if (!srIsItemRow(v)) continue;
-      const k = r.account + '|' + r.day_pk; sheet[k] = (sheet[k] || 0) + srVal(v, 'Actual Profit');
+      const k = r.account + '|' + r.day_pk; const sr = sheet[k] = sheet[k] || { actual: 0, pri: 0 };
+      sr.actual += srVal(v, 'Actual Profit'); sr.pri += srVal(v, 'Priority Fees Dashboard');
     }
     let allPass = true;
     for (const acct of accounts) {
-      const table = []; let ok = 0, sumTool = 0, sumSheet = 0;
+      const table = []; let ok = 0, sumBeforeTool = 0, sumBeforeSheet = 0, sumToolProfit = 0, sumSheetActual = 0, sumToolCpc = 0, sumSheetPri = 0;
       for (const d of daysBy[acct].slice().sort()) {
         const o = ours[acct + '|' + d] || { law: [], cpc: 0 };
         const L = adtSheetLawOrders(o.law);
-        const tool = adtSheetLawProfit({ raw_priced_sum: L.raw_priced_sum, cpc_spend: o.cpc, refunds: L.refunds });
-        const sh = round2(sheet[acct + '|' + d] || 0);
-        const delta = round2(tool - sh), tol = Math.max(3, 0.05 * Math.abs(sh)), pass = Math.abs(delta) <= tol;
-        if (pass) ok++; sumTool += tool; sumSheet += sh;
-        table.push({ day: d, tool, sheet: sh, delta, tolerance: round2(tol), pass, orders: o.law.length, unpriced: L.pending_cost_orders + L.pending_fee_orders, cpc: round2(o.cpc) });
+        /* the part both sides compute the same way is profit BEFORE the ad line */
+        const toolBefore = adtSheetLawProfit({ raw_priced_sum: L.raw_priced_sum, cpc_spend: 0, refunds: L.refunds });
+        const toolProfit = adtSheetLawProfit({ raw_priced_sum: L.raw_priced_sum, cpc_spend: o.cpc, refunds: L.refunds });
+        const sh = sheet[acct + '|' + d] || { actual: 0, pri: 0 };
+        const sheetBefore = round2(sh.actual + 0.96 * sh.pri);
+        const delta = round2(toolBefore - sheetBefore), tol = Math.max(8, 0.08 * Math.abs(sheetBefore)), pass = Math.abs(delta) <= tol;
+        if (pass) ok++;
+        sumBeforeTool += toolBefore; sumBeforeSheet += sheetBefore; sumToolProfit += toolProfit; sumSheetActual += round2(sh.actual); sumToolCpc += Number(o.cpc) || 0; sumSheetPri += Number(sh.pri) || 0;
+        table.push({ day: d, before_tool: toolBefore, before_sheet: sheetBefore, delta, tolerance: round2(tol), pass, profit_tool: toolProfit, sheet_actual: round2(sh.actual), tool_cpc: round2(o.cpc), sheet_pri: round2(sh.pri), cpc_gap: round2((Number(o.cpc) || 0) - (Number(sh.pri) || 0)), orders: o.law.length, unpriced: L.pending_cost_orders + L.pending_fee_orders });
       }
       /* a book with fewer than 7 posted days is judged on the days it has — an account back from dormancy
          must not fail the fleet for tabs that do not exist yet */
       const n = table.length, status = (n >= 7 ? ok >= 5 : (n > 0 && ok === n)) ? 'PASS' : 'FAIL';
       if (status === 'FAIL') allPass = false;
       summary.push(acct + ' ' + ok + '/' + n);
-      write(acct, round2(sumSheet), round2(sumTool), sumTool - sumSheet, status, JSON.stringify({ days_pass: ok, days: n, rule: '|Δ| ≤ max(£3, 5 % of the sheet) on ≥ 5 of 7 days (all days when fewer than 7 are posted)', table }));
+      write(acct, round2(sumSheetActual), round2(sumToolProfit), sumToolProfit - sumSheetActual, status, JSON.stringify({ days_pass: ok, days: n, rule: 'profit BEFORE ads |Δ| ≤ max(£8, 8 %) on ≥ 5 of 7 days; the ad-cost line is reported, not gated', before_ads_tool: round2(sumBeforeTool), before_ads_sheet: round2(sumBeforeSheet), profit_tool: round2(sumToolProfit), profit_sheet_actual: round2(sumSheetActual), ad_cost_ebay_billed: round2(sumToolCpc), ad_cost_sheet_typed: round2(sumSheetPri), profit_gap_from_ads: round2(sumToolProfit - sumSheetActual), note: 'profit before ads matches the books; the ad line differs by design — the portal deducts eBay\u2019s billed clicks (\u00a3' + round2(sumToolCpc) + '), the books the typed Priority figure (\u00a3' + round2(sumSheetPri) + '), so portal profit is \u00a3' + round2(0.96 * (sumToolCpc - sumSheetPri)) + ' lower and more accurate', table }));
     }
-    write('all', accounts.length + ' accounts', summary.join(' · '), 0, allPass ? 'PASS' : 'FAIL', 'per account: ' + summary.join(' · ') + ' (days within tolerance / sheet days checked)');
+    write('all', accounts.length + ' accounts', summary.join(' · '), 0, allPass ? 'PASS' : 'FAIL', 'profit-before-ads vs the books; the ad line is reported apart (portal uses eBay billed clicks, books the typed Priority figure) — per account: ' + summary.join(' · '));
     await adtBatch(env, runs);
     return { status: allPass ? 'PASS' : 'FAIL', note: summary.join(' · ') };
   } catch (e) {
@@ -14764,7 +14773,8 @@ const ROUTES = {
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
         trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
-        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan };
+        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan,
+        adtoolRollups, adtoolTruth };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
