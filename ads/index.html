@@ -684,7 +684,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck'];
+var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -829,7 +829,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260927-0314';
+var BUILD = '20260927-0407';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1276,7 +1276,10 @@ var ADT_REG_MAP = [
      even when its source tables are shared with older rows */
   [/frontier/i, ['FRONTIER', 'adtool_listing_day', 'adtool_listings']],
   [/run today|running today|RUN_TODAY/i, ['RUN_TODAY_VERDICT', 'adtool_listing_today']],
-  [/hour band/i, ['HOUR_BANDS', 'adtool_listing_hour']]
+  [/hour band/i, ['HOUR_BANDS', 'adtool_listing_hour']],
+  /* Phase 3: CPC active / post listings and the advertising overview */
+  [/cpc listings|cpc active|cpc post/i, ['campaign_ads', 'campaigns', 'adtool_campaign_ad_events', 'adtool_campaign_archive', 'adtool_listing_day', 'items_api']],
+  [/overview|behaviour pattern|top mover/i, ['adtool_scope_day', 'adtool_listing_week', 'adtool_listing_day']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label){
@@ -1714,6 +1717,284 @@ window.M98M_ADS_ONLY = true;
   }
 })();
 
+/* ---------- view-adtool-cpc.js ---------- */
+/* view-adtool-cpc.js — Advertising Tool · CPC listings (owner's brief, 27 Sep 2026: two NEW pages —
+ * "CPC Active Listings" and "CPC Post Listings"). One view, a mode toggle: Active shows every listing
+ * with a live cost-per-click ad; Post shows listings whose CPC ad is paused, archived or ended and how
+ * they did after it stopped. Both carry the product cell (image, name, id, eBay link, account), the
+ * period bar, account chips, a sortable table with every column the brief lists, and a period-comparison
+ * graph (this window vs the previous comparable one, per metric). Profit appears per listing only, under
+ * the Sales Analysis law — no collective profit. avg CPC / CVR / ROAS / ACoS print "—" when their
+ * denominator is zero. "Sold since listed" is labelled exactly so (eBay Quantity − QuantityAvailable,
+ * resets on a quantity revision — never "total sold"). Hidden; flag adtool_page_cpc. The page refreshes
+ * every 5 minutes only while the window reaches into today. Nothing here is sent to eBay.
+ * Galaxy tokens only, gold the accent, #e0563f the loss colour. */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+  var CP = { mode: 'active', account: '', period: null, accounts: [], data: null, sort: { key: 'spend', dir: -1 } };
+
+  VIEW_CSS.push([
+    '.cpc-wrap{max-width:1360px}',
+    '.cpc-mode{display:flex;gap:0;border:1px solid var(--gold-line);border-radius:10px;overflow:hidden;margin:0 0 12px;width:max-content}',
+    '.cpc-mode button{background:var(--panel);border:0;border-right:1px solid var(--gold-line);color:var(--text-2);padding:7px 16px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}',
+    '.cpc-mode button:last-child{border-right:0}',
+    '.cpc-mode button.on{color:var(--gold-ink);background:var(--gold-b);font-weight:800}',
+    '.cpc-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--text-2);font-weight:600}',
+    '.cpc-tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
+    '.cpc-tile{flex:1 1 130px;border:1px solid var(--gold-line);border-radius:12px;padding:9px 13px;background:var(--panel-2)}',
+    '.cpc-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.cpc-tile .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.cpc-tile.gold .v{color:var(--gold-a)}.cpc-tile.loss .v{color:' + LOSS + '}',
+    '.cpc-tile .d{font-size:11px;color:var(--text-2);margin-top:2px}',
+    '.cpc-cmp{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}@media(max-width:900px){.cpc-cmp{grid-template-columns:1fr}}',
+    '.cpc-cmp-card{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel)}',
+    '.cpc-cmp-card h4{margin:0 0 2px;font-size:12px;font-weight:800;color:var(--text)}',
+    '.cpc-cmp-card .sub{font-size:11px;color:var(--text-2);margin-bottom:4px}',
+    '.cpc-note{font-size:12px;color:var(--text-2);background:var(--panel-2);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5}',
+    '.cpc-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.cpc-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap;cursor:pointer;user-select:none}',
+    '.cpc-tbl th.r{text-align:right}.cpc-tbl th .ar{color:var(--gold-a);margin-left:3px}',
+    '.cpc-tbl td{padding:8px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.cpc-tbl td.r{text-align:right;white-space:nowrap}',
+    '.cpc-tbl tr:hover td{background:rgba(255,255,255,.03)}',
+    '.cpc-cost .s{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:700;display:block}',
+    '.cpc-sub{font-size:10.5px;color:var(--text-3)}',
+    '.cpc-neg{color:' + LOSS + ';font-weight:700}.cpc-pos{color:var(--gold-a);font-weight:700}',
+    '.cpc-held{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2)}',
+    '.cpc-held.up{color:var(--gold-a);border-color:rgba(242,176,53,.45)}.cpc-held.down{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
+    '.cpc-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
+    '.cpc-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
+  ].join(''));
+
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function gbp0(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)).toLocaleString('en-GB'); }
+  function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
+  function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
+  function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
+  function src(t) { return '<span class="cpc-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  function dayTxt(d) { d = String(d || '').slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(d) ? d : '—'; }
+
+  /* a metric printed "—" the moment its denominator is zero — never a divide-by-nothing figure.
+     the engine sends the computed value; the page falls back to the safe ratio and still prints "—". */
+  function ratio(topv, botv) { var t = num(topv), b = num(botv); if (b == null || b === 0) return null; if (t == null) return null; return t / b; }
+  function acosOf(r) { var v = num(r.acos); if (v != null) return v; return ratio(r.spend, r.attr_revenue); }
+  function avgCpcOf(r) { var v = num(r.avg_cpc); if (v != null) return v; return ratio(r.spend, r.clicks); }
+  function cvrOf(r) { var v = num(r.cvr); if (v != null) return v; return ratio(r.attr_units, r.clicks); }
+  function roasOf(r) { var v = num(r.roas); if (v != null) return v; return ratio(r.attr_revenue, r.spend); }
+
+  VIEWS.adtoolCpc = {
+    label: 'CPC listings (ads)', hidden: true, order: 40, roles: ROLES,
+    icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 14h5"/>',
+    render: function () {
+      return '<div class="cpc-wrap">' + adtHgroup('CPC listings', 'every cost-per-click listing and exactly how it did — active now, or after the ad stopped', 'cpcFresh') +
+        '<div class="cpc-mode" id="cpcMode">' +
+          '<button data-m="active"' + (CP.mode === 'active' ? ' class="on"' : '') + '>CPC active</button>' +
+          '<button data-m="post"' + (CP.mode === 'post' ? ' class="on"' : '') + '>CPC post</button>' +
+        '</div>' +
+        '<div id="cpcBar"></div><div id="cpcAcct" class="an-filters"></div>' +
+        '<div id="cpcBody"><div class="cpc-empty">Reading the window…</div></div></div>';
+    },
+    init: function () {
+      try { var m = localStorage.getItem('m98m:adtCpcMode'); if (m === 'active' || m === 'post') CP.mode = m; } catch (e) {}
+      modeButtons();
+      CP.period = adtPeriodBar('cpcBar', { page: 'adtoolCpc', def: 'd30', onChange: function (v) { CP.period = v; load(false); } });
+      acctChips();
+      load(false).catch(function () {});
+    }
+  };
+
+  function modeButtons() {
+    var el = $('cpcMode'); if (!el) return;
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].classList.toggle('on', bs[i].getAttribute('data-m') === CP.mode);
+      bs[i].onclick = function () {
+        var m = this.getAttribute('data-m'); if (m === CP.mode) return;
+        CP.mode = m; try { localStorage.setItem('m98m:adtCpcMode', m); } catch (e) {}
+        CP.sort = m === 'post' ? { key: 'last_active_day', dir: -1 } : { key: 'spend', dir: -1 };
+        modeButtons(); load(false);
+      };
+    }
+  }
+  function acctChips() {
+    var el = $('cpcAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (CP.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      CP.accounts.map(function (a) { return '<button class="' + (CP.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { CP.account = this.getAttribute('data-a'); acctChips(); load(false); };
+  }
+  function load(quiet) {
+    var p = adtPeriodParams(CP.period); p.mode = CP.mode; if (CP.account) p.account = CP.account;
+    return api('adtoolCpcListings', p).then(function (d) {
+      CP.data = d || {};
+      var names = (d && d.accounts) || [];
+      if (names.length) { CP.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); }
+      if (!$('cpcBody')) return;
+      draw();
+      adtPeriodEcho('cpcBar', d && d.period); adtFreshShow('cpcFresh', d && d.fresh);
+      /* a window into today moves every 5 minutes; a finished window does not. adtPoll skips hidden
+         tabs and stops on an 'auth' refusal (the session-expiry law). */
+      if (adtIncludesToday(d && d.period, CP.period)) { adtPoll('cpcBody', 300000, function () { return load(true); }); } else { adtPollStop('cpcBody'); }
+    }).catch(function (e) {
+      if (!quiet && $('cpcBody')) $('cpcBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the CPC listings could not be read') + '</div></div>';
+      throw e;
+    });
+  }
+
+  function draw() {
+    var D = CP.data, rows = (D.rows || []).filter(function (r) { return r && typeof r === 'object'; });
+    var post = CP.mode === 'post';
+    var h = '';
+    var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'the window';
+    h += '<div class="cpc-top"><span><b>' + (post ? 'CPC post' : 'CPC active') + '</b></span><span>·</span><span>' + esc(when) + '</span><span>·</span><span>' + esc(CP.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span>' + src('cpc listings') + '</div>';
+    h += totalsTiles(D);
+    h += comparePanel(D);
+    h += '<div class="cpc-note">' + (post
+      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
+      : '<b>CPC active.</b> Every listing with an ACTIVE ad in a RUNNING cost-per-click campaign. Ads are counted by eBay\'s report day (UTC); all-channel orders and units by the UK day. Impressions exist only from 18 Sep, so an earlier window shows "—". Profit is the listing\'s own figure under the Sales Analysis law; there is no collective profit. avg CPC, CVR, ROAS and ACoS read "—" when their denominator is zero.') +
+      ' The lever a hand can move is the campaign\'s daily budget (eBay exposes no per-click bid). Nothing on this page is sent to eBay.</div>';
+
+    var cols = post ? POST_COLS : ACTIVE_COLS;
+    var shown = rows.slice().sort(sorter(cols));
+    if (!shown.length) {
+      h += '<div class="cpc-empty">' + (post ? 'No listing has left a CPC ad in this window.' : 'No listing has a live cost-per-click ad right now.') + '</div>';
+    } else {
+      h += '<div class="an-scroll"><table class="cpc-tbl"><thead><tr>' + cols.map(function (c) {
+        var on = CP.sort.key === c.key;
+        return '<th class="' + (c.cls || '') + '" data-k="' + esc(c.key) + '" title="' + esc(c.title || c.label) + '">' + esc(c.label) + (on ? '<span class="ar">' + (CP.sort.dir < 0 ? '▼' : '▲') + '</span>' : '') + (c.src ? src(c.src) : '') + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+        shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td class="' + (c.cls || '') + '">' + c.cell(r) + '</td>'; }).join('') + '</tr>'; }).join('') +
+        '</tbody></table></div>';
+    }
+    h += '<div class="cpc-sub" style="margin-top:8px">' + esc(D.source || '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
+    $('cpcBody').innerHTML = h;
+    var ths = document.querySelectorAll('#cpcBody th[data-k]');
+    for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
+      var k = this.getAttribute('data-k');
+      if (CP.sort.key === k) { CP.sort.dir = -CP.sort.dir; } else { CP.sort.key = k; CP.sort.dir = k === 'listing' || k === 'listing_date' ? 1 : -1; }
+      draw();
+    };
+  }
+
+  /* the collective tiles the brief asks for — spend, attributed sales, ROAS, clicks, avg CPC, CVR;
+     NO profit at this collective level (profit lives on each item row only). */
+  function totalsTiles(D) {
+    var T = D.totals || null;
+    if (!T) {
+      var rows = D.rows || [], s = 0, v = 0, c = 0, au = 0; rows.forEach(function (r) { s += num(r.spend) || 0; v += num(r.attr_revenue) || 0; c += num(r.clicks) || 0; au += num(r.attr_units) || 0; });
+      T = s > 0 || c > 0 ? { spend: s, attr_revenue: v, clicks: c, attr_units: au, roas: ratio(v, s), avg_cpc: ratio(s, c), cvr: ratio(au, c) } : null;
+    }
+    if (!T) return '';
+    var roas = num(T.roas); if (roas == null) roas = ratio(T.attr_revenue, T.spend);
+    var acpc = num(T.avg_cpc); if (acpc == null) acpc = ratio(T.spend, T.clicks);
+    var cvr = num(T.cvr); if (cvr == null) cvr = ratio(T.attr_units, T.clicks);
+    function tile(k, v, d, cls) { return '<div class="cpc-tile ' + (cls || '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
+    return '<div class="cpc-tiles">' +
+      tile('Spend', gbp0(T.spend), (num(T.orders) != null ? cnt(T.orders) + ' orders' : 'ad spend'), 'gold') +
+      tile('Attributed sales', gbp0(T.attr_revenue), cnt(T.attr_units) + ' ad units', '') +
+      tile('ROAS', roasTxt(roas), 'attributed ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
+      tile('Clicks', cnt(T.clicks), 'cost-per-click', '') +
+      tile('Avg CPC', gbp(acpc), acpc == null ? 'no clicks' : 'spend ÷ clicks', '') +
+      tile('CVR', pct(cvr), cvr == null ? 'no clicks' : 'ad units ÷ clicks', '') +
+      '</div>';
+  }
+
+  /* period-comparison graph: this window vs the previous comparable one, per metric. Money and a ratio
+     do not share a scale, so each metric is its own two-bar chart (now vs prev) with its own formatter. */
+  function comparePanel(D) {
+    var T = D.totals, prev = D.prev;
+    if (!T || !prev) return '';
+    var Pn = D.period, plabel = Pn && Pn.label ? String(Pn.label).replace(/ \(.*\)$/, '') : 'this window';
+    var metrics = [
+      { key: 'spend', title: 'Spend', fmt: function (v) { return chartMoney(v); } },
+      { key: 'attr_revenue', title: 'Attributed sales', fmt: function (v) { return chartMoney(v); } },
+      { key: 'roas', title: 'ROAS', fmt: function (v) { return (Math.round(v * 100) / 100) + '×'; }, ratio: ['attr_revenue', 'spend'] }
+    ];
+    var cards = metrics.map(function (m) {
+      var now = m.ratio ? ratio(T[m.ratio[0]], T[m.ratio[1]]) : num(T[m.key]);
+      var was = m.ratio ? ratio(prev[m.ratio[0]], prev[m.ratio[1]]) : num(prev[m.key]);
+      var pts = [
+        { label: plabel, value: now || 0, strong: true, title: m.title + ' ' + plabel + ': ' + m.fmt(now || 0) },
+        { label: 'previous', value: was || 0, title: m.title + ' previous: ' + m.fmt(was || 0) }
+      ];
+      var d = (now != null && was != null && was !== 0) ? (now - was) / Math.abs(was) : null;
+      var good = m.key === 'spend' ? 0 : 1; /* spend up is neither win nor loss on its own */
+      var arrow = d == null ? '' : (d > 0.0005 ? '▲' : (d < -0.0005 ? '▼' : '■'));
+      var red = d != null && ((good > 0 && d < 0));
+      var sub = d == null ? 'no previous window to compare' : m.fmt(now || 0) + ' vs ' + m.fmt(was || 0) + ' · <span class="' + (red ? 'cpc-neg' : (d > 0 && good > 0 ? 'cpc-pos' : '')) + '">' + arrow + ' ' + pct(Math.abs(d)) + '</span>';
+      return '<div class="cpc-cmp-card"><h4>' + esc(m.title) + '</h4><div class="sub">' + sub + '</div>' +
+        chartBars(pts, { height: 120, fmt: m.fmt, minGap: 0 }) + '</div>';
+    }).join('');
+    return '<div class="cpc-cmp">' + cards + '</div>';
+  }
+
+  function sorter(cols) {
+    var key = CP.sort.key, dir = CP.sort.dir;
+    var col = null; for (var i = 0; i < cols.length; i++) if (cols[i].key === key) { col = cols[i]; break; }
+    var val = col && col.sortVal ? col.sortVal : function (r) { return num(r[key]); };
+    return function (a, b) {
+      var va = val(a), vb = val(b);
+      if (typeof va === 'string' || typeof vb === 'string') { va = String(va == null ? '' : va).toLowerCase(); vb = String(vb == null ? '' : vb).toLowerCase(); return va < vb ? -dir : (va > vb ? dir : 0); }
+      if (va == null && vb == null) return 0; if (va == null) return 1; if (vb == null) return -1; /* nulls sink */
+      return (va - vb) * dir;
+    };
+  }
+
+  function costCell(r) {
+    var c = r.product_cost || {}; var v = num(c.value);
+    return '<div class="cpc-cost">' + (v == null ? '—' : gbp(v)) + '<span class="s">' + esc(c.source || (v == null ? 'not costed' : '')) + '</span></div>';
+  }
+  function profitCell(r) { return adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders); }
+  function impCell(r) { var v = num(r.impressions); return v == null ? '<span class="cpc-sub">—</span>' : cnt(v); }
+  function unitsWindow(r) {
+    return '<span title="all-channel units — 7 / 14 / 30 days to the window end">' + cnt(r.units_7d) + ' · ' + cnt(r.units_14d) + ' · ' + cnt(r.units_30d) + '</span>';
+  }
+
+  var ACTIVE_COLS = [
+    { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
+    { key: 'listing_date', label: 'Listed', cell: function (r) { return '<span class="cpc-sub">' + dayTxt(r.listing_date) + '</span>'; }, sortVal: function (r) { return dayTxt(r.listing_date); } },
+    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', title: 'eBay Quantity − QuantityAvailable; resets on a quantity revision — not a lifetime total', cell: function (r) { return cnt(r.sold_since_listed); } },
+    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'all-channel units — 7 / 14 / 30 days to the window end', cell: unitsWindow },
+    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
+    { key: 'spend', label: 'Spend', cls: 'r', cell: function (r) { return gbp(r.spend); } },
+    { key: 'clicks', label: 'Clicks', cls: 'r', cell: function (r) { return cnt(r.clicks); } },
+    { key: 'attr_units', label: 'Ad sales', cls: 'r', title: 'attributed units · attributed revenue', cell: function (r) { return cnt(r.attr_units) + '<div class="cpc-sub">' + gbp(r.attr_revenue) + '</div>'; } },
+    { key: 'impressions', label: 'Impr.', cls: 'r', title: 'impressions (from 18 Sep only)', cell: impCell },
+    { key: 'acos', label: 'ACoS', cls: 'r', title: 'spend ÷ attributed revenue', cell: function (r) { return pct(acosOf(r)); }, sortVal: acosOf },
+    { key: 'avg_cpc', label: 'Avg CPC', cls: 'r', title: 'spend ÷ clicks', cell: function (r) { return gbp(avgCpcOf(r)); }, sortVal: avgCpcOf },
+    { key: 'cvr', label: 'CVR', cls: 'r', title: 'attributed units ÷ clicks', cell: function (r) { return pct(cvrOf(r)); }, sortVal: cvrOf },
+    { key: 'roas', label: 'ROAS', cls: 'r', title: 'attributed revenue ÷ spend', cell: function (r) { var v = roasOf(r); return '<span class="' + (v != null ? (v < 1 ? 'cpc-neg' : 'cpc-pos') : '') + '">' + roasTxt(v) + '</span>'; }, sortVal: roasOf },
+    { key: 'actual_profit', label: 'Profit (law)', cls: 'r', src: 'orders', title: 'this listing under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } },
+    { key: 'lever', label: 'Lever', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
+  ];
+
+  /* CPC post: before the ad stopped vs after, and whether sales held. */
+  function heldCell(r) {
+    var before = r.before || {}, after = r.after || {};
+    var bu = num(before.units != null ? before.units : before.attr_units), au = num(after.units != null ? after.units : after.attr_units);
+    if (bu == null || au == null) return '<span class="cpc-held">—</span>';
+    if (bu === 0) return '<span class="cpc-held">n/a</span>';
+    var held = au >= bu * 0.6;
+    return '<span class="cpc-held ' + (held ? 'up' : 'down') + '">' + (held ? 'held' : 'fell') + '</span>';
+  }
+  function beforeCell(r) { var b = r.before || {}; return '<div class="cpc-sub">spend ' + gbp(b.spend) + '</div>' + cnt(b.attr_units) + ' units · ' + gbp0(b.attr_revenue) + '<div>' + adtProfitCell(b.actual_profit, b.pending_cost_orders, b.pending_fee_orders) + '</div>'; }
+  function afterCell(r) { var a = r.after || {}; var u = a.units != null ? a.units : a.attr_units; return cnt(u) + ' units · ' + gbp0(a.revenue != null ? a.revenue : a.attr_revenue) + '<div>' + adtProfitCell(a.actual_profit, a.pending_cost_orders, a.pending_fee_orders) + '</div>'; }
+
+  var POST_COLS = [
+    { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
+    { key: 'last_active_day', label: 'Last active', cls: 'r', title: 'the ad\'s last status event; "—" before 18 Sep', cell: function (r) { return r.last_active_day ? '<span class="cpc-sub">' + dayTxt(r.last_active_day) + '</span>' : '<span class="cpc-sub" title="before event tracking">date unknown</span>'; }, sortVal: function (r) { return dayTxt(r.last_active_day); } },
+    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', title: 'eBay Quantity − QuantityAvailable; resets on a quantity revision — not a lifetime total', cell: function (r) { return cnt(r.sold_since_listed); } },
+    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'all-channel units — 7 / 14 / 30 days to the window end', cell: unitsWindow },
+    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
+    { key: 'before', label: 'While advertised', cls: 'r', title: 'the ad\'s own last window', cell: beforeCell, sortVal: function (r) { return num(r.before && r.before.spend); } },
+    { key: 'after', label: 'Since it stopped', cls: 'r', title: 'all-channel sales after the ad stopped', cell: afterCell, sortVal: function (r) { return num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); } },
+    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped?', cell: heldCell, sortVal: function (r) { var b = num(r.before && (r.before.units != null ? r.before.units : r.before.attr_units)), a = num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); return b && a != null ? a / b : null; } },
+    { key: 'actual_profit', label: 'Profit now (law)', cls: 'r', src: 'orders', title: 'the listing now, under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } }
+  ];
+})();
+
 /* ---------- view-adtool-forecast.js ---------- */
 /* view-adtool-forecast.js — Advertising Tool · Forecast & behaviour lab (spec §7, Phase 4). Hidden; flag adtool_page_forecast.
  * Accuracy is shown, never claimed: the scorecard and the realised-vs-forecast panel sit next to every forecast. */
@@ -2053,6 +2334,269 @@ window.M98M_ADS_ONLY = true;
       }).catch(function (e) { fail('moHe', e); });
     }
   };
+})();
+
+/* ---------- view-adtool-overview.js ---------- */
+/* view-adtool-overview.js — Advertising Tool · Advertising overview (owner's brief, 27 Sep 2026: a NEW
+ * "behaviour patterns" page — "compare last 7 days, last 10 days, previous comparable periods; up/down
+ * of ROAS, spend, sales, profit, CPC, CVR; the purpose is the trend, not single numbers"). One line per
+ * metric over the window (value pills), an up/down summary strip (last 7 vs previous 7, last 10 vs
+ * previous 10) with ▲/▼ and the delta, and — because the portal never shows a collective profit figure —
+ * the profit trend is drawn as counts of profitable vs losing listings per week plus a top-movers list of
+ * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. Refreshes every 5 minutes
+ * only while the window reaches into today. Nothing here is sent to eBay.
+ * Galaxy tokens only, gold the accent, #e0563f the loss / decline colour. */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+  var OV = { account: '', period: null, accounts: [], data: null };
+
+  VIEW_CSS.push([
+    '.ov-wrap{max-width:1240px}',
+    '.ov-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 8px}',
+    '.ov-chip{border:1px solid var(--gold-line);border-radius:12px;padding:9px 12px;background:var(--panel-2)}',
+    '.ov-chip .k{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
+    '.ov-chip .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.ov-chip .d{font-size:11.5px;margin-top:2px;font-weight:700}',
+    '.ov-chip .d.up{color:var(--gold-a)}.ov-chip .d.down{color:' + LOSS + '}.ov-chip .d.flat{color:var(--text-3)}',
+    '.ov-chip .d .was{color:var(--text-3);font-weight:600}',
+    '.ov-winlbl{font-size:12px;font-weight:800;color:var(--text-2);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}',
+    '.ov-panel{background:linear-gradient(var(--panel),var(--panel)),var(--bg0);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:14px}',
+    '.ov-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.ov-panel .note{color:var(--text-2);font-size:12px;margin-bottom:10px;line-height:1.5}',
+    '.ov-metrics{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:980px){.ov-metrics{grid-template-columns:1fr}}',
+    '.ov-mcard{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel)}',
+    '.ov-mcard h4{margin:0 0 2px;font-size:12.5px;font-weight:800;color:var(--text)}',
+    '.ov-mcard .sub{font-size:11px;color:var(--text-2);margin-bottom:2px}',
+    '.ov-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.ov-grid2{grid-template-columns:1fr}}',
+    '.ov-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.ov-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line)}',
+    '.ov-tbl th.r{text-align:right}',
+    '.ov-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.ov-tbl td.r{text-align:right;white-space:nowrap}',
+    '.ov-neg{color:' + LOSS + ';font-weight:700}.ov-pos{color:var(--gold-a);font-weight:700}',
+    '.ov-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
+    '.ov-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
+    '.ov-legend{display:flex;gap:14px;font-size:11px;font-weight:800;color:var(--text-3);margin:0 0 6px;flex-wrap:wrap}',
+    '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}'
+  ].join(''));
+
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function gbp0(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)).toLocaleString('en-GB'); }
+  function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
+  function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
+  function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
+  function pctSign(v) { v = num(v); if (v == null) return '—'; return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(Math.round(v * 1000) / 10) + '%'; }
+  function src(t) { return '<span class="ov-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  function ratio(t, b) { t = num(t); b = num(b); if (b == null || b === 0 || t == null) return null; return t / b; }
+
+  /* how each metric is drawn and judged. good: +1 higher is better, −1 lower is better (CPC), 0 neutral (spend). */
+  var METRICS = [
+    { key: 'spend', label: 'Spend', money: true, good: 0, fmt: function (v) { return chartMoney(v); } },
+    { key: 'attr_revenue', label: 'Attributed sales', money: true, good: 1, fmt: function (v) { return chartMoney(v); } },
+    { key: 'roas', label: 'ROAS', good: 1, ref: 1, fmt: function (v) { return (Math.round(v * 100) / 100) + '×'; }, ratio: ['attr_revenue', 'spend'] },
+    { key: 'cpc', label: 'CPC', money: true, good: -1, fmt: function (v) { return chartMoney(v); }, ratio: ['spend', 'clicks'] },
+    { key: 'cvr', label: 'CVR', good: 1, fmt: function (v) { return (Math.round(v * 1000) / 10) + '%'; }, pctScale: true, ratio: ['attr_units', 'clicks'] }
+  ];
+  var STRIP_METRICS = [
+    { key: 'spend', label: 'Spend', good: 0, fmt: gbp0 },
+    { key: 'attr_revenue', label: 'Attributed sales', good: 1, fmt: gbp0 },
+    { key: 'roas', label: 'ROAS', good: 1, fmt: roasTxt, ratio: ['attr_revenue', 'spend'] },
+    { key: 'cpc', label: 'CPC', good: -1, fmt: gbp, ratio: ['spend', 'clicks'] },
+    { key: 'cvr', label: 'CVR', good: 1, fmt: pct, ratio: ['attr_units', 'clicks'] },
+    { key: 'orders', label: 'Orders', good: 1, fmt: cnt },
+    { key: 'units', label: 'Units', good: 1, fmt: cnt }
+  ];
+
+  VIEWS.adtoolOverview = {
+    label: 'Advertising overview (ads)', hidden: true, order: 62, roles: ROLES,
+    icon: '<path d="M3 3v18h18"/><path d="m6 15 4-4 3 3 5-7"/>',
+    render: function () {
+      return '<div class="ov-wrap">' + adtHgroup('Advertising overview', 'the trend, not single numbers — where spend, sales, ROAS, CPC and CVR are heading', 'ovFresh') +
+        '<div id="ovBar"></div><div id="ovAcct" class="an-filters"></div>' +
+        '<div id="ovBody"><div class="ov-empty">Reading the trend…</div></div></div>';
+    },
+    init: function () {
+      OV.period = adtPeriodBar('ovBar', { page: 'adtoolOverview', def: 'd30', onChange: function (v) { OV.period = v; load(false); } });
+      acctChips();
+      load(false).catch(function () {});
+    }
+  };
+
+  function acctChips() {
+    var el = $('ovAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (OV.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      OV.accounts.map(function (a) { return '<button class="' + (OV.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { OV.account = this.getAttribute('data-a'); acctChips(); load(false); };
+  }
+  function load(quiet) {
+    var p = adtPeriodParams(OV.period); if (OV.account) p.account = OV.account;
+    return api('adtoolOverview', p).then(function (d) {
+      OV.data = d || {};
+      var names = (d && d.accounts) || [];
+      if (names.length) { OV.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); }
+      if (!$('ovBody')) return;
+      draw();
+      adtPeriodEcho('ovBar', d && d.period); adtFreshShow('ovFresh', d && d.fresh);
+      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 300000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
+    }).catch(function (e) {
+      if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the overview could not be read') + '</div></div>';
+      throw e;
+    });
+  }
+
+  function draw() {
+    var D = OV.data, h = '';
+    if (!D || typeof D !== 'object') { $('ovBody').innerHTML = '<div class="ov-empty">No answer for this window.</div>'; return; }
+    h += windowStrip(D, 'last7', 'prev7', 'Last 7 days vs the previous 7');
+    h += windowStrip(D, 'last10', 'prev10', 'Last 10 days vs the previous 10');
+    h += trendPanel(D);
+    h += profitPanel(D);
+    h += moversPanel(D);
+    h += '<div class="an-sub" style="margin-top:8px">' + esc(D.source || '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
+    $('ovBody').innerHTML = h;
+  }
+
+  function totalOf(w, m) {
+    if (!w) return null;
+    var cell = w[m.key];
+    if (cell && typeof cell === 'object' && ('value' in cell)) return num(cell.value);
+    if (m.ratio) return ratio(w[m.ratio[0]], w[m.ratio[1]]);
+    return num(cell);
+  }
+  function dirOf(w, m) { var cell = w && w[m.key]; if (cell && typeof cell === 'object' && cell.dir) return String(cell.dir); return null; }
+
+  /* the up/down strip: each metric's value now, the arrow, and the % move from the previous comparable
+     window. A decline in a "higher is better" metric (or a rise in CPC) is #e0563f; a favourable move is gold. */
+  function windowStrip(D, lastKey, prevKey, label) {
+    var W = D.windows || {}, last = W[lastKey], prev = W[prevKey];
+    if (!last && !prev) return '';
+    var chips = STRIP_METRICS.map(function (m) {
+      var now = totalOf(last, m), was = totalOf(prev, m);
+      var d = (now != null && was != null && was !== 0) ? (now - was) / Math.abs(was) : null;
+      var explicit = dirOf(last, m);
+      var moveUp = explicit ? explicit === 'up' : (d != null && d > 0.0005);
+      var moveDown = explicit ? explicit === 'down' : (d != null && d < -0.0005);
+      var flat = !moveUp && !moveDown;
+      var favourable = m.good === 0 ? null : ((m.good > 0 && moveUp) || (m.good < 0 && moveDown));
+      var cls = flat ? 'flat' : (m.good === 0 ? 'flat' : (favourable ? 'up' : 'down'));
+      var arrow = moveUp ? '▲' : (moveDown ? '▼' : '■');
+      return '<div class="ov-chip"><div class="k">' + esc(m.label) + '</div><div class="v">' + esc(m.fmt(now)) + '</div>' +
+        '<div class="d ' + cls + '">' + arrow + ' ' + (d == null ? '—' : pctSign(d)) + ' <span class="was">from ' + esc(m.fmt(was)) + '</span></div></div>';
+    }).join('');
+    return '<div class="ov-winlbl">' + esc(label) + src('overview') + '</div><div class="ov-strip">' + chips + '</div>';
+  }
+
+  /* one line per metric over the window, value pills, a 1× reference on ROAS. The series is the fleet's
+     (or the account's) daily figures from adtool_scope_day. */
+  function trendPanel(D) {
+    var series = (D.series || []).filter(function (r) { return r && r.day; });
+    if (!series.length) return '<div class="ov-panel"><h3>Trend</h3><div class="note">No daily series for this window yet.</div></div>';
+    var cards = METRICS.map(function (m) {
+      return '<div class="ov-mcard"><h4>' + esc(m.label) + '</h4><div class="sub">' + esc(dayRange(series)) + '</div>' + lineChart(series, m) + '</div>';
+    }).join('');
+    return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
+      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The last point is today, sampled and provisional when the window includes it.</div>' +
+      '<div class="ov-metrics">' + cards + '</div></div>';
+  }
+  function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
+
+  function lineChart(series, m) {
+    var vals = series.map(function (r) {
+      var v = m.ratio ? ratio(r[m.ratio[0]], r[m.ratio[1]]) : num(r[m.key]);
+      return v;
+    });
+    var W = 460, H = 150, L = 44, R = 14, T = 18, B = 22;
+    var present = vals.filter(function (v) { return v != null; });
+    if (!present.length) return '<div class="ov-empty">no data</div>';
+    var mx = Math.max.apply(null, present), mn = Math.min.apply(null, present);
+    if (m.ref != null) mx = Math.max(mx, m.ref);
+    if (mn > 0) mn = 0;   /* baseline at zero so the line's height reads as its true size, not a zoomed slice */
+    var span = (mx - mn) || 1;
+    var n = series.length;
+    var xAt = function (i) { return L + (n <= 1 ? 0 : (i / (n - 1)) * (W - L - R)); };
+    var yAt = function (v) { return H - B - ((v - mn) / span) * (H - T - B); };
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
+    [0, 0.5, 1].forEach(function (f) {
+      var gv = mn + span * f, gy = yAt(gv);
+      s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="rgba(255,255,255,.07)" stroke-width="1"/>' +
+        '<text x="' + (L - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#66707c">' + esc(m.fmt(gv)) + '</text>';
+    });
+    if (m.ref != null && m.ref >= mn && m.ref <= mx) {
+      var ry = yAt(m.ref);
+      s += '<line x1="' + L + '" y1="' + ry.toFixed(1) + '" x2="' + (W - R) + '" y2="' + ry.toFixed(1) + '" stroke="rgba(224,86,63,.45)" stroke-width="1" stroke-dasharray="4 3"/>' +
+        '<text x="' + (W - R) + '" y="' + (ry - 3).toFixed(1) + '" text-anchor="end" font-size="8.5" fill="rgba(224,86,63,.8)">' + esc(m.fmt(m.ref)) + '</text>';
+    }
+    var pts = [];
+    for (var i = 0; i < n; i++) {
+      if (vals[i] == null) continue;
+      pts.push({ x: xAt(i), y: yAt(vals[i]), label: null, _v: vals[i], _day: series[i].day });
+    }
+    var every = n > 8 ? Math.ceil(n / 6) : 1;
+    var pill = pts.map(function (p, idx) {
+      var showLabel = (idx % every === 0) || idx === pts.length - 1;
+      return { x: p.x, y: p.y, label: showLabel ? m.fmt(p._v) : null, title: String(p._day) + ' — ' + m.fmt(p._v) };
+    });
+    s += chartLineSeries(pill, { color: 'var(--gold-b)', width: 2.2, minGap: 40 });
+    /* x labels: first, middle, last */
+    [0, Math.floor(n / 2), n - 1].forEach(function (i) {
+      if (i < 0 || i >= n) return;
+      s += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="8.5" fill="#66707c">' + esc(String(series[i].day).slice(5)) + '</text>';
+    });
+    s += '</svg>';
+    return s;
+  }
+
+  /* profit trend WITHOUT a collective figure: counts of profitable vs losing listings per week. */
+  function profitPanel(D) {
+    var pv = D.profit_view || null;
+    var weeks = pv && (pv.weeks || pv.by_week) ? (pv.weeks || pv.by_week) : null;
+    if (!weeks && pv && Array.isArray(pv.profitable_listings)) {
+      /* per-week arrays keyed the same length */
+      weeks = pv.profitable_listings.map(function (p, i) { var l = (pv.losing_listings || [])[i] || {}; return { week: p.week || l.week, profitable: p.count != null ? p.count : p.value, losing: l.count != null ? l.count : l.value }; });
+    }
+    if (!weeks || !weeks.length) return '';
+    var norm = weeks.map(function (w) {
+      return { week: String(w.week || w.iso_week || ''), profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
+    });
+    function bars(pick, color) {
+      return chartBars(norm.map(function (w) {
+        return { label: (w.week || '').replace(/^\d{4}-?/, 'W'), value: num(w[pick]) || 0, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' };
+      }), { height: 140, color: color, pillColor: color, fmt: function (v) { return String(Math.round(v)); }, minGap: 0 });
+    }
+    return '<div class="ov-panel"><h3>Profit trend, as listing counts' + src('overview') + '</h3>' +
+      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.</div>' +
+      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span></div>' +
+      '<div class="ov-grid2"><div class="ov-mcard"><h4>Profitable listings / week</h4>' + bars('profitable', 'var(--gold-b)') + '</div>' +
+      '<div class="ov-mcard"><h4>Losing listings / week</h4>' + bars('losing', LOSS) + '</div></div></div>';
+  }
+
+  /* top movers: individual items, previous vs current profit and % change (owner: "Top Risers / Top
+     Decliners — image, name, item ID, account, previous, current, % change"). Item rows only. */
+  function moversPanel(D) {
+    var pv = D.profit_view || {}, movers = (pv.top_movers || D.top_movers || []).filter(function (r) { return r && typeof r === 'object'; });
+    if (!movers.length) return '';
+    movers.forEach(function (r) { if (r.pct == null) { var a = num(r.cur_profit), b = num(r.prev_profit); r._pct = (a != null && b != null && b !== 0) ? (a - b) / Math.abs(b) : null; } else r._pct = num(r.pct); });
+    var risers = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) > num(r.prev_profit); }).sort(function (a, b) { return (b._pct || 0) - (a._pct || 0); }).slice(0, 8);
+    var decliners = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) < num(r.prev_profit); }).sort(function (a, b) { return (a._pct || 0) - (b._pct || 0); }).slice(0, 8);
+    function tbl(rows, riser) {
+      if (!rows.length) return '<div class="ov-empty">none in this window</div>';
+      return '<div class="an-scroll"><table class="ov-tbl"><thead><tr><th>Listing</th><th class="r">Was</th><th class="r">Now</th><th class="r">Change</th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          var p = r._pct;
+          return '<tr><td>' + adtProductCell(r) + '</td>' +
+            '<td class="r">' + adtProfitCell(r.prev_profit) + '</td>' +
+            '<td class="r">' + adtProfitCell(r.cur_profit) + '</td>' +
+            '<td class="r ' + (riser ? 'ov-pos' : 'ov-neg') + '">' + (p == null ? '—' : pctSign(p)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    return '<div class="ov-panel"><h3>Top movers, item by item' + src('overview') + '</h3>' +
+      '<div class="note">The listings whose own profit moved most between the previous comparable window and this one. Profit is per item, under the Sales Analysis law.</div>' +
+      '<div class="ov-grid2"><div class="ov-mcard"><h4>Top risers</h4>' + tbl(risers, true) + '</div>' +
+      '<div class="ov-mcard"><h4>Top decliners</h4>' + tbl(decliners, false) + '</div></div></div>';
+  }
 })();
 
 /* ---------- view-adtool-plan.js ---------- */
@@ -3304,8 +3848,8 @@ function enterApp(user){
     });
     NAV_DEPTS = [
       { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolStop', 'adtoolRunToday', 'adtoolAlerts', 'adtoolReport'] },
-      { name: 'Products',      keys: ['adtoolProduct', 'adtoolForecast'] },
-      { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
+      { name: 'Products',      keys: ['adtoolProduct', 'adtoolCpc', 'adtoolForecast'] },
+      { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolOverview', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
       { name: 'Campaigns',     keys: ['adtoolCampaigns', 'adtoolRoas', 'adtoolSales'] },
       { name: 'Data health',   keys: ['adtoolHealth'] }
     ];

@@ -92,7 +92,9 @@ export default {
         adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000,
         adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000,
         /* Running today is a read page (the note op lives on adtoolStopToday, which stays uncached) */
-        adtoolRunToday: 60000 };
+        adtoolRunToday: 60000,
+        /* Phase 3 (big update): CPC Active / Post listings + Advertising Overview — 120 s, warmed hourly */
+        adtoolCpcListings: 120000, adtoolOverview: 120000 };
       /* Phase 1B: the advertising reads use a KV-backed memo instead (adtKvMemo) — the in-isolate map misses on
          every fresh isolate, and the 5-minute job pre-warms the today / Command centre payloads into KV. Same TTLs,
          same write-intent skip; a page that includes today is 60 s. */
@@ -3634,6 +3636,11 @@ function adtSheetLawProfit(x) {
   const raw = Number(x.raw_priced_sum) || 0, cpc = Number(x.cpc_spend) || 0, ref = Number(x.refunds) || 0;
   return round2(0.8 * raw - 0.96 * cpc - ref);
 }
+/* keys that read as "profit" to the regex below but are listing COUNTS or a counts container, not a money figure —
+   the Advertising Overview's profit-as-counts view (Phase 3 of the 27 Sep 2026 big update). Exempt from the
+   collective-profit strip so every advertising role sees the trend; the actual money still travels only on
+   item-keyed rows. */
+const ADTOOL_PROFIT_COUNT_KEYS = { profit_view: 1, profitable: 1, profitable_listings: 1 };
 function adtStripCollectiveProfit(data, opts) {
   /* The brief's rule: profit leaves the engine per ITEM only. Any key matching /profit/i is removed from every
      object that is not keyed by item_id (and is not inside one), unless the caller may see collective profit;
@@ -3646,6 +3653,12 @@ function adtStripCollectiveProfit(data, opts) {
     if (!v || typeof v !== 'object') return;
     const item = underItem || !!v.item_id;
     for (const k of Object.keys(v)) {
+      /* Phase 3 (big update): the Advertising Overview shows the profit trend as COUNTS of listings, never a fleet
+         profit sum — profit_view is a counts+item-movers container, and profitable_listings / profitable are integer
+         counts, not money. They are shown to every advertising role, so they are exempt here (the money inside
+         profit_view lives only on the item-keyed movers, which pass by the item_id rule). losing / losing_listings
+         do not match /profit/i at all. Nothing else in the engine returns these keys as a figure. */
+      if (ADTOOL_PROFIT_COUNT_KEYS[k] && typeof v[k] !== 'string') { walk(v[k], item); continue; }
       if (/^ad_profit/.test(k) || (!item && !keepCollective && /profit/i.test(k) && typeof v[k] !== 'string')) { delete v[k]; continue; }
       walk(v[k], item);
     }
@@ -4260,6 +4273,10 @@ async function adtoolRollups(env) {
       const ran = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_PARITY_FLEET' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first();
       if (!ran || !Number(ran.n)) { try { await adtoolTruth(env); } catch (e) { /* recorded by adtoolTruth itself */ } }
     }
+    /* Phase 3 (big update): warm the KV page cache for the heavy first-open pages once the history is complete and
+       there is still budget in this invocation — the owner's first open after the rollup is then a KV read, not a
+       7-10 s compute. adtWarmHourly is itself time-budgeted and records its own sync_state row. */
+    if (cursor >= adtAddDays(today, -1) && Date.now() - t0 < 150000) { try { await adtWarmHourly(env); } catch (e) { /* recorded by its own sync_state row */ } }
   } catch (e) {
     await adtJobEnd(env, 'adtoolRollups', t, rows, 'error', String(e && e.message || e));
     throw e;
@@ -4764,7 +4781,7 @@ async function adtoolTodayPrewarm(env, rebuild) {
   if (rebuild && !rebuild.skipped) { try { await ctx_setSync(env, 'adtoolToday', '', JSON.stringify(Object.assign({}, rebuild, { prewarm: out.join('+'), prewarm_ms: Date.now() - t0 }))); } catch (e) { /* the note is best effort */ } }
   return out;
 }
-const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000 };
+const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -7722,6 +7739,353 @@ const ADTOOL_ACTIONS_P10 = {
   },
 };
 /* ADTOOL-P10-END ================================================================================== */
+
+
+/* ADTOOL-P11-BEGIN ================================================================================
+   Phase 3 of the owner's 27 Sep 2026 brief: CPC Active Listings, CPC Post Listings and the Advertising
+   Overview (behaviour patterns), plus the hourly pre-warm of the heavy first-open pages. Every figure
+   here is read from the precomputed grains — the window from adtDaySrc (the today grain spliced in when
+   the window includes today), the 7 / 14 / 30-day trailing units and the previous-period comparison from
+   adtool_listing_day, the daily series from adtool_scope_day, the profitable-vs-losing counts and the
+   item movers from adtool_listing_week. Membership is the portal's ONE live-ad rule (liveMembershipRow /
+   ADTOOL_LIVE_AD_SQL) for the active page, and the paused / archived / campaign-gone state of a CPC ad
+   (adtool_campaign_ad_events, adtool_campaign_archive, campaign_ads) for the post page. No profit is
+   summed at any collective level — profit lives only on item rows (product cost, actual_profit, movers).
+   Nothing here touches an eBay write endpoint.
+*/
+/* ADTOOL-P11-PURE-BEGIN */
+const ADTOOL_IMPRESSIONS_FROM = '2026-09-18';   // adtool_ads_daily.impressions is only populated from this day (campaign_truth on)
+function adtCpcDerived(row) {
+  /* the CPC ratios, each guarded against a zero denominator (null → the view prints "—"):
+     acos = spend ÷ attributed revenue, avg_cpc = spend ÷ clicks, cvr = attributed units ÷ clicks,
+     roas = attributed revenue ÷ spend. Ad sales are the eBay-attributed units/revenue, not all-channel. */
+  const spend = Number(row.spend) || 0, clicks = Number(row.clicks) || 0, au = Number(row.attr_units) || 0, ar = Number(row.attr_revenue) || 0;
+  return {
+    acos: ar > 0 ? round2(spend / ar) : null,
+    avg_cpc: clicks > 0 ? round2(spend / clicks) : null,
+    cvr: clicks > 0 ? round2(au / clicks) : null,
+    roas: spend > 0 ? round2(ar / spend) : null,
+  };
+}
+function adtCpcTotals(rows) {
+  /* the collective totals a CPC page shows — spend, attributed sales, ROAS, clicks, avg CPC, CVR, ad units,
+     all-channel orders and units. NO profit key: profit leaves the engine per item only (adtStripCollectiveProfit
+     would strip it here anyway, but the totals never compute it). */
+  const t = { spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0 };
+  for (const r of rows || []) { t.spend += Number(r.spend) || 0; t.attr_revenue += Number(r.attr_revenue) || 0; t.clicks += Number(r.clicks) || 0; t.attr_units += Number(r.attr_units) || 0; t.orders += Number(r.orders) || 0; t.units += Number(r.units) || 0; }
+  const d = adtCpcDerived(t);
+  return { spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), clicks: t.clicks, attr_units: t.attr_units, orders: t.orders, units: t.units, roas: d.roas, avg_cpc: d.avg_cpc, cvr: d.cvr };
+}
+function adtTrend(cur, prev) {
+  /* one metric this period vs the comparable previous period: the raw delta, the percent change against the
+     previous magnitude (null when the previous is zero and the current is not — an infinite rise the view shows
+     as "new"), and the direction. Pure, so the Overview's up/down arrows are testable. */
+  const c = Number(cur) || 0, p = Number(prev) || 0, eps = 1e-9;
+  const pct = Math.abs(p) > eps ? round2((c - p) / Math.abs(p)) : (Math.abs(c) > eps ? null : 0);
+  return { cur: round2(c), prev: round2(p), delta: round2(c - p), pct, direction: Math.abs(c - p) < eps ? 'flat' : (c > p ? 'up' : 'down') };
+}
+/* ADTOOL-P11-PURE-END */
+
+const ADTOOL_REGISTER_P11 = [
+  ['CPC_LISTINGS', 'CPC Active Listings — every listing with a live cost-per-click ad', 'membership = ADTOOL_LIVE_AD_SQL restricted to COST_PER_CLICK (a RUNNING campaign, an ACTIVE items_api listing, an ad ACTIVE or not yet stamped — the SQL twin of liveMembershipRow); per listing over the chosen window from adtDaySrc (the today grain spliced when the window includes today): spend, cpc_spend, clicks, ad sales (attr_units / attr_revenue), all-channel orders / units / revenue, Sales Analysis law profit (priced orders only, with pending counts); 7 / 14 / 30-day trailing all-channel units are three CASE sums over adtool_listing_day ending yesterday, in the same aggregate; ACoS = spend ÷ attr_revenue, avg CPC = spend ÷ clicks, CVR = attr_units ÷ clicks, ROAS = attr_revenue ÷ spend (each null when its denominator is 0); impressions summed from adtool_ads_daily only for days ≥ 2026-09-18 (null otherwise); product cost = items_facts.ali_cost (Main Sheet) else the average ali_cost of the item\'s own priced orders (source stated); listing date = items_api.start_time, sold since listed = items_api.sold_qty (resets on a quantity revision); lever = the campaign daily budget (CPC) via adtLever; totals carry NO profit; prev = the same window totals one comparable period earlier for the comparison graph', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today, adtool_ads_daily, items_facts, adtool_orders', 'per request (adtoolCpcListings; KV page cache 120 s, warmed hourly)', 'unit tests: adtCpcDerived zero-denominator guards and the acos / cvr / roas / avg_cpc formulas; no profit key on totals'],
+  ['CPC_POST', 'CPC Post Listings — listings no longer in an active CPC ad, and how they did', 'membership = a listing whose CPC ad is PAUSED / ARCHIVED (campaign_ads.ad_status) or whose CPC campaign has left eBay\'s list (adtool_campaign_archive) or is no longer RUNNING, EXCLUDING any listing currently CPC-active; last_active_day = the most recent adtool_campaign_ad_events row to PAUSED / ARCHIVED / REMOVED (else the campaign\'s gone_at, else null = "date unknown — before event tracking", tracking began 18 Sep); before / after = the 30 days ending on last_active_day and the up-to-30 days after it from adtool_listing_day (spend, ad units, ad revenue, law profit), computed only when last_active_day falls in the last 60 days; the window metrics are the same shape as CPC_LISTINGS', 'campaign_ads, campaigns, adtool_campaign_archive, adtool_campaign_ad_events, items_api, adtool_listing_day, adtool_ads_daily, items_facts, adtool_orders', 'per request (adtoolCpcListings mode=post; KV page cache 120 s, warmed hourly)', 'unit tests share CPC_LISTINGS\' ratio tests; the exclusion of currently-active listings is asserted'],
+  ['ADV_OVERVIEW', 'Advertising Overview — behaviour patterns, the trend not the single number', 'daily series from adtool_scope_day (fleet = scope "fleet"/"all", account = scope "account"/name): spend, attributed sales, ROAS, CPC, CVR, ad units, orders, units per day; last 7 vs previous 7 and last 10 vs previous 10 (each window ending yesterday) with a delta + percent + direction per metric (adtTrend); the profit view is COUNTS not a fleet total — profitable vs losing listings per ISO week over the last 4 weeks from adtool_listing_week (sign of actual_profit), plus the top item movers by the change in their own law profit from the previous ISO week to the current one (item rows only, where profit is allowed to leave the engine)', 'adtool_scope_day, adtool_listing_week, items_api', 'per request (adtoolOverview; KV page cache 120 s, warmed hourly)', 'unit tests: adtTrend delta / percent / direction incl. the zero-previous case; the profit_view counts survive the strip for a non-profit role while no fleet profit money does (ADTOOL_PROFIT_COUNT_KEYS exemption)'],
+  ['WARM_HOURLY', 'Hourly pre-warm of the heavy first-open pages', 'after adtoolRollups completes for the day, adtWarmHourly computes and stores the KV page cache (adtKvMemo keys, both profit classes p / np, default all-accounts payload) for adtoolPlan, adtoolReport, adtoolAccounts, adtoolCategories, adtoolForecastLab, adtoolCpcListings (active + post) and adtoolOverview, so the first open after the rollup is a KV read rather than a 7-10 s compute; guarded by a time budget (any page that would blow it is skipped and counted); recorded in sync_state job adtoolWarmHourly', 'ROUTES (the pages above), env.HOT (KV)', 'hourly at the tail of adtoolRollups (:20)', 'sync_state job adtoolWarmHourly names the pages warmed and any skipped for time'],
+];
+let ADTOOL_BU3_REG_OK = false;
+async function ensureAdtoolPhaseBu3Register(env) {
+  if (ADTOOL_BU3_REG_OK) return;
+  const stmts = ADTOOL_REGISTER_P11.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 11, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 11").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* both new pages are born ON (read-only analytics); a manager can switch either off in Flags */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_cpc', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_overview', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  ADTOOL_BU3_REG_OK = true;
+}
+
+/* ---- CPC Active / Post listings ---- */
+async function adtCpcWindowAgg(env, ids, from, to, src, today, yday) {
+  /* per listing over the window (from adtDaySrc, so the today grain is spliced in when the window includes today)
+     PLUS the 7 / 14 / 30-day trailing all-channel units (ending yesterday) — all in ONE aggregate per IN chunk. */
+  /* the 7 / 14 / 30-day trailing units end at the SELECTED window's end (capped at yesterday, today being
+     incomplete), not always at yesterday — so on a historical window they cover the same period as the row. */
+  const tEnd = to < yday ? to : yday;
+  const d7from = adtAddDays(tEnd, -6), d14from = adtAddDays(tEnd, -13), d30from = adtAddDays(tEnd, -29);
+  const lo = from < d30from ? from : d30from, hi = to > yday ? to : yday;
+  const win = (f, r) => (r ? 'ROUND(' : '') + 'SUM(CASE WHEN d.day >= ?1 AND d.day <= ?2 THEN ' + f + ' ELSE 0 END)' + (r ? ', 2)' : '');
+  const out = {};
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare(
+    'SELECT d.item_id, ' +
+    win('d.spend', 1) + ' AS spend, ' + win('d.cpc_spend', 1) + ' AS cpc_spend, ' + win('d.clicks') + ' AS clicks, ' +
+    win('d.attr_units') + ' AS attr_units, ' + win('d.attr_revenue', 1) + ' AS attr_revenue, ' +
+    win('d.orders') + ' AS orders, ' + win('d.units') + ' AS units, ' + win('d.revenue', 1) + ' AS revenue, ' +
+    win('d.actual_profit', 1) + ' AS actual_profit, ' + win('d.pending_cost_orders') + ' AS pending_cost_orders, ' +
+    win('COALESCE(d.pending_fee_orders, 0)') + ' AS pending_fee_orders, ' +
+    'SUM(CASE WHEN d.day >= ?3 AND d.day <= ?6 THEN d.units ELSE 0 END) AS units_7d, ' +
+    'SUM(CASE WHEN d.day >= ?4 AND d.day <= ?6 THEN d.units ELSE 0 END) AS units_14d, ' +
+    'SUM(CASE WHEN d.day >= ?5 AND d.day <= ?6 THEN d.units ELSE 0 END) AS units_30d ' +
+    'FROM ' + src + ' d WHERE d.day >= ?7 AND d.day <= ?8 AND d.item_id IN ' + adtInList(ch, 8) + ' GROUP BY d.item_id'
+  ).bind(from, to, d7from, d14from, d30from, tEnd, lo, hi, ...ch));
+  for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) out[String(r.item_id)] = r;
+  return out;
+}
+async function adtCpcImpressions(env, ids, from, to) {
+  /* impressions per listing over the window, but only for days on or after 2026-09-18 (before that adtool_ads_daily
+     has none). Returns a map id → number for ids that have any; a listing missing here reads impressions null. */
+  const impFrom = from > ADTOOL_IMPRESSIONS_FROM ? from : ADTOOL_IMPRESSIONS_FROM;
+  const out = {};
+  if (impFrom > to) return { map: out, available: false, from: impFrom };
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, SUM(impressions) AS impressions FROM adtool_ads_daily WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ch, 2) + ' GROUP BY item_id').bind(impFrom, to, ...ch));
+  for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) out[String(r.item_id)] = Number(r.impressions) || 0;
+  return { map: out, available: true, from: impFrom };
+}
+async function adtProductCost(env, ids) {
+  /* item cost with its source: items_facts.ali_cost (the Main Sheet's standing cost) first, else the average
+     ali_cost of the item's OWN priced orders, else "—". Two chunked reads, never one per row. */
+  const facts = {}, ordAvg = {};
+  const fs = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, ali_cost FROM items_facts WHERE item_id IN (' + ch.map((_, i) => '?' + (i + 1)).join(',') + ')').bind(...ch));
+  for (const rs of await adtBatchRead(env, fs)) for (const r of rs) if (Number(r.ali_cost) > 0) facts[String(r.item_id)] = round2(r.ali_cost);
+  const os = adtChunks(ids).map(ch => env.DB.prepare("SELECT item_id, ROUND(AVG(ali_cost), 2) AS c, COUNT(*) AS n FROM adtool_orders WHERE ali_cost > 0 AND status <> 'CANCELLED' AND item_id IN " + adtInList(ch, 0) + ' GROUP BY item_id').bind(...ch));
+  for (const rs of await adtBatchRead(env, os)) for (const r of rs) if (Number(r.c) > 0) ordAvg[String(r.item_id)] = { value: round2(r.c), n: Number(r.n) || 0 };
+  const out = {};
+  for (const id of ids) {
+    if (facts[id] != null) out[id] = { value: facts[id], source: 'Main Sheet' };
+    else if (ordAvg[id]) out[id] = { value: ordAvg[id].value, source: 'orders', orders: ordAvg[id].n };
+    else out[id] = { value: null, source: '—' };
+  }
+  return out;
+}
+async function adtCpcMeta(env, ids) {
+  /* listing header from items_api: image, title, price, status, listing date (start_time), sold since listed
+     (sold_qty — eBay Quantity − QuantityAvailable, resets on a quantity revision, so it is LABELLED that way). */
+  const out = {};
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, account, title, image, price, status, start_time, sold_qty FROM items_api WHERE item_id IN (' + ch.map((_, i) => '?' + (i + 1)).join(',') + ')').bind(...ch));
+  for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) out[String(r.item_id)] = r;
+  return out;
+}
+async function adtCpcPrevTotals(env, ids, prevFrom, prevTo) {
+  /* the comparable previous window's collective totals over adtool_listing_day (fully historical, so no splice),
+     for the comparison graph. No profit. */
+  const t = { spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0 };
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ch, 2)).bind(prevFrom, prevTo, ...ch));
+  for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { if (!r) continue; t.spend += Number(r.spend) || 0; t.attr_revenue += Number(r.attr_revenue) || 0; t.clicks += Number(r.clicks) || 0; t.attr_units += Number(r.attr_units) || 0; t.orders += Number(r.orders) || 0; t.units += Number(r.units) || 0; }
+  const d = adtCpcDerived(t);
+  return { from: prevFrom, to: prevTo, spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), clicks: t.clicks, attr_units: t.attr_units, orders: t.orders, units: t.units, roas: d.roas, avg_cpc: d.avg_cpc, cvr: d.cvr };
+}
+async function adtCpcPostContext(env, ids, camp, today, yday) {
+  /* per post listing: last_active_day (the most recent event to PAUSED / ARCHIVED / REMOVED, else the campaign's
+     gone_at, else null = before tracking), and before / after totals around it — the 30 days ending on that day
+     and the up-to-30 days after it — from adtool_listing_day, computed only when the day is inside the last 60
+     days (older transitions are left with before / after null). */
+  const lastEv = {};
+  const evStmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT item_id, MAX(substr(seen_at, 1, 10)) AS d FROM adtool_campaign_ad_events WHERE to_status IN ('PAUSED', 'ARCHIVED', 'REMOVED') AND item_id IN " + adtInList(ch, 0) + ' GROUP BY item_id').bind(...ch));
+  for (const rs of await adtBatchRead(env, evStmts)) for (const r of rs) if (r.d) lastEv[String(r.item_id)] = String(r.d);
+  const ctx = {};
+  const recent = [];
+  const cut60 = adtAddDays(today, -60);
+  for (const id of ids) {
+    let day = lastEv[id] || null, src = day ? 'event' : null;
+    if (!day) { const rows = camp[id] || []; let g = ''; for (const r of rows) { const gd = r.gone_at ? String(r.gone_at).slice(0, 10) : ''; if (gd && gd > g) g = gd; } if (g) { day = g; src = 'campaign gone'; } }
+    ctx[id] = { last_active_day: day, last_active_source: src || 'unknown — before event tracking', before: null, after: null };
+    if (day && day >= cut60) recent.push(id);
+  }
+  if (recent.length) {
+    const daily = {};
+    const stmts = adtChunks(recent).map(ch => env.DB.prepare('SELECT item_id, day, spend, attr_units, attr_revenue, orders, units, revenue, actual_profit, pending_cost_orders, COALESCE(pending_fee_orders, 0) AS pending_fee_orders FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ch, 2)).bind(adtAddDays(today, -90), yday, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) (daily[String(r.item_id)] = daily[String(r.item_id)] || []).push(r);
+    for (const id of recent) {
+      const day = ctx[id].last_active_day, bFrom = adtAddDays(day, -29), aTo = adtAddDays(day, 30) < yday ? adtAddDays(day, 30) : yday;
+      /* before / after carry BOTH the ad-attributed figures (attr_units / attr_revenue — ~0 once the ad stops)
+         AND the all-channel figures (orders / units / revenue), so the "Since it stopped" and "did sales hold"
+         columns read genuine organic sales as their labels claim, not the ~0 attributed figure. */
+      const before = { spend: 0, attr_units: 0, attr_revenue: 0, orders: 0, units: 0, revenue: 0, actual_profit: 0, pending_cost_orders: 0, pending_fee_orders: 0 }, after = { spend: 0, attr_units: 0, attr_revenue: 0, orders: 0, units: 0, revenue: 0, actual_profit: 0, pending_cost_orders: 0, pending_fee_orders: 0 };
+      for (const r of (daily[id] || [])) {
+        const acc = (r.day >= bFrom && r.day <= day) ? before : (r.day > day && r.day <= aTo) ? after : null;
+        if (!acc) continue; acc.spend += Number(r.spend) || 0; acc.attr_units += Number(r.attr_units) || 0; acc.attr_revenue += Number(r.attr_revenue) || 0; acc.orders += Number(r.orders) || 0; acc.units += Number(r.units) || 0; acc.revenue += Number(r.revenue) || 0; acc.actual_profit += Number(r.actual_profit) || 0; acc.pending_cost_orders += Number(r.pending_cost_orders) || 0; acc.pending_fee_orders += Number(r.pending_fee_orders) || 0;
+      }
+      const fin = o => ({ spend: round2(o.spend), attr_units: o.attr_units, attr_revenue: round2(o.attr_revenue), orders: o.orders, units: o.units, revenue: round2(o.revenue), actual_profit: round2(o.actual_profit), pending_cost_orders: o.pending_cost_orders, pending_fee_orders: o.pending_fee_orders });
+      ctx[id].before = Object.assign(fin(before), { from: bFrom, to: day });
+      ctx[id].after = Object.assign(fin(after), { from: adtAddDays(day, 1), to: aTo });
+    }
+  }
+  return ctx;
+}
+async function adtoolCpcCompute(env, p) {
+  await ensureAdtoolPhase2Schema(env); await ensureAdtoolPhaseBu3Register(env);
+  const today = ukDate(''), todayUtc = utcDate(), yday = adtAddDays(today, -1);
+  const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
+  const acct = String((p && p.account) || '').trim();
+  const mode = String((p && p.mode) || 'active') === 'post' ? 'post' : 'active';
+  const accounts = ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account));
+  /* the currently CPC-live set (the SQL twin of liveMembershipRow): the active page IS this set, the post page
+     EXCLUDES it */
+  const liveRows = (await env.DB.prepare(ADTOOL_LIVE_AD_SQL + " AND c.funding_model = 'COST_PER_CLICK'" + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])).all()).results || [];
+  const liveCamp = {}; for (const r of liveRows) (liveCamp[String(r.item_id)] = liveCamp[String(r.item_id)] || []).push(r);
+  let ids, camp = {}, postCtx = null;
+  if (mode === 'active') {
+    ids = Object.keys(liveCamp); camp = liveCamp;
+  } else {
+    const cand = (await env.DB.prepare(
+      "SELECT ca.listing_id AS item_id, ca.campaign_id, ca.ad_status, COALESCE(c.funding_model, a.funding) AS funding_model, COALESCE(c.name, a.name) AS name, COALESCE(c.budget, a.budget) AS budget, c.bid_pct AS c_bid, ca.bid_pct AS bid_pct, c.status AS c_status, a.gone_at AS gone_at " +
+      'FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id ' +
+      "WHERE COALESCE(c.funding_model, a.funding) = 'COST_PER_CLICK' AND (a.campaign_id IS NOT NULL OR ca.ad_status IN ('PAUSED', 'ARCHIVED') OR (c.status IS NOT NULL AND c.status NOT LIKE '%RUNNING%'))" + (acct ? ' AND ca.account = ?1' : '')
+    ).bind(...(acct ? [acct] : [])).all()).results || [];
+    for (const r of cand) { const id = String(r.item_id); if (liveCamp[id]) continue; (camp[id] = camp[id] || []).push(r); }
+    ids = Object.keys(camp);
+    postCtx = await adtCpcPostContext(env, ids, camp, today, yday);
+  }
+  if (!ids.length) {
+    return {
+      period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
+      rows: [], totals: adtCpcTotals([]), prev: await adtCpcPrevTotals(env, [], w.prev_from, w.prev_to),
+      impressions_from: mode === 'active' || from <= to ? (from > ADTOOL_IMPRESSIONS_FROM ? from : ADTOOL_IMPRESSIONS_FROM) : null,
+      profit_label: 'Profit (Sales Analysis law) — item level only', computed_at: new Date().toISOString(),
+      source: 'no ' + (mode === 'active' ? 'live cost-per-click' : 'paused / archived cost-per-click') + ' listing' + (acct ? ' on ' + acct : ''),
+    };
+  }
+  const [agg, imp, cost, meta] = await Promise.all([
+    adtCpcWindowAgg(env, ids, from, to, src, today, yday),
+    adtCpcImpressions(env, ids, from, to),
+    adtProductCost(env, ids),
+    adtCpcMeta(env, ids),
+  ]);
+  const rows = ids.map(id => {
+    const a = agg[id] || {}, m = meta[id] || {}, cps = camp[id] || [];
+    const base = { spend: round2(a.spend), cpc_spend: round2(a.cpc_spend), clicks: Number(a.clicks) || 0, attr_units: Number(a.attr_units) || 0, attr_revenue: round2(a.attr_revenue), orders: Number(a.orders) || 0, units: Number(a.units) || 0, revenue: round2(a.revenue) };
+    const d = adtCpcDerived(base);
+    const row = {
+      item_id: id, account: String(m.account || (cps[0] && cps[0].account) || ''), title: String(m.title || ''), image: m.image ? String(m.image) : null,
+      listing_date: m.start_time ? String(m.start_time) : null, sold_since_listed: m.sold_qty == null ? null : Number(m.sold_qty),
+      product_cost: cost[id] || { value: null, source: '—' },
+      spend: base.spend, cpc_spend: base.cpc_spend, clicks: base.clicks, attr_units: base.attr_units, attr_revenue: base.attr_revenue,
+      orders: base.orders, units: base.units, revenue: base.revenue,
+      units_7d: Number(a.units_7d) || 0, units_14d: Number(a.units_14d) || 0, units_30d: Number(a.units_30d) || 0,
+      acos: d.acos, avg_cpc: d.avg_cpc, cvr: d.cvr, roas: d.roas,
+      actual_profit: a.actual_profit == null ? null : round2(a.actual_profit), pending_cost_orders: Number(a.pending_cost_orders) || 0, pending_fee_orders: Number(a.pending_fee_orders) || 0,
+      impressions: imp.available && imp.map[id] != null ? imp.map[id] : null,
+      lever: adtLever(cps), who: adtWho(String(m.account || (cps[0] && cps[0].account) || '')), in_cpc: mode === 'active',
+    };
+    if (postCtx && postCtx[id]) { row.last_active_day = postCtx[id].last_active_day; row.last_active_source = postCtx[id].last_active_source; row.before = postCtx[id].before; row.after = postCtx[id].after; }
+    return row;
+  }).sort((x, y) => (Number(y.spend) || 0) - (Number(x.spend) || 0) || (Number(y.attr_revenue) || 0) - (Number(x.attr_revenue) || 0));
+  return {
+    period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
+    rows, totals: adtCpcTotals(rows), prev: await adtCpcPrevTotals(env, ids, w.prev_from, w.prev_to),
+    impressions_from: imp.available ? imp.from : null,
+    profit_label: 'Profit (Sales Analysis law) — item level only',
+    note: (mode === 'active' ? 'live cost-per-click listings (ACTIVE ad in a RUNNING campaign on an ACTIVE listing)' : 'listings whose cost-per-click ad is paused, archived or whose campaign has ended, excluding any that are live again') + '; ads by eBay report day (UTC), orders by UK day' + (w.includes_today ? '; today is sampled and provisional' : '') + (imp.available ? '' : '; impressions unavailable before ' + ADTOOL_IMPRESSIONS_FROM),
+    computed_at: new Date().toISOString(),
+    source: 'campaign_ads + campaigns' + (mode === 'post' ? ' + adtool_campaign_archive + adtool_campaign_ad_events' : '') + ', items_api, adtool_listing_day' + (w.includes_today ? ' + adtool_listing_today (sampled)' : '') + ', adtool_ads_daily (impressions), items_facts / adtool_orders (cost) · Sales Analysis law',
+  };
+}
+
+/* ---- Advertising Overview (behaviour patterns) ---- */
+function adtOverviewSum(rows, from, to) {
+  const t = { spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0 };
+  for (const r of rows) { if (r.day < from || r.day > to) continue; t.spend += Number(r.spend) || 0; t.attr_revenue += Number(r.attr_revenue) || 0; t.clicks += Number(r.clicks) || 0; t.attr_units += Number(r.attr_units) || 0; t.orders += Number(r.orders) || 0; t.units += Number(r.units) || 0; }
+  const roas = t.spend > 0 ? round2(t.attr_revenue / t.spend) : null, cpc = t.clicks > 0 ? round2(t.spend / t.clicks) : null, cvr = t.clicks > 0 ? round2(t.attr_units / t.clicks) : null;
+  return { from, to, spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), clicks: t.clicks, attr_units: t.attr_units, orders: t.orders, units: t.units, roas, cpc, cvr };
+}
+function adtOverviewTrends(cur, prev) {
+  /* delta + direction per metric between two window totals (adtTrend on each) */
+  const out = {};
+  for (const k of ['spend', 'attr_revenue', 'roas', 'cpc', 'cvr', 'orders', 'units']) out[k] = adtTrend(cur[k], prev[k]);
+  return out;
+}
+async function adtoolOverviewCompute(env, p) {
+  await ensureAdtoolPhase1Schema(env); await ensureAdtoolPhaseBu3Register(env);
+  const today = ukDate(''), yday = adtAddDays(today, -1);
+  const acct = String((p && p.account) || '').trim();
+  const scope = acct ? 'account' : 'fleet', scopeId = acct ? acct : 'all';
+  const w = adtPeriodOr(p, today, 'd30');
+  const accounts = ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account));
+  /* the daily series (adtool_scope_day has no today row): read from the earlier of the window start and 20 days
+     back (so the 7 / 10-day windows are always covered) up to yesterday, then split in JS */
+  const lo = w.from < adtAddDays(today, -20) ? w.from : adtAddDays(today, -20), seriesTo = (w.to < yday ? w.to : yday);
+  const day = (await env.DB.prepare('SELECT day, spend, attr_revenue, clicks, attr_units, orders, units FROM adtool_scope_day WHERE scope = ?1 AND scope_id = ?2 AND day >= ?3 AND day <= ?4 ORDER BY day').bind(scope, scopeId, lo, yday).all()).results || [];
+  const series = day.filter(r => r.day >= w.from && r.day <= seriesTo).map(r => {
+    const spend = Number(r.spend) || 0, ar = Number(r.attr_revenue) || 0, clicks = Number(r.clicks) || 0, au = Number(r.attr_units) || 0;
+    return { day: String(r.day), spend: round2(spend), attr_revenue: round2(ar), roas: spend > 0 ? round2(ar / spend) : null, cpc: clicks > 0 ? round2(spend / clicks) : null, cvr: clicks > 0 ? round2(au / clicks) : null, attr_units: au, orders: Number(r.orders) || 0, units: Number(r.units) || 0 };
+  });
+  const last7 = adtOverviewSum(day, adtAddDays(today, -7), yday), prev7 = adtOverviewSum(day, adtAddDays(today, -14), adtAddDays(today, -8));
+  const last10 = adtOverviewSum(day, adtAddDays(today, -10), yday), prev10 = adtOverviewSum(day, adtAddDays(today, -20), adtAddDays(today, -11));
+  const windows = { last7, prev7, last10, prev10, trend7: adtOverviewTrends(last7, prev7), trend10: adtOverviewTrends(last10, prev10) };
+  /* the profit view is COUNTS, never a fleet total: profitable vs losing listings per ISO week over the last 4
+     weeks (sign of adtool_listing_week.actual_profit), plus the item movers by the change in their own law profit
+     from the previous ISO week to the current one. profit_view / profitable are exempt from the collective-profit
+     strip as listing counts (ADTOOL_PROFIT_COUNT_KEYS), so every advertising role sees the trend while the money
+     travels only on the item-keyed movers below. */
+  const weeksKeys = [0, 1, 2, 3].map(n => adtIsoWeek(adtAddDays(today, -7 * n)));
+  const wq = 'SELECT iso_week, SUM(CASE WHEN actual_profit > 0 THEN 1 ELSE 0 END) AS profitable, SUM(CASE WHEN actual_profit < 0 THEN 1 ELSE 0 END) AS losing, SUM(CASE WHEN actual_profit IS NULL OR (pending_cost_orders IS NOT NULL AND pending_cost_orders > 0) OR (pending_fee_orders IS NOT NULL AND pending_fee_orders > 0) THEN 1 ELSE 0 END) AS pending, COUNT(*) AS listings FROM adtool_listing_week WHERE iso_week IN (?1, ?2, ?3, ?4)' + (acct ? ' AND account = ?5' : '') + ' GROUP BY iso_week';
+  const wkRows = (await env.DB.prepare(wq).bind(...weeksKeys.concat(acct ? [acct] : [])).all()).results || [];
+  const byWk = {}; for (const r of wkRows) byWk[String(r.iso_week)] = r;
+  const weeks = weeksKeys.slice().reverse().map(k => { const r = byWk[k] || {}; return { iso_week: k, week: k, profitable: Number(r.profitable) || 0, losing: Number(r.losing) || 0, pending: Number(r.pending) || 0, listings: Number(r.listings) || 0 }; });
+  const curWk = weeksKeys[0], prevWk = weeksKeys[1];
+  const movRows = (await env.DB.prepare('SELECT item_id, account, iso_week, actual_profit FROM adtool_listing_week WHERE iso_week IN (?1, ?2)' + (acct ? ' AND account = ?3' : '')).bind(...[curWk, prevWk].concat(acct ? [acct] : [])).all()).results || [];
+  const mv = {};
+  for (const r of movRows) { const id = String(r.item_id); const o = mv[id] = mv[id] || { item_id: id, account: String(r.account || ''), prev_profit: null, cur_profit: null }; if (String(r.iso_week) === curWk) o.cur_profit = r.actual_profit == null ? null : round2(r.actual_profit); else o.prev_profit = r.actual_profit == null ? null : round2(r.actual_profit); }
+  const movers = Object.values(mv).map(o => { const c = Number(o.cur_profit) || 0, pr = Number(o.prev_profit) || 0; return Object.assign(o, { delta: round2(c - pr), pct: Math.abs(pr) > 1e-9 ? round2((c - pr) / Math.abs(pr)) : (Math.abs(c) > 1e-9 ? null : 0) }); })
+    .filter(o => o.cur_profit != null || o.prev_profit != null)
+    .sort((a, b) => Math.abs(Number(b.delta) || 0) - Math.abs(Number(a.delta) || 0)).slice(0, 12);
+  await adtProductCells(env, movers);
+  const top_movers = movers.map(o => ({ item_id: o.item_id, account: o.account, title: o.title || '', image: o.image || null, prev_profit: o.prev_profit, cur_profit: o.cur_profit, delta: o.delta, pct: o.pct }));
+  const latest = weeks[weeks.length - 1] || { profitable: 0, losing: 0 };
+  return {
+    period: w, fresh: await adtFresh(env, 'day'), account: acct || 'all', scope, accounts,
+    series, windows,
+    /* profit_view is a counts + item-movers container (never a fleet profit sum): profit_view and profitable are
+       exempt from the collective-profit strip, so the Advertising Manager sees this trend too */
+    profit_view: { profitable_listings: latest.profitable, losing_listings: latest.losing, weeks, top_movers, current_week: curWk, note: 'counts of listings whose own Sales Analysis law profit was positive / negative that ISO week (a week with unpriced orders is counted under pending); the money figures are the item movers only' },
+    profit_label: 'Profit (Sales Analysis law) — item level only; the Overview shows counts, never a fleet total',
+    computed_at: new Date().toISOString(),
+    source: 'adtool_scope_day (' + scope + ' ' + scopeId + ' daily series), adtool_listing_week (profitable-vs-losing counts + item movers), items_api',
+  };
+}
+
+/* ---- hourly pre-warm of the heavy first-open pages (plan §4) ---- */
+async function adtWarmHourly(env) {
+  /* After the :20 rollup, warm the KV page cache for the pages whose first open was measured at 7-10 s so the next
+     open is a KV read. Default all-accounts payloads, both profit classes, exactly as adtoolTodayPrewarm does for
+     the live pages. Time-budgeted: any page that would overrun is skipped and counted. */
+  const t0 = Date.now(), BUDGET_MS = 45000;
+  const ctx = { env, user: { role: 'Management', email: 'warm@engine' }, waitUntil: null };
+  const copy = v => JSON.parse(JSON.stringify(v));
+  /* the Phase 3 pages this warm was ADDED for lead the list, so a tight hour caches them rather than skipping them. */
+  const jobs = [['adtoolCpcListings', {}], ['adtoolCpcListings', { mode: 'post' }], ['adtoolOverview', {}], ['adtoolPlan', {}], ['adtoolReport', {}], ['adtoolForecastLab', {}], ['adtoolAccounts', {}], ['adtoolCategories', {}]];
+  const out = []; const skippedNames = [];
+  for (const j of jobs) {
+    const action = j[0], payload = j[1];
+    if (Date.now() - t0 > BUDGET_MS) { skippedNames.push(action + (payload.mode ? ':' + payload.mode : '')); continue; }
+    const route = ROUTES[action]; if (!route) { continue; }
+    try {
+      const data = await (route.raw || route.fn)(payload, ctx);
+      const ttl = ADTOOL_KV_TTL_MS[action] || 120000;
+      await adtKvPut(env, adtKvKey(action, 'p', payload), ttl, adtStripCollectiveProfit(copy(data), { keepCollective: true }), true);
+      await adtKvPut(env, adtKvKey(action, 'np', payload), ttl, adtStripCollectiveProfit(copy(data), { keepCollective: false }), true);
+      out.push(action + (payload.mode ? ':' + payload.mode : ''));
+    } catch (e) { /* a page flag off, or the compute failed: the next open computes on demand */ }
+  }
+  try { await ctx_setSync(env, 'adtoolWarmHourly', '', 'warmed ' + (out.join('+') || 'nothing') + (skippedNames.length ? ' · skipped ' + skippedNames.join('+') + ' (time budget)' : '') + ' in ' + (Date.now() - t0) + ' ms'); } catch (e) { /* the note is best effort */ }
+  return out;
+}
+
+const ADTOOL_ACTIONS_P11 = {
+  adtoolCpcListings: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureAdtoolPhaseBu3Register(ctx.env);   // seeds adtool_page_cpc ON before the gate reads it
+      await adtGate(ctx, 'adtool_page_cpc');
+      return adtoolCpcCompute(ctx.env, p || {});
+    },
+  },
+  adtoolOverview: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureAdtoolPhaseBu3Register(ctx.env);   // seeds adtool_page_overview ON before the gate reads it
+      await adtGate(ctx, 'adtool_page_overview');
+      return adtoolOverviewCompute(ctx.env, p || {});
+    },
+  },
+};
+/* ADTOOL-P11-END ================================================================================== */
 
 
 
@@ -15763,6 +16127,7 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P7); /* ADTOOL Phase 7: analyst narratives 
 Object.assign(ROUTES, ADTOOL_ACTIONS_P8); /* ADTOOL Phase 8: live apply (off until an account's own switch is on) */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P9); /* ADTOOL war room: what to do today, with the arithmetic behind it */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P10); /* ADTOOL sale events: who qualifies, and the rotation that keeps one running */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P11); /* ADTOOL big update phase 3: CPC Active / Post listings, Advertising Overview */
 /* Phase 1A (27 Sep 2026): no collective profit leaves the engine for the ads portal. Every adtool action's answer
    passes through adtStripCollectiveProfit on the way out — profit keys survive only inside item-keyed rows, and the
    old est. ad profit never survives. The actions themselves no longer compute account or fleet profit; this is the
