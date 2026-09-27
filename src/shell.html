@@ -1279,7 +1279,12 @@ var ADT_REG_MAP = [
   [/hour band/i, ['HOUR_BANDS', 'adtool_listing_hour']],
   /* Phase 3: CPC active / post listings and the advertising overview */
   [/cpc listings|cpc active|cpc post/i, ['campaign_ads', 'campaigns', 'adtool_campaign_ad_events', 'adtool_campaign_archive', 'adtool_listing_day', 'items_api']],
-  [/overview|behaviour pattern|top mover/i, ['adtool_scope_day', 'adtool_listing_week', 'adtool_listing_day']]
+  [/overview|behaviour pattern|top mover/i, ['adtool_scope_day', 'adtool_listing_week', 'adtool_listing_day']],
+  /* Phase 4: week-to-week behaviour, action scenarios, the stage explainer, forecast-vs-actual */
+  [/week behaviour|weeks behaviour/i, ['adtool_descriptors', 'adtool_listing_week']],
+  [/scenario|what must change|binding limit|scale profitable/i, ['adtool_descriptors', 'adtool_cap_days', 'adtool_stages', 'adtool_forecast']],
+  [/stage explainer|stage guide|each stage/i, ['adtool_stages']],
+  [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label){

@@ -829,7 +829,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260927-0407';
+var BUILD = '20260927-0454';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1279,7 +1279,12 @@ var ADT_REG_MAP = [
   [/hour band/i, ['HOUR_BANDS', 'adtool_listing_hour']],
   /* Phase 3: CPC active / post listings and the advertising overview */
   [/cpc listings|cpc active|cpc post/i, ['campaign_ads', 'campaigns', 'adtool_campaign_ad_events', 'adtool_campaign_archive', 'adtool_listing_day', 'items_api']],
-  [/overview|behaviour pattern|top mover/i, ['adtool_scope_day', 'adtool_listing_week', 'adtool_listing_day']]
+  [/overview|behaviour pattern|top mover/i, ['adtool_scope_day', 'adtool_listing_week', 'adtool_listing_day']],
+  /* Phase 4: week-to-week behaviour, action scenarios, the stage explainer, forecast-vs-actual */
+  [/week behaviour|weeks behaviour/i, ['adtool_descriptors', 'adtool_listing_week']],
+  [/scenario|what must change|binding limit|scale profitable/i, ['adtool_descriptors', 'adtool_cap_days', 'adtool_stages', 'adtool_forecast']],
+  [/stage explainer|stage guide|each stage/i, ['adtool_stages']],
+  [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label){
@@ -3128,7 +3133,22 @@ VIEWS.home = {
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var GOLD = '#f2b035', GOLD2 = '#ffd27a', WHITE55 = 'rgba(255,255,255,.55)', BAND = 'rgba(242,176,53,.16)', GRID = 'rgba(255,255,255,.08)', ZERO = 'rgba(255,255,255,.35)', LOSS = '#e0563f';
-  VIEW_CSS.push('.fl-chart{width:100%;height:300px}.fl-spark{display:inline-block;vertical-align:middle;margin-left:6px}');
+  VIEW_CSS.push('.fl-chart{width:100%;height:300px}.fl-spark{display:inline-block;vertical-align:middle;margin-left:6px}' +
+    /* Phase 4: objective banner, forecast-vs-actual metric grid, action scenarios, stage explainer */
+    '.fl-obj{font-size:13px;color:var(--text);background:var(--panel-2);border:1px solid var(--gold-line);border-left:3px solid var(--gold-b);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-weight:600;line-height:1.5}' +
+    '.fl-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}' +
+    '.fl-mh{font-weight:800;font-size:12px;margin-bottom:2px}' +
+    '.fl-mape{display:inline-block;padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--gold-line);color:var(--gold-a);margin-left:6px}' +
+    '.fl-mape.hi{color:#ffb3a6;border-color:rgba(224,86,63,.5)}' +
+    '.fl-lc{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;border:1px solid rgba(224,86,63,.5);color:#ffb3a6;margin-left:6px}' +
+    '.fl-sc{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}@media(max-width:760px){.fl-sc{grid-template-columns:1fr}}' +
+    '.fl-scc{background:var(--panel-2);border:1px solid var(--gold-line);border-radius:10px;padding:9px 11px}' +
+    '.fl-scc.A{border-left:3px solid rgba(255,255,255,.35)}.fl-scc.B{border-left:3px solid var(--gold-b)}.fl-scc.C{border-left:3px solid #e0563f}' +
+    '.fl-scc .h{font-weight:800;font-size:12px;margin-bottom:4px}' +
+    '.fl-scc .fig{font-size:11.5px;color:var(--text-2);line-height:1.6}.fl-scc .fig b{color:var(--text)}' +
+    '.fl-scc .lim{font-size:11px;color:#ffb3a6;margin-top:5px}.fl-scc .mc{font-size:11px;color:var(--gold-a);margin-top:3px}' +
+    '.fl-stagebtn{background:transparent;border:0;color:var(--gold-a);font:inherit;font-weight:800;font-variant-numeric:tabular-nums;cursor:pointer;text-decoration:underline;padding:0}' +
+    '.fl-stageitems{margin-top:10px}.fl-stageitems .row{padding:6px 0;border-top:1px solid var(--gold-line)}');
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'an-neg' : Number(v) > 0 ? 'an-pos' : ''); }
@@ -3144,17 +3164,98 @@ VIEWS.home = {
   };
   function draw(D) {
     var h = '';
+    /* the objective in one line, so no one reads ROAS as the goal (owner: "increase profitable sales
+       while scaling — improve ROAS, increase sales, maintain profitability, scale profitable products,
+       reduce unproductive spend"). ad_profit is never shown anywhere on this page. */
+    h += '<div class="fl-obj">' + esc(D.objective || 'The objective is to scale profitable sales, not ROAS alone: grow the products that make money, hold their profit, and cut spend that does not pay. Every forecast below is judged against what actually happened, and the system learns from the gap.') + '</div>';
     h += '<div class="an-panel"><h3>Fleet units: last 30 days and the next 30' + src('actual: orders') + src('forecast made ' + (D.made_day || '—')) + '</h3><div class="an-sub">Sum of the listing forecasts; the band adds the listing bands assuming independence (approximate).</div><div id="flFleet" class="fl-chart"></div></div>';
-    h += '<div class="an-grid2"><div class="an-panel"><h3>Stage distribution' + src('stages') + '</h3><table class="an-tbl"><thead><tr><th>Stage</th><th class="r">Listings</th></tr></thead><tbody>' + (D.stages.length ? D.stages.map(function (s) { return '<tr><td>' + esc(s.stage) + '</td><td class="r">' + s.n + '</td></tr>'; }).join('') : '<tr><td colspan="2" class="an-empty">stages arrive with the first profiles run</td></tr>') + '</tbody></table></div>';
+    /* stage counts link to the listings behind them when the engine sends the item rows on each stage
+       (fleet stages, and a per-account matrix when stage_by_account is present); the reveal below the
+       table fills in on click without another read. */
+    var stageMap = {}; /* key -> item rows */
+    /* the engine sends stages_by_account FLAT ([{account,stage,n,items}]); group it per account here so the
+       matrix and its per-account drill-downs read one nested row per account (older builds sent it nested). */
+    var stageByAccount = D.stage_by_account || null;
+    if (!stageByAccount && D.stages_by_account && D.stages_by_account.length) {
+      var accMap = {}, accOrder = [];
+      D.stages_by_account.forEach(function (r) { if (!accMap[r.account]) { accMap[r.account] = { account: r.account, stages: [] }; accOrder.push(r.account); } accMap[r.account].stages.push({ stage: r.stage, n: r.n, items: r.items }); });
+      stageByAccount = accOrder.map(function (a) { return accMap[a]; });
+    }
+    (D.stages || []).forEach(function (s) { if (s.items && s.items.length) stageMap['fleet|' + s.stage] = s.items; });
+    (stageByAccount || []).forEach(function (a) { (a.stages || []).forEach(function (s) { if (s.items && s.items.length) stageMap[a.account + '|' + s.stage] = s.items; }); });
+    var stageCount = function (key, n) { return stageMap[key] ? '<button class="fl-stagebtn" data-stagekey="' + esc(key) + '">' + n + '</button>' : String(n); };
+    h += '<div class="an-grid2"><div class="an-panel"><h3>Stage distribution' + src('stages') + '</h3><table class="an-tbl"><thead><tr><th>Stage</th><th class="r">Listings</th></tr></thead><tbody>' + (D.stages && D.stages.length ? D.stages.map(function (s) { return '<tr><td>' + esc(s.label || s.stage) + '</td><td class="r">' + stageCount('fleet|' + s.stage, s.n) + '</td></tr>'; }).join('') : '<tr><td colspan="2" class="an-empty">stages arrive with the first profiles run</td></tr>') + '</tbody></table><div class="fl-stageitems" id="flStageItems"></div></div>';
     h += '<div class="an-panel"><h3>Model scorecard' + src('backtest · ' + (D.scorecard.length ? (Math.round(D.scorecard.reduce(function (t, r) { return t + (Number(r.folds) || 0) * r.n; }, 0) / Math.max(1, D.scorecard.reduce(function (t, r) { return t + r.n; }, 0)) * 10) / 10) + ' of 8 origins' : '8 origins') + ' · horizon 14') + '</h3><div class="an-sub">MASE vs the seasonal naive (1.0 = no better). An origin needs 21 days of training behind it, so the eight the spec asks for need 77 days of history; until then fewer run and the share below is a noisy read. ' + (D.acceptance ? 'Acceptance: <b>' + esc(D.acceptance.status) + '</b> — ' + esc(D.acceptance.evidence) : 'Acceptance row not written yet.') + '</div><table class="an-tbl"><thead><tr><th>Chosen model</th><th class="r">Listings</th><th class="r">Mean MASE</th><th class="r">Beat naive</th></tr></thead><tbody>' + (D.scorecard.length ? D.scorecard.map(function (s) { return '<tr><td>' + esc(s.model) + '</td><td class="r">' + s.n + '</td><td class="r">' + (s.mase == null ? '—' : s.mase) + '</td><td class="r">' + s.beats_naive + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="an-empty">no forecasts yet</td></tr>') + '</tbody></table></div></div>';
+    /* what every stage means, how it is decided and what to do about it (owner: "The 22–40 type
+       categorization is unclear. Explain each stage: what it means, how calculated, what action"). */
+    var guide = D.stage_explainer || D.stage_guide || D.stages_guide || null;
+    if (guide && guide.length) {
+      h += '<div class="an-panel"><h3>What each stage means' + src('stage explainer') + '</h3><div class="an-sub">The six stages a listing moves through, how the engine decides each from its 28-day trend and level, and the recommended action.</div><table class="an-tbl"><thead><tr><th>Stage</th><th>What it means</th><th>How it is calculated</th><th>Recommended action</th></tr></thead><tbody>' +
+        guide.map(function (g) { return '<tr><td><span class="at-tag ' + (/Decline|Dormant|Dead/i.test(g.stage) ? 'loss' : 'gold') + '" style="border:1px solid var(--gold-line);border-radius:999px;padding:2px 8px">' + esc(g.label || g.stage) + '</span></td><td>' + esc(g.meaning || '') + '</td><td>' + esc(g.how_calculated || g.how || '') + '</td><td>' + esc(g.action || '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    /* stage counts per account, each linking to its listings when the engine sends them */
+    if (stageByAccount && stageByAccount.length) {
+      var stageOrder = (D.stages || []).map(function (s) { return s.stage; });
+      if (!stageOrder.length) { var seen = {}; stageByAccount.forEach(function (a) { (a.stages || []).forEach(function (s) { if (!seen[s.stage]) { seen[s.stage] = 1; stageOrder.push(s.stage); } }); }); }
+      var stageLabelOf = {}; (D.stages || []).forEach(function (s) { stageLabelOf[s.stage] = s.label || s.stage; });
+      (guide || []).forEach(function (g) { if (!stageLabelOf[g.stage]) stageLabelOf[g.stage] = g.label || g.stage; });
+      h += '<div class="an-panel"><h3>Stages by account' + src('stages') + '</h3><div class="an-sub">Click a count to list the listings behind it.</div><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Account</th>' + stageOrder.map(function (st) { return '<th class="r">' + esc(stageLabelOf[st] || st) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        stageByAccount.map(function (a) { var by = {}; (a.stages || []).forEach(function (s) { by[s.stage] = s.n; }); return '<tr><td>' + esc(a.account) + '</td>' + stageOrder.map(function (st) { var n = by[st] || 0; return '<td class="r">' + (n ? stageCount(a.account + '|' + st, n) : '0') + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div></div>';
+    }
     var mover = function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td>' + spark((D.spark || {})[r.item_id]) + '</td><td>' + esc(r.stage) + '</td><td class="r ' + cls(r.slope28) + '">' + (r.slope28 > 0 ? '+' : '') + r.slope28 + ' %/day</td><td class="r">' + r.level28 + '</td></tr>'; };
     var head = '<thead><tr><th>Listing</th><th>Last 14 days</th><th>Stage</th><th class="r">28-day slope</th><th class="r">Units/day</th></tr></thead>';
     h += '<div class="an-grid2"><div class="an-panel"><h3>Top risers</h3><table class="an-tbl">' + head + '<tbody>' + (D.risers.length ? D.risers.map(mover).join('') : '<tr><td colspan="5" class="an-empty">—</td></tr>') + '</tbody></table></div><div class="an-panel"><h3>Top decliners</h3><table class="an-tbl">' + head + '<tbody>' + (D.decliners.length ? D.decliners.map(mover).join('') : '<tr><td colspan="5" class="an-empty">—</td></tr>') + '</tbody></table></div></div>';
-    h += '<div class="an-panel"><h3>Realised vs forecast' + src('vintage ' + (D.realised_vintage || '—')) + '</h3><div class="an-sub">' + (D.realised.length ? 'Fleet units the oldest stored vintage predicted for the days that have since happened.' : 'Fills in as forecast days pass: the first comparison is available the morning after the first forecast; 14 days of it from 14 days after the first run.') + '</div><div id="flReal" class="fl-chart" style="height:220px"></div></div>';
+    /* per-metric forecast-vs-reality: the engine sends the MAPE in forecast_vs_actual.metrics and the day rows in
+       the flat realised[] (each row carries the units/revenue/spend forecast and actual); assemble the {mape,
+       vintage, rows} shape the metric grid draws from. Older builds may send realised_metrics ready-made. */
+    var RM = D.realised_metrics || null;
+    if (!RM && D.forecast_vs_actual && D.forecast_vs_actual.metrics && D.realised && D.realised.length) {
+      var fva = D.forecast_vs_actual, fm = fva.metrics || {};
+      var mkRows = function (fk, ak) { return D.realised.map(function (r) { return { day: r.day, forecast: r[fk], actual: r[ak] }; }); };
+      var mapeOf = function (m) { return fm[m] && fm[m].mape != null ? fm[m].mape : null; };
+      RM = {
+        units: { mape: mapeOf('units'), vintage: fva.vintage, rows: mkRows('forecast', 'actual') },
+        revenue: { mape: mapeOf('revenue'), vintage: fva.vintage, rows: mkRows('revenue_forecast', 'revenue_actual') },
+        spend: { mape: mapeOf('spend'), vintage: fva.vintage, rows: mkRows('spend_forecast', 'spend_actual') }
+      };
+    }
+    if (RM) {
+      var metrics = [['units', 'Units'], ['revenue', 'Revenue'], ['spend', 'Spend']];
+      h += '<div class="an-panel"><h3>Forecast vs reality' + src('realised vs forecast') + '</h3><div class="an-sub">The oldest stored forecast against what actually happened, per metric — units, revenue and spend. MAPE is the mean absolute percentage error over the compared days; lower is better, and over 50% is flagged. The system learns from this gap.</div><div class="fl-metrics">' +
+        metrics.map(function (m) { var r = RM[m[0]]; var mape = r && r.mape != null ? Number(r.mape) : null; return '<div><div class="fl-mh">' + esc(m[1]) + (mape != null ? '<span class="fl-mape' + (mape > 50 ? ' hi' : '') + '">MAPE ' + Math.round(mape) + '%</span>' : '') + (r && r.vintage ? ' <span class="an-src">vintage ' + esc(r.vintage) + '</span>' : '') + '</div><div id="flReal_' + m[0] + '" class="fl-chart" style="height:180px"></div></div>'; }).join('') + '</div></div>';
+    } else {
+      h += '<div class="an-panel"><h3>Realised vs forecast' + src('vintage ' + (D.realised_vintage || '—')) + '</h3><div class="an-sub">' + ((D.realised && D.realised.length) ? 'Fleet units the oldest stored vintage predicted for the days that have since happened.' : 'Fills in as forecast days pass: the first comparison is available the morning after the first forecast; 14 days of it from 14 days after the first run.') + '</div><div id="flReal" class="fl-chart" style="height:220px"></div></div>';
+    }
     /* units only: the forecast's profit column stood on est. ad profit and is not shown (owner, 27 Sep) */
     h += '<div class="an-panel"><h3>Per-listing forecast' + src('next 30 days') + '</h3><div class="an-sub">Chosen model, its backtest MASE, the next 7 and 30 days with the 10–90 % band. <a href="#" id="flCsv">Export CSV</a></div><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th>Model</th><th class="r">MASE</th><th class="r">Next 7</th><th class="r">Next 30</th><th class="r">Band 30</th></tr></thead><tbody>' + (D.table.length ? D.table.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td>' + esc(r.model) + '</td><td class="r">' + (r.mase == null ? '—' : r.mase) + '</td><td class="r">' + r.next7 + '</td><td class="r">' + r.next30 + '</td><td class="r">' + r.lo30 + '–' + r.hi30 + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">no forecasts yet — the job runs in the morning chain and catches up hourly</td></tr>') + '</tbody></table></div></div>';
+    /* per-listing action scenarios: A keep spend, B +30% budget, C reduce/stop — modelled units,
+       revenue, spend, profit, the binding limit and what must change. Modelled from spend elasticity,
+       ad dependence, stage and budget-capped days (adtScenarios); a promise nowhere, a model always. */
+    /* the engine attaches the A/B/C scenarios per row on table[].scenarios (with per-row low_confidence /
+       confidence_note); an older/newer engine may also send a ready-made top-level scenarios[] — take whichever. */
+    var scenRows = (D.scenarios && D.scenarios.length) ? D.scenarios : (D.table || []).filter(function (r) { return r.scenarios && r.scenarios.length; });
+    if (scenRows.length) {
+      h += '<div class="an-panel"><h3>Action scenarios' + src('scenarios') + '</h3>' +
+        '<div class="an-sub">For each listing: <b>A</b> keep spend, <b>B</b> +30% budget, <b>C</b> reduce/stop — the modelled outcome, the binding limit that caps it, and what must change to go further. If the oldest-vintage error is over 50% the listing is marked low confidence; the scenarios are still shown, as models.</div>' +
+        scenRows.map(function (L) {
+          return '<div style="border-top:1px solid var(--gold-line);padding:10px 0">' +
+            '<div>' + adtProductCell({ item_id: L.item_id, account: L.account, title: L.title, image: L.image }) + (L.low_confidence ? '<span class="fl-lc" title="oldest-vintage MAPE over 50%">modelled, low confidence</span>' : '') + '</div>' +
+            '<div class="fl-sc">' + (L.scenarios || []).map(function (s) {
+              var fig = [s.modelled_units != null ? 'Units <b>' + esc(s.modelled_units) + '</b>' : '', s.modelled_revenue != null ? 'Revenue <b>' + gbp(s.modelled_revenue, 0) + '</b>' : '', s.modelled_spend != null ? 'Spend <b>' + gbp(s.modelled_spend, 0) + '</b>' : '', s.modelled_profit != null ? 'Profit <b>' + gbp(s.modelled_profit, 0) + '</b>' : ''].filter(Boolean).join(' · ');
+              return '<div class="fl-scc ' + esc(String(s.id || '')) + '"><div class="h">' + esc(s.id || '') + ' · ' + esc(s.label || '') + '</div><div class="fig">' + (fig || '—') + '</div>' + (s.limit ? '<div class="lim">Limit: ' + esc(s.limit) + '</div>' : '') + (s.what_must_change ? '<div class="mc">To go further: ' + esc(s.what_must_change) + '</div>' : '') + '</div>';
+            }).join('') + '</div></div>';
+        }).join('') + '</div>';
+    }
     h += '<div class="an-note">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + '</div>';
     $('flBody').innerHTML = h;
+    /* stage-count reveal: fill the panel under the stage tables with the item rows behind a count */
+    var stageBtns = document.querySelectorAll('[data-stagekey]');
+    for (var sbi = 0; sbi < stageBtns.length; sbi++) stageBtns[sbi].onclick = function () {
+      var key = this.getAttribute('data-stagekey'), items = stageMap[key] || [], box = document.getElementById('flStageItems');
+      if (!box) return;
+      var parts = key.split('|');
+      box.innerHTML = '<div class="fl-mh">' + esc(parts[1]) + (parts[0] !== 'fleet' ? ' · ' + esc(parts[0]) : '') + ' — ' + items.length + ' listing' + (items.length === 1 ? '' : 's') + '</div>' + (items.length ? items.map(function (r) { return '<div class="row">' + adtProductCell(r) + '</div>'; }).join('') : '<div class="an-empty">no listings</div>');
+    };
     var csv = $('flCsv'); if (csv) csv.onclick = function (e) { e.preventDefault(); var lines = [['item_id', 'account', 'title', 'model', 'mase', 'next7', 'next30', 'lo30', 'hi30']].concat(D.table.map(function (r) { return [r.item_id, r.account, String(r.title || '').replace(/"/g, "'"), r.model, r.mase, r.next7, r.next30, r.lo30, r.hi30]; })).map(function (row) { return row.map(function (v) { return '"' + String(v == null ? '' : v) + '"'; }).join(','); }).join('\n'); var w = window.open('', '_blank'); if (w) { w.document.write('<pre>' + esc(lines) + '</pre>'); w.document.title = 'adtool-forecast-' + (D.made_day || '') + '.csv'; } else { toast('Pop-up blocked — allow pop-ups to export'); } };
     if (!window.echarts) return;
     /* Numbers ON the chart, the way every other graph in the portal shows them. ECharts hides a label
@@ -3165,12 +3266,23 @@ VIEWS.home = {
     var pill = function (fmt) { return Object.assign({}, PILL, { formatter: fmt }); };
     var LAYOUT = { hideOverlap: true };
     var base = { backgroundColor: 'transparent', textStyle: { color: '#9aa4b1', fontFamily: 'Instrument Sans, system-ui, sans-serif' }, animation: false, grid: { left: 44, right: 14, top: 26, bottom: 28 }, tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, yAxis: { type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 } } };
+    D.actual = D.actual || []; D.next = D.next || [];
     var days = D.actual.map(function (r) { return r.day.slice(5); }).concat(D.next.map(function (r) { return r.target_day.slice(5); }));
     var act = D.actual.map(function (r) { return r.units; }).concat(D.next.map(function () { return null; }));
     var fc = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.units; }));
     var lo = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.lo; })), hi = D.actual.map(function () { return null; }).concat(D.next.map(function (r) { return r.hi - r.lo; }));
     var c1 = window.echarts.init($('flFleet')); c1.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'band low', type: 'line', data: lo, stack: 'b', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '10–90 % band', type: 'line', data: hi, stack: 'b', lineStyle: { opacity: 0 }, areaStyle: { color: BAND }, symbol: 'none' }, { name: 'Units (actual)', type: 'line', data: act, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 3, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Forecast', type: 'line', data: fc, lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, itemStyle: { color: WHITE55 }, symbolSize: 3, label: Object.assign({}, PILL, { backgroundColor: 'rgba(255,255,255,.55)', formatter: function (o) { return o.value == null ? '' : Math.round(o.value); } }), labelLayout: LAYOUT }] }));
-    if (D.realised.length) { var c2 = window.echarts.init($('flReal')); c2.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: D.realised.map(function (r) { return r.day.slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: D.realised.map(function (r) { return r.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: D.realised.map(function (r) { return r.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: D.realised.map(function (r) { return r.actual == null ? null : Math.round((r.actual - r.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] })); } else { $('flReal').innerHTML = '<div class="an-empty">Nothing to compare yet.</div>'; }
+    /* forecast-vs-actual: three metric charts (units, revenue, spend) when the engine sends
+       realised_metrics; otherwise the single units chart the older engine sent on D.realised */
+    if (RM) {
+      [['units', function (v) { return v == null ? '' : Math.round(v); }], ['revenue', null], ['spend', null]].forEach(function (m) {
+        var mk = m[0], r = RM[mk], el = document.getElementById('flReal_' + mk); if (!el) return;
+        var rows = r && r.rows ? r.rows : null;
+        if (!rows || !rows.length) { el.innerHTML = '<div class="an-empty">nothing to compare yet</div>'; return; }
+        var fmt = m[1] || function (v) { return v == null ? '' : '£' + Math.round(v); };
+        window.echarts.init(el).setOption(Object.assign({}, base, { xAxis: { type: 'category', data: rows.map(function (x) { return String(x.day).slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: rows.map(function (x) { return x.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: rows.map(function (x) { return x.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(fmt), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: rows.map(function (x) { return x.actual == null || x.forecast == null ? null : Math.round((x.actual - x.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] }));
+      });
+    } else if (D.realised && D.realised.length) { var c2 = window.echarts.init($('flReal')); c2.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: D.realised.map(function (r) { return r.day.slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: D.realised.map(function (r) { return r.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: D.realised.map(function (r) { return r.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: D.realised.map(function (r) { return r.actual == null ? null : Math.round((r.actual - r.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] })); } else { var fr = $('flReal'); if (fr) fr.innerHTML = '<div class="an-empty">Nothing to compare yet.</div>'; }
   }
 })();
 
@@ -3194,7 +3306,13 @@ VIEWS.home = {
     '.mo-ladder .lab{font-size:10.5px;color:var(--text-3);text-align:center;margin-top:5px;line-height:1.3}' +
     '.mo-ladder .val{font-size:12px;font-weight:800;margin-bottom:3px}' +
     '.mo-hours{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;align-items:end;height:90px}' +
-    '.mo-hours .h{background:var(--gold-b);border-radius:2px 2px 0 0;min-height:1px}.mo-hours .h.under{background:#e0563f}.mo-hours .lab{font-size:9px;color:var(--text-3);text-align:center}'
+    '.mo-hours .h{background:var(--gold-b);border-radius:2px 2px 0 0;min-height:1px}.mo-hours .h.under{background:#e0563f}.mo-hours .lab{font-size:9px;color:var(--text-3);text-align:center}' +
+    /* Phase 4 alerts: five labelled lines + an urgency pill (overdue = loss colour, now = gold, soon = pale gold, watch = muted) */
+    '.mo-urg{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap;vertical-align:middle}' +
+    '.mo-urg.overdue{color:#fff;background:#e0563f;border-color:#e0563f}.mo-urg.now{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}.mo-urg.soon{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.1)}.mo-urg.watch{color:var(--text-2)}' +
+    '.mo-line{display:grid;grid-template-columns:104px 1fr;gap:8px;font-size:12px;margin-top:5px;align-items:start}' +
+    '.mo-line .lb{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding-top:1px}.mo-line .vl{color:var(--text-2)}' +
+    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}'
   );
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
@@ -3205,6 +3323,29 @@ VIEWS.home = {
   function fail(id, e) { $(id).innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'failed') + '</div></div>'; }
   function kpi(k, v, d, c) { return '<div class="an-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   function ago(t) { if (!t) return 'never'; var ms = Date.now() - new Date(String(t).replace(' ', 'T') + (String(t).endsWith('Z') ? '' : 'Z')).getTime(); if (isNaN(ms)) return esc(String(t).slice(0, 16)); var m = Math.round(ms / 60000); return m < 60 ? m + ' min ago' : (m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'); }
+
+  /* ── Phase 4 alert pieces ──────────────────────────────────────────────────────────────────
+     Each alert reads as five plain lines — what happened, where, why it matters, what to do, how
+     urgent — off the engine's new fields (what / why_matters / do / urgency / hours_open), falling
+     back to the old payload shape so an older engine still draws. Numbers come from the payload as
+     'label value' pairs, never a raw snake_case key or a JSON blob. */
+  var NUM_LABEL = { spend: 'Spend', roas: 'ROAS', cpc: 'CPC', cvr: 'CVR', clicks: 'Clicks', attr_units: 'Ad sales', attr_revenue: 'Attributed', revenue: 'Revenue', units: 'Units', orders: 'Orders', actual_profit: 'Profit', profit: 'Profit', d7: '7 d', d30: '30 d', d14: '14 d', spend_7d: '7-day spend', spend_30d: '30-day spend', be: 'Break-even', breakeven: 'Break-even', breakeven_roas: 'Break-even', margin: 'Margin', pending: 'Unpriced', pending_cost_orders: 'No cost yet', pending_fee_orders: 'No fees yet', days: 'Days', slope28: '28-day slope', level28: 'Units/day', share: 'Share', cost: 'Cost', bid: 'Ad rate', budget: 'Budget' };
+  function humanKey(k) { return NUM_LABEL[k] || String(k).replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); }); }
+  function fmtNum(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/roas|(^|_)be$|breakeven/.test(k)) return n.toFixed(2) + '×'; if (/spend|profit|revenue|cpc|margin|attributed|cost|budget/.test(k)) return gbp(n); if (/cvr|share|_pct$|percent/.test(k)) return (Math.round(n * 1000) / 10) + '%'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; return String(v); }
+  function payloadPairs(p) {
+    var pairs = [], skip = { rule_text: 1, suggested: 1, title: 1, why_matters: 1, what: 1, where: 1, 'do': 1, image: 1, account: 1, item_id: 1 };
+    Object.keys(p || {}).forEach(function (k) {
+      if (skip[k]) return; var v = p[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { Object.keys(v).forEach(function (k2) { if (v[k2] == null || v[k2] === '') return; pairs.push([humanKey(k) + ' ' + humanKey(k2).toLowerCase(), fmtNum(k2, v[k2])]); }); }
+      else if (!Array.isArray(v) && v != null && v !== '') { pairs.push([humanKey(k), fmtNum(k, v)]); }
+    });
+    return pairs;
+  }
+  function alSev(a) { return String(a.sev || a.severity || 'low'); }
+  function alUrgency(a) { if (a.urgency) return String(a.urgency).toLowerCase(); var s = alSev(a).toLowerCase(); if (s === 'high' && Number(a.hours_open) > 24) return 'overdue'; return s === 'high' ? 'now' : s === 'medium' ? 'soon' : 'watch'; }
+  function urgencyText(u) { return u === 'overdue' ? 'a high alert open more than a day — clear it today' : u === 'now' ? 'act today' : u === 'soon' ? 'act this week' : 'keep an eye on it'; }
+  function openText(a) { if (a.hours_open != null && !isNaN(Number(a.hours_open))) { var hh = Number(a.hours_open); return hh < 24 ? Math.round(hh) + ' h' : Math.round(hh / 24) + ' d'; } return a.fired_at ? ago(a.fired_at) : '—'; }
+  function moLine(lb, vl) { return '<div class="mo-line"><div class="lb">' + esc(lb) + '</div><div class="vl">' + vl + '</div></div>'; }
 
   /* ---------------- Command centre ---------------- */
   /* Phase 1B: today so far comes from the 5-minute grain (adtoolToday: per-listing rows, hour curve,
@@ -3320,15 +3461,28 @@ VIEWS.home = {
   };
   function loadAlerts() {
     api('adtoolAlerts', {}).then(function (D) {
-      var counts = { high: 0, medium: 0, low: 0 }; D.open.forEach(function (a) { counts[a.severity] = (counts[a.severity] || 0) + 1; });
+      var counts = { high: 0, medium: 0, low: 0 }; D.open.forEach(function (a) { var s = alSev(a); counts[s] = (counts[s] || 0) + 1; });
+      var overdue = D.open.filter(function (a) { return alUrgency(a) === 'overdue'; }).length;
       var h = '<div class="an-filters">' + [['', 'All (' + D.open.length + ')'], ['high', 'High (' + counts.high + ')'], ['medium', 'Medium (' + counts.medium + ')'], ['low', 'Low (' + counts.low + ')']].map(function (x) { return '<button class="' + (AL.sev === x[0] ? 'on' : '') + '" data-s="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+      if (overdue) h += '<div class="an-note" style="margin-bottom:10px;border:1px solid rgba(224,86,63,.5);background:rgba(224,86,63,.08);color:#ffb3a6"><b>' + overdue + ' overdue</b> — a high alert has been open more than a day. Clear these first.</div>';
       if (D.fixture_check) h += '<div class="an-note" style="margin-bottom:10px">Fixture check (' + esc(String(D.fixture_check.ran_at).slice(0, 16)) + '): <b>' + esc(D.fixture_check.status) + '</b> — ' + esc(D.fixture_check.evidence) + '</div>';
-      var rows = D.open.filter(function (a) { return !AL.sev || a.severity === AL.sev; });
+      var rows = D.open.filter(function (a) { return !AL.sev || alSev(a) === AL.sev; });
       h += '<div id="moAlList">' + (rows.length ? rows.map(function (a) {
-        var p = a.payload || {}; var nums = Object.keys(p).filter(function (k) { return k !== 'rule_text' && k !== 'suggested' && k !== 'title'; }).map(function (k) { return k + ' ' + (typeof p[k] === 'object' ? JSON.stringify(p[k]) : p[k]); }).join(' · ');
-        return '<div class="mo-alert ' + esc(a.severity) + '"><div class="t">' + esc(a.rule_id) + ' · ' + esc(p.rule_text || '') + '</div>' + (a.item_id ? '<div style="margin:6px 0 4px">' + adtProductCell({ item_id: a.item_id, account: a.account, title: a.title || p.title || '', image: a.image }) + '</div>' : '') + '<div class="m">' + (!a.item_id && a.account ? esc(a.account) + ' · ' : '') + (a.campaign_id ? 'campaign ' + esc(a.campaign_id) + ' · ' : '') + esc(nums) + '</div><div class="m">Since ' + esc(String(a.fired_at).slice(0, 16)) + ' · suggested: <b>' + esc(p.suggested || '') + '</b>' + (a.acknowledged_by ? ' · acknowledged by ' + esc(a.acknowledged_by) : '') + (a.snoozed_until ? ' · snoozed to ' + esc(String(a.snoozed_until).slice(0, 10)) : '') + '</div><div class="btns">' + (a.item_id ? '<button data-open="' + esc(a.item_id) + '">Open listing</button>' : '') + '<button data-snooze="' + esc(a.alert_id) + '">Snooze 3 d</button><button data-ack="' + esc(a.alert_id) + '">Acknowledge</button></div></div>';
+        var p = a.payload || {}; var sev = alSev(a), urg = alUrgency(a);
+        var what = a.what || p.rule_text || ''; var why = a.why_matters || p.why_matters || ''; var doit = a['do'] || p.suggested || '';
+        var ruleId = a.rule || a.rule_id || ''; var pairs = payloadPairs(p);
+        var where = a.item_id ? adtProductCell({ item_id: a.item_id, account: a.account, title: a.title || p.title || '', image: a.image }) : (a.account ? '<b>' + esc(a.account) + '</b>' : '—');
+        return '<div class="mo-alert ' + esc(sev) + '">' +
+          '<div class="t">' + esc(ruleId) + (what ? ' · ' + esc(what) : '') + ' <span class="mo-urg ' + esc(urg) + '">' + esc(urg) + '</span></div>' +
+          moLine('Happened', esc(what || 'the rule fired')) +
+          moLine('Where', where + (a.campaign_id ? '<div class="adt-pf-p">campaign ' + esc(a.campaign_id) + '</div>' : '')) +
+          (why ? moLine('Why it matters', esc(why)) : '') +
+          (pairs.length ? moLine('Numbers', '<div class="mo-nums">' + pairs.map(function (x) { return '<span class="n">' + esc(x[0]) + ' <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div>') : '') +
+          moLine('What to do', esc(doit || 'review the listing')) +
+          moLine('Urgency', '<span class="mo-urg ' + esc(urg) + '">' + esc(urg) + '</span> ' + esc(urgencyText(urg)) + ' · open ' + esc(openText(a)) + (a.acknowledged_by ? ' · acknowledged by ' + esc(a.acknowledged_by) : '') + (a.snoozed_until ? ' · snoozed to ' + esc(String(a.snoozed_until).slice(0, 10)) : '')) +
+          '<div class="btns">' + (a.item_id ? '<button data-open="' + esc(a.item_id) + '">Open listing</button>' : '') + '<button data-snooze="' + esc(a.alert_id) + '">Snooze 3 d</button><button data-ack="' + esc(a.alert_id) + '">Acknowledge</button></div></div>';
       }).join('') : '<div class="an-empty">No open alerts in this filter.</div>') + '</div>';
-      h += '<div class="an-panel"><h3>Rule catalogue</h3><div class="an-sub">' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? 'Management can turn a rule off; it stops firing and its open alerts clear on the next run.' : 'Management can turn rules on and off.') + '</div><table class="an-tbl"><thead><tr><th>Rule</th><th>Fires when</th><th>Severity</th><th class="r">Cool-down</th><th>Suggested</th><th>State</th></tr></thead><tbody>' + D.rules.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td>' + esc(r.text) + '</td><td>' + esc(r.sev) + '</td><td class="r">' + r.cool + ' d</td><td>' + esc(r.action) + '</td><td>' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? '<button class="an-btn" style="padding:3px 8px;font-size:11px" data-rule="' + esc(r.rule_id) + '" data-en="' + (r.enabled ? 0 : 1) + '">' + (r.enabled ? 'on' : 'off') + '</button>' : (r.enabled ? 'on' : 'off')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      h += '<div class="an-panel"><h3>Rule catalogue</h3><div class="an-sub">' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? 'Management can turn a rule off; it stops firing and its open alerts clear on the next run. Every rule now carries why it matters to money.' : 'Management can turn rules on and off.') + '</div><table class="an-tbl"><thead><tr><th>Rule</th><th>Fires when</th><th>Why it matters</th><th>Severity</th><th class="r">Cool-down</th><th>Suggested</th><th>State</th></tr></thead><tbody>' + D.rules.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td>' + esc(r.text) + '</td><td>' + esc(r.why_matters || r.why || '—') + '</td><td>' + esc(r.sev) + '</td><td class="r">' + r.cool + ' d</td><td>' + esc(r.action) + '</td><td>' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? '<button class="an-btn" style="padding:3px 8px;font-size:11px" data-rule="' + esc(r.rule_id) + '" data-en="' + (r.enabled ? 0 : 1) + '">' + (r.enabled ? 'on' : 'off') + '</button>' : (r.enabled ? 'on' : 'off')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
       h += '<div class="an-panel"><h3>History</h3><table class="an-tbl"><thead><tr><th>Rule</th><th>Scope</th><th>Fired</th><th>Cleared</th><th>Acknowledged</th></tr></thead><tbody>' + (D.history.length ? D.history.map(function (a) { return '<tr><td>' + esc(a.rule_id) + '</td><td>' + esc(a.item_id || a.account || '') + '</td><td>' + esc(String(a.fired_at).slice(0, 16)) + '</td><td>' + esc(String(a.cleared_at || '').slice(0, 16) || '—') + '</td><td>' + esc(a.acknowledged_by || '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">nothing yet</td></tr>') + '</tbody></table></div>';
       h += '<div class="an-note">Last run: ' + (D.last_run ? esc(String(D.last_run.finished_at).slice(0, 16)) + ' · ' + esc(D.last_run.note) : 'not run yet') + '</div>';
       $('moAl').innerHTML = h;
@@ -3342,14 +3496,15 @@ VIEWS.home = {
   }
 
   /* ---------------- Yesterday's report ---------------- */
-  var RP = { day: '' };
+  var RP = { day: '', account: '' };
   VIEWS.adtoolReport = {
     label: "Yesterday's report (ads)", hidden: true, order: 94, roles: ROLES, icon: '<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><path d="M9 13h7M9 17h7"/>',
     render: function () { return '<div class="an-wrap">' + hg("Yesterday's report", 'Advertising tool · preview · one page the morning can be run from') + '<div id="moRp"><div class="an-empty">Loading…</div></div></div>'; },
     init: function () { loadReport(); }
   };
   function loadReport() {
-    api('adtoolReport', RP.day ? { day: RP.day } : {}).then(function (D) {
+    var params = {}; if (RP.day) params.day = RP.day; if (RP.account) params.account = RP.account;
+    api('adtoolReport', params).then(function (D) {
       if (!D.report) { $('moRp').innerHTML = '<div class="an-panel"><h3>No report yet</h3><div class="an-sub">The report job runs in the morning chain and catches up hourly. The first one covers yesterday.</div></div>'; return; }
       var R = D.report, y = R.fleet;
       /* Never show an older day in silence. The owner opened this page, saw Sunday where he expected
@@ -3369,14 +3524,33 @@ VIEWS.home = {
         '<div class="an-sub">Against the 7-day average per day: spend ' + (R.vs_7day ? gbp(R.vs_7day.spend) : '—') + ' · ROAS ' + (R.vs_7day ? roas(R.vs_7day.roas) : '—') + '. Same weekday last week: spend ' + (R.vs_same_weekday_last_week ? gbp(R.vs_same_weekday_last_week.spend) : '—') + ' · ROAS ' + (R.vs_same_weekday_last_week ? roas(R.vs_same_weekday_last_week.roas) : '—') + '. ' + esc(R.decisions && R.decisions.note || '') + '.</div>' +
         '<button class="an-btn" id="moPdf">Download PDF</button> <button class="an-btn" id="moSend" style="background:transparent;border:1px solid var(--gold-line);color:var(--text-2)">Send to inbox</button></div>';
       h += '<div class="an-panel"><h3>What changed</h3><ul class="at-list">' + R.what_changed.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>';
-      h += '<div class="an-panel"><h3>By account</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">Attributed</th><th class="r">ROAS</th></tr></thead><tbody>' + (R.by_account || []).map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      var mx = Math.max.apply(null, R.hours.map(function (x) { return Math.max(x.units, x.expected || 0); })) || 1;
-      h += '<div class="an-panel"><h3>Hour by hour' + src('orders') + '</h3><div class="an-sub">Against the fleet hour × weekday profile for that weekday; red = 2σ or more under.</div><div class="mo-hours">' + R.hours.map(function (x) { return '<div class="h' + (x.z != null && x.z <= -2 ? ' under' : '') + '" style="height:' + Math.max(1, Math.round(x.units / mx * 88)) + 'px" title="' + x.hour + ':00 — ' + x.units + ' units' + (x.expected != null ? ', expected ' + x.expected + (x.z != null ? ' (z ' + x.z + ')' : '') : '') + '"></div>'; }).join('') + '</div><div class="mo-hours">' + R.hours.map(function (x) { return '<div class="lab">' + (x.hour % 3 === 0 ? x.hour : '') + '</div>'; }).join('') + '</div><table class="an-tbl" style="margin-top:10px"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Expected</th><th class="r">z</th></tr></thead><tbody>' + R.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + s.units + '</td><td class="r">' + (s.expected == null ? '—' : s.expected) + '</td><td class="r ' + (s.z != null && s.z < 0 ? 'an-neg' : '') + '">' + (s.z == null ? '—' : (s.z > 0 ? '+' : '') + s.z) + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      var tbl = function (rows, title) { return '<div class="an-panel"><h3>' + title + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Profit (Sales Analysis law)</th><th>Why</th></tr></thead><tbody>' + (rows.length ? rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.spend) + '</td><td class="r">' + (r.attr_units || 0) + '</td><td class="r">' + (r.spend > 0 && r.attr_revenue != null ? roas(r.attr_revenue / r.spend) : '—') + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td><td>' + esc(r.why || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">none</td></tr>') + '</tbody></table></div></div>'; };
-      h += '<div class="an-grid2">' + tbl(R.winners || [], 'Winners') + tbl(R.losers || [], 'Losers') + '</div>';
+      /* account rows carry spend / ad sales / ROAS only — never a collective profit figure */
+      var ba = R.by_account || [];
+      h += '<div class="an-panel"><h3>By account</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">Attributed</th><th class="r">ROAS</th></tr></thead><tbody>' + ba.map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : (a.roas != null ? roas(a.roas) : '—')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      /* Hour by hour on the shared bar kit so the figure sits on each bar — the old version hid the
+         count in a tooltip and left the axis blank (owner: "R/R graph, left-side numbers not visible"). */
+      var hoursSeries = (R.hour_series || R.hours || []).map(function (x) { return { label: (Number(x.hour) < 10 ? '0' : '') + x.hour, value: Number(x.units) || 0, strong: (x.z != null && x.z <= -2), title: x.hour + ':00 — ' + (x.units || 0) + ' units' + (x.expected != null ? ', expected ' + x.expected : '') + (x.z != null ? ' (z ' + x.z + ')' : '') }; });
+      h += '<div class="an-panel"><h3>Hour by hour' + src('orders') + '</h3><div class="an-sub">Units sold per UK hour, the count on each bar. Red = an hour 2σ or more under the share of the day it usually takes (fleet hour × weekday profile).</div>' +
+        (hoursSeries.length ? chartBars(hoursSeries, { height: 180, everyNth: 2, minGap: 30, strongColor: '#e0563f', fmt: function (v) { return String(Math.round(v)); } }) : '<div class="an-empty">No hour data for this day.</div>') +
+        '<table class="an-tbl" style="margin-top:10px"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Expected</th><th class="r">z</th></tr></thead><tbody>' + R.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + s.units + '</td><td class="r">' + (s.expected == null ? '—' : s.expected) + '</td><td class="r ' + (s.z != null && s.z < 0 ? 'an-neg' : '') + '">' + (s.z == null ? '—' : (s.z > 0 ? '+' : '') + s.z) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      /* Winners / losers, viewable by account. The engine sends winners/losers per account on
+         by_account[]; the chips pick one, and the fleet view is the default. Every row is a product
+         cell with its 'why' sentence and item-level profit under the Sales Analysis law. */
+      var accWL = null;
+      if (RP.account) { for (var ai = 0; ai < ba.length; ai++) { if (ba[ai].account === RP.account) { accWL = ba[ai]; break; } } }
+      var winners = accWL ? (accWL.winners || []) : (R.winners || []);
+      var losers = accWL ? (accWL.losers || []) : (R.losers || []);
+      var acctsWithWL = ba.filter(function (a) { return (a.winners && a.winners.length) || (a.losers && a.losers.length); });
+      if (acctsWithWL.length) {
+        h += '<div class="an-filters">' + [['', 'All accounts']].concat(acctsWithWL.map(function (a) { return [a.account, a.account]; })).map(function (x) { return '<button class="' + (RP.account === x[0] ? 'on' : '') + '" data-acc="' + esc(x[0]) + '">' + esc(x[1]) + '</button>'; }).join('') + '</div>';
+      } else if (RP.account) {
+        h += '<div class="an-note" style="margin-bottom:8px">Per-account winners/losers arrive with the next engine update; showing the fleet.</div>';
+      }
+      var tbl = function (rows, title) { return '<div class="an-panel"><h3>' + esc(title) + (RP.account ? ' · ' + esc(RP.account) : '') + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Profit (Sales Analysis law)</th><th>Why</th></tr></thead><tbody>' + (rows.length ? rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.spend) + '</td><td class="r">' + (r.attr_units || 0) + '</td><td class="r">' + (r.spend > 0 && r.attr_revenue != null ? roas(r.attr_revenue / r.spend) : (r.roas != null ? roas(r.roas) : '—')) + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td><td>' + esc(r.why || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">none</td></tr>') + '</tbody></table></div></div>'; };
+      h += '<div class="an-grid2">' + tbl(winners, 'Winners') + tbl(losers, 'Losers') + '</div>';
       h += '<div class="an-note">Open alerts ' + ((R.open_alerts && R.open_alerts.n) || 0) + ' (' + ((R.open_alerts && R.open_alerts.high) || 0) + ' high) · ' + (R.capped_listings || 0) + ' listings hit their budget cap · ' + ((R.ad_status_changes && R.ad_status_changes.n) || 0) + ' ad status changes seen</div>';
       $('moRp').innerHTML = h;
-      var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { RP.day = this.getAttribute('data-d'); loadReport(); };
+      var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { if (this.hasAttribute('data-d')) { RP.day = this.getAttribute('data-d'); } else if (this.hasAttribute('data-acc')) { RP.account = this.getAttribute('data-acc'); } loadReport(); };
       $('moPdf').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, pdf: 1 }).then(function (r) { var bin = atob(r.pdf_base64); var arr = new Uint8Array(bin.length); for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k); var blob = new Blob([arr], { type: 'application/pdf' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 2000); b.disabled = false; }).catch(function (e) { toast(e.message || 'failed'); b.disabled = false; }); };
       $('moSend').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, send: 1 }).then(function () { toast('Sent to the management inbox'); b.disabled = false; }).catch(function (e) { toast(e.message); b.disabled = false; }); };
     }).catch(function (e) { fail('moRp', e); });
@@ -4224,6 +4398,14 @@ VIEWS.home = {
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'at-neg' : Number(v) > 0 ? 'at-pos' : ''); }
   function dfmt(d) { if (!d) return ''; var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return Number(d.slice(8, 10)) + ' ' + m[Number(d.slice(5, 7)) - 1]; }
   function src(t, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  /* Phase 4: week-to-week behaviour. The engine sends weeks_behaviour[] = {iso_week, label,
+     descriptors, changed:[{descriptor, from, to, direction}], sentence}; the descriptor names are the
+     ones from adtool_descriptors. A plain-English label per descriptor and a value formatter so the
+     'what changed' cell reads as prose, not raw keys. */
+  var DESC_LABEL = { weekday_ratio: 'Weekday concentration', slot_hhi: 'Time-of-day concentration', concentration: 'Time-of-day concentration', slot_concentration: 'Time-of-day concentration', volatility: 'Volatility', cv28: 'Volatility', volatility_cv28: 'Volatility', ad_dependence28: 'Ad dependence', ad_dependence: 'Ad dependence', spend_elasticity: 'Spend elasticity', intermittency28: 'Zero-sale days', level28: 'Units/day', slope28: '28-day slope' };
+  function descLabel(k) { return DESC_LABEL[k] || String(k).replace(/_?\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); }); }
+  function descVal(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/dependence|intermittency|share|_pct$/.test(k)) return Math.round(n * 100) + '%'; if (/elasticity/.test(k)) return n + ' u/£'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; if (/level/.test(k)) return n + '/day'; return String(Math.round(n * 100) / 100); }
+  function trendTag(label) { var l = String(label || '').toLowerCase(); if (/improv|recover|rising|up/.test(l)) return '<span class="at-tag gold">' + esc(label || 'improving') + '</span>'; if (/declin|worse|falling|down|slowing/.test(l)) return '<span class="at-tag loss">' + esc(label || 'declining') + '</span>'; return '<span class="at-tag">' + esc(label || 'steady') + '</span>'; }
 
   function loadECharts() {
     if (window.echarts) return Promise.resolve(window.echarts);
@@ -4361,6 +4543,21 @@ VIEWS.home = {
       w.map(function (x) { var s = x[1]; var pc = Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0, pf = Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; return '<tr><td>' + x[0] + '</td><td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td><td class="r">' + roas(s.roas) + '</td><td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td><td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) + (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' orders unpriced</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
     /* notes, decision, actions */
     if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>Behaviour descriptors' + src('profiles · ' + (ds.day || '')) + '</h3><div class="at-sub">Spec §6.4, last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'ratio ' + ds.weekday_ratio + ' · ' : '') + esc(ds.weekday_label || '')], ['Slot concentration', SLOTS[ds.top_slot] || '—', 'top share ' + Math.round((ds.top_slot_share || 0) * 100) + '% · HHI ' + ds.slot_hhi], ['Volatility', ds.volatility_cv28 == null ? '—' : 'CV ' + ds.volatility_cv28, 'zero-sale days ' + Math.round((ds.intermittency28 || 0) * 100) + '%'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'attributed ÷ all units'], ['Spend elasticity', ds.spend_elasticity == null ? 'not enough levels' : ds.spend_elasticity + ' units/£', ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
+    /* Phase 4: week-to-week behaviour — the descriptors that moved week over week, with the reading
+       and the recommended action (owner: "Make Behaviour Descriptors much larger and week-to-week:
+       what changed, why, what to fix, what action, improving or declining"). */
+    if (D.weeks_behaviour && D.weeks_behaviour.length) {
+      h += '<div class="at-panel"><h3>Week-to-week behaviour' + src('week behaviour') + '</h3>' +
+        '<div class="at-sub">Each week against the one before: which descriptors moved, the likely reason, and what to do. Improving weeks are gold, declining weeks are red.</div>' +
+        '<table class="at-tbl"><thead><tr><th>Week</th><th>Trend</th><th>What changed</th><th>Reading &amp; action</th></tr></thead><tbody>' +
+        D.weeks_behaviour.slice().reverse().map(function (wb) {
+          var ch = (wb.changed || []).map(function (c) {
+            var arrow = /up|\+|rise|increase/i.test(String(c.direction)) ? '▲' : /down|-|fall|decrease/i.test(String(c.direction)) ? '▼' : '→';
+            return '<div>' + esc(descLabel(c.descriptor)) + ' <span class="at-src">' + descVal(c.descriptor, c.from) + ' ' + arrow + ' ' + descVal(c.descriptor, c.to) + '</span></div>';
+          }).join('');
+          return '<tr><td>' + esc(wb.iso_week || '') + '</td><td>' + trendTag(wb.label) + '</td><td>' + (ch || '<span class="at-empty">no material change</span>') + '</td><td>' + esc(wb.sentence || '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
     /* §7: pattern changes — the regime history, what moved and when. The rows come from adtool_regimes, the
        same detections A17 fires on, so the page and the alert can never tell different stories. */
     var rg = D.profile && D.profile.regime, rh = (D.profile && D.profile.regime_history) || [];
@@ -4833,7 +5030,7 @@ VIEWS.home = {
     api('adtoolStopToday', ST.day ? { day: ST.day } : {}).then(function (D) {
       var counts = {}; D.counts.forEach(function (c) { counts[c.decision] = (counts[c.decision] || 0) + Number(c.n); counts[c.decision + '|' + c.confidence] = Number(c.n); });
       var ySc = D.yesterday_score || {};
-      var h = '<div class="an-note" style="margin-bottom:12px"><b>Shadow mode.</b> Nothing on this page has been sent to eBay. Each decision is written, then scored the next morning against the day the listing actually had.' + (D.acceptance ? ' Acceptance: <b>' + esc(D.acceptance.status) + '</b> — ' + esc(D.acceptance.evidence) : '') + '</div>';
+      var h = '<div class="an-note" style="margin-bottom:12px"><b>Shadow mode.</b> Nothing on this page has been sent to eBay. Each decision is made on <b>real profit (Sales Analysis law)</b> — the old est. ad-profit call is kept beside it for comparison — then scored the next morning on the real profit the listing actually made.' + (D.acceptance ? ' Acceptance: <b>' + esc(D.acceptance.status) + '</b> — ' + esc(D.acceptance.evidence) : '') + '</div>';
       h += '<div class="an-kpis">' + [['Stop', counts.STOP || 0, (counts['STOP|confident'] || 0) + ' confident'], ['Reduce', counts.REDUCE || 0, (counts['REDUCE|confident'] || 0) + ' confident'], ['Push', counts.PUSH || 0, (counts['PUSH|confident'] || 0) + ' confident'], ['Keep', counts.KEEP || 0, 'left alone'], ["Yesterday's score", (ySc.r == null ? '—' : ySc.r + ' of ' + ySc.n), ySc.n ? Math.round(Number(ySc.r) / Number(ySc.n) * 100) + ' % right' : 'nothing scored yet']].map(function (x) { return '<div class="an-kpi"><div class="k">' + esc(x[0]) + '</div><div class="v">' + x[1] + '</div><div class="d">' + esc(x[2]) + '</div></div>'; }).join('') + '</div>';
       h += clockPanel();
       h += '<div class="an-filters">' + [['', 'All'], ['STOP', 'Stop'], ['REDUCE', 'Reduce'], ['PUSH', 'Push']].map(function (x) { return '<button class="' + (ST.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
@@ -4843,10 +5040,16 @@ VIEWS.home = {
         /* the 30-day figure is the listing's profit under the Sales Analysis law when the decision
            inputs carry it; older decisions (scored on the old basis) show the spend alone */
         var d30 = i.d30 || {}, lawD30 = d30.actual_profit !== undefined ? d30.actual_profit : null;
+        /* Phase 4: the decision is now made on real profit (Sales Analysis law); the old est. ad-profit
+           decision is kept beside it so the two can be compared. Both fields are guarded — an older
+           decision, made before the rebase, carries neither and the line is dropped. */
+        var adp = d.decision_adprofit != null ? d.decision_adprofit : (i.decision_adprofit != null ? i.decision_adprofit : null);
+        var agree = d.agree != null ? d.agree : (i.agree != null ? i.agree : null);
         return '<div class="st-d ' + esc(d.decision) + '"><div class="t">' + esc(d.decision) + ' <span class="an-src">' + esc(d.confidence) + '</span> <span class="an-src">' + esc(d.batch) + '</span></div>' +
           '<div style="margin:6px 0 4px">' + adtProductCell({ item_id: d.item_id, account: d.account, title: d.title || i.title || '', image: d.image }) + '</div>' +
           '<div class="m">' + esc(d.action) + ' — ' + esc(d.why) + '</div>' +
-          '<div class="r">rules ' + esc((d.rules || []).join(', ') || '—') + ' · EV ' + pm(d.expected_value) + ' · 30-day profit (Sales Analysis law) ' + adtProfitCell(lawD30, d30.pending_cost_orders, d30.pending_fee_orders) + ' on ' + gbp(d30.spend, 0) + ' spend · break-even ' + (i.be ? Number(i.be).toFixed(1) + '×' : '—') + ' · ' + (i.campaigns || 0) + ' live campaign' + ((i.campaigns || 0) === 1 ? '' : 's') + (i.blocked ? ' · <b>blocked:</b> ' + esc(i.blocked) : '') + (d.outcome_score != null ? ' · scored <b>' + (d.outcome_score ? 'right' : 'wrong') + '</b>' + (d.outcome_actual_profit != null ? ' (' + adtProfitCell(d.outcome_actual_profit, 0, 0) + ' on the day)' : '') : '') + '</div>' +
+          '<div class="r">rules ' + esc((d.rules || []).join(', ') || '—') + ' · EV ' + pm(d.expected_value) + ' · 30-day profit (Sales Analysis law) ' + adtProfitCell(lawD30, d30.pending_cost_orders, d30.pending_fee_orders) + ' on ' + gbp(d30.spend, 0) + ' spend · break-even ' + (i.be ? Number(i.be).toFixed(1) + '×' : '—') + ' · ' + (i.campaigns || 0) + ' live campaign' + ((i.campaigns || 0) === 1 ? '' : 's') + (i.blocked ? ' · <b>blocked:</b> ' + esc(i.blocked) : '') + (d.outcome_score != null ? ' · scored <b>' + (d.outcome_score ? 'right' : 'wrong') + '</b> on real profit' + (d.outcome_actual_profit != null ? ' (' + adtProfitCell(d.outcome_actual_profit, 0, 0) + ' on the day)' : '') : '') + '</div>' +
+          (adp != null ? '<div class="r">decided on <b>real profit</b>; on est. ad profit it would be <b>' + esc(adp) + '</b> — ' + (agree === false || agree === 0 ? '<span class="an-neg">the two disagree</span>' : 'the two agree') + (d.outcome_ad_profit != null ? ' · ad-profit basis scored ' + (d.outcome_ad_profit_score != null ? '<b>' + (d.outcome_ad_profit_score ? 'right' : 'wrong') + '</b>' : adtProfitCell(d.outcome_ad_profit, 0, 0)) : '') + '</div>' : '') +
           /* Phase 2: which hours to run and not to run (advisory — eBay cannot schedule by the hour), and the
              one lever a hand can move; both only when the engine sends them for this decision */
           (d.hour_bands ? '<div class="r" style="margin-top:6px"><span class="an-src">hours today</span></div><div style="margin-top:4px">' + adtHourStrip(d.hour_bands) + '</div>' : '') +

@@ -4867,10 +4867,21 @@ const ADTOOL_ACTIONS = {
       let decision = null; try { decision = await env.DB.prepare("SELECT day, batch, decision, rules_json, why, action, confidence, expected_value, outcome_score FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC, batch LIMIT 1").bind(iid).first(); } catch (e) { decision = null; }
       let narrative = null; try { narrative = await env.DB.prepare("SELECT text, model, validated, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 ORDER BY day DESC LIMIT 1").bind(iid).first(); } catch (e) { narrative = null; }
       const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
+      /* Phase 4 big update: week-to-week behaviour — one descriptor snapshot per ISO week (the last sampled day of the
+         week), then adtWeekBehaviour says what changed vs the week before, the likely why and the recommended action.
+         The P&L stays the single real-profit figure (kpis/weeks under the law); the yesterday chart data is unchanged. */
+      let weeks_behaviour = [];
+      try {
+        const drows = (await env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day').bind(iid).all()).results || [];
+        const perWeek = {};
+        for (const r of drows) { let j = {}; try { j = JSON.parse(r.json); } catch (e) {} const wk = adtIsoWeek(r.day); perWeek[wk] = { iso_week: wk, day: r.day, descriptors: { weekday_ratio: j.weekday_ratio, slot_hhi: j.slot_hhi, cv28: j.cv28 != null ? j.cv28 : j.volatility_cv28, ad_dependence28: j.ad_dependence28, spend_elasticity: j.spend_elasticity } }; }
+        const weeksDesc = Object.keys(perWeek).sort().slice(-8).map(w => perWeek[w]);
+        weeks_behaviour = adtWeekBehaviour(weeksDesc);
+      } catch (e) { weeks_behaviour = []; }
       return {
         item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
         header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null },
-        period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, months, weekday: wd, heat, slots, dom, actions,
+        period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
         hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
         profit_label: 'Profit (Sales Analysis law)',
         computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Sales Analysis law)', sample_size: days.length,
@@ -5316,6 +5327,43 @@ function adtDescriptors(dayRows, weekly, weekdayProfile, slotShares, pSpread) {
     ad_dependence28: tot > 0 ? Math.round(attr / tot * 100) / 100 : null, spend_elasticity: el.length ? Math.round(el[Math.floor(el.length / 2)] * 1000) / 1000 : null, elasticity_levels: el.length + 1,
   };
 }
+const ADTOOL_WEEK_DESCRIPTORS = {
+  weekday_ratio: { label: 'weekday spread', up: ['the gap between its best and worst weekday widened', 'demand is concentrating on particular days', 'pause the weak weekdays and keep the budget for the strong ones'], down: ['the weekday gap narrowed', 'demand levelled out across the week', 'a flat all-week schedule now fits — no need to pause days'] },
+  slot_hhi: { label: 'hour concentration', up: ['sales concentrated into fewer hours', 'buyers are clustering into a narrower window', 'focus bids and the daily review on the peak slot'], down: ['sales spread across more hours of the day', 'demand broadened through the day', 'an all-day schedule now fits better than a peak-hour one'] },
+  cv28: { label: 'volatility', up: ['day-to-day sales grew more erratic', 'the listing is running hot and cold', 'judge it on weekly totals, not single days, before acting'], down: ['day-to-day sales steadied', 'demand became more predictable', 'you can trust shorter windows for decisions now'] },
+  ad_dependence28: { label: 'ad dependence', up: ['the ad is carrying more of the sales', 'organic demand is thinning', 'confirm it still sells without the ad before raising spend'], down: ['more of the sales are coming organically', 'the listing is standing on its own more', 'you can lean off the ad without losing the sales'] },
+  spend_elasticity: { label: 'spend elasticity', up: ['extra spend is buying more units than before', 'the audience has room to grow', 'there is headroom to scale spend on it'], down: ['extra spend is buying fewer units than before', 'the audience is saturating', 'hold or trim spend — more is not returning more'] },
+};
+function adtWeekBehaviour(weeksDesc) {
+  /* weeksDesc: [{iso_week, label?, descriptors:{weekday_ratio, slot_hhi|concentration, cv28|volatility, ad_dependence28,
+     spend_elasticity}}] oldest → newest. Returns one row per week with the descriptors, what changed vs the previous
+     week (with direction), and a plain sentence: what changed, the likely why, and a recommended action. Pure. */
+  const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+  const nn = v => (v == null || isNaN(Number(v))) ? null : Number(v);
+  const norm = d => { d = d || {}; return { weekday_ratio: nn(d.weekday_ratio), slot_hhi: nn(d.slot_hhi != null ? d.slot_hhi : d.concentration), cv28: nn(d.cv28 != null ? d.cv28 : d.volatility), ad_dependence28: nn(d.ad_dependence28), spend_elasticity: nn(d.spend_elasticity) }; };
+  const keys = Object.keys(ADTOOL_WEEK_DESCRIPTORS);
+  const rows = weeksDesc || [], out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const cur = norm(rows[i].descriptors), prev = i > 0 ? norm(rows[i - 1].descriptors) : null;
+    const changed = [];
+    if (prev) for (const k of keys) {
+      const a = prev[k], b = cur[k]; if (a == null || b == null) continue;
+      const base = Math.abs(a) > 1e-9 ? Math.abs(a) : 1;
+      if (Math.abs(b - a) / base >= 0.2 && Math.abs(b - a) >= 0.02) changed.push({ descriptor: k, label: ADTOOL_WEEK_DESCRIPTORS[k].label, from: r2(a), to: r2(b), direction: b > a ? 'up' : 'down', magnitude: Math.abs(b - a) / base });
+    }
+    changed.sort((x, y) => y.magnitude - x.magnitude);
+    let sentence;
+    if (!prev) sentence = 'First week with behaviour data — nothing to compare against yet.';
+    else if (!changed.length) sentence = 'Behaviour held steady week on week — no descriptor moved materially, so keep doing what worked.';
+    else {
+      const parts = changed.slice(0, 2).map(c => { const m = ADTOOL_WEEK_DESCRIPTORS[c.descriptor][c.direction]; return m[0] + ' (' + c.label + ' ' + c.from + ' → ' + c.to + '), ' + m[1] + '; ' + m[2]; });
+      sentence = 'This week ' + parts.join('. Also ') + '.';
+    }
+    for (const c of changed) delete c.magnitude;
+    out.push({ iso_week: rows[i].iso_week, label: rows[i].label || '', descriptors: cur, changed, sentence });
+  }
+  return out;
+}
 /* ADTOOL-P3-PURE-END */
 
 let ADTOOL_P3_SCHEMA_OK = false;
@@ -5718,6 +5766,51 @@ function adtChooseModel(series, weekdays, opts) {
   const chosen = (best !== 'naive' && bestMase <= 1.1) ? best : 'naive';
   return { family, chosen, scores: Object.keys(scores).reduce((o, k) => { o[k] = { mase: scores[k].mase, folds: scores[k].folds, hw: scores[k].hw || null }; return o; }, {}), residuals: (scores[chosen] || scores.naive).residuals, hw: scores[chosen] && scores[chosen].hw ? scores[chosen].hw : null, zeros56: Math.round(zeros * 100) / 100, mean56: Math.round(mean * 100) / 100 };
 }
+function adtScenarios(desc, caps, stage) {
+  /* Phase 4 big update: three what-if scenarios for one listing, from its own behaviour + budget-capped days + stage.
+     desc carries the base window (base_units, base_spend, base_revenue and margin = per-unit margin before ads) plus
+     spend_elasticity (units per extra £) and ad_dependence28 (share of units the ad drives). caps = capped days in the
+     last 7 (adtool_cap_days); stage = the six-stage label. Pure. The objective is scaling PROFITABLE sales, so every
+     scenario reports modelled profit — never ROAS alone — and names the binding constraint and what must change. */
+  const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+  const d = desc || {};
+  const bu = Math.max(0, Number(d.base_units) || 0), bs = Math.max(0, Number(d.base_spend) || 0), br = Math.max(0, Number(d.base_revenue) || 0);
+  const perUnitRev = bu > 0 ? br / bu : 0;
+  const margin = (d.margin != null && !isNaN(Number(d.margin))) ? Number(d.margin) : (perUnitRev ? 0.353 * perUnitRev : 0);
+  const el = (d.spend_elasticity != null && !isNaN(Number(d.spend_elasticity))) ? Number(d.spend_elasticity) : null;
+  const adDep = (d.ad_dependence28 != null && !isNaN(Number(d.ad_dependence28))) ? Number(d.ad_dependence28) : 0.5;
+  const capN = Number(caps) || 0;
+  const shrinking = stage === 'Decline' || stage === 'Dormant' || stage === 'Dead';
+  const elWeak = el == null || (Number(d.elasticity_levels) || 0) < 3;
+  const limit = capN >= 3 ? ('budget-capped on ' + capN + ' of the last 7 days — the ceiling is the budget, raise it first')
+    : shrinking ? ('stage is ' + stage + ' — demand is shrinking, so extra spend fights the trend')
+    : elWeak ? 'too few distinct spend levels to trust the elasticity — the scale estimate is a guess'
+    : 'audience size — extra spend returns less as the audience saturates';
+  const profitOf = (units, spend) => r2(margin * units - 0.96 * spend);
+  const A = { id: 'A', label: 'keep spend', modelled_units: r2(bu), modelled_revenue: r2(br), modelled_spend: r2(bs), modelled_profit: profitOf(bu, bs), limit: 'none — this is the current run', what_must_change: "nothing; hold today's budget and bids" };
+  const dSpend = 0.3 * bs;
+  const elUse = el != null ? Math.max(0, el) : (capN >= 3 && bs > 0 ? bu / bs * 0.5 : 0);
+  const gainUnits = shrinking ? 0.4 * elUse * dSpend : elUse * dSpend;
+  const buB = bu + gainUnits, bsB = bs + dSpend, brB = br + gainUnits * perUnitRev;
+  const B = { id: 'B', label: '+30% budget', modelled_units: r2(buB), modelled_revenue: r2(brB), modelled_spend: r2(bsB), modelled_profit: profitOf(buB, bsB), limit, what_must_change: capN >= 3 ? 'raise the daily budget above where it caps out' : (elWeak ? 'prove the extra spend converts — run it a week and measure before committing' : 'the audience must hold its conversion rate as spend rises') };
+  const lostUnits = 0.3 * adDep * bu;
+  const buC = Math.max(0, bu - lostUnits), bsC = 0.7 * bs, brC = Math.max(0, br - lostUnits * perUnitRev);
+  const C = { id: 'C', label: 'reduce / stop', modelled_units: r2(buC), modelled_revenue: r2(brC), modelled_spend: r2(bsC), modelled_profit: profitOf(buC, bsC), limit: adDep >= 0.8 ? 'most sales are ad-driven — cutting spend cuts sales almost one for one' : 'organic demand should hold most of the sales without the ad', what_must_change: 'accept fewer units for less spend; keep it only if profit per £ rises' };
+  return [A, B, C];
+}
+const ADTOOL_STAGE_EXPLAIN = [
+  { stage: 'Launch', meaning: 'A new listing still finding its footing.', how_calculated: 'listed under 28 days ago, or first order under 21 days ago.', action: 'give it time and a modest ad budget; do not judge or stop it yet.' },
+  { stage: 'Growth', meaning: 'Sales are climbing.', how_calculated: '28-day unit trend rising over 1 % per day AND the last 28 days at least 1.2× the previous 28.', action: 'feed the winner — raise budget while it stays profitable; this is where to scale.' },
+  { stage: 'Plateau', meaning: 'Steady, established sales with no strong trend.', how_calculated: 'none of the other stages fire — the trend is flat and level is holding.', action: 'hold spend at its efficient level; look for a slot or weekday edge rather than more budget.' },
+  { stage: 'Decline', meaning: 'Sales are fading.', how_calculated: '28-day trend falling over 1 % per day, persistent for 14 days, and the level below 0.8× its own peak.', action: 'reduce spend; do not scale into a falling listing; consider a refresh or replacement.' },
+  { stage: 'Dormant', meaning: 'Almost no recent sales, but it has sold before.', how_calculated: 'under 1 unit in the last 14 days while lifetime units are above zero.', action: 'pause the ad; spend here is chasing demand that is not there now.' },
+  { stage: 'Dead', meaning: 'No sales at all and no active ad.', how_calculated: 'zero units in the last 42 days and no active ad.', action: 'end or relist; there is nothing for the ad to work with.' },
+];
+function adtStageExplain() {
+  /* the six-stage explainer (spec §6.5, adtStage rules): stage → meaning → how it is calculated → recommended action.
+     Static and pure so the Forecast lab / Stage distribution panel and the tests read the same table. */
+  return ADTOOL_STAGE_EXPLAIN.map(s => Object.assign({}, s));
+}
 /* ADTOOL-P4-PURE-END */
 
 let ADTOOL_P4_SCHEMA_OK = false;
@@ -5864,12 +5957,51 @@ const ADTOOL_ACTIONS_P4 = {
       const spark = {}; const ids = risers.concat(decliners).map(x => x.item_id);
       if (ids.length) { for (const r of ((await env.DB.prepare('SELECT item_id, day, units FROM adtool_listing_day WHERE day >= ?1 AND item_id IN (' + ids.map(() => '?').join(',') + ') ORDER BY item_id, day').bind(adtAddDays(today, -14), ...ids).all()).results || [])) (spark[r.item_id] = spark[r.item_id] || []).push([r.day, r.units]); }
       const scorecard = md ? ((await env.DB.prepare("SELECT model, COUNT(*) AS n, ROUND(AVG(mase), 3) AS mase, SUM(CASE WHEN mase < 1 THEN 1 ELSE 0 END) AS beats_naive, ROUND(AVG(CAST(json_extract(params_json, '$.folds') AS REAL)), 1) AS folds FROM adtool_model_scores WHERE scored_day = ?1 AND chosen = 1 GROUP BY model ORDER BY n DESC").bind(md).all()).results || []) : [];
-      /* realised vs forecast: forecasts made 14 days ago (or the oldest vintage) against what happened */
+      /* Forecast vs reality (the brief): the OLDEST vintage's forecast against what actually happened, per metric —
+         units, revenue AND spend — with a MAPE per metric so the system can see, and learn from, the difference.
+         Each realised row keeps the units forecast/actual (the existing chart) and adds revenue and spend. */
       const vint = await env.DB.prepare('SELECT MIN(made_day) AS d FROM adtool_forecast WHERE made_day <= ?1').bind(adtAddDays(today, -1)).first();
-      let realised = []; if (vint && vint.d && vint.d < today) { realised = (await env.DB.prepare('SELECT f.target_day AS day, ROUND(SUM(f.units_mean), 2) AS forecast, ROUND(SUM(f.units_lo), 2) AS lo, ROUND(SUM(f.units_hi), 2) AS hi, (SELECT SUM(units) FROM adtool_listing_day d WHERE d.day = f.target_day) AS actual FROM adtool_forecast f WHERE f.made_day = ?1 AND f.target_day < ?2 GROUP BY f.target_day ORDER BY f.target_day').bind(vint.d, today).all()).results || []; }
-      const table = md ? ((await env.DB.prepare("SELECT f.item_id, f.account, l.title, i.image AS image, f.model, ROUND(SUM(CASE WHEN f.target_day < ?2 THEN f.units_mean ELSE 0 END), 1) AS next7, ROUND(SUM(f.units_mean), 1) AS next30, ROUND(SUM(f.units_lo), 1) AS lo30, ROUND(SUM(f.units_hi), 1) AS hi30, ROUND(SUM(f.revenue_mean), 2) AS revenue30, ROUND(SUM(f.spend_mean), 2) AS spend30, (SELECT mase FROM adtool_model_scores s WHERE s.item_id = f.item_id AND s.scored_day = f.made_day AND s.chosen = 1) AS mase FROM adtool_forecast f JOIN adtool_listings l ON l.item_id = f.item_id LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.made_day = ?1 GROUP BY f.item_id ORDER BY next30 DESC LIMIT 400").bind(md, adtAddDays(today, 7)).all()).results || []) : [];
+      let realised = [], forecast_vs_actual = { vintage: vint && vint.d ? vint.d : null, metrics: {} };
+      if (vint && vint.d && vint.d < today) {
+        realised = (await env.DB.prepare('SELECT f.target_day AS day, ROUND(SUM(f.units_mean), 2) AS forecast, ROUND(SUM(f.units_lo), 2) AS lo, ROUND(SUM(f.units_hi), 2) AS hi, ROUND(SUM(f.revenue_mean), 2) AS revenue_forecast, ROUND(SUM(f.spend_mean), 2) AS spend_forecast, (SELECT SUM(units) FROM adtool_listing_day d WHERE d.day = f.target_day) AS actual, (SELECT ROUND(SUM(revenue), 2) FROM adtool_listing_day d WHERE d.day = f.target_day) AS revenue_actual, (SELECT ROUND(SUM(spend), 2) FROM adtool_listing_day d WHERE d.day = f.target_day) AS spend_actual FROM adtool_forecast f WHERE f.made_day = ?1 AND f.target_day < ?2 GROUP BY f.target_day ORDER BY f.target_day').bind(vint.d, today).all()).results || [];
+        const mape = (fk, ak) => { let s = 0, n = 0; for (const r of realised) { const a = Number(r[ak]); if (a > 0) { s += Math.abs(Number(r[fk]) - a) / a; n++; } } return n ? round2(s / n * 100) : null; };
+        forecast_vs_actual.metrics = { units: { mape: mape('forecast', 'actual') }, revenue: { mape: mape('revenue_forecast', 'revenue_actual') }, spend: { mape: mape('spend_forecast', 'spend_actual') } };
+      }
+      const table = md ? ((await env.DB.prepare("SELECT f.item_id, f.account, l.title, i.image AS image, f.model, ROUND(SUM(CASE WHEN f.target_day < ?2 THEN f.units_mean ELSE 0 END), 1) AS next7, ROUND(SUM(f.units_mean), 1) AS next30, ROUND(SUM(f.units_lo), 1) AS lo30, ROUND(SUM(f.units_hi), 1) AS hi30, ROUND(SUM(f.revenue_mean), 2) AS revenue30, ROUND(SUM(f.spend_mean), 2) AS spend30, (SELECT mase FROM adtool_model_scores s WHERE s.item_id = f.item_id AND s.scored_day = f.made_day AND s.chosen = 1) AS mase FROM adtool_forecast f JOIN adtool_listings l ON l.item_id = f.item_id LEFT JOIN items_api i ON i.item_id = f.item_id WHERE f.made_day = ?1 GROUP BY f.item_id ORDER BY next30 DESC LIMIT 200").bind(md, adtAddDays(today, 7)).all()).results || []) : [];
+      /* Per-listing scenarios A/B/C + a low-confidence flag. The base window is each listing's last 28 days; the
+         descriptors carry spend_elasticity + ad_dependence28; cap_days is the budget-capped count in the last 7; the
+         stage is its latest. Low confidence = the oldest vintage's units MAPE for THAT listing over 50 %. Reads are
+         chunked (≤ 90 ids) — never one query per listing. */
+      const tIds = table.map(r => String(r.item_id));
+      const base28 = {}, descById = {}, capById = {}, stageById = {}, mapeById = {};
+      for (let i = 0; i < tIds.length; i += 90) {
+        const ch = tIds.slice(i, i + 90); const ph = ch.map(() => '?').join(',');
+        for (const r of ((await env.DB.prepare('SELECT d.item_id, SUM(d.units) AS units, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.revenue), 2) AS revenue FROM adtool_listing_day d WHERE d.day >= ?1 AND d.day < ?2 AND d.item_id IN (' + ph + ') GROUP BY d.item_id').bind(adtAddDays(today, -28), today, ...ch).all()).results || [])) base28[r.item_id] = r;
+        for (const r of ((await env.DB.prepare('SELECT d.item_id, d.json FROM adtool_descriptors d WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors) AND d.item_id IN (' + ph + ')').bind(...ch).all()).results || [])) { try { descById[r.item_id] = JSON.parse(r.json); } catch (e) {} }
+        for (const r of ((await env.DB.prepare('SELECT item_id, COUNT(*) AS n FROM adtool_cap_days WHERE day >= ?1 AND item_id IN (' + ph + ') GROUP BY item_id').bind(adtAddDays(today, -7), ...ch).all()).results || [])) capById[r.item_id] = Number(r.n);
+        for (const r of ((await env.DB.prepare('SELECT item_id, stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages) AND item_id IN (' + ph + ')').bind(...ch).all()).results || [])) stageById[r.item_id] = r.stage;
+        if (vint && vint.d && vint.d < today) for (const r of ((await env.DB.prepare('SELECT f.item_id, AVG(ABS(f.units_mean - COALESCE(d.units, 0)) / NULLIF(d.units, 0)) AS mape FROM adtool_forecast f LEFT JOIN adtool_listing_day d ON d.item_id = f.item_id AND d.day = f.target_day WHERE f.made_day = ?1 AND f.target_day < ?2 AND f.item_id IN (' + ph + ') GROUP BY f.item_id').bind(vint.d, today, ...ch).all()).results || [])) mapeById[r.item_id] = r.mape != null ? Number(r.mape) : null;
+      }
+      const L4 = {}; for (const r of ((await env.DB.prepare('SELECT item_id, margin_before_ads FROM adtool_listings').all()).results || [])) L4[r.item_id] = r;
+      for (const r of table) {
+        const b = base28[r.item_id] || {}; const dsc = descById[r.item_id] || {};
+        const margin = L4[r.item_id] && L4[r.item_id].margin_before_ads != null ? Number(L4[r.item_id].margin_before_ads) : null;
+        const descIn = Object.assign({}, dsc, { base_units: Number(b.units) || 0, base_spend: Number(b.spend) || 0, base_revenue: Number(b.revenue) || 0, margin });
+        r.scenarios = adtScenarios(descIn, capById[r.item_id] || 0, stageById[r.item_id] || '');
+        r.stage = stageById[r.item_id] || '';
+        const mp = mapeById[r.item_id];
+        r.mape = mp != null ? round2(mp * 100) : null;
+        r.low_confidence = mp != null && mp > 0.5;
+        if (r.low_confidence) r.confidence_note = 'modelled, low confidence — the oldest forecast for this listing was off by ' + r.mape + ' %';
+      }
+      /* Stage explainer + stage counts per account, each count linked to the item rows behind it (item-keyed, allowed) */
+      const stageExplain = adtStageExplain();
+      const stageRows = (await env.DB.prepare('SELECT s.account, s.stage, s.item_id, l.title, i.image AS image FROM adtool_stages s JOIN adtool_listings l ON l.item_id = s.item_id LEFT JOIN items_api i ON i.item_id = s.item_id WHERE s.day = (SELECT MAX(day) FROM adtool_stages) ORDER BY s.account, s.stage').all()).results || [];
+      const sba = {}; for (const r of stageRows) { const k = (r.account || '') + '|' + (r.stage || ''); const g = (sba[k] = sba[k] || { account: r.account || '', stage: r.stage || '', n: 0, items: [] }); g.n++; if (g.items.length < 25) g.items.push({ item_id: r.item_id, title: r.title, image: r.image, account: r.account, stage: r.stage }); }
+      const stages_by_account = Object.values(sba).sort((a, b) => (a.account + a.stage).localeCompare(b.account + b.stage));
+      const objective = 'The goal is to scale PROFITABLE sales — increase units and revenue while keeping each listing profitable — not to maximise ROAS alone. Read each scenario by its modelled profit and the constraint that binds it, then act where profit grows.';
       const acc = (await env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_FORECAST_MASE' ORDER BY ran_at DESC LIMIT 1").first()) || null;
-      return { made_day: md || '', actual, next, stages, risers, decliners, spark, scorecard, realised, realised_vintage: vint && vint.d, table, acceptance: acc, computed_at: new Date().toISOString(), source: 'adtool_forecast (made daily), adtool_model_scores, adtool_stages, adtool_listing_day' };
+      return { made_day: md || '', period: adtPeriod({ period: 'd30' }, today), fresh: await adtFresh(env, 'day'), actual, next, stages, stage_explainer: stageExplain, stages_by_account, risers, decliners, spark, scorecard, realised, realised_vintage: vint && vint.d, forecast_vs_actual, objective, table, acceptance: acc, computed_at: new Date().toISOString(), source: 'adtool_forecast (made daily), adtool_model_scores, adtool_stages, adtool_descriptors, adtool_cap_days, adtool_listing_day' };
     },
   },
 };
@@ -5889,27 +6021,38 @@ async function adtNotify(env, audience, type, message, ref) {
   } catch (e) { /* telling someone must never fail the job that raised it */ }
 }
 /* ADTOOL-P5-PURE-BEGIN */
+/* why_matters (Phase 4 big update): a plain sentence per rule on why it costs or makes money, shown on the Alerts
+   card beside what / where / do / urgency. A unit test asserts all 19 rules carry one. The profit-based rules read
+   real profit (Sales Analysis law) — A02 is the item-profit rule; no rule text says 'est. ad profit' any more. */
 const ADTOOL_ALERT_RULES = {
-  A01: { sev: 'high', cool: 3, text: 'ROAS below break-even on 5 consecutive days with spend ≥ £2/day', action: 'stop' },
-  A02: { sev: 'high', cool: 3, text: 'item profit (Sales Analysis law) below −£10 over 7 days and below 0 over 30 days, every order priced (Ali cost typed and eBay fees landed)', action: 'stop' },
-  A03: { sev: 'high', cool: 5, text: 'zero-sale spend ≥ £10 in 14 days', action: 'stop' },
-  A04: { sev: 'high', cool: 1, text: 'listing ended or sold out while an ad is active', action: 'check' },
-  A05: { sev: 'medium', cool: 7, text: 'charged by both a CPC and a cost-per-sale campaign — live in both now, or billed for both on the same day', action: 'check' },
-  A06: { sev: 'high', cool: 2, text: 'campaign paused/ended but spend accrued in the last 2 days', action: 'check' },
-  A07: { sev: 'high', cool: 3, text: 'daily spend under 50 % of the 7-day average for 2 days (went dark)', action: 'check' },
-  A08: { sev: 'medium', cool: 2, text: 'daily spend over 200 % of the 7-day average', action: 'check' },
-  A09: { sev: 'medium', cool: 14, text: 'margin before ads under 40 % of the fleet median for its price band, ads running', action: 'reduce' },
-  A10: { sev: 'medium', cool: 3, text: 'attributed units down over 50 % week on week with spend flat or up', action: 'reduce' },
-  A11: { sev: 'medium', cool: 21, text: 'stage flipped to Decline or Dormant', action: 'check' },
-  A12: { sev: 'low', cool: 7, text: 'campaign id referenced by ads but missing from the campaigns table', action: 'check' },
-  A13: { sev: 'low', cool: 14, text: 'ad still attached to a paused campaign for over 7 days', action: 'check' },
-  A14: { sev: 'high', cool: 1, text: 'ads report for yesterday not received by 07:30', action: 'check' },
-  A15: { sev: 'low', cool: 7, text: 'budget-capped on ≥ 3 of the last 7 days with 7-day ROAS ≥ 1.5× break-even (under-funded winner)', action: 'push' },
-  A16: { sev: 'high', cool: 1, text: 'Truth Check mismatch on a registered number', action: 'check' },
-  A17: { sev: 'low', cool: 21, text: 'pattern changed: hourly / slot / weekday shape diverged for 3 days', action: 'check' },
-  A18: { sev: 'medium', cool: 7, text: 'diminishing returns: spend/day up ≥ 15 % while ROAS fell, two weeks running', action: 'reduce' },
-  A19: { sev: 'medium', cool: 7, text: 'ROAS target at risk: 30-day ROAS more than 0.5× below target with under 14 days to the checkpoint', action: 'check' },
+  A01: { sev: 'high', cool: 3, text: 'ROAS below break-even on 5 consecutive days with spend ≥ £2/day', action: 'stop', why_matters: 'Five straight days paying more for clicks than the sales are worth — every extra day burns cash with no path to profit.' },
+  A02: { sev: 'high', cool: 3, text: 'real profit (Sales Analysis law) below −£10 over 7 days and below 0 over 30 days, every order priced (Ali cost typed and eBay fees landed)', action: 'stop', why_matters: 'The listing is losing real money after fees, cost and returns — not an estimate — so the ad spend is coming straight out of profit.' },
+  A03: { sev: 'high', cool: 5, text: 'zero-sale spend ≥ £10 in 14 days', action: 'stop', why_matters: '£10 or more of clicks bought nothing — the ad is paying for traffic that never converts.' },
+  A04: { sev: 'high', cool: 1, text: 'listing ended or sold out while an ad is active', action: 'check', why_matters: 'Money is being spent advertising a listing buyers cannot actually purchase.' },
+  A05: { sev: 'medium', cool: 7, text: 'charged by both a CPC and a cost-per-sale campaign — live in both now, or billed for both on the same day', action: 'check', why_matters: 'The same sale is being paid for twice — two ad fees on one listing quietly double its ad cost.' },
+  A06: { sev: 'high', cool: 2, text: 'campaign paused/ended but spend accrued in the last 2 days', action: 'check', why_matters: 'eBay is still billing a campaign that should have stopped — spend with no one watching it.' },
+  A07: { sev: 'high', cool: 3, text: 'daily spend under 50 % of the 7-day average for 2 days (went dark)', action: 'check', why_matters: 'A listing that normally sells has almost stopped spending — a winner may have been paused or capped by mistake.' },
+  A08: { sev: 'medium', cool: 2, text: 'daily spend over 200 % of the 7-day average', action: 'check', why_matters: 'Spend has doubled overnight — a budget or bid change may be running away before anyone has seen the return.' },
+  A09: { sev: 'medium', cool: 14, text: 'margin before ads under 40 % of the fleet median for its price band, ads running', action: 'reduce', why_matters: 'The product barely earns before ad cost, so any spend on it turns thin margin into a loss faster than a healthy listing.' },
+  A10: { sev: 'medium', cool: 3, text: 'attributed units down over 50 % week on week with spend flat or up', action: 'reduce', why_matters: 'Paying the same or more for half the sales — the ad has lost its efficiency and profit is leaking.' },
+  A11: { sev: 'medium', cool: 21, text: 'stage flipped to Decline or Dormant', action: 'check', why_matters: 'Demand is fading; ad spend set for its better days is now chasing a shrinking market.' },
+  A12: { sev: 'low', cool: 7, text: 'campaign id referenced by ads but missing from the campaigns table', action: 'check', why_matters: 'An ad is billing against a campaign the tool cannot see — its spend cannot be attributed or controlled until it is resolved.' },
+  A13: { sev: 'low', cool: 14, text: 'ad still attached to a paused campaign for over 7 days', action: 'check', why_matters: 'An ad has sat on a paused campaign for over a week — it should be moved to a live campaign or removed.' },
+  A14: { sev: 'high', cool: 1, text: 'ads report for yesterday not received by 07:30', action: 'check', why_matters: "Yesterday's numbers have not arrived, so today's stop and push decisions would be made blind." },
+  A15: { sev: 'low', cool: 7, text: 'budget-capped on ≥ 3 of the last 7 days with 7-day ROAS ≥ 1.5× break-even (under-funded winner)', action: 'push', why_matters: 'A profitable winner keeps hitting its budget ceiling — it is leaving sales on the table every capped day.' },
+  A16: { sev: 'high', cool: 1, text: 'Truth Check mismatch on a registered number', action: 'check', why_matters: 'A number on the portal disagrees with its own source — the page beside it cannot be trusted until this is resolved.' },
+  A17: { sev: 'low', cool: 21, text: 'pattern changed: hourly / slot / weekday shape diverged for 3 days', action: 'check', why_matters: "The listing's hourly and weekday shape has shifted — the schedule and bids tuned to the old pattern may now be wrong." },
+  A18: { sev: 'medium', cool: 7, text: 'diminishing returns: spend/day up ≥ 15 % while ROAS fell, two weeks running', action: 'reduce', why_matters: 'Each extra pound is buying less back two weeks running — spend is scaling past the point where it pays.' },
+  A19: { sev: 'medium', cool: 7, text: 'ROAS target at risk: 30-day ROAS more than 0.5× below target with under 14 days to the checkpoint', action: 'check', why_matters: 'The account is drifting below its ROAS target with little time left to correct before the checkpoint.' },
 };
+function adtAlertUrgency(sev, hoursOpen) {
+  /* how loudly the card should read: a high alert open more than 24 h is 'overdue'; otherwise urgency is derived
+     from severity — high → 'now', medium → 'soon', low → 'watch'. Pure so the frontend and the tests agree. */
+  const h = Number(hoursOpen) || 0;
+  if (sev === 'high') return h > 24 ? 'overdue' : 'now';
+  if (sev === 'medium') return 'soon';
+  return 'watch';
+}
 function adtListingAlerts(rows, L, ctx) {
   /* rows: this listing's listing_day rows (oldest → newest, up to yesterday); L: listing meta; ctx: {fleetMedianMarginByBand, today}.
      Returns [{rule, payload}] for the listing-level rules A01, A02, A03, A10. */
@@ -6205,6 +6348,26 @@ async function adtReportItemLists(env, day) {
   for (const r of losers) r.why = whyOf(r, false);
   return { winners, losers };
 }
+async function adtReportByAccountLists(env, day) {
+  /* Phase 4 big update: winners and losers PER ACCOUNT for the report day, each row the shared product shape
+     (image / title / item id / account / actual_profit / pending / why). One query for the whole day, partitioned
+     in JS by account (never a query per account) — the header rows carry no collective profit, only these item
+     rows do, so per-item profit is allowed to leave the engine. */
+  const cols = 'd.item_id, l.account, l.title, i.image AS image, d.spend, d.clicks, d.attr_units, d.attr_revenue, d.roas, d.orders, d.units, d.revenue, d.actual_profit, d.pending_cost_orders, COALESCE(d.pending_fee_orders, 0) AS pending_fee_orders FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id LEFT JOIN items_api i ON i.item_id = d.item_id';
+  const rows = (await env.DB.prepare('SELECT ' + cols + ' WHERE d.day = ?1 AND (d.spend > 0 OR d.attr_units > 0)').bind(day).all()).results || [];
+  const whyOf = (r, winner) => { const roas = Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null; const unpriced = Number(r.pending_cost_orders) + Number(r.pending_fee_orders); return (winner ? 'profit £' + round2(r.actual_profit) : 'lost £' + round2(-Number(r.actual_profit))) + ' on ' + Number(r.orders) + ' orders · £' + round2(r.spend) + ' ads' + (roas != null ? ' at ' + roas + '×' : ' with no attributed sale') + (unpriced ? ' · ' + unpriced + ' orders unpriced' : ''); };
+  const by = {}; for (const r of rows) (by[r.account] = by[r.account] || []).push(r);
+  const out = [];
+  for (const a of Object.keys(by).sort()) {
+    const list = by[a];
+    const winners = list.filter(r => Number(r.actual_profit) > 0).sort((x, y) => Number(y.actual_profit) - Number(x.actual_profit)).slice(0, 5);
+    const losers = list.filter(r => Number(r.spend) > 0 && Number(r.actual_profit) < 0).sort((x, y) => Number(x.actual_profit) - Number(y.actual_profit)).slice(0, 5);
+    for (const r of winners) r.why = whyOf(r, true);
+    for (const r of losers) r.why = whyOf(r, false);
+    out.push({ account: a, winners, losers });
+  }
+  return out;
+}
 async function adtoolReport(env) {
   if ((await adtFlag(env, 'adtool_report')) !== 'on') return;
   await ensureAdtoolPhase5Schema(env);
@@ -6411,6 +6574,28 @@ const ADTOOL_ACTIONS_P5 = {
       const fx = await env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_ALERTS_FIXTURE' ORDER BY ran_at DESC LIMIT 1").first();
       const openRows = open.map(a => { let pj = {}; try { pj = JSON.parse(a.payload_json || '{}'); } catch (e) {} return Object.assign(a, { payload: pj, payload_json: undefined }); });
       await adtProductCells(env, openRows.concat(history));
+      /* Phase 4 (big update): every alert reads as what happened / where / why it matters / what to do / how urgent.
+         The rule text is `what`, the rule's why_matters is `why_matters`, the suggested action is `do`, and urgency
+         is 'overdue' for a high alert open over 24 h else severity-derived. Open rows measure hours from fired to now;
+         history rows from fired to when they cleared or were acknowledged. */
+      const nowMs = Date.now();
+      const enrich = (a, isOpen) => {
+        const R = ADTOOL_ALERT_RULES[a.rule_id] || {};
+        const end = isOpen ? nowMs : (a.cleared_at ? Date.parse(a.cleared_at) : (a.acknowledged_at ? Date.parse(a.acknowledged_at) : nowMs));
+        const start = a.fired_at ? Date.parse(a.fired_at) : NaN;
+        const hoursOpen = isNaN(start) ? 0 : Math.max(0, Math.round((end - start) / 3600000));
+        const prod = a.title ? a.title : (a.item_id || '');
+        const whereParts = [a.account, prod || (a.campaign_id ? 'campaign ' + a.campaign_id : '')].filter(Boolean);
+        return Object.assign(a, {
+          rule: a.rule_id, sev: a.severity, hours_open: hoursOpen,
+          what: R.text || '', why_matters: R.why_matters || '',
+          do: (a.payload && a.payload.suggested) || R.action || '',
+          where: { account: a.account || '', item_id: a.item_id || '', title: a.title || '', campaign_id: a.campaign_id || '', label: whereParts.join(' · ') },
+          urgency: adtAlertUrgency(a.severity, hoursOpen),
+        });
+      };
+      for (const a of openRows) enrich(a, true);
+      for (const a of history) enrich(a, false);
       return { open: openRows, history, rules, last_run: last, fixture_check: fx || null, computed_at: new Date().toISOString() };
     },
   },
@@ -6432,6 +6617,15 @@ const ADTOOL_ACTIONS_P5 = {
         if (fresh.winners.length || fresh.losers.length) { report.winners = fresh.winners; report.losers = fresh.losers; }
         else await adtProductCells(env, [].concat(report.winners || [], report.losers || []));
         report.profit_label = 'Profit (Sales Analysis law)';
+        /* Phase 4 big update: winners / losers PER ACCOUNT (item rows, allowed) attached to the header rows, and an
+           hour-by-hour series ready for chartBars with a labelled axis. p.account narrows the whole report to one
+           account's desk. The strip has already run above, so the item-level profit these rows carry is kept. */
+        const wantAcct = String((p && p.account) || '');
+        const acctLists = await adtReportByAccountLists(env, day);
+        const listMap = {}; for (const x of acctLists) listMap[x.account] = x;
+        report.by_account = (report.by_account || []).filter(a => !wantAcct || a.account === wantAcct).map(a => Object.assign({}, a, { winners: (listMap[a.account] || {}).winners || [], losers: (listMap[a.account] || {}).losers || [] }));
+        report.hour_series = (report.hours || []).map(h => ({ label: String(h.hour).padStart(2, '0') + ':00', hour: h.hour, units: h.units, spend: h.spend, expected: h.expected, z: h.z == null ? null : h.z }));
+        report.account = wantAcct || 'all';
       }
       if (p && p.pdf && report) {
         const L = []; const f = v => v == null ? '-' : String(v); const money = v => v == null ? '-' : '£' + Number(v).toFixed(2);
@@ -6449,7 +6643,7 @@ const ADTOOL_ACTIONS_P5 = {
         return { day, pdf_base64: adtPdf(L), filename: 'ads-report-' + day + '.pdf' };
       }
       if (p && p.send && report) { const u = ctx.user || {}; const y = report.fleet; try { await adtNotify(env, 'management', "Yesterday's ads report", '📊 Ads report ' + day + ' sent by ' + (u.email || '') + ': £' + y.spend + ' spend · ROAS ' + (y.roas == null ? '—' : y.roas + '×') + ' · ' + report.what_changed[0], 'adtool:reportsend:' + day + ':' + Date.now()); } catch (e) {} return { ok: true }; }
-      return { day, yesterday: ukYesterday, yesterday_missing: !days.some(d => d.day === ukYesterday), report, days, computed_at: new Date().toISOString() };
+      return { day, account: String((p && p.account) || 'all'), yesterday: ukYesterday, yesterday_missing: !days.some(d => d.day === ukYesterday), report, days, period: adtPeriod({ period: 'yesterday' }, ukDate('')), fresh: await adtFresh(env, 'day'), computed_at: new Date().toISOString() };
     },
   },
   adtoolRoasTarget: {
@@ -6529,20 +6723,32 @@ const ADTOOL_ACTIONS_P5 = {
    decision is written, scored the next day against what actually happened, and shown with its score. The live
    apply path is Phase 8 and is gated per account by its own flag, off by default. */
 /* ADTOOL-P6-PURE-BEGIN */
-function adtDecide(I) {
+function adtDecide(I, basis) {
   /* I: the inputs snapshot of §6.11. Returns {decision, rules[], confidence, ev, why, action}.
-     First rule that fires wins; every rule that fired is recorded. */
+     First rule that fires wins; every rule that fired is recorded.
+     basis (Phase 4 big update): 'actual' (default) decides the money rules — S-series STOP, R-series REDUCE,
+     P-series PUSH — on the item's REAL profit (Sales Analysis law), i.e. the actual_profit windows and the
+     actual-profit weekday/half signs adtDecisionInputs now carries; 'adprofit' reproduces the old est. ad
+     profit decision so the two can be stored side by side. In production every window carries a numeric
+     actual_profit (adtDecisionInputs sums it, so an all-unpriced listing reads £0, not null — treated as "watch,
+     not stop" under the law); the ad_profit fall-back below fires only for hand-built inputs whose actual_profit
+     is genuinely absent (the tests). EV keeps its blended definition. */
+  const useAd = basis === 'adprofit';
   const r2 = v => Math.round(v * 100) / 100;
   const y = I.y || { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 }, d7 = I.d7 || { spend: 0, ad_profit: 0, attr_revenue: 0 }, d30 = I.d30 || { spend: 0, ad_profit: 0, attr_revenue: 0 }, d14 = I.d14 || { spend: 0, ad_profit: 0 };
+  const pf = w => { if (!w) return 0; if (useAd) return Number(w.ad_profit) || 0; const a = w.actual_profit; return (a != null && !isNaN(Number(a))) ? Number(a) : (Number(w.ad_profit) || 0); };
+  const halves = (useAd ? I.halves : (I.halves_actual || I.halves)) || [];
+  const wdLosingConfIn = useAd ? I.weekday_losing_confident : (I.weekday_losing_confident_actual != null ? I.weekday_losing_confident_actual : I.weekday_losing_confident);
+  const wdWinningConfIn = useAd ? I.weekday_winning_confident : (I.weekday_winning_confident_actual != null ? I.weekday_winning_confident_actual : I.weekday_winning_confident);
   const be = Number(I.be) || 0;
   const roasOf = w => (w && w.spend > 0) ? w.attr_revenue / w.spend : null;
   const ev = r2(0.5 * (Number(I.profile_today) || 0) + 0.3 * (Number(d7.ad_profit) || 0) / 7 + 0.2 * (Number(y.ad_profit) || 0));
   const fired = [];
-  const halvesNeg = (I.halves || []).filter(h => h < 0).length, halvesWithSpend = (I.halves || []).filter(h => h !== 0).length;
+  const halvesNeg = halves.filter(h => h < 0).length, halvesWithSpend = halves.filter(h => h !== 0).length;
   const daysWithSpend = Number(I.days_with_spend_30) || 0, stillSpending = Number(d7.spend) > 0;
   const confidentStop = halvesWithSpend === 2 && halvesNeg === 2 && daysWithSpend >= 10 && stillSpending;
   /* STOP candidates */
-  const s1 = d30.ad_profit < 0 && d7.ad_profit < 0 && ev < 0 && confidentStop;
+  const s1 = pf(d30) < 0 && pf(d7) < 0 && ev < 0 && confidentStop;
   const s2 = Number(I.zero_streak) >= 14 && Number(d14.spend) >= 10;
   const s3 = !!I.roas_under_be_5d;
   const s4 = I.margin != null && Number(I.margin) <= 0 && !!I.ads_running;
@@ -6552,20 +6758,20 @@ function adtDecide(I) {
   let blocked = '';
   if (stopWanted) {
     if (Number(I.age_ads) < 14 && !hardStop) blocked = 'the ad is under 14 days old';
-    else if (Number(I.organic3) >= 1 && Number(d30.ad_profit) >= -5 && !hardStop) blocked = 'it still sells without the ad and the 30-day loss is under £5';
+    else if (Number(I.organic3) >= 1 && pf(d30) >= -5 && !hardStop) blocked = 'it still sells without the ad and the 30-day loss is under £5';
     else if (String(I.stage) === 'Launch' && Number(I.age_days) < 21 && !hardStop) blocked = 'it is a Launch-stage listing under 21 days old';
   }
   const why = [];
   const money = v => (v < 0 ? '−£' : '+£') + Math.abs(r2(v)).toFixed(2);
-  why.push('yesterday ' + money(Number(y.ad_profit) || 0) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : '') + (I.y_source === 'sampled' ? ' (sampled — the report for that day has not landed)' : ''));
+  why.push('yesterday ' + money(pf(y)) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : '') + (I.y_source === 'sampled' ? ' (sampled — the report for that day has not landed)' : ''));
   why.push('today expected ' + money(Number(I.profile_today) || 0) + ' (EV ' + money(ev) + ')');
   if (I.weekday_name) why.push(I.weekday_name + (I.weekday_p != null ? ' p=' + I.weekday_p : '') + (I.weekday_losing ? ' is a losing day for it' : I.weekday_winning ? ' is a winning day for it' : ''));
   if (I.stage) why.push('stage ' + I.stage);
   if (stopWanted && !blocked) return { decision: 'STOP', rules: fired, confidence: (s1 && confidentStop) || s2 || s4 ? 'confident' : 'watch', ev, why: why.join(' · '), action: 'pause the ad in every campaign it sits in', blocked: '' };
   /* REDUCE */
-  const r1 = !!I.weekday_losing_confident;
-  const r2rule = halvesWithSpend === 2 && halvesNeg === 1 && Number(d30.ad_profit) < 0;
-  const r3 = String(I.stage) === 'Decline' && Number(d7.ad_profit) < 0 && Number(d30.ad_profit) > 0;
+  const r1 = !!wdLosingConfIn;
+  const r2rule = halvesWithSpend === 2 && halvesNeg === 1 && pf(d30) < 0;
+  const r3 = String(I.stage) === 'Decline' && pf(d7) < 0 && pf(d30) > 0;
   const r4 = stopWanted && !!blocked;
   if (r1) fired.push('R1'); if (r2rule) fired.push('R2'); if (r3) fired.push('R3'); if (r4) fired.push('R4');
   if (r1) return { decision: 'REDUCE', rules: fired, confidence: 'confident', ev, why: why.join(' · '), action: 'pause today only, auto-resume tomorrow 00:05', blocked: '' };
@@ -6575,7 +6781,7 @@ function adtDecide(I) {
   /* PUSH */
   const roas30 = roasOf(d30), roas7 = roasOf(d7);
   const p1 = be > 0 && roas30 != null && roas7 != null && roas30 >= 1.5 * be && roas7 >= 1.5 * be && Number(I.capped7) >= 3;
-  const p2 = !!I.weekday_winning_confident && Number(d7.ad_profit) > 0;
+  const p2 = !!wdWinningConfIn && pf(d7) > 0;
   const p3 = String(I.stage) === 'Growth' && be > 0 && roas7 != null && roas7 >= 1.5 * be && Number(I.capped7) < 3;
   if (p1) fired.push('P1'); if (p2) fired.push('P2'); if (p3) fired.push('P3');
   if (p1) return { decision: 'PUSH', rules: fired, confidence: 'confident', ev, why: why.join(' · ') + ' · capped on ' + I.capped7 + ' of the last 7 days at ' + r2(roas7) + '×', action: 'daily budget +30 % (capped at 2× the current)', blocked: '' };
@@ -6583,12 +6789,24 @@ function adtDecide(I) {
   if (p3) return { decision: 'PUSH', rules: fired, confidence: 'watch', ev, why: why.join(' · '), action: 'bid +10 %', blocked: '' };
   return { decision: 'KEEP', rules: fired, confidence: 'confident', ev, why: why.join(' · '), action: 'leave it alone', blocked: '' };
 }
-function adtScoreDecision(decision, realised, be) {
-  /* §6.11 scoring, for shadow decisions (the listing kept running, so the day is observable) */
+function adtScoreDecision(decision, realised, be, basis) {
+  /* §6.11 scoring, for shadow decisions (the listing kept running, so the day is observable).
+     Phase 4 big update: the PRIMARY score is on the day's REAL profit under the Sales Analysis law
+     (realised.actual_profit) — STOP/REDUCE right when that day's law profit was negative; PUSH right when the
+     realised ROAS ≥ 1.2 × break-even AND the law profit was positive; KEEP right when the day was not a law loss.
+     basis 'adprofit' reproduces the old est. ad profit score (realised.ad_profit, PUSH on ROAS alone) so both
+     hit rates can be reported side by side. Returns null when the profit for the chosen basis is not available. */
   if (!realised) return null;
-  if (decision === 'STOP' || decision === 'REDUCE') return (Number(realised.ad_profit) < 0) ? 1 : 0;
-  if (decision === 'PUSH') { const roas = Number(realised.spend) > 0 ? Number(realised.attr_revenue) / Number(realised.spend) : null; return (roas != null && be > 0 && roas >= 1.2 * be) ? 1 : 0; }
-  if (decision === 'KEEP') return (Number(realised.ad_profit) >= 0) ? 1 : 0;
+  const useAd = basis === 'adprofit';
+  /* guard on the RAW value before coercion: a SQL NULL arrives as JS null and Number(null) === 0, which would
+     score a KEEP spuriously right and a STOP/REDUCE spuriously wrong — so an absent/blank/non-numeric profit
+     for the chosen basis is left unscored, not read as £0 */
+  const raw = useAd ? realised.ad_profit : realised.actual_profit;
+  if (raw == null || raw === '' || isNaN(Number(raw))) return null;
+  const profit = Number(raw);
+  if (decision === 'STOP' || decision === 'REDUCE') return profit < 0 ? 1 : 0;
+  if (decision === 'PUSH') { const roas = Number(realised.spend) > 0 ? Number(realised.attr_revenue) / Number(realised.spend) : null; const roasOk = roas != null && be > 0 && roas >= 1.2 * be; return useAd ? (roasOk ? 1 : 0) : ((roasOk && profit > 0) ? 1 : 0); }
+  if (decision === 'KEEP') return profit >= 0 ? 1 : 0;
   return null;
 }
 function adtCarryForward(listings) {
@@ -6616,12 +6834,13 @@ async function ensureAdtoolPhase6Schema(env) {
   ];
   await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
   try { await env.DB.prepare('ALTER TABLE adtool_decisions ADD COLUMN outcome_actual_profit REAL').run(); } catch (e) { /* already there */ }
+  try { await env.DB.prepare('ALTER TABLE adtool_decisions ADD COLUMN outcome_score_adprofit INTEGER').run(); } catch (e) { /* already there — the ad-profit score kept beside the law score for the side-by-side */ }
   await adtoolRegisterSeedP6(env);
   ADTOOL_P6_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P6 = [
-  ['DECISION', 'Decision per advertised listing per day', '§6.11: first rule that fires wins (S1–S4 → STOP, R1–R4 → REDUCE, P1–P3 → PUSH, else KEEP) with guardrails; EV = 0.5 × today expected + 0.3 × 7-day profit/day + 0.2 × yesterday', 'adtool_listing_day, adtool_profiles, adtool_stages, adtool_cap_days, campaign_ads', 'adtoolDecisions: boundary batch 23:30 UTC, morning batch 05:55 UTC', '14 days of shadow scores published (ADTOOL_SHADOW_14D)'],
-  ['DECISION_SCORE', 'Was yesterday\'s decision right?', 'shadow: STOP/REDUCE right when the realised ad profit that day was negative; PUSH right when realised ROAS ≥ 1.2 × break-even; KEEP right when the day was not a loss', 'adtool_decisions, adtool_listing_day', 'adtoolDecisionScore daily 06:00 UTC', 'the Stop today page shows yesterday and the trailing 30 days'],
+  ['DECISION', 'Decision per advertised listing per day', '§6.11: first rule that fires wins (S1–S4 → STOP, R1–R4 → REDUCE, P1–P3 → PUSH, else KEEP) with guardrails, DECIDED ON REAL PROFIT (Sales Analysis law) as the primary basis; the old est. ad profit decision is computed in parallel and stored beside it (decision_adprofit + agree) for comparison; EV = 0.5 × today expected + 0.3 × 7-day profit/day + 0.2 × yesterday; shadow only, nothing sent to eBay', 'adtool_listing_day, adtool_profiles, adtool_stages, adtool_cap_days, campaign_ads', 'adtoolDecisions: boundary batch 23:30 UTC, morning batch 05:55 UTC', '14 days of shadow scores published on real profit (ADTOOL_SHADOW_14D), clock restarted at portal_config.adtool_decision_basis = actual-v1'],
+  ['DECISION_SCORE', 'Was yesterday\'s decision right?', 'shadow, SCORED ON REAL PROFIT (Sales Analysis law): STOP/REDUCE right when the realised law profit that day was negative; PUSH right when realised ROAS ≥ 1.2 × break-even AND law profit positive; KEEP right when the day was not a law loss; the ad-profit score (outcome_score_adprofit) is kept beside it for the side-by-side', 'adtool_decisions, adtool_listing_day', 'adtoolDecisionScore daily 06:00 UTC', 'the Stop today page shows yesterday and the trailing 30 days'],
   ['RULE_TRUST', 'Trailing 30-day score per rule', 'share of that rule\'s scored decisions that were right; a rule under the base rate is switched to watch automatically', 'adtool_rule_scores', 'same', 'shown on the Stop today page'],
   ['CARRY_FORWARD', 'Does the rule repeat? (§6.12)', 'every Monday: the rule applied to days −28…−15 and scored on −14…−1, against the base rate of all spending listings; trusted needs rate ≥ base + 10 points', 'adtool_listing_day, adtool_carry', 'adtoolCarry weekly (Monday, morning chain)', "the review's own finding: Tue/Thu pause does not repeat, loses-across-the-week and Sunday winners do"],
 ];
@@ -6661,15 +6880,19 @@ async function adtDecisionInputs(env, day) {
     /* the windows carry the item's profit under the law beside the estimate the rules still decide on (Phase 4
        rebases them): the Stop today card prints the law figure with its unpriced counts */
     const win = n => ({ spend: round2(sum('spend', n)), attr_units: sum('attr_units', n), attr_revenue: round2(sum('attr_revenue', n)), ad_profit: round2(sum('ad_profit', n)), actual_profit: round2(sum('actual_profit', n)), pending_cost_orders: sum('pending_cost_orders', n), pending_fee_orders: sum('pending_fee_orders', n) });
-    let y = rs.length && rs[rs.length - 1].day === yday ? { spend: Number(rs[rs.length - 1].spend), attr_units: Number(rs[rs.length - 1].attr_units), attr_revenue: Number(rs[rs.length - 1].attr_revenue), ad_profit: Number(rs[rs.length - 1].ad_profit) } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0 };
+    const yRow = rs.length && rs[rs.length - 1].day === yday ? rs[rs.length - 1] : null;
+    let y = yRow ? { spend: Number(yRow.spend), attr_units: Number(yRow.attr_units), attr_revenue: Number(yRow.attr_revenue), ad_profit: Number(yRow.ad_profit), actual_profit: yRow.actual_profit != null ? Number(yRow.actual_profit) : null } : { spend: 0, attr_units: 0, attr_revenue: 0, ad_profit: 0, actual_profit: null };
     let ySource = 'report';
-    if (y.spend === 0 && sampled[iid]) { const sm = sampled[iid]; const mg = Number(m.margin_before_ads); y = { spend: sm.spend, attr_units: sm.attr_units, attr_revenue: sm.attr_revenue, ad_profit: isNaN(mg) ? -sm.spend : round2(sm.attr_units * mg - sm.spend) }; ySource = 'sampled'; }
+    if (y.spend === 0 && sampled[iid]) { const sm = sampled[iid]; const mg = Number(m.margin_before_ads); y = { spend: sm.spend, attr_units: sm.attr_units, attr_revenue: sm.attr_revenue, ad_profit: isNaN(mg) ? -sm.spend : round2(sm.attr_units * mg - sm.spend), actual_profit: yRow && yRow.actual_profit != null ? Number(yRow.actual_profit) : null }; ySource = 'sampled'; }
     const d7 = win(7), d14 = win(14), d30 = win(30);
     if (d30.spend <= 0 && !live[iid]) continue;                       // never advertised and not live: nothing to decide
-    /* halves of the last 30 days */
+    /* halves of the last 30 days — the profit sign of each half, on BOTH bases so adtDecide can decide on the law
+       (actual_profit) while the parallel ad_profit decision is kept for the side-by-side */
     const h1 = rs.slice(-30, -15), h2 = rs.slice(-15);
-    const sgn = arr => { const sp = arr.reduce((t, r) => t + Number(r.spend), 0); if (sp < 1) return 0; const p = arr.reduce((t, r) => t + Number(r.ad_profit), 0); return p < 0 ? -1 : (p > 0 ? 1 : 0); };
+    const sgnF = (arr, field) => { const sp = arr.reduce((t, r) => t + Number(r.spend), 0); if (sp < 1) return 0; const p = arr.reduce((t, r) => t + (Number(r[field]) || 0), 0); return p < 0 ? -1 : (p > 0 ? 1 : 0); };
+    const sgn = arr => sgnF(arr, 'ad_profit');
     const halves = [sgn(h1), sgn(h2)];
+    const halvesActual = [sgnF(h1, 'actual_profit'), sgnF(h2, 'actual_profit')];
     /* zero streak while spending, days with spend, roas under be for 5 days */
     let zero = 0; for (let i = rs.length - 1; i >= 0; i--) { if (Number(rs[i].attr_units) > 0) break; if (Number(rs[i].spend) > 0) zero++; else if (zero) break; }
     const daysWithSpend = rs.filter(r => Number(r.spend) > 0).length;
@@ -6680,11 +6903,16 @@ async function adtDecisionInputs(env, day) {
     const wdRows = rs.filter(r => Number(r.weekday) === todayWd);
     const wdH1 = wdRows.filter(r => r.day < adtAddDays(day, -15)), wdH2 = wdRows.filter(r => r.day >= adtAddDays(day, -15));
     const wdSign = [sgn(wdH1), sgn(wdH2)];
+    const wdSignA = [sgnF(wdH1, 'actual_profit'), sgnF(wdH2, 'actual_profit')];
     const otherRows = rs.filter(r => Number(r.weekday) !== todayWd); const otherProfit = otherRows.reduce((t, r) => t + Number(r.ad_profit), 0);
+    const otherProfitA = otherRows.reduce((t, r) => t + (Number(r.actual_profit) || 0), 0);
     const p = prof && prof.spread ? prof.spread.p : null;
     const wdLosingConf = p != null && p < 0.05 && wdSign[0] === -1 && wdSign[1] === -1 && otherProfit > 0;
     const soldRecent = wdRows.slice(-4).filter(r => Number(r.attr_units) > 0).length;
     const wdWinningConf = p != null && p < 0.05 && wdSign[0] === 1 && wdSign[1] === 1 && soldRecent >= 3;
+    /* the same weekday confidence, judged on the real profit sign (the law) — adtDecide's default basis reads these */
+    const wdLosingConfA = p != null && p < 0.05 && wdSignA[0] === -1 && wdSignA[1] === -1 && otherProfitA > 0;
+    const wdWinningConfA = p != null && p < 0.05 && wdSignA[0] === 1 && wdSignA[1] === 1 && soldRecent >= 3;
     /* expected ad profit today from the weekday profile */
     const rate = prof && prof.rates ? Number(prof.rates[todayWd].rate) : null;
     const adDep = dsc.ad_dependence28 == null ? (d30.attr_units && rs.reduce((t, r) => t + Number(r.units), 0) ? d30.attr_units / rs.slice(-30).reduce((t, r) => t + Number(r.units), 0) : 0) : Number(dsc.ad_dependence28);
@@ -6693,12 +6921,13 @@ async function adtDecisionInputs(env, day) {
     const firstAd = rs.find(r => Number(r.spend) > 0);
     out.push({
       item_id: iid, account: m.account, title: m.title, margin: m.margin_before_ads, be, ads_running: !!live[iid], campaigns: live[iid] || 0,
-      y, y_source: ySource, d7, d14, d30, halves, days_with_spend_30: daysWithSpend, zero_streak: zero, roas_under_be_5d: under5,
+      y, y_source: ySource, d7, d14, d30, halves, halves_actual: halvesActual, days_with_spend_30: daysWithSpend, zero_streak: zero, roas_under_be_5d: under5,
       stage: stages[iid] ? stages[iid].stage : '', age_days: m.start_time ? Math.floor((Date.now() - new Date(String(m.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : 999,
       age_ads: firstAd ? Math.round((new Date(day + 'T00:00:00Z') - new Date(firstAd.day + 'T00:00:00Z')) / 86400000) : 0,
       organic3: organic[iid] || 0, capped7: capped[iid] || 0, profile_today: profileToday, weekday_p: p, weekday_name: ADTOOL_DOW[todayWd],
       weekday_losing: wdSign[0] === -1 && wdSign[1] === -1, weekday_winning: wdSign[0] === 1 && wdSign[1] === 1,
       weekday_losing_confident: wdLosingConf, weekday_winning_confident: wdWinningConf,
+      weekday_losing_confident_actual: wdLosingConfA, weekday_winning_confident_actual: wdWinningConfA,
     });
   }
   return out;
@@ -6714,23 +6943,30 @@ async function adtoolDecisions(env, batch) {
     const done = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND batch = ?2').bind(day, B).first();
     if (done && Number(done.n)) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'ok', B + ' batch for ' + day + ' already decided (' + done.n + ')'); return; }
     const inputs = await adtDecisionInputs(env, day);
+    /* Phase 4 big update: decisions are now made on the REAL profit law (the primary basis). Stamp the marker on
+       the first rebased run — adtShadowAcceptance counts only decisions made on or after this date, restarting the
+       14-day shadow clock so the new-law hit rate is not mixed with the old est. ad profit one. */
+    const basisMarker = await adtFlag(env, 'adtool_decision_basis');
+    if (basisMarker !== 'actual-v1') await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_decision_basis', 'actual-v1', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = 'actual-v1', updated_at = datetime('now')").run();
     const trust = {}; for (const r of ((await env.DB.prepare('SELECT rule_id, trusted FROM adtool_rule_scores WHERE scored_day = (SELECT MAX(scored_day) FROM adtool_rule_scores)').all()).results || [])) trust[r.rule_id] = Number(r.trusted);
-    const stmts = []; const counts = { STOP: 0, REDUCE: 0, PUSH: 0, KEEP: 0 }; let confident = 0;
+    const stmts = []; const counts = { STOP: 0, REDUCE: 0, PUSH: 0, KEEP: 0 }; let confident = 0, disagree = 0;
     for (const I of inputs) {
-      const d = adtDecide(I);
+      const d = adtDecide(I);                          // primary: the real-profit law
+      const dAd = adtDecide(I, 'adprofit');            // parallel: the old est. ad profit decision, kept for the side-by-side
       /* the boundary batch is weekday work only: it never STOPs (spec §6.11) */
       if (B === 'boundary' && d.decision === 'STOP') { d.decision = 'REDUCE'; d.rules = d.rules.concat(['boundary-no-stop']); d.action = 'held for the morning batch (the boundary batch never stops)'; d.confidence = 'watch'; }
       if (B === 'boundary' && d.decision === 'KEEP') continue;                        // nothing to record
       /* a rule the carry-forward or the trailing score has demoted can still be shown, never as confident */
       if (d.rules.some(r => trust[r] === 0)) d.confidence = 'watch';
+      const agree = d.decision === dAd.decision; if (!agree) disagree++;
       counts[d.decision]++; if (d.confidence === 'confident') confident++;
       const id = day + '|' + B + '|' + I.item_id;
       stmts.push(env.DB.prepare("INSERT INTO adtool_decisions (decision_id, day, batch, account, item_id, decision, rules_json, inputs_json, expected_value, confidence, why, action, mode) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'shadow') ON CONFLICT(decision_id) DO UPDATE SET decision = ?6, rules_json = ?7, inputs_json = ?8, expected_value = ?9, confidence = ?10, why = ?11, action = ?12")
-        .bind(id, day, B, I.account, I.item_id, d.decision, JSON.stringify(d.rules), JSON.stringify({ y: I.y, d7: I.d7, d30: I.d30, be: I.be, stage: I.stage, halves: I.halves, zero_streak: I.zero_streak, capped7: I.capped7, organic3: I.organic3, age_ads: I.age_ads, profile_today: I.profile_today, weekday_p: I.weekday_p, weekday: I.weekday_name, title: I.title, campaigns: I.campaigns, blocked: d.blocked }), d.ev, d.confidence, d.why, d.action));
+        .bind(id, day, B, I.account, I.item_id, d.decision, JSON.stringify(d.rules), JSON.stringify({ basis: 'actual-v1', y: I.y, d7: I.d7, d30: I.d30, be: I.be, stage: I.stage, halves: I.halves, halves_actual: I.halves_actual, zero_streak: I.zero_streak, capped7: I.capped7, organic3: I.organic3, age_ads: I.age_ads, profile_today: I.profile_today, weekday_p: I.weekday_p, weekday: I.weekday_name, title: I.title, campaigns: I.campaigns, blocked: d.blocked, decision_adprofit: dAd.decision, rules_adprofit: dAd.rules, agree }), d.ev, d.confidence, d.why, d.action));
       if (stmts.length >= 400) { await adtBatch(env, stmts); stmts.length = 0; }
     }
     await adtBatch(env, stmts);
-    const note = B + ' batch ' + day + ': ' + counts.STOP + ' stop · ' + counts.REDUCE + ' reduce · ' + counts.PUSH + ' push · ' + counts.KEEP + ' keep · ' + confident + ' confident (shadow — nothing sent to eBay)';
+    const note = B + ' batch ' + day + ': ' + counts.STOP + ' stop · ' + counts.REDUCE + ' reduce · ' + counts.PUSH + ' push · ' + counts.KEEP + ' keep · ' + confident + ' confident · ' + disagree + ' differ from the ad-profit basis (shadow — nothing sent to eBay)';
     if (B === 'morning' && (counts.STOP + counts.REDUCE + counts.PUSH) > 0) { try { await adtNotify(env, 'advertising', 'Stop today (shadow)', '🟡 ' + note, 'adtool:dec:' + day); } catch (e) {} }
     await adtJobEnd(env, 'adtoolDecisions:' + B, t, inputs.length, 'ok', note);
   } catch (e) { await adtJobEnd(env, 'adtoolDecisions:' + B, t, 0, 'error', String(e && e.message || e)); throw e; }
@@ -6742,11 +6978,19 @@ async function adtoolDecisionsBoundary(env) { return adtoolDecisions(env, 'bound
    on both exits: a gate reading "0 of 14 days" is information; a gate that is simply absent is not. */
 async function adtShadowAcceptance(env, today, baseRate) {
   try {
-    const days = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL').first();
+    /* Phase 4 big update: the clock restarts at the decision-basis marker — only decisions made on or after the day
+       the rules moved to the real-profit law count, so the new-law hit rate is not diluted by the old est. ad profit
+       one. The evidence carries BOTH: the law-based score (outcome_score, primary) and the ad-profit score kept beside
+       it (outcome_score_adprofit), so the two can be compared. */
+    const bm = await env.DB.prepare("SELECT substr(updated_at, 1, 10) AS d FROM portal_config WHERE key = 'adtool_decision_basis'").first().catch(() => null);
+    const basisDay = bm && bm.d ? String(bm.d) : '2000-01-01';
+    const days = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS n FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1').bind(basisDay).first();
     const n14 = Number(days && days.n) || 0;
-    const tot = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1').bind(adtAddDays(today, -14)).first();
+    const tot = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(outcome_score) AS r, SUM(CASE WHEN outcome_score_adprofit IS NOT NULL THEN 1 ELSE 0 END) AS n_ad, SUM(COALESCE(outcome_score_adprofit, 0)) AS r_ad FROM adtool_decisions WHERE outcome_score IS NOT NULL AND day >= ?1').bind(adtAddDays(today, -14) > basisDay ? adtAddDays(today, -14) : basisDay).first();
     const status = n14 >= 14 ? 'PASS' : 'pending';
-    const ev = n14 + ' of 14 days scored · last 14 days ' + (tot ? Number(tot.r || 0) + ' right of ' + Number(tot.n || 0) : '0 of 0') + ' · base rate ' + Math.round((baseRate || 0) * 100) + ' %';
+    const lawPct = tot && Number(tot.n) ? Math.round(Number(tot.r || 0) / Number(tot.n) * 100) : 0;
+    const adPct = tot && Number(tot.n_ad) ? Math.round(Number(tot.r_ad || 0) / Number(tot.n_ad) * 100) : 0;
+    const ev = n14 + ' of 14 days scored since the real-profit basis (' + basisDay + ') · last 14 days: real profit ' + (tot ? Number(tot.r || 0) + ' right of ' + Number(tot.n || 0) + ' (' + lawPct + ' %)' : '0 of 0') + ' vs ad-profit basis ' + (tot ? Number(tot.r_ad || 0) + ' of ' + Number(tot.n_ad || 0) + ' (' + adPct + ' %)' : '0 of 0') + ' · base rate ' + Math.round((baseRate || 0) * 100) + ' %';
     const seen = await env.DB.prepare("SELECT status, recomputed FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' AND substr(ran_at, 1, 10) = ?1 ORDER BY ran_at DESC LIMIT 1").bind(today).first();
     if (seen && String(seen.status) === status && String(seen.recomputed) === String(n14) + ' days') return n14;
     await env.DB.prepare("INSERT INTO validation_runs (metric_id, scope_key, ran_at, shown, recomputed, delta, status, method, evidence, next_run_at) VALUES ('ADTOOL_SHADOW_14D', 'decisions', ?1, '14 days of shadow scores', ?2, 0, ?3, 'shadow decisions scored against the realised day', ?4, '')")
@@ -6767,10 +7011,11 @@ async function adtoolDecisionScore(env) {
     const stmts = []; const byRule = {}; let right = 0, scored = 0;
     for (const d of dec) {
       const rr = real[d.item_id]; let be = 0; try { be = Number(JSON.parse(d.inputs_json).be) || 0; } catch (e) {}
-      const sc = adtScoreDecision(d.decision, rr, be);
-      if (sc == null) continue;
+      const sc = adtScoreDecision(d.decision, rr, be);                        // primary: the day's real profit (Sales Analysis law)
+      const scAd = adtScoreDecision(d.decision, rr, be, 'adprofit');          // parallel: the old est. ad profit score, kept for the side-by-side
+      if (sc == null) continue;                                              // no priced law profit that day → left unscored
       scored++; if (sc) right++;
-      stmts.push(env.DB.prepare('UPDATE adtool_decisions SET outcome_day = ?2, outcome_ad_profit = ?3, outcome_score = ?4, outcome_actual_profit = ?5 WHERE decision_id = ?1').bind(d.decision_id, yday, rr ? Number(rr.ad_profit) : null, sc, rr && rr.actual_profit != null ? Number(rr.actual_profit) : null));
+      stmts.push(env.DB.prepare('UPDATE adtool_decisions SET outcome_day = ?2, outcome_ad_profit = ?3, outcome_score = ?4, outcome_actual_profit = ?5, outcome_score_adprofit = ?6 WHERE decision_id = ?1').bind(d.decision_id, yday, rr ? Number(rr.ad_profit) : null, sc, rr && rr.actual_profit != null ? Number(rr.actual_profit) : null, scAd == null ? null : scAd));
       let rules = []; try { rules = JSON.parse(d.rules_json); } catch (e) {}
       for (const ru of rules) { const b = (byRule[ru] = byRule[ru] || { n: 0, r: 0 }); b.n++; b.r += sc; }
     }

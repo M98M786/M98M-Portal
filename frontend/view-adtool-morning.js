@@ -17,7 +17,13 @@
     '.mo-ladder .lab{font-size:10.5px;color:var(--text-3);text-align:center;margin-top:5px;line-height:1.3}' +
     '.mo-ladder .val{font-size:12px;font-weight:800;margin-bottom:3px}' +
     '.mo-hours{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;align-items:end;height:90px}' +
-    '.mo-hours .h{background:var(--gold-b);border-radius:2px 2px 0 0;min-height:1px}.mo-hours .h.under{background:#e0563f}.mo-hours .lab{font-size:9px;color:var(--text-3);text-align:center}'
+    '.mo-hours .h{background:var(--gold-b);border-radius:2px 2px 0 0;min-height:1px}.mo-hours .h.under{background:#e0563f}.mo-hours .lab{font-size:9px;color:var(--text-3);text-align:center}' +
+    /* Phase 4 alerts: five labelled lines + an urgency pill (overdue = loss colour, now = gold, soon = pale gold, watch = muted) */
+    '.mo-urg{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap;vertical-align:middle}' +
+    '.mo-urg.overdue{color:#fff;background:#e0563f;border-color:#e0563f}.mo-urg.now{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}.mo-urg.soon{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.1)}.mo-urg.watch{color:var(--text-2)}' +
+    '.mo-line{display:grid;grid-template-columns:104px 1fr;gap:8px;font-size:12px;margin-top:5px;align-items:start}' +
+    '.mo-line .lb{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding-top:1px}.mo-line .vl{color:var(--text-2)}' +
+    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}'
   );
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
@@ -28,6 +34,29 @@
   function fail(id, e) { $(id).innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'failed') + '</div></div>'; }
   function kpi(k, v, d, c) { return '<div class="an-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   function ago(t) { if (!t) return 'never'; var ms = Date.now() - new Date(String(t).replace(' ', 'T') + (String(t).endsWith('Z') ? '' : 'Z')).getTime(); if (isNaN(ms)) return esc(String(t).slice(0, 16)); var m = Math.round(ms / 60000); return m < 60 ? m + ' min ago' : (m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'); }
+
+  /* ── Phase 4 alert pieces ──────────────────────────────────────────────────────────────────
+     Each alert reads as five plain lines — what happened, where, why it matters, what to do, how
+     urgent — off the engine's new fields (what / why_matters / do / urgency / hours_open), falling
+     back to the old payload shape so an older engine still draws. Numbers come from the payload as
+     'label value' pairs, never a raw snake_case key or a JSON blob. */
+  var NUM_LABEL = { spend: 'Spend', roas: 'ROAS', cpc: 'CPC', cvr: 'CVR', clicks: 'Clicks', attr_units: 'Ad sales', attr_revenue: 'Attributed', revenue: 'Revenue', units: 'Units', orders: 'Orders', actual_profit: 'Profit', profit: 'Profit', d7: '7 d', d30: '30 d', d14: '14 d', spend_7d: '7-day spend', spend_30d: '30-day spend', be: 'Break-even', breakeven: 'Break-even', breakeven_roas: 'Break-even', margin: 'Margin', pending: 'Unpriced', pending_cost_orders: 'No cost yet', pending_fee_orders: 'No fees yet', days: 'Days', slope28: '28-day slope', level28: 'Units/day', share: 'Share', cost: 'Cost', bid: 'Ad rate', budget: 'Budget' };
+  function humanKey(k) { return NUM_LABEL[k] || String(k).replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); }); }
+  function fmtNum(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/roas|(^|_)be$|breakeven/.test(k)) return n.toFixed(2) + '×'; if (/spend|profit|revenue|cpc|margin|attributed|cost|budget/.test(k)) return gbp(n); if (/cvr|share|_pct$|percent/.test(k)) return (Math.round(n * 1000) / 10) + '%'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; return String(v); }
+  function payloadPairs(p) {
+    var pairs = [], skip = { rule_text: 1, suggested: 1, title: 1, why_matters: 1, what: 1, where: 1, 'do': 1, image: 1, account: 1, item_id: 1 };
+    Object.keys(p || {}).forEach(function (k) {
+      if (skip[k]) return; var v = p[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) { Object.keys(v).forEach(function (k2) { if (v[k2] == null || v[k2] === '') return; pairs.push([humanKey(k) + ' ' + humanKey(k2).toLowerCase(), fmtNum(k2, v[k2])]); }); }
+      else if (!Array.isArray(v) && v != null && v !== '') { pairs.push([humanKey(k), fmtNum(k, v)]); }
+    });
+    return pairs;
+  }
+  function alSev(a) { return String(a.sev || a.severity || 'low'); }
+  function alUrgency(a) { if (a.urgency) return String(a.urgency).toLowerCase(); var s = alSev(a).toLowerCase(); if (s === 'high' && Number(a.hours_open) > 24) return 'overdue'; return s === 'high' ? 'now' : s === 'medium' ? 'soon' : 'watch'; }
+  function urgencyText(u) { return u === 'overdue' ? 'a high alert open more than a day — clear it today' : u === 'now' ? 'act today' : u === 'soon' ? 'act this week' : 'keep an eye on it'; }
+  function openText(a) { if (a.hours_open != null && !isNaN(Number(a.hours_open))) { var hh = Number(a.hours_open); return hh < 24 ? Math.round(hh) + ' h' : Math.round(hh / 24) + ' d'; } return a.fired_at ? ago(a.fired_at) : '—'; }
+  function moLine(lb, vl) { return '<div class="mo-line"><div class="lb">' + esc(lb) + '</div><div class="vl">' + vl + '</div></div>'; }
 
   /* ---------------- Command centre ---------------- */
   /* Phase 1B: today so far comes from the 5-minute grain (adtoolToday: per-listing rows, hour curve,
@@ -143,15 +172,28 @@
   };
   function loadAlerts() {
     api('adtoolAlerts', {}).then(function (D) {
-      var counts = { high: 0, medium: 0, low: 0 }; D.open.forEach(function (a) { counts[a.severity] = (counts[a.severity] || 0) + 1; });
+      var counts = { high: 0, medium: 0, low: 0 }; D.open.forEach(function (a) { var s = alSev(a); counts[s] = (counts[s] || 0) + 1; });
+      var overdue = D.open.filter(function (a) { return alUrgency(a) === 'overdue'; }).length;
       var h = '<div class="an-filters">' + [['', 'All (' + D.open.length + ')'], ['high', 'High (' + counts.high + ')'], ['medium', 'Medium (' + counts.medium + ')'], ['low', 'Low (' + counts.low + ')']].map(function (x) { return '<button class="' + (AL.sev === x[0] ? 'on' : '') + '" data-s="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+      if (overdue) h += '<div class="an-note" style="margin-bottom:10px;border:1px solid rgba(224,86,63,.5);background:rgba(224,86,63,.08);color:#ffb3a6"><b>' + overdue + ' overdue</b> — a high alert has been open more than a day. Clear these first.</div>';
       if (D.fixture_check) h += '<div class="an-note" style="margin-bottom:10px">Fixture check (' + esc(String(D.fixture_check.ran_at).slice(0, 16)) + '): <b>' + esc(D.fixture_check.status) + '</b> — ' + esc(D.fixture_check.evidence) + '</div>';
-      var rows = D.open.filter(function (a) { return !AL.sev || a.severity === AL.sev; });
+      var rows = D.open.filter(function (a) { return !AL.sev || alSev(a) === AL.sev; });
       h += '<div id="moAlList">' + (rows.length ? rows.map(function (a) {
-        var p = a.payload || {}; var nums = Object.keys(p).filter(function (k) { return k !== 'rule_text' && k !== 'suggested' && k !== 'title'; }).map(function (k) { return k + ' ' + (typeof p[k] === 'object' ? JSON.stringify(p[k]) : p[k]); }).join(' · ');
-        return '<div class="mo-alert ' + esc(a.severity) + '"><div class="t">' + esc(a.rule_id) + ' · ' + esc(p.rule_text || '') + '</div>' + (a.item_id ? '<div style="margin:6px 0 4px">' + adtProductCell({ item_id: a.item_id, account: a.account, title: a.title || p.title || '', image: a.image }) + '</div>' : '') + '<div class="m">' + (!a.item_id && a.account ? esc(a.account) + ' · ' : '') + (a.campaign_id ? 'campaign ' + esc(a.campaign_id) + ' · ' : '') + esc(nums) + '</div><div class="m">Since ' + esc(String(a.fired_at).slice(0, 16)) + ' · suggested: <b>' + esc(p.suggested || '') + '</b>' + (a.acknowledged_by ? ' · acknowledged by ' + esc(a.acknowledged_by) : '') + (a.snoozed_until ? ' · snoozed to ' + esc(String(a.snoozed_until).slice(0, 10)) : '') + '</div><div class="btns">' + (a.item_id ? '<button data-open="' + esc(a.item_id) + '">Open listing</button>' : '') + '<button data-snooze="' + esc(a.alert_id) + '">Snooze 3 d</button><button data-ack="' + esc(a.alert_id) + '">Acknowledge</button></div></div>';
+        var p = a.payload || {}; var sev = alSev(a), urg = alUrgency(a);
+        var what = a.what || p.rule_text || ''; var why = a.why_matters || p.why_matters || ''; var doit = a['do'] || p.suggested || '';
+        var ruleId = a.rule || a.rule_id || ''; var pairs = payloadPairs(p);
+        var where = a.item_id ? adtProductCell({ item_id: a.item_id, account: a.account, title: a.title || p.title || '', image: a.image }) : (a.account ? '<b>' + esc(a.account) + '</b>' : '—');
+        return '<div class="mo-alert ' + esc(sev) + '">' +
+          '<div class="t">' + esc(ruleId) + (what ? ' · ' + esc(what) : '') + ' <span class="mo-urg ' + esc(urg) + '">' + esc(urg) + '</span></div>' +
+          moLine('Happened', esc(what || 'the rule fired')) +
+          moLine('Where', where + (a.campaign_id ? '<div class="adt-pf-p">campaign ' + esc(a.campaign_id) + '</div>' : '')) +
+          (why ? moLine('Why it matters', esc(why)) : '') +
+          (pairs.length ? moLine('Numbers', '<div class="mo-nums">' + pairs.map(function (x) { return '<span class="n">' + esc(x[0]) + ' <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div>') : '') +
+          moLine('What to do', esc(doit || 'review the listing')) +
+          moLine('Urgency', '<span class="mo-urg ' + esc(urg) + '">' + esc(urg) + '</span> ' + esc(urgencyText(urg)) + ' · open ' + esc(openText(a)) + (a.acknowledged_by ? ' · acknowledged by ' + esc(a.acknowledged_by) : '') + (a.snoozed_until ? ' · snoozed to ' + esc(String(a.snoozed_until).slice(0, 10)) : '')) +
+          '<div class="btns">' + (a.item_id ? '<button data-open="' + esc(a.item_id) + '">Open listing</button>' : '') + '<button data-snooze="' + esc(a.alert_id) + '">Snooze 3 d</button><button data-ack="' + esc(a.alert_id) + '">Acknowledge</button></div></div>';
       }).join('') : '<div class="an-empty">No open alerts in this filter.</div>') + '</div>';
-      h += '<div class="an-panel"><h3>Rule catalogue</h3><div class="an-sub">' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? 'Management can turn a rule off; it stops firing and its open alerts clear on the next run.' : 'Management can turn rules on and off.') + '</div><table class="an-tbl"><thead><tr><th>Rule</th><th>Fires when</th><th>Severity</th><th class="r">Cool-down</th><th>Suggested</th><th>State</th></tr></thead><tbody>' + D.rules.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td>' + esc(r.text) + '</td><td>' + esc(r.sev) + '</td><td class="r">' + r.cool + ' d</td><td>' + esc(r.action) + '</td><td>' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? '<button class="an-btn" style="padding:3px 8px;font-size:11px" data-rule="' + esc(r.rule_id) + '" data-en="' + (r.enabled ? 0 : 1) + '">' + (r.enabled ? 'on' : 'off') + '</button>' : (r.enabled ? 'on' : 'off')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      h += '<div class="an-panel"><h3>Rule catalogue</h3><div class="an-sub">' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? 'Management can turn a rule off; it stops firing and its open alerts clear on the next run. Every rule now carries why it matters to money.' : 'Management can turn rules on and off.') + '</div><table class="an-tbl"><thead><tr><th>Rule</th><th>Fires when</th><th>Why it matters</th><th>Severity</th><th class="r">Cool-down</th><th>Suggested</th><th>State</th></tr></thead><tbody>' + D.rules.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td>' + esc(r.text) + '</td><td>' + esc(r.why_matters || r.why || '—') + '</td><td>' + esc(r.sev) + '</td><td class="r">' + r.cool + ' d</td><td>' + esc(r.action) + '</td><td>' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? '<button class="an-btn" style="padding:3px 8px;font-size:11px" data-rule="' + esc(r.rule_id) + '" data-en="' + (r.enabled ? 0 : 1) + '">' + (r.enabled ? 'on' : 'off') + '</button>' : (r.enabled ? 'on' : 'off')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
       h += '<div class="an-panel"><h3>History</h3><table class="an-tbl"><thead><tr><th>Rule</th><th>Scope</th><th>Fired</th><th>Cleared</th><th>Acknowledged</th></tr></thead><tbody>' + (D.history.length ? D.history.map(function (a) { return '<tr><td>' + esc(a.rule_id) + '</td><td>' + esc(a.item_id || a.account || '') + '</td><td>' + esc(String(a.fired_at).slice(0, 16)) + '</td><td>' + esc(String(a.cleared_at || '').slice(0, 16) || '—') + '</td><td>' + esc(a.acknowledged_by || '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">nothing yet</td></tr>') + '</tbody></table></div>';
       h += '<div class="an-note">Last run: ' + (D.last_run ? esc(String(D.last_run.finished_at).slice(0, 16)) + ' · ' + esc(D.last_run.note) : 'not run yet') + '</div>';
       $('moAl').innerHTML = h;
@@ -165,14 +207,15 @@
   }
 
   /* ---------------- Yesterday's report ---------------- */
-  var RP = { day: '' };
+  var RP = { day: '', account: '' };
   VIEWS.adtoolReport = {
     label: "Yesterday's report (ads)", hidden: true, order: 94, roles: ROLES, icon: '<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><path d="M9 13h7M9 17h7"/>',
     render: function () { return '<div class="an-wrap">' + hg("Yesterday's report", 'Advertising tool · preview · one page the morning can be run from') + '<div id="moRp"><div class="an-empty">Loading…</div></div></div>'; },
     init: function () { loadReport(); }
   };
   function loadReport() {
-    api('adtoolReport', RP.day ? { day: RP.day } : {}).then(function (D) {
+    var params = {}; if (RP.day) params.day = RP.day; if (RP.account) params.account = RP.account;
+    api('adtoolReport', params).then(function (D) {
       if (!D.report) { $('moRp').innerHTML = '<div class="an-panel"><h3>No report yet</h3><div class="an-sub">The report job runs in the morning chain and catches up hourly. The first one covers yesterday.</div></div>'; return; }
       var R = D.report, y = R.fleet;
       /* Never show an older day in silence. The owner opened this page, saw Sunday where he expected
@@ -192,14 +235,33 @@
         '<div class="an-sub">Against the 7-day average per day: spend ' + (R.vs_7day ? gbp(R.vs_7day.spend) : '—') + ' · ROAS ' + (R.vs_7day ? roas(R.vs_7day.roas) : '—') + '. Same weekday last week: spend ' + (R.vs_same_weekday_last_week ? gbp(R.vs_same_weekday_last_week.spend) : '—') + ' · ROAS ' + (R.vs_same_weekday_last_week ? roas(R.vs_same_weekday_last_week.roas) : '—') + '. ' + esc(R.decisions && R.decisions.note || '') + '.</div>' +
         '<button class="an-btn" id="moPdf">Download PDF</button> <button class="an-btn" id="moSend" style="background:transparent;border:1px solid var(--gold-line);color:var(--text-2)">Send to inbox</button></div>';
       h += '<div class="an-panel"><h3>What changed</h3><ul class="at-list">' + R.what_changed.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>';
-      h += '<div class="an-panel"><h3>By account</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">Attributed</th><th class="r">ROAS</th></tr></thead><tbody>' + (R.by_account || []).map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      var mx = Math.max.apply(null, R.hours.map(function (x) { return Math.max(x.units, x.expected || 0); })) || 1;
-      h += '<div class="an-panel"><h3>Hour by hour' + src('orders') + '</h3><div class="an-sub">Against the fleet hour × weekday profile for that weekday; red = 2σ or more under.</div><div class="mo-hours">' + R.hours.map(function (x) { return '<div class="h' + (x.z != null && x.z <= -2 ? ' under' : '') + '" style="height:' + Math.max(1, Math.round(x.units / mx * 88)) + 'px" title="' + x.hour + ':00 — ' + x.units + ' units' + (x.expected != null ? ', expected ' + x.expected + (x.z != null ? ' (z ' + x.z + ')' : '') : '') + '"></div>'; }).join('') + '</div><div class="mo-hours">' + R.hours.map(function (x) { return '<div class="lab">' + (x.hour % 3 === 0 ? x.hour : '') + '</div>'; }).join('') + '</div><table class="an-tbl" style="margin-top:10px"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Expected</th><th class="r">z</th></tr></thead><tbody>' + R.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + s.units + '</td><td class="r">' + (s.expected == null ? '—' : s.expected) + '</td><td class="r ' + (s.z != null && s.z < 0 ? 'an-neg' : '') + '">' + (s.z == null ? '—' : (s.z > 0 ? '+' : '') + s.z) + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      var tbl = function (rows, title) { return '<div class="an-panel"><h3>' + title + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Profit (Sales Analysis law)</th><th>Why</th></tr></thead><tbody>' + (rows.length ? rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.spend) + '</td><td class="r">' + (r.attr_units || 0) + '</td><td class="r">' + (r.spend > 0 && r.attr_revenue != null ? roas(r.attr_revenue / r.spend) : '—') + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td><td>' + esc(r.why || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">none</td></tr>') + '</tbody></table></div></div>'; };
-      h += '<div class="an-grid2">' + tbl(R.winners || [], 'Winners') + tbl(R.losers || [], 'Losers') + '</div>';
+      /* account rows carry spend / ad sales / ROAS only — never a collective profit figure */
+      var ba = R.by_account || [];
+      h += '<div class="an-panel"><h3>By account</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">Attributed</th><th class="r">ROAS</th></tr></thead><tbody>' + ba.map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : (a.roas != null ? roas(a.roas) : '—')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      /* Hour by hour on the shared bar kit so the figure sits on each bar — the old version hid the
+         count in a tooltip and left the axis blank (owner: "R/R graph, left-side numbers not visible"). */
+      var hoursSeries = (R.hour_series || R.hours || []).map(function (x) { return { label: (Number(x.hour) < 10 ? '0' : '') + x.hour, value: Number(x.units) || 0, strong: (x.z != null && x.z <= -2), title: x.hour + ':00 — ' + (x.units || 0) + ' units' + (x.expected != null ? ', expected ' + x.expected : '') + (x.z != null ? ' (z ' + x.z + ')' : '') }; });
+      h += '<div class="an-panel"><h3>Hour by hour' + src('orders') + '</h3><div class="an-sub">Units sold per UK hour, the count on each bar. Red = an hour 2σ or more under the share of the day it usually takes (fleet hour × weekday profile).</div>' +
+        (hoursSeries.length ? chartBars(hoursSeries, { height: 180, everyNth: 2, minGap: 30, strongColor: '#e0563f', fmt: function (v) { return String(Math.round(v)); } }) : '<div class="an-empty">No hour data for this day.</div>') +
+        '<table class="an-tbl" style="margin-top:10px"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Expected</th><th class="r">z</th></tr></thead><tbody>' + R.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + s.units + '</td><td class="r">' + (s.expected == null ? '—' : s.expected) + '</td><td class="r ' + (s.z != null && s.z < 0 ? 'an-neg' : '') + '">' + (s.z == null ? '—' : (s.z > 0 ? '+' : '') + s.z) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      /* Winners / losers, viewable by account. The engine sends winners/losers per account on
+         by_account[]; the chips pick one, and the fleet view is the default. Every row is a product
+         cell with its 'why' sentence and item-level profit under the Sales Analysis law. */
+      var accWL = null;
+      if (RP.account) { for (var ai = 0; ai < ba.length; ai++) { if (ba[ai].account === RP.account) { accWL = ba[ai]; break; } } }
+      var winners = accWL ? (accWL.winners || []) : (R.winners || []);
+      var losers = accWL ? (accWL.losers || []) : (R.losers || []);
+      var acctsWithWL = ba.filter(function (a) { return (a.winners && a.winners.length) || (a.losers && a.losers.length); });
+      if (acctsWithWL.length) {
+        h += '<div class="an-filters">' + [['', 'All accounts']].concat(acctsWithWL.map(function (a) { return [a.account, a.account]; })).map(function (x) { return '<button class="' + (RP.account === x[0] ? 'on' : '') + '" data-acc="' + esc(x[0]) + '">' + esc(x[1]) + '</button>'; }).join('') + '</div>';
+      } else if (RP.account) {
+        h += '<div class="an-note" style="margin-bottom:8px">Per-account winners/losers arrive with the next engine update; showing the fleet.</div>';
+      }
+      var tbl = function (rows, title) { return '<div class="an-panel"><h3>' + esc(title) + (RP.account ? ' · ' + esc(RP.account) : '') + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Profit (Sales Analysis law)</th><th>Why</th></tr></thead><tbody>' + (rows.length ? rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.spend) + '</td><td class="r">' + (r.attr_units || 0) + '</td><td class="r">' + (r.spend > 0 && r.attr_revenue != null ? roas(r.attr_revenue / r.spend) : (r.roas != null ? roas(r.roas) : '—')) + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td><td>' + esc(r.why || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">none</td></tr>') + '</tbody></table></div></div>'; };
+      h += '<div class="an-grid2">' + tbl(winners, 'Winners') + tbl(losers, 'Losers') + '</div>';
       h += '<div class="an-note">Open alerts ' + ((R.open_alerts && R.open_alerts.n) || 0) + ' (' + ((R.open_alerts && R.open_alerts.high) || 0) + ' high) · ' + (R.capped_listings || 0) + ' listings hit their budget cap · ' + ((R.ad_status_changes && R.ad_status_changes.n) || 0) + ' ad status changes seen</div>';
       $('moRp').innerHTML = h;
-      var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { RP.day = this.getAttribute('data-d'); loadReport(); };
+      var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { if (this.hasAttribute('data-d')) { RP.day = this.getAttribute('data-d'); } else if (this.hasAttribute('data-acc')) { RP.account = this.getAttribute('data-acc'); } loadReport(); };
       $('moPdf').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, pdf: 1 }).then(function (r) { var bin = atob(r.pdf_base64); var arr = new Uint8Array(bin.length); for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k); var blob = new Blob([arr], { type: 'application/pdf' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 2000); b.disabled = false; }).catch(function (e) { toast(e.message || 'failed'); b.disabled = false; }); };
       $('moSend').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, send: 1 }).then(function () { toast('Sent to the management inbox'); b.disabled = false; }).catch(function (e) { toast(e.message); b.disabled = false; }); };
     }).catch(function (e) { fail('moRp', e); });

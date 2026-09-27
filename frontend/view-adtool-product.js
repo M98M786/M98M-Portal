@@ -57,6 +57,14 @@
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'at-neg' : Number(v) > 0 ? 'at-pos' : ''); }
   function dfmt(d) { if (!d) return ''; var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return Number(d.slice(8, 10)) + ' ' + m[Number(d.slice(5, 7)) - 1]; }
   function src(t, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  /* Phase 4: week-to-week behaviour. The engine sends weeks_behaviour[] = {iso_week, label,
+     descriptors, changed:[{descriptor, from, to, direction}], sentence}; the descriptor names are the
+     ones from adtool_descriptors. A plain-English label per descriptor and a value formatter so the
+     'what changed' cell reads as prose, not raw keys. */
+  var DESC_LABEL = { weekday_ratio: 'Weekday concentration', slot_hhi: 'Time-of-day concentration', concentration: 'Time-of-day concentration', slot_concentration: 'Time-of-day concentration', volatility: 'Volatility', cv28: 'Volatility', volatility_cv28: 'Volatility', ad_dependence28: 'Ad dependence', ad_dependence: 'Ad dependence', spend_elasticity: 'Spend elasticity', intermittency28: 'Zero-sale days', level28: 'Units/day', slope28: '28-day slope' };
+  function descLabel(k) { return DESC_LABEL[k] || String(k).replace(/_?\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); }); }
+  function descVal(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/dependence|intermittency|share|_pct$/.test(k)) return Math.round(n * 100) + '%'; if (/elasticity/.test(k)) return n + ' u/£'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; if (/level/.test(k)) return n + '/day'; return String(Math.round(n * 100) / 100); }
+  function trendTag(label) { var l = String(label || '').toLowerCase(); if (/improv|recover|rising|up/.test(l)) return '<span class="at-tag gold">' + esc(label || 'improving') + '</span>'; if (/declin|worse|falling|down|slowing/.test(l)) return '<span class="at-tag loss">' + esc(label || 'declining') + '</span>'; return '<span class="at-tag">' + esc(label || 'steady') + '</span>'; }
 
   function loadECharts() {
     if (window.echarts) return Promise.resolve(window.echarts);
@@ -194,6 +202,21 @@
       w.map(function (x) { var s = x[1]; var pc = Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0, pf = Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; return '<tr><td>' + x[0] + '</td><td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td><td class="r">' + roas(s.roas) + '</td><td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td><td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) + (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' orders unpriced</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
     /* notes, decision, actions */
     if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>Behaviour descriptors' + src('profiles · ' + (ds.day || '')) + '</h3><div class="at-sub">Spec §6.4, last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'ratio ' + ds.weekday_ratio + ' · ' : '') + esc(ds.weekday_label || '')], ['Slot concentration', SLOTS[ds.top_slot] || '—', 'top share ' + Math.round((ds.top_slot_share || 0) * 100) + '% · HHI ' + ds.slot_hhi], ['Volatility', ds.volatility_cv28 == null ? '—' : 'CV ' + ds.volatility_cv28, 'zero-sale days ' + Math.round((ds.intermittency28 || 0) * 100) + '%'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'attributed ÷ all units'], ['Spend elasticity', ds.spend_elasticity == null ? 'not enough levels' : ds.spend_elasticity + ' units/£', ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
+    /* Phase 4: week-to-week behaviour — the descriptors that moved week over week, with the reading
+       and the recommended action (owner: "Make Behaviour Descriptors much larger and week-to-week:
+       what changed, why, what to fix, what action, improving or declining"). */
+    if (D.weeks_behaviour && D.weeks_behaviour.length) {
+      h += '<div class="at-panel"><h3>Week-to-week behaviour' + src('week behaviour') + '</h3>' +
+        '<div class="at-sub">Each week against the one before: which descriptors moved, the likely reason, and what to do. Improving weeks are gold, declining weeks are red.</div>' +
+        '<table class="at-tbl"><thead><tr><th>Week</th><th>Trend</th><th>What changed</th><th>Reading &amp; action</th></tr></thead><tbody>' +
+        D.weeks_behaviour.slice().reverse().map(function (wb) {
+          var ch = (wb.changed || []).map(function (c) {
+            var arrow = /up|\+|rise|increase/i.test(String(c.direction)) ? '▲' : /down|-|fall|decrease/i.test(String(c.direction)) ? '▼' : '→';
+            return '<div>' + esc(descLabel(c.descriptor)) + ' <span class="at-src">' + descVal(c.descriptor, c.from) + ' ' + arrow + ' ' + descVal(c.descriptor, c.to) + '</span></div>';
+          }).join('');
+          return '<tr><td>' + esc(wb.iso_week || '') + '</td><td>' + trendTag(wb.label) + '</td><td>' + (ch || '<span class="at-empty">no material change</span>') + '</td><td>' + esc(wb.sentence || '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
     /* §7: pattern changes — the regime history, what moved and when. The rows come from adtool_regimes, the
        same detections A17 fires on, so the page and the alert can never tell different stories. */
     var rg = D.profile && D.profile.regime, rh = (D.profile && D.profile.regime_history) || [];
