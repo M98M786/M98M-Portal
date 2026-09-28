@@ -19,14 +19,15 @@ function run(argv) {
   const i7 = src.indexOf('/* ADTOOL-P7-PURE-BEGIN */'); const j7 = src.indexOf('/* ADTOOL-P7-PURE-END */');
   const i8 = src.indexOf('/* ADTOOL-P8-PURE-BEGIN */'); const j8 = src.indexOf('/* ADTOOL-P8-PURE-END */');
   const i9 = src.indexOf('/* ADTOOL-P9-PURE-BEGIN */'); const j9 = src.indexOf('/* ADTOOL-P9-PURE-END */');
+  const i10 = src.indexOf('/* ADTOOL-P10-PURE-BEGIN */'); const j10 = src.indexOf('/* ADTOOL-P10-PURE-END */');
   const i11 = src.indexOf('/* ADTOOL-P11-PURE-BEGIN */'); const j11 = src.indexOf('/* ADTOOL-P11-PURE-END */');
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '');   /* pure helpers of every phase */
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '');   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtTrend, ADTOOL_IMPRESSIONS_FROM, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtTrend, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -592,6 +593,65 @@ function run(argv) {
   F.adtStripCollectiveProfit(ovKeep, { keepCollective: true });
   t('overview strip: a profit role keeps everything (account_profit too)', ovKeep.profit_view.profitable_listings === 3 && ovKeep.account_profit === 42, ovKeep);
   t('impressions floor constant is the 18 Sep campaign-truth start', F.ADTOOL_IMPRESSIONS_FROM === '2026-09-18', F.ADTOOL_IMPRESSIONS_FROM);
+
+  /* ---- Phase 5 (big update): the observed sale-event lifecycle ---- */
+  /* the discount buyers actually paid, from the day's orders vs the listed price (AZHAR ABRT 23 Sep proof: listed
+     11.99, paid 11.39 → 5% off) */
+  const dObs = F.adtSaleDiscountObserved([{ qty: 1, sale_price: 11.39, status: 'ACTIVE' }, { qty: 1, sale_price: 11.39, status: 'ACTIVE' }], 11.99);
+  t('sale discount: buyers paid 11.39 on a listed 11.99 → observable 5% off, discounted true', dObs.observable && near(dObs.pct, 0.05) && dObs.discounted === true && dObs.units === 2, dObs);
+  const dFull = F.adtSaleDiscountObserved([{ qty: 2, sale_price: 23.98, status: 'ACTIVE' }], 11.99);
+  t('sale discount: buyers paid the full price → observable but not discounted (pct 0)', dFull.observable && near(dFull.pct, 0) && dFull.discounted === false, dFull);
+  const dNone = F.adtSaleDiscountObserved([{ qty: 1, sale_price: 0, status: 'CANCELLED' }], 11.99);
+  t('sale discount: no non-cancelled order → not observable, pct null (cannot observe today)', dNone.observable === false && dNone.pct === null, dNone);
+  const dNoPrice = F.adtSaleDiscountObserved([{ qty: 1, sale_price: 10, status: 'ACTIVE' }], 0);
+  t('sale discount: a zero listed price is not observable (no divide-by-zero)', dNoPrice.observable === false && dNoPrice.pct === null, dNoPrice);
+  /* discount-text parser */
+  t('sale discount text: "5% off" → 0.05, "£3 off" → null, "" → null', near(F.adtParseDiscountPct('5% off'), 0.05) && F.adtParseDiscountPct('£3 off') === null && F.adtParseDiscountPct('') === null, [F.adtParseDiscountPct('5% off'), F.adtParseDiscountPct('£3 off')]);
+
+  /* the brief's worked example: a 1,1,0 sequence with removal observed 2026-09-10 → removed_on 10 Sep,
+     restriction_end 24 Sep, eligible_on 24 Sep */
+  const tlEx = F.adtSaleTimeline(
+    [{ day: '2026-09-08', in_sale: 1, basis: 'list', promo_id: 'P1', discount_pct: 0.05 }, { day: '2026-09-09', in_sale: 1, basis: 'list', promo_id: 'P1', discount_pct: 0.05 }, { day: '2026-09-10', in_sale: 0, basis: 'none', promo_id: '', discount_pct: null }],
+    [], '2026-09-12');
+  t('sale timeline: 1,1,0 removed 10 Sep → removed_on 2026-09-10, restriction_end 2026-09-24, eligible_on 2026-09-24 (brief example)', tlEx.removed_on === '2026-09-10' && tlEx.restriction_end === '2026-09-24' && tlEx.eligible_on === '2026-09-24' && tlEx.added_on === '2026-09-08' && tlEx.status === 'waiting', tlEx);
+  /* a whole-shop 'any' item that never flips to 0 → in_sale stays true, removal not observable (removed_on null) */
+  const tlAny = F.adtSaleTimeline(
+    [{ day: '2026-09-24', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }, { day: '2026-09-25', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }, { day: '2026-09-26', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }],
+    [], '2026-09-26');
+  t('sale timeline: a whole-shop item with an observed discount and no removal stays in-sale, removed_on null, status live', tlAny.removed_on === null && tlAny.in_sale === true && tlAny.status === 'live' && tlAny.eligible_on === null, tlAny);
+  const tlAnyUnconf = F.adtSaleTimeline([{ day: '2026-09-26', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: null }], [], '2026-09-26');
+  t('sale timeline: whole-shop event running, no order to observe the discount → added-unconfirmed', tlAnyUnconf.status === 'added-unconfirmed' && tlAnyUnconf.in_sale === true, tlAnyUnconf);
+  /* the event text parses to 5% but no order confirms it → still added-unconfirmed, never a false "live" (finding: the parsed discount must not resolve to live) */
+  const tlParsed = F.adtSaleTimeline([{ day: '2026-09-26', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'event' }], [], '2026-09-26');
+  t('sale timeline: event text 5% but no order → added-unconfirmed (parsed discount never reads as live)', tlParsed.status === 'added-unconfirmed', tlParsed);
+  const tlNotDisc = F.adtSaleTimeline([{ day: '2026-09-26', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0, disc_src: 'observed' }], [], '2026-09-26');
+  t('sale timeline: an order shows buyers paid full price → not-discounted', tlNotDisc.status === 'not-discounted', tlNotDisc);
+  /* the net-neutral ÷0.95 enrolment raise (AZHAR ABRT 23 Sep): a price move during a live event whose orders still
+     show the discount is NOT a removal — status stays live, removed_on null, no eligible clock, no spurious task */
+  const tlNeutralRaise = F.adtSaleTimeline(
+    [{ day: '2026-09-22', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }, { day: '2026-09-23', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }, { day: '2026-09-24', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'observed' }],
+    [{ day: '2026-09-20', price: 11.39 }, { day: '2026-09-23', price: 11.99 }], '2026-09-24');
+  t('sale timeline: a ÷0.95 raise with buyers still observed at the discount → status live, removed_on null, eligible_on null (finding: net-neutral raise is not a removal)', tlNeutralRaise.status === 'live' && tlNeutralRaise.removed_on === null && tlNeutralRaise.eligible_on === null, tlNeutralRaise);
+  /* but the SAME price move with no order to confirm the discount still reads as eBay's silent removal */
+  const tlUnconfRaise = F.adtSaleTimeline(
+    [{ day: '2026-09-22', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'event' }, { day: '2026-09-23', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05, disc_src: 'event' }],
+    [{ day: '2026-09-20', price: 11.39 }, { day: '2026-09-23', price: 11.99 }], '2026-09-23');
+  t('sale timeline: a price move with no order to confirm the discount still reads as removed', tlUnconfRaise.status === 'removed' && tlUnconfRaise.removed_by === 'price', tlUnconfRaise);
+  /* a price change DURING a live event sets removed_on = the change day and eligible_on = change + 14 */
+  const tlPrice = F.adtSaleTimeline(
+    [{ day: '2026-09-01', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05 }, { day: '2026-09-02', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05 }, { day: '2026-09-03', in_sale: 1, basis: 'any', promo_id: 'W1', discount_pct: 0.05 }],
+    [{ day: '2026-08-20', price: 10.0 }, { day: '2026-09-02', price: 9.5 }], '2026-09-03');
+  t('sale timeline: a price change during a live event → removed_on 2026-09-02, eligible_on 2026-09-16 (change + 14), status removed', tlPrice.removed_on === '2026-09-02' && tlPrice.removed_by === 'price' && tlPrice.eligible_on === '2026-09-16' && tlPrice.status === 'removed', tlPrice);
+  /* an item never in any sale → no-event, no fabricated dates */
+  const tlNone = F.adtSaleTimeline([], [], '2026-09-28');
+  t('sale timeline: no membership at all → no-event, no dates', tlNone.status === 'no-event' && tlNone.added_on === null && tlNone.removed_on === null, tlNone);
+  /* the status vocabulary is decided purely by adtSaleStatus */
+  t('sale status: waiting inside the 14 days, eligible once the clock is over', F.adtSaleStatus({ today: '2026-09-20', in_sale: false, removed_on: '2026-09-10', eligible_on: '2026-09-24' }) === 'waiting' && F.adtSaleStatus({ today: '2026-09-25', in_sale: false, removed_on: '2026-09-10', eligible_on: '2026-09-24' }) === 'eligible', null);
+  /* the timeline restarts eligibility once a later price change pushes it past the removal restriction */
+  const tlLater = F.adtSaleTimeline(
+    [{ day: '2026-09-08', in_sale: 1, basis: 'list', promo_id: 'P1', discount_pct: 0.05 }, { day: '2026-09-10', in_sale: 0, basis: 'none', promo_id: '', discount_pct: null }],
+    [{ day: '2026-09-01', price: 10 }, { day: '2026-09-15', price: 9 }], '2026-09-20');
+  t('sale timeline: a price change after removal (15 Sep) pushes eligible_on to 29 Sep = max(24 Sep restriction, 15 Sep + 14)', tlLater.eligible_on === '2026-09-29', tlLater);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

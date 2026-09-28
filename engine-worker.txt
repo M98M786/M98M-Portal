@@ -2793,6 +2793,16 @@ async function marketingSync(env) {
     }
   });
 
+  /* Phase 5 (27 Sep 2026 big update, plan §3): observe today's per-listing sale membership, recompute the timeline
+     for the listings that moved, and open eligible / event-ending tasks — all in the SAME hourly job, behind a flag,
+     AFTER the promotions/promo_members upsert above. No second cron; nothing is sent to eBay. */
+  /* ensure the schema (and its 'on' seed) here, in a path that always runs, so the snapshot starts on the next :50
+     after a fresh deploy without waiting for someone to open the Sale events page first. */
+  try { await ensureAdtoolSaleSchema(env); } catch (e) {}
+  if ((await adtFlag(env, 'adtool_sale_snapshot')) === 'on') {
+    try { await adtSaleSnapshot(env); } catch (e) { console.log('sale snapshot', String(e && e.message || e).slice(0, 160)); }
+  }
+
   /* eligibility digest: ACTIVE listings in NO running event whose last observed revision is
      14+ days old (or that have never changed since tracking began and are old stock) */
   try {
@@ -4832,6 +4842,14 @@ const ADTOOL_ACTIONS = {
       const months = (await env.DB.prepare('SELECT month, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_month WHERE item_id = ?1 ORDER BY month').bind(iid).all()).results || [];
       const actions = (await env.DB.prepare('SELECT type, note, by_email, at FROM adtool_actions WHERE item_id = ?1 ORDER BY at DESC LIMIT 30').bind(iid).all()).results || [];
       const img = await env.DB.prepare('SELECT image FROM items_api WHERE item_id = ?1').bind(iid).first();
+      /* Phase 5 (big update): the Active-listings fields — Currently in Sale Event (today's membership) and Eligible
+         for Sale Event On (the observed timeline). Guarded: the sale grains may not exist until marketingSync runs. */
+      let saleField = { in_sale: false, eligible_on: null };
+      try {
+        const sm = await env.DB.prepare('SELECT in_sale FROM adtool_sale_membership_day WHERE item_id = ?1 AND day = ?2').bind(iid, today).first();
+        const st = await env.DB.prepare('SELECT eligible_on FROM adtool_sale_timeline WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1').bind(iid).first();
+        saleField = { in_sale: sm ? Number(sm.in_sale) === 1 : false, eligible_on: st && st.eligible_on ? String(st.eligible_on) : null };
+      } catch (e) { saleField = { in_sale: false, eligible_on: null }; }
       /* Phase 1B: the today window comes from the today grain (listing_day's own today row has no ad columns) */
       const tRow = adtTodayRowHonest(await env.DB.prepare('SELECT report_day, spend, cpc_spend, clicks, impressions, attr_units, attr_revenue, orders, units, revenue, raw_priced_sum, refunds, actual_profit, pending_cost_orders, pending_fee_orders, unpriced_orders, sampled_at, orders_at FROM adtool_listing_today WHERE item_id = ?1 AND uk_day = ?2').bind(iid, today).first().catch(() => null), todayUtc);
       const kpis = { yesterday: adtWindowSums(days, yday, yday), d7: adtWindowSums(days, adtAddDays(today, -7), yday), d30: adtWindowSums(days, adtAddDays(today, -30), yday) };
@@ -4880,7 +4898,7 @@ const ADTOOL_ACTIONS = {
       } catch (e) { weeks_behaviour = []; }
       return {
         item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
-        header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null },
+        header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on },
         period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
         hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
         profit_label: 'Profit (Sales Analysis law)',
@@ -7921,64 +7939,348 @@ function adtSaleEligibility(row, today, daysBetween) {
     eligible_on: eligible ? today : null
   };
 }
+/* ---- Phase 5 (27 Sep 2026 big update, plan §3): the OBSERVED sale-event lifecycle ----
+   We cannot ask eBay which listings are in a whole-shop (INVENTORY_ANY) event — it returns no member
+   list and silently drops any listing whose price moved in the last 14 days. So the lifecycle below is
+   INFERRED from what we can see day by day: the day's orders (buyers pay ≈ (1 − pct) × the listed price
+   under a markdown, proven on AZHAR ABRT 23–26 Sep) and the day's listed price (adtool_price_day). Every
+   date is therefore at one-day granularity, and the page says so. Nothing here is ever sent to eBay. */
+function adtParseDiscountPct(text) {
+  /* "5% off" / "5 % off order" → 0.05; an amount-off or an unparseable string → null (fall back to the observed
+     order price, or to null, never to a made-up percentage). */
+  const m = /(\d+(?:\.\d+)?)\s*%/.exec(String(text || ''));
+  if (!m) return null;
+  const n = Number(m[1]);
+  return isFinite(n) && n > 0 && n < 100 ? round2(n / 100) : null;
+}
+function adtSaleDiscountObserved(orders, listedPrice) {
+  /* the discount buyers ACTUALLY paid on a listing over a set of orders (one day's, normally): mean paid per unit
+     vs the listed price. observable only when there is at least one non-cancelled order with a quantity and a
+     positive listed price; otherwise pct is null ("cannot observe today"). discounted is pct ≥ 2 % — below that is
+     rounding / a coupon, not the sale. sale_price in adtool_orders is the line total, so per unit = Σ sale ÷ Σ qty. */
+  const lp = Number(listedPrice) || 0;
+  let sale = 0, units = 0, n = 0;
+  for (const o of (orders || [])) {
+    if (String(o.status || '') === 'CANCELLED') continue;
+    const q = Number(o.qty) || 0, sp = Number(o.sale_price) || 0;
+    if (q <= 0) continue;
+    sale += sp; units += q; n++;
+  }
+  if (n === 0 || lp <= 0 || units <= 0) return { observable: false, orders: n, units, paid_per_unit: null, listed: lp > 0 ? round2(lp) : null, pct: null, discounted: null };
+  const paid = sale / units, pct = round2(1 - paid / lp);
+  return { observable: true, orders: n, units, paid_per_unit: round2(paid), listed: round2(lp), pct, discounted: pct >= 0.02 };
+}
+function adtSaleStatus(row) {
+  /* the one word for a listing's place in the lifecycle, from its derived row. Vocabulary (plan §3):
+     live · added-unconfirmed · not-discounted · removed · waiting · eligible · no-event. */
+  const r = row || {}, today = r.today || '';
+  const dp = r.discount_pct, observed = r.disc_src === 'observed';   // observed = an order proved the price buyers paid
+  const provenLive = observed && dp != null && dp > 0;               // buyers demonstrably paid the marked-down price
+  /* a price change during a live whole-shop event is eBay's silent removal — the event still lists the item
+     ('any' keeps in_sale = 1) but the 14-day clock has restarted, so it reads as removed, not live. The exception is
+     the net-neutral ÷(1-pct) enrolment raise (plan §1, AZHAR ABRT 23 Sep): if an order still shows the discount, it
+     never left the sale. */
+  if (r.in_sale && r.removed_by === 'price' && !provenLive) return 'removed';
+  if (r.in_sale) {
+    if (!observed) return 'added-unconfirmed';   // event running, no order yet to confirm the discount (event text only)
+    return dp > 0 ? 'live' : 'not-discounted';   // an order proves the marked-down price, or proves full price
+  }
+  if (r.removed_on) return (r.eligible_on && r.eligible_on > today) ? 'waiting' : 'eligible';
+  if (r.eligible_on) return r.eligible_on > today ? 'waiting' : 'eligible';   // never in a sale but a recent price change still runs the 14-day clock
+  if (r.event_running) return 'eligible';          // account has a running event, item not in it, clock over
+  return 'no-event';
+}
+function adtSaleTimeline(mdays, priceDays, today) {
+  /* the per-listing timeline from its membership-day sequence and its price history (all pure, so the brief's
+     worked example is a unit test): added_on = first day in_sale = 1; removed_on = the first day in_sale flips
+     1 → 0 after being 1, OR the day the price changed during a live run (eBay's silent drop) — whichever is
+     earlier; restriction_end = removed_on + 14; eligible_on = max(restriction_end, lastPriceChange + 14); a
+     whole-shop 'any' item never flips to 0 (removal is not observable) so its removed_on stays null while the
+     event runs. Dates are YYYY-MM-DD strings compared lexically. */
+  const days = (mdays || []).slice().filter(d => d && d.day).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
+  const pd = (priceDays || []).slice().filter(d => d && d.day).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
+  let prevP = null, lastPriceChange = null;
+  for (const r of pd) { const p = Number(r.price); if (!isFinite(p)) continue; if (prevP != null && p !== prevP) lastPriceChange = r.day; prevP = p; }
+  let added_on = null, flipRemoved = null, sawOne = false, lastLive = null, promo_id = null, basis = null;
+  for (const d of days) {
+    const inSale = Number(d.in_sale) === 1;
+    if (inSale) { if (added_on == null) added_on = d.day; sawOne = true; lastLive = d.day; if (d.promo_id) promo_id = String(d.promo_id); if (d.basis) basis = String(d.basis); }
+    else if (sawOne && flipRemoved == null) flipRemoved = d.day;
+  }
+  let priceRemoved = null;
+  if (added_on != null && lastPriceChange != null && lastPriceChange >= added_on && (lastLive == null || lastPriceChange <= lastLive)) priceRemoved = lastPriceChange;
+  let removed_on = null, removed_by = null;
+  if (flipRemoved != null && priceRemoved != null) { const flipFirst = flipRemoved <= priceRemoved; removed_on = flipFirst ? flipRemoved : priceRemoved; removed_by = flipFirst ? 'flip' : 'price'; }
+  else if (flipRemoved != null) { removed_on = flipRemoved; removed_by = 'flip'; }
+  else if (priceRemoved != null) { removed_on = priceRemoved; removed_by = 'price'; }
+  const last = days.length ? days[days.length - 1] : null;
+  const in_sale = !!(last && Number(last.in_sale) === 1);
+  const event_running = !!(last && last.promo_id);
+  const discount_pct = last ? (last.discount_pct == null ? null : Number(last.discount_pct)) : null;
+  const lastDiscSrc = last ? String(last.disc_src || '') : '';
+  /* the net-neutral ÷(1-pct) enrolment raise (plan §1, AZHAR ABRT 23 Sep): a price move during a live event whose
+     orders still show the ~pct discount was NOT eBay's silent removal — the listing never left the sale, so drop the
+     price-removal inference and let it read as live with no restart. */
+  if (in_sale && removed_by === 'price' && lastDiscSrc === 'observed' && discount_pct != null && discount_pct > 0) { removed_on = null; removed_by = null; }
+  const restriction_end = removed_on ? adtAddDays(removed_on, 14) : null;
+  const priceClock = lastPriceChange ? adtAddDays(lastPriceChange, 14) : null;
+  let eligible_on = null;
+  if (!(in_sale && removed_by !== 'price')) {
+    const cands = [restriction_end, priceClock].filter(Boolean);
+    eligible_on = cands.length ? cands.reduce((a, b) => a > b ? a : b) : null;   /* no observed clock → leave the date to the estimate */
+  }
+  const status = adtSaleStatus({ today, in_sale, event_running, removed_on, removed_by, eligible_on, discount_pct, added_on, disc_src: lastDiscSrc });
+  return { added_on, removed_on, removed_by, restriction_end, eligible_on, status, promo_id: promo_id || (last && last.promo_id ? String(last.promo_id) : ''), basis: basis || (last && last.basis ? String(last.basis) : ''), in_sale, discount_pct, disc_src: lastDiscSrc, last_price_change: lastPriceChange };
+}
 /* ADTOOL-P10-PURE-END */
+
+/* ---- Phase 5 schema: the three observed sale-event grains (plan §3, big update 27 Sep 2026) ----
+   Written by the EXISTING marketingSync behind adtool_sale_snapshot='on' (no second cron). Every column that a
+   missing brief field needs is one nullable/defaulted column here; nothing is sent to eBay. */
+const ADTOOL_REGISTER_P10 = [
+  ['SALE_MEMBERSHIP_DAY', 'Per-listing sale membership, one row per day', "written by marketingSync (:50) when adtool_sale_snapshot='on', for TODAY, for every ACTIVE listing of an account with a RUNNING MARKDOWN_SALE. in_sale=1 with basis 'list' when the item is in a BY_VALUE event's listing_ids, basis 'any' when the account runs a whole-shop (INVENTORY_ANY) event and the listing is ACTIVE (removal is NOT observable for these), else in_sale=0 basis 'none'. discount_pct = observed from the day's adtool_orders (buyers paid ~ (1-pct)x listed) when there is an order, else parsed from the event's discount text, else null. price = items_api listed price that day. OBSERVED, never asked of eBay", 'promotions, items_api, adtool_orders, adtool_price_day', "marketingSync :50 behind adtool_sale_snapshot (change-only writes)", 'unit tests: adtSaleDiscountObserved paid-vs-listed; the whole-shop / list / none basis rule'],
+  ['SALE_TIMELINE', 'Per-listing observed lifecycle', 'derived by pure adtSaleTimeline from the membership-day sequence + adtool_price_day: added_on = first day in_sale=1; removed_on = the first 1->0 flip after being in-sale OR the price-change day during a live run (whichever is earlier; a whole-shop item never flips so removed_on stays null while it runs); restriction_end = removed_on + 14; eligible_on = max(restriction_end, last price change + 14); status in {live, added-unconfirmed, not-discounted, removed, waiting, eligible, no-event}. Brief example holds: removed 10 Sep -> restriction_end 24 Sep -> eligible 24 Sep', 'adtool_sale_membership_day, adtool_price_day', 'marketingSync :50 (recomputed for the items whose membership changed)', 'unit tests: the 1,1,0 example; a whole-shop item with removed_on null; a price change during a live event'],
+  ['SALE_TASKS', 'Sale-event tasks (engine-native)', "an 'eligible' task is opened when a listing's observed status first flips to 'eligible' (partial unique index keeps one open per account+item+kind); an 'event-ending' task when a running event ends within 2 days and no replacement covers the account (the old 2-day bell, as a task). Marketing marks a task done/dismissed on the Sale events page; each op writes an audit row. Tasks live only in D1 (the Apps Script task-board bridge is a noted follow-up, out of scope)", 'adtool_sale_timeline, promotions', 'marketingSync :50; ops via adtoolSales (task_done / task_dismiss)', 'unit tests cover the timeline that drives the eligible flip; the ending fold is asserted on the promotions shape'],
+  ['SALE_ELIGIBLE_ON', 'Active-listings "Eligible for Sale Event On" + "Currently in Sale Event"', "adtoolCpcListings rows and adtoolListing's header carry in_sale (today's membership) and eligible_on (the observed timeline). YES/NO and a date, both OBSERVED at one-day granularity; for whole-shop events removal is not observable so eligible_on reflects the last observed price change + 14 rather than an eBay removal date", 'adtool_sale_membership_day, adtool_sale_timeline', 'read per request (joined, batched)', 'the honest-limits block on the page states the one-day granularity and the whole-shop caveat'],
+];
+let ADTOOL_SALE_SCHEMA_OK = false;
+async function ensureAdtoolSaleSchema(env) {
+  if (ADTOOL_SALE_SCHEMA_OK) return;
+  await ensureAdtoolPhase1Schema(env);
+  const ddl = [
+    "CREATE TABLE IF NOT EXISTS adtool_sale_membership_day (account TEXT NOT NULL, item_id TEXT NOT NULL, day TEXT NOT NULL, promo_id TEXT DEFAULT '', in_sale INTEGER DEFAULT 0, basis TEXT DEFAULT 'none', discount_pct REAL, disc_src TEXT DEFAULT '', price REAL, updated_at TEXT, PRIMARY KEY (account, item_id, day))",
+    "CREATE TABLE IF NOT EXISTS adtool_sale_timeline (account TEXT NOT NULL, item_id TEXT NOT NULL, promo_id TEXT DEFAULT '', added_on TEXT DEFAULT '', removed_on TEXT DEFAULT '', restriction_end TEXT DEFAULT '', eligible_on TEXT DEFAULT '', status TEXT DEFAULT '', updated_at TEXT, PRIMARY KEY (account, item_id, promo_id))",
+    "CREATE TABLE IF NOT EXISTS adtool_sale_tasks (task_id TEXT PRIMARY KEY, account TEXT, item_id TEXT, kind TEXT, eligible_on TEXT, status TEXT DEFAULT 'open', created_at TEXT, done_by TEXT DEFAULT '', done_at TEXT DEFAULT '', note TEXT DEFAULT '')",
+    /* one OPEN task per (account, item, kind): a done/dismissed row is outside the index so the item can be tasked again later */
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_adt_sale_task_open ON adtool_sale_tasks(account, item_id, kind) WHERE status = 'open'",
+    "CREATE INDEX IF NOT EXISTS idx_adt_sale_mem_item ON adtool_sale_membership_day(item_id, day)",
+  ];
+  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  /* disc_src distinguishes an OBSERVED discount (an order proved the price buyers paid) from the event text alone;
+     added after the first release, so an ALTER for any table already created without it. */
+  try { await env.DB.prepare("ALTER TABLE adtool_sale_membership_day ADD COLUMN disc_src TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  const seeds = ADTOOL_REGISTER_P10.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 10, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 10").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* the snapshot behaviour and the page are born ON; a manager can switch either off in Flags. DO NOTHING never
+     overrides an existing choice (adtool_page_sales may already be set by Apps Script). */
+  seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_sale_snapshot', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_sales', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  try { await adtBatch(env, seeds); } catch (e) { /* documentation + defaults; never let it stop a page */ }
+  ADTOOL_SALE_SCHEMA_OK = true;
+}
+
+/* ---- the snapshot writer: called BY marketingSync after its promotions/promo_members upsert, behind the flag ----
+   Observes today's membership from the running events + the day's orders, recomputes the timeline for the listings
+   that changed, and opens eligible / event-ending tasks. Budget-guarded (batch <= 50, a per-run item cap). Reads and
+   records only — nothing is sent to eBay. */
+async function adtSaleSnapshot(env) {
+  await ensureAdtoolSaleSchema(env);
+  const t0 = Date.now(), today = ukDate(''), CAP = 400;
+  const running = (await env.DB.prepare(
+    "SELECT account, promo_id, COALESCE(discount,'') AS discount, COALESCE(criterion_type,'') AS criterion, COALESCE(listing_ids,'') AS listing_ids, substr(end_at,1,10) AS ends " +
+    "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%'"
+  ).all()).results || [];
+  const acctEvents = {};
+  for (const e of running) {
+    const a = String(e.account), s = acctEvents[a] = acctEvents[a] || { any: [], listMap: {}, events: [] };
+    s.events.push(e);
+    if (String(e.criterion) === 'INVENTORY_ANY') s.any.push(e);
+    else for (const id of String(e.listing_ids || '').split(',').filter(Boolean)) if (!s.listMap[id]) s.listMap[id] = e;   /* basis 'list' (BY_VALUE) */
+  }
+  const accounts = Object.keys(acctEvents);
+  if (!accounts.length) { try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'no running markdown sale events'); } catch (e) {} return; }
+  const items = (await env.DB.prepare("SELECT item_id, account, price FROM items_api WHERE status = 'ACTIVE' AND account IN " + adtInList(accounts, 0)).bind(...accounts).all()).results || [];
+  const ids = items.map(i => String(i.item_id));
+  const ordMap = {};
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT item_id, qty, sale_price, status FROM adtool_orders WHERE local_date = ?1 AND item_id IN " + adtInList(ch, 1)).bind(today, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) (ordMap[String(r.item_id)] = ordMap[String(r.item_id)] || []).push(r); }
+  const memRows = [];
+  for (const it of items) {
+    const a = String(it.account), id = String(it.item_id), s = acctEvents[a];
+    let inSale = 0, basis = 'none', promo = '';
+    if (s.listMap[id]) { inSale = 1; basis = 'list'; promo = String(s.listMap[id].promo_id); }
+    else if (s.any.length) { inSale = 1; basis = 'any'; promo = String(s.any[0].promo_id); }
+    let dpct = null, dsrc = '';
+    if (inSale) {
+      const obs = adtSaleDiscountObserved(ordMap[id] || [], it.price);
+      /* an order proves the price buyers paid — keep it even when it is 0 (they paid full price): that is the
+         honest 'not-discounted' signal. Fall back to the event's own discount text ONLY when no order let us look. */
+      if (obs.observable && obs.pct != null) { dpct = obs.pct < 0 ? 0 : obs.pct; dsrc = 'observed'; }
+      else { const ev = basis === 'list' ? s.listMap[id] : s.any[0]; dpct = adtParseDiscountPct(ev && ev.discount); dsrc = dpct == null ? '' : 'event'; }
+    }
+    memRows.push({ account: a, item_id: id, promo_id: promo, in_sale: inSale, basis, discount_pct: dpct, disc_src: dsrc, price: it.price == null ? null : Number(it.price) });
+  }
+  const existing = {};
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT account, item_id, promo_id, in_sale, basis, discount_pct, disc_src, price FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN " + adtInList(ch, 1)).bind(today, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) existing[r.account + '|' + r.item_id] = r; }
+  const changed = [], writes = [];
+  for (const m of memRows) {
+    const cur = existing[m.account + '|' + m.item_id];
+    const same = cur && Number(cur.in_sale) === m.in_sale && String(cur.promo_id || '') === (m.promo_id || '') && String(cur.basis || '') === m.basis &&
+      ((cur.discount_pct == null && m.discount_pct == null) || Number(cur.discount_pct) === Number(m.discount_pct)) &&
+      String(cur.disc_src || '') === (m.disc_src || '') &&
+      ((cur.price == null && m.price == null) || Number(cur.price) === Number(m.price));
+    if (same) continue;
+    writes.push(env.DB.prepare("INSERT INTO adtool_sale_membership_day (account, item_id, day, promo_id, in_sale, basis, discount_pct, disc_src, price, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,datetime('now')) ON CONFLICT(account, item_id, day) DO UPDATE SET promo_id=?4, in_sale=?5, basis=?6, discount_pct=?7, disc_src=?8, price=?9, updated_at=datetime('now')").bind(m.account, m.item_id, today, m.promo_id, m.in_sale, m.basis, m.discount_pct, m.disc_src, m.price));
+    changed.push(m.item_id);
+  }
+  if (writes.length) await adtBatch(env, writes);
+  const todo = changed.slice(0, CAP);
+  let tlN = 0, taskN = 0;
+  if (todo.length) {
+    const memHist = {}, priceHist = {}, accById = {}, prevStatus = {};
+    const ms = adtChunks(todo).map(ch => env.DB.prepare("SELECT account, item_id, day, in_sale, basis, promo_id, discount_pct, disc_src FROM adtool_sale_membership_day WHERE item_id IN " + adtInList(ch, 0) + " ORDER BY item_id, day").bind(...ch));
+    for (const rs of await adtBatchRead(env, ms)) for (const r of rs) { (memHist[String(r.item_id)] = memHist[String(r.item_id)] || []).push(r); accById[String(r.item_id)] = String(r.account); }
+    const ps = adtChunks(todo).map(ch => env.DB.prepare("SELECT item_id, day, price FROM adtool_price_day WHERE item_id IN " + adtInList(ch, 0) + " ORDER BY item_id, day").bind(...ch));
+    for (const rs of await adtBatchRead(env, ps)) for (const r of rs) (priceHist[String(r.item_id)] = priceHist[String(r.item_id)] || []).push(r);
+    const ts = adtChunks(todo).map(ch => env.DB.prepare("SELECT item_id, status, updated_at FROM adtool_sale_timeline WHERE item_id IN " + adtInList(ch, 0)).bind(...ch));
+    for (const rs of await adtBatchRead(env, ts)) for (const r of rs) { const k = String(r.item_id); if (!prevStatus[k] || String(r.updated_at || '') > prevStatus[k].u) prevStatus[k] = { s: String(r.status || ''), u: String(r.updated_at || '') }; }
+    const tlWrites = [], taskWrites = [];
+    for (const id of todo) {
+      const tl = adtSaleTimeline(memHist[id] || [], priceHist[id] || [], today), acct = accById[id] || '';
+      tlWrites.push(env.DB.prepare("INSERT INTO adtool_sale_timeline (account, item_id, promo_id, added_on, removed_on, restriction_end, eligible_on, status, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,datetime('now')) ON CONFLICT(account, item_id, promo_id) DO UPDATE SET added_on=?4, removed_on=?5, restriction_end=?6, eligible_on=?7, status=?8, updated_at=datetime('now')").bind(acct, id, tl.promo_id || '', tl.added_on || '', tl.removed_on || '', tl.restriction_end || '', tl.eligible_on || '', tl.status));
+      const prev = prevStatus[id] ? prevStatus[id].s : '';
+      if (tl.status === 'eligible' && prev !== 'eligible') {
+        const tid = 'elig:' + acct + ':' + id + ':' + (tl.eligible_on || today);
+        taskWrites.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_sale_tasks (task_id, account, item_id, kind, eligible_on, status, created_at) VALUES (?1,?2,?3,'eligible',?4,'open',datetime('now'))").bind(tid, acct, id, tl.eligible_on || today));
+      }
+    }
+    if (tlWrites.length) await adtBatch(env, tlWrites);
+    if (taskWrites.length) await adtBatch(env, taskWrites);
+    tlN = tlWrites.length; taskN = taskWrites.length;
+  }
+  /* the 2-day ending bell, as a task: a running event ends within 2 days and no later event covers the account */
+  const endTasks = [];
+  for (const a of accounts) {
+    const evs = acctEvents[a].events;
+    for (const e of evs) {
+      const end = String(e.ends || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+      const dLeft = Math.round((Date.parse(end + 'T12:00:00Z') - Date.parse(today + 'T12:00:00Z')) / 86400000);
+      if (dLeft < 0 || dLeft > 2) continue;
+      if (evs.some(x => x !== e && String(x.ends || '') > end)) continue;   /* a replacement already runs later */
+      endTasks.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_sale_tasks (task_id, account, item_id, kind, eligible_on, status, created_at) VALUES (?1,?2,'','event-ending',?3,'open',datetime('now'))").bind('end:' + a + ':' + String(e.promo_id) + ':' + end, a, end));
+    }
+  }
+  if (endTasks.length) await adtBatch(env, endTasks);
+  try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'accounts ' + accounts.length + ' · listings ' + items.length + ' · changed ' + changed.length + ' · timelines ' + tlN + ' · tasks ' + (taskN + endTasks.length) + (changed.length > CAP ? ' · capped ' + CAP + ' (rest next run)' : '') + ' in ' + (Date.now() - t0) + ' ms'); } catch (e) {}
+}
 
 const ADTOOL_ACTIONS_P10 = {
   adtoolSales: {
     auth: 'any', fn: async (p, ctx) => {
+      await ensureAdtoolSaleSchema(ctx.env);   /* seeds adtool_page_sales + adtool_sale_snapshot before the gate reads them */
       await adtGate(ctx, 'adtool_page_sales');
-      const env = ctx.env, today = ukDate('');
+      const env = ctx.env, today = ukDate(''), u = ctx.user || {};
+      /* ---- write ops (payload.op → route cache skipped; gated to the ads roles by adtGate above) ---- */
+      if (p && p.op) {
+        const tid = String(p.task_id || ''), note = String(p.note || '').slice(0, 500);
+        if (!tid) throw new Error('SAY: give a task id');
+        if (p.op === 'task_done' || p.op === 'task_dismiss') {
+          const st = p.op === 'task_done' ? 'done' : 'dismissed';
+          await env.DB.prepare("UPDATE adtool_sale_tasks SET status = ?2, done_by = ?3, done_at = datetime('now'), note = ?4 WHERE task_id = ?1").bind(tid, st, String(u.email || ''), note).run();
+          await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_SALE_TASK', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), tid, st + (note ? ' · ' + note : '')).run();
+          /* the page reloads adtoolSales with an empty payload right after — purge both profit-class KV entries so the
+             just-closed task drops out at once instead of lingering for the 3-min read TTL. */
+          try { await env.HOT.delete(adtKvKey('adtoolSales', 'p', {})); await env.HOT.delete(adtKvKey('adtoolSales', 'np', {})); } catch (e) {}
+          return { ok: true, task_id: tid, status: st };
+        }
+        throw new Error('SAY: unknown op');
+      }
+      const acct = String((p && p.account) || '').trim();
       const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
-      /* how long has the price actually held? only answerable where the snapshot has history */
+      /* how long has the price actually held? only answerable where the snapshot has history — the observed clock */
       const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_price_day').first();
       const priceDays = Number(hist && hist.d) || 0;
-      const rows = (await env.DB.prepare(
+      const rows0 = (await env.DB.prepare(
         'SELECT i.item_id, i.account, i.title, i.image, i.price, i.start_time, i.last_revised, ' +
         '(SELECT MIN(pd.day) FROM adtool_price_day pd WHERE pd.item_id = i.item_id AND pd.price = i.price ' +
         '   AND pd.day > COALESCE((SELECT MAX(p2.day) FROM adtool_price_day p2 WHERE p2.item_id = i.item_id AND p2.price <> i.price), "")) AS price_since ' +
-        "FROM items_api i WHERE i.status = 'ACTIVE' ORDER BY i.account, i.item_id"
-      ).all()).results || [];
-      const items = rows.map(r => {
+        "FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + ' ORDER BY i.account, i.item_id'
+      ).bind(...(acct ? [acct] : [])).all()).results || [];
+      const ids = rows0.map(r => String(r.item_id));
+      /* observed lifecycle (latest timeline per item) + today's membership — precomputed by marketingSync */
+      const tlById = {}, memById = {};
+      { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, account, promo_id, added_on, removed_on, restriction_end, eligible_on, status, updated_at FROM adtool_sale_timeline WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
+        for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { const k = String(r.item_id); if (!tlById[k] || String(r.updated_at || '') > String(tlById[k].updated_at || '')) tlById[k] = r; } }
+      { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, promo_id, in_sale, basis, discount_pct, disc_src, price FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
+        for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) memById[String(r.item_id)] = r; }
+      const running = (await env.DB.prepare(
+        "SELECT account, name, promo_id, status, COALESCE(discount,'') AS discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
+        "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY account'
+      ).bind(...(acct ? [acct] : [])).all()).results || [];
+      /* INVENTORY_ANY covers the WHOLE SHOP: eBay returns no listing list and enrols each listing itself, so item_n=0
+         means "not enumerated", never "empty". Per-item removal is therefore not observable for these (honest limits below). */
+      const anyCover = Array.from(new Set(running.filter(r => String(r.criterion) === 'INVENTORY_ANY').map(r => String(r.account))));
+      const coveredAcct = {}; for (const a of anyCover) coveredAcct[a] = true;
+      const runByAcct = {}; for (const e of running) (runByAcct[String(e.account)] = runByAcct[String(e.account)] || []).push(e);
+      const items = rows0.map(r => {
+        const id = String(r.item_id), t = tlById[id] || null, m = memById[id] || null, runs = runByAcct[String(r.account)] || [];
         const steadyFromPrice = (priceDays >= 14 && r.price_since) ? daysBetween(String(r.price_since), today) : null;
-        const e = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
-        return Object.assign({ item_id: r.item_id, account: r.account, title: r.title, image: r.image ? String(r.image) : null, price: r.price }, e);
+        const est = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
+        const inSale = m ? Number(m.in_sale) === 1 : false;
+        /* only a MEMBER of a running event carries a discount: for a listing not in the sale, do not borrow the
+           account's event and fabricate an "original → sale price". evForItem, pct and sale stay null unless in_sale. */
+        const evForItem = inSale ? ((m && m.promo_id ? runs.find(e => String(e.promo_id) === String(m.promo_id)) : null) || runs[0] || null) : null;
+        const observedDisc = m ? String(m.disc_src || '') === 'observed' : false;
+        const pct = !inSale ? null : ((m && m.discount_pct != null) ? Number(m.discount_pct) : (evForItem ? adtParseDiscountPct(evForItem.discount) : null));
+        const orig = r.price == null ? null : round2(r.price);
+        const sale = (inSale && orig != null && pct != null) ? round2(orig * (1 - pct)) : null;
+        const status = t ? String(t.status) : (est.eligible ? 'eligible' : 'no-event');
+        const eligible_on = t ? (t.eligible_on || null) : est.eligible_on;
+        /* only say "(observed)" when an order actually proved the price; the event text alone is "states … (unconfirmed)" */
+        const dpNum = m && m.discount_pct != null ? Number(m.discount_pct) : null;
+        const observed_note = !m
+          ? (priceDays >= 14 ? 'no snapshot for this listing yet' : 'estimate — the observed price clock has ' + priceDays + ' of 14 days')
+          : !inSale ? 'not in a running sale event'
+          : observedDisc
+            ? (dpNum > 0 ? 'buyers paid ' + Math.round(dpNum * 100) + '% off (observed)' : 'an order today shows buyers paid full price')
+            : String(m.basis) === 'any' ? 'whole-shop event: eBay auto-enrols; per-item removal not observable'
+            : dpNum != null ? 'event states ' + Math.round(dpNum * 100) + '% off (no order yet to confirm)' : 'in the event; no order yet to observe the discount';
+        return {
+          item_id: id, account: String(r.account), title: String(r.title || ''), image: r.image ? String(r.image) : null,
+          event_running: inSale, promo_id: t ? String(t.promo_id || '') : (evForItem ? String(evForItem.promo_id || '') : ''),
+          discount_pct: pct, ends: evForItem ? String(evForItem.ends || '') : (runs[0] ? String(runs[0].ends || '') : ''),
+          basis: m ? String(m.basis) : (coveredAcct[String(r.account)] ? 'any' : 'none'),
+          in_sale: inSale, status, added_on: t ? (t.added_on || null) : null, removed_on: t ? (t.removed_on || null) : null,
+          restriction_end: t ? (t.restriction_end || null) : null, eligible_on,
+          original_price: orig, sale_price: sale, difference: (orig != null && sale != null) ? round2(orig - sale) : null,
+          discount_shown: pct != null ? Math.round(pct * 100) + '%' : null, observed_note, estimate: !m,
+        };
       });
-      const C = adtSaleCohorts(items, today, adtAddDays);
+      /* counts keyed by the view's six chip buckets (live folds in added-unconfirmed; not-discounted/no-event fold
+         into notinsale), not by raw status — the frontend reads status_filter[bucket] directly. */
+      const saleBucket = s => { s = String(s || '').toLowerCase(); if (s === 'live' || s === 'added-unconfirmed') return 'live'; if (s === 'eligible') return 'eligible'; if (s === 'waiting') return 'waiting'; if (s === 'removed') return 'removed'; return 'notinsale'; };
+      const status_filter = { live: 0, eligible: 0, waiting: 0, removed: 0, notinsale: 0 };
+      for (const it of items) { const b = saleBucket(it.status); status_filter[b] = (status_filter[b] || 0) + 1; }
+      const C = adtSaleCohorts(items.map(i => ({ item_id: i.item_id, eligible: i.status === 'eligible' })), today, adtAddDays);
       const byAcct = {};
-      for (const i of items) {
-        const a = byAcct[i.account] = byAcct[i.account] || { account: i.account, active: 0, eligible: 0, blocked: 0 };
-        a.active++; if (i.eligible) a.eligible++; else a.blocked++;
-      }
-      const live = (await env.DB.prepare(
-        "SELECT account, name, status, discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
-        "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%' ORDER BY account"
-      ).all()).results || [];
-      /* INVENTORY_ANY means the event covers the WHOLE SHOP — eBay does not return a listing list
-         because there is no list, and it adds each listing itself the moment that listing qualifies.
-         An item count of zero on such an event means "not enumerated", never "empty". Getting this
-         backwards would have had the owner building a rotation he does not need. */
-      const anyCover = live.filter(r => String(r.criterion) === 'INVENTORY_ANY').map(r => r.account);
-      const covered = {}; for (const a of anyCover) covered[a] = true;
+      for (const i of items) { const a = byAcct[i.account] = byAcct[i.account] || { account: i.account, active: 0, in_sale: 0, eligible: 0, waiting: 0 }; a.active++; if (i.in_sale) a.in_sale++; if (i.status === 'eligible') a.eligible++; if (i.status === 'waiting') a.waiting++; }
+      /* open tasks with their product cell + the flags the brief asks for */
+      const tasksRaw = (await env.DB.prepare("SELECT task_id, account, item_id, kind, eligible_on, status, created_at FROM adtool_sale_tasks WHERE status = 'open'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY created_at DESC LIMIT 200').bind(...(acct ? [acct] : [])).all()).results || [];
+      await adtProductCells(env, tasksRaw.filter(x => x.item_id));
+      const byId = {}; for (const it of items) byId[it.item_id] = it;
+      const tasks = tasksRaw.map(x => { const it = byId[String(x.item_id)] || {}; return { task_id: x.task_id, item_id: String(x.item_id || ''), account: String(x.account || ''), title: x.title || it.title || '', image: x.image || it.image || null, kind: String(x.kind || ''), eligible_on: x.eligible_on || null, status: String(x.status || ''), flags: { already_added: !!it.in_sale, live: it.status === 'live', price_changed_on: it.status === 'removed' ? (it.removed_on || null) : null } }; });
+      const obsSince = await env.DB.prepare('SELECT MIN(day) AS d FROM adtool_sale_membership_day' + (acct ? ' WHERE account = ?1' : '')).bind(...(acct ? [acct] : [])).first();
+      const observed_since = obsSince && obsSince.d ? String(obsSince.d) : null;
+      const rowsCapped = items.slice(0, 500);
       return {
-        today,
-        rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
-        price_history_days: priceDays,
-        clock_is_real: priceDays >= 14,
-        by_account: Object.keys(byAcct).map(k => Object.assign(byAcct[k], {
-          half: Math.ceil(byAcct[k].active / 2),
-          meets_half: byAcct[k].eligible >= Math.ceil(byAcct[k].active / 2)
-        })),
-        eligible_total: C.eligible,
-        active_total: items.length,
-        cohorts: { a: C.A.length, b: C.B.length, cycle: C.cycle },
-        schedule: C.plan,
-        blocked_sample: items.filter(i => !i.eligible).slice(0, 40),
-        eligible_sample: items.filter(i => i.eligible).slice(0, 40),
-        running: live,
+        today, fresh: await adtFresh(env, 'day'), account: acct || 'all', accounts: Object.keys(byAcct).sort(),
+        clock_is_real: priceDays >= 14, price_history_days: priceDays, observed_since,
         covers_whole_shop: anyCover,
-        rotation_needed: anyCover.length < (Object.keys(byAcct).length || 1),
+        estimate_banner: priceDays < 14 ? ('dates are estimated until 14 days of price history exist (' + priceDays + ' so far)' + (observed_since ? '; observed removal begins from ' + observed_since : '')) : null,
+        rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
+        running_events: running.map(e => ({ account: String(e.account), name: String(e.name || ''), promo_id: String(e.promo_id || ''), discount: String(e.discount || ''), criterion: String(e.criterion || ''), starts: String(e.starts || ''), ends: String(e.ends || ''), covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items' })),
+        by_account: Object.values(byAcct), cohorts: { a: C.A.length, b: C.B.length, cycle: C.cycle }, schedule: C.plan,
+        status_filter, active_total: items.length, rows: rowsCapped, rows_total: items.length,
+        tasks,
+        honest_limits: [
+          'dates are observed at one-day granularity from ' + (observed_since || 'the first snapshot'),
+          'for whole-shop (INVENTORY_ANY) events an individual item’s removal cannot be seen from eBay — it counts as in-sale while the event runs and the listing is active, with an adtool_price_day dip as corroboration',
+          'sale price is computed from the event’s discount unless the observed order price proves the marked-down price',
+          'nothing is ever sent to eBay — the tool only observes and records',
+        ],
         computed_at: new Date().toISOString(),
-        source: 'items_api + adtool_price_day · eBay sale-event rules, Seller Centre'
+        source: 'adtool_sale_timeline + adtool_sale_membership_day (observed) · promotions (running events) · items_api + adtool_price_day (estimate until the clock is real) · eBay sale-event rules, Seller Centre',
       };
     },
   },
@@ -8213,6 +8515,17 @@ async function adtoolCpcCompute(env, p) {
     if (postCtx && postCtx[id]) { row.last_active_day = postCtx[id].last_active_day; row.last_active_source = postCtx[id].last_active_source; row.before = postCtx[id].before; row.after = postCtx[id].after; }
     return row;
   }).sort((x, y) => (Number(y.spend) || 0) - (Number(x.spend) || 0) || (Number(y.attr_revenue) || 0) - (Number(x.attr_revenue) || 0));
+  /* Phase 5 (big update): the Active-listings fields on every CPC row — Currently in Sale Event (today's membership,
+     → 'YES'/'NO' in the view) and Eligible for Sale Event On (the observed timeline). Two batched reads, guarded so a
+     database without the sale grains (before marketingSync runs) simply leaves them false / null. */
+  try {
+    const saleIn = {}, saleElig = {};
+    const ms = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, in_sale FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
+    for (const rs of await adtBatchRead(env, ms)) for (const r of rs) saleIn[String(r.item_id)] = Number(r.in_sale) === 1;
+    const ts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, eligible_on, updated_at FROM adtool_sale_timeline WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
+    for (const rs of await adtBatchRead(env, ts)) for (const r of rs) { const k = String(r.item_id); if (saleElig[k] === undefined || String(r.updated_at || '') > String(saleElig[k].u || '')) saleElig[k] = { v: r.eligible_on ? String(r.eligible_on) : null, u: String(r.updated_at || '') }; }
+    for (const row of rows) { row.in_sale = !!saleIn[row.item_id]; row.eligible_on = saleElig[row.item_id] ? saleElig[row.item_id].v : null; }
+  } catch (e) { for (const row of rows) { if (row.in_sale === undefined) row.in_sale = false; if (row.eligible_on === undefined) row.eligible_on = null; } }
   return {
     period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
     rows, totals: adtCpcTotals(rows), prev: await adtCpcPrevTotals(env, ids, w.prev_from, w.prev_to),

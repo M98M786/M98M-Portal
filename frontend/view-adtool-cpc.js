@@ -231,6 +231,14 @@
   function unitsWindow(r) {
     return '<span title="all-channel units — 7 / 14 / 30 days to the window end">' + cnt(r.units_7d) + ' · ' + cnt(r.units_14d) + ' · ' + cnt(r.units_30d) + '</span>';
   }
+  /* Sale-event fields (Phase 5): observed membership + when eligible again. Null → "—". */
+  function inSaleCell(r) {
+    if (r.in_sale == null) return '<span class="cpc-sub">—</span>';
+    return r.in_sale ? '<span class="cpc-pos">YES</span>' : '<span class="cpc-sub">NO</span>';
+  }
+  function eligibleCell(r) {
+    return r.eligible_on ? '<span class="cpc-sub">' + dayTxt(r.eligible_on) + '</span>' : '<span class="cpc-sub">—</span>';
+  }
 
   var ACTIVE_COLS = [
     { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
@@ -247,6 +255,8 @@
     { key: 'cvr', label: 'CVR', cls: 'r', title: 'attributed units ÷ clicks', cell: function (r) { return pct(cvrOf(r)); }, sortVal: cvrOf },
     { key: 'roas', label: 'ROAS', cls: 'r', title: 'attributed revenue ÷ spend', cell: function (r) { var v = roasOf(r); return '<span class="' + (v != null ? (v < 1 ? 'cpc-neg' : 'cpc-pos') : '') + '">' + roasTxt(v) + '</span>'; }, sortVal: roasOf },
     { key: 'actual_profit', label: 'Profit (law)', cls: 'r', src: 'orders', title: 'this listing under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } },
+    { key: 'in_sale', label: 'In sale event', cls: 'r', src: 'sale events', title: 'Currently in a running Sale Event — observed at one-day granularity; whole-shop events auto-enrol', cell: inSaleCell, sortVal: function (r) { return r.in_sale ? 1 : 0; } },
+    { key: 'eligible_on', label: 'Eligible on', cls: 'r', src: 'sale events', title: 'Eligible for a Sale Event again on this date (after the 14-day restriction)', cell: eligibleCell, sortVal: function (r) { return r.eligible_on || ''; } },
     { key: 'lever', label: 'Lever', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
   ];
 

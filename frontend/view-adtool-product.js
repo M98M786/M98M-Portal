@@ -163,7 +163,10 @@
       '<div>Margin before ads <b style="color:var(--text)">' + gbp(H.margin) + '</b> <span class="at-src">' + esc(H.margin_source || '') + '</span></div>' +
       '<div>Break-even ROAS <b style="color:var(--text)">' + roas(H.breakeven_roas) + '</b></div>' +
       '<div>Listed ' + esc(H.start_time ? String(H.start_time).slice(0, 10) : '—') + (H.age_days != null ? ' · ' + H.age_days + ' days' : '') + '</div>' +
-      '<div>First ad day ' + esc(H.first_ad_day || '—') + ' · last ' + esc(H.last_ad_day || '—') + '</div></div></div></div>';
+      '<div>First ad day ' + esc(H.first_ad_day || '—') + ' · last ' + esc(H.last_ad_day || '—') + '</div>' +
+      /* Phase 5 sale-event fields — observed at one-day granularity; null → not known yet */
+      '<div>Currently in Sale Event: <b style="color:var(--text)">' + (H.in_sale == null ? '—' : (H.in_sale ? 'YES' : 'NO')) + '</b></div>' +
+      '<div>Eligible for Sale Event On <b style="color:var(--text)">' + esc(H.eligible_on ? String(H.eligible_on).slice(0, 10) : '—') + '</b></div></div></div></div>';
     /* KPIs */
     /* one profit per window, the Sales Analysis law; `actual` is the engine's item-level key and
        `pending` / `pending_fee` count the orders it could not price */

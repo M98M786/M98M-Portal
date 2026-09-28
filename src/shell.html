@@ -1284,7 +1284,9 @@ var ADT_REG_MAP = [
   [/week behaviour|weeks behaviour/i, ['adtool_descriptors', 'adtool_listing_week']],
   [/scenario|what must change|binding limit|scale profitable/i, ['adtool_descriptors', 'adtool_cap_days', 'adtool_stages', 'adtool_forecast']],
   [/stage explainer|stage guide|each stage/i, ['adtool_stages']],
-  [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']]
+  [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']],
+  /* Phase 5: sale-event lifecycle (observed membership, derived timeline, eligibility tasks) */
+  [/sale event|sale events|eligible again|restriction|membership|eligible on|in sale event/i, ['adtool_sale_membership_day', 'adtool_sale_timeline', 'adtool_sale_tasks', 'promotions', 'promo_members', 'adtool_price_day']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label){
