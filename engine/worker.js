@@ -16603,8 +16603,9 @@ const ROUTES = {
      cure is Trading ReviseFixedPriceItem with Variations.ModifyNameList, which keeps the item
      number and every sold/watch/search figure. This lets the build session drive that flow with
      the engine's own token — the token itself never leaves the worker (the same stance that keeps
-     oauth_ref out of backupDump). GetItem + ReviseFixedPriceItem only, UK site, plus the read-only
-     taxonomy aspect probe that proves the new name is custom, not one eBay has reserved. */
+     oauth_ref out of backupDump). GetItem + ReviseFixedPriceItem + read-only GetSellerList (the
+     full-catalogue variation sweep), UK site, plus the read-only taxonomy aspect probe that proves
+     the new name is custom, not one eBay has reserved. */
   ebayTradeCall: {
     auth: 'sync', fn: async (p, ctx) => {
       const call = String(p.call || '');
@@ -16621,8 +16622,8 @@ const ROUTES = {
           { headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } });
         return { status: r.status, body: await r.text() };
       }
-      if (call !== 'GetItem' && call !== 'ReviseFixedPriceItem') {
-        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem or taxonomyAspects');
+      if (call !== 'GetItem' && call !== 'ReviseFixedPriceItem' && call !== 'GetSellerList') {
+        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem, GetSellerList or taxonomyAspects');
       }
       const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
       const r = await fetch('https://api.ebay.com/ws/api.dll', {
