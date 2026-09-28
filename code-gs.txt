@@ -767,7 +767,7 @@ function runMissedCheckpointSweep() {
   /* R5: the Ali order-number sweep (day tabs → Engine) — the one the Order Processors wait on,
    * so it outranks the dashboard refreshers. Carries the one-time first-backup bootstrap. */
   if (typeof nightWatchHourlyRide === 'function') {
-    try { nightWatchHourlyRide(); }
+    try { nightWatchHourlyRide(t0); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
   /* Queued hunt-decision mirrors (29 Aug) — land the workbooks' copies out of the interactive
@@ -24060,11 +24060,18 @@ function nbHeaderCols_(headers) {
   return { ebayCol: ebayCol, aliNumCol: aliNumCol, linkCol: linkCol, altLinkCol: aliLinkCol };
 }
 
-function aliSweep() {
+function aliSweep(deadline) {
+  /* 28 Sept (owner forwarded a 'Exceeded maximum execution time' email for the hourly rider):
+     this full sweep walks every order book × 7 days with no clock of its own, so a busy hour —
+     or the 6-hour forced-full-read boundary — could run the 6-minute trigger to an OS kill,
+     losing the whole hour's sweep AND the tail flush. A hard deadline lets it stop cleanly:
+     the end-of-function engine flush then always runs, and any book not fully swept keeps its
+     old fingerprint so the next hour resweeps it. Default 4 min for standalone/editor runs. */
+  var swDeadline = (typeof deadline === 'number' && deadline > 0) ? deadline : (Date.now() + 240000);
   var conns = readTab_('CONNECTIONS').filter(function (c) {
     return String(c.sheet_kind) === 'order_processing' && String(c.status || '').toLowerCase() !== 'off';
   });
-  var out = [], opened = 0;
+  var out = [], opened = 0, swDeferred = 0;
   /* 13 Sept (owner: "make the speed fast"): this hourly full sweep opened every order book and
      read EVERY column of seven day tabs each — 290 s at the top of every hour, exactly when the
      hourly users/cost push also runs, so staff clicks queued behind both. Two cuts: a book whose
@@ -24075,6 +24082,7 @@ function aliSweep() {
   try { swMap = JSON.parse(swProps.getProperty('ALI_SWEEP_FP') || '{}') || {}; } catch (e) { swMap = {}; }
   var swSkipped = 0;
   conns.forEach(function (c) {
+    if (Date.now() > swDeadline) { swDeferred++; return; }   // out of budget — leave this book, its fingerprint untouched so next hour resweeps it
     var bookId = String(c.spreadsheet_id);
     var stamp = '';
     try { stamp = String(DriveApp.getFileById(bookId).getLastUpdated().getTime()); } catch (e) { stamp = ''; }
@@ -24082,9 +24090,10 @@ function aliSweep() {
     if (stamp && prev.stamp === stamp && (Date.now() - Number(prev.at || 0)) < 6 * 3600000) { swSkipped++; return; }
     var ss;
     try { ss = SpreadsheetApp.openById(bookId); } catch (e) { return; }
-    swMap[bookId] = { stamp: stamp, at: Date.now() };
     var sheets = ss.getSheets();
+    var bookDone = true;
     for (var back = 0; back <= 6; back++) {
+      if (Date.now() > swDeadline) { bookDone = false; break; }   // partial book — do NOT fingerprint it, so it is reswept next hour
       /* UK day, like the tabs themselves — see aliSweepFast. Asking Karachi put the window a
          day ahead, so back=0 hunted a tab that does not exist yet and the far end of the range
          lost a real day off the bottom. */
@@ -24132,6 +24141,7 @@ function aliSweep() {
         break;                                             // one tab per date is enough
       }
     }
+    if (bookDone) swMap[bookId] = { stamp: stamp, at: Date.now() };   // fingerprint a fully-swept book only
   });
   var written = 0;
   for (var i = 0; i < out.length; i += 400) {
@@ -24140,8 +24150,8 @@ function aliSweep() {
   }
   try { swProps.setProperty('ALI_SWEEP_FP', JSON.stringify(swMap).slice(0, 8000)); } catch (e) {}
   PropertiesService.getScriptProperties().setProperty('ALI_SWEEP_LAST',
-    JSON.stringify({ at: new Date().toISOString(), tabs: opened, found: out.length, written: written, skipped_books: swSkipped }));
-  return { accounts: conns.length, tabs: opened, found: out.length, written: written, skipped_books: swSkipped };
+    JSON.stringify({ at: new Date().toISOString(), tabs: opened, found: out.length, written: written, skipped_books: swSkipped, deferred_books: swDeferred }));
+  return { accounts: conns.length, tabs: opened, found: out.length, written: written, skipped_books: swSkipped, deferred_books: swDeferred };
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -24250,19 +24260,25 @@ function aliSweepFast() {
   return { tabs: tabs, found: out.length, written: written };
 }
 
-function nightWatchHourlyRide() {
-  try { aliSweep(); }
+function nightWatchHourlyRide(t0) {
+  /* 28 Sept: budgeted against the 6-minute trigger clock. The Ali sweep (the one Order
+     Processors wait on) gets the first 4 minutes and stops itself cleanly; the cheaper riders
+     run only while under 5 minutes, so the trigger always finishes on its own instead of being
+     killed. Anything skipped a busy hour is picked up next hour (all are hourly + idempotent). */
+  var rideStart = (typeof t0 === 'number' && t0 > 0) ? t0 : Date.now();
+  var underBudget = function () { return (Date.now() - rideStart) < 300000; };
+  try { aliSweep(rideStart + 240000); }
   catch (e) { logActivity_('trigger', 'ERROR:aliSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* R8 rides: link-request sweep hourly; the weekly review nudge is a cheap no-op most hours. */
-  if (typeof orderLinkSweep === 'function') {
+  if (typeof orderLinkSweep === 'function' && underBudget()) {
     try { orderLinkSweep(); }
     catch (e) { logActivity_('trigger', 'ERROR:orderLinkSweep', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
-  if (typeof reviewWatch === 'function') {
+  if (typeof reviewWatch === 'function' && underBudget()) {
     try { reviewWatch(); }
     catch (e) { logActivity_('trigger', 'ERROR:reviewWatch', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
-  if (!PropertiesService.getScriptProperties().getProperty('BACKUP_SS_MONEY')) {
+  if (underBudget() && !PropertiesService.getScriptProperties().getProperty('BACKUP_SS_MONEY')) {
     try { nightBackupPull(); }
     catch (e) { logActivity_('trigger', 'ERROR:firstBackup', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }

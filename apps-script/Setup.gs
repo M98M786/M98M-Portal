@@ -148,7 +148,7 @@ function runMissedCheckpointSweep() {
   /* R5: the Ali order-number sweep (day tabs → Engine) — the one the Order Processors wait on,
    * so it outranks the dashboard refreshers. Carries the one-time first-backup bootstrap. */
   if (typeof nightWatchHourlyRide === 'function') {
-    try { nightWatchHourlyRide(); }
+    try { nightWatchHourlyRide(t0); }
     catch (e) { logActivity_('trigger', 'ERROR:nightWatchRide', '', '', '', String(e && e.stack || e)); }
   }
   /* Queued hunt-decision mirrors (29 Aug) — land the workbooks' copies out of the interactive
