@@ -479,9 +479,12 @@ function chartLineSeries(pts, opt){
     '" stroke-linejoin="round" stroke-linecap="round"/>' + chartValueDots(pts, opt);
 }
 /* A bar chart in one call, with the same number pills as the line kit — because a bar you cannot
-   read the value of is decoration. pts = [{label, value, title?, strong?}]. opt: {height, fmt,
+   read the value of is decoration. pts = [{label, value, title?, strong?, muted?}]. opt: {height, fmt,
    color, strongColor, everyNth} — fmt turns a value into the pill text (chartMoney by default).
-   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. */
+   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. A `muted`
+   bar is drawn hatched in the same colour — a figure that is still filling (a week in progress),
+   never to be read against the solid bars beside it. */
+var CHART_PATTERN_SEQ = 0;
 function chartBars(pts, opt){
   opt = opt || {}; if (!pts || !pts.length) { return ''; }
   var H = opt.height || 150, W = 980, L = 46, R = 12, T = 22, B = 26;
@@ -493,6 +496,13 @@ function chartBars(pts, opt){
   var scale = (zero - T) / mx;
   var bw = (W - L - R) / pts.length;
   var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
+  var hatch = '';
+  if (pts.some(function(p){ return p && p.muted; })) {
+    hatch = 'cb-hatch-' + (++CHART_PATTERN_SEQ);
+    out += '<defs><pattern id="' + hatch + '" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+           '<rect width="7" height="7" fill="' + col + '" opacity=".18"/>' +
+           '<line x1="0" y1="0" x2="0" y2="7" stroke="' + col + '" stroke-width="2.2" opacity=".8"/></pattern></defs>';
+  }
   out += '<line x1="' + L + '" y1="' + zero.toFixed(1) + '" x2="' + (W - R) + '" y2="' + zero.toFixed(1) +
          '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
   var dots = [];
@@ -502,7 +512,8 @@ function chartBars(pts, opt){
     var x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
     var y = v >= 0 ? zero - hgt : zero;
     out += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) +
-           '" rx="2.5" fill="' + (p.strong ? strong : col) + '">' +
+           '" rx="2.5" fill="' + (p.muted && hatch ? 'url(#' + hatch + ')' : (p.strong ? strong : col)) + '"' +
+           (p.muted ? ' stroke="' + col + '" stroke-width="1" stroke-dasharray="3 2"' : '') + '>' +
            (p.title ? '<title>' + esc(p.title) + '</title>' : '') + '</rect>';
     if (p.label != null && p.label !== '' && (!opt.everyNth || i % opt.everyNth === 0 || i === pts.length - 1)) {
       out += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' +
@@ -829,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20260928-1411';
+var BUILD = '20260930-1759';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2897,6 +2908,7 @@ VIEWS.home = {
     '.cpc-neg{color:' + LOSS + ';font-weight:700}.cpc-pos{color:var(--gold-a);font-weight:700}',
     '.cpc-held{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2)}',
     '.cpc-held.up{color:var(--gold-a);border-color:rgba(242,176,53,.45)}.cpc-held.down{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
+    '.cpc-held.early{color:var(--text-3);border-style:dashed;text-transform:none;letter-spacing:0}',
     '.cpc-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
     '.cpc-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
   ].join(''));
@@ -2986,7 +2998,7 @@ VIEWS.home = {
     h += totalsTiles(D);
     h += comparePanel(D);
     h += '<div class="cpc-note">' + (post
-      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
+      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. <b>Sales</b> compares units <i>per day</i> — since the stop against while advertised — and reads "held" at 60 % of the advertised rate or better; under 7 days since the stop it is too early to tell. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
       : '<b>CPC active.</b> Every listing with an ACTIVE ad in a RUNNING cost-per-click campaign. Ads are counted by eBay\'s report day (UTC); all-channel orders and units by the UK day. Impressions exist only from 18 Sep, so an earlier window shows "—". Profit is the listing\'s own figure under the Sales Analysis law; there is no collective profit. avg CPC, CVR, ROAS and ACoS read "—" when their denominator is zero.') +
       ' The lever a hand can move is the campaign\'s daily budget (eBay exposes no per-click bid). Nothing on this page is sent to eBay.</div>';
 
@@ -3114,14 +3126,44 @@ VIEWS.home = {
     { key: 'lever', label: 'Lever', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
   ];
 
-  /* CPC post: before the ad stopped vs after, and whether sales held. */
-  function heldCell(r) {
+  /* CPC post: before the ad stopped vs after, and whether sales held — judged on per-day units RATES, never on
+     the raw totals: the before window is 30 days and the after window is only what has elapsed since the stop
+     (0..30 days), so totals would stamp every recent stop "fell". Under 7 days after the stop there is not enough
+     to judge: "too early". The engine's verdict (adtCpcHeld: held / fell / too early / no sales either side, with
+     before.units_per_day and after.units_per_day) wins when it sends one; the ratio of the two rates is the sort key. */
+  function daysIn(w, fallback) {
+    if (!w || typeof w !== 'object') return fallback == null ? null : fallback;
+    var d = num(w.days); if (d != null) return Math.max(0, d);
+    var a = String(w.from || '').slice(0, 10), b = String(w.to || '').slice(0, 10);
+    if (!/^\d{4}-\d\d-\d\d$/.test(a) || !/^\d{4}-\d\d-\d\d$/.test(b)) return fallback == null ? null : fallback;
+    var n = Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000) + 1;
+    return n < 0 ? 0 : n;                                    /* from > to = the stop was yesterday: 0 days after */
+  }
+  function heldJudge(r) {
     var before = r.before || {}, after = r.after || {};
+    var sent = String(r.held || '').toLowerCase();
+    if (sent) {
+      var v = /early/.test(sent) ? 'early' : (/held|up/.test(sent) ? 'held' : (/fell|down/.test(sent) ? 'fell' : (/n\/a|none|no sales/.test(sent) ? 'na' : null)));
+      var brS = num(before.units_per_day), arS = num(after.units_per_day);
+      return v ? { v: v, ratio: (brS != null && brS > 0 && arS != null) ? arS / brS : null, days: daysIn(after, null), rule: r.held_rule || '', br: brS, ar: arS } : null;
+    }
     var bu = num(before.units != null ? before.units : before.attr_units), au = num(after.units != null ? after.units : after.attr_units);
-    if (bu == null || au == null) return '<span class="cpc-held">—</span>';
-    if (bu === 0) return '<span class="cpc-held">n/a</span>';
-    var held = au >= bu * 0.6;
-    return '<span class="cpc-held ' + (held ? 'up' : 'down') + '">' + (held ? 'held' : 'fell') + '</span>';
+    if (bu == null || au == null) return null;
+    var bd = daysIn(before, 30), ad = daysIn(after, null);
+    if (ad == null) return null;
+    if (ad < 7) return { v: 'early', days: ad };
+    if (!bd || bu === 0) return { v: 'na' };
+    var br = bu / bd, ar = au / ad;
+    return { v: ar >= br * 0.6 ? 'held' : 'fell', ratio: ar / br, days: ad, br: br, ar: ar };
+  }
+  function rate(v) { return v == null ? '—' : (Math.round(v * 100) / 100) + '/day'; }
+  function heldCell(r) {
+    var j = heldJudge(r);
+    if (!j) return '<span class="cpc-held">—</span>';
+    if (j.v === 'na') return '<span class="cpc-held" title="no units while advertised or since — nothing to hold">n/a</span>';
+    if (j.v === 'early') return '<span class="cpc-held early" title="under 7 days since the ad stopped — not enough to judge">too early' + (j.days != null ? ' (' + Math.round(j.days) + ' d)' : '') + '</span>';
+    var t = j.rule || (j.br != null ? 'since the stop ' + rate(j.ar) + ' vs ' + rate(j.br) + ' while advertised (units per day over ' + Math.round(j.days) + ' d after)' : '');
+    return '<span class="cpc-held ' + (j.v === 'held' ? 'up' : 'down') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (j.v === 'held' ? 'held' : 'fell') + '</span>';
   }
   function beforeCell(r) { var b = r.before || {}; return '<div class="cpc-sub">spend ' + gbp(b.spend) + '</div>' + cnt(b.attr_units) + ' units · ' + gbp0(b.attr_revenue) + '<div>' + adtProfitCell(b.actual_profit, b.pending_cost_orders, b.pending_fee_orders) + '</div>'; }
   function afterCell(r) { var a = r.after || {}; var u = a.units != null ? a.units : a.attr_units; return cnt(u) + ' units · ' + gbp0(a.revenue != null ? a.revenue : a.attr_revenue) + '<div>' + adtProfitCell(a.actual_profit, a.pending_cost_orders, a.pending_fee_orders) + '</div>'; }
@@ -3134,7 +3176,7 @@ VIEWS.home = {
     { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
     { key: 'before', label: 'While advertised', cls: 'r', title: 'the ad\'s own last window', cell: beforeCell, sortVal: function (r) { return num(r.before && r.before.spend); } },
     { key: 'after', label: 'Since it stopped', cls: 'r', title: 'all-channel sales after the ad stopped', cell: afterCell, sortVal: function (r) { return num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); } },
-    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped?', cell: heldCell, sortVal: function (r) { var b = num(r.before && (r.before.units != null ? r.before.units : r.before.attr_units)), a = num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); return b && a != null ? a / b : null; } },
+    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped? per-day units rate since the stop vs while advertised; too early under 7 days', cell: heldCell, sortVal: function (r) { var j = heldJudge(r); return j && j.ratio != null ? j.ratio : null; } },
     { key: 'actual_profit', label: 'Profit now (law)', cls: 'r', src: 'orders', title: 'the listing now, under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } }
   ];
 })();
@@ -3233,7 +3275,10 @@ VIEWS.home = {
     }
     if (RM) {
       var metrics = [['units', 'Units'], ['revenue', 'Revenue'], ['spend', 'Spend']];
-      h += '<div class="an-panel"><h3>Forecast vs reality' + src('realised vs forecast') + '</h3><div class="an-sub">The oldest stored forecast against what actually happened, per metric — units, revenue and spend. MAPE is the mean absolute percentage error over the compared days; lower is better, and over 50% is flagged. The system learns from this gap.</div><div class="fl-metrics">' +
+      /* the actual side is the SAME listings the vintage forecast, never the whole fleet's day — the engine names the
+         count (forecast_vs_actual.listings / scope) */
+      var fvaScope = D.forecast_vs_actual && D.forecast_vs_actual.scope ? String(D.forecast_vs_actual.scope) : (D.forecast_vs_actual && D.forecast_vs_actual.listings != null ? 'over the ' + D.forecast_vs_actual.listings + ' listings forecast in this vintage (actuals of the same listings, not the whole fleet)' : '');
+      h += '<div class="an-panel"><h3>Forecast vs reality' + src('realised vs forecast') + '</h3><div class="an-sub">The oldest stored forecast against what actually happened, per metric — units, revenue and spend' + (fvaScope ? ', ' + esc(fvaScope) : '') + '. MAPE is the mean absolute percentage error over the compared days; lower is better, and over 50% is flagged. The system learns from this gap.</div><div class="fl-metrics">' +
         metrics.map(function (m) { var r = RM[m[0]]; var mape = r && r.mape != null ? Number(r.mape) : null; return '<div><div class="fl-mh">' + esc(m[1]) + (mape != null ? '<span class="fl-mape' + (mape > 50 ? ' hi' : '') + '">MAPE ' + Math.round(mape) + '%</span>' : '') + (r && r.vintage ? ' <span class="an-src">vintage ' + esc(r.vintage) + '</span>' : '') + '</div><div id="flReal_' + m[0] + '" class="fl-chart" style="height:180px"></div></div>'; }).join('') + '</div></div>';
     } else {
       h += '<div class="an-panel"><h3>Realised vs forecast' + src('vintage ' + (D.realised_vintage || '—')) + '</h3><div class="an-sub">' + ((D.realised && D.realised.length) ? 'Fleet units the oldest stored vintage predicted for the days that have since happened.' : 'Fills in as forecast days pass: the first comparison is available the morning after the first forecast; 14 days of it from 14 days after the first run.') + '</div><div id="flReal" class="fl-chart" style="height:220px"></div></div>';
@@ -3253,7 +3298,15 @@ VIEWS.home = {
           return '<div style="border-top:1px solid var(--gold-line);padding:10px 0">' +
             '<div>' + adtProductCell({ item_id: L.item_id, account: L.account, title: L.title, image: L.image }) + (L.low_confidence ? '<span class="fl-lc" title="oldest-vintage MAPE over 50%">modelled, low confidence</span>' : '') + '</div>' +
             '<div class="fl-sc">' + (L.scenarios || []).map(function (s) {
-              var fig = [s.modelled_units != null ? 'Units <b>' + esc(s.modelled_units) + '</b>' : '', s.modelled_revenue != null ? 'Revenue <b>' + gbp(s.modelled_revenue, 0) + '</b>' : '', s.modelled_spend != null ? 'Spend <b>' + gbp(s.modelled_spend, 0) + '</b>' : '', s.modelled_profit != null ? 'Profit <b>' + gbp(s.modelled_profit, 0) + '</b>' : ''].filter(Boolean).join(' · ');
+              /* scenario A ("keep spend") is the current run, whose REAL Sales Analysis law profit exists — the
+                 engine sends it in modelled_profit with profit_basis 'real (law)' and the window's unpriced order
+                 count (adtScenarios); B and C are the real base plus a modelled delta. Per listing, so the
+                 item-level law figure is allowed here, and it carries its unpriced caveat like every other. */
+              var pLabel = String(s.profit_label || s.profit_basis || 'modelled');
+              var realP = /^real \(law\)/.test(pLabel) && s.modelled_profit != null ? s.modelled_profit : null;
+              var profitTxt = realP != null ? 'Profit <span class="an-src">' + esc(pLabel) + '</span> <b>' + adtProfitCell(realP, Number(s.unpriced) || 0, 0) + '</b>'
+                : (s.modelled_profit != null ? 'Profit <span class="an-src">' + esc(pLabel) + '</span> <b>' + gbp(s.modelled_profit, 0) + '</b>' : '');
+              var fig = [s.modelled_units != null ? 'Units <b>' + esc(s.modelled_units) + '</b>' : '', s.modelled_revenue != null ? 'Revenue <b>' + gbp(s.modelled_revenue, 0) + '</b>' : '', s.modelled_spend != null ? 'Spend <b>' + gbp(s.modelled_spend, 0) + '</b>' : '', profitTxt].filter(Boolean).join(' · ');
               return '<div class="fl-scc ' + esc(String(s.id || '')) + '"><div class="h">' + esc(s.id || '') + ' · ' + esc(s.label || '') + '</div><div class="fig">' + (fig || '—') + '</div>' + (s.limit ? '<div class="lim">Limit: ' + esc(s.limit) + '</div>' : '') + (s.what_must_change ? '<div class="mc">To go further: ' + esc(s.what_must_change) + '</div>' : '') + '</div>';
             }).join('') + '</div></div>';
         }).join('') + '</div>';
@@ -3638,7 +3691,19 @@ VIEWS.home = {
         }
         h += '<div class="an-panel"><h3>Truth Check' + src('validation_runs') + '</h3><table class="an-tbl"><thead><tr><th>Metric</th><th>Scope</th><th>Status</th><th>Evidence</th><th>Ran</th></tr></thead><tbody>' + D.truth_summary.map(function (t) { return '<tr><td>' + esc(t.metric_id) + '</td><td>' + t.n + ' scope' + (t.n === 1 ? '' : 's') + '</td><td class="' + (t.status === 'PASS' ? 'an-pos' : 'an-neg') + '">' + esc(t.status) + '</td><td></td><td>' + esc(String(t.last).slice(0, 16)) + '</td></tr>'; }).join('') + D.truth.filter(function (t) { return t.status !== 'PASS' || /LISTING|VERDICT|FLEET|SHUFFLE|MASE|ALERTS/.test(t.metric_id); }).slice(0, 12).map(function (t) { return '<tr><td>' + esc(t.metric_id) + '</td><td>' + esc(t.scope_key) + '</td><td class="' + (t.status === 'PASS' ? 'an-pos' : 'an-neg') + '">' + esc(t.status) + '</td><td>' + esc(t.evidence) + '</td><td>' + esc(String(t.ran_at).slice(0, 16)) + '</td></tr>'; }).join('') + '</tbody></table></div>';
         var SL = D.sheet_law_check;
-        h += '<div class="an-panel"><h3>Profit law vs the Sales Analysis sheet' + src('ADTOOL_PROFIT_VS_SHEET') + '</h3><div class="an-sub">' + esc(SL ? SL.rule : '') + '</div>' + (SL ? '<div class="an-kpis">' + kpi('Verdict', esc(SL.status), 'ran ' + esc(String(SL.ran_at || '').slice(0, 16)), SL.status === 'PASS' ? 'an-pos' : 'an-neg') + '</div><table class="an-tbl"><thead><tr><th>Account</th><th>Status</th><th class="r">Days within tolerance</th></tr></thead><tbody>' + (SL.per_account || []).map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="' + (a.status === 'PASS' ? 'an-pos' : 'an-neg') + '">' + esc(a.status) + '</td><td class="r">' + (a.days_pass == null ? '—' : a.days_pass + ' of ' + a.days) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="an-empty">not reconciled yet — the truth job writes the first verdict once the history rebuild has reached today</div>') + '</div>';
+        /* the GATE the verdict is computed on is the WINDOW total (profit before ads, |Δ| ≤ max(£25, 10 %) of the
+           sheet); the per-day count is an informational band (max(£8, 8 %)) — printed as such, so a PASS never sits
+           beside a column it visibly fails. The window's money (profit_window) is account profit in disguise — the
+           tolerance is 10 % of the account's week before ads — so the engine strips it for non-profit roles: the
+           cells then read the within-window verdict, never a figure. */
+        function slDelta(a) {
+          var w = a.profit_window || {};
+          var d = num(w.window_delta); if (d == null) return a.within_window == null ? '—' : (a.within_window ? '<span class="an-pos">within</span>' : '<span class="an-neg">outside</span>');
+          var p = num(w.before_ads_delta_pct);
+          return gbp(d) + (p != null ? ' (' + (p > 0 ? '+' : '') + (Math.round(p * 10) / 10) + ' %)' : '');
+        }
+        function slTol(a) { var t = num(a.profit_window && a.profit_window.window_tolerance); return t == null ? '—' : '±' + gbp(t, 0); }
+        h += '<div class="an-panel"><h3>Profit law vs the Sales Analysis sheet' + src('ADTOOL_PROFIT_VS_SHEET') + '</h3><div class="an-sub">' + esc(SL ? SL.rule : '') + '</div>' + (SL ? '<div class="an-kpis">' + kpi('Verdict', esc(SL.status), 'ran ' + esc(String(SL.ran_at || '').slice(0, 16)), SL.status === 'PASS' ? 'an-pos' : 'an-neg') + '</div><table class="an-tbl"><thead><tr><th>Account</th><th>Status</th><th class="r" title="the gate: profit before ads over the window, tool minus sheet">Window Δ (before ads)</th><th class="r" title="max(£25, 10 % of the sheet window)">Tolerance</th><th class="r" title="informational per-day band max(£8, 8 %) — not the gate">Days within per-day band</th></tr></thead><tbody>' + (SL.per_account || []).map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="' + (a.status === 'PASS' ? 'an-pos' : 'an-neg') + '">' + esc(a.status) + '</td><td class="r">' + slDelta(a) + '</td><td class="r">' + slTol(a) + '</td><td class="r">' + (a.days_pass == null ? '—' : a.days_pass + ' of ' + a.days) + ' <span class="an-src" style="margin-left:4px">info</span></td></tr>'; }).join('') + '</tbody></table>' : '<div class="an-empty">not reconciled yet — the truth job writes the first verdict once the history rebuild has reached today</div>') + '</div>';
         h += '<div class="an-panel"><h3>Known gaps</h3><div>' + [['Campaign-level rows', (D.gaps.campaign_rows && D.gaps.campaign_rows.n) ? D.gaps.campaign_rows.n + ' rows ' + D.gaps.campaign_rows.mn + ' → ' + D.gaps.campaign_rows.mx : 'none yet (first daily ingest)'], ['Intraday samples', (D.gaps.intraday && D.gaps.intraday.samples) ? D.gaps.intraday.samples + ' since ' + String(D.gaps.intraday.first).slice(0, 16) : 'none'], ['Budget-capped days (7 d)', String((D.gaps.capped_days_7d && D.gaps.capped_days_7d.n) || 0)], ['Missing report days', D.gaps.missing_report_days.length ? D.gaps.missing_report_days.map(function (m) { return m.account + ' ' + m.days; }).join(', ') : 'none']].map(function (x) { return '<span class="mo-chip">' + esc(x[0]) + ': <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div></div>';
         h += '<div class="an-panel"><h3>Flags</h3><div>' + D.flags.map(function (f) { return '<span class="mo-chip ' + (f.value === 'on' ? 'ok' : '') + '">' + esc(f.key.replace('adtool_', '')) + ': <b>' + esc(f.value) + '</b></span>'; }).join('') + '</div><div class="an-sub" style="margin-top:8px">Each flag is one row in portal_config; setting it to off is the roll-back for that piece.</div></div>';
         h += '<div class="an-panel"><h3>Number Register' + src(D.register.length + ' numbers') + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th class="r">Phase</th><th>Id</th><th>Name</th><th>Formula</th><th>Sources</th><th>Recompute</th><th>Recheck</th></tr></thead><tbody>' + D.register.map(function (r) { return '<tr><td class="r">' + r.phase + '</td><td>' + esc(r.metric_id) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.formula) + '</td><td>' + esc(r.source_tables) + '</td><td>' + esc(r.recompute) + '</td><td>' + esc(r.recheck) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
@@ -3656,8 +3721,9 @@ VIEWS.home = {
  * metric over the window (value pills), an up/down summary strip (last 7 vs previous 7, last 10 vs
  * previous 10) with ▲/▼ and the delta, and — because the portal never shows a collective profit figure —
  * the profit trend is drawn as counts of profitable vs losing listings per week plus a top-movers list of
- * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. Refreshes every 5 minutes
- * only while the window reaches into today. Nothing here is sent to eBay.
+ * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. The daily series ends
+ * yesterday (adtool_scope_day has no today row), so the page re-reads hourly — after each :20 rollup —
+ * and only while the window reaches into today. Nothing here is sent to eBay.
  * Galaxy tokens only, gold the accent, #e0563f the loss / decline colour. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
@@ -3691,7 +3757,8 @@ VIEWS.home = {
     '.ov-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
     '.ov-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
     '.ov-legend{display:flex;gap:14px;font-size:11px;font-weight:800;color:var(--text-3);margin:0 0 6px;flex-wrap:wrap}',
-    '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}'
+    '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}',
+    '.ov-legend i.ov-hatch{background:repeating-linear-gradient(45deg,var(--gold-b) 0 2px,transparent 2px 5px);border:1px dashed var(--gold-b);box-sizing:border-box}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -3753,7 +3820,9 @@ VIEWS.home = {
       if (!$('ovBody')) return;
       draw();
       adtPeriodEcho('ovBar', d && d.period); adtFreshShow('ovFresh', d && d.fresh);
-      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 300000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
+      /* nothing on this page moves before the next :20 rollup (the series has no today row), so the live
+         re-read is hourly, not every 5 minutes; adtPoll keeps the hidden-tab and 'auth' guards */
+      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 3600000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
     }).catch(function (e) {
       if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the overview could not be read') + '</div></div>';
       throw e;
@@ -3810,15 +3879,20 @@ VIEWS.home = {
     var cards = METRICS.map(function (m) {
       return '<div class="ov-mcard"><h4>' + esc(m.label) + '</h4><div class="sub">' + esc(dayRange(series)) + '</div>' + lineChart(series, m) + '</div>';
     }).join('');
+    /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
+    var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
     return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The last point is today, sampled and provisional when the window includes it.</div>' +
+      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The series ends yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + ' — the daily grain has no today row; today lives on the War room and the Command centre.</div>' +
       '<div class="ov-metrics">' + cards + '</div></div>';
   }
   function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
 
   function lineChart(series, m) {
     var vals = series.map(function (r) {
-      var v = m.ratio ? ratio(r[m.ratio[0]], r[m.ratio[1]]) : num(r[m.key]);
+      /* the engine's own figure first (cpc / cvr / roas arrive computed, null when the denominator is zero);
+         the ratio from the raw columns only when the row lacks it */
+      var v = num(r[m.key]);
+      if (v == null && m.ratio) v = ratio(r[m.ratio[0]], r[m.ratio[1]]);
       return v;
     });
     var W = 460, H = 150, L = 44, R = 14, T = 18, B = 22;
@@ -3871,17 +3945,28 @@ VIEWS.home = {
       weeks = pv.profitable_listings.map(function (p, i) { var l = (pv.losing_listings || [])[i] || {}; return { week: p.week || l.week, profitable: p.count != null ? p.count : p.value, losing: l.count != null ? l.count : l.value }; });
     }
     if (!weeks || !weeks.length) return '';
+    var curWk = pv && pv.current_week ? String(pv.current_week) : '';
     var norm = weeks.map(function (w) {
-      return { week: String(w.week || w.iso_week || ''), profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
+      var key = String(w.week || w.iso_week || ''), days = num(w.days);
+      /* the current ISO week runs Monday → yesterday (the daily grain has no today row), so its counts are
+         still filling: the engine marks it `partial`; without that field, fewer than 7 rolled days or the
+         current-week key says the same */
+      var partial = w.partial != null ? !!w.partial : (days != null ? days < 7 : (!!curWk && key === curWk));
+      return { week: key, days: days, partial: partial, profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
     });
+    var anyPartial = norm.some(function (w) { return w.partial; });
     function bars(pick, color) {
       return chartBars(norm.map(function (w) {
-        return { label: (w.week || '').replace(/^\d{4}-?/, 'W'), value: num(w[pick]) || 0, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' };
+        var lbl = (w.week || '').replace(/^\d{4}-?/, 'W');
+        if (w.partial) lbl += w.days != null ? ' · ' + Math.round(w.days) + ' d' : ' · so far';
+        return { label: lbl, value: num(w[pick]) || 0, muted: w.partial, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' + (w.partial ? ' (week in progress' + (w.days != null ? ', ' + Math.round(w.days) + ' of 7 days rolled' : ', Monday to yesterday') + ')' : '') };
       }), { height: 140, color: color, pillColor: color, fmt: function (v) { return String(Math.round(v)); }, minGap: 0 });
     }
     return '<div class="ov-panel"><h3>Profit trend, as listing counts' + src('overview') + '</h3>' +
-      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.</div>' +
-      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span></div>' +
+      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.' +
+      (anyPartial ? ' The hatched bar is the <b>week in progress</b> (Monday to yesterday) — it fills as the week goes on, so read it against the finished weeks only once it is complete.' : '') + '</div>' +
+      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span>' +
+      (anyPartial ? '<span><i class="ov-hatch"></i>Week in progress</span>' : '') + '</div>' +
       '<div class="ov-grid2"><div class="ov-mcard"><h4>Profitable listings / week</h4>' + bars('profitable', 'var(--gold-b)') + '</div>' +
       '<div class="ov-mcard"><h4>Losing listings / week</h4>' + bars('losing', LOSS) + '</div></div></div>';
   }
@@ -4589,7 +4674,7 @@ VIEWS.home = {
 
     h += '<div class="at-grid2">' +
       '<div class="at-panel"><h3>Behaviour notes' + (D.narrative ? src(D.narrative.model === 'template' ? 'written from the numbers' : 'model, validated') : '') + '</h3><div class="at-note" id="atNarr">' + (D.narrative ? esc(D.narrative.text) + (D.narrative.validated ? '' : ' <b>(a figure in this text is not in its inputs — held back)</b>') : 'No narrative yet. <a href="#" id="atNarrGo">Write one from the numbers</a>.') + '</div>' +
-      '<h3 style="margin-top:12px">Today\'s decision</h3><div class="at-note">' + (D.decision ? '<b>' + esc(D.decision.decision) + '</b> · ' + esc(D.decision.confidence) + ' · ' + esc(D.decision.action) + '<div class="at-sub" style="margin:4px 0 0">' + esc(D.decision.why) + '</div><div class="at-sub" style="margin:2px 0 0">' + esc(D.decision.day) + ' ' + esc(D.decision.batch) + ' batch · rules ' + esc((function () { try { return JSON.parse(D.decision.rules_json || '[]').join(', '); } catch (e) { return ''; } })() || '—') + ' · EV ' + pm(D.decision.expected_value) + (D.decision.outcome_score != null ? ' · scored ' + (D.decision.outcome_score ? 'right' : 'wrong') : '') + ' · shadow, nothing sent to eBay</div>' : 'The decision engine has not run for this listing yet.') + '</div></div>' +
+      '<h3 style="margin-top:12px">Today\'s decision</h3><div class="at-note">' + (D.decision ? '<b>' + esc(D.decision.decision) + '</b> · ' + esc(D.decision.confidence) + ' · ' + esc(D.decision.action) + '<div class="at-sub" style="margin:4px 0 0">' + esc(D.decision.why) + '</div><div class="at-sub" style="margin:2px 0 0">' + esc(D.decision.day) + ' ' + esc(D.decision.batch) + ' batch · rules ' + esc((function () { try { return JSON.parse(D.decision.rules_json || '[]').join(', '); } catch (e) { return ''; } })() || '—') + ' · EV ' + pm(D.decision.expected_value) + (D.decision.outcome_score != null ? ' · scored ' + (D.decision.outcome_score ? 'right' : 'wrong') + (Number(D.decision.outcome_provisional) === 1 ? ' (provisional — unpriced orders / report pending, re-scored)' : '') : '') + ' · shadow, nothing sent to eBay</div>' : 'The decision engine has not run for this listing yet.') + '</div></div>' +
       '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only; nothing here reaches eBay.</div>' +
       '<ul class="at-list" id="atActs">' + (D.actions.length ? D.actions.map(function (a) { return '<li>' + esc(a.note) + '<div class="m">' + esc(a.type) + ' · ' + esc(a.by_email) + ' · ' + esc(String(a.at).slice(0, 16)) + '</div></li>'; }).join('') : '<li class="at-empty">No actions logged yet.</li>') + '</ul>' +
       '<textarea id="atNote" placeholder="Add a note (what was changed, where, why)"></textarea><button class="at-btn" id="atNoteBtn">Log note</button></div></div>';
@@ -4885,6 +4970,7 @@ VIEWS.home = {
     '.sv-runc .m{font-size:11px;color:var(--text-2);margin-top:3px;line-height:1.5}',
     '.sv-task{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:rgba(255,255,255,.02)}',
     '.sv-task.ending{border-color:rgba(224,86,63,.4)}',
+    '.sv-acct .a{font-size:14px;font-weight:800;color:var(--text)}.sv-acct .m{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
     '.sv-task-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}',
     '.sv-flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}',
     '.sv-flag{font-size:11px;color:var(--text-2);background:rgba(255,255,255,.04);border:1px solid var(--gold-line);border-radius:8px;padding:3px 9px}',
@@ -5033,20 +5119,47 @@ VIEWS.home = {
     return h + '</div>';
   }
 
+  /* the running event an event-ending task is about: matched on the promo id folded into the task id
+     ('end:<account>:<promo>:<end>'), else on the account — the engine sends no promo field on the task */
+  function endingEvent(t) {
+    var evs = (SV.data && SV.data.running_events) || [], parts = String(t.task_id || '').split(':');
+    var promo = parts.length >= 4 ? parts[parts.length - 2] : '';
+    for (var i = 0; i < evs.length; i++) if (promo && String(evs[i].promo_id || '') === promo) return evs[i];
+    for (var j = 0; j < evs.length; j++) if (String(evs[j].account || '') === String(t.account || '')) return evs[j];
+    return null;
+  }
+
   function taskHtml(t) {
-    var f = t.flags || {}, ending = String(t.kind || '') === 'event-ending';
-    var kindTxt = ending ? 'Create the next sale event' : (String(t.kind || '') === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event');
+    var f = t.flags || {}, kind = String(t.kind || ''), ending = kind === 'event-ending';
     var perform = t.perform_on || t.eligible_on;
-    var flags = '<div class="sv-flags">' +
-      '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
-      '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
-      '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
-      '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
-      '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
-      '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
-      '</div>';
+    var head, kindTxt, flags;
+    if (ending) {
+      /* an ACCOUNT task (item_id ''): the ending event and its date, never a product cell */
+      var ev = endingEvent(t), ends = String(t.ends || t.eligible_on || (ev && ev.ends) || '').slice(0, 10);
+      var cd = ends ? countdown(D_today(), ends) : null;
+      kindTxt = 'Create the next sale event on ' + (t.account || '—') + (ends ? ' — ends ' + ends : '');
+      head = '<div class="sv-acct"><div class="a">' + esc(t.account || 'account —') + '</div><div class="m">' +
+        (ev ? '<b>' + esc(ev.name || 'Sale') + '</b>' + (ev.discount ? ' · ' + esc(ev.discount) : '') + ' · ' + esc(ev.covers || ev.criterion || 'whole shop') + '<br>' : '') +
+        'ends <b>' + esc(ends || '—') + '</b>' + (cd ? ' · ' + esc(cd.txt.replace('eligible now', 'ended')) : '') + ' · no replacement event seen for this account</div></div>';
+      flags = '<div class="sv-flags">' +
+        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
+        '<span class="sv-flag warn">event ends <b>' + esc(ends || '—') + '</b></span>' +
+        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '</div>';
+    } else {
+      kindTxt = kind === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event';
+      head = adtProductCell(t);
+      flags = '<div class="sv-flags">' +
+        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
+        '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
+        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
+        '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
+        '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
+        '</div>';
+    }
     return '<div class="sv-task' + (ending ? ' ending' : '') + '" data-tid="' + esc(t.task_id) + '">' +
-      '<div class="sv-task-h"><div style="flex:1 1 320px">' + adtProductCell(t) + '</div>' +
+      '<div class="sv-task-h"><div style="flex:1 1 320px">' + head + '</div>' +
       '<div style="font-size:12px;font-weight:800;color:var(--gold-a);text-align:right">' + esc(kindTxt) + '</div></div>' +
       flags +
       '<div class="sv-task-btns"><button class="sv-btn" data-act="task_done">Done</button>' +
@@ -5165,7 +5278,13 @@ VIEWS.home = {
       var counts = {}; D.counts.forEach(function (c) { counts[c.decision] = (counts[c.decision] || 0) + Number(c.n); counts[c.decision + '|' + c.confidence] = Number(c.n); });
       var ySc = D.yesterday_score || {};
       var h = '<div class="an-note" style="margin-bottom:12px"><b>Shadow mode.</b> Nothing on this page has been sent to eBay. Each decision is made on <b>real profit (Sales Analysis law)</b> — the old est. ad-profit call is kept beside it for comparison — then scored the next morning on the real profit the listing actually made.' + (D.acceptance ? ' Acceptance: <b>' + esc(D.acceptance.status) + '</b> — ' + esc(D.acceptance.evidence) : '') + '</div>';
-      h += '<div class="an-kpis">' + [['Stop', counts.STOP || 0, (counts['STOP|confident'] || 0) + ' confident'], ['Reduce', counts.REDUCE || 0, (counts['REDUCE|confident'] || 0) + ' confident'], ['Push', counts.PUSH || 0, (counts['PUSH|confident'] || 0) + ' confident'], ['Keep', counts.KEEP || 0, 'left alone'], ["Yesterday's score", (ySc.r == null ? '—' : ySc.r + ' of ' + ySc.n), ySc.n ? Math.round(Number(ySc.r) / Number(ySc.n) * 100) + ' % right' : 'nothing scored yet']].map(function (x) { return '<div class="an-kpi"><div class="k">' + esc(x[0]) + '</div><div class="v">' + x[1] + '</div><div class="d">' + esc(x[2]) + '</div></div>'; }).join('') + '</div>';
+      var conf = function (k) { return (counts[k + '|confident'] || 0) + ' confident' + (counts[k + '|watch'] ? ' · ' + counts[k + '|watch'] + ' watch' : ''); };
+      /* the tile is the FINAL scores only; a score still waiting on costs / fees / the ads report is named beside it,
+         never counted — the engine re-scores it on later runs (outcome_provisional) */
+      var yProv = Number(ySc.provisional) || 0, yN = Number(ySc.n) || 0;
+      var yTile = yN ? Number(ySc.r) + ' of ' + yN + (yProv ? ' <span class="an-src">· ' + yProv + ' provisional</span>' : '') : (yProv ? '<span class="an-src">' + yProv + ' provisional</span>' : '—');
+      var ySub = yN ? Math.round(Number(ySc.r) / yN * 100) + ' % right' + (yProv ? ' (final scores; provisional ones re-scored as costs and the ads report land)' : '') : (yProv ? 'no final score yet — re-scored as costs and the ads report land' : 'nothing scored yet');
+      h += '<div class="an-kpis">' + [['Stop', counts.STOP || 0, conf('STOP')], ['Reduce', counts.REDUCE || 0, conf('REDUCE')], ['Push', counts.PUSH || 0, conf('PUSH')], ['Keep', counts.KEEP || 0, 'left alone'], ["Yesterday's score", yTile, ySub]].map(function (x) { return '<div class="an-kpi"><div class="k">' + esc(x[0]) + '</div><div class="v">' + x[1] + '</div><div class="d">' + esc(x[2]) + '</div></div>'; }).join('') + '</div>';
       h += clockPanel();
       h += '<div class="an-filters">' + [['', 'All'], ['STOP', 'Stop'], ['REDUCE', 'Reduce'], ['PUSH', 'Push']].map(function (x) { return '<button class="' + (ST.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
       var rows = D.decisions.filter(function (d) { return !ST.filter || d.decision === ST.filter; });
@@ -5179,10 +5298,20 @@ VIEWS.home = {
            decision, made before the rebase, carries neither and the line is dropped. */
         var adp = d.decision_adprofit != null ? d.decision_adprofit : (i.decision_adprofit != null ? i.decision_adprofit : null);
         var agree = d.agree != null ? d.agree : (i.agree != null ? i.agree : null);
-        return '<div class="st-d ' + esc(d.decision) + '"><div class="t">' + esc(d.decision) + ' <span class="an-src">' + esc(d.confidence) + '</span> <span class="an-src">' + esc(d.batch) + '</span></div>' +
+        /* a 'watch' on unpriced orders: the engine names the count in the decision inputs (inputs.unpriced, counted
+           over the 30-day window the rule reads); an older answer carries only the d30 pending buckets, which say the
+           same thing without the exact count. A STOP that stays confident despite them says so in its reason. */
+        var unp = i.unpriced != null ? Number(i.unpriced) : (d.unpriced_orders != null ? Number(d.unpriced_orders) : null);
+        var pend = (Number(d30.pending_cost_orders) || 0) + (Number(d30.pending_fee_orders) || 0);
+        var watchTxt = String(d.confidence) === 'watch' && unp != null && unp > 0 ? 'watch — ' + unp + ' order' + (unp === 1 ? '' : 's') + ' unpriced' : (String(d.confidence) === 'watch' && unp == null && pend > 0 ? 'watch — unpriced orders in the window' : '');
+        /* the EV is on the law when the engine says so (inputs.ev_basis, the same basis the why-line prints) */
+        var evLaw = String(i.ev_basis || '') === 'law';
+        var evTag = evLaw ? '<span title="expected value on the Sales Analysis law: the listing\'s law profit per weekday, its 7-day law profit per day and yesterday\'s law figure">(law)</span>' : '<span title="modelled expected value — an estimate, not the law profit">(modelled est.)</span>';
+        var provisional = Number(d.outcome_provisional) === 1;
+        return '<div class="st-d ' + esc(d.decision) + '"><div class="t">' + esc(d.decision) + ' <span class="an-src">' + esc(d.confidence) + '</span> <span class="an-src">' + esc(d.batch) + '</span>' + (watchTxt ? ' <span class="an-src an-neg" title="the law profit cannot be trusted until every order is priced (Ali cost typed, eBay fee landed)">' + esc(watchTxt) + '</span>' : '') + '</div>' +
           '<div style="margin:6px 0 4px">' + adtProductCell({ item_id: d.item_id, account: d.account, title: d.title || i.title || '', image: d.image }) + '</div>' +
           '<div class="m">' + esc(d.action) + ' — ' + esc(d.why) + '</div>' +
-          '<div class="r">rules ' + esc((d.rules || []).join(', ') || '—') + ' · EV ' + pm(d.expected_value) + ' · 30-day profit (Sales Analysis law) ' + adtProfitCell(lawD30, d30.pending_cost_orders, d30.pending_fee_orders) + ' on ' + gbp(d30.spend, 0) + ' spend · break-even ' + (i.be ? Number(i.be).toFixed(1) + '×' : '—') + ' · ' + (i.campaigns || 0) + ' live campaign' + ((i.campaigns || 0) === 1 ? '' : 's') + (i.blocked ? ' · <b>blocked:</b> ' + esc(i.blocked) : '') + (d.outcome_score != null ? ' · scored <b>' + (d.outcome_score ? 'right' : 'wrong') + '</b> on real profit' + (d.outcome_actual_profit != null ? ' (' + adtProfitCell(d.outcome_actual_profit, 0, 0) + ' on the day)' : '') : '') + '</div>' +
+          '<div class="r">rules ' + esc((d.rules || []).join(', ') || '—') + ' · EV ' + evTag + ' ' + pm(d.expected_value) + ' · 30-day profit (Sales Analysis law) ' + adtProfitCell(lawD30, d30.pending_cost_orders, d30.pending_fee_orders) + ' on ' + gbp(d30.spend, 0) + ' spend · break-even ' + (i.be ? Number(i.be).toFixed(1) + '×' : '—') + ' · ' + (i.campaigns || 0) + ' live campaign' + ((i.campaigns || 0) === 1 ? '' : 's') + (i.blocked ? ' · <b>blocked:</b> ' + esc(i.blocked) : '') + (d.outcome_score != null ? ' · scored <b>' + (d.outcome_score ? 'right' : 'wrong') + '</b> on real profit' + (d.outcome_actual_profit != null ? ' (' + adtProfitCell(d.outcome_actual_profit, 0, 0) + ' on the day)' : '') + (provisional ? ' <span class="an-src" title="the day still has unpriced orders or its ads report is not final — the engine re-scores it on later runs">(provisional — unpriced orders / report pending, re-scored)</span>' : '') : '') + '</div>' +
           (adp != null ? '<div class="r">decided on <b>real profit</b>; on est. ad profit it would be <b>' + esc(adp) + '</b> — ' + (agree === false || agree === 0 ? '<span class="an-neg">the two disagree</span>' : 'the two agree') + (d.outcome_ad_profit != null ? ' · ad-profit basis scored ' + (d.outcome_ad_profit_score != null ? '<b>' + (d.outcome_ad_profit_score ? 'right' : 'wrong') + '</b>' : adtProfitCell(d.outcome_ad_profit, 0, 0)) : '') + '</div>' : '') +
           /* Phase 2: which hours to run and not to run (advisory — eBay cannot schedule by the hour), and the
              one lever a hand can move; both only when the engine sends them for this decision */
@@ -5192,7 +5321,7 @@ VIEWS.home = {
       }).join('') : '<div class="an-empty">No decisions for ' + esc(D.day) + ' in this filter.</div>';
       h += '<div class="an-grid2"><div class="an-panel"><h3>Rule scores, trailing 30 days' + src('scored daily') + '</h3><div class="an-sub">A rule that falls under the base rate is shown but never applied.</div><table class="an-tbl"><thead><tr><th>Rule</th><th class="r">Decisions</th><th class="r">Right</th><th class="r">Score</th><th>Trusted</th></tr></thead><tbody>' + (D.rule_scores.length ? D.rule_scores.map(function (r) { return '<tr><td>' + esc(r.rule_id) + '</td><td class="r">' + r.decisions + '</td><td class="r">' + r.right_n + '</td><td class="r">' + (r.score == null ? '—' : Math.round(r.score * 100) + '%') + '</td><td class="' + (r.trusted ? 'an-pos' : 'an-neg') + '">' + (r.trusted ? 'yes' : 'no') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">the first scores land the morning after the first decisions</td></tr>') + '</tbody></table></div>';
       h += '<div class="an-panel"><h3>Carry-forward validation' + src('Mondays · §6.12') + '</h3><div class="an-sub">Each rule applied to days −28…−15 and scored on −14…−1, against the base rate of every spending listing. The review found the Tue/Thu pause rule does not repeat and loses-across-the-week and Sunday winners do.</div><table class="an-tbl"><thead><tr><th>Rule</th><th class="r">Selected</th><th class="r">Repeated</th><th class="r">Base rate</th><th class="r">Spend</th><th>Trusted</th></tr></thead><tbody>' + (D.carry.length ? D.carry.map(function (c) { return '<tr><td>' + esc(c.rule_id) + '</td><td class="r">' + c.selected + '</td><td class="r">' + (c.rate == null ? '—' : c.rate + '%') + '</td><td class="r">' + (c.base_rate == null ? '—' : c.base_rate + '%') + '</td><td class="r">' + gbp(c.spend, 0) + '</td><td class="' + (c.trusted ? 'an-pos' : 'an-neg') + '">' + (c.trusted ? 'yes' : 'not trusted') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">runs on Mondays</td></tr>') + '</tbody></table></div></div>';
-      h += '<div class="an-panel"><h3>Days scored</h3><table class="an-tbl"><thead><tr><th>Day</th><th class="r">Decisions</th><th class="r">Scored</th><th class="r">Right</th></tr></thead><tbody>' + (D.days.length ? D.days.map(function (d) { return '<tr><td><a href="#" class="st-day" data-d="' + esc(d.day) + '">' + esc(d.day) + '</a></td><td class="r">' + d.n + '</td><td class="r">' + d.scored + '</td><td class="r">' + (d.right_n == null ? '—' : d.right_n + (d.scored ? ' (' + Math.round(Number(d.right_n) / Number(d.scored) * 100) + '%)' : '')) + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="an-empty">—</td></tr>') + '</tbody></table></div>';
+      h += '<div class="an-panel"><h3>Days scored</h3><div class="an-sub">Scored and right count final scores only; a provisional score (unpriced orders on the day, or the ads report not final) is re-scored on later runs.</div><table class="an-tbl"><thead><tr><th>Day</th><th class="r">Decisions</th><th class="r">Scored</th><th class="r">Right</th><th class="r">Provisional</th></tr></thead><tbody>' + (D.days.length ? D.days.map(function (d) { return '<tr><td><a href="#" class="st-day" data-d="' + esc(d.day) + '">' + esc(d.day) + '</a></td><td class="r">' + d.n + '</td><td class="r">' + d.scored + '</td><td class="r">' + (d.right_n == null || !d.scored ? '—' : d.right_n + ' (' + Math.round(Number(d.right_n) / Number(d.scored) * 100) + '%)') + '</td><td class="r">' + (Number(d.provisional) ? d.provisional : '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">—</td></tr>') + '</tbody></table></div>';
       h += '<div class="an-panel"><h3>Action log</h3><div class="an-sub">What the team did, in their own words. Notes only.</div><table class="an-tbl"><thead><tr><th>When</th><th>Listing</th><th>Note</th><th>By</th></tr></thead><tbody>' + (D.action_log.length ? D.action_log.map(function (a) { return '<tr><td>' + esc(String(a.at).slice(0, 16)) + '</td><td>' + adtProductCell(a, { compact: true }) + '</td><td>' + esc(a.note) + '</td><td>' + esc(a.by_email) + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="an-empty">nothing logged yet</td></tr>') + '</tbody></table></div>';
       h += '<div id="stLive"></div>';
       $('stBody').innerHTML = h;

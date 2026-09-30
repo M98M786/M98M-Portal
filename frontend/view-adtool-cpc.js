@@ -43,6 +43,7 @@
     '.cpc-neg{color:' + LOSS + ';font-weight:700}.cpc-pos{color:var(--gold-a);font-weight:700}',
     '.cpc-held{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2)}',
     '.cpc-held.up{color:var(--gold-a);border-color:rgba(242,176,53,.45)}.cpc-held.down{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
+    '.cpc-held.early{color:var(--text-3);border-style:dashed;text-transform:none;letter-spacing:0}',
     '.cpc-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
     '.cpc-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
   ].join(''));
@@ -132,7 +133,7 @@
     h += totalsTiles(D);
     h += comparePanel(D);
     h += '<div class="cpc-note">' + (post
-      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
+      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. <b>Sales</b> compares units <i>per day</i> — since the stop against while advertised — and reads "held" at 60 % of the advertised rate or better; under 7 days since the stop it is too early to tell. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
       : '<b>CPC active.</b> Every listing with an ACTIVE ad in a RUNNING cost-per-click campaign. Ads are counted by eBay\'s report day (UTC); all-channel orders and units by the UK day. Impressions exist only from 18 Sep, so an earlier window shows "—". Profit is the listing\'s own figure under the Sales Analysis law; there is no collective profit. avg CPC, CVR, ROAS and ACoS read "—" when their denominator is zero.') +
       ' The lever a hand can move is the campaign\'s daily budget (eBay exposes no per-click bid). Nothing on this page is sent to eBay.</div>';
 
@@ -260,14 +261,44 @@
     { key: 'lever', label: 'Lever', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
   ];
 
-  /* CPC post: before the ad stopped vs after, and whether sales held. */
-  function heldCell(r) {
+  /* CPC post: before the ad stopped vs after, and whether sales held — judged on per-day units RATES, never on
+     the raw totals: the before window is 30 days and the after window is only what has elapsed since the stop
+     (0..30 days), so totals would stamp every recent stop "fell". Under 7 days after the stop there is not enough
+     to judge: "too early". The engine's verdict (adtCpcHeld: held / fell / too early / no sales either side, with
+     before.units_per_day and after.units_per_day) wins when it sends one; the ratio of the two rates is the sort key. */
+  function daysIn(w, fallback) {
+    if (!w || typeof w !== 'object') return fallback == null ? null : fallback;
+    var d = num(w.days); if (d != null) return Math.max(0, d);
+    var a = String(w.from || '').slice(0, 10), b = String(w.to || '').slice(0, 10);
+    if (!/^\d{4}-\d\d-\d\d$/.test(a) || !/^\d{4}-\d\d-\d\d$/.test(b)) return fallback == null ? null : fallback;
+    var n = Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000) + 1;
+    return n < 0 ? 0 : n;                                    /* from > to = the stop was yesterday: 0 days after */
+  }
+  function heldJudge(r) {
     var before = r.before || {}, after = r.after || {};
+    var sent = String(r.held || '').toLowerCase();
+    if (sent) {
+      var v = /early/.test(sent) ? 'early' : (/held|up/.test(sent) ? 'held' : (/fell|down/.test(sent) ? 'fell' : (/n\/a|none|no sales/.test(sent) ? 'na' : null)));
+      var brS = num(before.units_per_day), arS = num(after.units_per_day);
+      return v ? { v: v, ratio: (brS != null && brS > 0 && arS != null) ? arS / brS : null, days: daysIn(after, null), rule: r.held_rule || '', br: brS, ar: arS } : null;
+    }
     var bu = num(before.units != null ? before.units : before.attr_units), au = num(after.units != null ? after.units : after.attr_units);
-    if (bu == null || au == null) return '<span class="cpc-held">—</span>';
-    if (bu === 0) return '<span class="cpc-held">n/a</span>';
-    var held = au >= bu * 0.6;
-    return '<span class="cpc-held ' + (held ? 'up' : 'down') + '">' + (held ? 'held' : 'fell') + '</span>';
+    if (bu == null || au == null) return null;
+    var bd = daysIn(before, 30), ad = daysIn(after, null);
+    if (ad == null) return null;
+    if (ad < 7) return { v: 'early', days: ad };
+    if (!bd || bu === 0) return { v: 'na' };
+    var br = bu / bd, ar = au / ad;
+    return { v: ar >= br * 0.6 ? 'held' : 'fell', ratio: ar / br, days: ad, br: br, ar: ar };
+  }
+  function rate(v) { return v == null ? '—' : (Math.round(v * 100) / 100) + '/day'; }
+  function heldCell(r) {
+    var j = heldJudge(r);
+    if (!j) return '<span class="cpc-held">—</span>';
+    if (j.v === 'na') return '<span class="cpc-held" title="no units while advertised or since — nothing to hold">n/a</span>';
+    if (j.v === 'early') return '<span class="cpc-held early" title="under 7 days since the ad stopped — not enough to judge">too early' + (j.days != null ? ' (' + Math.round(j.days) + ' d)' : '') + '</span>';
+    var t = j.rule || (j.br != null ? 'since the stop ' + rate(j.ar) + ' vs ' + rate(j.br) + ' while advertised (units per day over ' + Math.round(j.days) + ' d after)' : '');
+    return '<span class="cpc-held ' + (j.v === 'held' ? 'up' : 'down') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (j.v === 'held' ? 'held' : 'fell') + '</span>';
   }
   function beforeCell(r) { var b = r.before || {}; return '<div class="cpc-sub">spend ' + gbp(b.spend) + '</div>' + cnt(b.attr_units) + ' units · ' + gbp0(b.attr_revenue) + '<div>' + adtProfitCell(b.actual_profit, b.pending_cost_orders, b.pending_fee_orders) + '</div>'; }
   function afterCell(r) { var a = r.after || {}; var u = a.units != null ? a.units : a.attr_units; return cnt(u) + ' units · ' + gbp0(a.revenue != null ? a.revenue : a.attr_revenue) + '<div>' + adtProfitCell(a.actual_profit, a.pending_cost_orders, a.pending_fee_orders) + '</div>'; }
@@ -280,7 +311,7 @@
     { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
     { key: 'before', label: 'While advertised', cls: 'r', title: 'the ad\'s own last window', cell: beforeCell, sortVal: function (r) { return num(r.before && r.before.spend); } },
     { key: 'after', label: 'Since it stopped', cls: 'r', title: 'all-channel sales after the ad stopped', cell: afterCell, sortVal: function (r) { return num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); } },
-    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped?', cell: heldCell, sortVal: function (r) { var b = num(r.before && (r.before.units != null ? r.before.units : r.before.attr_units)), a = num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); return b && a != null ? a / b : null; } },
+    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped? per-day units rate since the stop vs while advertised; too early under 7 days', cell: heldCell, sortVal: function (r) { var j = heldJudge(r); return j && j.ratio != null ? j.ratio : null; } },
     { key: 'actual_profit', label: 'Profit now (law)', cls: 'r', src: 'orders', title: 'the listing now, under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } }
   ];
 })();

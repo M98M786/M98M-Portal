@@ -37,6 +37,7 @@
     '.sv-runc .m{font-size:11px;color:var(--text-2);margin-top:3px;line-height:1.5}',
     '.sv-task{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:rgba(255,255,255,.02)}',
     '.sv-task.ending{border-color:rgba(224,86,63,.4)}',
+    '.sv-acct .a{font-size:14px;font-weight:800;color:var(--text)}.sv-acct .m{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
     '.sv-task-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}',
     '.sv-flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}',
     '.sv-flag{font-size:11px;color:var(--text-2);background:rgba(255,255,255,.04);border:1px solid var(--gold-line);border-radius:8px;padding:3px 9px}',
@@ -185,20 +186,47 @@
     return h + '</div>';
   }
 
+  /* the running event an event-ending task is about: matched on the promo id folded into the task id
+     ('end:<account>:<promo>:<end>'), else on the account — the engine sends no promo field on the task */
+  function endingEvent(t) {
+    var evs = (SV.data && SV.data.running_events) || [], parts = String(t.task_id || '').split(':');
+    var promo = parts.length >= 4 ? parts[parts.length - 2] : '';
+    for (var i = 0; i < evs.length; i++) if (promo && String(evs[i].promo_id || '') === promo) return evs[i];
+    for (var j = 0; j < evs.length; j++) if (String(evs[j].account || '') === String(t.account || '')) return evs[j];
+    return null;
+  }
+
   function taskHtml(t) {
-    var f = t.flags || {}, ending = String(t.kind || '') === 'event-ending';
-    var kindTxt = ending ? 'Create the next sale event' : (String(t.kind || '') === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event');
+    var f = t.flags || {}, kind = String(t.kind || ''), ending = kind === 'event-ending';
     var perform = t.perform_on || t.eligible_on;
-    var flags = '<div class="sv-flags">' +
-      '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
-      '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
-      '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
-      '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
-      '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
-      '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
-      '</div>';
+    var head, kindTxt, flags;
+    if (ending) {
+      /* an ACCOUNT task (item_id ''): the ending event and its date, never a product cell */
+      var ev = endingEvent(t), ends = String(t.ends || t.eligible_on || (ev && ev.ends) || '').slice(0, 10);
+      var cd = ends ? countdown(D_today(), ends) : null;
+      kindTxt = 'Create the next sale event on ' + (t.account || '—') + (ends ? ' — ends ' + ends : '');
+      head = '<div class="sv-acct"><div class="a">' + esc(t.account || 'account —') + '</div><div class="m">' +
+        (ev ? '<b>' + esc(ev.name || 'Sale') + '</b>' + (ev.discount ? ' · ' + esc(ev.discount) : '') + ' · ' + esc(ev.covers || ev.criterion || 'whole shop') + '<br>' : '') +
+        'ends <b>' + esc(ends || '—') + '</b>' + (cd ? ' · ' + esc(cd.txt.replace('eligible now', 'ended')) : '') + ' · no replacement event seen for this account</div></div>';
+      flags = '<div class="sv-flags">' +
+        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
+        '<span class="sv-flag warn">event ends <b>' + esc(ends || '—') + '</b></span>' +
+        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '</div>';
+    } else {
+      kindTxt = kind === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event';
+      head = adtProductCell(t);
+      flags = '<div class="sv-flags">' +
+        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
+        '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
+        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
+        '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
+        '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
+        '</div>';
+    }
     return '<div class="sv-task' + (ending ? ' ending' : '') + '" data-tid="' + esc(t.task_id) + '">' +
-      '<div class="sv-task-h"><div style="flex:1 1 320px">' + adtProductCell(t) + '</div>' +
+      '<div class="sv-task-h"><div style="flex:1 1 320px">' + head + '</div>' +
       '<div style="font-size:12px;font-weight:800;color:var(--gold-a);text-align:right">' + esc(kindTxt) + '</div></div>' +
       flags +
       '<div class="sv-task-btns"><button class="sv-btn" data-act="task_done">Done</button>' +

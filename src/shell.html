@@ -479,9 +479,12 @@ function chartLineSeries(pts, opt){
     '" stroke-linejoin="round" stroke-linecap="round"/>' + chartValueDots(pts, opt);
 }
 /* A bar chart in one call, with the same number pills as the line kit — because a bar you cannot
-   read the value of is decoration. pts = [{label, value, title?, strong?}]. opt: {height, fmt,
+   read the value of is decoration. pts = [{label, value, title?, strong?, muted?}]. opt: {height, fmt,
    color, strongColor, everyNth} — fmt turns a value into the pill text (chartMoney by default).
-   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. */
+   Bars carry their own <title>, so hovering still gives the exact figure on a dense chart. A `muted`
+   bar is drawn hatched in the same colour — a figure that is still filling (a week in progress),
+   never to be read against the solid bars beside it. */
+var CHART_PATTERN_SEQ = 0;
 function chartBars(pts, opt){
   opt = opt || {}; if (!pts || !pts.length) { return ''; }
   var H = opt.height || 150, W = 980, L = 46, R = 12, T = 22, B = 26;
@@ -493,6 +496,13 @@ function chartBars(pts, opt){
   var scale = (zero - T) / mx;
   var bw = (W - L - R) / pts.length;
   var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
+  var hatch = '';
+  if (pts.some(function(p){ return p && p.muted; })) {
+    hatch = 'cb-hatch-' + (++CHART_PATTERN_SEQ);
+    out += '<defs><pattern id="' + hatch + '" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+           '<rect width="7" height="7" fill="' + col + '" opacity=".18"/>' +
+           '<line x1="0" y1="0" x2="0" y2="7" stroke="' + col + '" stroke-width="2.2" opacity=".8"/></pattern></defs>';
+  }
   out += '<line x1="' + L + '" y1="' + zero.toFixed(1) + '" x2="' + (W - R) + '" y2="' + zero.toFixed(1) +
          '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
   var dots = [];
@@ -502,7 +512,8 @@ function chartBars(pts, opt){
     var x = L + i * bw + bw * 0.16, w = Math.max(2, bw * 0.68);
     var y = v >= 0 ? zero - hgt : zero;
     out += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) +
-           '" rx="2.5" fill="' + (p.strong ? strong : col) + '">' +
+           '" rx="2.5" fill="' + (p.muted && hatch ? 'url(#' + hatch + ')' : (p.strong ? strong : col)) + '"' +
+           (p.muted ? ' stroke="' + col + '" stroke-width="1" stroke-dasharray="3 2"' : '') + '>' +
            (p.title ? '<title>' + esc(p.title) + '</title>' : '') + '</rect>';
     if (p.label != null && p.label !== '' && (!opt.everyNth || i % opt.everyNth === 0 || i === pts.length - 1)) {
       out += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' +

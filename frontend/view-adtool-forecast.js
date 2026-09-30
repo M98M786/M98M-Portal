@@ -91,7 +91,10 @@
     }
     if (RM) {
       var metrics = [['units', 'Units'], ['revenue', 'Revenue'], ['spend', 'Spend']];
-      h += '<div class="an-panel"><h3>Forecast vs reality' + src('realised vs forecast') + '</h3><div class="an-sub">The oldest stored forecast against what actually happened, per metric — units, revenue and spend. MAPE is the mean absolute percentage error over the compared days; lower is better, and over 50% is flagged. The system learns from this gap.</div><div class="fl-metrics">' +
+      /* the actual side is the SAME listings the vintage forecast, never the whole fleet's day — the engine names the
+         count (forecast_vs_actual.listings / scope) */
+      var fvaScope = D.forecast_vs_actual && D.forecast_vs_actual.scope ? String(D.forecast_vs_actual.scope) : (D.forecast_vs_actual && D.forecast_vs_actual.listings != null ? 'over the ' + D.forecast_vs_actual.listings + ' listings forecast in this vintage (actuals of the same listings, not the whole fleet)' : '');
+      h += '<div class="an-panel"><h3>Forecast vs reality' + src('realised vs forecast') + '</h3><div class="an-sub">The oldest stored forecast against what actually happened, per metric — units, revenue and spend' + (fvaScope ? ', ' + esc(fvaScope) : '') + '. MAPE is the mean absolute percentage error over the compared days; lower is better, and over 50% is flagged. The system learns from this gap.</div><div class="fl-metrics">' +
         metrics.map(function (m) { var r = RM[m[0]]; var mape = r && r.mape != null ? Number(r.mape) : null; return '<div><div class="fl-mh">' + esc(m[1]) + (mape != null ? '<span class="fl-mape' + (mape > 50 ? ' hi' : '') + '">MAPE ' + Math.round(mape) + '%</span>' : '') + (r && r.vintage ? ' <span class="an-src">vintage ' + esc(r.vintage) + '</span>' : '') + '</div><div id="flReal_' + m[0] + '" class="fl-chart" style="height:180px"></div></div>'; }).join('') + '</div></div>';
     } else {
       h += '<div class="an-panel"><h3>Realised vs forecast' + src('vintage ' + (D.realised_vintage || '—')) + '</h3><div class="an-sub">' + ((D.realised && D.realised.length) ? 'Fleet units the oldest stored vintage predicted for the days that have since happened.' : 'Fills in as forecast days pass: the first comparison is available the morning after the first forecast; 14 days of it from 14 days after the first run.') + '</div><div id="flReal" class="fl-chart" style="height:220px"></div></div>';
@@ -111,7 +114,15 @@
           return '<div style="border-top:1px solid var(--gold-line);padding:10px 0">' +
             '<div>' + adtProductCell({ item_id: L.item_id, account: L.account, title: L.title, image: L.image }) + (L.low_confidence ? '<span class="fl-lc" title="oldest-vintage MAPE over 50%">modelled, low confidence</span>' : '') + '</div>' +
             '<div class="fl-sc">' + (L.scenarios || []).map(function (s) {
-              var fig = [s.modelled_units != null ? 'Units <b>' + esc(s.modelled_units) + '</b>' : '', s.modelled_revenue != null ? 'Revenue <b>' + gbp(s.modelled_revenue, 0) + '</b>' : '', s.modelled_spend != null ? 'Spend <b>' + gbp(s.modelled_spend, 0) + '</b>' : '', s.modelled_profit != null ? 'Profit <b>' + gbp(s.modelled_profit, 0) + '</b>' : ''].filter(Boolean).join(' · ');
+              /* scenario A ("keep spend") is the current run, whose REAL Sales Analysis law profit exists — the
+                 engine sends it in modelled_profit with profit_basis 'real (law)' and the window's unpriced order
+                 count (adtScenarios); B and C are the real base plus a modelled delta. Per listing, so the
+                 item-level law figure is allowed here, and it carries its unpriced caveat like every other. */
+              var pLabel = String(s.profit_label || s.profit_basis || 'modelled');
+              var realP = /^real \(law\)/.test(pLabel) && s.modelled_profit != null ? s.modelled_profit : null;
+              var profitTxt = realP != null ? 'Profit <span class="an-src">' + esc(pLabel) + '</span> <b>' + adtProfitCell(realP, Number(s.unpriced) || 0, 0) + '</b>'
+                : (s.modelled_profit != null ? 'Profit <span class="an-src">' + esc(pLabel) + '</span> <b>' + gbp(s.modelled_profit, 0) + '</b>' : '');
+              var fig = [s.modelled_units != null ? 'Units <b>' + esc(s.modelled_units) + '</b>' : '', s.modelled_revenue != null ? 'Revenue <b>' + gbp(s.modelled_revenue, 0) + '</b>' : '', s.modelled_spend != null ? 'Spend <b>' + gbp(s.modelled_spend, 0) + '</b>' : '', profitTxt].filter(Boolean).join(' · ');
               return '<div class="fl-scc ' + esc(String(s.id || '')) + '"><div class="h">' + esc(s.id || '') + ' · ' + esc(s.label || '') + '</div><div class="fig">' + (fig || '—') + '</div>' + (s.limit ? '<div class="lim">Limit: ' + esc(s.limit) + '</div>' : '') + (s.what_must_change ? '<div class="mc">To go further: ' + esc(s.what_must_change) + '</div>' : '') + '</div>';
             }).join('') + '</div></div>';
         }).join('') + '</div>';

@@ -4,8 +4,9 @@
  * metric over the window (value pills), an up/down summary strip (last 7 vs previous 7, last 10 vs
  * previous 10) with ▲/▼ and the delta, and — because the portal never shows a collective profit figure —
  * the profit trend is drawn as counts of profitable vs losing listings per week plus a top-movers list of
- * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. Refreshes every 5 minutes
- * only while the window reaches into today. Nothing here is sent to eBay.
+ * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. The daily series ends
+ * yesterday (adtool_scope_day has no today row), so the page re-reads hourly — after each :20 rollup —
+ * and only while the window reaches into today. Nothing here is sent to eBay.
  * Galaxy tokens only, gold the accent, #e0563f the loss / decline colour. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
@@ -39,7 +40,8 @@
     '.ov-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
     '.ov-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
     '.ov-legend{display:flex;gap:14px;font-size:11px;font-weight:800;color:var(--text-3);margin:0 0 6px;flex-wrap:wrap}',
-    '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}'
+    '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}',
+    '.ov-legend i.ov-hatch{background:repeating-linear-gradient(45deg,var(--gold-b) 0 2px,transparent 2px 5px);border:1px dashed var(--gold-b);box-sizing:border-box}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -101,7 +103,9 @@
       if (!$('ovBody')) return;
       draw();
       adtPeriodEcho('ovBar', d && d.period); adtFreshShow('ovFresh', d && d.fresh);
-      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 300000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
+      /* nothing on this page moves before the next :20 rollup (the series has no today row), so the live
+         re-read is hourly, not every 5 minutes; adtPoll keeps the hidden-tab and 'auth' guards */
+      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 3600000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
     }).catch(function (e) {
       if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the overview could not be read') + '</div></div>';
       throw e;
@@ -158,15 +162,20 @@
     var cards = METRICS.map(function (m) {
       return '<div class="ov-mcard"><h4>' + esc(m.label) + '</h4><div class="sub">' + esc(dayRange(series)) + '</div>' + lineChart(series, m) + '</div>';
     }).join('');
+    /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
+    var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
     return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The last point is today, sampled and provisional when the window includes it.</div>' +
+      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The series ends yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + ' — the daily grain has no today row; today lives on the War room and the Command centre.</div>' +
       '<div class="ov-metrics">' + cards + '</div></div>';
   }
   function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
 
   function lineChart(series, m) {
     var vals = series.map(function (r) {
-      var v = m.ratio ? ratio(r[m.ratio[0]], r[m.ratio[1]]) : num(r[m.key]);
+      /* the engine's own figure first (cpc / cvr / roas arrive computed, null when the denominator is zero);
+         the ratio from the raw columns only when the row lacks it */
+      var v = num(r[m.key]);
+      if (v == null && m.ratio) v = ratio(r[m.ratio[0]], r[m.ratio[1]]);
       return v;
     });
     var W = 460, H = 150, L = 44, R = 14, T = 18, B = 22;
@@ -219,17 +228,28 @@
       weeks = pv.profitable_listings.map(function (p, i) { var l = (pv.losing_listings || [])[i] || {}; return { week: p.week || l.week, profitable: p.count != null ? p.count : p.value, losing: l.count != null ? l.count : l.value }; });
     }
     if (!weeks || !weeks.length) return '';
+    var curWk = pv && pv.current_week ? String(pv.current_week) : '';
     var norm = weeks.map(function (w) {
-      return { week: String(w.week || w.iso_week || ''), profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
+      var key = String(w.week || w.iso_week || ''), days = num(w.days);
+      /* the current ISO week runs Monday → yesterday (the daily grain has no today row), so its counts are
+         still filling: the engine marks it `partial`; without that field, fewer than 7 rolled days or the
+         current-week key says the same */
+      var partial = w.partial != null ? !!w.partial : (days != null ? days < 7 : (!!curWk && key === curWk));
+      return { week: key, days: days, partial: partial, profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
     });
+    var anyPartial = norm.some(function (w) { return w.partial; });
     function bars(pick, color) {
       return chartBars(norm.map(function (w) {
-        return { label: (w.week || '').replace(/^\d{4}-?/, 'W'), value: num(w[pick]) || 0, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' };
+        var lbl = (w.week || '').replace(/^\d{4}-?/, 'W');
+        if (w.partial) lbl += w.days != null ? ' · ' + Math.round(w.days) + ' d' : ' · so far';
+        return { label: lbl, value: num(w[pick]) || 0, muted: w.partial, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' + (w.partial ? ' (week in progress' + (w.days != null ? ', ' + Math.round(w.days) + ' of 7 days rolled' : ', Monday to yesterday') + ')' : '') };
       }), { height: 140, color: color, pillColor: color, fmt: function (v) { return String(Math.round(v)); }, minGap: 0 });
     }
     return '<div class="ov-panel"><h3>Profit trend, as listing counts' + src('overview') + '</h3>' +
-      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.</div>' +
-      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span></div>' +
+      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.' +
+      (anyPartial ? ' The hatched bar is the <b>week in progress</b> (Monday to yesterday) — it fills as the week goes on, so read it against the finished weeks only once it is complete.' : '') + '</div>' +
+      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span>' +
+      (anyPartial ? '<span><i class="ov-hatch"></i>Week in progress</span>' : '') + '</div>' +
       '<div class="ov-grid2"><div class="ov-mcard"><h4>Profitable listings / week</h4>' + bars('profitable', 'var(--gold-b)') + '</div>' +
       '<div class="ov-mcard"><h4>Losing listings / week</h4>' + bars('losing', LOSS) + '</div></div></div>';
   }
