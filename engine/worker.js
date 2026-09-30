@@ -8296,7 +8296,7 @@ async function ensureAdtoolSaleSchema(env) {
    records only — nothing is sent to eBay. */
 async function adtSaleSnapshot(env) {
   await ensureAdtoolSaleSchema(env);
-  const t0 = Date.now(), today = ukDate(''), CAP = 400;
+  const t0 = Date.now(), today = ukDate(''), CAP = 1000;   /* covers the whole fleet in one run; the walk below is the safety net for growth */
   /* RUNNING events give today's membership; SCHEDULED ones answer only "is a successor lined up" for the
      event-ending task (eBay's promotionStatus is stored verbatim, and a replacement created ahead of time sits as
      SCHEDULED until the current one ends) */
@@ -8370,11 +8370,17 @@ async function adtSaleSnapshot(env) {
   const cursorRaw = await adtFlag(env, 'adtool_sale_tl_cursor'), cursor = cursorRaw === 'off' ? '' : String(cursorRaw);
   const missing = ids.filter(id => !tlInfo[id]).sort();
   const staleSet = {}; const stale = ids.filter(id => tlInfo[id] && tlInfo[id].u.slice(0, 10) < today).sort(); for (const id of stale) staleSet[id] = 1;
+  /* a listing with NO timeline row shows a fabricated status on every page, so those come first; then the changed
+     set, then the stale tail. Each group is walked from the watermark and wraps, and the watermark is the last id
+     processed whenever a backlog remains — so a day whose 'changed' set alone exceeds the cap still advances through
+     the fleet run after run instead of restarting at the same first cap every time. */
+  const order = [];
+  for (const group of [missing, changed.slice().sort(), stale]) { for (const id of group.filter(id => id > cursor)) order.push(id); }
+  for (const group of [missing, changed.slice().sort(), stale]) { for (const id of group.filter(id => id <= cursor)) order.push(id); }
   const seen = {}, todo = [];
-  for (const id of changed.concat(missing, stale.filter(id => id > cursor), stale.filter(id => id <= cursor))) { if (seen[id]) continue; seen[id] = 1; if (todo.length < CAP) todo.push(id); }
+  for (const id of order) { if (seen[id]) continue; seen[id] = 1; if (todo.length < CAP) todo.push(id); }
   const backlog = Object.keys(seen).length - todo.length;
-  const lastStale = todo.slice().reverse().find(id => staleSet[id] && !changedSet[id]);
-  const newCursor = backlog > 0 ? (lastStale || cursor) : '';
+  const newCursor = backlog > 0 ? todo.reduce((mx, id) => (id > mx ? id : mx), '') : '';
   if (newCursor !== cursor) { try { await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_sale_tl_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(newCursor).run(); } catch (e) { /* the cursor is a convenience; a lost write restarts the walk */ } }
   let tlN = 0, taskN = 0;
   if (todo.length) {
