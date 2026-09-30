@@ -23295,6 +23295,7 @@ function actionEngineSheetWrite_(payload) {
  * writes to a business sheet, and the shared Engine key is required. */
 const ENGINE_RUNNABLE = {
   provenanceListerFix: function () { return r8ProvenanceListerFix(); },
+  nightBackupPull: function () { return JSON.stringify(nightBackupPull()).slice(0, 500); },
   taskDeadlineExtend: function (args) { return taskDeadlineExtend(args); },
   staffRename: function (args) { return staffRename(args); },
   staffSetShift: function (args) { return staffSetShift(args); },
