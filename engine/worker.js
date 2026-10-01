@@ -59,6 +59,9 @@ export default {
     try {
       if (route.auth === 'sync') {
         if (String(body.key || '') !== (await secret(env, 'SYNC_KEY'))) throw new AuthError('auth');
+      } else if (route.auth === 'tracking') {
+        /* Tracking Fetch Agent: its own key (TRACKING_KEY secret or portal_config tracking_fetch_key), never the sync key */
+        if (!(await tfKeyOk(env, body.key))) throw new AuthError('auth');
       } else if (route.auth !== 'public') {
         ctx2 = await authorize(env, String(body.idToken || ''), String(body.session || ''));
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
@@ -174,7 +177,7 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [reportsRelayToSheet, adsItems, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch],
+      '*/15 * * * *': [reportsRelayToSheet, adsItems, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
       '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
          orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
@@ -10003,6 +10006,238 @@ const ORDER_DATA_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lea
    Order Processor. A Team Lead reads orders but never the buyer's name. */
 const ORDER_PII_ROLES = ['Management', 'Ops Head', 'CS', 'Order Processor'];
 
+/* ======================================================= TRACKING FETCH AGENT (fleet 07) ====
+   The AliExpress → eBay tracking loop with no typing in it (1 Oct 2026).
+
+   A Chrome extension signed in to an AliExpress buyer account asks the Engine which orders
+   still need a tracking number (trackingPullList), opens each order's own AliExpress tracking
+   page, captures the number the page itself loads, and hands the batch back (trackingIntake).
+   The Engine matches every AliExpress order number against orders.ali_order — the column the
+   hourly aliSweep fills from the day tabs' 'Order Number' — and pushes through pushTracking,
+   the SAME path the Orders screen's "Upload to eBay" button uses: eBay's own accepted-carrier
+   list picks the courier, the trackings ledger records eBay's answer, and the bridge writes the
+   day tab's 'Tracking number' + 'Delivery Status' cells. Nothing in this block writes a sheet.
+
+   SHADOW BY DEFAULT: while portal_config tracking_fetch_live != 'on', every match is recorded in
+   tracking_inbox as SHADOW with exactly what would have been sent and nothing reaches eBay.
+   The hold statuses (DUPLICATE, AMBIGUOUS, HAS_OTHER, FAIL) are never pushed in either mode —
+   a person decides those from trackingInboxRead. A team-typed number always wins (HAS_OTHER).
+
+   Key: the extension carries its OWN key (Worker secret TRACKING_KEY, or portal_config
+   tracking_fetch_key set through syncConfig) — never the SYNC_KEY, which opens 40 routes. */
+/* TRACKFETCH-BEGIN */
+/* TRACKFETCH-PURE-BEGIN */
+const TF_HOLD = ['DUPLICATE', 'AMBIGUOUS', 'HAS_OTHER', 'FAIL'];   // statuses a person decides
+const TF_RETRY_DAYS = 21;      // a NO_MATCH row keeps retrying this long (aliSweep may still fill the number)
+const TF_PULL_DAYS = 30;       // orders older than this are never pulled
+const TF_RECHECK_HOURS = 12;   // an order AliExpress has not shipped yet is re-asked no sooner than this
+/* statuses the pull list treats as "already captured" — no second visit while one of these stands */
+const TF_CAPTURED = ['NEW', 'MATCHED', 'SHADOW', 'PUSHED', 'ALREADY', 'HAS_OTHER', 'DUPLICATE', 'AMBIGUOUS'];
+
+function tfAliOrder(v) {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d.length >= 8 && d.length <= 22 ? d : '';
+}
+function tfTracking(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, '');
+  if (!/^[A-Z0-9]{8,35}$/.test(s)) return '';
+  if (!/\d/.test(s)) return '';
+  if (/^0+$/.test(s)) return '';
+  return s;
+}
+/* The decision for ONE inbox row — pure, so it is tested without D1.
+     row        {ali_order, tracking}
+     candidates orders rows carrying that ali_order: [{order_id, account, buyer, status}]
+     existing   {order_id → {tracking, push_status}} from the trackings ledger
+     claimed    {tracking → ali_order} numbers already matched from a DIFFERENT AliExpress order
+   Returns {status, note, order_id, account, targets:[{order_id, account}]}. 'MATCHED' means
+   "push these targets"; everything else is final for this pass. */
+function tfDecide(row, candidates, existing, claimed) {
+  const trk = tfTracking(row.tracking);
+  const none = (status, note, c) => ({ status, note, order_id: c ? c.order_id : '', account: c ? c.account : '', targets: [] });
+  if (!trk) return none('INVALID', 'tracking number failed the format check');
+  const owner = (claimed || {})[trk];
+  if (owner && owner !== row.ali_order) return none('DUPLICATE', 'the same tracking number already belongs to AliExpress order ' + owner + ' — one parcel cannot serve two buyers');
+  const all = candidates || [];
+  if (!all.length) return none('NO_MATCH', 'no order carries this AliExpress order number yet');
+  const live = all.filter(c => String(c.status || '') !== 'CANCELLED');
+  if (!live.length) return none('CANCELLED', 'every eBay order on this AliExpress order is cancelled', all[0]);
+  const buyers = {};
+  live.forEach(c => { buyers[String(c.buyer || '').toLowerCase()] = 1; });
+  if (Object.keys(buyers).length > 1) return none('AMBIGUOUS', live.length + ' eBay orders from different buyers share this AliExpress order number — a person must pick');
+  const targets = [], already = [], other = [];
+  for (const c of live) {
+    const ex = (existing || {})[c.order_id];
+    const has = ex ? tfTracking(ex.tracking) : '';
+    if (has && has === trk) already.push(c);
+    else if (has) other.push({ c, has });
+    else targets.push(c);
+  }
+  if (!targets.length && already.length) return none('ALREADY', 'eBay order ' + already[0].order_id + ' already carries this number', already[0]);
+  if (!targets.length && other.length) return none('HAS_OTHER', 'eBay order ' + other[0].c.order_id + ' already has a different tracking number (' + other[0].has + ') — left alone, the team’s entry wins', other[0].c);
+  return { status: 'MATCHED', note: '', order_id: targets[0].order_id, account: targets[0].account,
+    targets: targets.map(c => ({ order_id: c.order_id, account: c.account })) };
+}
+/* TRACKFETCH-PURE-END */
+
+async function tfFlag(env, key, dflt) {
+  const row = await env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(key).first().catch(() => null);
+  const v = row && row.value != null ? String(row.value) : '';
+  return v !== '' ? v : (dflt == null ? '' : dflt);
+}
+async function tfKeyOk(env, key) {
+  const k = String(key || '');
+  if (k.length < 16) return false;
+  const envKey = String(env.TRACKING_KEY || '');
+  if (envKey && k === envKey) return true;
+  const cfg = await tfFlag(env, 'tracking_fetch_key', '');
+  return cfg !== '' && k === cfg;
+}
+
+/* Which AliExpress order numbers one extension profile should look up now. Oldest first inside
+   the window; an order already captured, already tracked on eBay, asked within the re-check
+   window, or known not to belong to this AliExpress account is left out. */
+async function tfPullList(env, p) {
+  const aeAccount = String(p.aeAccount || '').slice(0, 40);
+  const limit = Math.min(Math.max(Number(p.limit) || 30, 1), 80);
+  const rs = await env.DB.prepare(
+    'SELECT o.ali_order, MIN(o.order_id) AS order_id, MIN(o.account) AS account, MIN(o.created_at) AS created_at, COUNT(*) AS n ' +
+    'FROM orders o ' +
+    "WHERE o.ali_order != '' AND o.status NOT IN ('FULFILLED','CANCELLED','NOT_FOUND') " +
+    "AND o.created_at >= datetime('now', ?1) " +
+    "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') " +
+    "AND NOT EXISTS (SELECT 1 FROM tracking_inbox x WHERE x.ali_order = o.ali_order AND x.status IN ('" + TF_CAPTURED.join("','") + "')) " +
+    "AND NOT EXISTS (SELECT 1 FROM tracking_pulls q WHERE q.ali_order = o.ali_order AND (q.last_checked_at >= datetime('now', ?2) OR (',' || q.not_mine || ',') LIKE ?3)) " +
+    'GROUP BY o.ali_order ORDER BY created_at ASC LIMIT ?4'
+  ).bind('-' + TF_PULL_DAYS + ' day', '-' + TF_RECHECK_HOURS + ' hour', '%,' + aeAccount + ',%', limit).all();
+  const rows = (rs.results || []).map(r => ({ ali_order: String(r.ali_order), order_id: String(r.order_id || ''), account: String(r.account || ''), created_at: String(r.created_at || ''), orders: Number(r.n) || 1 }));
+  return { aeAccount, rows, n: rows.length, as_of: new Date().toISOString() };
+}
+
+/* Park what the extension captured. Idempotent on (ali_order, tracking); `checked` carries the
+   per-order outcome of the visit so the pull list can throttle unshipped orders and stop
+   offering an order to a profile that does not own it. */
+async function tfIntake(env, p) {
+  const aeAccount = String(p.aeAccount || '').slice(0, 40) || 'AE';
+  const records = Array.isArray(p.records) ? p.records.slice(0, 400) : [];
+  const checked = Array.isArray(p.checked) ? p.checked.slice(0, 400) : [];
+  const seen = {};
+  const ins = [];
+  let bad = 0, dup = 0;
+  for (const r of records) {
+    const ali = tfAliOrder(r.aliOrderId != null ? r.aliOrderId : r.ali_order);
+    const trk = tfTracking(r.tracking);
+    if (!ali || !trk) { bad++; continue; }
+    const k = ali + '|' + trk;
+    if (seen[k]) { dup++; continue; }
+    seen[k] = 1;
+    ins.push(env.DB.prepare(
+      'INSERT OR IGNORE INTO tracking_inbox (ali_order, tracking, ae_account, carrier, ship_date, source, status, note, order_id, account, attempts, received_at, updated_at, pushed_at) ' +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'NEW', '', '', '', 0, datetime('now'), datetime('now'), '')"
+    ).bind(ali, trk, aeAccount, String(r.carrier || '').slice(0, 60), String(r.shipDate != null ? r.shipDate : (r.ship_date || '')).slice(0, 40), String(r.sourceUrl || r.source || '').slice(0, 200)));
+  }
+  let accepted = 0;
+  if (ins.length) {
+    const res = await env.DB.batch(ins);
+    for (const r of (res || [])) accepted += (r && r.meta && Number(r.meta.changes)) || 0;
+  }
+  const marks = [];
+  for (const c of checked) {
+    const ali = tfAliOrder(c.aliOrderId != null ? c.aliOrderId : c.ali_order);
+    const result = String(c.result || '').slice(0, 20);
+    if (!ali) continue;
+    /* only a visit that actually read the order counts as a check; a captcha, a login wall or an
+       error must leave the order on the list for the next run */
+    if (['found', 'none', 'notmine'].indexOf(result) < 0) continue;
+    const notMine = result === 'notmine' ? aeAccount : '';
+    marks.push(env.DB.prepare(
+      "INSERT INTO tracking_pulls (ali_order, last_checked_at, checks, last_result, not_mine, updated_at) VALUES (?1, datetime('now'), 1, ?2, ?3, datetime('now')) " +
+      "ON CONFLICT(ali_order) DO UPDATE SET last_checked_at = datetime('now'), checks = checks + 1, last_result = ?2, updated_at = datetime('now'), " +
+      "not_mine = CASE WHEN ?3 != '' AND (',' || not_mine || ',') NOT LIKE ('%,' || ?3 || ',%') THEN (CASE WHEN not_mine = '' THEN ?3 ELSE not_mine || ',' || ?3 END) ELSE not_mine END"
+    ).bind(ali, result, notMine));
+  }
+  if (marks.length) await env.DB.batch(marks);
+  return { aeAccount, received: records.length, accepted, skipped: records.length - accepted - bad, bad, checked: marks.length };
+}
+
+/* Match and (in live mode) push. Bounded by rows and wall-clock so it fits beside the other
+   quarter-hour jobs; whatever is left stays NEW for the next pass. */
+async function tfProcess(env, maxRows, budgetMs) {
+  const t0 = Date.now();
+  const live = (await tfFlag(env, 'tracking_fetch_live', 'off')) === 'on';
+  await env.DB.prepare(
+    "UPDATE tracking_inbox SET status = 'EXPIRED', note = 'no order carried this AliExpress order number within " + TF_RETRY_DAYS + " days', updated_at = datetime('now') " +
+    "WHERE status = 'NO_MATCH' AND received_at < datetime('now', ?1)"
+  ).bind('-' + TF_RETRY_DAYS + ' day').run();
+  const rows = (await env.DB.prepare(
+    'SELECT ali_order, tracking, ae_account, carrier, status, attempts, received_at FROM tracking_inbox ' +
+    "WHERE status = 'NEW' OR status = 'NO_MATCH' " +
+    "ORDER BY CASE WHEN status = 'NEW' THEN 0 ELSE 1 END, received_at ASC LIMIT ?1"
+  ).bind(Math.max(1, Number(maxRows) || 40)).all()).results || [];
+  const counts = {};
+  let done = 0;
+  for (const r of rows) {
+    if (done > 0 && Date.now() - t0 > budgetMs) break;
+    done++;
+    const cands = (await env.DB.prepare('SELECT order_id, account, buyer, status FROM orders WHERE ali_order = ?1').bind(r.ali_order).all()).results || [];
+    const existing = {};
+    if (cands.length) {
+      const ids = cands.map(c => String(c.order_id));
+      const ex = (await env.DB.prepare('SELECT order_id, tracking, push_status FROM trackings WHERE order_id IN (' + ids.map((_, i) => '?' + (i + 1)).join(',') + ')').bind(...ids).all()).results || [];
+      ex.forEach(e => { existing[String(e.order_id)] = e; });
+    }
+    const claimed = {};
+    const c1 = await env.DB.prepare(
+      "SELECT ali_order FROM tracking_inbox WHERE tracking = ?1 AND ali_order != ?2 AND status IN ('MATCHED','SHADOW','PUSHED','ALREADY','HAS_OTHER') LIMIT 1"
+    ).bind(r.tracking, r.ali_order).first();
+    if (c1) claimed[r.tracking] = String(c1.ali_order);
+    else {
+      const c2 = await env.DB.prepare(
+        "SELECT o.ali_order FROM trackings t JOIN orders o ON o.order_id = t.order_id WHERE t.tracking = ?1 AND o.ali_order != '' AND o.ali_order != ?2 LIMIT 1"
+      ).bind(r.tracking, r.ali_order).first();
+      if (c2) claimed[r.tracking] = String(c2.ali_order);
+    }
+    const d = tfDecide({ ali_order: String(r.ali_order), tracking: String(r.tracking) }, cands, existing, claimed);
+    let status = d.status, note = d.note;
+    if (status === 'MATCHED') {
+      if (!live) {
+        status = 'SHADOW';
+        note = 'shadow — would push ' + r.tracking + ' to eBay order ' + d.targets.map(t => t.order_id).join(', ') + ' (' + d.account + ')';
+      } else {
+        const outs = [];
+        for (const t of d.targets) {
+          try {
+            const res = await pushTracking({ account: t.account, order_id: t.order_id, tracking: r.tracking, courier: r.carrier, by: 'tracking-fetch:' + r.ae_account }, { env });
+            outs.push(t.order_id + ': ' + (res.shadow ? 'engine shadow (TRACKING_LIVE is off)'
+              : 'eBay ' + String(res.status || 'ok') + (res.already ? ' (already there)' : '') + ', carrier ' + String(res.carrier_auto || '') +
+                (res.sheet && res.sheet.ok === false ? ', sheet: ' + String(res.sheet.reason || '') : '')));
+          } catch (e) {
+            status = 'FAIL';
+            outs.push(t.order_id + ': ' + String(e && e.message || e).replace(/^SAY: /, '').slice(0, 160));
+          }
+        }
+        if (status !== 'FAIL') status = 'PUSHED';
+        note = outs.join(' | ');
+      }
+    }
+    await env.DB.prepare(
+      'UPDATE tracking_inbox SET status = ?3, note = ?4, order_id = ?5, account = ?6, attempts = attempts + 1, updated_at = datetime(\'now\'), ' +
+      "pushed_at = CASE WHEN ?3 = 'PUSHED' THEN datetime('now') ELSE pushed_at END WHERE ali_order = ?1 AND tracking = ?2"
+    ).bind(r.ali_order, r.tracking, status, String(note).slice(0, 400), d.order_id || '', d.account || '').run();
+    counts[status] = (counts[status] || 0) + 1;
+  }
+  return { processed: done, pending: rows.length - done, live, counts };
+}
+
+/* Quarter-hour job: expire, retry NO_MATCH rows (aliSweep fills numbers hourly), push matches
+   when live. Cheap D1 work in shadow; in live mode each push is two eBay calls plus the bridge. */
+async function trackingInboxRetry(env) {
+  await ensureTruthSchema(env);
+  const r = await tfProcess(env, 60, 45000);
+  await ctx_setSync(env, 'trackingInboxRetry', '', JSON.stringify(r).slice(0, 300));
+}
+/* TRACKFETCH-END */
+
 /* ================================================================================ TRUTH v2 ====
    docs/TRUTH-UPDATE-v2.md — Phase 1. One metric per number (Path A), an independent verifier
    (Path B) with separately written queries, and the schema both stand on. Pages adopt these
@@ -10129,6 +10364,12 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS metric_snapshots (metric_id TEXT, scope_key TEXT, value TEXT, unit TEXT, as_of TEXT, computed_at TEXT, provenance TEXT, PRIMARY KEY (metric_id, scope_key, as_of))",
     "CREATE TABLE IF NOT EXISTS validation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, metric_id TEXT, scope_key TEXT, ran_at TEXT, shown TEXT, recomputed TEXT, delta TEXT, status TEXT, method TEXT, evidence TEXT, next_run_at TEXT)",
     "CREATE INDEX IF NOT EXISTS ix_validation_metric ON validation_runs (metric_id, ran_at)",
+    /* Tracking Fetch Agent (fleet 07): the captured-number inbox and the per-order visit log */
+    "CREATE TABLE IF NOT EXISTS tracking_inbox (ali_order TEXT NOT NULL, tracking TEXT NOT NULL, ae_account TEXT DEFAULT '', carrier TEXT DEFAULT '', ship_date TEXT DEFAULT '', source TEXT DEFAULT '', status TEXT DEFAULT 'NEW', note TEXT DEFAULT '', order_id TEXT DEFAULT '', account TEXT DEFAULT '', attempts INTEGER DEFAULT 0, received_at TEXT, updated_at TEXT, pushed_at TEXT DEFAULT '', PRIMARY KEY (ali_order, tracking))",
+    "CREATE INDEX IF NOT EXISTS idx_tfi_status ON tracking_inbox(status, received_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tfi_tracking ON tracking_inbox(tracking)",
+    "CREATE TABLE IF NOT EXISTS tracking_pulls (ali_order TEXT PRIMARY KEY, last_checked_at TEXT, checks INTEGER DEFAULT 0, last_result TEXT DEFAULT '', not_mine TEXT DEFAULT '', updated_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_ali ON orders(ali_order)",
   ];
   /* 12 Sept (owner: "make these things fast"): this pass ran ~70 sequential D1 statements on the
      FIRST request of every fresh isolate — ~5 s added to whichever staff click happened to land
@@ -10981,6 +11222,18 @@ async function truthTier1(env) {
      sweep ever looks at push_status again. Seven orders had been sitting like that since
      25 Aug. Counted here so the board shows them; INFO, not FAIL, because the number is not
      wrong — the push failed, and re-pushing to eBay is a buyer-facing act someone must choose. */
+  /* Tracking Fetch Agent: a captured number the engine would not push on its own (two AliExpress
+     orders sharing one parcel, two buyers on one AliExpress order, a different number already on
+     the eBay order, or a push eBay refused) waits for a person. INFO - nothing is wrong, someone
+     has to look. */
+  const tfh = await env.DB.prepare(
+    "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM tracking_inbox WHERE status IN ('DUPLICATE','AMBIGUOUS','HAS_OTHER','FAIL')"
+  ).first().catch(() => null);
+  const tfhN = Number(tfh && tfh.n) || 0;
+  out.push({ metric_id: 'TRACKING_FETCH_HELD', scope_key: 'all', shown: 0, recomputed: tfhN, delta: tfhN,
+    status: tfhN === 0 ? 'PASS' : 'INFO', method: 'D1_RECOMPUTE',
+    evidence: tfhN === 0 ? 'no fetched tracking number is waiting on a person' : tfhN + ' fetched tracking number(s) held for a person (duplicate / ambiguous / already tracked / push failed), oldest ' + String((tfh && tfh.oldest) || ''),
+    next_run_at: next });
   const tpf = await env.DB.prepare(
     "SELECT COUNT(*) AS n, MIN(pushed_at) AS oldest FROM trackings WHERE push_status LIKE 'FAIL%'"
   ).first().catch(() => null);
@@ -12259,6 +12512,53 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       if (TRACKING_PUSH_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       return pushTracking({ ...p, force_live: true, by: ctx.email }, ctx);
+    },
+  },
+
+  /* ---- Tracking Fetch Agent (fleet 07): the extension's two calls behind their own key, a read
+     for the people who own the queue, and the owner's switch. Logic lives in the TRACKFETCH block. */
+  trackingPullList: {
+    auth: 'tracking', fn: async (p, ctx) => { await ensureTruthSchema(ctx.env); return tfPullList(ctx.env, p); },
+  },
+  trackingIntake: {
+    auth: 'tracking', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const r = await tfIntake(ctx.env, p);
+      /* match (and in live mode push) after answering, inside this invocation; the quarter-hour
+         job sweeps whatever this budget leaves */
+      ctx.waitUntil(tfProcess(ctx.env, 40, 25000).catch(() => {}));
+      return r;
+    },
+  },
+  trackingInboxRead: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (ORDER_DATA_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureTruthSchema(ctx.env);
+      const live = (await tfFlag(ctx.env, 'tracking_fetch_live', 'off')) === 'on';
+      const keySet = !!String(ctx.env.TRACKING_KEY || '') || (await tfFlag(ctx.env, 'tracking_fetch_key', '')) !== '';
+      const counts = {};
+      ((await ctx.env.DB.prepare('SELECT status, COUNT(*) AS n FROM tracking_inbox GROUP BY status').all()).results || []).forEach(r => { counts[r.status] = Number(r.n) || 0; });
+      const status = String(p.status || '').slice(0, 20);
+      const sql = 'SELECT ali_order, tracking, ae_account, carrier, status, note, order_id, account, attempts, received_at, updated_at, pushed_at FROM tracking_inbox ' +
+        (status ? 'WHERE status = ?1 ' : '') + 'ORDER BY updated_at DESC LIMIT 300';
+      const q = status ? ctx.env.DB.prepare(sql).bind(status) : ctx.env.DB.prepare(sql);
+      const rows = (await q.all()).results || [];
+      const pulls = (await ctx.env.DB.prepare('SELECT COUNT(*) AS n, MAX(last_checked_at) AS last FROM tracking_pulls').first().catch(() => null)) || {};
+      const job = (await ctx.env.DB.prepare("SELECT cursor, last_ok, last_error FROM sync_state WHERE job = 'trackingInboxRetry' AND account = ''").first().catch(() => null)) || null;
+      return { live, key_set: keySet, counts, rows, pulls, job, hold: TF_HOLD };
+    },
+  },
+  trackingFetchSet: {
+    auth: 'mgmt', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const rows = [];
+      if (p.live === 'on' || p.live === 'off') rows.push(['tracking_fetch_live', p.live]);
+      if (typeof p.key === 'string' && p.key.length >= 16) rows.push(['tracking_fetch_key', p.key.slice(0, 120)]);
+      if (!rows.length) throw new Error('SAY: nothing to set - pass live:"on"|"off" and/or key (16+ chars)');
+      for (const r of rows) {
+        await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(r[0], r[1]).run();
+      }
+      return { set: rows.map(r => r[0]), by: ctx.email };
     },
   },
 
@@ -15999,7 +16299,7 @@ const ROUTES = {
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
         trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
-        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan,
+        trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
         adtoolRollups, adtoolTruth };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
@@ -16234,6 +16534,8 @@ const ROUTES = {
         sourcing: 'SELECT * FROM sourcing',
         orders: 'SELECT * FROM orders',
         trackings: 'SELECT * FROM trackings',
+        tracking_inbox: 'SELECT * FROM tracking_inbox',
+        tracking_pulls: 'SELECT * FROM tracking_pulls',
         sales_daily: 'SELECT * FROM sales_daily',
         ads_daily: 'SELECT * FROM ads_daily',
         ads_today: 'SELECT * FROM ads_today',

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2026-10-01 — TRACKING FETCH AGENT (fleet 07) — engine side, undeployed
+
+The AliExpress → eBay tracking loop with no typing in it. A Chrome extension (repo
+`M98M-Tracking-Sync`, v2) asks the Engine which orders still need a number (`trackingPullList`),
+reads each order's own AliExpress tracking page, and hands the numbers back (`trackingIntake`).
+The Engine matches on `orders.ali_order` and pushes through the existing `pushTracking`.
+
+- New block `/* TRACKFETCH-BEGIN */ … END */`; tables `tracking_inbox`, `tracking_pulls`; index
+  `idx_orders_ali`; routes `trackingPullList` / `trackingIntake` (own key: `TRACKING_KEY` secret
+  or `portal_config.tracking_fetch_key`), `trackingInboxRead` (order roles), `trackingFetchSet`
+  (Management); job `trackingInboxRetry` on the quarter-hour slot and in `runJobKey`;
+  `backupDump` gains both tables; truth board gains `TRACKING_FETCH_HELD` (INFO).
+- **Shadow by default** (`portal_config.tracking_fetch_live` unset). Held, never pushed:
+  DUPLICATE (one parcel, two Ali orders), AMBIGUOUS (two buyers), HAS_OTHER (team's number
+  wins), FAIL. No sheet is written from the block — `pushTracking`'s bridge write is the only
+  one, as before.
+- Written and tested (36/36 in `M98M-Tracking-Sync/tests/engine-trackfetch.test.js`);
+  **not deployed** — the dash session had expired. Blueprint: `M98M-Tracking-Sync/BLUEPRINT.md`.
+
 ## 2026-09-01 — TRUTH UPDATE v2 (phases 0–6)
 
 The whole portal moved onto a verified number register: one metric, one function, two

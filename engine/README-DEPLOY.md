@@ -40,6 +40,7 @@ Force any job: `POST {action:'runJobNow', key:SYNC_KEY, payload:{job:'<name>'}}`
 | Var | Arms |
 |---|---|
 | `TRACKING_LIVE` | tracking push to eBay on dispatch (`ebayPushTracking`) |
+| `portal_config.tracking_fetch_live` = `on` (D1, not a var) | the Tracking Fetch Agent's own pushes (fleet 07; its key is `TRACKING_KEY` or `portal_config.tracking_fetch_key`) |
 | `ADS_WRITE_LIVE` | Campaign-watch ✕ buttons (remove item from campaign) |
 | `AUTOMSG_LIVE` | the auto-message sender (per-account triggers still gate each send) |
 | `CS_WRITE_LIVE` | CS desk Reply + Refund buttons |
