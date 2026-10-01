@@ -10020,6 +10020,8 @@ const ORDER_PII_ROLES = ['Management', 'Ops Head', 'CS', 'Order Processor'];
 
    SHADOW BY DEFAULT: while portal_config tracking_fetch_live != 'on', every match is recorded in
    tracking_inbox as SHADOW with exactly what would have been sent and nothing reaches eBay.
+   When it is 'on', pushes go with force_live (like the Orders screen's button): this switch alone
+   arms the feed, independent of the Engine's TRACKING_LIVE var.
    The hold statuses (DUPLICATE, AMBIGUOUS, HAS_OTHER, FAIL) are never pushed in either mode —
    a person decides those from trackingInboxRead. A team-typed number always wins (HAS_OTHER).
 
@@ -10207,7 +10209,10 @@ async function tfProcess(env, maxRows, budgetMs) {
         const outs = [];
         for (const t of d.targets) {
           try {
-            const res = await pushTracking({ account: t.account, order_id: t.order_id, tracking: r.tracking, courier: r.carrier, by: 'tracking-fetch:' + r.ae_account }, { env });
+            /* force_live: the owner's tracking_fetch_live switch is THIS feed's go-live. The Engine's own
+               TRACKING_LIVE var gates the Apps-Script-driven bulk path and is deliberately unset in
+               production; without force_live every push here would silently record SHADOW. */
+            const res = await pushTracking({ account: t.account, order_id: t.order_id, tracking: r.tracking, courier: r.carrier, by: 'tracking-fetch:' + r.ae_account, force_live: true }, { env });
             outs.push(t.order_id + ': ' + (res.shadow ? 'engine shadow (TRACKING_LIVE is off)'
               : 'eBay ' + String(res.status || 'ok') + (res.already ? ' (already there)' : '') + ', carrier ' + String(res.carrier_auto || '') +
                 (res.sheet && res.sheet.ok === false ? ', sheet: ' + String(res.sheet.reason || '') : '')));
