@@ -60,10 +60,20 @@
     var acctSet = {};
     list.forEach(function (r) { Object.keys(r.accounts || {}).forEach(function (a) { acctSet[a] = 1; }); });
     var acctCols = Object.keys(acctSet).sort();
+    /* 2 Oct (owner): the per-account headers used only the first word, so "AZHAR ABRT" and
+       "Azhar Bhai" both read "Azhar" — two different shops, indistinguishable. Use the first
+       word ONLY when it is unique (case-insensitively) across the shown accounts; otherwise the
+       full account name. Full name is always on hover. */
+    var irFwCount = {};
+    acctCols.forEach(function (a) { var fw = String(a).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
+    function irAcctLabel(a) {
+      var parts = String(a).trim().split(/\s+/);
+      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a).trim() : parts[0];
+    }
     h += '<div class="scroll"><table class="ir-tbl"><thead><tr>' +
       '<th>#</th><th style="text-align:left">Product · folded across accounts</th>' +
       '<th>Today</th><th>Yesterday</th><th>7 days</th><th>30 days</th><th>All time</th>' +
-      acctCols.map(function (a) { return '<th>' + esc(a.split(' ')[0]) + '</th>'; }).join('') +
+      acctCols.map(function (a) { return '<th title="' + esc(a) + '">' + esc(irAcctLabel(a)) + '</th>'; }).join('') +
       (showReasons ? '<th>Refund £</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
       '<th>% of total</th></tr></thead><tbody>';
     if (!list.length) {
