@@ -198,6 +198,17 @@
     if (typeof refreshBadges === 'function') { refreshBadges(); }
   }
 
+  /* 1 Oct (owner): the checkpoint archive (day chips) and the notes filed against each check. */
+  VIEW_CSS.push(
+    '.rc-days{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
+    '.rc-day{border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);border-radius:99px;padding:4px 11px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}' +
+    '.rc-day.on{border-color:var(--gold-a);color:var(--gold-a)}' +
+    '.rc-notes{margin-top:10px;border-top:1px dashed var(--gold-line);padding-top:8px}' +
+    '.rc-notes summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--gold-a)}' +
+    '.rc-note-form{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:10px;align-items:center}' +
+    '.rc-note-form .rc-note-text{grid-column:1/-1}'
+  );
+
   // ============================== §11.1 ORDER RECHECKING ==============================
   VIEWS.recheck = {
     label: 'Order rechecking',
@@ -216,7 +227,7 @@
         '</div>' +
         '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — who is late ' +
           '<span class="hint">judged on real evidence: a buyer chasing, no tracking, or nothing either way</span></div>' +
-          '<div class="bd" id="rcOwners"><div class="spinner"></div></div></div>' +
+          '<div class="bd"><div class="rc-days" id="rcDays"></div><div id="rcOwners"><div class="spinner"></div></div></div></div>' +
         '<div class="card enter d1"><div class="hd">Why today’s list holds these orders ' +
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
           '<div class="bd" id="rcWhy"><div class="spinner"></div></div>' +
@@ -225,6 +236,7 @@
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
+      rcDayChips();
       rcOwnersLoad();
 
       $('rcRefresh').onclick = function () { rcOwnersLoad(); rcLoad(); };
@@ -322,13 +334,74 @@
         '<span class="pill rc-p-off">day ' + rcNum(c.days) + '</span>' +
         '<span class="rc-cp-ask">' + esc(rcStr(c.asks)) + '</span>' +
         '<span class="rc-cp-when">orders placed ' + esc(rcStr(c.order_date_nice) || rcNice(rcStr(c.order_date))) + ' · ' + rcPlural(c.total, 'order') + '</span></div>' +
-      '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + '</div>';
+      '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + rcNotesBlock(c) + '</div>';
+  }
+
+  /* 1 Oct (owner): "keep the archive of previous days in order rechecking, min one week old" —
+     the day chips ask the engine for any past day, which answers exactly as it did on the day. */
+  var RC_DAY = '';                               // '' = today; a yyyy-mm-dd = the archive
+  function rcDayChips() {
+    var host = $('rcDays');
+    if (!host) { return; }
+    var base = rcToday(), m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(base);
+    var t0 = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : Date.now(), days = [], i;
+    for (i = 0; i < 10; i++) { days.push(new Date(t0 - i * 86400000).toISOString().slice(0, 10)); }
+    host.innerHTML = days.map(function (ymd, k) {
+      var on = (k === 0 && !RC_DAY) || RC_DAY === ymd;
+      return '<button class="rc-day' + (on ? ' on' : '') + '" data-rc-day="' + (k === 0 ? '' : rcAttr(ymd)) + '">' + (k === 0 ? 'Today' : k === 1 ? 'Yesterday' : esc(rcNice(ymd))) + '</button>';
+    }).join('') + '<span class="rc-sub" style="margin-left:6px">the archive — a past day answers as it did on the day · notes stay with their check</span>';
+    host.querySelectorAll('[data-rc-day]').forEach(function (b) {
+      b.onclick = function () { RC_DAY = this.getAttribute('data-rc-day') || ''; rcDayChips(); rcOwnersLoad(); };
+    });
+  }
+
+  /* 1 Oct (owner): "show the check details there, and under it the page where the checker adds
+     the details for that specific check." Every note filed against this checkpoint-day, then the
+     form — status, account, order (optional), what was found. */
+  var RC_NOTE_STATUS = ['Left China', 'With UK courier', 'Delivered', 'Buyer chasing — replied', 'No tracking — chased the supplier', 'Refunded / replaced', 'Other'];
+  function rcNotesBlock(c) {
+    var notes = c.notes || [], key = rcAttr(rcStr(c.order_date) + '|' + rcNum(c.days));
+    var h = '<details class="rc-notes"' + (notes.length ? ' open' : '') + '><summary>Check details · ' + rcPlural(notes.length, 'note') + ' filed on this check</summary>';
+    if (notes.length) {
+      h += '<div class="rc-scroll"><table class="rc-tbl"><thead><tr><th>When</th><th>By</th><th>Status</th><th>Account</th><th>Order</th><th>Note</th></tr></thead><tbody>' +
+        notes.map(function (n) {
+          return '<tr><td class="rc-tight">' + esc(fmtPkt(n.at, true) || rcStr(n.at)) + '</td><td>' + esc(rcStr(n.by_email).split('@')[0]) + '</td>' +
+            '<td><span class="pill rc-p-open">' + esc(rcStr(n.status) || '—') + '</span></td><td>' + esc(rcStr(n.account) || 'all') + '</td>' +
+            '<td>' + (rcStr(n.order_id) ? rcOrderLink(n.order_id) : '—') + '</td><td style="white-space:normal">' + esc(rcStr(n.note)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else {
+      h += '<div class="rc-sub">Nothing filed on this check yet.</div>';
+    }
+    if (rcHas(RC_ROLES, rcRole()) || rcRole() === 'CS' || (STATE.user && STATE.user.super)) {
+      var accts = (c.accounts || []).map(function (a) { return rcStr(a.account); }).filter(Boolean);
+      h += '<div class="rc-note-form" data-rcn="' + key + '">' +
+        '<select class="rc-in" data-rcn-status><option value="">status…</option>' + RC_NOTE_STATUS.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select>' +
+        '<select class="rc-in" data-rcn-acct><option value="">all accounts</option>' + accts.map(function (a) { return '<option value="' + rcAttr(a) + '">' + esc(a) + '</option>'; }).join('') + '</select>' +
+        '<input class="rc-in" data-rcn-order placeholder="order no. (optional)">' +
+        '<input class="rc-in rc-note-text" data-rcn-note placeholder="what you found on this check — counts, states, what you did">' +
+        '<button class="btn-gold" data-rcn-save>Save to this check</button></div>';
+    }
+    return h + '</details>';
+  }
+  function rcNotesWire(box) {
+    box.querySelectorAll('[data-rcn-save]').forEach(function (b) {
+      b.onclick = function () {
+        var f = this.closest('[data-rcn]'), parts = String(f.getAttribute('data-rcn') || '').split('|');
+        var status = rcStr(f.querySelector('[data-rcn-status]').value), note = rcStr(f.querySelector('[data-rcn-note]').value);
+        if (!status && !note) { toast('Pick a status or write what you found.'); return; }
+        var btn = this; btn.disabled = true;
+        api('recheckNoteSave', { ref_date: parts[0], days: parts[1], account: rcStr(f.querySelector('[data-rcn-acct]').value),
+          order_id: rcStr(f.querySelector('[data-rcn-order]').value), status: status, note: note })
+          .then(function () { toast('Filed on the check.'); rcOwnersLoad(); })
+          .catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
   }
 
   function rcOwnersLoad() {
     var box = $('rcOwners');
     if (!box) { return; }
-    api('deliveryCheckpoints', {}).then(function (d) {
+    api('deliveryCheckpoints', RC_DAY ? { date: RC_DAY } : {}).then(function (d) {
       var cps = (d && d.checkpoints) || [];
       var who = $('rcWho');
       if (who && cps.length) {
@@ -339,11 +412,12 @@
       if (!cps.length) { box.innerHTML = '<div class="rc-empty">No checkpoints are configured.<span>CONFIG key recheck_checkpoints holds the list.</span></div>'; return; }
       var late = 0;
       cps.forEach(function (c) { late += rcNum(c.needs_you); });
-      box.innerHTML = (late
+      box.innerHTML = (RC_DAY ? '<div class="rc-sub" style="margin-bottom:8px">Archive · as the checkpoints stood on ' + esc(rcNice(rcStr(d && d.day) || RC_DAY)) + '</div>' : '') + (late
           ? '<div class="rc-dis" style="margin-top:0;margin-bottom:12px"><b>' + rcPlural(late, 'order') + ' need' + (late === 1 ? 's' : '') + ' a person today.</b> Each row below says who, what and why — everything else on these days is proven delivered, still inside the estimate, or settled.</div>'
           : '<div class="rc-box rc-blue" style="margin-top:0;margin-bottom:12px"><span class="k">All three days are clean</span>No buyer is chasing and nothing is missing a tracking number.</div>') +
         cps.map(rcCpCard).join('') +
         '<div class="rc-sub" style="margin-top:4px">' + esc(rcStr(d && d.note)) + '</div>';
+      rcNotesWire(box);
     }).catch(function (e) {
       box.innerHTML = '<div class="rc-empty">Checkpoints did not answer.<span>' + esc(e.message) + '</span></div>';
     });

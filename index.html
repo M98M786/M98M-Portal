@@ -573,7 +573,7 @@ var SHEET_WRITE_ACTIONS = [
   'decisionAct','zeroSaleDecide','submitHunt','reviseHunt','decideHunt','mgmtRejectDecide','submitReport','clockIn','clockOut',
   'updateStaff','addStaff','deactivateStaff','reactivateStaff','saveAccount','approveUser','setSchedule','staffReviewSave','saveEvaluation',
   'submitRecheck','submitPotentialCpc','decidePotentialCpc','switchPotentialCpcCampaign','submitCpcResearch','keywordDecide','approveKeywords','returnKeywords',
-  'sourcingSave','logWrongOrder','replacementCreate','createCase','updateCase','recoveryUpsert','resolveAlert','priceAck',
+  'sourcingSave','logWrongOrder','replacementCreate','replacementDecide','replacementFulfil','refundRequestCreate','refundRequestDecide','refundRequestProcess','createCase','updateCase','recoveryUpsert','resolveAlert','priceAck',
   'acknowledgeSignal','acknowledgeAllSignals','sendMessage','inboxSend','createMeeting','rsvp','setAgenda','congratulate',
   'ideaSubmit','ideaDecide','retireRule','register','toolStateSave','csPlaybookSave','csToolLog'
 ];
@@ -695,7 +695,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck'];
+var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261001-2156';
+var BUILD = '20261002-0025';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9974,7 +9974,7 @@ function createMeeting() {
         '</div></div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">The feed ' +
           '<span class="hint" id="csRHint">newest first</span></div>' +
-          '<div class="bd"><div class="cs-tiles" id="csRTiles"></div>' +
+          '<div class="bd"><div class="cs-tiles" id="csRTiles"></div><div id="csRWhy"></div>' +
             '<div id="csRList"><div class="spinner"></div></div></div>' +
         '</div>';
     },
@@ -10050,6 +10050,19 @@ function createMeeting() {
     return map;
   }
 
+  /* 1 Oct (owner): "breakdown of reasons of returns getting opened". */
+  VIEW_CSS.push(
+    '.cs-why{margin:4px 0 14px;padding:12px 14px;border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2)}' +
+    '.cs-why-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:8px}' +
+    '.cs-why-row{display:grid;grid-template-columns:minmax(140px,260px) 1fr 36px auto;gap:10px;align-items:center;font-size:12px;font-weight:700;padding:3px 0}' +
+    '.cs-why-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.cs-why-bar{height:8px;border-radius:99px;background:var(--panel);border:1px solid var(--gold-line);overflow:hidden}' +
+    '.cs-why-bar i{display:block;height:100%;background:var(--gold-a);border-radius:99px}' +
+    '.cs-why-p{font-size:11px;color:var(--text-3);white-space:nowrap}' +
+    '.cs-why-types{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}' +
+    '.cs-why-chip{font-size:11px;font-weight:700;border:1px solid var(--gold-line);border-radius:99px;padding:2px 9px;color:var(--text-2)}'
+  );
+
   function csRenderReturns() {
     var list = $('csRList');
     if (!list) { return; }
@@ -10077,6 +10090,28 @@ function createMeeting() {
         csTile(CS_R_H.refund + ' · rows shown', csMoney(money), true);
     }
     csCount('returns', open);
+
+    /* The eBay reason and the case type counted over the rows shown, biggest first, with the
+       refund money each reason carries. */
+    if ($('csRWhy')) {
+      var byReason = {}, byType = {}, rz, ty, tot = shown.length, j;
+      for (j = 0; j < shown.length; j++) {
+        rz = csStr(csVal(shown[j], CS_R_H.reason)) || '(no reason given)';
+        ty = csStr(csVal(shown[j], CS_R_H.type)) || '(no type)';
+        byReason[rz] = byReason[rz] || { n: 0, money: 0 };
+        byReason[rz].n++; byReason[rz].money += csNum(csVal(shown[j], CS_R_H.refund)) || 0;
+        byType[ty] = (byType[ty] || 0) + 1;
+      }
+      var reasons = Object.keys(byReason).sort(function (a, b) { return byReason[b].n - byReason[a].n; });
+      var types = Object.keys(byType).sort(function (a, b) { return byType[b] - byType[a]; });
+      $('csRWhy').innerHTML = tot ? '<div class="cs-why"><div class="cs-why-h">Why returns are opened · ' + tot + ' row' + (tot === 1 ? '' : 's') + ' shown</div>' +
+        reasons.map(function (r) {
+          var pct = Math.round(byReason[r].n / tot * 100);
+          return '<div class="cs-why-row"><span class="cs-why-l" title="' + esc(r) + '">' + esc(r) + '</span><span class="cs-why-bar"><i style="width:' + pct + '%"></i></span>' +
+            '<b>' + byReason[r].n + '</b><span class="cs-why-p">' + pct + '%' + (byReason[r].money ? ' · ' + csMoney(byReason[r].money) : '') + '</span></div>';
+        }).join('') +
+        '<div class="cs-why-types">' + types.map(function (t) { return '<span class="cs-why-chip">' + esc(t) + ' <b>' + byType[t] + '</b></span>'; }).join('') + '</div></div>' : '';
+    }
 
     if (!shown.length) {
       list.innerHTML = '<div class="cs-empty">Nothing in this feed for those filters.' +
@@ -11820,6 +11855,25 @@ VIEWS.dashboard = {
      a listing that did not actually publish is never hidden. (owner, 6 Sept — "it says live but
      comes back on refresh".) A full page reload clears this, by which time the mirror has caught up. */
   var GL_DONE = {};
+  /* 1 Oct (owner): "give option to Zaid to select the campaign … when he is adding the item id and
+     title in the go-live desk, so he can change campaign type on the basis of listing quality."
+     The same list the hunt form offers; the server checks the value. Blank = the hunt's own pick. */
+  var GL_ADV_TYPES = ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
+    '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'];
+  function glHuntAdv(t) {
+    var m = (glS(t.details) + '\n' + glS(t.comments)).match(/(?:CPC Selling Chance|Advertising(?: type)?|Campaign(?: type)?)\s*[:：]\s*([^\n·|(]+)/i);
+    return m ? glS(m[1]) : '';
+  }
+  function glAdvOptions(cur) {
+    var norm = function (v) { return glS(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    var found = false, h = '';
+    GL_ADV_TYPES.forEach(function (v) {
+      var on = !!cur && norm(v) === norm(cur);
+      if (on) { found = true; }
+      h += '<option value="' + esc(v) + '"' + (on ? ' selected' : '') + '>' + esc(glS(v)) + (on ? ' — the hunt’s pick' : '') + '</option>';
+    });
+    return '<option value=""' + (found ? '' : ' selected') + '>' + (cur && !found ? '— keep the hunt’s pick (' + esc(cur) + ')' : '— as the hunt said —') + '</option>' + h;
+  }
 
   VIEW_CSS.push(
     '.gl-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
@@ -11859,7 +11913,7 @@ VIEWS.dashboard = {
           '<button class="minibtn" id="glRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
         '<div class="card enter d2"><div class="hd">Drafts assigned to you ' +
-          '<span class="hint">entering the Item ID fires the campaign, supplier and 72-hour tasks</span></div>' +
+          '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span></div>' +
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
@@ -11919,6 +11973,8 @@ VIEWS.dashboard = {
               '<input class="gl-in mono" inputmode="numeric" placeholder="123456789012" data-gl-item="' + esc(id) + '"></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Final eBay title (saved for ever)</label>' +
               '<input class="gl-in" data-gl-title="' + esc(id) + '" maxlength="160" placeholder="the title exactly as published"></div>' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Campaign type · change it on listing quality</label>' +
+              '<select class="gl-in" data-gl-camp="' + esc(id) + '">' + glAdvOptions(glHuntAdv(t)) + '</select></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Note (optional)</label>' +
               '<input class="gl-in" data-gl-note="' + esc(id) + '" placeholder="anything the approver should know"></div>' +
           '</div>' +
@@ -11934,16 +11990,18 @@ VIEWS.dashboard = {
           var inp = box.querySelector('[data-gl-item="' + id.replace(/"/g, '') + '"]');
           var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
           var ttl = box.querySelector('[data-gl-title="' + id.replace(/"/g, '') + '"]');
+          var camp = box.querySelector('[data-gl-camp="' + id.replace(/"/g, '') + '"]');
           var v = inp ? glS(inp.value) : '';
           if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
           var btn = this; btn.disabled = true;
           btn.textContent = 'Live ✓';
-          toast('Live · the campaign, supplier and 72-hour tasks are being created.');
+          toast('Live · the campaign, supplier and 7-day tasks are being created.');
           api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
+            campaign_type: camp ? glS(camp.value) : '',
             note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
               GL_DONE[id] = true;   // confirmed live — keep it off the desk even while the mirror lags
-              toast('Live ✓ — campaign, supplier and 72-hour tasks created.');
+              toast('Live ✓ — campaign, supplier and 7-day tasks created.');
               glLoad();
             }).catch(function (e) {
               var msg = String((e && e.message) || '');
@@ -14913,8 +14971,43 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.ir-tbl td:first-child{text-align:left}' +
     '.ir-alert{border:1px solid var(--bad);border-radius:12px;background:var(--bad-soft);padding:12px 14px;margin-bottom:14px;font-size:12.5px}' +
     '.ir-hot{background:var(--bad-soft)}' +
-    '.ir-dup{font-size:9.5px;font-weight:800;letter-spacing:.05em;color:var(--warn);border:1px solid rgba(255,159,67,.5);border-radius:99px;padding:1px 7px;margin-left:6px}'
+    '.ir-dup{font-size:9.5px;font-weight:800;letter-spacing:.05em;color:var(--warn);border:1px solid rgba(255,159,67,.5);border-radius:99px;padding:1px 7px;margin-left:6px}' +
+    '.ir-speed-tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px}' +
+    '.ir-st{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel-2)}' +
+    '.ir-st .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.ir-st b{display:block;font-size:20px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}' +
+    '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}'
   );
+
+  /* 1 Oct (owner): "update late tracking with different time frames — 2, 3, 4, 5 days — in which
+     time tracking is being uploaded for that item, and how much time orders are really waiting."
+     Every order of the last 30 days by the days from the order to its FIRST tracking number;
+     "still waiting" = no tracking yet, with how long those orders have waited so far. */
+  function irSpeedTable(d) {
+    var rows = d.track_speed || [], tot = { all: 0, within2: 0, d3: 0, d4: 0, d5: 0, over5: 0, untracked: 0 };
+    rows.forEach(function (r) { Object.keys(tot).forEach(function (k) { tot[k] += Number(r[k]) || 0; }); });
+    var pc = function (n) { return tot.all ? Math.round(n / tot.all * 100) + '%' : ''; };
+    var h = '<div class="ir-speed-tiles">' + [
+      ['Orders · 30 days', tot.all, '', ''], ['Tracked within 2 days', tot.within2, pc(tot.within2), 'ok'], ['Day 3', tot.d3, pc(tot.d3), ''], ['Day 4', tot.d4, pc(tot.d4), ''],
+      ['Day 5', tot.d5, pc(tot.d5), ''], ['After 5 days', tot.over5, pc(tot.over5), tot.over5 ? 'bad' : ''], ['Still waiting', tot.untracked, pc(tot.untracked), tot.untracked ? 'bad' : '']
+    ].map(function (t) { return '<div class="ir-st ' + t[3] + '"><span class="k">' + t[0] + '</span><b>' + t[1] + '</b>' + (t[2] ? '<span class="p">' + t[2] + ' of orders</span>' : '') + '</div>'; }).join('') + '</div>';
+    h += '<div class="scroll"><table class="ir-tbl"><thead><tr><th>#</th><th style="text-align:left">Product · folded across accounts</th><th>Orders 30d</th>' +
+      '<th>≤2 days</th><th>3 days</th><th>4 days</th><th>5 days</th><th>&gt;5 days</th><th>Still waiting</th><th>Avg days to tracking</th><th>Waiting now · avg days</th><th>Late share</th></tr></thead><tbody>';
+    if (!rows.length) { h += '<tr><td colspan="12" style="text-align:left"><div class="empty">No orders in the last 30 days for this view.</div></td></tr>'; }
+    rows.forEach(function (r, i) {
+      var hot = r.late_share >= 50 && r.all >= 3;
+      h += '<tr' + (hot ? ' class="ir-hot"' : '') + '><td>' + (i + 1) + '</td><td><b>' + esc(String(r.title || r.key).slice(0, 70)) + '</b>' +
+        '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + (r.item_ids || []).slice(0, 4).map(function (id) {
+          return '<a href="https://www.ebay.co.uk/itm/' + esc(String(id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(id)) + '</a>';
+        }).join(' · ') + ((r.item_ids || []).length > 4 ? ' +' + (r.item_ids.length - 4) : '') + '</div></td>' +
+        '<td style="font-weight:800">' + r.all + '</td><td style="color:var(--ok)">' + (r.within2 || '—') + '</td><td>' + (r.d3 || '—') + '</td><td>' + (r.d4 || '—') + '</td><td>' + (r.d5 || '—') + '</td>' +
+        '<td' + (r.over5 ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (r.over5 || '—') + '</td><td' + (r.untracked ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (r.untracked || '—') + '</td>' +
+        '<td>' + (r.avg_days === null || r.avg_days === undefined ? '—' : r.avg_days + 'd') + '</td><td>' + (r.waiting_avg_days === null || r.waiting_avg_days === undefined ? '—' : r.waiting_avg_days + 'd') + '</td>' +
+        '<td' + (hot ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (r.late_share || 0) + '%</td></tr>';
+    });
+    return h + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Days = from the order to its FIRST tracking number in the tracking ledger. ' +
+      '“Still waiting” = no tracking yet; its average is how long those orders have waited so far. Late share = orders not tracked within 2 days. The 2-day marks tab is the permanent ledger of orders that crossed 2 business days untracked.</p>';
+  }
 
   function irLoad() {
     var box = $('irBody');
@@ -14950,6 +15043,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       h += '<div style="margin-top:6px;font-size:11px;color:var(--text-3);font-weight:600">The same alerts land as letters in the Alerts centre, one per tier (5, 10, 15…), so nothing rings twice.</div></div>';
     }
 
+    if (IR.tab === 'speed') { box.innerHTML = h + irSpeedTable(d); return; }
     var list = IR.tab === 'returns' ? (d.returns || []) : IR.tab === 'inr' ? (d.inr || []) : (d.late || []);
     var threshold = IR.tab === 'late' ? 10 : 5;
     var showReasons = IR.tab !== 'late';
@@ -15009,9 +15103,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     prefetch: function () { return api('itemRisk', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Item <span class="goldtext">risk</span></h1>' +
-        '<span class="sub">returns · item not received · late tracking — item by item, across all accounts, with the decision alerts</span>' +
+        '<span class="sub">returns · item not received · late tracking by 2 / 3 / 4 / 5 days — item by item, across all accounts, with the decision alerts</span>' +
         '<span style="margin-left:auto;display:flex;gap:6px">' +
-        [['returns', 'Returns'], ['inr', 'Not received'], ['late', 'Late tracking']].map(function (t) {
+        [['returns', 'Returns'], ['inr', 'Not received'], ['speed', 'Late tracking'], ['late', '2-day marks']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
         '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
@@ -15746,7 +15840,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
-      lsStepCard('Step 2 · +72 hours', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
+      lsStepCard('Step 2 · +7 days', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
       lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
@@ -16429,7 +16523,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         (lsStr(t.go_live_pkt) ? ' · <span class="num">' + esc(lsWhen(t.go_live_pkt)) + '</span>' : ''));
     }
     if (lsStr(rev.uk)) {
-      rows += lsReceiptRow('72-hour revision', '<span class="num">' + esc(lsStr(rev.uk)) + '</span> (' + esc(lsStr(rev.pkt)) + ') on ' + esc(lsStr(rev.uk_date)));
+      rows += lsReceiptRow('7-day revision', '<span class="num">' + esc(lsStr(rev.uk)) + '</span> (' + esc(lsStr(rev.pkt)) + ') on ' + esc(lsStr(rev.uk_date)));
     }
     if (lsStr(camp.uk)) {
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));
@@ -16728,7 +16822,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (C.decided_today !== undefined) { decidedToday = ldNum(C.decided_today); }
     var autoN = ldNum(C.auto_sold) + ldNum(C.auto_ended);
     var summary = '<div class="ld-summary">' +
-      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + nPend + '</div><div class="s">7 days, no sale</div></div>' +
+      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + nPend + '</div><div class="s">7 days no sale · 14-day review</div></div>' +
       '<div class="ld-st" style="--tone:var(--bad)"><div class="l">Oldest waiting</div><div class="v">' + (oldest || '—') + (oldest ? ' days' : '') + '</div><div class="s">every extra day costs fees</div></div>' +
       '<div class="ld-st" style="--tone:#e8a15a"><div class="l">Never advertised</div><div class="v">' + neverAd + '</div><div class="s">try ads before ending</div></div>' +
       '<div class="ld-st" style="--tone:var(--ok,#5fbf7a)"><div class="l">Decided today</div><div class="v">' + decidedToday + '</div><div class="s">end · revise · keep</div></div>' +
@@ -16769,6 +16863,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<div class="ld-badges">' +
             (dd != null ? '<span class="ld-b age' + (hot ? ' hot' : '') + '">' + dd + ' days live</span>' : '') +
             (ldSold(r) ? '<span class="ld-b sold">' + ldSold(r) + ' sold</span>' : '<span class="ld-b zero">0 sold</span>') +
+            (String(r.kind || '') === 'day14' ? '<span class="ld-b hot" title="no sale in the 7 days since its 7-day revision">14-day review</span>' : '') +
             '<span class="ld-b">£' + ldNum(r.price).toFixed(2) + '</span>' +
             (!ldLive(r) ? '<span class="ld-b gone">no longer live on eBay</span>'
               : (r.stock != null && r.stock !== '' ? '<span class="ld-b">' + ldNum(r.stock) + ' in stock</span>' : '')) +
@@ -16778,10 +16873,14 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             (r.hunter_email ? ' · hunted by ' + esc(String(r.hunter_email).split('@')[0]) : '') +
             (r.lister_email ? ' · listed by ' + esc(String(r.lister_email).split('@')[0]) : '') + '</div></div>';
       if (isPend && LD.canDecide) {
+        /* 1 Oct (owner): the revise job goes to the SAME lister by default, with a deadline Zaid picks. */
+        var pref = String(r.decision_lister || r.lister_email || '');
+        var rowOpts = pref ? selOpts.replace('value="' + esc(pref) + '"', 'value="' + esc(pref) + '" selected') : selOpts;
         h += '<div class="ld-acts">' +
           '<button class="minibtn" data-ld-v="END">End → Team Lead</button>' +
           '<button class="minibtn" data-ld-v="REVISE">Revise →</button>' +
-          '<select class="alx-sel" data-ld-a>' + selOpts + '</select>' +
+          '<select class="alx-sel" data-ld-a>' + rowOpts + '</select>' +
+          '<input class="alx-sel" data-ld-d type="number" min="1" max="14" value="2" title="deadline for the revision, in days" style="width:58px"><span class="ld-meta">days</span>' +
           '<button class="minibtn" data-ld-v="KEEP">Keep</button></div>';
       } else if (!isPend) {
         var bySystem = String(r.decided_by || '') === 'system';
@@ -16806,6 +16905,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         var sel = card.querySelector('[data-ld-a]');
         var assignee = sel ? String(sel.value || '') : '';
         if (verdict === 'REVISE' && !assignee) { toast('Pick which lister gets the revise job'); return; }
+        var dl = card.querySelector('[data-ld-d]');
+        var days = dl ? Math.max(1, Math.min(14, Number(dl.value) || 2)) : 2;
         var itemId = card.getAttribute('data-ld');
         var row = null;
         LD.rows.forEach(function (x) { if (String(x.item_id) === itemId) { row = x; } });
@@ -16815,7 +16916,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           return api('decisionAct', {
             item_id: itemId, kind: verdict === 'END' ? 'end' : 'revise',
             account: row ? String(row.account || '') : '', title: row ? String(row.title || '') : '',
-            assignee_email: assignee, note: '7 days live with no sale.',
+            assignee_email: assignee, deadline_days: days,
+            reason: row && String(row.kind || '') === 'day14' ? '14-day review: no sale since the 7-day revision' : '7 days live with no sale',
+            note: row && String(row.kind || '') === 'day14' ? '14-day review: no sale since the 7-day revision.' : '7 days live with no sale.',
           }).then(function (r2) {
             toast((verdict === 'END' ? 'End job sent to ' : 'Revision sent to ') + (String(r2 && r2.assigned_to || '').split('@')[0] || 'the team') + '.');
             ldLoad();
@@ -20720,7 +20823,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
      comes from the backend (listingChain_), never from arithmetic here. */
   var PL_WINDOWS = [
     { k: 'Day 0', t: 'New listings go live', uk: '7:00 PM UK' },
-    { k: '+72 hours', t: 'Real revision of the dummy listing', uk: '1:00 PM – 5:00 PM UK' },
+    { k: '+7 days', t: 'Real revision of the dummy listing', uk: '1:00 PM – 5:00 PM UK' },
     { k: 'Same day', t: 'Campaign testing window', uk: '5:00 PM – 10:00 PM UK' }
   ];
 
@@ -20737,7 +20840,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     { key: 'listing', label: 'Listing', hint: 'dummy listing → Item ID', go: PL_GO_LIST },
     { key: 'cpc', label: 'CPC research', hint: 'keywords before any campaign', go: PL_GO_CPC },
     { key: 'live', label: 'Live + campaign', hint: 'Item ID in · campaign next', go: PL_GO_LIST, gold: true },
-    { key: 'revision', label: 'Revision', hint: '+72 hours and ad-hoc', go: PL_GO_LIST }
+    { key: 'revision', label: 'Revision', hint: '+7 days and ad-hoc', go: PL_GO_LIST }
   ];
 
   var PL_MAX_CARDS = 10;
@@ -21007,7 +21110,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         buckets.revision.push({
           title: plStr(t.title) || 'Listing revision',
           account: t.account, itemId: t.item_id,
-          chips: (t.is_72h ? [{ t: '+72 hours', c: 'g' }] : [])
+          chips: (t.is_72h ? [{ t: '+7 days', c: 'g' }] : [])
             .concat([{ t: status === PL_SUBMITTED ? 'Awaiting approval' : status, c: 'b' }])
             .concat(plDueChip(t.deadline_pkt, status)),
           note: t.is_72h ? 'Revision window 1:00 PM – 5:00 PM UK.' : '',
@@ -21015,7 +21118,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         });
       });
       hints.listing = 'dummy listing → Item ID · your desk';
-      hints.revision = '+72 hours and ad-hoc · your desk';
+      hints.revision = '+7 days and ad-hoc · your desk';
     } else {
       errs.listing = errs.revision = plErr(listRes);
     }
@@ -22081,6 +22184,163 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
 })();
 
+/* ---------- view-profitability.js ---------- */
+/* view-profitability.js — Product profitability (1 Oct, owner): "the profit of every item working
+ * in the system — current profit, is it in a sale event, profit after the sale event, which prices
+ * need revising … along with the margin show the avg CPC cost per order of the last 7 days, the
+ * advertising status and the campaign." The price-revision rules stay the benchmark (profit under
+ * £1 a unit or CPC over £2.10 a unit → revise; a loss after ads → stop; ads at 70% of the margin
+ * → cut the bid). The cost-rise desk (Price revisions) keeps its own page; its open alerts are
+ * flagged here too. Backend: profitBoard (engine). */
+(function () {
+  'use strict';
+
+  var PF_ROLES = ['Management', 'Ops Head', 'Pricing', 'Advertising Manager'];
+  var PF = { data: null, acct: '', q: '', only: 'all', sort: 'flags' };
+
+  VIEW_CSS.push(
+    '.pf-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
+    '.pf-t{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.pf-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.pf-t b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.pf-t.bad b{color:var(--bad)}.pf-t.ok b{color:var(--ok)}.pf-t.gold b{color:var(--gold-a)}' +
+    '.pf-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
+    '.pf-chip{border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);border-radius:99px;padding:5px 12px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}' +
+    '.pf-chip.on{border-color:var(--gold-a);color:var(--gold-a)}' +
+    '.pf-flag{display:inline-block;font-size:10px;font-weight:800;border-radius:99px;padding:1px 8px;margin:2px 3px 0 0;border:1px solid rgba(240,96,90,.5);color:var(--bad);white-space:nowrap}' +
+    '.pf-flag.warn{border-color:rgba(255,159,67,.5);color:var(--warn)}' +
+    '.pf-sale{font-size:10px;font-weight:800;border-radius:99px;padding:1px 8px;border:1px solid rgba(155,106,230,.5);color:#9B6AE6;white-space:nowrap}' +
+    '.pf-camp{font-size:10.5px;font-weight:700;color:var(--text-2)}.pf-camp .s{color:var(--text-3)}' +
+    '.pf-neg{color:var(--bad);font-weight:800}.pf-pos{color:var(--ok);font-weight:800}' +
+    '.pf-sub{font-size:10px;color:var(--text-3);font-weight:700}'
+  );
+
+  function pfS(v) { return String(v == null ? '' : v); }
+  function pfN(v) { return Number(v) || 0; }
+  function pfM(v) {
+    if (v === null || v === undefined || v === '') { return '—'; }
+    var n = Number(v) || 0;
+    return (n < 0 ? '-£' : '£') + Math.abs(n).toFixed(2);
+  }
+  function pfTone(v) {
+    if (v === null || v === undefined || v === '') { return ''; }
+    return Number(v) < 0 ? 'pf-neg' : Number(v) > 0 ? 'pf-pos' : '';
+  }
+
+  VIEWS.profitability = {
+    label: 'Product profitability',
+    icon: '<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
+    roles: PF_ROLES,
+    order: 12.4,
+    prefetch: function () { return api('profitBoard', {}); },
+    render: function () {
+      return '<div class="hgroup enter d1"><h1>Product <span class="goldtext">profitability</span></h1>' +
+          '<span class="sub">every active item: margin now, the sale event and the margin after it, profit after ads over 7 and 30 days, CPC per unit, the campaign — and which prices need revising</span>' +
+          '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+          '<select id="pfAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
+          '<button class="minibtn" id="pfRefresh">Refresh</button></span></div>' +
+        '<div id="pfTiles" class="enter d1"></div>' +
+        '<div class="card enter d2"><div class="bd" id="pfBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      var sa = $('pfAcct');
+      if (sa) { fillAccountSelect(sa, PF.acct, function () { PF.acct = sa.value; PF.data = null; pfLoad(); }); }
+      $('pfRefresh').onclick = function () { PF.data = null; pfLoad(); };
+      pfLoad();
+    }
+  };
+
+  function pfLoad() {
+    var box = $('pfBody');
+    if (!box) { return; }
+    if (!PF.data) { box.innerHTML = '<div class="spinner"></div>'; }
+    api('profitBoard', PF.acct ? { account: PF.acct } : {}).then(function (d) { PF.data = d || {}; pfPaint(); })
+      .catch(function (e) { box.innerHTML = '<div class="empty">The board did not answer — ' + esc(e.message) + '</div>'; });
+  }
+
+  function pfPaint() {
+    var d = PF.data, box = $('pfBody');
+    if (!d || !box) { return; }
+    var c = d.counts || {}, b = d.benchmarks || {};
+    setHTML('pfTiles', '<div class="pf-tiles">' +
+      '<div class="pf-t"><span class="k">Active items</span><b>' + (c.items || 0) + '</b></div>' +
+      '<div class="pf-t bad"><span class="k">Need a price revision</span><b>' + (c.revise || 0) + '</b></div>' +
+      '<div class="pf-t bad"><span class="k">Loss after ads · 7 days</span><b>' + (c.loss_7d || 0) + '</b></div>' +
+      '<div class="pf-t gold"><span class="k">In a sale event</span><b>' + (c.in_sale || 0) + '</b></div>' +
+      '<div class="pf-t"><span class="k">On CPC campaigns</span><b>' + (c.cpc_items || 0) + '</b></div>' +
+      '<div class="pf-t ok"><span class="k">Selling · 7 days</span><b>' + (c.selling_7d || 0) + '</b></div>' +
+      '<div class="pf-t' + (c.cost_rises ? ' bad' : '') + '"><span class="k">Open cost rises</span><b>' + (c.cost_rises || 0) + '</b></div></div>');
+
+    var rows = (d.rows || []).slice();
+    if (PF.only === 'revise') { rows = rows.filter(function (r) { return r.revise; }); }
+    else if (PF.only === 'sale') { rows = rows.filter(function (r) { return r.sale; }); }
+    else if (PF.only === 'cpc') { rows = rows.filter(function (r) { return r.campaign && r.campaign.is_cpc; }); }
+    else if (PF.only === 'selling') { rows = rows.filter(function (r) { return r.units_7d > 0; }); }
+    if (PF.q) {
+      var q = PF.q.toLowerCase();
+      rows = rows.filter(function (r) { return pfS(r.title).toLowerCase().indexOf(q) >= 0 || pfS(r.item_id).indexOf(q) >= 0; });
+    }
+    if (PF.sort === 'profit7') { rows.sort(function (a, b2) { return pfN(a.profit_7d) - pfN(b2.profit_7d); }); }
+    else if (PF.sort === 'units') { rows.sort(function (a, b2) { return pfN(b2.units_7d) - pfN(a.units_7d); }); }
+    else if (PF.sort === 'margin') { rows.sort(function (a, b2) { return (a.margin_now === null ? 99 : pfN(a.margin_now)) - (b2.margin_now === null ? 99 : pfN(b2.margin_now)); }); }
+    else if (PF.sort === 'cpc') { rows.sort(function (a, b2) { return pfN(b2.cpc_per_unit_7d) - pfN(a.cpc_per_unit_7d); }); }
+
+    var chip = function (k, l, cur, attr) { return '<button class="pf-chip' + (cur === k ? ' on' : '') + '" data-' + attr + '="' + k + '">' + l + '</button>'; };
+    var h = '<div class="pf-tools">' +
+      chip('all', 'All', PF.only, 'pf-only') + chip('revise', 'Needs revision', PF.only, 'pf-only') + chip('selling', 'Selling · 7d', PF.only, 'pf-only') +
+      chip('sale', 'In a sale event', PF.only, 'pf-only') + chip('cpc', 'On CPC', PF.only, 'pf-only') +
+      '<span class="pf-sub" style="margin-left:8px">sort</span>' +
+      chip('flags', 'Worst first', PF.sort, 'pf-sort') + chip('profit7', 'Profit 7d', PF.sort, 'pf-sort') + chip('margin', 'Margin', PF.sort, 'pf-sort') +
+      chip('cpc', 'CPC/unit', PF.sort, 'pf-sort') + chip('units', 'Units 7d', PF.sort, 'pf-sort') +
+      '<input class="src-input" id="pfQ" placeholder="Search title or item id…" value="' + esc(PF.q) + '" style="margin-left:auto">' +
+      '<span class="pf-sub">' + rows.length + ' of ' + (d.rows || []).length + '</span></div>';
+
+    h += '<div class="scroll" style="max-height:640px"><table class="ir-tbl" style="min-width:1240px"><thead><tr>' +
+      '<th style="text-align:left">Item</th><th>Price</th><th>Ali cost</th><th>Margin now</th><th style="text-align:left">Sale event</th><th>After sale</th>' +
+      '<th>Units 7d</th><th>Profit 7d</th><th>Per unit 7d</th><th>Units 30d</th><th>Per unit 30d</th>' +
+      '<th>Ads 7d</th><th>CPC / unit 7d</th><th style="text-align:left">Campaign</th><th style="text-align:left">Verdict</th></tr></thead><tbody>';
+    if (!rows.length) { h += '<tr><td colspan="15" style="text-align:left"><div class="empty">Nothing matches.</div></td></tr>'; }
+    rows.slice(0, 600).forEach(function (r) {
+      var cmp = r.campaign, sale = r.sale;
+      h += '<tr' + (r.revise ? ' class="ir-hot"' : '') + '>' +
+        '<td style="text-align:left;max-width:300px"><a href="https://www.ebay.co.uk/itm/' + esc(pfS(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;font-weight:700">' + esc(pfS(r.title).slice(0, 70) || pfS(r.item_id)) + '</a>' +
+          '<div class="pf-sub"><span class="mono">' + esc(pfS(r.item_id)) + '</span> · ' + esc(pfS(r.account)) +
+          (r.cost_pending_7d ? ' · ' + r.cost_pending_7d + ' order' + (r.cost_pending_7d === 1 ? '' : 's') + ' awaiting cost' : '') + '</div></td>' +
+        '<td>' + pfM(r.price) + '</td><td>' + (r.ali_cost ? pfM(r.ali_cost) : '—') + '</td>' +
+        '<td class="' + pfTone(r.margin_now) + '">' + pfM(r.margin_now) + '</td>' +
+        '<td style="text-align:left">' + (sale ? '<span class="pf-sale" title="' + esc(pfS(sale.name)) + '">' + esc(pfS(sale.discount) || pfS(sale.type)) + '</span>' +
+          (sale.end_at ? '<div class="pf-sub">ends ' + esc(pfS(sale.end_at).slice(0, 10)) + '</div>' : '') : '<span class="pf-sub">—</span>') + '</td>' +
+        '<td class="' + pfTone(r.margin_after_sale) + '">' + (sale ? pfM(r.margin_after_sale) : '<span class="pf-sub">same</span>') + '</td>' +
+        '<td>' + (r.units_7d || '—') + '</td><td class="' + pfTone(r.profit_7d) + '">' + (r.units_7d ? pfM(r.profit_7d) : '—') + '</td>' +
+        '<td class="' + pfTone(r.profit_per_unit_7d) + '">' + pfM(r.profit_per_unit_7d) + '</td>' +
+        '<td>' + (r.units_30d || '—') + '</td><td class="' + pfTone(r.profit_per_unit_30d) + '">' + pfM(r.profit_per_unit_30d) + '</td>' +
+        '<td>' + (r.ads_7d ? pfM(r.ads_7d) : '—') + '</td>' +
+        '<td' + (r.cpc_per_unit_7d !== null && r.cpc_per_unit_7d !== undefined && r.cpc_per_unit_7d > (b.max_cpc_per_unit || 2.1) ? ' class="pf-neg"' : '') + '>' + pfM(r.cpc_per_unit_7d) + '</td>' +
+        '<td style="text-align:left">' + (cmp ? '<div class="pf-camp">' + esc(pfS(cmp.name).slice(0, 36)) + '<div class="s">' + esc(pfS(cmp.status)) + (cmp.is_cpc ? ' · CPC' : ' · general') +
+          (cmp.bid_pct ? ' · ' + esc(pfS(cmp.bid_pct)) + '%' : '') + (pfS(cmp.ad_status) ? ' · ad ' + esc(pfS(cmp.ad_status)) : '') + '</div></div>' : '<span class="pf-sub">no campaign</span>') + '</td>' +
+        '<td style="text-align:left;max-width:260px;white-space:normal">' + ((r.flags || []).length
+          ? r.flags.map(function (f) { return '<span class="pf-flag' + (/cost rose|ads take/.test(f) ? ' warn' : '') + '">' + esc(f) + '</span>'; }).join('')
+          : '<span class="pf-sub">fine</span>') + '</td></tr>';
+    });
+    h += '</tbody></table></div>' +
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Benchmarks — revise when profit is under ' + pfM(b.min_profit_per_unit || 1) + ' a unit or CPC over ' +
+      pfM(b.max_cpc_per_unit || 2.1) + ' a unit (7 days); a loss after ads → stop the ads; ads at ' + Math.round((b.ads_share_cut || 0.7) * 100) + '% of the margin → cut the bid. ' +
+      esc(pfS(d.note)) + ' Supplier cost rises are acknowledged on the Price revisions desk.</p>';
+    box.innerHTML = h;
+    box.querySelectorAll('[data-pf-only]').forEach(function (x) { x.onclick = function () { PF.only = this.getAttribute('data-pf-only'); pfPaint(); }; });
+    box.querySelectorAll('[data-pf-sort]').forEach(function (x) { x.onclick = function () { PF.sort = this.getAttribute('data-pf-sort'); pfPaint(); }; });
+    var qi = $('pfQ');
+    if (qi) {
+      qi.oninput = function () {
+        PF.q = String(this.value || '').trim(); pfPaint();
+        var q2 = $('pfQ');
+        if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }
+      };
+    }
+  }
+
+})();
+
 /* ---------- view-recheck.js ---------- */
 /* view-recheck.js — §11.1/§11.2 the four-stage order recheck · §11.3 wrong orders.
  * Views: recheck (Order rechecking) · wrongOrders (Wrong orders).
@@ -22282,6 +22542,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (typeof refreshBadges === 'function') { refreshBadges(); }
   }
 
+  /* 1 Oct (owner): the checkpoint archive (day chips) and the notes filed against each check. */
+  VIEW_CSS.push(
+    '.rc-days{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}' +
+    '.rc-day{border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);border-radius:99px;padding:4px 11px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}' +
+    '.rc-day.on{border-color:var(--gold-a);color:var(--gold-a)}' +
+    '.rc-notes{margin-top:10px;border-top:1px dashed var(--gold-line);padding-top:8px}' +
+    '.rc-notes summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--gold-a)}' +
+    '.rc-note-form{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:10px;align-items:center}' +
+    '.rc-note-form .rc-note-text{grid-column:1/-1}'
+  );
+
   // ============================== §11.1 ORDER RECHECKING ==============================
   VIEWS.recheck = {
     label: 'Order rechecking',
@@ -22300,7 +22571,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '</div>' +
         '<div class="card enter d1" style="margin-bottom:14px"><div class="hd">Delivery checkpoints — who is late ' +
           '<span class="hint">judged on real evidence: a buyer chasing, no tracking, or nothing either way</span></div>' +
-          '<div class="bd" id="rcOwners"><div class="spinner"></div></div></div>' +
+          '<div class="bd"><div class="rc-days" id="rcDays"></div><div id="rcOwners"><div class="spinner"></div></div></div></div>' +
         '<div class="card enter d1"><div class="hd">Why today’s list holds these orders ' +
           '<span class="hint">§11.1 — the day offset, stage by stage</span></div>' +
           '<div class="bd" id="rcWhy"><div class="spinner"></div></div>' +
@@ -22309,6 +22580,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div id="rcStages"><div class="card enter d2" style="margin-top:16px"><div class="bd"><div class="spinner"></div></div></div></div>';
     },
     init: function () {
+      rcDayChips();
       rcOwnersLoad();
 
       $('rcRefresh').onclick = function () { rcOwnersLoad(); rcLoad(); };
@@ -22406,13 +22678,74 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span class="pill rc-p-off">day ' + rcNum(c.days) + '</span>' +
         '<span class="rc-cp-ask">' + esc(rcStr(c.asks)) + '</span>' +
         '<span class="rc-cp-when">orders placed ' + esc(rcStr(c.order_date_nice) || rcNice(rcStr(c.order_date))) + ' · ' + rcPlural(c.total, 'order') + '</span></div>' +
-      '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + '</div>';
+      '<div class="rc-tiles">' + tiles + '</div>' + body + confirm + clearLine + rcNotesBlock(c) + '</div>';
+  }
+
+  /* 1 Oct (owner): "keep the archive of previous days in order rechecking, min one week old" —
+     the day chips ask the engine for any past day, which answers exactly as it did on the day. */
+  var RC_DAY = '';                               // '' = today; a yyyy-mm-dd = the archive
+  function rcDayChips() {
+    var host = $('rcDays');
+    if (!host) { return; }
+    var base = rcToday(), m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(base);
+    var t0 = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : Date.now(), days = [], i;
+    for (i = 0; i < 10; i++) { days.push(new Date(t0 - i * 86400000).toISOString().slice(0, 10)); }
+    host.innerHTML = days.map(function (ymd, k) {
+      var on = (k === 0 && !RC_DAY) || RC_DAY === ymd;
+      return '<button class="rc-day' + (on ? ' on' : '') + '" data-rc-day="' + (k === 0 ? '' : rcAttr(ymd)) + '">' + (k === 0 ? 'Today' : k === 1 ? 'Yesterday' : esc(rcNice(ymd))) + '</button>';
+    }).join('') + '<span class="rc-sub" style="margin-left:6px">the archive — a past day answers as it did on the day · notes stay with their check</span>';
+    host.querySelectorAll('[data-rc-day]').forEach(function (b) {
+      b.onclick = function () { RC_DAY = this.getAttribute('data-rc-day') || ''; rcDayChips(); rcOwnersLoad(); };
+    });
+  }
+
+  /* 1 Oct (owner): "show the check details there, and under it the page where the checker adds
+     the details for that specific check." Every note filed against this checkpoint-day, then the
+     form — status, account, order (optional), what was found. */
+  var RC_NOTE_STATUS = ['Left China', 'With UK courier', 'Delivered', 'Buyer chasing — replied', 'No tracking — chased the supplier', 'Refunded / replaced', 'Other'];
+  function rcNotesBlock(c) {
+    var notes = c.notes || [], key = rcAttr(rcStr(c.order_date) + '|' + rcNum(c.days));
+    var h = '<details class="rc-notes"' + (notes.length ? ' open' : '') + '><summary>Check details · ' + rcPlural(notes.length, 'note') + ' filed on this check</summary>';
+    if (notes.length) {
+      h += '<div class="rc-scroll"><table class="rc-tbl"><thead><tr><th>When</th><th>By</th><th>Status</th><th>Account</th><th>Order</th><th>Note</th></tr></thead><tbody>' +
+        notes.map(function (n) {
+          return '<tr><td class="rc-tight">' + esc(fmtPkt(n.at, true) || rcStr(n.at)) + '</td><td>' + esc(rcStr(n.by_email).split('@')[0]) + '</td>' +
+            '<td><span class="pill rc-p-open">' + esc(rcStr(n.status) || '—') + '</span></td><td>' + esc(rcStr(n.account) || 'all') + '</td>' +
+            '<td>' + (rcStr(n.order_id) ? rcOrderLink(n.order_id) : '—') + '</td><td style="white-space:normal">' + esc(rcStr(n.note)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else {
+      h += '<div class="rc-sub">Nothing filed on this check yet.</div>';
+    }
+    if (rcHas(RC_ROLES, rcRole()) || rcRole() === 'CS' || (STATE.user && STATE.user.super)) {
+      var accts = (c.accounts || []).map(function (a) { return rcStr(a.account); }).filter(Boolean);
+      h += '<div class="rc-note-form" data-rcn="' + key + '">' +
+        '<select class="rc-in" data-rcn-status><option value="">status…</option>' + RC_NOTE_STATUS.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select>' +
+        '<select class="rc-in" data-rcn-acct><option value="">all accounts</option>' + accts.map(function (a) { return '<option value="' + rcAttr(a) + '">' + esc(a) + '</option>'; }).join('') + '</select>' +
+        '<input class="rc-in" data-rcn-order placeholder="order no. (optional)">' +
+        '<input class="rc-in rc-note-text" data-rcn-note placeholder="what you found on this check — counts, states, what you did">' +
+        '<button class="btn-gold" data-rcn-save>Save to this check</button></div>';
+    }
+    return h + '</details>';
+  }
+  function rcNotesWire(box) {
+    box.querySelectorAll('[data-rcn-save]').forEach(function (b) {
+      b.onclick = function () {
+        var f = this.closest('[data-rcn]'), parts = String(f.getAttribute('data-rcn') || '').split('|');
+        var status = rcStr(f.querySelector('[data-rcn-status]').value), note = rcStr(f.querySelector('[data-rcn-note]').value);
+        if (!status && !note) { toast('Pick a status or write what you found.'); return; }
+        var btn = this; btn.disabled = true;
+        api('recheckNoteSave', { ref_date: parts[0], days: parts[1], account: rcStr(f.querySelector('[data-rcn-acct]').value),
+          order_id: rcStr(f.querySelector('[data-rcn-order]').value), status: status, note: note })
+          .then(function () { toast('Filed on the check.'); rcOwnersLoad(); })
+          .catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
   }
 
   function rcOwnersLoad() {
     var box = $('rcOwners');
     if (!box) { return; }
-    api('deliveryCheckpoints', {}).then(function (d) {
+    api('deliveryCheckpoints', RC_DAY ? { date: RC_DAY } : {}).then(function (d) {
       var cps = (d && d.checkpoints) || [];
       var who = $('rcWho');
       if (who && cps.length) {
@@ -22423,11 +22756,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (!cps.length) { box.innerHTML = '<div class="rc-empty">No checkpoints are configured.<span>CONFIG key recheck_checkpoints holds the list.</span></div>'; return; }
       var late = 0;
       cps.forEach(function (c) { late += rcNum(c.needs_you); });
-      box.innerHTML = (late
+      box.innerHTML = (RC_DAY ? '<div class="rc-sub" style="margin-bottom:8px">Archive · as the checkpoints stood on ' + esc(rcNice(rcStr(d && d.day) || RC_DAY)) + '</div>' : '') + (late
           ? '<div class="rc-dis" style="margin-top:0;margin-bottom:12px"><b>' + rcPlural(late, 'order') + ' need' + (late === 1 ? 's' : '') + ' a person today.</b> Each row below says who, what and why — everything else on these days is proven delivered, still inside the estimate, or settled.</div>'
           : '<div class="rc-box rc-blue" style="margin-top:0;margin-bottom:12px"><span class="k">All three days are clean</span>No buyer is chasing and nothing is missing a tracking number.</div>') +
         cps.map(rcCpCard).join('') +
         '<div class="rc-sub" style="margin-top:4px">' + esc(rcStr(d && d.note)) + '</div>';
+      rcNotesWire(box);
     }).catch(function (e) {
       box.innerHTML = '<div class="rc-empty">Checkpoints did not answer.<span>' + esc(e.message) + '</span></div>';
     });
@@ -23098,13 +23432,340 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
 })();
 
+/* ---------- view-refunds.js ---------- */
+/* view-refunds.js — the Refunds desk (1 Oct, owner). Two things on one page:
+ *  · the request trail — a CS agent APPLIES (order, amount, reason, comment) → Management APPROVES
+ *    or rejects → approval becomes the handler's task by itself → the handler RECORDS the eBay
+ *    refund, which completes the task. Backend: refundRequestCreate · refundRequestDecide ·
+ *    refundRequestProcess · refundRequestList (sheet).
+ *  · the money — every refund eBay actually paid back, date to date, account to account, this
+ *    month against last, with the history of each one. Backend: refundsBoard (engine, Finances
+ *    feed). This file is served from a public URL: no staff name, email or account name lives in it. */
+(function () {
+  'use strict';
+
+  var RF_ROLES = ['CS', 'Team Lead', 'Management', 'Ops Head', 'Order Processor', 'Sales Operations'];
+  var RF = { tab: 'apply', data: null, seq: 0, board: null, from: '', to: '', acct: '' };
+
+  VIEW_CSS.push(
+    '.rf-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}' +
+    '.rf-tab{border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);border-radius:99px;padding:6px 13px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}' +
+    '.rf-tab.on{border-color:var(--gold-a);color:var(--gold-a)}' +
+    '.rf-tab b{font-variant-numeric:tabular-nums;margin-left:4px}' +
+    '.rf-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}' +
+    '.rf-in,.rf-sel,.rf-ta{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.rf-ta{min-height:74px;resize:vertical}' +
+    '.rf-lab{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px}' +
+    '.rf-req::after{content:" *";color:var(--bad)}' +
+    '.rf-note{font-size:12px;font-weight:600;color:var(--text-3);margin-top:8px}' +
+    '.rf-ok{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--ok-soft);border:1px solid rgba(63,207,142,.4);font-weight:700;font-size:13px;color:var(--ok)}' +
+    '.rf-bad{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--warn-soft);border:1px solid rgba(255,159,67,.45);font-weight:700;font-size:13px;color:var(--warn)}' +
+    '.rf-row{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-top:10px;background:var(--panel)}' +
+    '.rf-row .t{font-weight:800;font-size:13.5px}.rf-row .m{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
+    '.rf-row .c{font-size:12.5px;color:var(--text-2);font-weight:600;margin-top:6px;white-space:pre-wrap}' +
+    '.rf-act{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}' +
+    '.rf-act input{padding:9px 12px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600}' +
+    '.rf-pill{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:7px;border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}' +
+    '.rf-pill.PENDING{color:var(--warn);border-color:rgba(255,159,67,.5)}.rf-pill.APPROVED{color:var(--blue-2,#6fa8ff)}.rf-pill.PROCESSED{color:var(--ok);border-color:rgba(63,207,142,.4)}.rf-pill.REJECTED{color:var(--bad)}' +
+    '.rf-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px}' +
+    '.rf-t{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
+    '.rf-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.rf-t b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.rf-t .s{font-size:11px;color:var(--text-3);font-weight:700;margin-top:3px}' +
+    '.rf-t.bad b{color:var(--bad)}.rf-t.ok b{color:var(--ok)}' +
+    '.rf-days{display:flex;gap:3px;align-items:flex-end;height:96px;margin:6px 0 14px;overflow-x:auto}' +
+    '.rf-day{flex:1 0 14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:14px}' +
+    '.rf-day i{display:block;width:100%;background:var(--bad);opacity:.75;border-radius:3px 3px 0 0;min-height:1px}' +
+    '.rf-day span{font-size:8.5px;color:var(--text-3);font-weight:700;margin-top:3px;white-space:nowrap}' +
+    '.rf-approx{color:var(--text-3);font-weight:800;cursor:help}'
+  );
+
+  function rfS(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
+  function rfAttr(v) { return esc(rfS(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function rfM(v) { var n = Number(v) || 0; return (n < 0 ? '-£' : '£') + Math.abs(n).toFixed(2); }
+  function rfWho(e) { return esc(rfS(e).split('@')[0]); }
+  function rfYmd(d) { return d.toISOString().slice(0, 10); }
+  function rfRole() { return (STATE.user && STATE.user.role) || ''; }
+  function rfMoneyOk() { return RF_ROLES.indexOf(rfRole()) >= 0 || !!(STATE.user && STATE.user.super); }
+
+  VIEWS.refunds = {
+    label: 'Refunds',
+    icon: '<path d="M3 10h18"/><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h3"/>',
+    roles: RF_ROLES,
+    order: 3.65,
+    render: function () {
+      return '<div class="hgroup enter d1"><h1><span class="goldtext">Refunds</span></h1>' +
+          '<span class="sub">apply → Management approves → the handler gets the task and records the eBay refund · and the money: every refund paid back, date to date, account to account</span>' +
+          '<button class="minibtn" id="rfRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div class="rf-tabs enter d1" id="rfTabs"></div>' +
+        '<div id="rfBody" class="enter d2"><div class="spinner"></div></div>';
+    },
+    init: function () {
+      $('rfRefresh').onclick = function () { RF.board = null; rfLoad(); };
+      rfLoad();
+    }
+  };
+
+  function rfTabs() {
+    var host = $('rfTabs'), d = RF.data || {}, rows = d.rows || [];
+    if (!host) { return; }
+    var n = function (st) { return rows.filter(function (r) { return rfS(r.status) === st; }).length; };
+    var tabs = [['apply', 'Apply', 0], ['approve', 'Awaiting approval', n('PENDING')], ['process', 'To process', n('APPROVED')],
+      ['money', 'Amounts & history', 0], ['all', 'Every request', rows.length]];
+    host.innerHTML = tabs.map(function (t) {
+      return '<button class="rf-tab' + (RF.tab === t[0] ? ' on' : '') + '" data-rf-tab="' + t[0] + '">' + t[1] + (t[2] ? '<b>' + t[2] + '</b>' : '') + '</button>';
+    }).join('');
+    host.querySelectorAll('[data-rf-tab]').forEach(function (b) {
+      b.onclick = function () { RF.tab = this.getAttribute('data-rf-tab'); rfTabs(); rfPaint(); };
+    });
+  }
+
+  function rfLoad() {
+    var seq = ++RF.seq;
+    api('refundRequestList', {}).then(function (d) {
+      if (seq !== RF.seq) { return; }
+      RF.data = d || {};
+      if (RF.tab === 'apply' && !RF.data.can_raise) { RF.tab = RF.data.can_decide ? 'approve' : (RF.data.can_process ? 'process' : 'money'); }
+      rfTabs(); rfPaint();
+    }).catch(function (e) {
+      if (seq !== RF.seq) { return; }
+      setHTML('rfBody', '<div class="rf-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>');
+    });
+  }
+
+  function rfPaint() {
+    var box = $('rfBody');
+    if (!box) { return; }
+    if (RF.tab === 'apply') { rfPaintApply(box); }
+    else if (RF.tab === 'approve') { rfPaintQueue(box, 'PENDING'); }
+    else if (RF.tab === 'process') { rfPaintQueue(box, 'APPROVED'); }
+    else if (RF.tab === 'money') { rfPaintMoney(box); }
+    else { rfPaintAll(box); }
+  }
+
+  /* ---------- 1 · apply ---------- */
+  function rfPaintApply(box) {
+    var d = RF.data || {};
+    if (!d.can_raise) {
+      box.innerHTML = '<div class="card"><div class="bd"><div class="rf-note" style="margin-top:0">Your role views this desk; CS, the Team Lead, Order Processors and Management apply for refunds.</div></div></div>';
+      return;
+    }
+    box.innerHTML = '<div class="card"><div class="hd">Apply for a refund<span class="hint">goes to Management · approval becomes the handler’s task by itself' +
+        (d.handler ? ' (' + esc(rfS(d.handler.name)) + ')' : '') + '</span></div><div class="bd">' +
+      '<div class="rf-grid">' +
+        '<div><label class="rf-lab rf-req">Account</label><select class="rf-sel" id="rfAcc"><option value="">Loading…</option></select></div>' +
+        '<div><label class="rf-lab rf-req">eBay order number</label><input class="rf-in" id="rfOrder" placeholder="e.g. 18-15052-74974"></div>' +
+        '<div><label class="rf-lab rf-req">Amount to refund (£)</label><input class="rf-in" id="rfAmt" inputmode="decimal" placeholder="e.g. 12.99"></div>' +
+        '<div><label class="rf-lab">Buyer</label><input class="rf-in" id="rfBuyer" placeholder="eBay username"></div>' +
+        '<div><label class="rf-lab">Item title</label><input class="rf-in" id="rfTitle" placeholder="what the buyer ordered"></div>' +
+        '<div><label class="rf-lab rf-req">Reason</label><select class="rf-sel" id="rfReason">' +
+          (d.reasons || []).map(function (r) { return '<option value="' + rfAttr(r.key) + '">' + esc(r.label) + '</option>'; }).join('') + '</select></div>' +
+      '</div>' +
+      '<div style="margin-top:12px"><label class="rf-lab rf-req">Comment — what happened and why the refund</label>' +
+        '<textarea class="rf-ta" id="rfComment" placeholder="in a sentence or two; this is what Management reads"></textarea></div>' +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap"><button class="btn-gold" id="rfSend">Send to Management</button>' +
+        '<span class="rf-note" style="margin-top:0">Nothing is refunded here — the eBay refund is done by the handler after approval.</span></div>' +
+      '<div id="rfOut"></div></div></div>';
+    cachedCall('accountList', {}, function (a) {
+      var sel = $('rfAcc');
+      if (!sel) { return; }
+      var accs = ((a && a.accounts) || []).map(function (x) { return rfS(x.account); }).filter(Boolean);
+      sel.innerHTML = accs.length ? accs.map(function (x) { return '<option value="' + rfAttr(x) + '">' + esc(x) + '</option>'; }).join('')
+        : '<option value="">No account connected yet</option>';
+    }).done.catch(function () {
+      var sel = $('rfAcc');
+      if (sel && /Loading/.test(sel.innerHTML)) { sel.innerHTML = '<option value="">Could not load accounts — press Refresh</option>'; }
+    });
+    $('rfSend').onclick = function () {
+      var out = $('rfOut');
+      var payload = { account: rfS($('rfAcc').value), order_number: rfS($('rfOrder').value), amount: rfS($('rfAmt').value), buyer: rfS($('rfBuyer').value),
+        item_title: rfS($('rfTitle').value), reason_key: rfS($('rfReason').value), comment: rfS($('rfComment').value) };
+      if (!payload.account) { out.innerHTML = '<div class="rf-bad">Choose the account.</div>'; return; }
+      if (!payload.order_number) { out.innerHTML = '<div class="rf-bad">The eBay order number is required.</div>'; return; }
+      if (!(Number(payload.amount.replace(/[£,]/g, '')) > 0)) { out.innerHTML = '<div class="rf-bad">The amount to refund is required.</div>'; return; }
+      if (payload.comment.length < 3) { out.innerHTML = '<div class="rf-bad">Write the comment — what happened and why.</div>'; return; }
+      if (payload.reason_key === 'custom' && payload.comment.length < 10) { out.innerHTML = '<div class="rf-bad">A custom reason needs at least 10 characters of explanation.</div>'; return; }
+      var btn = this; btn.disabled = true; btn.textContent = 'Sending…'; out.innerHTML = '';
+      api('refundRequestCreate', payload).then(function (r) {
+        btn.disabled = false; btn.textContent = 'Send to Management';
+        out.innerHTML = '<div class="rf-ok">Sent — ' + esc(rfS(r && r.refund_id)) + ' · ' + rfM(r && r.amount) + ' · Pending with Management.</div>';
+        ['rfOrder', 'rfAmt', 'rfBuyer', 'rfTitle', 'rfComment'].forEach(function (id) { var el = $(id); if (el) { el.value = ''; } });
+        api('refundRequestList', {}).then(function (d2) { RF.data = d2 || RF.data; rfTabs(); }).catch(function () {});
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = 'Send to Management';
+        out.innerHTML = '<div class="rf-bad">' + esc(e.message) + '</div>';
+      });
+    };
+  }
+
+  /* ---------- 2 · approve  ·  3 · process ---------- */
+  function rfRowHead(r) {
+    var st = rfS(r.status) || 'PENDING';
+    return '<div class="t">' + rfM(r.amount) + ' · order <span class="mono">' + esc(rfS(r.order_number)) + '</span> · ' + esc(rfS(r.account)) +
+        ' <span class="rf-pill ' + esc(st) + '">' + esc(st) + '</span></div>' +
+      '<div class="m">' + esc(rfS(r.reason_text)) + (rfS(r.item_title) ? ' · ' + esc(rfS(r.item_title).slice(0, 70)) : '') + (rfS(r.buyer) ? ' · buyer ' + esc(rfS(r.buyer)) : '') +
+        ' · applied by ' + rfWho(r.raised_by) + ' · ' + esc(fmtPkt(r.ts, true) || rfS(r.ts)) + '</div>' +
+      (rfS(r.comment) ? '<div class="c">“' + esc(rfS(r.comment)) + '”</div>' : '') +
+      (rfS(r.decided_by) ? '<div class="m">Management: ' + (esc(rfS(r.decision_note)) || st.toLowerCase()) + ' — ' + rfWho(r.decided_by) + ' · ' + esc(fmtPkt(r.decided_at, true) || '') + '</div>' : '');
+  }
+
+  function rfPaintQueue(box, st) {
+    var d = RF.data || {}, rows = (d.rows || []).filter(function (r) { return rfS(r.status) === st; });
+    var can = st === 'PENDING' ? d.can_decide : d.can_process;
+    var h = '<div class="card"><div class="hd">' + (st === 'PENDING' ? 'Awaiting Management' : 'Approved — to process on eBay') +
+      '<span class="hint">' + (st === 'PENDING' ? 'approve (the amount can be corrected) or reject with a reason' : 'record the eBay refund reference and the final amount — that completes the task') + '</span></div><div class="bd">';
+    if (!rows.length) { h += '<div class="rf-note" style="margin-top:0">' + (st === 'PENDING' ? 'Nothing is waiting for a decision.' : 'Nothing approved is waiting to be processed.') + '</div>'; }
+    rows.forEach(function (r) {
+      h += '<div class="rf-row" data-rf="' + rfAttr(r.refund_id) + '">' + rfRowHead(r);
+      if (can && st === 'PENDING') {
+        h += '<div class="rf-act"><input data-rf-amt style="width:110px" value="' + rfAttr(r.amount) + '" title="approved amount £">' +
+          '<input data-rf-note style="flex:1;min-width:200px" placeholder="note (required to reject)">' +
+          '<button class="btn-gold" data-rf-dec="APPROVE">Approve → task to the handler</button><button class="minibtn" data-rf-dec="REJECT">Reject</button></div>';
+      } else if (can && st === 'APPROVED') {
+        h += '<div class="rf-act"><input data-rf-ref style="width:220px" placeholder="eBay refund reference / id">' +
+          '<input data-rf-final style="width:110px" value="' + rfAttr(r.amount) + '" title="final refunded amount £">' +
+          '<input data-rf-pnote style="flex:1;min-width:160px" placeholder="note (optional)">' +
+          '<button class="btn-gold" data-rf-proc>Refunded on eBay — record it</button></div>' +
+          (rfS(r.task_id) ? '<div class="m">task ' + esc(rfS(r.task_id)) + '</div>' : '');
+      } else {
+        h += '<div class="m">' + (st === 'PENDING' ? 'Waiting on Management.' : 'Waiting on the handler.') + '</div>';
+      }
+      h += '</div>';
+    });
+    box.innerHTML = h + '</div></div>';
+    box.querySelectorAll('[data-rf-dec]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.closest('[data-rf]'), id = row.getAttribute('data-rf'), dec = this.getAttribute('data-rf-dec');
+        var note = rfS(row.querySelector('[data-rf-note]').value), amt = rfS(row.querySelector('[data-rf-amt]').value);
+        if (dec === 'REJECT' && note.length < 3) { toast('Say why it is rejected — the note goes back to CS.'); return; }
+        row.querySelectorAll('button').forEach(function (x) { x.disabled = true; });
+        api('refundRequestDecide', { refund_id: id, decision: dec, note: note, amount: amt }).then(function (r) {
+          toast(dec === 'REJECT' ? 'Rejected.' : 'Approved — task sent to ' + (rfWho(r && r.assigned_to) || 'the handler') + '.');
+          rfLoad();
+        }).catch(function (e) { row.querySelectorAll('button').forEach(function (x) { x.disabled = false; }); toast(e.message); });
+      };
+    });
+    box.querySelectorAll('[data-rf-proc]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.closest('[data-rf]'), id = row.getAttribute('data-rf');
+        var ref = rfS(row.querySelector('[data-rf-ref]').value), fin = rfS(row.querySelector('[data-rf-final]').value), note = rfS(row.querySelector('[data-rf-pnote]').value);
+        if (!(Number(fin.replace(/[£,]/g, '')) >= 0)) { toast('The final refunded amount must be a number.'); return; }
+        var btn = this; btn.disabled = true;
+        api('refundRequestProcess', { refund_id: id, ebay_ref: ref, amount_final: fin, note: note }).then(function () {
+          toast('Recorded — the task is complete.'); RF.board = null; rfLoad();
+        }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
+  }
+
+  /* ---------- 5 · every request ---------- */
+  function rfPaintAll(box) {
+    var rows = (RF.data && RF.data.rows) || [];
+    if (!rows.length) { box.innerHTML = '<div class="card"><div class="bd"><div class="rf-note" style="margin-top:0">No refund has been applied for yet.</div></div></div>'; return; }
+    box.innerHTML = '<div class="card"><div class="hd">Every request<span class="hint">newest first · the full trail of each one</span></div><div class="bd">' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:980px"><thead><tr>' +
+      '<th style="text-align:left">Applied</th><th style="text-align:left">Account</th><th style="text-align:left">Order</th><th>Asked £</th><th style="text-align:left">Reason</th>' +
+      '<th style="text-align:left">By</th><th style="text-align:left">Status</th><th style="text-align:left">Decision</th><th>Final £</th><th style="text-align:left">Processed</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var st = rfS(r.status) || 'PENDING';
+        return '<tr><td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' + esc(fmtPkt(r.ts, true) || rfS(r.ts)) + '</td>' +
+          '<td style="text-align:left">' + esc(rfS(r.account)) + '</td><td style="text-align:left" class="mono">' + esc(rfS(r.order_number)) + '</td>' +
+          '<td>' + rfM(r.amount) + '</td><td style="text-align:left;max-width:220px;font-size:12px" title="' + rfAttr(r.comment) + '">' + esc(rfS(r.reason_text).slice(0, 60)) + '</td>' +
+          '<td style="text-align:left">' + rfWho(r.raised_by) + '</td><td style="text-align:left"><span class="rf-pill ' + esc(st) + '">' + esc(st) + '</span></td>' +
+          '<td style="text-align:left;font-size:11.5px">' + (rfS(r.decided_by) ? rfWho(r.decided_by) + ' · ' + esc(fmtPkt(r.decided_at, true) || '') + (rfS(r.decision_note) ? ' — ' + esc(rfS(r.decision_note).slice(0, 60)) : '') : '—') + '</td>' +
+          '<td>' + (rfS(r.amount_final) !== '' ? rfM(r.amount_final) : '—') + '</td>' +
+          '<td style="text-align:left;font-size:11.5px">' + (rfS(r.processed_by) ? rfWho(r.processed_by) + ' · ' + esc(fmtPkt(r.processed_at, true) || '') + (rfS(r.ebay_ref) ? ' · ' + esc(rfS(r.ebay_ref)) : '') : '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div></div></div>';
+  }
+
+  /* ---------- 4 · the money ---------- */
+  function rfPaintMoney(box) {
+    if (!rfMoneyOk()) { box.innerHTML = '<div class="card"><div class="bd"><div class="rf-note" style="margin-top:0">Your role does not see the refund amounts.</div></div></div>'; return; }
+    if (!RF.to) { var now = new Date(); RF.to = rfYmd(now); RF.from = rfYmd(new Date(now.getTime() - 29 * 86400000)); }
+    box.innerHTML = '<div class="card"><div class="hd">Refunded amounts<span class="hint">eBay’s own Finances feed — what was actually paid back</span></div><div class="bd">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+        '<input class="rf-in" id="rfFrom" type="date" style="width:auto" value="' + rfAttr(RF.from) + '"><span class="rf-note" style="margin:0">to</span>' +
+        '<input class="rf-in" id="rfTo" type="date" style="width:auto" value="' + rfAttr(RF.to) + '">' +
+        '<select class="rf-sel" id="rfBAcct" style="width:auto"><option value="">All accounts</option></select>' +
+        '<button class="minibtn" id="rfBGo">Show</button></div>' +
+      '<div id="rfBoard"><div class="spinner"></div></div></div></div>';
+    var sa = $('rfBAcct');
+    if (sa) { fillAccountSelect(sa, RF.acct, function () { RF.acct = sa.value; RF.board = null; rfBoardLoad(); }); }
+    $('rfBGo').onclick = function () { RF.from = rfS($('rfFrom').value); RF.to = rfS($('rfTo').value); RF.board = null; rfBoardLoad(); };
+    rfBoardLoad();
+  }
+
+  function rfBoardLoad() {
+    var host = $('rfBoard');
+    if (!host) { return; }
+    if (RF.board) { rfBoardPaint(host, RF.board); return; }
+    host.innerHTML = '<div class="spinner"></div>';
+    var p = { from: RF.from, to: RF.to };
+    if (RF.acct) { p.account = RF.acct; }
+    api('refundsBoard', p).then(function (d) { RF.board = d || {}; rfBoardPaint(host, RF.board); })
+      .catch(function (e) { host.innerHTML = '<div class="rf-bad">The money board did not answer: ' + esc(e.message) + '</div>'; });
+  }
+
+  function rfBoardPaint(host, d) {
+    var tm = d.this_month || {}, pm = d.prev_month || {};
+    var delta = pm.amount ? Math.round((tm.amount - pm.amount) / pm.amount * 100) : null;
+    var days = Object.keys(d.by_day || {}).sort();
+    var max = 0;
+    days.forEach(function (k) { if (d.by_day[k] > max) { max = d.by_day[k]; } });
+    var h = '<div class="rf-tiles">' +
+      '<div class="rf-t bad"><span class="k">Refunded · ' + esc(rfS(d.from)) + ' → ' + esc(rfS(d.to)) + '</span><b>' + rfM(d.total) + '</b><span class="s">' + (d.count || 0) + ' refund' + (d.count === 1 ? '' : 's') + '</span></div>' +
+      '<div class="rf-t"><span class="k">This month · ' + esc(rfS(tm.ym)) + '</span><b>' + rfM(tm.amount) + '</b><span class="s">' + (tm.n || 0) + ' refunds</span></div>' +
+      '<div class="rf-t"><span class="k">Last month · ' + esc(rfS(pm.ym)) + '</span><b>' + rfM(pm.amount) + '</b><span class="s">' + (pm.n || 0) + ' refunds</span></div>' +
+      '<div class="rf-t ' + (delta === null ? '' : delta > 0 ? 'bad' : 'ok') + '"><span class="k">Month on month</span><b>' + (delta === null ? '—' : (delta > 0 ? '+' : '') + delta + '%') + '</b>' +
+        '<span class="s">' + (delta === null ? 'no refunds last month' : (delta > 0 ? 'more' : 'less') + ' refunded so far this month') + '</span></div>' +
+      '<div class="rf-t"><span class="k">Exact dates</span><b>' + (d.count ? Math.round((d.exact_dates || 0) / d.count * 100) : 0) + '%</b><span class="s">the rest carry the order date (≈)</span></div></div>';
+    if (days.length) {
+      h += '<div class="rf-days">' + days.map(function (k) {
+        var v = d.by_day[k];
+        return '<div class="rf-day" title="' + esc(k) + ' · ' + rfM(v) + '"><i style="height:' + (max ? Math.max(2, Math.round(v / max * 72)) : 2) + 'px"></i><span>' + esc(k.slice(5)) + '</span></div>';
+      }).join('') + '</div>';
+    }
+    var accts = d.by_account || [];
+    if (accts.length) {
+      h += '<div class="scroll"><table class="ir-tbl" style="min-width:520px;margin-bottom:14px"><thead><tr><th style="text-align:left">Account</th><th>Refunds</th><th>Refunded £</th><th>Of those orders’ sales</th></tr></thead><tbody>' +
+        accts.map(function (a) {
+          return '<tr><td style="text-align:left">' + esc(rfS(a.account)) + '</td><td>' + a.refunds + '</td><td style="color:var(--bad);font-weight:800">' + rfM(a.amount) + '</td>' +
+            '<td>' + (a.sold ? Math.round(a.amount / a.sold * 100) + '% of ' + rfM(a.sold) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    var hist = d.history || [];
+    var showBuyer = hist.some(function (x) { return rfS(x.buyer); });
+    h += '<div class="rf-lab" style="margin-top:4px">History · every refund in the range</div>';
+    if (!hist.length) { h += '<div class="rf-note" style="margin-top:0">No refund in this range.</div>'; }
+    else {
+      h += '<div class="scroll" style="max-height:520px"><table class="ir-tbl" style="min-width:860px"><thead><tr><th style="text-align:left">Refunded</th><th style="text-align:left">Account</th>' +
+        '<th style="text-align:left">Order</th><th style="text-align:left">Item</th>' + (showBuyer ? '<th style="text-align:left">Buyer</th>' : '') +
+        '<th>Sold £</th><th>Refunded £</th><th style="text-align:left">Ordered</th></tr></thead><tbody>' +
+        hist.map(function (r) {
+          return '<tr><td style="text-align:left;white-space:nowrap">' + esc(rfS(r.date)) +
+              (r.exact_date ? '' : ' <span class="rf-approx" title="eBay’s refund date not seen yet — this is the order date">≈</span>') + '</td>' +
+            '<td style="text-align:left">' + esc(rfS(r.account)) + '</td>' +
+            '<td style="text-align:left" class="mono"><a href="https://www.ebay.co.uk/sh/ord/details?orderid=' + encodeURIComponent(rfS(r.order_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(rfS(r.order_id)) + '</a></td>' +
+            '<td style="text-align:left;max-width:260px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + rfAttr(r.title) + '">' + esc(rfS(r.title) || rfS(r.item_id)) + '</div></td>' +
+            (showBuyer ? '<td style="text-align:left">' + esc(rfS(r.buyer)) + '</td>' : '') +
+            '<td>' + rfM(r.sold) + '</td><td style="color:var(--bad);font-weight:800">' + rfM(r.refunded) + '</td><td style="text-align:left">' + esc(rfS(r.ordered)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    host.innerHTML = h + '<p class="rf-note">' + esc(rfS(d.note)) + '</p>';
+  }
+
+})();
+
 /* ---------- view-replacements.js ---------- */
-/* view-replacements.js — the Replacement orders desk (26 Aug, owner). CS, Team Lead, Management
- * and Order Processors raise a replacement for any order: preset reasons plus a custom option
- * that REQUIRES an explanation. The backend appends the row to TODAY's day tab in that account's
- * live order book, headed REPLACEMENT ORDER with the reason — so the processor buys it like any
- * order — and archives every request here. Rows arrive pre-filled from the button on Today's
- * orders. Backend: replacementCreate · replacementList. */
+/* view-replacements.js — the Replacement orders desk (26 Aug, owner; lifecycle 1 Oct). CS, Team
+ * Lead, Management and Order Processors RAISE a replacement for any order with a preset reason
+ * (custom demands an explanation). Since 1 Oct the request goes to MANAGEMENT first: on approval
+ * the confirmed item lands on today's tab of that account's live order book, headed REPLACEMENT
+ * ORDER, and a task goes to the handling Order Processor, who records the AliExpress cost, the
+ * AliExpress order id and — once it ships — the tracking (added on eBay against the original
+ * order); the tracking completes the task. Everything stays on the archive. Rows arrive pre-filled
+ * from the button on Today's orders. Backend: replacementCreate · replacementDecide ·
+ * replacementFulfil · replacementList. This file is public: no staff name or email lives in it. */
 (function () {
   'use strict';
 
@@ -23119,13 +23780,30 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.rp-note{font-size:12px;font-weight:600;color:var(--text-3);margin-top:8px}' +
     '.rp-ok{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--ok-soft);border:1px solid rgba(63,207,142,.4);font-weight:700;font-size:13px;color:var(--ok)}' +
     '.rp-bad{margin-top:12px;padding:11px 14px;border-radius:10px;background:var(--warn-soft);border:1px solid rgba(255,159,67,.45);font-weight:700;font-size:13px;color:var(--warn)}' +
-    '.rp-pill{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}'
+    '.rp-pill{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}' +
+    '.rp-pill.PENDING{color:var(--warn);border-color:rgba(255,159,67,.5)}.rp-pill.APPROVED{color:var(--blue-2,#6fa8ff)}.rp-pill.ORDERED{color:#9B6AE6}' +
+    '.rp-pill.TRACKED{color:var(--ok);border-color:rgba(63,207,142,.4)}.rp-pill.REJECTED{color:var(--bad)}' +
+    '.rp-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px}' +
+    '.rp-t{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;background:var(--panel-2)}' +
+    '.rp-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.rp-t b{display:block;font-size:22px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}' +
+    '.rp-t.warn b{color:var(--warn)}.rp-t.ok b{color:var(--ok)}' +
+    '.rp-row{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-top:10px;background:var(--panel)}' +
+    '.rp-row .t{font-weight:800;font-size:13.5px}.rp-row .m{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
+    '.rp-row .c{font-size:12.5px;color:var(--text-2);font-weight:600;margin-top:6px;white-space:pre-wrap}' +
+    '.rp-act{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:10px;align-items:center}' +
+    '.rp-act input{padding:9px 12px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:600;width:100%}' +
+    '.rp-act .rp-btns{display:flex;gap:8px;flex-wrap:wrap;grid-column:1/-1}'
   );
 
   function rpS(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
   function rpAttr(v) { return esc(rpS(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function rpWho(e) { return esc(rpS(e).split('@')[0]); }
+  /* Rows raised before 1 Oct carry no status — they went straight to the order book. */
+  function rpSt(r) { return rpS(r.status) || 'LEGACY'; }
+  function rpM(v) { var s = rpS(v); if (s === '') { return ''; } var n = Number(s); return isFinite(n) ? '£' + n.toFixed(2) : esc(s); }
 
-  var RP = { reasons: [], canRaise: false, seq: 0 };
+  var RP = { reasons: [], canRaise: false, canDecide: false, canFulfil: false, handler: null, rows: [], seq: 0 };
   var RP_PREFILL_KEY = 'm98m:repl:prefill';
 
   VIEWS.replacements = {
@@ -23135,13 +23813,20 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     order: 3.6,
     render: function () {
       return '<div class="hgroup enter d1"><h1>Replacement <span class="goldtext">orders</span></h1>' +
-          '<span class="sub">raise one → it lands on today’s tab of that account’s order book, headed REPLACEMENT ORDER, Pending</span>' +
+          '<span class="sub">raise → Management approves and confirms the item → the handler buys it, records cost and AliExpress order id, adds the tracking on eBay · archive of everything</span>' +
           '<button class="minibtn" id="rpRefresh" style="margin-left:auto">Refresh</button></div>' +
+        '<div id="rpTiles" class="enter d1"></div>' +
         '<div class="card enter d1" id="rpFormCard"><div class="hd">Raise a replacement' +
-          '<span class="hint">the processor then purchases it like any order</span></div>' +
+          '<span class="hint">it goes to Management first — nothing reaches the order book until it is approved</span></div>' +
           '<div class="bd" id="rpForm"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Awaiting Management' +
+          '<span class="hint">approve — confirming the item — or reject with a reason</span></div>' +
+          '<div class="bd" id="rpPending"><div class="spinner"></div></div></div>' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Approved — to order and track' +
+          '<span class="hint">AliExpress cost · AliExpress order id · tracking (added on eBay against the original order) — the tracking completes the task</span></div>' +
+          '<div class="bd" id="rpOpen"><div class="spinner"></div></div></div>' +
         '<div class="card enter d2" style="margin-top:14px"><div class="hd">Every replacement raised' +
-          '<span class="hint">newest first · where each one landed</span></div>' +
+          '<span class="hint">newest first · the full trail of each one</span></div>' +
           '<div class="bd" id="rpList"><div class="spinner"></div></div></div>';
     },
     init: function () {
@@ -23165,17 +23850,34 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var seq = ++RP.seq;
     api('replacementList', {}).then(function (d) {
       if (seq !== RP.seq) { return; }
-      RP.reasons = (d && d.reasons) || [];
-      RP.canRaise = !!(d && d.can_raise);
-      /* After a raise only the archive refreshes — repainting the form here would destroy the
-         confirmation (with the tab and row the raiser is reading) and reset their selections. */
+      d = d || {};
+      RP.reasons = d.reasons || [];
+      RP.canRaise = !!d.can_raise; RP.canDecide = !!d.can_decide; RP.canFulfil = !!d.can_fulfil;
+      RP.handler = d.handler || null;
+      RP.rows = d.rows || [];
+      /* After a raise only the lists refresh — repainting the form would destroy the
+         confirmation the raiser is reading and reset their selections. */
       if (!listOnly) { rpPaintForm(); }
-      rpPaintList((d && d.rows) || []);
+      rpPaintTiles(); rpPaintPending(); rpPaintOpen(); rpPaintList();
     }).catch(function (e) {
       if (seq !== RP.seq) { return; }
       if (!listOnly) { setHTML('rpForm', '<div class="rp-bad">Could not load: ' + esc(e.message) + ' — press Refresh.</div>'); }
       setHTML('rpList', '<div class="rp-note" style="margin-top:0">The list could not refresh — press Refresh.</div>');
     });
+  }
+
+  function rpPaintTiles() {
+    var host = $('rpTiles');
+    if (!host) { return; }
+    var n = {};
+    RP.rows.forEach(function (r) { var s = rpSt(r); n[s] = (n[s] || 0) + 1; });
+    host.innerHTML = '<div class="rp-tiles">' +
+      '<div class="rp-t warn"><span class="k">Awaiting Management</span><b>' + (n.PENDING || 0) + '</b></div>' +
+      '<div class="rp-t"><span class="k">Approved · to order</span><b>' + (n.APPROVED || 0) + '</b></div>' +
+      '<div class="rp-t"><span class="k">Ordered · awaiting tracking</span><b>' + (n.ORDERED || 0) + '</b></div>' +
+      '<div class="rp-t ok"><span class="k">Tracked</span><b>' + (n.TRACKED || 0) + '</b></div>' +
+      '<div class="rp-t"><span class="k">Rejected</span><b>' + (n.REJECTED || 0) + '</b></div>' +
+      '<div class="rp-t"><span class="k">Handler</span><b style="font-size:13px">' + (RP.handler ? esc(rpS(RP.handler.name)) : '—') + '</b></div></div>';
   }
 
   function rpPaintForm() {
@@ -23198,10 +23900,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '</select></div>' +
       '</div>' +
       '<div style="margin-top:12px"><label class="rp-lab" id="rpExpLab">Explanation <span style="text-transform:none;letter-spacing:0">(required for a custom reason)</span></label>' +
-        '<textarea class="rp-ta" id="rpExp" placeholder="what happened, in a sentence or two"></textarea></div>' +
+        '<textarea class="rp-ta" id="rpExp" placeholder="what happened, in a sentence or two — this is what Management reads"></textarea></div>' +
       '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
-        '<button class="btn-gold" id="rpSend">Raise the replacement</button>' +
-        '<span class="rp-note" style="margin-top:0">It is appended to today’s tab with the original order number — nothing on the original row is touched.</span>' +
+        '<button class="btn-gold" id="rpSend">Send to Management</button>' +
+        '<span class="rp-note" style="margin-top:0">Management confirms the item, then the order-book row and the handler’s task are created by themselves.</span>' +
       '</div>' +
       '<div id="rpOut"></div>');
 
@@ -23237,52 +23939,152 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       if (payload.reason_key === 'custom' && payload.explanation.length < 10) {
         out.innerHTML = '<div class="rp-bad">A custom reason needs an explanation — at least 10 characters.</div>'; return;
       }
-      var btn = this; btn.disabled = true; btn.textContent = 'Raising…';
+      var btn = this; btn.disabled = true; btn.textContent = 'Sending…';
       out.innerHTML = '';
       api('replacementCreate', payload).then(function (r) {
-        btn.disabled = false; btn.textContent = 'Raise the replacement';
-        if (r && r.ok) {
-          out.innerHTML = '<div class="rp-ok">Raised — ' + esc(r.repl_id) + '. ' +
-            (r.sheet_tab ? 'On the <b>' + esc(r.sheet_tab) + '</b> tab' + (r.sheet_row && r.sheet_row !== 'shadow' ? ', row ' + esc(r.sheet_row) : '') + ', Pending.' : esc(r.sheet_note || '')) +
-            (r.shadow ? ' (shadow mode — recorded, not written)' : '') + '</div>';
-          var oi = $('rpOrder'); if (oi) { oi.value = ''; }
-          var ti = $('rpTitle'); if (ti) { ti.value = ''; }
-          var xi = $('rpExp'); if (xi) { xi.value = ''; }
-          rpLoad(true);
-        } else {
-          out.innerHTML = '<div class="rp-bad">The sheet write did not land: ' + esc((r && r.sheet_note) || 'unknown') + '. The request is recorded on this desk either way.</div>';
-          rpLoad(true);
-        }
+        btn.disabled = false; btn.textContent = 'Send to Management';
+        out.innerHTML = '<div class="rp-ok">Sent — ' + esc(rpS(r && r.repl_id)) + ' · Pending with Management. They confirm the item; the order-book row and the handler’s task follow by themselves.</div>';
+        var oi = $('rpOrder'); if (oi) { oi.value = ''; }
+        var ti = $('rpTitle'); if (ti) { ti.value = ''; }
+        var xi = $('rpExp'); if (xi) { xi.value = ''; }
+        rpLoad(true);
       }).catch(function (e) {
-        btn.disabled = false; btn.textContent = 'Raise the replacement';
+        btn.disabled = false; btn.textContent = 'Send to Management';
         out.innerHTML = '<div class="rp-bad">' + esc(e.message) + '</div>';
       });
     };
   }
 
-  function rpPaintList(rows) {
+  function rpRowHead(r) {
+    var st = rpSt(r);
+    return '<div class="t">order <span class="mono">' + esc(rpS(r.order_number)) + '</span> · ' + esc(rpS(r.account)) + ' <span class="rp-pill ' + esc(st) + '">' + esc(st) + '</span></div>' +
+      '<div class="m">' + esc(rpS(r.reason_text)) + (rpS(r.item_title) ? ' · ' + esc(rpS(r.item_title).slice(0, 70)) : '') +
+        (rpS(r.variation) ? ' · ' + esc(rpS(r.variation)) : '') + ' · qty ' + esc(rpS(r.quantity) || '1') +
+        ' · raised by ' + rpWho(r.raised_by) + ' · ' + esc(fmtPkt(r.ts, true) || rpS(r.ts)) + '</div>' +
+      (rpS(r.explanation) ? '<div class="c">“' + esc(rpS(r.explanation)) + '”</div>' : '') +
+      (rpS(r.ali_link) ? '<div class="m"><a href="' + esc(safeUrl(rpS(r.ali_link)) || '#') + '" target="_blank" rel="noopener noreferrer">AliExpress link ↗</a></div>' : '') +
+      (rpS(r.decided_by) ? '<div class="m">Management: ' + (esc(rpS(r.decision_note)) || st.toLowerCase()) + ' — ' + rpWho(r.decided_by) + ' · ' + esc(fmtPkt(r.decided_at, true) || '') + '</div>' : '');
+  }
+
+  /* STEP 2 — Management confirms the item and approves, or rejects. */
+  function rpPaintPending() {
+    var box = $('rpPending');
+    if (!box) { return; }
+    var rows = RP.rows.filter(function (r) { return rpSt(r) === 'PENDING'; });
+    if (!rows.length) { box.innerHTML = '<div class="rp-note" style="margin-top:0">Nothing is waiting for Management.</div>'; return; }
+    box.innerHTML = rows.map(function (r) {
+      var h = '<div class="rp-row" data-rp="' + rpAttr(r.repl_id) + '">' + rpRowHead(r);
+      if (RP.canDecide) {
+        h += '<div class="rp-act">' +
+          '<input data-rp-title value="' + rpAttr(r.item_title) + '" placeholder="item title (as it should be ordered)">' +
+          '<input data-rp-qty value="' + rpAttr(r.quantity || '1') + '" placeholder="quantity" style="max-width:90px">' +
+          '<input data-rp-var value="' + rpAttr(r.variation) + '" placeholder="variation">' +
+          '<input data-rp-ali value="' + rpAttr(r.ali_link) + '" placeholder="AliExpress link (https://…)">' +
+          '<input data-rp-note placeholder="note for the handler — or why it is rejected" style="grid-column:1/-1">' +
+          '<div class="rp-btns"><button class="btn-gold" data-rp-dec="APPROVE">Approve → order book + task to the handler</button>' +
+          '<button class="minibtn" data-rp-dec="REJECT">Reject</button></div></div>';
+      } else {
+        h += '<div class="m">Waiting on Management.</div>';
+      }
+      return h + '</div>';
+    }).join('');
+    box.querySelectorAll('[data-rp-dec]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.closest('[data-rp]'), id = row.getAttribute('data-rp'), dec = this.getAttribute('data-rp-dec');
+        var note = rpS(row.querySelector('[data-rp-note]').value);
+        if (dec === 'REJECT' && note.length < 3) { toast('Say why it is rejected — the note goes back to the raiser.'); return; }
+        var payload = { repl_id: id, decision: dec, note: note };
+        if (dec === 'APPROVE') {
+          payload.item_title = rpS(row.querySelector('[data-rp-title]').value);
+          payload.quantity = rpS(row.querySelector('[data-rp-qty]').value) || '1';
+          payload.variation = rpS(row.querySelector('[data-rp-var]').value);
+          payload.ali_link = rpS(row.querySelector('[data-rp-ali]').value);
+        }
+        row.querySelectorAll('button').forEach(function (x) { x.disabled = true; });
+        api('replacementDecide', payload).then(function (r) {
+          if (dec === 'REJECT') { toast('Rejected.'); }
+          else {
+            toast('Approved — ' + (r && r.sheet_tab ? 'on the ' + r.sheet_tab + ' tab' : 'recorded') + (r && r.assigned_to ? ' · task to ' + rpWho(r.assigned_to) : '') + '.');
+          }
+          rpLoad(true);
+        }).catch(function (e) { row.querySelectorAll('button').forEach(function (x) { x.disabled = false; }); toast(e.message); });
+      };
+    });
+  }
+
+  /* STEP 3 — the handler records the purchase and the tracking. */
+  function rpPaintOpen() {
+    var box = $('rpOpen');
+    if (!box) { return; }
+    var rows = RP.rows.filter(function (r) { return rpSt(r) === 'APPROVED' || rpSt(r) === 'ORDERED'; });
+    if (!rows.length) { box.innerHTML = '<div class="rp-note" style="margin-top:0">Nothing approved is waiting to be ordered or tracked.</div>'; return; }
+    box.innerHTML = rows.map(function (r) {
+      var h = '<div class="rp-row" data-rp="' + rpAttr(r.repl_id) + '">' + rpRowHead(r) +
+        '<div class="m">' + (rpS(r.sheet_tab) ? 'order book: ' + esc(rpS(r.sheet_tab)) + (rpS(r.sheet_row) && rpS(r.sheet_row) !== 'shadow' ? ' row ' + esc(rpS(r.sheet_row)) : '') : 'order book: ' + esc(rpS(r.sheet_note) || 'not written')) +
+          (rpS(r.task_id) ? ' · task ' + esc(rpS(r.task_id)) : '') +
+          (rpM(r.ali_cost) ? ' · cost ' + rpM(r.ali_cost) : '') + (rpS(r.ali_order) ? ' · AliExpress order ' + esc(rpS(r.ali_order)) : '') +
+          (rpS(r.fulfilled_by) ? ' · last by ' + rpWho(r.fulfilled_by) + ' ' + esc(fmtPkt(r.fulfilled_at, true) || '') : '') + '</div>';
+      if (RP.canFulfil) {
+        h += '<div class="rp-act">' +
+          '<input data-rp-cost value="' + rpAttr(r.ali_cost) + '" placeholder="AliExpress cost £" inputmode="decimal">' +
+          '<input data-rp-order value="' + rpAttr(r.ali_order) + '" placeholder="AliExpress order id">' +
+          '<input data-rp-trk value="' + rpAttr(r.tracking) + '" placeholder="tracking number (once it ships)">' +
+          '<input data-rp-fnote placeholder="note (optional)">' +
+          '<div class="rp-btns"><button class="btn-gold" data-rp-ful>Record</button>' +
+          '<span class="rp-note" style="margin-top:0">Add the tracking on eBay against the original order too — recording it here completes the task.</span></div></div>';
+      } else {
+        h += '<div class="m">Waiting on the handler.</div>';
+      }
+      return h + '</div>';
+    }).join('');
+    box.querySelectorAll('[data-rp-ful]').forEach(function (b) {
+      b.onclick = function () {
+        var row = this.closest('[data-rp]'), id = row.getAttribute('data-rp');
+        var payload = { repl_id: id, ali_cost: rpS(row.querySelector('[data-rp-cost]').value), ali_order: rpS(row.querySelector('[data-rp-order]').value),
+          tracking: rpS(row.querySelector('[data-rp-trk]').value), note: rpS(row.querySelector('[data-rp-fnote]').value) };
+        if (payload.ali_cost === '' && !payload.ali_order && !payload.tracking && !payload.note) { toast('Record the cost, the AliExpress order id, the tracking — or a note.'); return; }
+        var btn = this; btn.disabled = true;
+        api('replacementFulfil', payload).then(function (r) {
+          toast(r && r.status === 'TRACKED' ? 'Tracked — the task is complete.' : 'Recorded.');
+          rpLoad(true);
+        }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
+  }
+
+  function rpPaintList() {
     if (!$('rpList')) { return; }
+    var rows = RP.rows;
     if (!rows.length) {
       setHTML('rpList', '<div class="rp-note" style="margin-top:0">No replacement has been raised yet.</div>');
       return;
     }
-    setHTML('rpList', '<div class="scroll"><table class="ir-tbl" style="min-width:860px"><thead><tr>' +
+    setHTML('rpList', '<div class="scroll"><table class="ir-tbl" style="min-width:1180px"><thead><tr>' +
       '<th style="text-align:left">When</th><th style="text-align:left">Account</th>' +
       '<th style="text-align:left">Order</th><th style="text-align:left">Item</th>' +
       '<th style="text-align:left">Reason</th><th style="text-align:left">Raised by</th>' +
+      '<th style="text-align:left">Status</th><th style="text-align:left">Decision</th>' +
+      '<th>Ali cost</th><th style="text-align:left">Ali order</th><th style="text-align:left">Tracking</th>' +
       '<th style="text-align:left">Landed</th></tr></thead><tbody>' +
       rows.map(function (r) {
+        var st = rpSt(r);
         var landed = rpS(r.sheet_row) === 'shadow'
           ? '<span class="rp-pill" style="color:var(--warn);border-color:rgba(255,159,67,.5)">shadow — NOT on the sheet</span>'
           : rpS(r.sheet_tab)
           ? '<span class="rp-pill">' + esc(rpS(r.sheet_tab)) + (rpS(r.sheet_row) ? ' · row ' + esc(rpS(r.sheet_row)) : '') + '</span>'
+          : (st === 'PENDING' || st === 'REJECTED') ? '<span class="rp-pill">not yet</span>'
           : '<span class="rp-pill" style="color:var(--warn)">' + esc(rpS(r.sheet_note) || 'portal only') + '</span>';
         return '<tr><td style="text-align:left;white-space:nowrap;font-size:11.5px;color:var(--text-3)">' + esc(fmtPkt(r.ts, true) || rpS(r.ts)) + '</td>' +
           '<td style="text-align:left">' + esc(rpS(r.account)) + '</td>' +
           '<td style="text-align:left" class="mono">' + esc(rpS(r.order_number)) + '</td>' +
-          '<td style="text-align:left;max-width:220px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + rpAttr(r.item_title) + '">' + esc(rpS(r.item_title) || '—') + '</div></td>' +
-          '<td style="text-align:left;max-width:240px;font-size:12px" title="' + rpAttr(r.reason_text) + '">' + esc(rpS(r.reason_text).slice(0, 90) || '—') + '</td>' +
-          '<td style="text-align:left">' + esc(rpS(r.raised_by).split('@')[0]) + '</td>' +
+          '<td style="text-align:left;max-width:200px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + rpAttr(r.item_title) + '">' + esc(rpS(r.item_title) || '—') + '</div></td>' +
+          '<td style="text-align:left;max-width:200px;font-size:12px" title="' + rpAttr(r.explanation || r.reason_text) + '">' + esc(rpS(r.reason_text).slice(0, 60) || '—') + '</td>' +
+          '<td style="text-align:left">' + rpWho(r.raised_by) + '</td>' +
+          '<td style="text-align:left"><span class="rp-pill ' + esc(st) + '">' + esc(st) + '</span></td>' +
+          '<td style="text-align:left;font-size:11.5px">' + (rpS(r.decided_by) ? rpWho(r.decided_by) + ' · ' + esc(fmtPkt(r.decided_at, true) || '') + (rpS(r.decision_note) ? ' — ' + esc(rpS(r.decision_note).slice(0, 50)) : '') : '—') + '</td>' +
+          '<td>' + (rpM(r.ali_cost) || '—') + '</td>' +
+          '<td style="text-align:left" class="mono">' + (esc(rpS(r.ali_order)) || '—') + '</td>' +
+          '<td style="text-align:left" class="mono">' + (esc(rpS(r.tracking)) || '—') + (rpS(r.fulfilled_by) ? '<div style="font-size:10.5px;color:var(--text-3)">' + rpWho(r.fulfilled_by) + ' · ' + esc(fmtPkt(r.fulfilled_at, true) || '') + '</div>' : '') + '</td>' +
           '<td style="text-align:left">' + landed + '</td></tr>';
       }).join('') + '</tbody></table></div>');
   }
@@ -23941,7 +24743,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 })();
 
 /* ---------- view-rev20.js ---------- */
-/* view-rev20.js — the 20-DAYS REVISION desk (owner, 10 Sept): sales-triggered revisions.
+/* view-rev20.js — the 14-DAY REVIEW desk (owner, 1 Oct: no sale in the 7 days after the 7-day
+ * revision → here AND on Management's Listing decisions desk — revise back to its lister with a
+ * deadline, or end it). Was the 20-DAYS REVISION desk (10 Sept): sales-triggered revisions.
  * Day 10: fewer than 5 sales since go-live → here. Day 20: fewer than 5 more in the second
  * window → here AGAIN and simultaneously on Management's Listing-decisions desk for the final
  * call. Same decision machinery as the 72-hours page (keywords, comment, tiers) — the shared
@@ -23970,8 +24774,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             (can ? U.lrDecisionForm(r, stage) : '') + '</div>';
         });
       }
-      section(d.day10 || [], 'Day-10 — under 5 sales since go-live', 'R10', '');
-      section(d.day20 || [], 'Day-20 — under 5 sales in the second window', 'R20',
+      if ((d.day10 || []).length) { section(d.day10, 'Day-10 (retired rung) — still waiting from before 1 Oct', 'R10', ''); }
+      section(d.day20 || [], 'Day-14 — no sale since the 7-day revision', 'R20',
         '<span class="lr-badge" style="color:var(--gold-a)">also with Management for the final call</span>');
       var rec = d.recent || [];
       if (rec.length) {
@@ -24007,13 +24811,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   VIEWS.rev20 = {
-    label: '20-days revision',
+    label: '14-day review',
     order: 17.66,
     roles: L20_ROLES,
     icon: '<path d="M8 2v4M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M9 16l2 2 4-4"/>',
     render: function () {
-      return '<div class="hgroup enter d1"><h1>20-days <span class="goldtext">revision</span></h1>' +
-        '<span class="sub">the sales ladder: day-10 under 5 sales, day-20 under 5 more — the system sends them, the Advertising Manager decides</span>' +
+      return '<div class="hgroup enter d1"><h1>14-day <span class="goldtext">review</span></h1>' +
+        '<span class="sub">no sale in the 7 days after the 7-day revision — the system sends them; decide here, Management has the final call on the Listing decisions page</span>' +
         '<button class="minibtn" id="r20Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="r20Body" class="enter d2"><div class="spinner"></div></div>';
     },
@@ -24022,7 +24826,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 })();
 
 /* ---------- view-rev72.js ---------- */
-/* view-rev72.js — the 72-HOURS REVISION desk (owner, 10 Sept: "after exact 72 hours the portal
+/* view-rev72.js — the 7-DAY REVISION desk (owner, 1 Oct: "we are ending the revision of 72 hours;
+ * revise the item after 7 days of the product getting live"). Was the 72-HOURS REVISION desk (10 Sept: "after exact 72 hours the portal
  * will show there all the listings"). The Advertising Manager decides each arrival:
  * No revision / Revision (typed TITLE + DESCRIPTION keywords with live counts, a comment,
  * Tier 1 = 2-day lister task, Tier 2 = parkable). Parked items wait here for his call;
@@ -24173,7 +24978,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       var can = d.canDecide, h = '';
       var q = d.queue || [];
       h += '<div class="lr-sec">Waiting for your decision · ' + q.length + '</div>';
-      if (!q.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing at the 72-hour mark right now.</div>'; }
+      if (!q.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing at the 7-day mark right now.</div>'; }
       q.forEach(function (r) {
         h += '<div class="lr-row">' + lrHead(r) +
           '<div class="lr-btns">' +
@@ -24226,13 +25031,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   VIEWS.rev72 = {
-    label: '72-hours revision',
+    label: '7-day revision',
     order: 17.65,
     roles: LR_ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
     render: function () {
-      return '<div class="hgroup enter d1"><h1>72-hours <span class="goldtext">revision</span></h1>' +
-        '<span class="sub">every listing lands here exactly 72 hours after go-live — decide and pick the tier · the dummy becomes the real listing here</span>' +
+      return '<div class="hgroup enter d1"><h1>7-day <span class="goldtext">revision</span></h1>' +
+        '<span class="sub">every listing lands here 7 days after go-live — take the keywords, decide and pick the tier · the dummy becomes the real listing here</span>' +
         '<button class="minibtn" id="r72Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="r72Body" class="enter d2"><div class="spinner"></div></div>';
     },
@@ -25184,6 +25989,13 @@ function saveSchedule() {
     '.sig-hist-note{color:var(--text-2);margin-top:2px}.sig-hist-none{color:var(--text-3);font-style:italic}',
     '.sig-dept-sum{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--text-2);margin:0 0 12px}',
     '.sig-lines{margin-top:8px;width:100%}.sig-line{font-size:12.5px;padding:4px 0;border-top:1px dashed rgba(120,132,152,.25)}.sig-line:first-child{border-top:0}',
+    '.sig-hist{width:100%;margin-top:10px}.sig-hist-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:6px}' +
+    '.sig-hist-row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}' +
+    '.sig-hist-d{border:1px solid var(--gold-line);border-radius:9px;padding:6px 6px;background:var(--panel);text-align:center;min-width:0}' +
+    '.sig-hist-d .k{display:block;font-size:9.5px;color:var(--text-3);font-weight:800;text-transform:uppercase;letter-spacing:.04em}' +
+    '.sig-hist-d b{display:block;font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--ok)}' +
+    '.sig-hist-d.neg b{color:var(--bad)}.sig-hist-d.last{border-color:var(--gold-a)}' +
+    '.sig-hist-d .s{display:block;font-size:9px;color:var(--text-3);font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.sig-dept-head{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2);margin:8px 0 -4px;padding-left:2px}.sig-dept-head .num{margin-left:6px;color:var(--text-3)}',
     '@media(max-width:880px){',
     '.sig-hd,.sig-bd,.sig-acts,.sig-foot{padding-left:15px}',
@@ -25344,6 +26156,27 @@ function saveSchedule() {
       '<b class="num">' + esc(value) + '</b></div>';
   }
 
+  /* 1 Oct (owner): "when you show a signal that an item went negative yesterday, show the data of
+     previous days too — yesterday, one week; same with advertising alerts." The engine sends the
+     item's last 7 days (orders · ads · profit after ads) from the ledgers; drawn only when sent. */
+  function sgDayShort(ymd) {
+    var p = String(ymd || '').split('-');
+    return p.length === 3 ? (Number(p[2]) + ' ' + (SG_MONTHS[Number(p[1]) - 1] || '')) : String(ymd || '');
+  }
+  function sgHistory(rec) {
+    var hist = rec && rec.history;
+    if (!hist || !hist.length) { return ''; }
+    var wk = rec.history_week || null;
+    var h = '<div class="sig-hist"><div class="sig-hist-h">The last 7 days' +
+      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
+    hist.forEach(function (d, i) {
+      var p = Number(d.profit) || 0, last = i === hist.length - 1;
+      h += '<div class="sig-hist-d' + (p < 0 ? ' neg' : '') + (last ? ' last' : '') + '" title="' + esc(sgStr(d.day)) + (last ? ' — yesterday' : '') + '"><span class="k">' + esc(sgDayShort(d.day)) + '</span>' +
+        '<b>' + sgGbp(p) + '</b><span class="s">' + sgNumText(d.orders) + ' ord · ads ' + sgGbp(d.ads) + '</span></div>';
+    });
+    return h + '</div></div>';
+  }
+
   /** §27's three cards. Every money row is drawn from its own named field and only when that field
       arrived; nothing is inferred, defaulted to zero, or left as an empty placeholder. */
   function sgFigures(rec) {
@@ -25361,6 +26194,7 @@ function saveSchedule() {
       if (raw !== null) { out += sgFig('', 'Raw Profit', sgGbp(raw)); }
       spend = sgField(rec, 'ad_fees');
       if (spend !== null) { out += sgFig('', 'Ad fees incl VAT', sgGbp(spend)); }
+      out += sgHistory(rec);
       return out;
     }
 
@@ -25377,6 +26211,7 @@ function saveSchedule() {
       if (excess !== null) { out += sgFig('loss', 'Spent over earned', sgGbp(excess)); }
       raw = sgField(rec, 'Actual Profit');
       if (raw !== null) { out += sgFig(raw < 0 ? 'loss' : '', 'Actual Profit', sgGbp(raw)); }
+      out += sgHistory(rec);
       return out;
     }
 
@@ -25433,6 +26268,7 @@ function saveSchedule() {
       if (net !== null && rawp !== null) { out += '<div class="sig-vs">AGAINST</div>'; }
       if (rawp !== null) { out += sgFig('gold', 'Raw profit', sgGbp(rawp)); }
       out += '<div class="sig-note">The advertising on this item disagrees with the decision — the Wrong ads screen has the live-vs-wanted detail.</div>';
+      out += sgHistory(rec);
       return out;
     }
 
@@ -26093,7 +26929,9 @@ function saveSchedule() {
 
   var SRC_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
   var SRC_EDIT_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
-  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {} };
+  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {}, fresh: '' };
+  /* 1 Oct (owner): links now also come from the go-live record and the hunt's own product links. */
+  var SRC_SRC_WORD = { portal: 'saved in the portal', sheet: 'from the central Main Sheet', 'go-live': 'from the go-live record', hunt: 'from the hunt’s product links' };
 
   VIEW_CSS.push(
     '.src-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px}' +
@@ -26106,7 +26944,8 @@ function saveSchedule() {
     '.src-add:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
     '.src-edit{border:none;background:none;color:var(--text-3);cursor:pointer;font-size:11px;padding:2px}' +
     '.src-input{width:230px;background:var(--panel);border:1px solid var(--gold-line-hi);border-radius:8px;color:var(--text);font:inherit;font-size:11.5px;padding:5px 8px}' +
-    '.src-miss{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}'
+    '.src-miss{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}' +
+    '.src-tag{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);border:1px solid var(--gold-line);border-radius:99px;padding:0 5px}'
   );
 
   function srcStr(v) { return String(v == null ? '' : v).trim(); }
@@ -26120,9 +26959,11 @@ function saveSchedule() {
   function srcSlotCell(r, slot) {
     var eff = srcStr(r['e' + slot]);
     var fromPortal = !!srcStr(r['s' + slot]);
+    var src = srcStr(r['src' + slot]) || (fromPortal ? 'portal' : 'sheet');
     var h = '<span class="src-slot" data-item="' + esc(srcStr(r.item_id)) + '" data-slot="' + slot + '">';
     if (eff) {
-      h += '<a href="' + esc(eff) + '" target="_blank" rel="noopener noreferrer" title="' + esc(eff) + (fromPortal ? ' (saved in the portal)' : ' (from the Main Sheet)') + '">' + esc(srcHost(eff)) + '</a>';
+      h += '<a href="' + esc(eff) + '" target="_blank" rel="noopener noreferrer" title="' + esc(eff) + ' (' + esc(SRC_SRC_WORD[src] || src) + ')">' + esc(srcHost(eff)) + '</a>' +
+        (src === 'go-live' || src === 'hunt' ? '<span class="src-tag" title="' + esc(SRC_SRC_WORD[src]) + '">' + esc(src) + '</span>' : '');
       if (srcCanEdit()) { h += '<button class="src-edit" data-act="edit" title="Replace this link">✎</button>'; }
     } else if (srcCanEdit()) {
       h += '<button class="src-add" data-act="edit">+ add</button>';
@@ -26151,7 +26992,8 @@ function saveSchedule() {
       '<div class="src-card"><div class="l">Active listings</div><div class="v">' + (s.total || 0) + '</div></div>' +
       '<div class="src-card"><div class="l">With supplier links</div><div class="v" style="color:var(--ok)">' + (s.with_links || 0) + '</div></div>' +
       '<div class="src-card"><div class="l">Missing — the task queue</div><div class="v" style="color:' + (s.missing_n ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_n || 0) + '</div></div>' +
-      '<div class="src-card"><div class="l">Missing AND selling / has open orders</div><div class="v" style="color:' + (s.missing_hot ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_hot || 0) + '</div></div></div>';
+      '<div class="src-card"><div class="l">Missing AND selling / has open orders</div><div class="v" style="color:' + (s.missing_hot ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_hot || 0) + '</div></div>' +
+      '<div class="src-card"><div class="l">Central sheets last read</div><div class="v" style="font-size:13px">' + esc(fmtPkt(SRC.fresh, true) || '—') + '</div></div></div>';
     if (SRC.tab === 'missing') {
       h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">Not a single working link on these — top sellers first. Add supplier 1 at least; the 9 AM letter keeps ringing the Order Processors until this list is empty.</p>';
     }
@@ -26230,6 +27072,7 @@ function saveSchedule() {
     box.innerHTML = '<div class="spinner"></div>';
     api('sourcingBoard', {}).then(function (d) {
       SRC.rows = (d && d.rows) || [];
+      SRC.fresh = (d && d.facts_fresh) || '';
       SRC.sums = { total: d.total, with_links: d.with_links, missing_n: d.missing_n, missing_hot: d.missing_hot };
       if (!d.missing_n && SRC.tab === 'missing') { SRC.tab = 'all'; }
       var mt = $('srcTabMiss');
@@ -26248,7 +27091,7 @@ function saveSchedule() {
     prefetch: function () { return api('sourcingBoard', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1><span class="goldtext">Sourcing</span> links</h1>' +
-        '<span class="sub">supplier 1 · 2 · 3 for every ACTIVE listing — the sheet’s links plus everything saved here · the Missing tab is the Order Processors’ task queue</span></div>' +
+        '<span class="sub">supplier 1 · 2 · 3 for every ACTIVE listing — the central Main Sheets’ links (read hourly), the go-live record and the hunt’s own links, plus everything saved here · the Missing tab is the Order Processors’ task queue</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">' +
         '<button class="ob-chip" id="srcTabMiss" data-tab="missing">Missing — task queue <b>…</b></button>' +
@@ -32671,7 +33514,7 @@ function enterApp(user){
     { name:'My desk',     keys:['home','tasks','approvals','reports'] },   // owner 10 Sept: My reports on every staff member's own desk
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
-        'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','priceDesk',
+        'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','profitability','priceDesk',
         'signals','alerts','truthCheck',
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
@@ -32680,7 +33523,7 @@ function enterApp(user){
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','huntRevised','huntRevisions','huntRecords','ideaBox'] },
-    { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','inbox','feedback'] },
+    { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','refunds','inbox','feedback'] },
     { name:'Library',     keys:['tools','rules'] }
   ];
   /* The advertising portal at /ads/ is THIS shell with only the adtool views spliced in. It sets

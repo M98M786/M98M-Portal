@@ -1,4 +1,6 @@
-/* view-rev20.js — the 20-DAYS REVISION desk (owner, 10 Sept): sales-triggered revisions.
+/* view-rev20.js — the 14-DAY REVIEW desk (owner, 1 Oct: no sale in the 7 days after the 7-day
+ * revision → here AND on Management's Listing decisions desk — revise back to its lister with a
+ * deadline, or end it). Was the 20-DAYS REVISION desk (10 Sept): sales-triggered revisions.
  * Day 10: fewer than 5 sales since go-live → here. Day 20: fewer than 5 more in the second
  * window → here AGAIN and simultaneously on Management's Listing-decisions desk for the final
  * call. Same decision machinery as the 72-hours page (keywords, comment, tiers) — the shared
@@ -27,8 +29,8 @@
             (can ? U.lrDecisionForm(r, stage) : '') + '</div>';
         });
       }
-      section(d.day10 || [], 'Day-10 — under 5 sales since go-live', 'R10', '');
-      section(d.day20 || [], 'Day-20 — under 5 sales in the second window', 'R20',
+      if ((d.day10 || []).length) { section(d.day10, 'Day-10 (retired rung) — still waiting from before 1 Oct', 'R10', ''); }
+      section(d.day20 || [], 'Day-14 — no sale since the 7-day revision', 'R20',
         '<span class="lr-badge" style="color:var(--gold-a)">also with Management for the final call</span>');
       var rec = d.recent || [];
       if (rec.length) {
@@ -64,13 +66,13 @@
   }
 
   VIEWS.rev20 = {
-    label: '20-days revision',
+    label: '14-day review',
     order: 17.66,
     roles: L20_ROLES,
     icon: '<path d="M8 2v4M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M9 16l2 2 4-4"/>',
     render: function () {
-      return '<div class="hgroup enter d1"><h1>20-days <span class="goldtext">revision</span></h1>' +
-        '<span class="sub">the sales ladder: day-10 under 5 sales, day-20 under 5 more — the system sends them, the Advertising Manager decides</span>' +
+      return '<div class="hgroup enter d1"><h1>14-day <span class="goldtext">review</span></h1>' +
+        '<span class="sub">no sale in the 7 days after the 7-day revision — the system sends them; decide here, Management has the final call on the Listing decisions page</span>' +
         '<button class="minibtn" id="r20Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="r20Body" class="enter d2"><div class="spinner"></div></div>';
     },

@@ -136,6 +136,13 @@
     '.sig-hist-note{color:var(--text-2);margin-top:2px}.sig-hist-none{color:var(--text-3);font-style:italic}',
     '.sig-dept-sum{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--text-2);margin:0 0 12px}',
     '.sig-lines{margin-top:8px;width:100%}.sig-line{font-size:12.5px;padding:4px 0;border-top:1px dashed rgba(120,132,152,.25)}.sig-line:first-child{border-top:0}',
+    '.sig-hist{width:100%;margin-top:10px}.sig-hist-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:6px}' +
+    '.sig-hist-row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}' +
+    '.sig-hist-d{border:1px solid var(--gold-line);border-radius:9px;padding:6px 6px;background:var(--panel);text-align:center;min-width:0}' +
+    '.sig-hist-d .k{display:block;font-size:9.5px;color:var(--text-3);font-weight:800;text-transform:uppercase;letter-spacing:.04em}' +
+    '.sig-hist-d b{display:block;font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--ok)}' +
+    '.sig-hist-d.neg b{color:var(--bad)}.sig-hist-d.last{border-color:var(--gold-a)}' +
+    '.sig-hist-d .s{display:block;font-size:9px;color:var(--text-3);font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.sig-dept-head{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2);margin:8px 0 -4px;padding-left:2px}.sig-dept-head .num{margin-left:6px;color:var(--text-3)}',
     '@media(max-width:880px){',
     '.sig-hd,.sig-bd,.sig-acts,.sig-foot{padding-left:15px}',
@@ -296,6 +303,27 @@
       '<b class="num">' + esc(value) + '</b></div>';
   }
 
+  /* 1 Oct (owner): "when you show a signal that an item went negative yesterday, show the data of
+     previous days too — yesterday, one week; same with advertising alerts." The engine sends the
+     item's last 7 days (orders · ads · profit after ads) from the ledgers; drawn only when sent. */
+  function sgDayShort(ymd) {
+    var p = String(ymd || '').split('-');
+    return p.length === 3 ? (Number(p[2]) + ' ' + (SG_MONTHS[Number(p[1]) - 1] || '')) : String(ymd || '');
+  }
+  function sgHistory(rec) {
+    var hist = rec && rec.history;
+    if (!hist || !hist.length) { return ''; }
+    var wk = rec.history_week || null;
+    var h = '<div class="sig-hist"><div class="sig-hist-h">The last 7 days' +
+      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
+    hist.forEach(function (d, i) {
+      var p = Number(d.profit) || 0, last = i === hist.length - 1;
+      h += '<div class="sig-hist-d' + (p < 0 ? ' neg' : '') + (last ? ' last' : '') + '" title="' + esc(sgStr(d.day)) + (last ? ' — yesterday' : '') + '"><span class="k">' + esc(sgDayShort(d.day)) + '</span>' +
+        '<b>' + sgGbp(p) + '</b><span class="s">' + sgNumText(d.orders) + ' ord · ads ' + sgGbp(d.ads) + '</span></div>';
+    });
+    return h + '</div></div>';
+  }
+
   /** §27's three cards. Every money row is drawn from its own named field and only when that field
       arrived; nothing is inferred, defaulted to zero, or left as an empty placeholder. */
   function sgFigures(rec) {
@@ -313,6 +341,7 @@
       if (raw !== null) { out += sgFig('', 'Raw Profit', sgGbp(raw)); }
       spend = sgField(rec, 'ad_fees');
       if (spend !== null) { out += sgFig('', 'Ad fees incl VAT', sgGbp(spend)); }
+      out += sgHistory(rec);
       return out;
     }
 
@@ -329,6 +358,7 @@
       if (excess !== null) { out += sgFig('loss', 'Spent over earned', sgGbp(excess)); }
       raw = sgField(rec, 'Actual Profit');
       if (raw !== null) { out += sgFig(raw < 0 ? 'loss' : '', 'Actual Profit', sgGbp(raw)); }
+      out += sgHistory(rec);
       return out;
     }
 
@@ -385,6 +415,7 @@
       if (net !== null && rawp !== null) { out += '<div class="sig-vs">AGAINST</div>'; }
       if (rawp !== null) { out += sgFig('gold', 'Raw profit', sgGbp(rawp)); }
       out += '<div class="sig-note">The advertising on this item disagrees with the decision — the Wrong ads screen has the live-vs-wanted detail.</div>';
+      out += sgHistory(rec);
       return out;
     }
 

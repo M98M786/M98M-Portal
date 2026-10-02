@@ -1,4 +1,5 @@
-/* view-rev72.js — the 72-HOURS REVISION desk (owner, 10 Sept: "after exact 72 hours the portal
+/* view-rev72.js — the 7-DAY REVISION desk (owner, 1 Oct: "we are ending the revision of 72 hours;
+ * revise the item after 7 days of the product getting live"). Was the 72-HOURS REVISION desk (10 Sept: "after exact 72 hours the portal
  * will show there all the listings"). The Advertising Manager decides each arrival:
  * No revision / Revision (typed TITLE + DESCRIPTION keywords with live counts, a comment,
  * Tier 1 = 2-day lister task, Tier 2 = parkable). Parked items wait here for his call;
@@ -149,7 +150,7 @@
       var can = d.canDecide, h = '';
       var q = d.queue || [];
       h += '<div class="lr-sec">Waiting for your decision · ' + q.length + '</div>';
-      if (!q.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing at the 72-hour mark right now.</div>'; }
+      if (!q.length) { h += '<div style="color:var(--text-3);font-weight:600;font-size:12.5px">Nothing at the 7-day mark right now.</div>'; }
       q.forEach(function (r) {
         h += '<div class="lr-row">' + lrHead(r) +
           '<div class="lr-btns">' +
@@ -202,13 +203,13 @@
   }
 
   VIEWS.rev72 = {
-    label: '72-hours revision',
+    label: '7-day revision',
     order: 17.65,
     roles: LR_ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
     render: function () {
-      return '<div class="hgroup enter d1"><h1>72-hours <span class="goldtext">revision</span></h1>' +
-        '<span class="sub">every listing lands here exactly 72 hours after go-live — decide and pick the tier · the dummy becomes the real listing here</span>' +
+      return '<div class="hgroup enter d1"><h1>7-day <span class="goldtext">revision</span></h1>' +
+        '<span class="sub">every listing lands here 7 days after go-live — take the keywords, decide and pick the tier · the dummy becomes the real listing here</span>' +
         '<button class="minibtn" id="r72Refresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="r72Body" class="enter d2"><div class="spinner"></div></div>';
     },

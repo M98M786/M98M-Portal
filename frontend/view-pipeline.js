@@ -30,7 +30,7 @@
      comes from the backend (listingChain_), never from arithmetic here. */
   var PL_WINDOWS = [
     { k: 'Day 0', t: 'New listings go live', uk: '7:00 PM UK' },
-    { k: '+72 hours', t: 'Real revision of the dummy listing', uk: '1:00 PM – 5:00 PM UK' },
+    { k: '+7 days', t: 'Real revision of the dummy listing', uk: '1:00 PM – 5:00 PM UK' },
     { k: 'Same day', t: 'Campaign testing window', uk: '5:00 PM – 10:00 PM UK' }
   ];
 
@@ -47,7 +47,7 @@
     { key: 'listing', label: 'Listing', hint: 'dummy listing → Item ID', go: PL_GO_LIST },
     { key: 'cpc', label: 'CPC research', hint: 'keywords before any campaign', go: PL_GO_CPC },
     { key: 'live', label: 'Live + campaign', hint: 'Item ID in · campaign next', go: PL_GO_LIST, gold: true },
-    { key: 'revision', label: 'Revision', hint: '+72 hours and ad-hoc', go: PL_GO_LIST }
+    { key: 'revision', label: 'Revision', hint: '+7 days and ad-hoc', go: PL_GO_LIST }
   ];
 
   var PL_MAX_CARDS = 10;
@@ -317,7 +317,7 @@
         buckets.revision.push({
           title: plStr(t.title) || 'Listing revision',
           account: t.account, itemId: t.item_id,
-          chips: (t.is_72h ? [{ t: '+72 hours', c: 'g' }] : [])
+          chips: (t.is_72h ? [{ t: '+7 days', c: 'g' }] : [])
             .concat([{ t: status === PL_SUBMITTED ? 'Awaiting approval' : status, c: 'b' }])
             .concat(plDueChip(t.deadline_pkt, status)),
           note: t.is_72h ? 'Revision window 1:00 PM – 5:00 PM UK.' : '',
@@ -325,7 +325,7 @@
         });
       });
       hints.listing = 'dummy listing → Item ID · your desk';
-      hints.revision = '+72 hours and ad-hoc · your desk';
+      hints.revision = '+7 days and ad-hoc · your desk';
     } else {
       errs.listing = errs.revision = plErr(listRes);
     }

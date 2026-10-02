@@ -352,7 +352,7 @@
     }
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
-      lsStepCard('Step 2 · +72 hours', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
+      lsStepCard('Step 2 · +7 days', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
       lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
@@ -1035,7 +1035,7 @@
         (lsStr(t.go_live_pkt) ? ' · <span class="num">' + esc(lsWhen(t.go_live_pkt)) + '</span>' : ''));
     }
     if (lsStr(rev.uk)) {
-      rows += lsReceiptRow('72-hour revision', '<span class="num">' + esc(lsStr(rev.uk)) + '</span> (' + esc(lsStr(rev.pkt)) + ') on ' + esc(lsStr(rev.uk_date)));
+      rows += lsReceiptRow('7-day revision', '<span class="num">' + esc(lsStr(rev.uk)) + '</span> (' + esc(lsStr(rev.pkt)) + ') on ' + esc(lsStr(rev.uk_date)));
     }
     if (lsStr(camp.uk)) {
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));

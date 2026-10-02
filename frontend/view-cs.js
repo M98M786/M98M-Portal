@@ -1045,7 +1045,7 @@
         '</div></div>' +
         '<div class="card enter d2" style="margin-top:16px"><div class="hd">The feed ' +
           '<span class="hint" id="csRHint">newest first</span></div>' +
-          '<div class="bd"><div class="cs-tiles" id="csRTiles"></div>' +
+          '<div class="bd"><div class="cs-tiles" id="csRTiles"></div><div id="csRWhy"></div>' +
             '<div id="csRList"><div class="spinner"></div></div></div>' +
         '</div>';
     },
@@ -1121,6 +1121,19 @@
     return map;
   }
 
+  /* 1 Oct (owner): "breakdown of reasons of returns getting opened". */
+  VIEW_CSS.push(
+    '.cs-why{margin:4px 0 14px;padding:12px 14px;border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2)}' +
+    '.cs-why-h{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:8px}' +
+    '.cs-why-row{display:grid;grid-template-columns:minmax(140px,260px) 1fr 36px auto;gap:10px;align-items:center;font-size:12px;font-weight:700;padding:3px 0}' +
+    '.cs-why-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.cs-why-bar{height:8px;border-radius:99px;background:var(--panel);border:1px solid var(--gold-line);overflow:hidden}' +
+    '.cs-why-bar i{display:block;height:100%;background:var(--gold-a);border-radius:99px}' +
+    '.cs-why-p{font-size:11px;color:var(--text-3);white-space:nowrap}' +
+    '.cs-why-types{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}' +
+    '.cs-why-chip{font-size:11px;font-weight:700;border:1px solid var(--gold-line);border-radius:99px;padding:2px 9px;color:var(--text-2)}'
+  );
+
   function csRenderReturns() {
     var list = $('csRList');
     if (!list) { return; }
@@ -1148,6 +1161,28 @@
         csTile(CS_R_H.refund + ' · rows shown', csMoney(money), true);
     }
     csCount('returns', open);
+
+    /* The eBay reason and the case type counted over the rows shown, biggest first, with the
+       refund money each reason carries. */
+    if ($('csRWhy')) {
+      var byReason = {}, byType = {}, rz, ty, tot = shown.length, j;
+      for (j = 0; j < shown.length; j++) {
+        rz = csStr(csVal(shown[j], CS_R_H.reason)) || '(no reason given)';
+        ty = csStr(csVal(shown[j], CS_R_H.type)) || '(no type)';
+        byReason[rz] = byReason[rz] || { n: 0, money: 0 };
+        byReason[rz].n++; byReason[rz].money += csNum(csVal(shown[j], CS_R_H.refund)) || 0;
+        byType[ty] = (byType[ty] || 0) + 1;
+      }
+      var reasons = Object.keys(byReason).sort(function (a, b) { return byReason[b].n - byReason[a].n; });
+      var types = Object.keys(byType).sort(function (a, b) { return byType[b] - byType[a]; });
+      $('csRWhy').innerHTML = tot ? '<div class="cs-why"><div class="cs-why-h">Why returns are opened · ' + tot + ' row' + (tot === 1 ? '' : 's') + ' shown</div>' +
+        reasons.map(function (r) {
+          var pct = Math.round(byReason[r].n / tot * 100);
+          return '<div class="cs-why-row"><span class="cs-why-l" title="' + esc(r) + '">' + esc(r) + '</span><span class="cs-why-bar"><i style="width:' + pct + '%"></i></span>' +
+            '<b>' + byReason[r].n + '</b><span class="cs-why-p">' + pct + '%' + (byReason[r].money ? ' · ' + csMoney(byReason[r].money) : '') + '</span></div>';
+        }).join('') +
+        '<div class="cs-why-types">' + types.map(function (t) { return '<span class="cs-why-chip">' + esc(t) + ' <b>' + byType[t] + '</b></span>'; }).join('') + '</div></div>' : '';
+    }
 
     if (!shown.length) {
       list.innerHTML = '<div class="cs-empty">Nothing in this feed for those filters.' +

@@ -78,7 +78,7 @@
     if (C.decided_today !== undefined) { decidedToday = ldNum(C.decided_today); }
     var autoN = ldNum(C.auto_sold) + ldNum(C.auto_ended);
     var summary = '<div class="ld-summary">' +
-      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + nPend + '</div><div class="s">7 days, no sale</div></div>' +
+      '<div class="ld-st" style="--tone:var(--gold-a)"><div class="l">Awaiting a decision</div><div class="v">' + nPend + '</div><div class="s">7 days no sale · 14-day review</div></div>' +
       '<div class="ld-st" style="--tone:var(--bad)"><div class="l">Oldest waiting</div><div class="v">' + (oldest || '—') + (oldest ? ' days' : '') + '</div><div class="s">every extra day costs fees</div></div>' +
       '<div class="ld-st" style="--tone:#e8a15a"><div class="l">Never advertised</div><div class="v">' + neverAd + '</div><div class="s">try ads before ending</div></div>' +
       '<div class="ld-st" style="--tone:var(--ok,#5fbf7a)"><div class="l">Decided today</div><div class="v">' + decidedToday + '</div><div class="s">end · revise · keep</div></div>' +
@@ -119,6 +119,7 @@
           '<div class="ld-badges">' +
             (dd != null ? '<span class="ld-b age' + (hot ? ' hot' : '') + '">' + dd + ' days live</span>' : '') +
             (ldSold(r) ? '<span class="ld-b sold">' + ldSold(r) + ' sold</span>' : '<span class="ld-b zero">0 sold</span>') +
+            (String(r.kind || '') === 'day14' ? '<span class="ld-b hot" title="no sale in the 7 days since its 7-day revision">14-day review</span>' : '') +
             '<span class="ld-b">£' + ldNum(r.price).toFixed(2) + '</span>' +
             (!ldLive(r) ? '<span class="ld-b gone">no longer live on eBay</span>'
               : (r.stock != null && r.stock !== '' ? '<span class="ld-b">' + ldNum(r.stock) + ' in stock</span>' : '')) +
@@ -128,10 +129,14 @@
             (r.hunter_email ? ' · hunted by ' + esc(String(r.hunter_email).split('@')[0]) : '') +
             (r.lister_email ? ' · listed by ' + esc(String(r.lister_email).split('@')[0]) : '') + '</div></div>';
       if (isPend && LD.canDecide) {
+        /* 1 Oct (owner): the revise job goes to the SAME lister by default, with a deadline Zaid picks. */
+        var pref = String(r.decision_lister || r.lister_email || '');
+        var rowOpts = pref ? selOpts.replace('value="' + esc(pref) + '"', 'value="' + esc(pref) + '" selected') : selOpts;
         h += '<div class="ld-acts">' +
           '<button class="minibtn" data-ld-v="END">End → Team Lead</button>' +
           '<button class="minibtn" data-ld-v="REVISE">Revise →</button>' +
-          '<select class="alx-sel" data-ld-a>' + selOpts + '</select>' +
+          '<select class="alx-sel" data-ld-a>' + rowOpts + '</select>' +
+          '<input class="alx-sel" data-ld-d type="number" min="1" max="14" value="2" title="deadline for the revision, in days" style="width:58px"><span class="ld-meta">days</span>' +
           '<button class="minibtn" data-ld-v="KEEP">Keep</button></div>';
       } else if (!isPend) {
         var bySystem = String(r.decided_by || '') === 'system';
@@ -156,6 +161,8 @@
         var sel = card.querySelector('[data-ld-a]');
         var assignee = sel ? String(sel.value || '') : '';
         if (verdict === 'REVISE' && !assignee) { toast('Pick which lister gets the revise job'); return; }
+        var dl = card.querySelector('[data-ld-d]');
+        var days = dl ? Math.max(1, Math.min(14, Number(dl.value) || 2)) : 2;
         var itemId = card.getAttribute('data-ld');
         var row = null;
         LD.rows.forEach(function (x) { if (String(x.item_id) === itemId) { row = x; } });
@@ -165,7 +172,9 @@
           return api('decisionAct', {
             item_id: itemId, kind: verdict === 'END' ? 'end' : 'revise',
             account: row ? String(row.account || '') : '', title: row ? String(row.title || '') : '',
-            assignee_email: assignee, note: '7 days live with no sale.',
+            assignee_email: assignee, deadline_days: days,
+            reason: row && String(row.kind || '') === 'day14' ? '14-day review: no sale since the 7-day revision' : '7 days live with no sale',
+            note: row && String(row.kind || '') === 'day14' ? '14-day review: no sale since the 7-day revision.' : '7 days live with no sale.',
           }).then(function (r2) {
             toast((verdict === 'END' ? 'End job sent to ' : 'Revision sent to ') + (String(r2 && r2.assigned_to || '').split('@')[0] || 'the team') + '.');
             ldLoad();

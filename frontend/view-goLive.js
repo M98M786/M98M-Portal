@@ -14,6 +14,25 @@
      a listing that did not actually publish is never hidden. (owner, 6 Sept — "it says live but
      comes back on refresh".) A full page reload clears this, by which time the mirror has caught up. */
   var GL_DONE = {};
+  /* 1 Oct (owner): "give option to Zaid to select the campaign … when he is adding the item id and
+     title in the go-live desk, so he can change campaign type on the basis of listing quality."
+     The same list the hunt form offers; the server checks the value. Blank = the hunt's own pick. */
+  var GL_ADV_TYPES = ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
+    '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'];
+  function glHuntAdv(t) {
+    var m = (glS(t.details) + '\n' + glS(t.comments)).match(/(?:CPC Selling Chance|Advertising(?: type)?|Campaign(?: type)?)\s*[:：]\s*([^\n·|(]+)/i);
+    return m ? glS(m[1]) : '';
+  }
+  function glAdvOptions(cur) {
+    var norm = function (v) { return glS(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    var found = false, h = '';
+    GL_ADV_TYPES.forEach(function (v) {
+      var on = !!cur && norm(v) === norm(cur);
+      if (on) { found = true; }
+      h += '<option value="' + esc(v) + '"' + (on ? ' selected' : '') + '>' + esc(glS(v)) + (on ? ' — the hunt’s pick' : '') + '</option>';
+    });
+    return '<option value=""' + (found ? '' : ' selected') + '>' + (cur && !found ? '— keep the hunt’s pick (' + esc(cur) + ')' : '— as the hunt said —') + '</option>' + h;
+  }
 
   VIEW_CSS.push(
     '.gl-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}' +
@@ -53,7 +72,7 @@
           '<button class="minibtn" id="glRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
         '<div class="card enter d2"><div class="hd">Drafts assigned to you ' +
-          '<span class="hint">entering the Item ID fires the campaign, supplier and 72-hour tasks</span></div>' +
+          '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span></div>' +
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
@@ -113,6 +132,8 @@
               '<input class="gl-in mono" inputmode="numeric" placeholder="123456789012" data-gl-item="' + esc(id) + '"></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Final eBay title (saved for ever)</label>' +
               '<input class="gl-in" data-gl-title="' + esc(id) + '" maxlength="160" placeholder="the title exactly as published"></div>' +
+            '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Campaign type · change it on listing quality</label>' +
+              '<select class="gl-in" data-gl-camp="' + esc(id) + '">' + glAdvOptions(glHuntAdv(t)) + '</select></div>' +
             '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800">Note (optional)</label>' +
               '<input class="gl-in" data-gl-note="' + esc(id) + '" placeholder="anything the approver should know"></div>' +
           '</div>' +
@@ -128,16 +149,18 @@
           var inp = box.querySelector('[data-gl-item="' + id.replace(/"/g, '') + '"]');
           var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
           var ttl = box.querySelector('[data-gl-title="' + id.replace(/"/g, '') + '"]');
+          var camp = box.querySelector('[data-gl-camp="' + id.replace(/"/g, '') + '"]');
           var v = inp ? glS(inp.value) : '';
           if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
           var btn = this; btn.disabled = true;
           btn.textContent = 'Live ✓';
-          toast('Live · the campaign, supplier and 72-hour tasks are being created.');
+          toast('Live · the campaign, supplier and 7-day tasks are being created.');
           api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
+            campaign_type: camp ? glS(camp.value) : '',
             note: note ? glS(note.value) : 'Published from the go-live desk.' })
             .then(function (res) {
               GL_DONE[id] = true;   // confirmed live — keep it off the desk even while the mirror lags
-              toast('Live ✓ — campaign, supplier and 72-hour tasks created.');
+              toast('Live ✓ — campaign, supplier and 7-day tasks created.');
               glLoad();
             }).catch(function (e) {
               var msg = String((e && e.message) || '');

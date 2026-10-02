@@ -9,7 +9,9 @@
 
   var SRC_VIEW_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS', 'Order Processor'];
   var SRC_EDIT_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
-  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {} };
+  var SRC = { tab: 'missing', acct: '', q: '', rows: [], sums: null, justSaved: {}, fresh: '' };
+  /* 1 Oct (owner): links now also come from the go-live record and the hunt's own product links. */
+  var SRC_SRC_WORD = { portal: 'saved in the portal', sheet: 'from the central Main Sheet', 'go-live': 'from the go-live record', hunt: 'from the hunt’s product links' };
 
   VIEW_CSS.push(
     '.src-cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px}' +
@@ -22,7 +24,8 @@
     '.src-add:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
     '.src-edit{border:none;background:none;color:var(--text-3);cursor:pointer;font-size:11px;padding:2px}' +
     '.src-input{width:230px;background:var(--panel);border:1px solid var(--gold-line-hi);border-radius:8px;color:var(--text);font:inherit;font-size:11.5px;padding:5px 8px}' +
-    '.src-miss{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}'
+    '.src-miss{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bad-soft,rgba(255,80,80,.12));color:var(--bad)}' +
+    '.src-tag{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);border:1px solid var(--gold-line);border-radius:99px;padding:0 5px}'
   );
 
   function srcStr(v) { return String(v == null ? '' : v).trim(); }
@@ -36,9 +39,11 @@
   function srcSlotCell(r, slot) {
     var eff = srcStr(r['e' + slot]);
     var fromPortal = !!srcStr(r['s' + slot]);
+    var src = srcStr(r['src' + slot]) || (fromPortal ? 'portal' : 'sheet');
     var h = '<span class="src-slot" data-item="' + esc(srcStr(r.item_id)) + '" data-slot="' + slot + '">';
     if (eff) {
-      h += '<a href="' + esc(eff) + '" target="_blank" rel="noopener noreferrer" title="' + esc(eff) + (fromPortal ? ' (saved in the portal)' : ' (from the Main Sheet)') + '">' + esc(srcHost(eff)) + '</a>';
+      h += '<a href="' + esc(eff) + '" target="_blank" rel="noopener noreferrer" title="' + esc(eff) + ' (' + esc(SRC_SRC_WORD[src] || src) + ')">' + esc(srcHost(eff)) + '</a>' +
+        (src === 'go-live' || src === 'hunt' ? '<span class="src-tag" title="' + esc(SRC_SRC_WORD[src]) + '">' + esc(src) + '</span>' : '');
       if (srcCanEdit()) { h += '<button class="src-edit" data-act="edit" title="Replace this link">✎</button>'; }
     } else if (srcCanEdit()) {
       h += '<button class="src-add" data-act="edit">+ add</button>';
@@ -67,7 +72,8 @@
       '<div class="src-card"><div class="l">Active listings</div><div class="v">' + (s.total || 0) + '</div></div>' +
       '<div class="src-card"><div class="l">With supplier links</div><div class="v" style="color:var(--ok)">' + (s.with_links || 0) + '</div></div>' +
       '<div class="src-card"><div class="l">Missing — the task queue</div><div class="v" style="color:' + (s.missing_n ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_n || 0) + '</div></div>' +
-      '<div class="src-card"><div class="l">Missing AND selling / has open orders</div><div class="v" style="color:' + (s.missing_hot ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_hot || 0) + '</div></div></div>';
+      '<div class="src-card"><div class="l">Missing AND selling / has open orders</div><div class="v" style="color:' + (s.missing_hot ? 'var(--bad)' : 'var(--ok)') + '">' + (s.missing_hot || 0) + '</div></div>' +
+      '<div class="src-card"><div class="l">Central sheets last read</div><div class="v" style="font-size:13px">' + esc(fmtPkt(SRC.fresh, true) || '—') + '</div></div></div>';
     if (SRC.tab === 'missing') {
       h += '<p style="font-size:12px;color:var(--text-3);font-weight:600;margin:0 0 10px">Not a single working link on these — top sellers first. Add supplier 1 at least; the 9 AM letter keeps ringing the Order Processors until this list is empty.</p>';
     }
@@ -146,6 +152,7 @@
     box.innerHTML = '<div class="spinner"></div>';
     api('sourcingBoard', {}).then(function (d) {
       SRC.rows = (d && d.rows) || [];
+      SRC.fresh = (d && d.facts_fresh) || '';
       SRC.sums = { total: d.total, with_links: d.with_links, missing_n: d.missing_n, missing_hot: d.missing_hot };
       if (!d.missing_n && SRC.tab === 'missing') { SRC.tab = 'all'; }
       var mt = $('srcTabMiss');
@@ -164,7 +171,7 @@
     prefetch: function () { return api('sourcingBoard', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1><span class="goldtext">Sourcing</span> links</h1>' +
-        '<span class="sub">supplier 1 · 2 · 3 for every ACTIVE listing — the sheet’s links plus everything saved here · the Missing tab is the Order Processors’ task queue</span></div>' +
+        '<span class="sub">supplier 1 · 2 · 3 for every ACTIVE listing — the central Main Sheets’ links (read hourly), the go-live record and the hunt’s own links, plus everything saved here · the Missing tab is the Order Processors’ task queue</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">' +
         '<button class="ob-chip" id="srcTabMiss" data-tab="missing">Missing — task queue <b>…</b></button>' +
