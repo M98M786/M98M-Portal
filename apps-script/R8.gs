@@ -433,7 +433,11 @@ function actionDecisionAct_(payload, ctx) {
   const note = String(payload.note || '').trim().slice(0, 300);
   const account = String(payload.account || '');
   const title = String(payload.title || '');
-  const all = readTab_('TASKS');
+  /* 1 Oct (owner): the 14-day review reuses this desk — the reason and the lister's deadline
+     (days, chosen by Zaid) arrive with the decision; the zero-sale week keeps its old defaults. */
+  const reason = String(payload.reason || '7 days, no sale').trim().slice(0, 80);
+  const dlDays = Math.max(1, Math.min(14, Number(payload.deadline_days) || 2));
+  const all = listingTasksSlim_();
   const sh = tasksSheet_();
   const stamp = now_();
   if (kind === 'end') {
@@ -444,7 +448,7 @@ function actionDecisionAct_(payload, ctx) {
       type: 'end_listing', account: account, item_id: itemId,
       title: 'end_listing — Item ID ' + itemId,
       details: listingLines_(['Item ID: ' + itemId, 'Listing: ' + title,
-        'Management decision: END this listing (7 days, no sale).', note ? 'Note: ' + note : '']),
+        'Management decision: END this listing (' + reason + ').', note ? 'Note: ' + note : '']),
       assigned_by: ctx.ident.email, assigned_to: tl.email,
       priority: 'high', deadline_pkt: taskPktIso_(new Date(Date.now() + 86400000)), stamp: stamp,
     });
@@ -468,12 +472,12 @@ function actionDecisionAct_(payload, ctx) {
       type: 'listing_revision', account: account, item_id: itemId,
       title: 'listing_revision — Item ID ' + itemId,
       details: listingLines_(['Item ID: ' + itemId, 'Listing: ' + title,
-        'Management decision: REVISE (7 days, no sale) — title, image, price or campaign.', note ? 'Changes required: ' + note : '']),
+        'Management decision: REVISE (' + reason + ') — title, image, price or campaign.', note ? 'Changes required: ' + note : '']),
       assigned_by: ctx.ident.email, assigned_to: who.email,
-      priority: 'high', deadline_pkt: taskPktIso_(new Date(Date.now() + 2 * 86400000)), stamp: stamp,
+      priority: 'high', deadline_pkt: taskPktIso_(new Date(Date.now() + dlDays * 86400000)), stamp: stamp,
     });
     notify_(who.email, 'Task assigned', '🟠 Revision · ' + itemId + ' · ' + account +
-      (title ? ' · ' + title.slice(0, 50) : '') + ' — 7 days without a sale. ' + (note || 'Revise title, image, price or campaign.'), 'task:' + taskId);
+      (title ? ' · ' + title.slice(0, 50) : '') + ' — ' + reason + ' · due in ' + dlDays + ' day' + (dlDays === 1 ? '' : 's') + '. ' + (note || 'Revise title, image, price or campaign.'), 'task:' + taskId);
     logActivity_(ctx.ident.email, 'R8_DECISION_REVISE', itemId, '', who.email, note);
     try { engineTaskPush_(taskId); } catch (e) {}   // 3 Sept: the lister sees the revision at once (was invisible — never mirrored)
     return { task_id: taskId, kind: 'revise', assigned_to: who.email };

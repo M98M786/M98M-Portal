@@ -801,6 +801,25 @@ function pvTokens(s) {
     .split(' ').filter((w) => w.length >= 3 && !STOP[w] && !/^\d+$/.test(w)).slice(0, 40);
 }
 
+/* 1 Oct (owner batch): every new column/table of this batch, each statement on its own so an
+   "already exists" never blocks the next. Called lazily by the actions and jobs that need it. */
+let BATCH_SCHEMA_OK = false;
+async function ensureBatchSchema(env) {
+  if (BATCH_SCHEMA_OK) return;
+  const ddl = [
+    "ALTER TABLE orders ADD COLUMN refunded_at TEXT DEFAULT ''",
+    "ALTER TABLE late_marks ADD COLUMN tracked_at TEXT DEFAULT ''",
+    "ALTER TABLE late_marks ADD COLUMN days_to_track REAL",
+    "ALTER TABLE listing_decisions ADD COLUMN kind TEXT DEFAULT 'zero_sale'",
+    "ALTER TABLE listing_decisions ADD COLUMN lister_email TEXT DEFAULT ''",
+    "CREATE TABLE IF NOT EXISTS recheck_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, ref_date TEXT, days INTEGER, account TEXT DEFAULT '', order_id TEXT DEFAULT '', status TEXT DEFAULT '', note TEXT DEFAULT '', by_email TEXT, at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_rcn_ref ON recheck_notes(ref_date, days)",
+    "CREATE TABLE IF NOT EXISTS golive_campaign (item_id TEXT PRIMARY KEY, campaign_type TEXT DEFAULT '', set_by TEXT DEFAULT '', set_at TEXT)",
+  ];
+  for (const d of ddl) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
+  BATCH_SCHEMA_OK = true;
+}
+
 async function policyScan(env) {
   await env.DB.prepare(PV_SCHEMA).run();
   /* one-shot (25 Sept): three Apps Script runs ride the first tick after this deploy — the
@@ -1741,6 +1760,19 @@ async function statusRefresh(env) {
     "SELECT order_id, account, item_id, created_at, datetime('now') FROM orders " +
     "WHERE status IN ('NOT_STARTED', 'IN_PROGRESS') AND created_at <= ?1"
   ).bind(twoBiz).run();
+  /* 1 Oct (owner): "how much time orders are really waiting to receive their trackings" — once a
+     late order finally gets a number, the ledger remembers WHEN (the tracking ledger's first
+     pushed_at) and how many days that was after the order. Item risk reads the buckets. */
+  try {
+    await ensureBatchSchema(env);
+    await env.DB.prepare(
+      "UPDATE late_marks SET tracked_at = (SELECT MIN(t.pushed_at) FROM trackings t WHERE t.order_id = late_marks.order_id AND t.tracking != '') " +
+      "WHERE COALESCE(tracked_at, '') = '' AND EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = late_marks.order_id AND t.tracking != '')"
+    ).run();
+    await env.DB.prepare(
+      "UPDATE late_marks SET days_to_track = ROUND(julianday(tracked_at) - julianday(created_at), 1) WHERE COALESCE(tracked_at, '') != '' AND days_to_track IS NULL"
+    ).run();
+  } catch (e) { /* best-effort ledger enrichment */ }
 }
 
 /** Run one whitelisted Apps Script job server-to-server (the AS /exec walls curl but answers a
@@ -2414,15 +2446,21 @@ async function financeSync(env) {
       if ((d.transactions || []).length < 100) break;
     }
 
+    await ensureBatchSchema(env);
     const feesByOrder = {};
     const refundsByOrder = {};
+    const refundDateByOrder = {};   // 1 Oct: eBay's transaction date — the refund's real day, for the Refunds page
     for (const t of txs) {
       const oid = String(t.orderId || '');
       if (!oid) continue;
       // the money handed back to the buyer — the sheet's own Returns column, per order
       if (String(t.transactionType) === 'REFUND') {
         const amt = Number((t.amount || {}).value || 0);
-        if (amt) refundsByOrder[oid] = round2((refundsByOrder[oid] || 0) + amt);
+        if (amt) {
+          refundsByOrder[oid] = round2((refundsByOrder[oid] || 0) + amt);
+          const td = String(t.transactionDate || '');
+          if (td && (!refundDateByOrder[oid] || td > refundDateByOrder[oid])) refundDateByOrder[oid] = td;
+        }
       }
       const fee = Number((t.totalFeeAmount || {}).value || 0);
       if (!fee) continue;
@@ -2443,7 +2481,7 @@ async function financeSync(env) {
     for (let i = 0; i < ids.length; i += 90) {
       const chunk = ids.slice(i, i + 90);
       const rs = await env.DB.prepare(
-        'SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, o.refunded, o.created_at, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id ' +
+        "SELECT o.order_id, o.sold, o.qty, o.item_id, o.ebay_fees, o.refunded, COALESCE(o.refunded_at, '') AS refunded_at, o.created_at, f.oe FROM orders o LEFT JOIN items_facts f ON f.item_id = o.item_id " +
         'WHERE o.order_id IN (' + chunk.map(() => '?').join(',') + ')'
       ).bind(...chunk).all();
       for (const row of (rs.results || [])) rows[row.order_id] = row;
@@ -2459,8 +2497,10 @@ async function financeSync(env) {
       const refund = refundsByOrder[oid] || 0;
       const feeSame = Math.abs(Number(row.ebay_fees) - fee) < 0.005;
       const refSame = Math.abs(Number(row.refunded || 0) - refund) < 0.005;
-      if (feeSame && refSame) continue;                                // unchanged → no write
-      stmts.push(env.DB.prepare('UPDATE orders SET ebay_fees = ?2, refunded = ?3 WHERE order_id = ?1').bind(oid, fee, refund));
+      const rDate = refund ? String(refundDateByOrder[oid] || '') : '';
+      const dateSame = !rDate || String(row.refunded_at || '') === rDate;
+      if (feeSame && refSame && dateSame) continue;                    // unchanged → no write
+      stmts.push(env.DB.prepare("UPDATE orders SET ebay_fees = ?2, refunded = ?3, refunded_at = CASE WHEN ?4 != '' THEN ?4 ELSE refunded_at END WHERE order_id = ?1").bind(oid, fee, refund, rDate));
       // drift is judged only on single-unit orders — multi-line orders mix items and the
       // per-unit OE of the first line would cry wolf
       const expected = round2((Number(row.sold) || 0) - (Number(row.oe) || 0));
@@ -3092,7 +3132,7 @@ async function ladderWatch(env) {
       "INSERT OR IGNORE INTO listing_ladder (item_id, account, title, lister_email, go_live_at, r72_at, r10_at, r20_at, created_at, updated_at) " +
       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))"
     ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
-      go, ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
+      go, ladderPlus(t, 7), ladderPlus(t, 14), ladderPlus(t, 14)).run();
   }
   /* MIGRATION (owner, 10 Sept: "send all the current 72 hours revision to zain"): items whose
      72-hour revision TASK is still open on the boards predate the ladder — seed them too, with
@@ -3111,7 +3151,7 @@ async function ladderWatch(env) {
       "INSERT OR IGNORE INTO listing_ladder (item_id, account, title, lister_email, go_live_at, r72_at, r10_at, r20_at, created_at, updated_at) " +
       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))"
     ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
-      ladderUtc(t), ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
+      ladderUtc(t), ladderPlus(t, 7), ladderPlus(t, 14), ladderPlus(t, 14)).run();
   }
   /* orders fast-path: retry day-tab writes the bridge missed, and keep the per-listing ali-link
      memory fed from order history (both cheap, both idempotent). */
@@ -3161,7 +3201,7 @@ async function ladderWatch(env) {
     if (go === String(r.go_live_at)) continue;
     await env.DB.prepare(
       "UPDATE listing_ladder SET go_live_at = ?2, r72_at = ?3, r10_at = ?4, r20_at = ?5, updated_at = datetime('now') WHERE item_id = ?1 AND r72_status IN ('', 'QUEUED')"
-    ).bind(r.item_id, go, ladderPlus(t, 3), ladderPlus(t, 10), ladderPlus(t, 20)).run();
+    ).bind(r.item_id, go, ladderPlus(t, 7), ladderPlus(t, 14), ladderPlus(t, 14)).run();
   }
   const nowU = ladderUtc(new Date());
   /* 72h due → Zain's queue. "after exact 72 hours the portal will show there all the listings". */
@@ -3169,33 +3209,41 @@ async function ladderWatch(env) {
     "SELECT item_id, title FROM listing_ladder WHERE r72_status = '' AND r72_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
   for (const r of (d72.results || [])) {
     await env.DB.prepare("UPDATE listing_ladder SET r72_status = 'QUEUED', updated_at = datetime('now') WHERE item_id = ?1 AND r72_status = ''").bind(r.item_id).run();
-    await notifyRole(env, 'Advertising Manager', '72-hour revision',
-      '🟣 72 hours are up · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — it is on your 72-hours Revision page: decide, add keywords, pick the tier.', 'ladder:r72:' + r.item_id);
+    await notifyRole(env, 'Advertising Manager', '7-day revision',
+      '🟣 7 days are up · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — it is on your 7-day Revision page: decide, add keywords, pick the tier.', 'ladder:r72:' + r.item_id);
   }
   /* 10-day: fewer than 5 sales since go-live → the 20-days Revision page. */
   const d10 = await env.DB.prepare(
     "SELECT item_id, title, go_live_at FROM listing_ladder WHERE r10_status = '' AND r10_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+  /* 1 Oct (owner): the 10-day rung is RETIRED — the ladder is 7 days, then 14. Rows reaching it
+     close silently so nothing queues or rings. */
   for (const r of (d10.results || [])) {
-    const n = await ladderSales(env, r.item_id, r.go_live_at, '');
-    const st = n >= 5 ? 'SALES_OK' : 'QUEUED';
-    await env.DB.prepare("UPDATE listing_ladder SET r10_status = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND r10_status = ''").bind(r.item_id, st).run();
-    if (st === 'QUEUED') await notifyRole(env, 'Advertising Manager', '10-day revision',
-      '🟠 10 days, ' + n + ' sale(s) · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — on the 20-days Revision page.', 'ladder:r10:' + r.item_id);
+    await env.DB.prepare("UPDATE listing_ladder SET r10_status = 'RETIRED', updated_at = datetime('now') WHERE item_id = ?1 AND r10_status = ''").bind(r.item_id).run();
   }
   /* 20-day: fewer than 5 sales in the SECOND 10-day window → revision again + Zaid's final desk. */
+  /* 1 Oct (owner): the 14-day review. "Give option of every listing to management to decide on
+     the item if the item has not given any sales in previous days — send the 14-day revision
+     decision to Zaid: either revise (the task goes to the same item lister, he selects the
+     deadline) or create a task for Husnain to end the item." No sale in the 7 days since the
+     7-day revision → the item lands on the Listing decisions board, kind day14, with the lister
+     remembered so the revise path lands on them. */
+  await ensureBatchSchema(env);
   const d20 = await env.DB.prepare(
-    "SELECT item_id, title, r10_at, video_status FROM listing_ladder WHERE r20_status = '' AND r20_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
+    "SELECT l.item_id, l.title, l.account, l.lister_email, l.go_live_at, l.r72_at, COALESCE(i.price, 0) AS price FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id " +
+    "WHERE l.r20_status = '' AND l.r20_at <= ?1 LIMIT 40").bind(nowU).all().catch(() => ({ results: [] }));
   for (const r of (d20.results || [])) {
-    const n = await ladderSales(env, r.item_id, r.r10_at, '');
-    /* Owner (10 Sept): day-20 only for items that GOT A VIDEO at the 10-day stage — no video,
-       no third revision; the row closes as SKIPPED_NOVIDEO instead of queueing. */
-    const st = n >= 5 ? 'SALES_OK' : (String(r.video_status) === 'DONE' ? 'QUEUED' : 'SKIPPED_NOVIDEO');
+    const since = String(r.r72_at || r.go_live_at || '');
+    const n = await ladderSales(env, r.item_id, since, '');
+    const st = n > 0 ? 'SALES_OK' : 'QUEUED';
     await env.DB.prepare("UPDATE listing_ladder SET r20_status = ?2, updated_at = datetime('now') WHERE item_id = ?1 AND r20_status = ''").bind(r.item_id, st).run();
     if (st === 'QUEUED') {
-      await notifyRole(env, 'Advertising Manager', '20-day revision',
-        '🔴 20 days, still under 5 sales in the last window · item ' + r.item_id + ' — on the 20-days Revision page AND with Management for the final call.', 'ladder:r20:' + r.item_id);
-      await queueNotify(env, 'management', 'Listing final decision',
-        '🔴 Item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" finished 20 days under target — it is on the Listing decisions page with its full history.', 'ladder:final:' + r.item_id);
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO listing_decisions (item_id, account, title, price, born, clock, flagged_at, status, decided_by, decided_at, assignee, note, kind, lister_email) " +
+        "VALUES (?1, ?2, ?3, ?4, ?5, 'ladder', datetime('now'), 'PENDING', '', '', '', ?6, 'day14', ?7)"
+      ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), Number(r.price) || 0, String(r.go_live_at || ''),
+        '14-day review: no sale in the 7 days since the 7-day revision — revise (back to its lister, with a deadline) or end it.', String(r.lister_email || '')).run();
+      await queueNotify(env, 'management', '14-day listing decision',
+        '🔴 14-day review · item ' + r.item_id + ' · "' + String(r.title || '').slice(0, 60) + '" — no sale since its 7-day revision. Decide on the Listing decisions page: revise (back to ' + (String(r.lister_email || '').split('@')[0] || 'its lister') + ', pick the deadline) or end it (task to the Team Lead).', 'ladder:final:' + r.item_id);
     }
   }
 }
@@ -12096,9 +12144,10 @@ const ROUTES = {
      Team Lead see everything; a listing manager sees only revise jobs assigned to them. */
   zeroSaleList: {
     auth: 'any', fn: async (p, ctx) => {
+      await ensureBatchSchema(ctx.env);
       const mgmt = ['Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) >= 0 || ctx.user.super;
       const rs = await ctx.env.DB.prepare(
-        'SELECT d.item_id, d.account, d.title, d.price, d.born, d.clock, d.flagged_at, d.status, d.decided_by, d.decided_at, d.assignee, d.note, ' +
+        "SELECT d.item_id, d.account, d.title, d.price, d.born, d.clock, d.flagged_at, d.status, d.decided_by, d.decided_at, d.assignee, d.note, COALESCE(d.kind, 'zero_sale') AS kind, COALESCE(d.lister_email, '') AS decision_lister, " +
         'p.hunter_email, p.lister_email, ia.qty AS stock, ia.image, ia.sold_qty, ia.start_time, ' +
         'ia.status AS live_status, ' +
         '(SELECT COUNT(*) FROM orders o WHERE o.item_id = d.item_id) AS orders_n, ' +
@@ -12151,7 +12200,8 @@ const ROUTES = {
       const assignee = String(p.assignee || ''), note = String(p.note || '').slice(0, 300);
       if (['END', 'REVISE', 'KEEP'].indexOf(verdict) < 0) throw new Error('SAY: the decision is END, REVISE or KEEP');
       if (verdict === 'REVISE' && !assignee) throw new Error('SAY: pick which listing manager gets the revise job');
-      const row = await ctx.env.DB.prepare("SELECT item_id, account, title, status FROM listing_decisions WHERE item_id = ?1").bind(item).first();
+      await ensureBatchSchema(ctx.env);
+      const row = await ctx.env.DB.prepare("SELECT item_id, account, title, status, COALESCE(kind, 'zero_sale') AS kind FROM listing_decisions WHERE item_id = ?1").bind(item).first();
       if (!row) throw new Error('SAY: that listing is not in the queue');
       if (row.status !== 'PENDING') throw new Error('SAY: already decided (' + row.status + ') — refresh the board');
       /* The UPDATE itself is the referee: two managers deciding at once both pass the SELECT
@@ -12163,11 +12213,11 @@ const ROUTES = {
       const label = String(row.title || item).slice(0, 70);
       if (verdict === 'END') {
         await notifyRole(ctx.env, 'Team Lead', 'End this listing',
-          'Management decided: END ' + label + ' (' + item + ', ' + row.account + ') — zero sales in its first week.' + (note ? ' Note: ' + note : ''),
+          'Management decided: END ' + label + ' (' + item + ', ' + row.account + ') — ' + (String(row.kind) === 'day14' ? 'no sale since its 7-day revision (14-day review).' : 'zero sales in its first week.') + (note ? ' Note: ' + note : ''),
           'engine:zerosale:end:' + item);
       } else if (verdict === 'REVISE') {
         await queueNotify(ctx.env, assignee, 'Revise this listing',
-          'Management decided: REVISE ' + label + ' (' + item + ', ' + row.account + ') — zero sales in its first week. Improve title, photos, price or specifics.' + (note ? ' Note: ' + note : ''),
+          'Management decided: REVISE ' + label + ' (' + item + ', ' + row.account + ') — ' + (String(row.kind) === 'day14' ? 'no sale since its 7-day revision (14-day review).' : 'zero sales in its first week.') + ' Improve title, photos, price or specifics.' + (note ? ' Note: ' + note : ''),
           'engine:zerosale:revise:' + item);
       }
       await flushNotifyQueue(ctx.env);
@@ -12922,13 +12972,227 @@ const ROUTES = {
       const returns = fold(retRows, r => String(r.opened_at || '').slice(0, 10), true);
       const inr = fold(inrRows, r => String(r.opened_at || '').slice(0, 10), true);
       const late = fold(lateRows, r => String(r.marked_at || '').slice(0, 10), false);
-      return { today, returns, inr, late,
+      /* 1 Oct (owner): "update late tracking with different time frames — 2, 3, 4, 5 days — in
+         which time tracking is being uploaded for that item, and how much time orders are really
+         waiting." Every order of the last 30 days, bucketed by the days from the order to its
+         FIRST tracking number (the tracking ledger's pushed_at); untracked = still waiting. */
+      let track_speed = [];
+      try {
+        const spdRows = (await ctx.env.DB.prepare(
+          "SELECT o.item_id, o.account, i.title, o.created_at, o.status, " +
+          "(SELECT MIN(t.pushed_at) FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') AS tracked_at " +
+          "FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id " +
+          "WHERE o.created_at >= datetime('now', '-30 day') AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?1' : '') + ' LIMIT 9000'
+        ).bind(...(acctF ? [acctF] : [])).all()).results || [];
+        const spd = {};
+        let spdTotal = 0;
+        for (const r of spdRows) {
+          const key = String(r.title || '').trim() || String(r.item_id || '?');
+          const g = (spd[key] = spd[key] || { key, title: String(r.title || '').trim(), items: {}, accounts: {}, n: 0, b2: 0, b3: 0, b4: 0, b5: 0, b6: 0, untracked: 0, waiting_days: 0, sumDays: 0, tracked_n: 0 });
+          g.n++; spdTotal++;
+          if (r.item_id) g.items[r.item_id] = 1;
+          if (r.account) g.accounts[r.account] = (g.accounts[r.account] || 0) + 1;
+          const c0 = Date.parse(String(r.created_at || '').replace(' ', 'T'));
+          const t0 = r.tracked_at ? Date.parse(String(r.tracked_at).replace(' ', 'T')) : NaN;
+          if (!isFinite(t0)) {
+            g.untracked++;
+            if (isFinite(c0)) g.waiting_days += Math.max(0, (Date.now() - c0) / 86400000);
+            continue;
+          }
+          const d = isFinite(c0) ? Math.max(0, (t0 - c0) / 86400000) : 0;
+          g.tracked_n++; g.sumDays += d;
+          if (d <= 2) g.b2++; else if (d <= 3) g.b3++; else if (d <= 4) g.b4++; else if (d <= 5) g.b5++; else g.b6++;
+        }
+        track_speed = Object.values(spd).map((g) => ({ key: g.key, title: g.title, item_ids: Object.keys(g.items), accounts: g.accounts,
+          all: g.n, within2: g.b2, d3: g.b3, d4: g.b4, d5: g.b5, over5: g.b6, untracked: g.untracked,
+          avg_days: g.tracked_n ? Math.round(g.sumDays / g.tracked_n * 10) / 10 : null,
+          waiting_avg_days: g.untracked ? Math.round(g.waiting_days / g.untracked * 10) / 10 : null,
+          late_n: g.n - g.b2, late_share: g.n ? Math.round((g.n - g.b2) / g.n * 100) : 0,
+          pct: spdTotal ? Math.round(g.n / spdTotal * 1000) / 10 : 0 }))
+          .sort((a, b) => (b.late_n - a.late_n) || (b.all - a.all)).slice(0, 150);
+      } catch (e) { track_speed = []; }
+      return { today, returns, inr, late, track_speed, track_windows: [2, 3, 4, 5],
         alerts: {
           returns5: returns.filter(x => x.all > 5),
           inr5: inr.filter(x => x.all > 5),
           late10: late.filter(x => x.all > 10),
         },
         note: 'products folded across accounts by TITLE (a duplicated listing carries a different id per shop) · late-tracking marks accumulate from 21 Aug — an order that crosses 2 business days untracked is marked forever, even after it finally ships' };
+    },
+  },
+
+  /* 1 Oct (owner): Husnain's entry against a specific delivery check — status + note, per
+     checkpoint day, optionally per account/order. The checkpoint card lists them back. */
+  recheckNoteSave: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureBatchSchema(ctx.env);
+      const refDate = String(p.ref_date || '').slice(0, 10), days = Math.round(Number(p.days) || 0);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(refDate) || !days) throw new Error('SAY: which checkpoint is this for?');
+      const status = String(p.status || '').trim().slice(0, 40), note = String(p.note || '').trim().slice(0, 600);
+      if (!status && !note) throw new Error('SAY: pick a status or write what you found');
+      await ctx.env.DB.prepare(
+        "INSERT INTO recheck_notes (ref_date, days, account, order_id, status, note, by_email, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))"
+      ).bind(refDate, days, String(p.account || '').slice(0, 40), String(p.order_id || '').slice(0, 40), status, note, ctx.user.email).run();
+      return { ok: true };
+    },
+  },
+  recheckNoteList: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'CS'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureBatchSchema(ctx.env);
+      const daysBack = Math.max(1, Math.min(60, Number(p.days_back) || 14));
+      const rs = await ctx.env.DB.prepare("SELECT ref_date, days, account, order_id, status, note, by_email, at FROM recheck_notes WHERE at >= datetime('now', '-' || ?1 || ' day') ORDER BY at DESC LIMIT 600").bind(String(daysBack)).all();
+      return { notes: rs.results || [] };
+    },
+  },
+
+  /* 1 Oct (owner): "proper tracking of refunded amount, date to date, account to account …
+     compare it with previous month, history of every refund". Amounts are eBay's own Finances
+     feed (what was really handed back); the date is eBay's transaction date where the sync has
+     seen it, else the order date (marked approximate). */
+  refundsBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['CS', 'Management', 'Ops Head', 'Team Lead', 'Order Processor', 'Sales Operations'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      await ensureBatchSchema(ctx.env);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(p.to || '')) ? String(p.to) : ukDate('');
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(p.from || '')) ? String(p.from) : ukDate(new Date(Date.parse(to + 'T12:00:00Z') - 29 * 86400000).toISOString());
+      const acct = String(p.account || '');
+      const dateExpr = "substr(COALESCE(NULLIF(o.refunded_at, ''), o.created_at), 1, 10)";
+      const rows = (await ctx.env.DB.prepare(
+        'SELECT o.order_id, o.account, o.item_id, o.buyer, o.sold, o.refunded, o.created_at, COALESCE(o.refunded_at, \'\') AS refunded_at, i.title ' +
+        'FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id WHERE o.refunded > 0 AND ' + dateExpr + ' >= ?1 AND ' + dateExpr + ' <= ?2' +
+        (acct ? ' AND o.account = ?3' : '') + ' ORDER BY ' + dateExpr + ' DESC, o.refunded DESC LIMIT 2500'
+      ).bind(...[from, to].concat(acct ? [acct] : [])).all()).results || [];
+      const byDay = {}, byAcct = {};
+      let total = 0, exact = 0;
+      for (const r of rows) {
+        const d = String(r.refunded_at || '').slice(0, 10) || String(r.created_at || '').slice(0, 10);
+        const amt = Number(r.refunded) || 0;
+        total += amt; if (r.refunded_at) exact++;
+        byDay[d] = Math.round(((byDay[d] || 0) + amt) * 100) / 100;
+        const a = (byAcct[r.account] = byAcct[r.account] || { account: r.account, refunds: 0, amount: 0, sold: 0 });
+        a.refunds++; a.amount = Math.round((a.amount + amt) * 100) / 100; a.sold = Math.round((a.sold + (Number(r.sold) || 0)) * 100) / 100;
+      }
+      const monthSum = async (ym) => {
+        const r = await ctx.env.DB.prepare(
+          "SELECT COUNT(*) AS n, ROUND(SUM(refunded), 2) AS amt FROM orders o WHERE refunded > 0 AND substr(COALESCE(NULLIF(refunded_at, ''), created_at), 1, 7) = ?1" + (acct ? ' AND account = ?2' : '')
+        ).bind(...[ym].concat(acct ? [acct] : [])).first();
+        return { n: Number(r && r.n) || 0, amount: Number(r && r.amt) || 0 };
+      };
+      const thisYm = ukDate('').slice(0, 7);
+      const pd = new Date(thisYm + '-01T12:00:00Z'); pd.setUTCMonth(pd.getUTCMonth() - 1);
+      const prevYm = pd.toISOString().slice(0, 7);
+      const piiOk = ['CS', 'Order Processor', 'Management', 'Ops Head'].indexOf(ctx.user.role) >= 0 || !!ctx.user.super;
+      const history = rows.map((r) => ({ order_id: r.order_id, account: r.account, item_id: r.item_id, title: r.title || '',
+        buyer: piiOk ? (r.buyer || '') : '', sold: Number(r.sold) || 0, refunded: Number(r.refunded) || 0,
+        date: String(r.refunded_at || '').slice(0, 10) || String(r.created_at || '').slice(0, 10), exact_date: !!r.refunded_at,
+        ordered: String(r.created_at || '').slice(0, 10) }));
+      return { from, to, account: acct, total: Math.round(total * 100) / 100, count: rows.length, exact_dates: exact,
+        by_day: byDay, by_account: Object.values(byAcct).sort((a, b) => b.amount - a.amount),
+        this_month: Object.assign({ ym: thisYm }, await monthSum(thisYm)), prev_month: Object.assign({ ym: prevYm }, await monthSum(prevYm)),
+        history,
+        note: "Amounts are eBay's own Finances feed — what was actually paid back. A refund's date is eBay's transaction date where the sync saw it; refunds before this feature carry the order date and are marked approximate. The Refunds desk (apply → approve → process) is the request trail; this page is the money." };
+    },
+  },
+
+  /* 1 Oct (owner): Product profitability — "the profit of every item working in the system,
+     current profit, is it in a sale event, profit after the sale event, which prices need to be
+     revised … along with the margin show the avg CPC cost per order of the last 7 days, the
+     advertising status and the campaign." Profit = revenue − AliExpress cost − eBay fees −
+     refunds − ads (orders + ads_daily, the itemPnl law). Benchmarks are the price-revision rules. */
+  profitBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const ok = ITEM_PROFIT_ROLES.indexOf(ctx.user.role) >= 0 || PROFIT_ROLES.indexOf(ctx.user.role) >= 0 || ctx.user.role === 'Pricing' || !!ctx.user.super;
+      if (!ok) throw new AuthError('auth');
+      await ensureBatchSchema(ctx.env);
+      const acct = String(p.account || '');
+      const today = ukDate('');
+      const d7 = ukDate(new Date(Date.now() - 6 * 86400000).toISOString()), d30 = ukDate(new Date(Date.now() - 29 * 86400000).toISOString());
+      const n = (v) => Number(v) || 0;
+      const items = (await ctx.env.DB.prepare(
+        "SELECT i.item_id, i.account, i.title, i.price, i.sold_30d, COALESCE(f.ali_cost, 0) AS ali_cost, COALESCE(f.oe, 0) AS oe, COALESCE(f.margin, 0) AS f_margin, " +
+        "COALESCE(f.campaign_type, '') AS f_campaign_type, a.margin_before_ads, a.breakeven_roas " +
+        'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN adtool_listings a ON a.item_id = i.item_id ' +
+        "WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '')
+      ).bind(...(acct ? [acct] : [])).all()).results || [];
+      const agg = async (from) => {
+        const rs = await ctx.env.DB.prepare(
+          'SELECT item_id, COUNT(*) AS orders_n, SUM(qty) AS units, SUM(sold) AS revenue, SUM(cost) AS cost, SUM(CASE WHEN cost > 0 THEN 1 ELSE 0 END) AS cost_n, ' +
+          'SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END) AS fees, SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END) AS refunded ' +
+          "FROM orders WHERE status NOT IN ('NOT_FOUND', 'CANCELLED') AND date(created_at) >= ?1" + (acct ? ' AND account = ?2' : '') + ' GROUP BY item_id'
+        ).bind(...[from].concat(acct ? [acct] : [])).all();
+        const m = {}; for (const r of (rs.results || [])) m[r.item_id] = r; return m;
+      };
+      const ads = async (from) => {
+        const rs = await ctx.env.DB.prepare(
+          'SELECT item_id, SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) AS clicks, SUM(cpc_clicks) AS cpc_clicks, SUM(sales) AS gen_sales, SUM(cpc_sales) AS cpc_sales ' +
+          'FROM ads_daily WHERE date >= ?1' + (acct ? ' AND account = ?2' : '') + ' GROUP BY item_id'
+        ).bind(...[from].concat(acct ? [acct] : [])).all();
+        const m = {}; for (const r of (rs.results || [])) m[r.item_id] = r; return m;
+      };
+      const o7 = await agg(d7), o30 = await agg(d30), a7 = await ads(d7), a30 = await ads(d30);
+      const camp = {};
+      const cr = await ctx.env.DB.prepare(
+        'SELECT ca.listing_id, c.name, c.status, c.funding_model, ca.ad_status, ca.bid_pct FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id' + (acct ? ' WHERE ca.account = ?1' : '')
+      ).bind(...(acct ? [acct] : [])).all().catch(() => ({ results: [] }));
+      for (const r of (cr.results || [])) {
+        const isCpc = /CLICK|CPC/i.test(String(r.funding_model || '') + ' ' + String(r.name || ''));
+        const cur = camp[r.listing_id];
+        if (!cur || (isCpc && !cur.is_cpc) || (/RUNNING/i.test(String(r.status || '')) && !/RUNNING/i.test(String(cur.status || '')))) {
+          camp[r.listing_id] = { name: r.name, status: r.status, funding: r.funding_model, ad_status: r.ad_status, bid_pct: r.bid_pct, is_cpc: isCpc };
+        }
+      }
+      const promo = {};
+      const pr = await ctx.env.DB.prepare(
+        "SELECT pm.item_id, p.name, p.type, p.discount, p.end_at FROM promo_members pm JOIN promotions p ON p.account = pm.account AND p.promo_id = pm.promo_id WHERE p.status LIKE '%RUNNING%'" + (acct ? ' AND pm.account = ?1' : '')
+      ).bind(...(acct ? [acct] : [])).all().catch(() => ({ results: [] }));
+      for (const r of (pr.results || [])) {
+        const m = String(r.discount || '').match(/(\d+(?:\.\d+)?)\s*%/);
+        const pct = m ? Number(m[1]) : 0;
+        const cur = promo[r.item_id];
+        if (!cur || pct > cur.pct) promo[r.item_id] = { name: r.name, type: r.type, discount: r.discount, pct, end_at: r.end_at };
+      }
+      const rises = {};
+      const wr = await ctx.env.DB.prepare("SELECT item_id, old_cost, new_cost, margin_after FROM price_watch WHERE COALESCE(acked_at, '') = ''").all().catch(() => ({ results: [] }));
+      for (const r of (wr.results || [])) rises[r.item_id] = r;
+      const BENCH = { min_profit_per_unit: 1.0, max_cpc_per_unit: 2.10, ads_share_cut: 0.70, sale_floor: 1.0 };
+      const rows = items.map((it) => {
+        const s7 = o7[it.item_id] || {}, s30 = o30[it.item_id] || {}, ad7 = a7[it.item_id] || {}, ad30 = a30[it.item_id] || {};
+        const prof = (sx, ax) => n(sx.revenue) - n(sx.cost) - n(sx.fees) - n(sx.refunded) - n(ax.gen) - n(ax.cpc);
+        const units7 = n(s7.units), units30 = n(s30.units);
+        const p7 = prof(s7, ad7), p30 = prof(s30, ad30);
+        const marginNow = (it.margin_before_ads !== null && it.margin_before_ads !== undefined) ? n(it.margin_before_ads)
+          : (n(it.f_margin) ? n(it.f_margin) : ((n(it.oe) && n(it.ali_cost)) ? Math.round((n(it.oe) - n(it.ali_cost)) * 100) / 100 : null));
+        const sale = promo[it.item_id] || null;
+        const afterSale = (marginNow !== null && sale) ? Math.round((marginNow - n(it.price) * sale.pct / 100) * 100) / 100 : marginNow;
+        const adSpend7 = n(ad7.cpc) + n(ad7.gen);
+        const cpcPerUnit7 = units7 ? Math.round(n(ad7.cpc) / units7 * 100) / 100 : null;
+        const adsPerUnit7 = units7 ? Math.round(adSpend7 / units7 * 100) / 100 : null;
+        const pu7 = units7 ? Math.round(p7 / units7 * 100) / 100 : null;
+        const c = camp[it.item_id] || null;
+        const flags = [];
+        if (pu7 !== null && units7 >= 2 && pu7 < BENCH.min_profit_per_unit) flags.push('profit per unit under £1 (7 days)');
+        if (cpcPerUnit7 !== null && cpcPerUnit7 > BENCH.max_cpc_per_unit) flags.push('CPC per unit over £2.10 (7 days)');
+        if (sale && afterSale !== null && afterSale < BENCH.sale_floor) flags.push('under £1 after the sale event');
+        if (units7 && adSpend7 > 0 && p7 < 0) flags.push('loss after advertising (7 days) — stop the ads');
+        else if (marginNow && adsPerUnit7 !== null && adsPerUnit7 >= marginNow * BENCH.ads_share_cut) flags.push('ads take 70%+ of the margin — cut the bid');
+        if (rises[it.item_id]) flags.push('supplier cost rose +' + Math.round((n(rises[it.item_id].new_cost) - n(rises[it.item_id].old_cost)) * 100) + 'p');
+        return { item_id: it.item_id, account: it.account, title: it.title, price: n(it.price), ali_cost: n(it.ali_cost),
+          margin_now: marginNow, sale, margin_after_sale: afterSale,
+          orders_7d: n(s7.orders_n), units_7d: units7, revenue_7d: Math.round(n(s7.revenue) * 100) / 100, profit_7d: Math.round(p7 * 100) / 100,
+          profit_per_unit_7d: pu7, cost_pending_7d: n(s7.orders_n) - n(s7.cost_n),
+          orders_30d: n(s30.orders_n), units_30d: units30, profit_30d: Math.round(p30 * 100) / 100, profit_per_unit_30d: units30 ? Math.round(p30 / units30 * 100) / 100 : null,
+          ads_7d: Math.round(adSpend7 * 100) / 100, cpc_7d: Math.round(n(ad7.cpc) * 100) / 100, cpc_per_unit_7d: cpcPerUnit7, ads_per_unit_7d: adsPerUnit7,
+          clicks_7d: n(ad7.clicks) + n(ad7.cpc_clicks), ads_30d: Math.round((n(ad30.cpc) + n(ad30.gen)) * 100) / 100,
+          campaign: c, cost_rise: rises[it.item_id] || null, flags, revise: flags.length > 0 };
+      });
+      rows.sort((a, b) => (b.flags.length - a.flags.length) || ((a.profit_per_unit_7d === null ? 99 : a.profit_per_unit_7d) - (b.profit_per_unit_7d === null ? 99 : b.profit_per_unit_7d)) || (b.units_7d - a.units_7d));
+      const counts = { items: rows.length, revise: rows.filter((r) => r.revise).length, in_sale: rows.filter((r) => r.sale).length,
+        selling_7d: rows.filter((r) => r.units_7d > 0).length, loss_7d: rows.filter((r) => r.units_7d > 0 && r.profit_7d < 0).length,
+        cost_rises: Object.keys(rises).length, cpc_items: rows.filter((r) => r.campaign && r.campaign.is_cpc).length };
+      return { rows, counts, benchmarks: BENCH, windows: { d7, d30, today },
+        note: "Profit = revenue − AliExpress cost − eBay fees − refunds − ads, from the orders and ads ledgers (the itemPnl law). Margin now = the Advertising Tool's margin before ads, else the Main Sheet's Order Earning − Ali cost. After-sale = margin − price × the running sale %. Benchmarks are the price-revision rules: profit under £1 a unit or CPC over £2.10 a unit → revise; a loss after ads → stop them; ads at 70% of the margin → cut the bid." };
     },
   },
 
@@ -13099,7 +13363,7 @@ const ROUTES = {
         const q20 = await ctx.env.DB.prepare(base + "WHERE l.r20_status = 'QUEUED' ORDER BY l.r20_at ASC LIMIT 120").all();
         const out10 = [], out20 = [];
         for (const r of (q10.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.go_live_at, ''); out10.push(r); }
-        for (const r of (q20.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.r10_at, ''); out20.push(r); }
+        for (const r of (q20.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.r72_at || r.go_live_at, ''); out20.push(r); }
         const done = await ctx.env.DB.prepare(
           "SELECT d.*, l.title FROM ladder_decisions d LEFT JOIN listing_ladder l ON l.item_id = d.item_id WHERE d.stage IN ('R10','R20') ORDER BY d.decided_at DESC LIMIT 30").all();
         return { canDecide, day10: out10, day20: out20, recent: done.results || [] };
@@ -14212,6 +14476,14 @@ const ROUTES = {
       }
       const id = String(p.item_id || '').replace(/\D/g, '');
       if (!/^\d{9,15}$/.test(id)) throw new Error('SAY: item id looks wrong');
+      /* 1 Oct (owner): the campaign type Zaid chose at go-live, kept per item for the advertising desk. */
+      if (String(p.campaign_type || '').trim()) {
+        try {
+          await ensureBatchSchema(ctx.env);
+          await ctx.env.DB.prepare("INSERT INTO golive_campaign (item_id, campaign_type, set_by, set_at) VALUES (?1, ?2, ?3, datetime('now')) ON CONFLICT(item_id) DO UPDATE SET campaign_type = ?2, set_by = ?3, set_at = datetime('now')")
+            .bind(id, String(p.campaign_type).slice(0, 60), String(p.by || '').slice(0, 120)).run();
+        } catch (e) {}
+      }
       /* 23 Sept: the caller reads this link out of a task field that holds prose, not JSON, so it
          has always arrived empty — every go-live row stored '' and first orders inherited nothing.
          The hunt record has it; take it from there rather than trusting the caller. */
@@ -16449,6 +16721,37 @@ const ROUTES = {
         if (card) { for (const k of Object.keys(card)) { if (k === 'targeted_roles' || k === 'actions') continue; rec[k] = card[k]; } rec.item_id = String(card.item_id || itemKey); }
         out.push(strip(rec));
       }
+      /* 1 Oct (owner): "when you show a signal that an item went negative yesterday, show the
+         data of previous days too — yesterday, one week — same with advertising alerts." The
+         last 7 days of that item: orders, revenue, profit after ads, ad spend — from the orders
+         and ads ledgers, the same figures the Product profitability page uses. */
+      try {
+        const MONEY = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'Wrong Advertising'];
+        const ids = [...new Set(out.filter((r) => MONEY.indexOf(r.type) >= 0 && /^\d{9,15}$/.test(String(r.item_id || ''))).map((r) => String(r.item_id)))].slice(0, 60);
+        if (ids.length) {
+          const ph = ids.map(() => '?').join(',');
+          const od = await ctx.env.DB.prepare(
+            "SELECT item_id, date(created_at) AS d, COUNT(*) AS orders_n, SUM(qty) AS units, SUM(sold) AS revenue, SUM(cost) AS cost, SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END) AS fees, SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END) AS refunded " +
+            "FROM orders WHERE item_id IN (" + ph + ") AND status NOT IN ('NOT_FOUND', 'CANCELLED') AND created_at >= datetime('now', '-8 day') GROUP BY item_id, d"
+          ).bind(...ids).all().catch(() => ({ results: [] }));
+          const ad = await ctx.env.DB.prepare(
+            'SELECT item_id, date AS d, SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) AS clicks FROM ads_daily WHERE item_id IN (' + ph + ") AND date >= date('now', '-8 day') GROUP BY item_id, d"
+          ).bind(...ids).all().catch(() => ({ results: [] }));
+          const hist = {};
+          const dayRow = (id, d) => { const k = id + '|' + d; return (hist[k] = hist[k] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, clicks: 0 }); };
+          for (const r of (od.results || [])) { const h = dayRow(String(r.item_id), String(r.d)); h.orders += Number(r.orders_n) || 0; h.units += Number(r.units) || 0; h.revenue += Number(r.revenue) || 0; h.cost += Number(r.cost) || 0; h.fees += Number(r.fees) || 0; h.refunded += Number(r.refunded) || 0; }
+          for (const r of (ad.results || [])) { const h = dayRow(String(r.item_id), String(r.d)); h.ads += (Number(r.gen) || 0) + (Number(r.cpc) || 0); h.clicks += Number(r.clicks) || 0; }
+          const days = []; for (let i = 7; i >= 1; i--) days.push(ukDate(new Date(Date.now() - i * 86400000).toISOString()));
+          for (const rec of out) {
+            if (MONEY.indexOf(rec.type) < 0 || !rec.item_id) continue;
+            rec.history = days.map((d) => { const h = hist[String(rec.item_id) + '|' + d] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, clicks: 0 };
+              return { day: d, orders: h.orders, units: h.units, revenue: Math.round(h.revenue * 100) / 100, ads: Math.round(h.ads * 100) / 100, clicks: h.clicks,
+                profit: Math.round((h.revenue - h.cost - h.fees - h.refunded - h.ads) * 100) / 100 }; });
+            const wk = rec.history.reduce((a, h) => ({ profit: a.profit + h.profit, orders: a.orders + h.orders, ads: a.ads + h.ads }), { profit: 0, orders: 0, ads: 0 });
+            rec.history_week = { profit: Math.round(wk.profit * 100) / 100, orders: wk.orders, ads: Math.round(wk.ads * 100) / 100 };
+          }
+        }
+      } catch (e) { /* history is a courtesy — the card stands without it */ }
       const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
       out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0); });
       const MAX = 60;
@@ -16617,26 +16920,50 @@ const ROUTES = {
   sourcingBoard: {
     auth: 'any', fn: async (p, ctx) => {
       if (ITEM_COST_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
-      const rs = await ctx.env.DB.prepare(
+      /* 1 Oct (owner: "sourcing links page is not getting updated on time and stale — take the
+         data from the central sheets"): the Main Sheet's three supplier columns (read hourly into
+         items_facts — and now matched on every account's own header spelling), PLUS the go-live
+         record's link and the hunt's own Product Link 1/2/3 — so an item whose central row was
+         never filled still shows the links the hunter found. Portal-saved links win. */
+      let rs;
+      const base =
         "SELECT i.item_id, i.account, i.title, i.price, i.sold_30d, " +
-        "COALESCE(f.sup1_link,'') AS f1, COALESCE(f.sup2_link,'') AS f2, COALESCE(f.sup3_link,'') AS f3, " +
+        "COALESCE(f.sup1_link,'') AS f1, COALESCE(f.sup2_link,'') AS f2, COALESCE(f.sup3_link,'') AS f3, COALESCE(f.enriched_at,'') AS facts_at, " +
         "COALESCE(f.current_sup,'') AS cur, COALESCE(f.ali_cost,0) AS cost, " +
         "COALESCE(s.s1,'') AS s1, COALESCE(s.s2,'') AS s2, COALESCE(s.s3,'') AS s3, " +
-        "COALESCE(s.updated_by,'') AS upd_by, COALESCE(s.updated_at,'') AS upd_at, COALESCE(op.n,0) AS open_orders " +
-        'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN sourcing s ON s.item_id = i.item_id ' +
-        "LEFT JOIN (SELECT item_id, COUNT(*) AS n FROM orders WHERE status = 'NOT_STARTED' GROUP BY item_id) op ON op.item_id = i.item_id " +
-        "WHERE i.status = 'ACTIVE' ORDER BY i.sold_30d DESC, i.title"
-      ).all();
+        "COALESCE(s.updated_by,'') AS upd_by, COALESCE(s.updated_at,'') AS upd_at, COALESCE(op.n,0) AS open_orders ";
+      try {
+        rs = await ctx.env.DB.prepare(base +
+          ", COALESCE(g.ali_link,'') AS g1, " +
+          "COALESCE(json_extract(h.vals, '$.\"Product Link 1 Main supplier\"'),'') AS h1, COALESCE(json_extract(h.vals, '$.\"Product Link 2\"'),'') AS h2, COALESCE(json_extract(h.vals, '$.\"Product Link 3\"'),'') AS h3 " +
+          'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN sourcing s ON s.item_id = i.item_id ' +
+          'LEFT JOIN golive g ON g.item_id = i.item_id LEFT JOIN provenance pv ON pv.item_id = i.item_id LEFT JOIN hunt_rows h ON h.hunt_id = pv.hunt_id ' +
+          "LEFT JOIN (SELECT item_id, COUNT(*) AS n FROM orders WHERE status = 'NOT_STARTED' GROUP BY item_id) op ON op.item_id = i.item_id " +
+          "WHERE i.status = 'ACTIVE' ORDER BY i.sold_30d DESC, i.title").all();
+      } catch (e) {
+        rs = await ctx.env.DB.prepare(base +
+          'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id LEFT JOIN sourcing s ON s.item_id = i.item_id ' +
+          "LEFT JOIN (SELECT item_id, COUNT(*) AS n FROM orders WHERE status = 'NOT_STARTED' GROUP BY item_id) op ON op.item_id = i.item_id " +
+          "WHERE i.status = 'ACTIVE' ORDER BY i.sold_30d DESC, i.title").all();
+      }
+      const isUrl = (v) => /^https?:\/\//i.test(String(v || '').trim());
+      const pick = (r, slot) => {
+        const cands = slot === 1 ? [['portal', r.s1], ['sheet', r.f1], ['go-live', r.g1], ['hunt', r.h1]]
+          : slot === 2 ? [['portal', r.s2], ['sheet', r.f2], ['hunt', r.h2]] : [['portal', r.s3], ['sheet', r.f3], ['hunt', r.h3]];
+        for (const [src, v] of cands) if (isUrl(v)) return { v: String(v).trim(), src };
+        return { v: '', src: '' };
+      };
       const rows = (rs.results || []).map((r) => {
-        const e1 = r.s1 || r.f1, e2 = r.s2 || r.f2, e3 = r.s3 || r.f3;
-        return { ...r, e1, e2, e3, links_n: [e1, e2, e3].filter(Boolean).length };
+        const p1 = pick(r, 1), p2 = pick(r, 2), p3 = pick(r, 3);
+        return { ...r, e1: p1.v, e2: p2.v, e3: p3.v, src1: p1.src, src2: p2.src, src3: p3.src, links_n: [p1.v, p2.v, p3.v].filter(Boolean).length };
       });
       const missing = rows.filter((r) => r.links_n === 0);
       return { rows, total: rows.length,
         with_links: rows.length - missing.length,
         missing_n: missing.length,
         missing_hot: missing.filter((r) => r.open_orders > 0 || Number(r.sold_30d) > 0).length,
-        note: 'links: portal-saved first, else the Main Sheet’s supplier columns · "missing" = not a single link in either place · the missing tab, sorted by 30-day sales, IS the Order Processors’ task queue' };
+        facts_fresh: rows.reduce((m, r) => (r.facts_at > m ? r.facts_at : m), ''),
+        note: 'links: portal-saved first, then the central Main Sheet’s supplier columns (read hourly, every account’s own header spelling), then the go-live record, then the hunt’s own Product Link 1/2/3 · "missing" = not a single link anywhere · the missing tab, sorted by 30-day sales, IS the Order Processors’ task queue' };
     },
   },
 
@@ -16734,7 +17061,8 @@ const ROUTES = {
      read once for the oldest checkpoint and shared, not re-queried per checker. */
   deliveryCheckpoints: {
     auth: 'any', fn: async (p, ctx) => {
-      const day = ukDate('');
+      /* 1 Oct (owner): the archive — any past day answers exactly as it would have on the day. */
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(p && p.date || '')) ? String(p.date) : ukDate('');
       const DAY_MS = 86400000;
       /* The checkpoints live in CONFIG so Management can move a day or a name without a deploy —
          portal_config.recheck_checkpoints = [{"days":4,"owner":"Noman","asks":"..."}, …]. */
@@ -16871,6 +17199,17 @@ const ROUTES = {
         });
       }
 
+      /* 1 Oct (owner): "show the check details, and under it the page where Husnain adds the
+         details for that specific check" — every note filed against a checkpoint rides with it. */
+      try {
+        await ensureBatchSchema(ctx.env);
+        if (refs.length) {
+          const nr = await ctx.env.DB.prepare('SELECT ref_date, days, account, order_id, status, note, by_email, at FROM recheck_notes WHERE ref_date IN (' + refs.map(() => '?').join(',') + ') ORDER BY at DESC LIMIT 400').bind(...refs).all();
+          const byKey = {};
+          for (const n of (nr.results || [])) (byKey[n.ref_date + '|' + n.days] = byKey[n.ref_date + '|' + n.days] || []).push(n);
+          for (const c of out) c.notes = byKey[c.order_date + '|' + c.days] || [];
+        }
+      } catch (e) { for (const c of out) c.notes = c.notes || []; }
       return { day, source, checkpoints: out,
         legend: { chasing: 'an open item-not-received case — the buyer says it is not here', no_tracking: 'no tracking number at all',
           unconfirmed: 'tracked, estimate passed, no news either way', in_transit: 'tracked and inside the estimate',

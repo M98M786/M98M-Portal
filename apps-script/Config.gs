@@ -60,6 +60,7 @@ const MODULE_KEYS = {
   adsCentre:'Ads command centre', campaignWatch:'Campaign watch', traffic:'Traffic',
   csDesk:'CS live desk', itemRisk:'Item risk', marketing:'Marketing (sale events)',
   feedback:'Feedback', sourcing:'Sourcing links', vatBreakdown:'VAT breakdown',
+  refunds:'Refunds (apply · approve · amounts)', profitability:'Product profitability',
 };
 
 function parseAccessCsv_(s) {
@@ -101,6 +102,16 @@ const CONFIG_DEFAULTS = {
   // §16.10 pilot gate: while this is anything but 'true', the pipeline never writes to a live
   // business sheet — intended writes are logged as SHADOW_WRITE so they can be inspected first.
   pipeline_write_external: 'false',
+  /* 1 Oct (owner): two Advertising Managers. Every advertising task goes to adv_interim_email
+     until adv_primary_from (UK date, inclusive), then to adv_primary_email — Malik Irfan Riaz
+     Khan becomes "the primary tasks handler of advertising, responsible for everything". Flip a
+     date or a name here, no deploy. */
+  adv_primary_email: 'm98mtwelve@gmail.com',
+  adv_primary_from: '2026-10-16',
+  adv_interim_email: 'm98mfour@gmail.com',
+  /* 1 Oct (owner): approved refunds and replacements become tasks for Wahab. */
+  refund_handler_email: 'm98meight@gmail.com',
+  replacement_handler_email: 'm98meight@gmail.com',
 };
 
 // §6 connection checklist: per active account ×4 + globals ×11.

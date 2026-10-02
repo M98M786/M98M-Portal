@@ -18,6 +18,23 @@ function enginePost_(action, payload) {
   return body.data;
 }
 
+/* 1 Oct: several best-effort engine posts in ONE round trip — UrlFetchApp.fetchAll runs them in
+   parallel. The go-live desk was paying three sequential Google→engine hops per publish. Never
+   throws; each reply (or failure) is returned in order. */
+function enginePostAll_(calls) {
+  const url = getConfig('engine_url');
+  const key = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');
+  if (!url || !key || !calls || !calls.length) return [];
+  const reqs = calls.map(function (c) {
+    return { url: url, method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ action: c.action, key: key, payload: c.payload || {} }), muteHttpExceptions: true };
+  });
+  let resps = [];
+  try { resps = UrlFetchApp.fetchAll(reqs); }
+  catch (e) { return calls.map(function () { return { ok: false, error: String(e && e.message || e).slice(0, 120) }; }); }
+  return resps.map(function (r) { try { return JSON.parse(r.getContentText() || '{}'); } catch (e) { return { ok: false }; } });
+}
+
 /** Trigger candidate (hourly) and also safe to run by hand after staff changes. */
 /* ---------- service-metric watch (26 Aug, owner) ----------
    "Detect transaction defect, new late-shipment case, any change in any service-metrics number,
@@ -622,12 +639,12 @@ function enrichEngineFacts_() {
     const FIELDS = {
       id: pick(['eBay Item No', 'eBay Item Number', 'Item No']),
       oe: pick(['Order Earning']),
-      ali_cost: pick(['Aliexpress Cost', 'AliExpress Cost', 'Ali Express Cost']),
+      ali_cost: pick(['Aliexpress Cost', 'AliExpress Cost', 'Ali Express Cost', 'Ali Cost', 'Ali Cost (range jahan variations)']),   // 1 Oct: Sir Hasib's own book
       profit: pick(['Profit']),
       campaign_type: pick(['Campaign Selection']),
       campaign_name: pick(['Current Campaign Selection']),
       current_sup: pick(['Current Supplier Working', 'Current Supplier']),
-      sup1_link: pick(['Ali Express Link 1', 'AliExpress Link 1', 'Supplier Link 1', 'Ali Express Link']),
+      sup1_link: pick(['Ali Express Link 1', 'AliExpress Link 1', 'Supplier Link 1', 'Ali Express Link', 'Supplier 1', 'Suuplier 1']),   // 1 Oct: HAFIZA's book says 'Supplier 1' — read as nothing for weeks
       sup2_link: pick(['Suuplier 2', 'Supplier 2', 'Supplier Link 2']),
       sup3_link: pick(['Supplier 3', 'Suuplier 3', 'Supplier Link 3']),
       category: pick(['eBay Category (FVF %)', 'eBay Category', 'Category (FVF %)']),
@@ -717,8 +734,9 @@ function ladderTaskCreate_(a) {
   const tier = String(a.tier || '').trim();
   const kind = String(a.kind || 'revision').trim();
   if (!item) throw new Error('ladderTask: item_id required');
-  const stageLabel = stageRaw === 'R72' ? '72-hour revision' : stageRaw === 'R10' ? '10-day revision'
-    : stageRaw === 'R20' ? '20-day revision' : (stageRaw || 'revision');
+  /* 1 Oct (owner): the ladder is now 7 days then 14 days — R72 is the 7-day rung, R20 the 14-day. */
+  const stageLabel = stageRaw === 'R72' ? '7-day revision' : stageRaw === 'R10' ? '10-day revision'
+    : stageRaw === 'R20' ? '14-day revision' : (stageRaw || 'revision');
   const days = Math.max(1, Math.min(14, Number(a.deadline_days) || 2));
   const due = taskPktIso_(new Date(Date.now() + days * 86400000));
   const stamp = now_();
@@ -732,14 +750,14 @@ function ladderTaskCreate_(a) {
       title: 'End listing — Item ID ' + item,
       details: listingLines_([
         'Item ID: ' + item, title ? 'Listing: ' + title : '',
-        'Management decided at the 20-day mark: END this listing on eBay, then submit the task.',
+        'Management decided at the 14-day review: END this listing on eBay, then submit the task.',
         String(a.comment || ''), '[LADDER:FINAL:END:' + item + ']',
       ].filter(String)),
       assigned_by: 'system:ladder', assigned_to: tl.email,
       priority: 'high', deadline_pkt: due, stamp: stamp,
     });
     try { engineTaskPush_(tid); } catch (e) {}
-    notify_(tl.email, 'Task assigned', '🔴 End listing ' + item + ' · ' + account + ' — Management decided at the 20-day review: end it on eBay, then submit the task.', 'task:' + tid);
+    notify_(tl.email, 'Task assigned', '🔴 End listing ' + item + ' · ' + account + ' — Management decided at the 14-day review: end it on eBay, then submit the task.', 'task:' + tid);
     return JSON.stringify({ task_id: tid, to: tl.email, kind: 'end' });
   }
 

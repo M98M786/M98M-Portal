@@ -281,12 +281,18 @@ function actionEnterItemId_(payload, ctx) {
      title keeps the hunt's own product name. */
   const finalTitle = String(payload.title || '').trim().slice(0, 160);
   const note = String(payload.note || '').trim().slice(0, LISTING_MAX_TEXT) || ('Item ID ' + itemId + ' entered — the listing is live.');
+  /* 1 Oct (owner): Zaid picks the campaign type at go-live, on listing quality — it rides the
+     campaign_set task to the Advertising Manager and the engine's permanent go-live record. */
+  let campaignType = '';
+  try { campaignType = huntAdvertisingType_(payload.campaign_type, false); }
+  catch (e) { throw new Error(SAFE_ERROR_PREFIX + 'unknown campaign type — pick one from the list'); }
 
   const sh = tasksSheet_();
   const chain = listingChain_(new Date());
   const stamp = now_();
   let rec = null, approver = '', idempotent = false;
   const made = { campaign_set: null, supplier_add: null, revision: null };
+  const postCalls = [];   // 1 Oct: every best-effort engine post rides ONE parallel fetchAll after the chain
 
   const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock (tranche 2)
   const lock = LockService.getScriptLock();
@@ -339,7 +345,7 @@ function actionEnterItemId_(payload, ctx) {
      holding the GLOBAL script lock across them (plus a full TASKS re-read) was the longest hot-path
      lock in the codebase and serialised every other portal write behind it. */
   if (rec) {
-    const all = readTab_('TASKS');
+    const all = listingTasksSlim_();
     const account = String(rec.account || '');
     const limited = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
     const product = String(limited['Title'] || rec.title || '');
@@ -354,9 +360,11 @@ function actionEnterItemId_(payload, ctx) {
           type: 'campaign_set', account: account, item_id: itemId, title: 'campaign_set — Item ID ' + itemId,
           details: listingLines_([
             'Item ID: ' + itemId, 'Listing: ' + product,
-            'CPC Selling Chance: ' + String(limited['CPC Selling Chance'] || ''),
+            'CPC Selling Chance: ' + (campaignType || String(limited['CPC Selling Chance'] || '')) +
+              (campaignType ? ' (chosen at go-live by ' + String(ctx.user.name || 'the go-live desk') +
+                (String(limited['CPC Selling Chance'] || '') && campaignType !== String(limited['CPC Selling Chance']) ? ' — the hunt said ' + String(limited['CPC Selling Chance']) : '') + ')' : ''),
             'Testing window: ' + chain.campaign.uk + ' (' + chain.campaign.pkt + ') on ' + chain.campaign.uk_date,
-            'Fires when the 72-hour revision is approved (§8.0).',
+            'Fires when the 7-day revision is approved (§8.0).',
           ]),
           assigned_by: String(rec.assigned_by || ''), assigned_to: adv.email,
           priority: String(rec.priority || ''), deadline_pkt: chain.campaign.end_pkt, stamp: stamp,
@@ -389,7 +397,7 @@ function actionEnterItemId_(payload, ctx) {
 
     /* the lister's keyword/SEO research was saved under task:<id> at draft time — move it onto
        the real Item ID the moment one exists, so Zain's desk shows it against the listing. */
-    try { enginePost_('ladderResearchRekey', { task_id: String(rec.task_id || ''), item_id: itemId, account: account }); } catch (e) {}
+    postCalls.push({ action: 'ladderResearchRekey', payload: { task_id: String(rec.task_id || ''), item_id: itemId, account: account } });
     /* ③ +72h revision — RETIRED as a direct task (owner, 10 Sept): the LISTING LADDER owns the
        72-hour step now. The engine's ladderWatch queues the item on the Advertising Manager's
        72-hours Revision page at eBay's own +72h; his keyword decision raises the lister task
@@ -402,12 +410,13 @@ function actionEnterItemId_(payload, ctx) {
      first order lands — before anyone has filled the Central Main Sheet row. Best-effort. */
   try {
     const lim2 = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
-    enginePost_('goliveRecord', {
+    postCalls.push({ action: 'goliveRecord', payload: {
       item_id: itemId, account: String(rec.account || ''),
       title: finalTitle || String(lim2['Title'] || rec.title || ''),
       ali_link: String(lim2['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
+      campaign_type: campaignType,
       lister: listingTrueLister_(rec), by: ctx.ident.email, at: now_(),
-    });
+    } });
   } catch (e) { /* the sheet chain still stands; the record fills on the next go-live touch */ }
 
   // A repeat entry re-reports the same tasks, but a downstream task that was never created
@@ -463,17 +472,18 @@ function actionEnterItemId_(payload, ctx) {
     try {
       const hunter = listingHunterFor_(rec);
       const parsedD = listingParseDetails_(rec.details);
-      enginePost_('provenanceSet', {
+      postCalls.push({ action: 'provenanceSet', payload: {
         item_id: itemId, account: String(rec.account || ''),
         lister_email: listingTrueLister_(rec),
         hunter_email: hunter ? String(hunter.email) : '',
         hunt_id: hunter ? String(hunter.hunt_id) : String((parsedD && parsedD.hunt_id) || ''),
-      });
+      } });
     } catch (e) { logActivity_('system', 'R8_PROV_FAIL', itemId, '', '', String(e && e.message || e).slice(0, 120)); }
   }
 
+  try { enginePostAll_(postCalls); } catch (e) { /* best-effort — the listing is already live */ }
   const mirrorPayload = listingBuildLimitedPayload_(listingParseDetails_(rec.details));
-  const mirror = listingMirrorListingDone_(String(rec.account || ''), String(mirrorPayload['Title'] || ''), ctx.ident.email);
+  const mirror = listingQueueListingDone_(String(rec.account || ''), String(mirrorPayload['Title'] || ''), ctx.ident.email);
   return {
     task_id: String(rec.task_id), item_id: itemId,
     status: idempotent ? String(rec.status || '') : TASK_STATUS_SUBMITTED,
@@ -732,8 +742,59 @@ function listingFind72h_(rows, itemId) {
 function listingIs72h_(t) { return String(t.title || '').indexOf(LISTING_KIND_72H) === 0; }
 
 /** Approved holders of a role; the named one wins, otherwise the lightest open queue does. */
+/* 1 Oct (owner): two Advertising Managers. "until 15th October send all the tasks to Zain …
+   after 15th make Malik Irfan Riaz Khan the primary tasks handler of advertising." A dated switch
+   in CONFIG (adv_primary_email / adv_primary_from / adv_interim_email) — flip it there, no deploy.
+   Returns the primary's email when that person is an approved Advertising Manager, else '' and
+   the picker load-balances exactly as before. */
+function listingAdvertisingPrimary_() {
+  try {
+    const from = String(getConfig('adv_primary_from') || CONFIG_DEFAULTS.adv_primary_from || '').slice(0, 10);
+    const todayUk = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd');
+    const key = (from && todayUk >= from) ? 'adv_primary_email' : 'adv_interim_email';
+    const email = normalizeEmail(getConfig(key) || CONFIG_DEFAULTS[key] || '');
+    if (!email) return '';
+    let ok = false;
+    readTab_('USERS').forEach(function (u) {
+      if (normalizeEmail(u.email) === email && String(u.status || '') === 'approved' && String(u.role || '') === 'Advertising Manager') ok = true;
+    });
+    return ok ? email : '';
+  } catch (e) { return ''; }
+}
+
+/* 1 Oct (go-live desk "works very slow"): the §8 chain asks the TASKS tab two questions — does a
+   (type, item_id) task exist, and who carries the least open load — yet readTab_ pulled EVERY
+   column of every task (19 × ~1,200). Five columns, straight from the ranges. */
+function listingTasksSlim_() {
+  const sh = tasksSheet_();
+  const lr = sh.getLastRow();
+  if (lr < 2) return [];
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const want = ['task_id', 'type', 'item_id', 'assigned_to', 'status'];
+  const cols = {};
+  want.forEach(function (n) { const i = head.indexOf(n); if (i >= 0) cols[n] = sh.getRange(2, i + 1, lr - 1, 1).getValues(); });
+  const out = [];
+  for (let r = 0; r < lr - 1; r++) {
+    const o = {};
+    want.forEach(function (n) { o[n] = cols[n] ? cols[n][r][0] : ''; });
+    if (String(o.task_id || '') === '') continue;
+    out.push(o);
+  }
+  return out;
+}
+
+/* 1 Oct: the "Listing Done" mark on the account's central sheet is bookkeeping, not the go-live —
+   it is queued (AGENT_QUEUE, kind listing_done) and landed by flushMirrorQueue within the hour,
+   instead of opening an external workbook inside Zaid's publish click. */
+function listingQueueListingDone_(account, title, actor) {
+  if (!account || !String(title || '').trim()) return { ok: false, reason: 'nothing to mirror' };
+  mirrorEnqueue_('listing_done', { account: account, title: String(title).trim(), actor: actor });
+  return { ok: true, queued: true };
+}
+
 function listingPickForRole_(role, preferredEmail, tasks, type) {
-  const wanted = normalizeEmail(preferredEmail || '');
+  let wanted = normalizeEmail(preferredEmail || '');
+  if (role === 'Advertising Manager' && !wanted) wanted = listingAdvertisingPrimary_();
   const users = [];
   readTab_('USERS').forEach(function (u) {
     if (String(u.role || '') !== role || String(u.status || '') !== 'approved') return;
@@ -1031,11 +1092,21 @@ function listingHunterFor_(rec) {
     const parsed = JSON.parse(String(rec.details || '{}'));
     const huntId = String((parsed && parsed.hunt_id) || '').trim();
     if (!huntId) return null;
-    let hit = null;
-    readTab_('HUNTING_DB').forEach(function (r) { if (String(r.hunt_id || '') === huntId) hit = r; });
-    if (!hit) return null;
-    const email = String(hit.hunter_email || '').trim();
-    return email ? { email: email, hunt_id: huntId, title: String(hit.Title || rec.title || '') } : null;
+    /* 1 Oct (go-live "very slow"): this read EVERY column of every hunt to find one id. Scan
+       column A, then read the two cells the caller uses. */
+    const sh = huntSheet_();
+    const lr = sh.getLastRow();
+    if (lr < 2) return null;
+    const head = huntHeaders_(sh);
+    const iId = head.indexOf('hunt_id'), iEm = head.indexOf('hunter_email'), iTt = head.indexOf(HC_TITLE);
+    if (iId < 0 || iEm < 0) return null;
+    const ids = sh.getRange(2, iId + 1, lr - 1, 1).getValues();
+    let row = 0;
+    for (let i = 0; i < ids.length; i++) { if (String(ids[i][0] || '') === huntId) { row = i + 2; break; } }
+    if (!row) return null;
+    const email = String(sh.getRange(row, iEm + 1).getValue() || '').trim();
+    const ttl = iTt >= 0 ? String(sh.getRange(row, iTt + 1).getValue() || '') : '';
+    return email ? { email: email, hunt_id: huntId, title: ttl || String(rec.title || '') } : null;
   } catch (e) { return null; }
 }
 

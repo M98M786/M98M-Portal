@@ -350,11 +350,21 @@ function flushMirrorQueue() {
   const t0 = Date.now();
   let done = 0, failed = 0, pending = 0;
   for (let i = 0; i < data.length; i++) {
-    if (String(data[i][iKind]) !== 'hunt_decision' || String(data[i][iStatus])) continue;
+    const qKind = String(data[i][iKind]);
+    if ((qKind !== 'hunt_decision' && qKind !== 'listing_done') || String(data[i][iStatus])) continue;
     if (Date.now() - t0 > 90000) { pending++; continue; }        // 90s budget (30 Aug: shorter slots under load) — the rest next run
     const row = i + 2;
     try {
       const p = JSON.parse(String(data[i][iPay] || '{}'));
+      if (qKind === 'listing_done') {
+        /* 1 Oct: the go-live desk's "Listing Done" mark on the central sheet — queued off the
+           publish click so Zaid's request returns in seconds; landed here within the hour. */
+        listingMirrorListingDone_(String(p.account || ''), String(p.title || ''), String(p.actor || 'queue'));
+        sh.getRange(row, iStatus + 1).setValue('done');
+        sh.getRange(row, iDone + 1).setValue(now_());
+        done++;
+        continue;
+      }
       const found = huntFind_(huntSheet_(), p.hunt_id);
       const rec = huntRecord_(found.rec);
       huntMirrorDecision_(rec, rec.approval_status, String(rec[HC_COMMENTS] || ''),
