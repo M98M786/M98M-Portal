@@ -10197,12 +10197,20 @@ async function tfIntake(env, p) {
     const result = String(c.result || '').slice(0, 20);
     if (!ali) continue;
     /* only a visit that actually read the order counts as a check; a captcha, a login wall or an
-       error must leave the order on the list for the next run */
+       error must leave the order on the list for the next run.
+       A 'notmine' answer says only that THIS login cannot see the order: it adds the login to
+       not_mine and nothing else. It must not stamp last_checked_at - that stamp is the 12-hour
+       re-ask throttle, and a stamp from the wrong login hid the order from its real owner (3 Oct
+       2026: order ...0195 marked not-mine by three sibling logins, never opened by its owner while
+       the team dispatched it by hand). last_result keeps the owner's real answer, if any. */
     if (['found', 'none', 'notmine'].indexOf(result) < 0) continue;
     const notMine = result === 'notmine' ? aeAccount : '';
     marks.push(env.DB.prepare(
-      "INSERT INTO tracking_pulls (ali_order, last_checked_at, checks, last_result, not_mine, updated_at) VALUES (?1, datetime('now'), 1, ?2, ?3, datetime('now')) " +
-      "ON CONFLICT(ali_order) DO UPDATE SET last_checked_at = datetime('now'), checks = checks + 1, last_result = ?2, updated_at = datetime('now'), " +
+      "INSERT INTO tracking_pulls (ali_order, last_checked_at, checks, last_result, not_mine, updated_at) " +
+      "VALUES (?1, CASE WHEN ?2 = 'notmine' THEN NULL ELSE datetime('now') END, 1, ?2, ?3, datetime('now')) " +
+      "ON CONFLICT(ali_order) DO UPDATE SET " +
+      "last_checked_at = CASE WHEN ?2 = 'notmine' THEN last_checked_at ELSE datetime('now') END, checks = checks + 1, " +
+      "last_result = CASE WHEN ?2 = 'notmine' AND last_result IN ('found', 'none') THEN last_result ELSE ?2 END, updated_at = datetime('now'), " +
       "not_mine = CASE WHEN ?3 != '' AND (',' || not_mine || ',') NOT LIKE ('%,' || ?3 || ',%') THEN (CASE WHEN not_mine = '' THEN ?3 ELSE not_mine || ',' || ?3 END) ELSE not_mine END"
     ).bind(ali, result, notMine));
   }

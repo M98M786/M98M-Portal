@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-10-03 - TRACKING FETCH: a not-mine mark no longer hides the order from its owner
+
+Two-day shadow test finding. Each AliExpress order is visible to exactly one of the four buyer
+logins; the other three profiles mark it 'notmine' (mostly inferred from the order number's family,
+without a visit). `tfIntake` stamped `tracking_pulls.last_checked_at` on every such mark, and that
+stamp is the 12-hour re-ask throttle in `tfPullList` - so three sibling stamps hid an order from
+its real owner for a day or more (order ...0195 / eBay 14-15235-89685: three not-mine marks, never
+opened by m98mshop2, dispatched by hand). At the time of the fix 326 of 337 pending orders were
+throttled, 179 of them only by sibling marks.
+
+- `tfIntake`: a 'notmine' mark adds the login to `not_mine` and bumps `checks`; it never touches
+  `last_checked_at` (NULL on first sight) and never replaces a real found/none `last_result`.
+- Data repair after deploy: `last_checked_at` cleared where `last_result = 'notmine'`.
+- Tests 41/41 (`M98M-Tracking-Sync/tests/engine-trackfetch.test.js`, 5 new).
+- Also carries 8424733 (Tracking Fetch pushes pass `force_live`), inert while the gate is off.
+
 ## 2026-10-01 — TRACKING FETCH AGENT (fleet 07) — engine side, undeployed
 
 The AliExpress → eBay tracking loop with no typing in it. A Chrome extension (repo
