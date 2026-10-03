@@ -10161,7 +10161,11 @@ async function tfPullList(env, p) {
     'GROUP BY o.ali_order ORDER BY created_at ASC LIMIT ?4'
   ).bind('-' + TF_PULL_DAYS + ' day', '-' + TF_RECHECK_HOURS + ' hour', '%,' + aeAccount + ',%', limit).all();
   const rows = (rs.results || []).map(r => ({ ali_order: String(r.ali_order), order_id: String(r.order_id || ''), account: String(r.account || ''), created_at: String(r.created_at || ''), orders: Number(r.n) || 1 }));
-  return { aeAccount, rows, n: rows.length, as_of: new Date().toISOString() };
+  /* notmine_hint: tells the extension that a 'notmine' mark is a list hint only (never a check),
+     so it may send its inferred family skips as marks without hiding the order from its owner.
+     An Engine without this flag still throttles on such marks - the extension then keeps them to
+     itself. */
+  return { aeAccount, rows, n: rows.length, as_of: new Date().toISOString(), notmine_hint: true };
 }
 
 /* Park what the extension captured. Idempotent on (ali_order, tracking); `checked` carries the
