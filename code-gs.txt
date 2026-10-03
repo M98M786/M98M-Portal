@@ -110,7 +110,7 @@ const CONFIG_DEFAULTS = {
      until adv_primary_from (UK date, inclusive), then to adv_primary_email — Malik Irfan Riaz
      Khan becomes "the primary tasks handler of advertising, responsible for everything". Flip a
      date or a name here, no deploy. */
-  adv_primary_email: 'm98mtwelve@gmail.com',
+  adv_primary_email: 'm98mtweleve@gmail.com',
   adv_primary_from: '2026-10-16',
   adv_interim_email: 'm98mfour@gmail.com',
   /* 1 Oct (owner): approved refunds and replacements become tasks for Wahab. */
