@@ -22,9 +22,10 @@
  * through safeUrl(). */
 (function () {
 
-  var OD_VIEW_ROLES = ['Order Processor', 'Management', 'Ops Head'];
-  /* §10.2 says surface the tiles to processors and Management; the Team Lead reads them too
-     (Orders.gs ORDERS_READ_ROLES) but has no working row of his own, so he gets Dispatch only. */
+  /* 4 Oct (owner): "Husnain Naeem can upload tracking too" — the Team Lead gets this desk with the
+     TRACKING step live (number · Upload to eBay · Mark uploaded); the purchase fields stay the
+     processors' (the server sends can_write for them and can_track for the tracking step). */
+  var OD_VIEW_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
   var OD_DISPATCH_ROLES = ['Order Processor', 'Management', 'Ops Head', 'Team Lead'];
 
   var OD_TZ_PKT = 'Asia/Karachi';
@@ -583,7 +584,7 @@
       if (odStr(t[OD_H.cost])) { chips += odChip('Cost total', '<span class="num">' + esc(odMoney(t[OD_H.cost])) + '</span>'); }
       if (odStr(t[OD_H.earning])) { chips += odChip('Order Earning total', '<span class="num">' + esc(odMoney(t[OD_H.earning])) + '</span>'); }
     }
-    if (!d.can_write) { chips += odChip('Read only', 'your role does not write order rows'); }
+    if (!d.can_write) { chips += d.can_track ? odChip('Tracking only', 'you record tracking and upload it to eBay; purchases stay with the processors') : odChip('Read only', 'your role does not write order rows'); }
     if (d.truncated) { chips += odChip('Long tab', 'the portal read the first rows only', 'od-bad'); }
     sum.innerHTML = chips + '<div id="odFilterNote" class="od-sub" style="display:none;margin-top:6px;font-size:11.5px;color:var(--text-3);font-weight:700"></div>';
     odWireChips();
@@ -835,9 +836,11 @@
   function odWorkBlock(o, cols, row) {
     var w = (OD_DATA && OD_DATA.writable) || [];
     var can = !!(OD_DATA && OD_DATA.can_write);
+    var canTrack = can || !!(OD_DATA && OD_DATA.can_track);     // the Team Lead: tracking step only
     var opts = (OD_DATA && OD_DATA.delivery_status_options) || OD_STATUS_FALLBACK;
     var carrier = odCarrier(o);
     var dis = can ? '' : ' disabled';
+    var disT = canTrack ? '' : ' disabled';
     var purchase = '', track = '';
 
     if (odHas(w, OD_H.cost)) {
@@ -866,10 +869,10 @@
     }
     if (odHas(w, OD_H.tracking)) {
       track += odField(OD_H.tracking, 'from AliExpress', odInput(row, 'tracking', odFieldValue(o, 'tracking', OD_H.tracking),
-        odDirty(o, 'tracking', OD_H.tracking), 'text', '', ' mono', dis));
+        odDirty(o, 'tracking', OD_H.tracking), 'text', '', ' mono', disT));
     }
     if (odHas(w, OD_H.status)) {
-      track += odField(OD_H.status, 'the tab\'s own dropdown', odSelect(row, 'status', odFieldValue(o, 'status', OD_H.status), opts, dis));
+      track += odField(OD_H.status, 'the tab\'s own dropdown', odSelect(row, 'status', odFieldValue(o, 'status', OD_H.status), opts, disT));
     }
 
     return '<div class="od-work">' +
@@ -882,18 +885,19 @@
         /* The courier eBay will be told. The list is eBay's OWN accepted-carrier list for this
            account, so whatever is chosen here is a name eBay will accept; leaving it on "work it
            out" lets the tracking number's own format nominate one. */
-        odField('Courier', 'eBay\u2019s own list', '<select class="od-sel" data-courier="' + odAttr(row) + '"' + dis + '>' +
+        odField('Courier', 'eBay\u2019s own list', '<select class="od-sel" data-courier="' + odAttr(row) + '"' + disT + '>' +
           '<option value="">Work it out from the number</option></select>') +
         '</div>' +
         '<div class="od-btns">' +
-          '<button class="btn-gold" data-act="tracking" data-row="' + odAttr(row) + '"' + dis + '>Record tracking</button>' +
-          '<button class="btn-gold" data-act="pushebay" data-row="' + odAttr(row) + '"' + dis + '>Upload to eBay</button>' +
-          '<button class="btn-ghost" data-act="uploaded" data-row="' + odAttr(row) + '"' + dis + '>Mark uploaded</button>' +
+          '<button class="btn-gold" data-act="tracking" data-row="' + odAttr(row) + '"' + disT + '>Record tracking</button>' +
+          '<button class="btn-gold" data-act="pushebay" data-row="' + odAttr(row) + '"' + disT + '>Upload to eBay</button>' +
+          '<button class="btn-ghost" data-act="uploaded" data-row="' + odAttr(row) + '"' + disT + '>Mark uploaded</button>' +
           '<span class="od-note" data-msg="t' + odAttr(row) + '"></span>' +
         '</div></div>' : '') +
       (carrier ? '<div class="od-sep"><span class="k">Carrier note</span>' +
         '<div class="od-addr-b" style="padding:8px 0 0">' + esc(carrier) + '</div></div>' : '') +
-      (can ? '' : '<div class="od-note" style="margin-top:10px">Read only — the Order Processors fill these fields.</div>') +
+      (can ? '' : canTrack ? '<div class="od-note" style="margin-top:10px">Tracking is yours to record and upload — the purchase fields stay with the Order Processors.</div>'
+        : '<div class="od-note" style="margin-top:10px">Read only — the Order Processors fill these fields.</div>') +
     '</div>';
   }
 

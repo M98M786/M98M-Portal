@@ -125,11 +125,16 @@ const ORDERS_DUE_WINDOW_DAYS = 3;                    // the tile is named for it
 const ORDERS_SLA_DAYS_DEFAULT = 5;
 // 'orders_tracking_uploader': the email of whoever uploads tracking to eBay (Wahab today).
 // Empty = any Order Processor may mark a row uploaded. Staff are data rows, never hardcoded.
+// 4 Oct (owner): the Team Lead may upload tracking too — see ORDERS_TRACK_ROLES.
 const ORDERS_UPLOADER_KEY = 'orders_tracking_uploader';
 const ORDERS_SLA_KEY = 'orders_dispatch_sla_days';
 
 const ORDERS_READ_ROLES = ['Order Processor', 'CS', 'Team Lead'];
 const ORDERS_WRITE_ROLES = ['Order Processor'];
+/* 4 Oct (owner): "Husnain Naeem can upload tracking too" — the Team Lead records tracking numbers,
+   uploads them to eBay and marks rows uploaded; the purchase step (Cost, AliExpress order number)
+   stays with the processors. */
+const ORDERS_TRACK_ROLES = ['Order Processor', 'Team Lead'];
 const ORDERS_DAY_LIMIT = 400;                        // biggest real day tab is 94 rows
 const ORDERS_RETURNS_LIMIT = 500;
 const ORDERS_DUE_ROWS_MAX = 60;
@@ -347,6 +352,12 @@ function ordersAssertWriter_(ctx) {
   if (ORDERS_WRITE_ROLES.indexOf(String(ctx.user.role)) < 0) throw new Error('role may not write order rows');
 }
 
+/** The tracking step only (number · upload · uploaded mark): processors and the Team Lead. */
+function ordersAssertTracker_(ctx) {
+  if (isMgmt_(ctx.user.role, ctx.ident.email)) return;
+  if (ORDERS_TRACK_ROLES.indexOf(String(ctx.user.role)) < 0) throw new Error('role may not record tracking');
+}
+
 /** accounts_access is a comma list when Management has scoped the person; the seed placeholders
  * ('per-role', 'ALL', empty) mean "not scoped yet" and do not restrict. */
 function ordersAccountsAllow_(accountsField, account) {
@@ -477,6 +488,7 @@ function actionTodayOrders_(payload, ctx) {
     }),
     delivery_status_options: ordersStatusOptions_(target.replacement),
     can_write: ordersMayWrite_(ctx),
+    can_track: ordersMayTrack_(ctx),
     shows_order_earning: view.earning,
   };
 }
@@ -489,6 +501,9 @@ function ordersStatusOptions_(isReplacement) {
 
 function ordersMayWrite_(ctx) {
   return isMgmt_(ctx.user.role, ctx.ident.email) || ORDERS_WRITE_ROLES.indexOf(String(ctx.user.role)) >= 0;
+}
+function ordersMayTrack_(ctx) {
+  return ordersMayWrite_(ctx) || ORDERS_TRACK_ROLES.indexOf(String(ctx.user.role)) >= 0;
 }
 
 // ---------- §10.1 the two writes ----------
@@ -517,7 +532,7 @@ function actionRecordPurchase_(payload, ctx) {
 /** Tracking step: the tracking number, then the tracking upload to eBay. `uploaded:true` is the
  * moment the spec gives Wahab — it stamps the Delivery Status dropdown token that records it. */
 function actionRecordTracking_(payload, ctx) {
-  ordersAssertWriter_(ctx);
+  ordersAssertTracker_(ctx);
   const account = ordersRequireAccount_(payload, ctx);
   const target = ordersTarget_(payload);
 
@@ -565,6 +580,7 @@ function actionRecordTracking_(payload, ctx) {
  * Unset = any Order Processor, which is how the team works when he is off. */
 function ordersAssertUploader_(ctx) {
   if (isMgmt_(ctx.user.role, ctx.ident.email)) return;
+  if (String(ctx.user.role) === 'Team Lead') return;            // 4 Oct (owner): the Team Lead uploads too
   const who = String(getConfig(ORDERS_UPLOADER_KEY) || '').trim();
   if (!who) return;
   const allowed = who.split(',').some(function (e) { return normalizeEmail(e) === normalizeEmail(ctx.ident.email); });
