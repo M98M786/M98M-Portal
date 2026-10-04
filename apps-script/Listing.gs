@@ -1342,6 +1342,10 @@ function actionSaveListingResearch_(payload, ctx) {
 
 const ACTIONS_LISTING = {
   myListingWork:    [actionMyListingWork_, 'any'],
+  /* 4 Oct (owner): the shared go-live desk. Same answer as myListingWork (a publisher gets every
+     publisher's waiting drafts) under a name the shell routes to THIS backend, not the engine mirror —
+     the desk merges it in until the engine pools drafts itself. */
+  goLiveDrafts:     [actionMyListingWork_, 'any'],
   enterItemId:      [actionEnterItemId_, 'any'],
   createRevision:   [actionCreateRevision_, 'any'],
   revisionRevisit:  [actionRevisionRevisit_, 'any'],

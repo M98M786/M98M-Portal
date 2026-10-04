@@ -77,7 +77,8 @@
           '<button class="minibtn" id="glRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
         '<div class="card enter d2"><div class="hd">Drafts waiting to go live ' +
-          '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span></div>' +
+          '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span>' +
+          '<span class="hint" id="glShared" style="margin-left:8px;color:var(--gold-a)"></span></div>' +
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
@@ -86,10 +87,42 @@
     }
   };
 
+  var GL_SEQ = 0;
   function glLoad() {
+    var seq = ++GL_SEQ;
     api('myListingWork', {}).then(function (d) {
-      var me = glS(STATE.user && STATE.user.email).toLowerCase();
+      if (seq !== GL_SEQ) { return; }
       var all = (d && d.listings) || [];
+      glPaint(all);
+      glSharedMerge(seq, all);
+    }).catch(function (e) {
+      setHTML('glTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
+      setHTML('glBody', '');
+    });
+  }
+
+  /* 4 Oct (owner): the shared desk. The fast engine answer paints first; if it does not yet pool the
+     other publisher's drafts (its records carry no assigned_to until that engine build is live), the
+     sheet backend is asked for every publisher's drafts and they are merged in, deduped by task id. */
+  function glSharedMerge(seq, all) {
+    var me = glS(STATE.user && STATE.user.email).toLowerCase();
+    if (GL_PUBLISHERS.indexOf(me) < 0) { return; }
+    var pooled = all.some(function (t) { return t && t.assigned_to !== undefined; });
+    if (pooled) { return; }
+    var note = $('glShared');
+    if (note) { note.textContent = 'checking the shared desk for drafts held by the other publisher…'; }
+    api('goLiveDrafts', {}).then(function (d2) {
+      if (seq !== GL_SEQ) { return; }
+      var seen = {};
+      all.forEach(function (t) { seen[glS(t.task_id)] = 1; });
+      var extra = ((d2 && d2.listings) || []).filter(function (t) { return !seen[glS(t.task_id)]; });
+      if (extra.length) { glPaint(all.concat(extra)); }
+      var n2 = $('glShared'); if (n2) { n2.textContent = ''; }
+    }).catch(function () { var n3 = $('glShared'); if (n3) { n3.textContent = ''; } });
+  }
+
+  function glPaint(all) {
+      var me = glS(STATE.user && STATE.user.email).toLowerCase();
       var drafts = all.map(function (t) { return { t: t, f: glFlag(t) }; })
         .filter(function (x) { return x.f && x.f.flag === 'draft' && !GL_DONE[glS(x.t.task_id)]; });
       var byAcct = {};
@@ -199,10 +232,6 @@
           }).catch(function (e) { btn.disabled = false; toast(e.message); });
         };
       });
-    }).catch(function (e) {
-      setHTML('glTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
-      setHTML('glBody', '');
-    });
   }
 
 })();
