@@ -208,17 +208,21 @@ function actionMyListingWork_(payload, ctx) {
   if (LISTING_WORKSPACE_ROLES.indexOf(role) < 0 && !isMgmt_(role, ctx.ident.email)) throw new Error('role has no listing workspace');
   const me = normalizeEmail(ctx.ident.email);
   const withCompleted = String(payload.include_completed || '') === 'true';
+  /* 4 Oct (owner): a go-live publisher sees every waiting listing draft, whoever it is assigned to. */
+  const pool = listingGoLivePublishers_();
+  const shared = pool.indexOf(me) >= 0 ? pool : [];
 
   const listings = [], revisions = [];
   readTab_('TASKS').forEach(function (t) {
-    if (normalizeEmail(t.assigned_to) !== me) return;
+    const owner = normalizeEmail(t.assigned_to);
     const type = String(t.type || '');
+    if (owner !== me && !(type === 'listing_new' && shared.indexOf(owner) >= 0)) return;
     if (type !== 'listing_new' && type !== 'listing_revision') return;
     const status = String(t.status || '');
     if (!withCompleted && status === TASK_STATUS_COMPLETED) return;
 
     const rec = {
-      task_id: String(t.task_id || ''), type: type, account: String(t.account || ''),
+      task_id: String(t.task_id || ''), type: type, account: String(t.account || ''), assigned_to: String(t.assigned_to || ''),
       item_id: String(t.item_id || ''), title: String(t.title || ''), status: status,
       priority: String(t.priority || ''), deadline_pkt: taskPktIso_(t.deadline_pkt),
       comments: String(t.comments || ''), submission_note: String(t.submission_note || ''),
@@ -295,6 +299,8 @@ function actionEnterItemId_(payload, ctx) {
   const postCalls = [];   // 1 Oct: every best-effort engine post rides ONE parallel fetchAll after the chain
 
   const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock (tranche 2)
+  const publisher = listingIsGoLivePublisher_(ctx.ident.email);   // 4 Oct: the shared desk — read before the lock
+  let mine = true;
   const lock = LockService.getScriptLock();
   try {
     try { lock.waitLock(15000); }
@@ -302,7 +308,8 @@ function actionEnterItemId_(payload, ctx) {
     const found = taskVerify_(sh, pre, payload.task_id);
     rec = found.rec;
     if (String(rec.type || '') !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'that draft is not a listing task any more — press Refresh');
-    if (normalizeEmail(rec.assigned_to) !== normalizeEmail(ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'this draft is not assigned to you');
+    mine = normalizeEmail(rec.assigned_to) === normalizeEmail(ctx.ident.email);
+    if (!mine && !publisher) throw new Error(SAFE_ERROR_PREFIX + 'this draft is not assigned to you');
 
     const status = String(rec.status || '');
     const carried = String(rec.item_id || '').trim();
@@ -335,6 +342,7 @@ function actionEnterItemId_(payload, ctx) {
       comments: listingMergeFlag_(rec.comments, null),   // R7-4: the flag is resolved at go-live; return-note history stays
     };
     if (finalTitle) { patch.title = finalTitle; }
+    if (!mine) { patch.assigned_to = ctx.ident.email; }   // 4 Oct: the completed task names who made it live (lister-truth law: a go-live person, never the lister)
     taskWrite_(sh, found, patch);
     approver = String(rec.assigned_by || '').trim();
   } finally { lock.releaseLock(); }
@@ -1189,6 +1197,17 @@ function listingGoLivePerson_(all) {
     listingPickForRole_('Team Lead', '', rows, 'listing_new') || null;
 }
 
+/** 4 Oct (owner): the go-live desk is SHARED — CONFIG 'go_live_publishers' (plus the approver the
+ * drafts are assigned to) may each see every waiting draft and make it live. Normalised emails. */
+function listingGoLivePublishers_() {
+  const out = [];
+  const add = function (e) { const n = normalizeEmail(e); if (n && out.indexOf(n) < 0) out.push(n); };
+  String(getConfig('go_live_publishers') || '').split(',').forEach(add);
+  add(getConfig('go_live_approver') || '');
+  return out;
+}
+function listingIsGoLivePublisher_(email) { return listingGoLivePublishers_().indexOf(normalizeEmail(email)) >= 0; }
+
 function actionListerDraft_(payload, ctx) {
   const link = listingUrl_(payload.draft_link);
   if (!link) throw new Error('add the eBay draft link (an http/https URL)');
@@ -1234,6 +1253,12 @@ function actionListerDraft_(payload, ctx) {
     { to: '@management', type: 'Draft handed to go-live',
       message: '🟣 "' + title + '" · ' + String(rec.account || '') + ' — ' + who + ' left it in draft; ' + go.name + ' will publish and add the Item ID.', ref: ref },
   ];
+  /* 4 Oct (owner): the desk is shared — every other publisher hears about the new draft too. */
+  listingGoLivePublishers_().forEach(function (e) {
+    if (e === normalizeEmail(go.email) || e === normalizeEmail(ctx.ident.email)) return;
+    bells.push({ to: e, type: 'Draft listing to publish',
+      message: '🟣 ' + who + ' left "' + title + '" in draft · ' + String(rec.account || '') + ' — it is on the Go-live desk (assigned to ' + go.name + '; any publisher may make it live). Draft: ' + link, ref: ref });
+  });
   // The lister's part is finished the moment the draft link is in — credit them and clear it from
   // their board (the task now belongs to the go-live approver).
   if (handed) {

@@ -7,6 +7,11 @@
   'use strict';
 
   var GL_ROLES = ['Team Lead', 'Listing Manager', 'Management', 'Ops Head', 'CS'];
+  /* 4 Oct (owner: "update Sir Hasib's portal with the go-live desk … make his portal the same as Zaid's"):
+     the desk is SHARED between the publishers — each sees every waiting draft and may make it live.
+     The server (CONFIG go_live_publishers) decides who may publish; this list only shows the desk.
+     Google signs the same person in as either @googlemail.com or @gmail.com, so both are listed. */
+  var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
   /* Item IDs published from THIS desk in this session. The desk reads myListingWork, which is
      engine-served (D1 tasks mirror) and lags the sheet write enterItemId just made — so without
      this the draft the publisher just made live comes straight back on the next refresh until the
@@ -63,7 +68,7 @@
     label: 'Go-live desk',
     icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
     roles: GL_ROLES,
-    only: 'zaidkaleem987@gmail.com',   // owner 5 Sept: Zaid alone publishes and enters Item IDs
+    only: GL_PUBLISHERS,   // owner 5 Sept: Zaid alone · 4 Oct: Zaid and Hasib share the desk
     order: 17.6,
     badge: function () { return (STATE.counts && STATE.counts.goLive) || 0; },
     render: function () {
@@ -71,7 +76,7 @@
           '<span class="sub">drafts waiting to be published — open the draft, publish on eBay, enter the Item ID here</span>' +
           '<button class="minibtn" id="glRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
-        '<div class="card enter d2"><div class="hd">Drafts assigned to you ' +
+        '<div class="card enter d2"><div class="hd">Drafts waiting to go live ' +
           '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span></div>' +
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
@@ -83,6 +88,7 @@
 
   function glLoad() {
     api('myListingWork', {}).then(function (d) {
+      var me = glS(STATE.user && STATE.user.email).toLowerCase();
       var all = (d && d.listings) || [];
       var drafts = all.map(function (t) { return { t: t, f: glFlag(t) }; })
         .filter(function (x) { return x.f && x.f.flag === 'draft' && !GL_DONE[glS(x.t.task_id)]; });
@@ -122,7 +128,8 @@
         return '<div class="gl-card">' +
           '<div class="t">🟣 ' + esc(glS(t.title) || id) + '</div>' +
           '<div class="m"><span class="mono">' + esc(id) + '</span> · ' + esc(glS(t.account)) +
-            (f.from ? ' · left by ' + esc(glS(f.from).split('@')[0]) : '') + ' · flagged ' + esc(fmtPkt(f.at, true) || '') + '</div>' +
+            (f.from ? ' · left by ' + esc(glS(f.from).split('@')[0]) : '') + ' · flagged ' + esc(fmtPkt(f.at, true) || '') +
+            (glS(t.assigned_to) && glS(t.assigned_to).toLowerCase() !== me ? ' · <b>with ' + esc(glS(t.assigned_to).split('@')[0]) + '</b> — shared desk, you may make it live too' : '') + '</div>' +
           (f.note ? '<div class="n">' + esc(glS(f.note)) + '</div>' : '') +
           '<div class="hu-btns" style="margin-top:10px">' +
             (url ? '<a class="minibtn" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">Open the eBay draft ↗</a>' : '<span class="hu-hint" style="margin-top:0">No draft link was given</span>') +

@@ -98,6 +98,10 @@ const CONFIG_DEFAULTS = {
   email_digest: 'false',
   submission_escalation_hours: '12',
   go_live_approver: 'zaidkaleem987@gmail.com',            // Zaid Kaleem publishes listings & enters the Item ID
+  /* 4 Oct (owner: "update Sir Hasib's portal with the go-live desk … same as Zaid's"): the go-live desk is
+     SHARED by these people — each sees every waiting draft and may publish it. Comma list; the approver
+     above (who the drafts are assigned to) is always included. Google may sign Hasib in as either domain. */
+  go_live_publishers: 'zaidkaleem987@gmail.com,mrhasibullah91@googlemail.com,mrhasibullah91@gmail.com,m98m786@gmail.com',
   paused_accounts: '',                                    // owner pause: accounts that generate NO automated tasks (comma-separated)
   // §16.10 pilot gate: while this is anything but 'true', the pipeline never writes to a live
   // business sheet — intended writes are logged as SHADOW_WRITE so they can be inspected first.

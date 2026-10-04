@@ -28,6 +28,9 @@ const PROFIT_ROLES = ['Management', 'Ops Head'];                 // collective p
 const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
 const MGMT_ROLES = ['Management', 'Ops Head'];
+/* 4 Oct (owner): the go-live desk is shared between these people (portal_config go_live_publishers
+   overrides; this is the fallback) — each sees every waiting listing draft and may make it live. */
+const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
@@ -15076,15 +15079,23 @@ const ROUTES = {
       if (['Item Lister', 'Listing Manager', 'Team Lead'].indexOf(role) < 0 && !mgmt) throw new AuthError('role has no listing workspace');
       const me = String(ctx.user.email || '').toLowerCase();
       const withCompleted = String(p.include_completed || '') === 'true';
+      /* 4 Oct (owner): a go-live publisher sees every waiting listing draft, whoever it is assigned to. */
+      let pool = [];
+      try {
+        const cfg = await ctx.env.DB.prepare("SELECT key, value FROM portal_config WHERE key IN ('go_live_publishers', 'go_live_approver')").all();
+        for (const r of (cfg.results || [])) String(r.value || '').split(',').forEach((e) => { e = e.trim().toLowerCase(); if (e && pool.indexOf(e) < 0) pool.push(e); });
+      } catch (e) { /* fallback below */ }
+      if (!pool.length) pool = GOLIVE_PUBLISHERS_DEFAULT.slice();
+      const shared = pool.indexOf(me) >= 0 ? pool : [me];
       const rs = await ctx.env.DB.prepare(
-        "SELECT * FROM tasks WHERE assigned_to = ?1 AND type IN ('listing_new','listing_revision')"
-      ).bind(me).all();
+        "SELECT * FROM tasks WHERE (assigned_to = ?1 OR (type = 'listing_new' AND assigned_to IN (" + shared.map((_, i) => '?' + (i + 2)).join(',') + "))) AND type IN ('listing_new','listing_revision')"
+      ).bind(me, ...shared).all();
       const listings = [], revisions = [];
       for (const t of (rs.results || [])) {
         const status = String(t.status || '');
         if (!withCompleted && status === 'Completed') continue;
         const rec = {
-          task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''),
+          task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''), assigned_to: String(t.assigned_to || ''),
           item_id: String(t.item_id || ''), title: String(t.title || ''), status,
           priority: String(t.priority || ''), deadline_pkt: String(t.deadline_pkt || ''),
           comments: String(t.comments || ''), submission_note: String(t.submission_note || ''),
