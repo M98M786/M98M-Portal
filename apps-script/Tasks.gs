@@ -7,7 +7,9 @@ const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research'
   /* 1 Oct: end_listing was CREATED by decisionAct (Listing decisions → END) but never registered here,
      so listingCreateTask_ refused it as 'unknown task type' — every END decision's task silently
      failed. replacement_order / refund_process carry the two new management-approved workflows. */
-  'end_listing', 'replacement_order', 'refund_process'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
+  /* 5 Oct: hunt_revision was created by the hunting and listing desks (which append straight to
+     the tab) but was never registered, so a manager raising one by hand was refused. */
+  'end_listing', 'replacement_order', 'refund_process', 'hunt_revision'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
 /* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
 const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
 const TASK_STATUS_PENDING = 'Pending';

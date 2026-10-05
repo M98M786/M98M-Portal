@@ -1025,11 +1025,22 @@ function listingMirrorRevisit_(account, itemId, fields, sheetRow, actor) {
 function listingHunterRevisionTask_(rec, hunter, note, byEmail) {
   if (!hunter || !hunter.email) return '';
   const itemId = String(rec.item_id || '');
+  const huntId = String((hunter && hunter.hunt_id) || '');
+  /* 5 Oct (owner: "he is not receiving revisions for hunting"). TWO faults lived here.
+     (1) The de-dupe compared item_id ALONE — and a listing that is not live yet carries NO item
+     id, so one open request with an empty id matched every later one and silently swallowed it:
+     a hunter with one open revision never received another, for any hunt, ever again.
+     (2) The task carried no hunt reference, so nothing could tie it back to the hunt and the
+     hunter's Revisions page — which reads hunts, not tasks — stayed empty while a real request
+     sat against them. De-dupe on the HUNT (the thing that is actually unique, and the same key
+     decideHunt's revision road uses, so one hunt never carries two open revisions whichever desk
+     raised it), and stamp that reference into the details. */
+  const ref = huntId ? 'hunt:' + huntId : (itemId ? 'item:' + itemId : 'listing-task:' + String(rec.task_id || ''));
   const already = readTab_('TASKS').some(function (t) {
     return String(t.type || '') === 'hunt_revision' &&
-      String(t.item_id || '') === itemId &&
       normalizeEmail(t.assigned_to) === normalizeEmail(hunter.email) &&
-      String(t.status || '') !== TASK_STATUS_COMPLETED;
+      String(t.status || '') !== TASK_STATUS_COMPLETED &&
+      String(t.details || '').indexOf(ref) >= 0;
   });
   if (already) return '';
   const stamp = now_();
@@ -1039,7 +1050,7 @@ function listingHunterRevisionTask_(rec, hunter, note, byEmail) {
     task_id: id, type: 'hunt_revision', account: String(rec.account || ''), item_id: itemId,
     title: 'hunt_revision — ' + title,
     details: 'Revision requested by ' + (byEmail || 'management') + ':\n' + String(note || '').slice(0, 800) +
-      (itemId ? '\nItem ID: ' + itemId : '') + '\nListing: ' + title,
+      (itemId ? '\nItem ID: ' + itemId : '') + '\nListing: ' + title + '\n[' + ref + ']',
     assigned_by: byEmail || '', assigned_to: hunter.email, priority: String(rec.priority || ''),
     deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), status: TASK_STATUS_PENDING,
     created_at: stamp, updated_at: stamp,

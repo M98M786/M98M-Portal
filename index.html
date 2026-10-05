@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261004-0106';
+var BUILD = '20261005-1835';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -12423,7 +12423,19 @@ VIEWS.dashboard = {
   var HRV_MGMT_ROLES = ['Management', 'Ops Head', 'Team Lead'];
   var HRV_ROLES = ['Product Hunter'].concat(HRV_MGMT_ROLES);
   var HRV_REVISION = 'REVISION REQUIRED';
-  var HRV = { byId: {}, seq: 0 };
+  var HRV = { byId: {}, mine: {}, seq: 0 };
+  /* 5 Oct (owner: "he is not receiving revisions for hunting"): a revision reaches a hunter by
+     TWO roads and this page only ever knew one of them.
+       · Management sends a hunt back at approval time → the hunt row turns REVISION REQUIRED and
+         appears below as a hunt.
+       · A lister, part-way through listing an already-approved hunt, needs more from the hunter →
+         a hunt_revision TASK is raised and the hunt row is deliberately left alone (it is approved
+         and being listed; flipping it back would drag it into the approval queue again).
+     The second road left this page saying "No revisions waiting" while a real request sat on the
+     hunter's task board, which is exactly what "not receiving revisions" looked like. Both roads
+     are shown now; the task-born ones carry a hunt reference so they can open the hunt itself. */
+  var HRV_TASK = 'hunt_revision';
+  var HRV_OPEN_STATUS = ['Pending', 'Working', 'Updated'];
 
   VIEW_CSS.push(
     '.hrv-wrap{display:flex;flex-direction:column;gap:12px}' +
@@ -12444,7 +12456,10 @@ VIEWS.dashboard = {
     '.hrv-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
     '.hrv-empty{text-align:center;padding:44px 16px;color:var(--text-2);display:flex;flex-direction:column;gap:6px}' +
     '.hrv-empty b{font-size:15px;color:var(--text)}' +
-    '.hrv-empty span{font-size:12.5px;color:var(--text-3)}'
+    '.hrv-empty span{font-size:12.5px;color:var(--text-3)}' +
+    '.hrv-sec{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:4px 0 2px}' +
+    '.hrv-ask::before{background:#8dc6f2}' +
+    '.hrv-kind-ask{color:#8dc6f2;border-color:rgba(141,198,242,.45)}'
   );
 
   function hrvStr(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
@@ -12462,6 +12477,70 @@ VIEWS.dashboard = {
   function hrvReason(rec) {
     var c = hrvStr(rec['Comments']);
     return c || 'Sent back for revision — open it and strengthen the case, then re-submit.';
+  }
+
+  /* The task's details are written for a human, not a parser: a header line naming who asked,
+     the note itself, then the listing's own facts and the machine reference. Keep the note. */
+  function hrvTaskReason(t) {
+    var lines = hrvStr(t.details).split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var l = hrvStr(lines[i]);
+      if (!l) { continue; }
+      if (i === 0 && /^(revision requested by|management sent this hunt back)/i.test(l)) { continue; }
+      if (/^(item id|listing|account)\s*:/i.test(l)) { continue; }
+      if (/^\[(hunt|item|listing-task):/i.test(l)) { continue; }
+      if (/^open product hunting/i.test(l)) { continue; }
+      out.push(l);
+    }
+    return out.join(' ') || 'More information is needed before this can be listed.';
+  }
+  function hrvTaskHuntId(t) {
+    var m = hrvStr(t.details).match(/hunt:([A-Za-z0-9_-]+)/);
+    return m ? m[1] : '';
+  }
+  function hrvTaskListing(t) {
+    var m = hrvStr(t.details).match(/^Listing:\s*(.+)$/m);
+    if (m) { return hrvStr(m[1]); }
+    return hrvStr(t.title).replace(/^hunt_revision\s*—\s*/, '');
+  }
+
+  /* A request raised from the listing desk. It is NOT a hunt waiting in the approval queue, so it
+     never offers "revise and resubmit" unless the hunt really is still revisable — an approved
+     hunt refuses a revise server-side, and offering a button that throws is worse than no button.
+     What it always offers is the answer road: the task on their own board. */
+  function hrvTaskCard(t) {
+    var huntId = hrvTaskHuntId(t);
+    var rec = huntId ? HRV.mine[huntId] : null;
+    var revisable = !!rec && (hrvStr(rec.approval_status) === '' || hrvStr(rec.approval_status) === HRV_REVISION);
+    if (rec) { HRV.byId[huntId] = rec; }
+    var listing = hrvTaskListing(t);
+    var asked = hrvStr(t.assigned_by).split('@')[0];
+    var due = fmtPkt(t.deadline_pkt, true) || '';
+    return '<div class="hrv-card hrv-ask">' +
+      '<div class="hrv-top">' +
+        '<div class="hrv-ttl">' + esc(listing || hrvStr(t.task_id)) +
+          '<span class="hrv-id mono">' + esc(hrvStr(t.task_id)) + (huntId ? ' · ' + esc(huntId) : '') + '</span></div>' +
+        '<span class="hrv-kind hrv-kind-ask">From the listing desk</span>' +
+      '</div>' +
+      '<div class="hrv-reason"><span class="lab">What they need from you</span>' +
+        '<div class="txt">' + esc(hrvTaskReason(t)) + '</div></div>' +
+      '<div class="hrv-meta">' +
+        (asked ? '<span>Asked by <b>' + esc(asked) + '</b></span>' : '') +
+        (hrvMgmt() && hrvStr(t.assigned_to) ? '<span>Hunter <b>' + esc(hrvStr(t.assigned_to).split('@')[0]) + '</b></span>' : '') +
+        (hrvStr(t.account) ? '<span>Account <b>' + esc(hrvStr(t.account)) + '</b></span>' : '') +
+        (due ? '<span>Due <b>' + esc(due) + '</b></span>' : '') +
+        '<span>Status <b>' + esc(hrvStr(t.status)) + '</b></span>' +
+      '</div>' +
+      '<div class="hrv-foot">' +
+        (revisable ? '<button class="btn-gold hrv-revbtn" data-hrvid="' + hrvAttr(huntId) + '">Revise this hunt</button>' : '') +
+        '<button class="minibtn" data-hrvtask="' + hrvAttr(hrvStr(t.task_id)) + '">Answer it on My tasks</button>' +
+        '<span class="hu-hint" style="margin:0">' +
+          (revisable ? 'The hunt is still open — fixing it there answers this too.'
+            : 'This hunt is already approved and being listed, so add what is missing and submit the task.') +
+        '</span>' +
+      '</div>' +
+    '</div>';
   }
 
   function hrvCard(rec) {
@@ -12493,6 +12572,17 @@ VIEWS.dashboard = {
   }
 
   function hrvWire(box) {
+    var jump = box.querySelectorAll('button[data-hrvtask]'), j;
+    for (j = 0; j < jump.length; j++) {
+      (function (b) {
+        b.onclick = function () {
+          /* The task board is the place to answer: it carries start, note and submit, and this
+             request is due within the day so it sits at the top of that deadline-sorted list. */
+          toast('Task ' + b.getAttribute('data-hrvtask') + ' — near the top of My tasks.');
+          location.hash = 'tasks';
+        };
+      })(jump[j]);
+    }
     var btns = box.querySelectorAll('button[data-hrvid]'), i;
     for (i = 0; i < btns.length; i++) {
       (function (b) {
@@ -12516,6 +12606,20 @@ VIEWS.dashboard = {
     }
   }
 
+  /* The open hunt_revision tasks — the listing desk's road. A hunter sees their own (myTasks);
+     Management and the Team Lead see everyone's (allTasksEngine, management-scoped server-side).
+     Never fatal: a failure here leaves the hunt-row list standing on its own. */
+  function hrvTaskCall(mgmt) {
+    var call = mgmt
+      ? api('allTasksEngine', { scope: 'open' }).catch(function () { return api('myTasks', {}); })
+      : api('myTasks', {});
+    return call.then(function (d) {
+      return ((d && d.tasks) || []).filter(function (t) {
+        return hrvStr(t.type) === HRV_TASK && HRV_OPEN_STATUS.indexOf(hrvStr(t.status)) >= 0;
+      });
+    }).catch(function () { return []; });
+  }
+
   function hrvLoad() {
     var box = document.getElementById('hrvBody');
     if (!box) { return; }
@@ -12523,25 +12627,48 @@ VIEWS.dashboard = {
     var mgmt = hrvMgmt();
     /* Mgmt/lead: every revision across all hunters (huntQueue's 'revision' filter). A hunter: only
        their own — huntQueue is not hunter-scoped, so myHunts (own rows) filtered to the revision
-       status, the same way the hunting page's "My hunts" does it. */
+       status, the same way the hunting page's "My hunts" does it. A hunter's own full list is kept
+       as well, so a task-born request can be matched to its hunt and opened for revision. */
     var call = mgmt
       ? api('huntQueue', { status: 'revision' }).then(function (d) { return (d && d.hunts) || []; })
       : api('myHunts', { status: 'all' }).then(function (d) {
-          return ((d && d.hunts) || []).filter(function (r) { return hrvStr(r.approval_status) === HRV_REVISION; });
+          var all = (d && d.hunts) || [];
+          HRV.mine = {};
+          all.forEach(function (r) { HRV.mine[hrvStr(r.hunt_id)] = r; });
+          return all.filter(function (r) { return hrvStr(r.approval_status) === HRV_REVISION; });
         });
     box.innerHTML = '<div class="spinner"></div>';
-    call.then(function (hunts) {
+    Promise.all([call, hrvTaskCall(mgmt)]).then(function (both) {
       if (seq !== HRV.seq) { return; }
+      var hunts = both[0] || [];
+      /* A hunt that is already showing as a sent-back hunt needs no second card for its task. */
+      var shown = {};
+      hunts.forEach(function (r) { shown[hrvStr(r.hunt_id)] = 1; });
+      var tasks = (both[1] || []).filter(function (t) {
+        var h = hrvTaskHuntId(t);
+        return !(h && shown[h]);
+      });
       HRV.byId = {};
-      if (STATE.counts) { STATE.counts.huntRevisions = hunts.length; }
+      var total = hunts.length + tasks.length;
+      if (STATE.counts) { STATE.counts.huntRevisions = total; }
+      if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (eB) {} }
       var cnt = document.getElementById('hrvCount');
-      if (cnt) { cnt.textContent = hunts.length ? (hunts.length + (mgmt ? ' across the team' : ' waiting on you')) : 'none'; }
-      if (!hunts.length) {
+      if (cnt) { cnt.textContent = total ? (total + (mgmt ? ' across the team' : ' waiting on you')) : 'none'; }
+      if (!total) {
         box.innerHTML = '<div class="hrv-empty"><b>No revisions waiting.</b>' +
           '<span>' + (mgmt ? 'Nothing is currently sent back to any hunter.' : 'Nothing of yours needs changes right now — nice.') + '</span></div>';
         return;
       }
-      box.innerHTML = '<div class="hrv-wrap">' + hunts.map(hrvCard).join('') + '</div>';
+      var h = '<div class="hrv-wrap">';
+      if (hunts.length) {
+        if (tasks.length) { h += '<div class="hrv-sec">Sent back by Management · ' + hunts.length + '</div>'; }
+        h += hunts.map(hrvCard).join('');
+      }
+      if (tasks.length) {
+        if (hunts.length) { h += '<div class="hrv-sec">Asked for by the listing desk · ' + tasks.length + '</div>'; }
+        h += tasks.map(hrvTaskCard).join('');
+      }
+      box.innerHTML = h + '</div>';
       hrvWire(box);
     }).catch(function (e) {
       if (seq !== HRV.seq) { return; }
