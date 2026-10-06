@@ -362,6 +362,74 @@ function escalateStaleSubmissions() {
 // ---------- helpers ----------
 function tasksSheet_() { return getPortalDb_(false).getSheetByName('TASKS'); }
 
+/* ---------- retire the 72-hour rung's leftovers (owner, 6 Oct) ----------
+ * "Listers still receiving alerts for 72 hours revision — delete all 72 hours previous pending
+ * tasks, and go with 7 days revision." The rung itself was retired on 1 Oct (the ladder is 7 days
+ * then 14, and ladderTaskCreate_ has labelled R72 '7-day revision' ever since), but the tasks it
+ * had ALREADY raised stayed open on the listers' boards — overdue since mid-September — so the
+ * overdue nag kept ringing them for work nobody wants done any more.
+ *
+ * This removes exactly those rows: type listing_revision, titled for the retired rung, not
+ * completed. The row is DELETED rather than marked Completed, because completing it would credit
+ * a lister with work they never did and feed the performance counts a lie. Every deletion is
+ * written to the activity log first, so the audit trail survives the row. The engine mirror —
+ * which is what the boards actually read — is reconciled at the end, and its own sweep retires
+ * anything the push no longer carries, so the boards clear in the same run.
+ *
+ * Idempotent: run it twice and the second run finds nothing. Run the DryRun twin first. */
+function retire72hRevisionTasksDryRun() { return retire72hTasks_(true); }
+function retire72hRevisionTasks() { return retire72hTasks_(false); }
+
+function retire72hTasks_(dryRun) {
+  const sh = tasksSheet_();
+  const lr = sh.getLastRow(), lc = sh.getLastColumn();
+  if (lr < 2) return 'TASKS is empty';
+  const head = sh.getRange(1, 1, 1, lc).getValues()[0].map(String);
+  const iType = head.indexOf('type'), iTitle = head.indexOf('title'), iStatus = head.indexOf('status');
+  const iId = head.indexOf('task_id'), iTo = head.indexOf('assigned_to'), iItem = head.indexOf('item_id');
+  if (iType < 0 || iTitle < 0 || iStatus < 0 || iId < 0) throw new Error('TASKS headers are not what this expects');
+  const vals = sh.getRange(2, 1, lr - 1, lc).getValues();
+  /* "72-hour revision", "72 hours revision", "72hour revision" — every spelling the rung ever
+     wrote. The 10-day and 20-day rungs were retired too; they are COUNTED here and left alone,
+     because the owner asked for the 72-hour ones and a leftover is not mine to delete unasked. */
+  const re72 = /^\s*72\s*[-\s]*hours?\s+revision\b/i;
+  const reOld = /^\s*(10|20)\s*[-\s]*days?\s+revision\b/i;
+  const hits = [], otherRungs = [];
+  for (let i = 0; i < vals.length; i++) {
+    const r = vals[i];
+    if (String(r[iType]) !== 'listing_revision') continue;
+    if (String(r[iStatus]) === TASK_STATUS_COMPLETED) continue;
+    const title = String(r[iTitle] || '');
+    const rec = { row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''),
+      item: String(r[iItem] || ''), status: String(r[iStatus] || ''), title: title.slice(0, 60) };
+    if (re72.test(title)) hits.push(rec);
+    else if (reOld.test(title)) otherRungs.push(rec);
+  }
+  const alsoNote = otherRungs.length
+    ? ' · ALSO FOUND (left alone, say the word): ' + otherRungs.length + ' open 10/20-day revision task(s)' : '';
+  if (!hits.length) return 'nothing to retire — no open 72-hour revision tasks' + alsoNote;
+  const who = {};
+  hits.forEach(function (h) { who[h.to] = (who[h.to] || 0) + 1; });
+  const summary = hits.length + ' open 72-hour revision task(s) · ' +
+    Object.keys(who).map(function (e) { return e.split('@')[0] + ' ' + who[e]; }).join(', ') + alsoNote;
+  if (dryRun) return 'DRY RUN · would delete ' + summary + ' · items: ' +
+    hits.map(function (h) { return h.item || h.task_id; }).join(', ').slice(0, 900);
+
+  /* the log is written BEFORE the rows go, so nothing is lost if the deletion half-runs */
+  hits.forEach(function (h) {
+    try { logActivity_('system', 'RETIRE_72H_TASK', h.task_id, h.status, 'deleted',
+      (h.item || '') + ' · ' + h.to + ' · retired rung (owner, 6 Oct)'); } catch (e) {}
+  });
+  for (let i = hits.length - 1; i >= 0; i--) sh.deleteRow(hits[i].row);   // bottom-up: earlier rows keep their numbers
+  SpreadsheetApp.flush();
+
+  let mirror;
+  try { mirror = String(pushEngineTasks()); }
+  catch (e) { mirror = 'MIRROR NOT RECONCILED — ' + String((e && e.message) || e) + ' (it self-heals on the next task sync)'; }
+  try { logActivity_('system', 'RETIRE_72H_DONE', '', '', String(hits.length), mirror.slice(0, 180)); } catch (e) {}
+  return 'deleted ' + summary + ' · ' + mirror;
+}
+
 function taskFind_(sh, taskId) {
   const id = String(taskId || '').trim();
   if (!id) throw new Error('task_id required');
