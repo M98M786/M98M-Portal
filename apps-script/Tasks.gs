@@ -377,8 +377,8 @@ function tasksSheet_() { return getPortalDb_(false).getSheetByName('TASKS'); }
  * anything the push no longer carries, so the boards clear in the same run.
  *
  * Idempotent: run it twice and the second run finds nothing. Run the DryRun twin first. */
-function retire72hRevisionTasksDryRun() { return retire72hTasks_(true); }
-function retire72hRevisionTasks() { return retire72hTasks_(false); }
+function retire72hRevisionTasksDryRun() { const r = retire72hTasks_(true); Logger.log(r); return r; }
+function retire72hRevisionTasks() { const r = retire72hTasks_(false); Logger.log(r); return r; }
 
 function retire72hTasks_(dryRun) {
   const sh = tasksSheet_();
