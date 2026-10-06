@@ -87,7 +87,8 @@
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
-      $('glRefresh').onclick = function () { glLoad(); };
+      /* Refresh is a deliberate ask: it always sweeps the shared desk too. */
+      $('glRefresh').onclick = function () { GL_MERGED_AT = 0; glLoad(); };
       /* One delegated listener on the container (which survives every repaint): everything typed
          into a card is remembered, so no refresh or background merge can take it away. */
       var body = $('glBody');
@@ -129,14 +130,19 @@
 
   var GL_SEQ = 0;
   var GL_SHOWN = [];             // the drafts currently on screen, so an append can recount the tiles
+  var GL_MERGED_AT = 0;          // when the shared-desk sweep last ran (see glSharedMerge)
 
-  function glLoad() {
+  /* `quiet` = this reload follows an action the publisher just took (made one live, sent one
+     back). The desk is refreshed from the fast engine mirror only — the shared-desk sweep is
+     skipped, because it costs a FULL read of the tasks sheet and the one thing that cannot have
+     changed in the last half-second is which drafts the OTHER publisher is holding. */
+  function glLoad(quiet) {
     var seq = ++GL_SEQ;
     api('myListingWork', {}).then(function (d) {
       if (seq !== GL_SEQ) { return; }
       var all = (d && d.listings) || [];
       glPaint(all);
-      glSharedMerge(seq, all);
+      if (!quiet) { glSharedMerge(seq, all); }
     }).catch(function (e) {
       setHTML('glTiles', '<div class="hu-hint">Could not load: ' + esc(e.message) + '</div>');
       setHTML('glBody', '');
@@ -151,6 +157,11 @@
     if (GL_PUBLISHERS.indexOf(me) < 0) { return; }
     var pooled = all.some(function (t) { return t && t.assigned_to !== undefined; });
     if (pooled) { return; }
+    /* 6 Oct: this sweep reads the WHOLE tasks sheet — the slowest call the portal makes. Once a
+       minute is plenty for "has the other publisher left anything?", and it kept the desk from
+       paying that cost again on every single refresh. */
+    if (Date.now() - GL_MERGED_AT < 60000) { return; }
+    GL_MERGED_AT = Date.now();
     var note = $('glShared');
     if (note) { note.textContent = 'checking the shared desk for drafts held by the other publisher…'; }
     api('goLiveDrafts', {}).then(function (d2) {
@@ -288,7 +299,7 @@
             GL_DONE[id] = true;   // confirmed live — keep it off the desk even while the mirror lags
             delete GL_DRAFT[id];  // it is on eBay now; nothing left to remember
             toast('Live ✓ — campaign, supplier and 7-day tasks created.');
-            glLoad();
+            glLoad(true);
           }).catch(function (e) {
             var msg = String((e && e.message) || '');
             /* The sheet backend is slow, not broken: it almost always FINISHES entering the Item
@@ -298,7 +309,7 @@
             if (/overloaded|timeout|did not answer|taking long|aborted/i.test(msg)) {
               btn.textContent = 'Finishing on the server…';
               toast('Google is slow right now — the Item ID is finishing on the server. Refreshing to confirm…');
-              setTimeout(glLoad, 7000);
+              setTimeout(function () { glLoad(true); }, 7000);
             } else {
               btn.disabled = false; btn.textContent = 'Make live — enter Item ID';
               toast('NOT entered — ' + msg);
@@ -316,7 +327,7 @@
         api('goLiveReturn', { task_id: id, note: msg }).then(function (r) {
           delete GL_DRAFT[id];
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
-          glLoad();
+          glLoad(true);
         }).catch(function (e) { btn.disabled = false; toast(e.message); });
       };
     });
