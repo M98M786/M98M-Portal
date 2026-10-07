@@ -1952,6 +1952,8 @@ $('avatar').onclick=signOut;
    7-day portal session expires QUIETLY and every engine call then answers 'auth' while the tab
    looks signed-in. One expired-session heal per 10 minutes: drop the dead session and reload —
    boot's silent Google sign-in re-mints a fresh one without the person touching anything. */
+/* the engine's office-IP gate (7 Oct) answers with this sentence — a refusal of the PLACE, not the person */
+function isOfficeRefusal(e){ return !!(e && /only opens from the office/i.test(String(e.message||''))); }
 function authSelfHeal(){
   try{
     var last = Number(sessionStorage.getItem('m98m:authHeal') || 0);
@@ -2121,6 +2123,11 @@ function bootSignIn(cfg){
         if(e && e.message === 'auth'){
           psessClear(); STATE.session = null; STATE.user = null;
           show('loginScreen'); trySilentSignIn();
+        } else if(isOfficeRefusal(e)){
+          /* 7 Oct: a stored session opened from outside the office — the cached paint must not
+             stand while every call refuses; back to the sign-in screen with the reason */
+          psessClear(); sessClear(); STATE.session = null; STATE.idToken = null; STATE.user = null;
+          show('loginScreen'); $('loginStatus').className='auth-status err'; $('loginStatus').textContent = e.message;
         }
       });
       /* quietly fetch a Google credential too — the sheet backend still likes one while its
@@ -2136,6 +2143,7 @@ function bootSignIn(cfg){
         /* 2 Sept: an engine blip at boot (worker mid-deploy, slow patch) is NOT a refusal —
            clearing the token here logged people out for nothing. Only 'auth' clears; anything
            transient retries once, then leaves the token for the next reload. */
+        if(isOfficeRefusal(e)){ sessClear(); STATE.idToken=null; $('loginStatus').className='auth-status err'; $('loginStatus').textContent = e.message; return; }
         if(e && /auth|denied|not approved/i.test(String(e.message||''))){ sessClear(); STATE.idToken=null; trySilentSignIn(); return; }
         $('loginStatus').className='auth-status info';
         $('loginStatus').innerHTML='<div class="spinner"></div>The server hiccupped — retrying…';

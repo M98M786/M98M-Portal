@@ -31,6 +31,25 @@ const MGMT_ROLES = ['Management', 'Ops Head'];
 /* 4 Oct (owner): the go-live desk is shared between these people (portal_config go_live_publishers
    overrides; this is the fallback) — each sees every waiting listing draft and may make it live. */
 const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+/* 7 Oct (owner): "no one other than Zaid, Hasib and me can sign in from anywhere other than the
+   office's IP address — advertising too." Every signed-in call (the portal AND the advertising
+   portal ride this same engine) must arrive from OFFICE_IP unless the email is on this list.
+   OFFICE_IP = dashboard plain var, comma list of exact IPs; an entry ending in '.' or ':' is a
+   prefix (an IPv6 /64, a small range). Left UNSET the gate stays open, so a deploy can never
+   lock the office itself out before the address is typed in. */
+const IP_FREE_EMAILS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+class LocationError extends Error {}
+function officeGate(env, req, email) {
+  const allow = String(env.OFFICE_IP || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!allow.length) return;
+  if (IP_FREE_EMAILS.indexOf(String(email || '').toLowerCase()) >= 0) return;
+  const ip = String(req.headers.get('cf-connecting-ip') || '').trim();
+  for (const a of allow) {
+    if (a === ip) return;
+    if (/[.:]$/.test(a) && ip.indexOf(a) === 0) return;
+  }
+  throw new LocationError('The portal only opens from the office. This sign-in came from ' + (ip || 'an unknown address') + ' — go to the office, or ask Sir Hasib or Zaid if that address should be allowed.');
+}
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
@@ -67,9 +86,11 @@ export default {
         if (!(await tfKeyOk(env, body.key))) throw new AuthError('auth');
       } else if (route.auth !== 'public') {
         ctx2 = await authorize(env, String(body.idToken || ''), String(body.session || ''));
+        officeGate(env, req, ctx2.email);
         if (route.auth === 'mgmt' && MGMT_ROLES.indexOf(ctx2.user.role) < 0 && !ctx2.user.super) throw new AuthError('auth');
       }
       ctx2.waitUntil = (pr) => { try { ctx.waitUntil(pr); } catch (e) {} };   // lets an action finish background work after answering
+      ctx2.ip = String(req.headers.get('cf-connecting-ip') || '');
       try { ctx2.ua = String(req.headers.get('user-agent') || '').replace(/Mozilla\/5\.0 |AppleWebKit\/\S+ |\(KHTML, like Gecko\) /g, '').slice(0, 70); } catch (e) { ctx2.ua = ''; }
       const t0 = Date.now();
       /* SPEED (Hasib, night order): the heavy read boards recomputed full scans on every
@@ -138,14 +159,17 @@ export default {
     } catch (e) {
       /* daily security telemetry: every refused call ticks a counter the nightly
          securitySweep reads — a spike means someone is probing the portal */
-      if (e instanceof AuthError) {
+      if (e instanceof AuthError || e instanceof LocationError) {
         try {
           const k = 'authfail:' + ukDate('');
           const c = Number(await env.HOT.get(k)) || 0;
           await env.HOT.put(k, String(c + 1), { expirationTtl: 172800 });
         } catch (e2) {}
       }
-      const msg = e instanceof AuthError ? 'auth'
+      /* a LocationError is a signed-in person in the wrong place: the message is shown as-is and
+         is NOT 'auth', so the client never treats it as a lapsed session and loops on re-login */
+      const msg = e instanceof LocationError ? String(e.message)
+        : e instanceof AuthError ? 'auth'
         : String(e && e.message || e).startsWith('SAY: ') ? String(e.message).slice(5)
         : 'request failed';
       if (msg === 'request failed') console.log('ERR', action, String(e && e.stack || e).slice(0, 500));
@@ -11443,7 +11467,7 @@ const ROUTES = {
         const r = await ctx.env.DB.prepare('SELECT COUNT(*) AS n FROM ' + t).first();
         counts[t] = r ? r.n : 0;
       }
-      return { sync: sync.results || [], counts };
+      return { sync: sync.results || [], counts, caller_ip: ctx.ip || '', office_ip: String(ctx.env.OFFICE_IP || '') };
     },
   },
 
