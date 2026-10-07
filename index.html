@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261007-1745';
+var BUILD = '20261007-2204';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -13442,15 +13442,44 @@ VIEWS.dashboard = {
     clearTimeout(huCalcTimer);
     huCalcTimer = setTimeout(huCalcNow, 450);
   }
+  /* 8 Oct (night audit): the guard below was huFirstNumber, which digs the FIRST number out of
+     anything — "12.50 + £4" gives 12.5 — while the server parses the WHOLE string (Brain.gs
+     brainParseAmount_: strip £ $ , and spaces, then either a strict lo-hi range or Number() on all
+     that is left). Every value the one accepted and the other refused fired a doomed call on each
+     450 ms debounce tick and put the server's raw "soldFor must be a number" in front of the
+     hunter mid-type: 22 of those in 30 h, and the same again as ERROR rows in ACTIVITY_LOG.
+     Mirror the server's rule here instead, so a half-typed cell simply leaves the calculator on
+     its own hint. The value itself is still sent RAW, so ranges keep working exactly as before. */
+  function huServerAmount(v) {
+    if (v === null || v === undefined || v === '') { return NaN; }
+    var s = String(v).replace(/[£$,\s]/g, '');
+    if (!s) { return NaN; }
+    var m = s.match(/^(\d*\.?\d+)-(\d*\.?\d+)$/);
+    if (m) {
+      var lo = Number(m[1]), hi = Number(m[2]);
+      return (isFinite(lo) && isFinite(hi)) ? Math.max(lo, hi) : NaN;
+    }
+    var n = Number(s);
+    return isFinite(n) ? n : NaN;
+  }
+
   function huCalcNow() {
     var box = huEl('huCalcBody');
     if (!box) { return; }
     var sell = huValue('E-Bey Caluclator + £4');
-    if (huFirstNumber(sell) === null) { huCalcIdle('Type a source price and an intended sell price — the projection appears here.'); return; }
+    var src = huValue('Source Price');
+    /* > 0 rather than isFinite: brainRequireSoldFor_ refuses zero and negatives too. */
+    if (!(huServerAmount(sell) > 0)) { huCalcIdle('Type a source price and an intended sell price — the projection appears here.'); return; }
+    /* sourcePrice is OPTIONAL server-side (brainOptionalAmount_ lets blank through as 0) — so only
+       a filled-in cell that cannot be read is worth stopping for, and say which cell it is. */
+    if (huStr(src) !== '' && !isFinite(huServerAmount(src))) {
+      huCalcIdle('That source price is not a number the calculator can read — try 3.50, or a range like 3.50-4.20.');
+      return;
+    }
     var seq = ++huCalcSeq;
     api('calcProjectedProfit', {
       soldFor: sell,
-      sourcePrice: huValue('Source Price'),
+      sourcePrice: src,
       shipping: huStr(huEl('huShip') ? huEl('huShip').value : ''),
       category: huValue('Category')
     }).then(function (r) {
