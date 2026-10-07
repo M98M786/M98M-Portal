@@ -1541,8 +1541,26 @@ async function stockWatch(env) {
   const rs = await env.DB.prepare(
     "SELECT item_id, account, title FROM items_api WHERE status = 'ACTIVE' AND qty <= 0 LIMIT 40"
   ).all();
+  /* 8 Oct (Night Watch): this watch rides the HOURLY slot and its ref is day-stamped, so an item
+     that stays at zero stock re-rang every single hour — 22 copies of the SAME (recipient, ref)
+     bell on 7 Oct, per item, and 6,814 bells in the day across 2,860 real events. That is how the
+     tray stopped being readable: Husnain was carrying 31,332 unread, Zain 29,788.
+     queueNotify's LETTER half already refuses a second row for the same (recipient, ref) — "Same
+     (recipient, ref) never files twice" — but the BELL half goes through notifInsert, whose
+     INSERT OR IGNORE is keyed on as_id, and every engine-raised bell passes as_id ''. So the
+     letter filed once while the bell rang all day; alert_log is therefore the honest record of
+     what has already gone out. Ask it, and skip the items it has already covered today.
+     Deliberately per ITEM, not per job-run (darkAccountWatch's whole-job cursor would have been
+     wrong here): a listing that empties at 14:00 still rings within the hour, which is the entire
+     point of the watch — nothing rings twice for the same day. */
+  const told = new Set();
+  const seen = await env.DB.prepare(
+    'SELECT DISTINCT ref FROM alert_log WHERE ref LIKE ?1'
+  ).bind('engine:oos:%:' + today + '%').all().catch(() => null);
+  for (const s of ((seen && seen.results) || [])) told.add(String(s.ref));
   for (const r of (rs.results || [])) {
     const key = 'engine:oos:' + r.item_id + ':' + today;
+    if (told.has(key) || told.has(key + ':m') || told.has(key + ':a')) continue;
     const msg = r.account + ' · "' + String(r.title || '').slice(0, 90) + '" (' + r.item_id +
       ') shows ZERO stock on eBay while still ACTIVE - buyers see "out of stock". Update the ' +
       'quantity (or end it) now; every hour empty is sales handed to a competitor.';
