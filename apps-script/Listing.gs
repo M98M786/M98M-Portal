@@ -656,6 +656,73 @@ function releaseCampaignAfterRevision() {
   return 'released ' + count + ' campaign_set task(s)';
 }
 
+/** 9 Oct (owner): the moment a listing_revision is APPROVED, the Advertising Manager gets the
+ * campaign work for the revised listing. If the item still carries an OPEN campaign_set (the
+ * go-live one, §8.0.3 — "fires when the revision is approved"), that task is rung rather than
+ * duplicated; otherwise a fresh campaign_set is created and routed like every advertising task
+ * (listingPickForRole_ → CONFIG adv_primary_*: Zain until the dated switch, then the primary).
+ * Called from actionApproveTask_; returns what it did so the desk can say so. */
+function listingCampaignAfterRevision_(rec, ctx) {
+  const itemId = String(rec.item_id || '').trim();
+  const account = String(rec.account || '');
+  const who = ctx && ctx.user ? (ctx.user.name || ctx.ident.email) : 'management';
+  if (!itemId) {
+    notifyManagement_('Task assigned',
+      '🟠 Revision "' + String(rec.title || '').slice(0, 50) + '" (' + account + ') was approved but carries NO item id — no campaign task could be raised. Create one by hand if the listing is live.',
+      'task:' + String(rec.task_id));
+    return { to: '', note: 'no item id — nothing raised' };
+  }
+  const changed = String(rec.submission_note || '').trim();
+  const all = listingTasksSlim_();
+
+  /* an OPEN campaign_set for this item = the go-live task still waiting on this very approval */
+  let open = null;
+  all.forEach(function (t) {
+    if (open) return;
+    if (String(t.type) === 'campaign_set' && String(t.item_id || '').trim() === itemId &&
+        String(t.status || '') !== TASK_STATUS_COMPLETED) open = t;
+  });
+  if (open) {
+    notify_(String(open.assigned_to || ''), 'Task assigned',
+      '🟠 Campaign window OPEN · ' + account + ' · ' + itemId + ' — the revision was approved by ' + who +
+      (changed ? '. What changed: ' + changed.slice(0, 250) : '') + ' → set the campaign now (My tasks).',
+      'revcamp:' + String(rec.task_id));
+    logActivity_(ctx && ctx.ident ? ctx.ident.email : 'system', 'REVISION_CAMPAIGN', String(rec.task_id), '', String(open.task_id), account + ' · ' + itemId + ' · open task rung');
+    return { task_id: String(open.task_id), to: String(open.assigned_to || ''), existing: true };
+  }
+
+  const adv = listingPickForRole_('Advertising Manager', '', all, 'campaign_set');
+  if (!adv) {
+    notifyManagement_('Task assigned',
+      '🔴 Revision approved on ' + itemId + ' (' + account + ') but there is NO approved Advertising Manager to take the campaign task → approve or assign one.',
+      'task:' + String(rec.task_id));
+    return { to: '', note: 'no Advertising Manager approved' };
+  }
+  const listing = String(rec.title || '').replace(/^.*?—\s*Item ID\s*\d+\s*/i, '').trim();
+  const tid = listingCreateTask_(tasksSheet_(), {
+    type: 'campaign_set', account: account, item_id: itemId,
+    title: 'campaign_set — Item ID ' + itemId + ' (after revision)',
+    details: listingLines_([
+      'Item ID: ' + itemId,
+      listing && listing !== rec.title ? 'Listing: ' + listing : '',
+      'The listing was REVISED by ' + String(rec.assigned_to || 'its lister') + ' and the revision was approved by ' + who + '.',
+      changed ? 'What changed: ' + changed.slice(0, 600) : '',
+      'Set or re-check the campaign for the revised listing — the title, keywords, photos or price may have moved.',
+      '[REVCAMP:' + String(rec.task_id) + ']',
+    ].filter(String)),
+    assigned_by: ctx && ctx.ident ? ctx.ident.email : 'system:revision', assigned_to: adv.email,
+    priority: 'high', deadline_pkt: taskPktIso_(new Date(Date.now() + 24 * 3600000)), stamp: now_(),
+  });
+  if (!tid) return { to: '', note: 'account is paused — no automated task' };
+  try { engineTaskPush_(tid); } catch (e) {}
+  notify_(adv.email, 'Task assigned',
+    '🔵 Campaign after revision · ' + account + ' · ' + itemId + ' — the listing was revised and management approved it' +
+    (changed ? '. What changed: ' + changed.slice(0, 250) : '') + ' → set or adjust the campaign (My tasks, due in 24h).',
+    'task:' + tid);
+  logActivity_(ctx && ctx.ident ? ctx.ident.email : 'system', 'REVISION_CAMPAIGN', String(rec.task_id), '', tid, account + ' · ' + itemId + ' → ' + adv.email);
+  return { task_id: tid, to: adv.email, existing: false };
+}
+
 // ---------- TASKS helpers ----------
 /** Appends a TASKS row in DB_TABS order. The caller holds the script lock; the type is checked
  * against the §7 enum, and every auto-task starts Pending like any assigned task. */

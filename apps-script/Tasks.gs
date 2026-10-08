@@ -179,7 +179,18 @@ function actionSubmitTask_(payload, ctx) {
   const msg = '🔵 ' + ctx.user.name + ' submitted "' + rec.title + '"' +
     (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
     ' for approval — took ' + total + ' min. Note: ' + note.slice(0, 200) + ' → approve or return it on the Approvals desk.';
-  if (approver) notify_(approver, 'Task submitted', msg, 'task:' + rec.task_id);
+  /* 9 Oct (owner): a revised listing goes to MANAGEMENT for approval, on its own desk. Two
+     faults hid these before: a system-raised task (assigned_by 'system:ladder' and friends)
+     belled its "assigner" — a name that reads no notifications — and nothing said where to
+     decide. Every submitted listing_revision now rings management with the desk's name. */
+  const approverReal = approver && approver.indexOf('system:') !== 0 ? approver : '';
+  if (String(rec.type) === 'listing_revision') {
+    notifyManagement_('Revision awaiting approval',
+      '🟣 ' + ctx.user.name + ' revised "' + String(rec.title || '').slice(0, 60) + '"' +
+      (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
+      ' — what changed: ' + note.slice(0, 250) + ' → approve or return it on the Revision approval desk (Listings). Approving raises the campaign task by itself.',
+      'task:' + rec.task_id);
+  } else if (approverReal) notify_(approverReal, 'Task submitted', msg, 'task:' + rec.task_id);
   else notifyManagement_('Task submitted', msg, 'task:' + rec.task_id);
   return { task_id: rec.task_id, status: TASK_STATUS_SUBMITTED, submitted_at: stamp };
 }
@@ -289,10 +300,19 @@ function actionApproveTask_(payload, ctx) {
   // written) must still return success; the chain can be re-raised by hand.
   try { taskChainNext_(rec, ctx); } catch (e) { try { logActivity_('system', 'CHAIN_SPAWN_FAIL', String(rec.task_id), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} }
 
+  /* 9 Oct (owner): "when management approves a revised listing, create the campaign_set task for
+     the Advertising Manager." Lives HERE — on the approval itself, not on any one screen — so the
+     rule holds whichever desk the approval came from. Best-effort after the approval is written. */
+  let campaign = null;
+  if (String(rec.type) === 'listing_revision') {
+    try { campaign = listingCampaignAfterRevision_(Object.assign({}, rec, { approved_by: ctx.ident.email }), ctx); }
+    catch (e) { try { logActivity_('system', 'REVCAMP_FAIL', String(rec.task_id), '', '', String(e && e.message || e).slice(0, 120)); } catch (e2) {} }
+  }
+
   notify_(rec.assigned_to, 'Task approved',
     '🔵 "' + rec.title + '"' + (rec.account ? ' · ' + rec.account : '') + (rec.item_id ? ' · ' + rec.item_id : '') +
     ' — approved by ' + (ctx.user.name || ctx.ident.email) + '. Submitted → Completed. Nothing more to do on this one.', 'task:' + rec.task_id);
-  return { task_id: rec.task_id, status: TASK_STATUS_COMPLETED, decided_at: stamp };
+  return { task_id: rec.task_id, status: TASK_STATUS_COMPLETED, decided_at: stamp, campaign: campaign || undefined };
 }
 
 function actionReturnTask_(payload, ctx) {
