@@ -11282,7 +11282,6 @@ async function truthTier1(env) {
   } catch (e) { /* recovery tables appear with the truth schema */ }
   /* money: yesterday per account — sums + per-row T = R − S and the ported formulas */
   const y = pkToday(-1);
-  const booksMissing = [];
   for (const acct of accounts) {
     const A = await metricMoney(env, acct, y, y);
     const rs = await env.DB.prepare('SELECT vals FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, y).all();
@@ -11315,7 +11314,7 @@ async function truthTier1(env) {
     out.push({ metric_id: 'ACTUAL_PROFIT', scope_key: acct + ':' + y, shown: A.ACTUAL_PROFIT, recomputed: round2(bT), delta: round2(dT), status: checked === 0 ? 'STALE' : (dT <= 0.05 && bad === 0 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s), ' + bad + ' formula fail(s)' + (ts2 !== null ? ', totals row used' : ''), next_run_at: next });
     out.push({ metric_id: 'VAT_TO_HMRC', scope_key: acct + ':' + y, shown: A.VAT_TO_HMRC, recomputed: round2(bS), delta: round2(Math.abs(round2(bS) - A.VAT_TO_HMRC)), status: checked === 0 ? 'STALE' : (Math.abs(round2(bS) - A.VAT_TO_HMRC) <= 0.05 ? 'PASS' : 'FAIL'), method: 'SHEET_RECOMPUTE', evidence: checked + ' row(s)', next_run_at: next });
     const bm1 = bookMissingRow(acct, y, A, checked, next);
-    if (bm1) { out.push(bm1); booksMissing.push(acct + ' (' + bm1.recomputed + ' order(s))'); }
+    if (bm1) out.push(bm1);
     /* the sheet disagreeing with itself is REPORTED, never silently resolved (owner's 92 case) */
     if (ts2 !== null && Math.abs(round2(tt2) - round2(t2)) > 0.05) {
       out.push({ metric_id: 'TOTALS_VS_ITEMS', scope_key: acct + ':' + y, shown: round2(tt2), recomputed: round2(t2),
@@ -11356,15 +11355,32 @@ async function truthTier1(env) {
      a time and only a person reading it found the gap. One bell a day to Management, guarded by
      the same day-cursor darkAccountWatch uses (notif_live has no unique ref index, so the guard
      IS the dedupe), says the account and the orders it is missing. */
-  if (booksMissing.length) {
-    const seen = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'bookMissingBell' AND account = ''").first();
-    if (!seen || String(seen.cursor) !== y) {
-      await notifyRole(env, 'Management', 'Day book not written: ' + y,
-        booksMissing.join(', ') + ' — eBay recorded orders on ' + y + ' but the day tab does not exist, so profit, ' +
-        'VAT and the margin for that day rest on nothing. Until the tab is written the truth board can only ' +
-        'report the day as unverified.', 'engine:bookmissing:' + y);
-      await ctx_setSync(env, 'bookMissingBell', '', y);
+  /* 10 Oct (Night Watch): this bell had fired on 21 consecutive nights — PKT 00:02, all six
+     accounts, three recipients — and 20 of those 21 books were written later the same day. The
+     cause is timing, not detection: it judged PKT-yesterday the instant the PKT day flipped, while
+     a day's sales-analysis tab is written DURING the day that follows it. So it always caught the
+     books before they were due, and the one night a book is genuinely late read exactly like the
+     twenty before it. The BOARD still shows the day-1 gap the moment it appears (the BOOK_MISSING
+     rows pushed above are untouched, and selfTest's own 'books match orders' check still covers
+     day 1); only the BELL now waits until a day is a full extra day overdue. One pass per PKT day,
+     cursor-stamped whether or not it rings, so a quiet day costs six queries and not six a tick. */
+  const dueDay = pkToday(-2);
+  const bellSeen = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'bookMissingBell' AND account = ''").first();
+  if (!bellSeen || String(bellSeen.cursor) !== dueDay) {
+    const overdue = [];
+    for (const acct of accounts) {
+      const A2 = await metricMoney(env, acct, dueDay, dueDay);
+      const c2 = await env.DB.prepare('SELECT COUNT(*) AS n FROM sheet_rows WHERE account = ?1 AND day_pk = ?2').bind(acct, dueDay).first();
+      const bm2 = bookMissingRow(acct, dueDay, A2, Number(c2 && c2.n) || 0, next);
+      if (bm2) overdue.push(acct + ' (' + bm2.recomputed + ' order(s))');
     }
+    if (overdue.length) {
+      await notifyRole(env, 'Management', 'Day book STILL not written: ' + dueDay,
+        overdue.join(', ') + ' — eBay recorded orders on ' + dueDay + ' and the day tab still does not exist a ' +
+        'full day later, so profit, VAT and the margin for that day rest on nothing. Until the tab is written the ' +
+        'truth board can only report the day as unverified.', 'engine:bookoverdue:' + dueDay);
+    }
+    await ctx_setSync(env, 'bookMissingBell', '', dueDay);
   }
   await truthWrite(env, out);
   return out.length;
@@ -16928,6 +16944,9 @@ const ROUTES = {
         users_snapshot: 'SELECT * FROM users_snapshot',
         daily_health: 'SELECT * FROM daily_health',
         sync_state: 'SELECT job, account, cursor, last_ok, last_error FROM sync_state',
+        /* 10 Oct: the nightly audit could not see the sheet-write queue at all through the key
+           route — a row stuck PENDING is meant to clear in 15 minutes and nothing else reports it. */
+        order_processing: 'SELECT * FROM order_processing',
         alert_log: "SELECT * FROM alert_log WHERE created_at >= datetime('now','-90 day')",
         tasks: 'SELECT * FROM tasks',
         hunt_rows: 'SELECT hunt_id, hunter_email, status, account, ts, synced_at FROM hunt_rows',
