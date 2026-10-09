@@ -17697,8 +17697,10 @@ const ROUTES = {
           { headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } });
         return { status: r.status, body: await r.text() };
       }
-      if (call !== 'GetItem' && call !== 'ReviseFixedPriceItem' && call !== 'GetSellerList') {
-        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem, GetSellerList or taxonomyAspects');
+      /* 10 Oct (owner): the CS reply study reads buyer conversations through the API — GetMyMessages
+         (inbox + sent bodies) and GetMemberMessages (item Q&A with the seller's answers), both read-only. */
+      if (['GetItem', 'ReviseFixedPriceItem', 'GetSellerList', 'GetMyMessages', 'GetMemberMessages'].indexOf(call) < 0) {
+        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem, GetSellerList, GetMyMessages, GetMemberMessages or taxonomyAspects');
       }
       const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
       const r = await fetch('https://api.ebay.com/ws/api.dll', {
