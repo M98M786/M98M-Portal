@@ -695,7 +695,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList'];
+var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261008-2048';
+var BUILD = '20261009-2318';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -19207,6 +19207,23 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 (function () {
 
   VIEW_CSS.push(
+    /* 10 Oct (owner): the dispatch clock — came · processed · remaining, refreshed every minute */
+    '.o2d{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}' +
+    '.o2d-t{border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;background:var(--panel-2)}' +
+    '.o2d-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.o2d-t b{display:block;font-size:26px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    '.o2d-t .s{display:block;font-size:11px;color:var(--text-3);font-weight:700;margin-top:3px}' +
+    '.o2d-t.ok b{color:var(--ok)}.o2d-t.warn b{color:var(--warn)}.o2d-t.bad b{color:var(--bad)}' +
+    '.o2d-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:12px}' +
+    '.o2d-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;text-align:right;padding:6px 10px;border-bottom:1px solid var(--gold-line)}' +
+    '.o2d-tbl th:first-child{text-align:left}' +
+    '.o2d-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;font-weight:700}' +
+    '.o2d-tbl td:first-child{text-align:left}' +
+    '.o2d-bar{height:7px;border-radius:99px;background:var(--panel);border:1px solid var(--gold-line);overflow:hidden;min-width:90px}' +
+    '.o2d-bar i{display:block;height:100%;background:var(--ok);border-radius:99px}' +
+    '.o2d-sub{font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px}' +
+    '.o2d-rem{color:var(--warn)}td.o2d-zero{color:var(--text-3)}' +
+
     '.ov2 .sec{margin-bottom:26px}' +
     '.ov2 .sec-h{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;flex-wrap:wrap}' +
     '.ov2 .sec-h h2{font-size:15px;font-weight:800;letter-spacing:.02em}' +
@@ -20039,6 +20056,97 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     box.innerHTML = h;
   }
 
+  /* ---------- the dispatch clock (10 Oct, owner) ----------
+     "Orders came today and orders processed yet, and orders remaining — updated every minute —
+     how my staff is working and how much needs dispatching in the day."
+     Primary feed: the engine's ordersPulse (memoized server-side, so the minute poll is cheap).
+     Until that engine build is live, the SAME card derives its numbers from ordersBoard — came
+     from its today block, remaining from the needs_processing rows — so the clock works either
+     way and upgrades itself the moment the engine ships. */
+  function oDispatchLoad() {
+    if (!$('o2Dispatch')) { return; }
+    engineCall('ordersPulse', {}, 20000).then(function (d) { oDispatchPaint(d, false); }).catch(function (e) {
+      if (!/unknown action/i.test(String((e && e.message) || ''))) { oDispatchErr(e); return; }
+      engineCall('ordersBoard', { bucket: 'needs_processing' }, 25000)
+        .then(function (d) { oDispatchPaint(oDispatchFromBoard(d), true); })
+        .catch(oDispatchErr);
+    });
+  }
+
+  /** ordersBoard → the pulse shape: came per account from its today block; remaining = its
+   *  needs_processing rows that were created today (its own UTC-today convention); backlog =
+   *  the older rows plus whatever sits beyond the 150-row page. */
+  function oDispatchFromBoard(d) {
+    var today = String((d && d.as_of) || new Date().toISOString()).slice(0, 10);
+    var rows = (d && d.rows) || [];
+    var remToday = {}, older = {}, olderN = 0;
+    rows.forEach(function (r) {
+      var a = oS(r.account);
+      if (String(r.created_at || '').slice(0, 10) === today) { remToday[a] = (remToday[a] || 0) + 1; }
+      else { older[a] = (older[a] || 0) + 1; olderN++; }
+    });
+    var overflow = Math.max(0, (((d || {}).counts || {}).needs_processing || 0) - rows.length);
+    var accounts = (((d || {}).today || {}).by_account || []).map(function (b) {
+      var came = Number(b.orders) || 0, rem = Math.min(came, remToday[oS(b.account)] || 0);
+      return { account: oS(b.account), came: came, processed: came - rem, remaining: rem,
+        dispatched: null, backlog: older[oS(b.account)] || 0 };
+    });
+    Object.keys(older).forEach(function (a) {
+      if (!accounts.some(function (x) { return x.account === a; })) {
+        accounts.push({ account: a, came: 0, processed: 0, remaining: 0, dispatched: null, backlog: older[a] });
+      }
+    });
+    var tot = { came: 0, processed: 0, remaining: 0, dispatched: null, backlog: olderN + overflow };
+    accounts.forEach(function (a) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; });
+    return { day: today, as_of: (d && d.as_of) || '', totals: tot, accounts: accounts,
+      note: 'Processed = AliExpress order number or buying link on the order, or a tracking number — the ordersBoard law.' };
+  }
+
+  function oDispatchErr(e) {
+    var box = $('o2Dispatch');
+    if (!box) { return; }
+    if (box.querySelector('.o2d')) {
+      var st = $('o2DispStamp');
+      if (st) { st.textContent = 'last update failed (' + oS((e && e.message) || 'no answer') + ') — showing the previous minute; retrying'; }
+      return;   // keep the last good numbers on screen rather than blanking the card
+    }
+    box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + '</div>';
+  }
+
+  function oDispatchPaint(d, approx) {
+    var box = $('o2Dispatch');
+    if (!box || !d) { return; }
+    var t = d.totals || {};
+    var pct = t.came ? Math.round((t.processed / t.came) * 100) : 0;
+    var h = '<div class="o2d">' +
+      '<div class="o2d-t"><span class="k">Orders came today</span><b>' + (t.came || 0) + '</b><span class="s">UK trading day · all accounts</span></div>' +
+      '<div class="o2d-t ok"><span class="k">Processed</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today' +
+        (t.dispatched !== null && t.dispatched !== undefined ? ' · ' + t.dispatched + ' dispatched on eBay' : '') + '</span></div>' +
+      '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining</span><b>' + (t.remaining || 0) + '</b><span class="s">still need the processor</span></div>' +
+      (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
+      '</div>';
+    var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
+    if (accts.length) {
+      h += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th>' +
+        '<th>Older unprocessed</th><th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
+        accts.map(function (a) {
+          var p = a.came ? Math.round((a.processed / a.came) * 100) : 100;
+          return '<tr><td>' + esc(a.account || '(none)') + '</td><td' + (a.came ? '' : ' class="o2d-zero"') + '>' + a.came + '</td>' +
+            '<td>' + a.processed + '</td>' +
+            '<td class="' + (a.remaining ? 'o2d-rem' : 'o2d-zero') + '">' + a.remaining + '</td>' +
+            '<td class="' + (a.backlog ? 'o2d-rem' : 'o2d-zero') + '">' + (a.backlog || 0) + '</td>' +
+            '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p + '% processed"><i style="width:' + p + '%"></i></div></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    h += '<div class="o2d-sub">' + esc(oS(d.note)) + (approx ? ' Interim figures via the orders board — the engine update sharpens them on its next deploy.' : '') + '</div>';
+    box.innerHTML = h;
+    var st = $('o2DispStamp');
+    if (st) {
+      var at = d.as_of ? new Date(d.as_of) : new Date();
+      st.textContent = 'updated ' + at.toTimeString().slice(0, 8) + ' · refreshes every minute' + (approx ? ' · interim' : '');
+    }
+  }
+
   VIEWS.overview = {
     label: 'Business overview',
     order: 2,
@@ -20061,6 +20169,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<button class="btn-p" id="o2Apply">Apply</button></div>' +
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2>Today\u2019s orders — the dispatch clock</h2>' +
+          '<span class="hint" id="o2DispStamp">came in · processed · remaining — refreshes every minute</span></div>' +
+          '<div id="o2Dispatch"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
@@ -20085,6 +20196,20 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         if (!document.querySelector('.ov2') || document.hidden) { return; }
         oFetchAll();
       }, 300000);
+      /* 10 Oct (owner): the dispatch clock ticks every MINUTE — its own interval, same visibility
+         law as O.tick, and a tab coming back to the front repaints at once instead of waiting. */
+      clearInterval(O.dispTick);
+      O.dispTick = setInterval(function () {
+        if (!document.querySelector('.ov2') || document.hidden) { return; }
+        oDispatchLoad();
+      }, 60000);
+      if (!O.dispVisWired) {
+        O.dispVisWired = true;
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden && document.querySelector('.ov2') && $('o2Dispatch')) { oDispatchLoad(); }
+        });
+      }
+      oDispatchLoad();
       var root = document.querySelector('.ov2');
       if (root) {
         root.onclick = function (ev) {

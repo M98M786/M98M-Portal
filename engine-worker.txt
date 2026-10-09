@@ -12041,6 +12041,52 @@ const ROUTES = {
       return { results, failed: results.filter((r) => !r.pass).length, ran_at: new Date().toISOString() };
     },
   },
+  /* 10 Oct (owner): "orders came today, orders processed yet, and orders remaining — updated
+     every minute — I need to know how my staff is working and how much needs dispatching today."
+     One cheap, memoized read the Business overview polls every 60 s. "Processed" is the portal's
+     own long-standing definition (R5, the ordersBoard needs_processing bucket inverted): an
+     AliExpress order number or link is on the order, a tracking number was pushed, or eBay has
+     moved the order past NOT_STARTED. "Dispatched" = eBay itself saw the dispatch. The day is
+     the UK trading day, same as every management strip. The 55 s memo means any number of open
+     tabs cost one query burst a minute. */
+  ordersPulse: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'Team Lead', 'Sales Operations'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      return memo('ordersPulse', 55000, async () => {
+        const dayStart = ukDayStartIso();
+        const PROCESSED = "(o.status != 'NOT_STARTED' OR COALESCE(o.ali_order,'') != '' OR COALESCE(o.ali_link,'') != '' " +
+          "OR EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != ''))";
+        const rows = (await ctx.env.DB.prepare(
+          'SELECT o.account, COUNT(*) AS came, ' +
+          'SUM(CASE WHEN ' + PROCESSED + ' THEN 1 ELSE 0 END) AS processed, ' +
+          "SUM(CASE WHEN o.status = 'FULFILLED' OR o.fh_count > 0 THEN 1 ELSE 0 END) AS dispatched " +
+          "FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') " +
+          'GROUP BY o.account ORDER BY came DESC'
+        ).bind(dayStart).all()).results || [];
+        /* yesterday's leftovers still wanting a processor — they are today's dispatch pile too */
+        const old = (await ctx.env.DB.prepare(
+          "SELECT o.account, COUNT(*) AS n FROM orders o WHERE o.created_at < ?1 AND o.created_at >= datetime('now', '-10 day') " +
+          "AND o.status = 'NOT_STARTED' AND COALESCE(o.ali_order,'') = '' AND COALESCE(o.ali_link,'') = '' " +
+          "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') GROUP BY o.account"
+        ).bind(dayStart).all()).results || [];
+        const backlog = {};
+        for (const r of old) backlog[r.account] = Number(r.n) || 0;
+        const accounts = rows.map((r) => {
+          const came = Number(r.came) || 0, processed = Number(r.processed) || 0;
+          return { account: String(r.account || ''), came, processed, remaining: Math.max(0, came - processed),
+            dispatched: Number(r.dispatched) || 0, backlog: backlog[r.account] || 0 };
+        });
+        for (const a of Object.keys(backlog)) {
+          if (!accounts.some((x) => x.account === a)) accounts.push({ account: a, came: 0, processed: 0, remaining: 0, dispatched: 0, backlog: backlog[a] });
+        }
+        const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, backlog: 0 };
+        for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.backlog += a.backlog; }
+        return { day: ukDate(''), as_of: new Date().toISOString(), totals: tot, accounts,
+          note: 'Processed = AliExpress order number or buying link on the order, a tracking number pushed, or eBay already past NOT STARTED (the ordersBoard law). Dispatched = eBay saw the dispatch. Cancelled and not-found orders are outside every count. Day = the UK trading day.' };
+      });
+    },
+  },
+
   mgmtPulse: {
     auth: 'mgmt', fn: async (p, ctx) => {
       return memo('mgmtPulse', 60000, async () => {
