@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261009-2320';
+var BUILD = '20261012-1356';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -20099,7 +20099,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var tot = { came: 0, processed: 0, remaining: 0, dispatched: null, backlog: olderN + overflow };
     accounts.forEach(function (a) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; });
     return { day: today, as_of: (d && d.as_of) || '', totals: tot, accounts: accounts,
-      note: 'Processed = AliExpress order number or buying link on the order, or a tracking number — the ordersBoard law.' };
+      note: 'Processed = the AliExpress cost and order number are both on the order (owner, 12 Oct).' };
   }
 
   function oDispatchErr(e) {
@@ -20120,9 +20120,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var pct = t.came ? Math.round((t.processed / t.came) * 100) : 0;
     var h = '<div class="o2d">' +
       '<div class="o2d-t"><span class="k">Orders came today</span><b>' + (t.came || 0) + '</b><span class="s">UK trading day · all accounts</span></div>' +
-      '<div class="o2d-t ok"><span class="k">Processed</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today' +
-        (t.dispatched !== null && t.dispatched !== undefined ? ' · ' + t.dispatched + ' dispatched on eBay' : '') + '</span></div>' +
-      '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining</span><b>' + (t.remaining || 0) + '</b><span class="s">still need the processor</span></div>' +
+      '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today · AliExpress cost + order number' +
+        (t.half_done ? ' · ' + t.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
+      '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + (t.remaining || 0) + '</b><span class="s">not yet bought on AliExpress</span></div>' +
       (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
       '</div>';
     var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
@@ -25194,7 +25194,6 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             (can ? U.lrDecisionForm(r, stage) : '') + '</div>';
         });
       }
-      if ((d.day10 || []).length) { section(d.day10, 'Day-10 (retired rung) — still waiting from before 1 Oct', 'R10', ''); }
       section(d.day20 || [], 'Day-14 — no sale since the 7-day revision', 'R20',
         '<span class="lr-badge" style="color:var(--gold-a)">also with Management for the final call</span>');
       var rec = d.recent || [];

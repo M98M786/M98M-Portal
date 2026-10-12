@@ -29,7 +29,6 @@
             (can ? U.lrDecisionForm(r, stage) : '') + '</div>';
         });
       }
-      if ((d.day10 || []).length) { section(d.day10, 'Day-10 (retired rung) — still waiting from before 1 Oct', 'R10', ''); }
       section(d.day20 || [], 'Day-14 — no sale since the 7-day revision', 'R20',
         '<span class="lr-badge" style="color:var(--gold-a)">also with Management for the final call</span>');
       var rec = d.recent || [];

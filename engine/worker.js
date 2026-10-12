@@ -3248,6 +3248,23 @@ async function ladderWatch(env) {
       "UPDATE listing_ladder SET go_live_at = ?2, r72_at = ?3, r10_at = ?4, r20_at = ?5, updated_at = datetime('now') WHERE item_id = ?1 AND r72_status IN ('', 'QUEUED')"
     ).bind(r.item_id, go, ladderPlus(t, 7), ladderPlus(t, 14), ladderPlus(t, 14)).run();
   }
+  /* 12 Oct (owner: "the 14-day review page is showing listings that are already ended a while
+     ago"). A rung holds a listing until somebody decides on it — but an ENDED listing has nothing
+     left to decide: revising it is impossible and ending it is already done. Any rung still
+     waiting on a listing eBay no longer shows ACTIVE closes itself as ENDED, so the desks only
+     ever carry live work. listingSync owns items_api.status, so this is the same truth the
+     Active-listings screen uses. */
+  try {
+    await env.DB.prepare(
+      "UPDATE listing_ladder SET r72_status = CASE WHEN r72_status IN ('', 'QUEUED') THEN 'ENDED' ELSE r72_status END, " +
+      "r10_status = CASE WHEN r10_status IN ('', 'QUEUED') THEN 'ENDED' ELSE r10_status END, " +
+      "r20_status = CASE WHEN r20_status IN ('', 'QUEUED') THEN 'ENDED' ELSE r20_status END, " +
+      "updated_at = datetime('now') " +
+      "WHERE (r72_status IN ('', 'QUEUED') OR r10_status IN ('', 'QUEUED') OR r20_status IN ('', 'QUEUED')) " +
+      "AND EXISTS (SELECT 1 FROM items_api i WHERE i.item_id = listing_ladder.item_id AND i.status != 'ACTIVE')"
+    ).run();
+  } catch (e) { /* best-effort hygiene — never blocks the rungs below */ }
+
   const nowU = ladderUtc(new Date());
   /* 72h due → Zain's queue. "after exact 72 hours the portal will show there all the listings". */
   const d72 = await env.DB.prepare(
@@ -11899,7 +11916,11 @@ const ROUTES = {
         /* R5 (Hasib): "show orders not processed or still need to be processed". Processed = an
            AliExpress order number or link is on the order — the hourly sheet sweep fills those
            in, portal-entered ones are already here. Tracking pushed via the portal also counts. */
-        needs_processing: "o.status = 'NOT_STARTED' AND COALESCE(o.ali_order,'') = '' AND COALESCE(o.ali_link,'') = '' " +
+        /* 12 Oct (owner): an order is bought — "processed" — only once the AliExpress COST and
+           ORDER NUMBER are both on it. ali_link was in this test, but the portal pre-fills that
+           buying link from sourcing on almost every order, so this queue was reporting a couple
+           of orders outstanding when hundreds were genuinely untouched. */
+        needs_processing: OPEN + " AND NOT (COALESCE(o.cost,0) > 0 AND COALESCE(o.ali_order,'') != '') " +
           "AND o.created_at >= datetime('now','-10 day') AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '')",
       };
 
@@ -12054,19 +12075,25 @@ const ROUTES = {
       if (['Management', 'Ops Head', 'Team Lead', 'Sales Operations'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       return memo('ordersPulse', 55000, async () => {
         const dayStart = ukDayStartIso();
-        const PROCESSED = "(o.status != 'NOT_STARTED' OR COALESCE(o.ali_order,'') != '' OR COALESCE(o.ali_link,'') != '' " +
-          "OR EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != ''))";
+        /* 12 Oct (owner): "we can consider an order as dispatched when that order has received
+           AliExpress cost AND order number." The first rule counted ali_link too — but that is a
+           BUYING link the portal pre-fills from sourcing, present on 387 of 391 orders before a
+           processor has touched them, so the clock read 117 of 119 done when the true figure was
+           49. Cost and the AliExpress order number only appear once somebody has actually bought
+           the item, which is the work this clock is meant to measure. */
+        const PROCESSED = "(COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') != '')";
         const rows = (await ctx.env.DB.prepare(
           'SELECT o.account, COUNT(*) AS came, ' +
           'SUM(CASE WHEN ' + PROCESSED + ' THEN 1 ELSE 0 END) AS processed, ' +
-          "SUM(CASE WHEN o.status = 'FULFILLED' OR o.fh_count > 0 THEN 1 ELSE 0 END) AS dispatched " +
+          "SUM(CASE WHEN o.status = 'FULFILLED' OR o.fh_count > 0 THEN 1 ELSE 0 END) AS ebay_dispatched, " +
+          "SUM(CASE WHEN COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') = '' THEN 1 ELSE 0 END) AS half_done " +
           "FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') " +
           'GROUP BY o.account ORDER BY came DESC'
         ).bind(dayStart).all()).results || [];
         /* yesterday's leftovers still wanting a processor — they are today's dispatch pile too */
         const old = (await ctx.env.DB.prepare(
           "SELECT o.account, COUNT(*) AS n FROM orders o WHERE o.created_at < ?1 AND o.created_at >= datetime('now', '-10 day') " +
-          "AND o.status = 'NOT_STARTED' AND COALESCE(o.ali_order,'') = '' AND COALESCE(o.ali_link,'') = '' " +
+          "AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') AND NOT (COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') != '') " +
           "AND NOT EXISTS (SELECT 1 FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') GROUP BY o.account"
         ).bind(dayStart).all()).results || [];
         const backlog = {};
@@ -12074,15 +12101,16 @@ const ROUTES = {
         const accounts = rows.map((r) => {
           const came = Number(r.came) || 0, processed = Number(r.processed) || 0;
           return { account: String(r.account || ''), came, processed, remaining: Math.max(0, came - processed),
-            dispatched: Number(r.dispatched) || 0, backlog: backlog[r.account] || 0 };
+            dispatched: Number(r.ebay_dispatched) || 0, half_done: Number(r.half_done) || 0,
+            backlog: backlog[r.account] || 0 };
         });
         for (const a of Object.keys(backlog)) {
-          if (!accounts.some((x) => x.account === a)) accounts.push({ account: a, came: 0, processed: 0, remaining: 0, dispatched: 0, backlog: backlog[a] });
+          if (!accounts.some((x) => x.account === a)) accounts.push({ account: a, came: 0, processed: 0, remaining: 0, dispatched: 0, half_done: 0, backlog: backlog[a] });
         }
-        const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, backlog: 0 };
-        for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.backlog += a.backlog; }
+        const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, half_done: 0, backlog: 0 };
+        for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.half_done += a.half_done; tot.backlog += a.backlog; }
         return { day: ukDate(''), as_of: new Date().toISOString(), totals: tot, accounts,
-          note: 'Processed = AliExpress order number or buying link on the order, a tracking number pushed, or eBay already past NOT STARTED (the ordersBoard law). Dispatched = eBay saw the dispatch. Cancelled and not-found orders are outside every count. Day = the UK trading day.' };
+          note: 'Processed = the AliExpress cost AND the AliExpress order number are both on the order — the order has actually been bought (owner, 12 Oct). "Started" counts orders carrying a cost but no order number yet. Cancelled and not-found orders are outside every count. Day = the UK trading day.' };
       });
     },
   },
@@ -13464,8 +13492,11 @@ const ROUTES = {
       const base = 'SELECT l.*, COALESCE(i.image, "") AS image, COALESCE(i.price, 0) AS price, COALESCE(i.sold_qty, 0) AS sold_qty, ' +
         '(SELECT COUNT(*) FROM listing_research r WHERE r.item_id = l.item_id) AS research_n ' +
         'FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id ';
+      /* 12 Oct (owner): never show a listing eBay has ended — the sweep in ladderWatch closes
+         these rungs within the hour, and this keeps them off the desk in the meantime. */
+      const LIVE = " AND COALESCE(i.status, 'ACTIVE') = 'ACTIVE' ";
       if (page === 'r72') {
-        const q = await ctx.env.DB.prepare(base + "WHERE l.r72_status = 'QUEUED' ORDER BY l.r72_at ASC LIMIT 120").all();
+        const q = await ctx.env.DB.prepare(base + "WHERE l.r72_status = 'QUEUED'" + LIVE + 'ORDER BY l.r72_at ASC LIMIT 120').all();
         const parked = await ctx.env.DB.prepare(base + "WHERE l.parked = 'AM_CALL' ORDER BY l.updated_at ASC LIMIT 120").all();
         const called = await ctx.env.DB.prepare(base + "WHERE l.parked = 'CALLED' AND l.video_status = '' ORDER BY l.updated_at ASC LIMIT 120").all();
         const done = await ctx.env.DB.prepare(
@@ -13478,8 +13509,10 @@ const ROUTES = {
           tier1: t1.results || [], tier2: t2.results || [], recent: done.results || [] };
       }
       if (page === 'r20') {
-        const q10 = await ctx.env.DB.prepare(base + "WHERE l.r10_status = 'QUEUED' ORDER BY l.r10_at ASC LIMIT 120").all();
-        const q20 = await ctx.env.DB.prepare(base + "WHERE l.r20_status = 'QUEUED' ORDER BY l.r20_at ASC LIMIT 120").all();
+        /* the 10-day rung was retired on 1 Oct; its leftovers were closed on 12 Oct and the desk
+           no longer asks for them — day10 stays in the answer (empty) so an older tab still paints. */
+        const q10 = { results: [] };
+        const q20 = await ctx.env.DB.prepare(base + "WHERE l.r20_status = 'QUEUED'" + LIVE + 'ORDER BY l.r20_at ASC LIMIT 120').all();
         const out10 = [], out20 = [];
         for (const r of (q10.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.go_live_at, ''); out10.push(r); }
         for (const r of (q20.results || [])) { r.sales = await ladderSales(ctx.env, r.item_id, r.r72_at || r.go_live_at, ''); out20.push(r); }

@@ -900,7 +900,7 @@
     var tot = { came: 0, processed: 0, remaining: 0, dispatched: null, backlog: olderN + overflow };
     accounts.forEach(function (a) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; });
     return { day: today, as_of: (d && d.as_of) || '', totals: tot, accounts: accounts,
-      note: 'Processed = AliExpress order number or buying link on the order, or a tracking number — the ordersBoard law.' };
+      note: 'Processed = the AliExpress cost and order number are both on the order (owner, 12 Oct).' };
   }
 
   function oDispatchErr(e) {
@@ -921,9 +921,9 @@
     var pct = t.came ? Math.round((t.processed / t.came) * 100) : 0;
     var h = '<div class="o2d">' +
       '<div class="o2d-t"><span class="k">Orders came today</span><b>' + (t.came || 0) + '</b><span class="s">UK trading day · all accounts</span></div>' +
-      '<div class="o2d-t ok"><span class="k">Processed</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today' +
-        (t.dispatched !== null && t.dispatched !== undefined ? ' · ' + t.dispatched + ' dispatched on eBay' : '') + '</span></div>' +
-      '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining</span><b>' + (t.remaining || 0) + '</b><span class="s">still need the processor</span></div>' +
+      '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today · AliExpress cost + order number' +
+        (t.half_done ? ' · ' + t.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
+      '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + (t.remaining || 0) + '</b><span class="s">not yet bought on AliExpress</span></div>' +
       (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
       '</div>';
     var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
