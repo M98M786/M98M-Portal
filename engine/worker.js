@@ -12109,7 +12109,17 @@ const ROUTES = {
         }
         const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, half_done: 0, backlog: 0 };
         for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.half_done += a.half_done; tot.backlog += a.backlog; }
-        return { day: ukDate(''), as_of: new Date().toISOString(), totals: tot, accounts,
+        /* 12 Oct: the figure above is only ever as current as the ORDER BOOKS — the cost and the
+           AliExpress order number are read from each account's day tab, so an order bought but not
+           yet written into the book counts as remaining. Yesterday's same pair rides along so the
+           screen shows whether the books are being kept up or simply filled in a day late. */
+        const yRow = (await ctx.env.DB.prepare(
+          'SELECT COUNT(*) AS came, ' +
+          "SUM(CASE WHEN COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') != '' THEN 1 ELSE 0 END) AS processed " +
+          "FROM orders o WHERE o.created_at >= ?1 AND o.created_at < ?2 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')"
+        ).bind(ukDayStartIsoFor(ukDate(new Date(Date.now() - 86400000).toISOString())), dayStart).first()) || {};
+        const yesterday = { came: Number(yRow.came) || 0, processed: Number(yRow.processed) || 0 };
+        return { day: ukDate(''), as_of: new Date().toISOString(), totals: tot, accounts, yesterday,
           note: 'Processed = the AliExpress cost AND the AliExpress order number are both on the order — the order has actually been bought (owner, 12 Oct). "Started" counts orders carrying a cost but no order number yet. Cancelled and not-found orders are outside every count. Day = the UK trading day.' };
       });
     },

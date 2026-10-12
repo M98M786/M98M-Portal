@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261012-1356';
+var BUILD = '20261012-1513';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -20137,6 +20137,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             '<td class="' + (a.backlog ? 'o2d-rem' : 'o2d-zero') + '">' + (a.backlog || 0) + '</td>' +
             '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p + '% processed"><i style="width:' + p + '%"></i></div></td></tr>';
         }).join('') + '</tbody></table></div>';
+    }
+    /* 12 Oct: cost and the AliExpress order number are read from each account's ORDER BOOK, so a
+       purchase that has not been written into today's tab yet still counts as remaining. Showing
+       yesterday beside today makes that plain instead of looking like a broken number. */
+    var y = d.yesterday;
+    if (y && y.came) {
+      var ypct = Math.round((y.processed / y.came) * 100);
+      h += '<div class="o2d-sub">Yesterday for comparison: <b>' + y.processed + ' of ' + y.came + '</b> bought (' + ypct + '%)' +
+        (ypct > pct + 25 ? ' — today trails yesterday, which usually means the order books have not been filled in yet rather than that nothing was bought.' : '') + '</div>';
     }
     h += '<div class="o2d-sub">' + esc(oS(d.note)) + (approx ? ' Interim figures via the orders board — the engine update sharpens them on its next deploy.' : '') + '</div>';
     box.innerHTML = h;

@@ -939,6 +939,15 @@
             '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p + '% processed"><i style="width:' + p + '%"></i></div></td></tr>';
         }).join('') + '</tbody></table></div>';
     }
+    /* 12 Oct: cost and the AliExpress order number are read from each account's ORDER BOOK, so a
+       purchase that has not been written into today's tab yet still counts as remaining. Showing
+       yesterday beside today makes that plain instead of looking like a broken number. */
+    var y = d.yesterday;
+    if (y && y.came) {
+      var ypct = Math.round((y.processed / y.came) * 100);
+      h += '<div class="o2d-sub">Yesterday for comparison: <b>' + y.processed + ' of ' + y.came + '</b> bought (' + ypct + '%)' +
+        (ypct > pct + 25 ? ' — today trails yesterday, which usually means the order books have not been filled in yet rather than that nothing was bought.' : '') + '</div>';
+    }
     h += '<div class="o2d-sub">' + esc(oS(d.note)) + (approx ? ' Interim figures via the orders board — the engine update sharpens them on its next deploy.' : '') + '</div>';
     box.innerHTML = h;
     var st = $('o2DispStamp');
