@@ -49,7 +49,9 @@
         '<td>' + (r.avg_days === null || r.avg_days === undefined ? '—' : r.avg_days + 'd') + '</td><td>' + (r.waiting_avg_days === null || r.waiting_avg_days === undefined ? '—' : r.waiting_avg_days + 'd') + '</td>' +
         '<td' + (hot ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (r.late_share || 0) + '%</td></tr>';
     });
-    return h + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Days = from the order to its FIRST tracking number in the tracking ledger. ' +
+    return h + '</tbody></table></div>' +
+      (d.track_truncated ? '<div class="ir-alert" style="margin-top:8px"><b style="color:var(--bad)">This table hit its row cap</b> — the 30-day window holds more orders than the board reads, so the counts below are a floor, not the whole fleet. Tell the portal team to raise it.</div>' : '') +
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Days = from the order to its FIRST tracking number in the tracking ledger. ' +
       '“Still waiting” = no tracking yet; its average is how long those orders have waited so far. Late share = orders not tracked within 2 days. The 2-day marks tab is the permanent ledger of orders that crossed 2 business days untracked.</p>';
   }
 

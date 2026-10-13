@@ -13134,13 +13134,19 @@ const ROUTES = {
          waiting." Every order of the last 30 days, bucketed by the days from the order to its
          FIRST tracking number (the tracking ledger's pushed_at); untracked = still waiting. */
       let track_speed = [];
+      let trackTruncated = false;
       try {
         const spdRows = (await ctx.env.DB.prepare(
           "SELECT o.item_id, o.account, i.title, o.created_at, o.status, " +
           "(SELECT MIN(t.pushed_at) FROM trackings t WHERE t.order_id = o.order_id AND t.tracking != '') AS tracked_at " +
           "FROM orders o LEFT JOIN items_api i ON i.item_id = o.item_id " +
-          "WHERE o.created_at >= datetime('now', '-30 day') AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?1' : '') + ' LIMIT 9000'
+          /* 14 Oct: the cap was 9,000 and the fleet now takes ~250-300 orders a day, so a
+             30-day window was weeks away from quietly losing its tail — and a tracking board
+             that silently drops orders is worse than one that says it did. Raised well clear,
+             and whether it bit is reported rather than hidden. */
+          "WHERE o.created_at >= datetime('now', '-30 day') AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?1' : '') + ' LIMIT 25000'
         ).bind(...(acctF ? [acctF] : [])).all()).results || [];
+        trackTruncated = spdRows.length >= 25000;
         const spd = {};
         let spdTotal = 0;
         for (const r of spdRows) {
@@ -13168,7 +13174,7 @@ const ROUTES = {
           pct: spdTotal ? Math.round(g.n / spdTotal * 1000) / 10 : 0 }))
           .sort((a, b) => (b.late_n - a.late_n) || (b.all - a.all)).slice(0, 150);
       } catch (e) { track_speed = []; }
-      return { today, returns, inr, late, track_speed, track_windows: [2, 3, 4, 5],
+      return { today, returns, inr, late, track_speed, track_windows: [2, 3, 4, 5], track_truncated: trackTruncated,
         alerts: {
           returns5: returns.filter(x => x.all > 5),
           inr5: inr.filter(x => x.all > 5),

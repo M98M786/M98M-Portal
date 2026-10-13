@@ -840,7 +840,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261012-1513';
+var BUILD = '20261013-1918';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -15296,7 +15296,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<td>' + (r.avg_days === null || r.avg_days === undefined ? '—' : r.avg_days + 'd') + '</td><td>' + (r.waiting_avg_days === null || r.waiting_avg_days === undefined ? '—' : r.waiting_avg_days + 'd') + '</td>' +
         '<td' + (hot ? ' style="color:var(--bad);font-weight:800"' : '') + '>' + (r.late_share || 0) + '%</td></tr>';
     });
-    return h + '</tbody></table></div><p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Days = from the order to its FIRST tracking number in the tracking ledger. ' +
+    return h + '</tbody></table></div>' +
+      (d.track_truncated ? '<div class="ir-alert" style="margin-top:8px"><b style="color:var(--bad)">This table hit its row cap</b> — the 30-day window holds more orders than the board reads, so the counts below are a floor, not the whole fleet. Tell the portal team to raise it.</div>' : '') +
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Days = from the order to its FIRST tracking number in the tracking ledger. ' +
       '“Still waiting” = no tracking yet; its average is how long those orders have waited so far. Late share = orders not tracked within 2 days. The 2-day marks tab is the permanent ledger of orders that crossed 2 business days untracked.</p>';
   }
 
