@@ -269,8 +269,70 @@ async function quota(env) {
   return { works: false, note: 'getRateLimits refused an application token on both base paths — Phase 2 keeps its own call counter in rt_runs instead', tried: tried };
 }
 
+/* ---------------- T8: one timed run of the real daily shape ----------------
+   A temporary cron fires this once. It does exactly what a production day would do for the
+   pilot set — scan every keyword to depth, then read the sold count of each of OUR listings —
+   and records what it cost. The guard makes repeat ticks free: the cron fires every 5 minutes
+   while it exists, and only the first tick of a UK day does any work, so a forgotten trigger
+   cannot quietly drain the Browse budget.
+   Writes go to rt_lab_runs and nowhere else (prompt rule 2: no writes outside rt_ tables). */
+const T8_KEYWORDS = [
+  ['heavy duty iphone case', '236997583159'],
+  ['silicone iphone case magsafe', '136854829678'],
+  ['samsung s24 ultra case', '406845460680'],
+  ['motion sensor light under cabinet', '236920889297'],
+  ['wireless mouse', '406966567912'],
+];
+
+async function labScheduledRun(env) {
+  if (!env.DB) return;
+  await env.DB.prepare(
+    'CREATE TABLE IF NOT EXISTS rt_lab_runs (day TEXT PRIMARY KEY, started_at TEXT, finished_at TEXT, ' +
+    'wall_ms INTEGER, calls_search INTEGER, calls_sold INTEGER, calls_total INTEGER, ' +
+    'keywords INTEGER, items INTEGER, found INTEGER, status TEXT, note TEXT)'
+  ).run();
+
+  const day = new Date().toISOString().slice(0, 10);
+  const claimed = await env.DB.prepare(
+    "INSERT INTO rt_lab_runs (day, started_at, status) VALUES (?1, ?2, 'running') ON CONFLICT(day) DO NOTHING"
+  ).bind(day, new Date().toISOString()).run();
+  /* Already ran today — a repeat tick costs one D1 write and no eBay call at all. */
+  if (!claimed.meta || !claimed.meta.changes) return;
+
+  CALLS.token = 0; CALLS.search = 0; CALLS.item = 0; CALLS.legacy = 0;
+  CALLS.group = 0; CALLS.quota = 0; CALLS.total = 0;
+  const t0 = Date.now();
+  let found = 0, status = 'ok', note = '';
+
+  try {
+    for (const [q, item] of T8_KEYWORDS) {
+      const s = await scan(env, q, 400, 'bin', DEFAULT_POSTCODE);
+      if (s.error) { status = 'partial'; note = (note + ' ' + q + ':' + s.error).trim().slice(0, 300); continue; }
+      if (s.hits.some(h => h.item === item)) found++;
+    }
+    const searchCalls = CALLS.search;
+    for (const [, item] of T8_KEYWORDS) {
+      const own = await ourListing(env, item);
+      if (own) await soldOurs(env, item, DEFAULT_POSTCODE);   // §8.1: ours only, same guard as the route
+    }
+    await env.DB.prepare(
+      'UPDATE rt_lab_runs SET finished_at = ?2, wall_ms = ?3, calls_search = ?4, calls_sold = ?5, ' +
+      'calls_total = ?6, keywords = ?7, items = ?8, found = ?9, status = ?10, note = ?11 WHERE day = ?1'
+    ).bind(day, new Date().toISOString(), Date.now() - t0, searchCalls,
+      CALLS.total - searchCalls - CALLS.token, CALLS.total, T8_KEYWORDS.length, T8_KEYWORDS.length,
+      found, status, note).run();
+  } catch (e) {
+    await env.DB.prepare("UPDATE rt_lab_runs SET status = 'error', note = ?2, wall_ms = ?3 WHERE day = ?1")
+      .bind(day, String((e && e.message) || e).slice(0, 300), Date.now() - t0).run();
+  }
+}
+
 /* ---------------- router ---------------- */
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(labScheduledRun(env));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -387,6 +449,13 @@ export default {
       }
 
       if (path === '/quota') return done({ quota: await quota(env) });
+
+      /* T8 read-back: what the cron run actually cost. */
+      if (path === '/lab-runs') {
+        if (!env.DB) return fail(503, 'no D1 binding');
+        const rs = await env.DB.prepare('SELECT * FROM rt_lab_runs ORDER BY day DESC LIMIT 5').all().catch(() => ({ results: [] }));
+        return done({ runs: rs.results || [] });
+      }
 
       return fail(404, 'no such lab route');
     } catch (e) {

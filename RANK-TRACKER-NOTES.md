@@ -353,3 +353,94 @@ names are already on the public remote by the owner's own choice, so these notes
 new — but **nothing here is pushed anywhere** without the owner saying so, and `scripts/rl-scan.sh`
 runs before every commit. Another session works from this same clone: check `git log` before any
 commit or deploy.
+
+---
+
+# PHASE 1D — test results (13 Oct 2026, evening)
+
+Lab: `https://m98m-rank-lab.m98m786.workers.dev/` · D1 `DB` bound · secrets `EBAY_APP_ID`,
+`EBAY_CERT_ID` (ZAREENLT **Production**), `LAB_KEY`. CF token `m98m-rank-lab (Claude Code)`,
+Workers Scripts:Edit, M98M account only, expires 27 Oct.
+
+| ID | Result | Evidence |
+|---|---|---|
+| T1 | **PASS** | token minted, 1,932 chars, `expires_in` 7,200 s. See the scope note below. |
+| T2 | **PASS** | every result priced GBP, every `itemWebUrl` on ebay.co.uk |
+| T3 | **PASS** | all five found at depth 400 in both modes; 2 search calls per scan |
+| T4 | **documented** | every one of our listings is a variation listing — see below |
+| T5 | **PASS 5/5** (needed 4) | per-variation sums matched our own records to 0/−3/+1/+9/+2 |
+| T6 | rounds 1–2 identical | round 3 pending |
+| T7 | **PASS** | `getRateLimits` works; Browse 5,000/day, ours alone |
+| T8 | running | temporary cron added 21:28:34Z, fires `*/5` |
+| T9 | with Hasib | API scans recorded 21:21:55–21:22:25Z |
+
+### T1 — the scope field is empty, and that is fine
+eBay's client-credentials response carried **no `scope` field**, so the lab's `has_api_scope`
+reads false. The grant is still right: every Browse call since has returned 200, which is only
+possible with `…/oauth/api_scope`. Phase 2 must not gate anything on that field being present.
+
+### T3 — positions (depth 400, postcode SW1A 1AA)
+| Keyword | BIN | ALL | excl. sponsored | sponsored above | total results |
+|---|---|---|---|---|---|
+| heavy duty iphone case | 9 | **8** | 6 | 3 | 21,388 |
+| silicone iphone case magsafe | 1 | 1 | 1 | 0 | 25,478 |
+| samsung s24 ultra case | 20 | 20 | 14 | 6 | 64,692 |
+| motion sensor light under cabinet | 1 | 1 | 1 | 0 | 4,931 |
+| wireless mouse | 9 | 9 | 6 | 3 | 35,022 |
+
+**BIN vs ALL barely matters** — one keyword moved by one place; the other four were identical.
+Auctions are not displacing us, so `RT_MODE` is close to a free choice. T9 decides it.
+
+### T4 — EVERY M98M listing is a variation listing
+All five test listings return `itemGroupHref`, and so do one-variation listings
+(236914232995 → 1 variation, 336720139422 → 1). The listing tool evidently creates a variation
+listing every time. Consequences:
+- dedupe by `legacyItemId` gives exactly one position per listing — confirmed, no listing
+  appeared twice in 400 results;
+- `items_api.qty` is **not** a variation tell (it predicted 2 singles out of 5; both were groups).
+  Only `itemGroupHref` is;
+- the single-listing branch of `/sold` is **untested** — our catalogue contains nothing to test
+  it with. Left in as a fallback, documented as unproven rather than claimed to work.
+
+### T5 — the rule: `estimatedSoldQuantity` is PER VARIATION, sum them
+Never one figure repeated: the five listings returned 18, 44, 35, 11 and 2 *distinct* values
+across their variations. Cross-checked against eBay's own `QuantitySold` in `items_api` — and a
+nightly backup happened to land at 21:23:08Z, two minutes after the scans:
+
+| Item | variations | Browse sum | items_api | diff |
+|---|---|---|---|---|
+| 236997583159 | 232 | 634 | 634 | 0 |
+| 136854829678 | 198 | 2,620 | 2,623 | −3 |
+| 406845460680 | 126 | 1,369 | 1,368 | +1 |
+| 236920889297 | 12 | 672 | 663 | +9 |
+| 406966567912 | 2 | 210 | 208 | +2 |
+
+This needed no manual reading of listing pages, and it is better evidence than the eyeball check
+the prompt asked for.
+
+**The §8.1 guard is proven live:** `/sold?item=146123456789` (not ours) →
+`403 that item number is not on our accounts`.
+
+### T7 — quota, confirmed empirically
+`GET https://api.ebay.com/developer/analytics/v1_beta/rate_limit/?api_context=buy&api_name=browse`
+accepts an **application** token. `apiz.ebay.com` was not needed.
+`buy.browse`: limit **5,000**, used 30, remaining 4,970, resets **07:00 UTC**, window 86,400 s.
+The count matching our own calls exactly proves nothing else shares this keyset.
+
+**Cost per keyword scan: 2 Browse calls** at depth 400 (page size 200). So the daily budget is
+`5000 / 2 = 2,500` keyword-scans/day in principle; the real ceiling will be `RT_MAX_QUOTA_SHARE`.
+
+### The secrets ordeal — two hours, two causes, both worth remembering
+1. **The browser pane's clipboard is completely isolated from the Mac's.** Copy buttons,
+   `navigator.clipboard.writeText` (permission denied), synthetic Cmd+C after a DOM selection,
+   and a native triple-click + Cmd+C — none of them reached `pbpaste`. Anything that must cross
+   that boundary needs the owner's own hands, or a trick that never moves the value (we recovered
+   one mis-read token character by having the page return a **SHA-256** and matching
+   single-deletion candidates locally).
+2. **Sandbox vs Production keys look identical in length.** Three pastes in a row were sandbox
+   (39 and 36 chars — exactly what production turned out to be). The only reliable tell is the
+   marker: App ID contains `-PRD-`, Cert ID starts `PRD-`, sandbox says `SBX`. The lab's
+   `/secret-shape` route reports that **without revealing a character**, and
+   `pbpaste | grep -o 'PRD\|SBX'` gives the owner the same check in one second.
+   Keep `/secret-shape` for Phase 2 — it turned an opaque 401 into a one-line diagnosis.
+3. `read -rs` does **not** work in Claude Code's inline bash mode (no TTY). Use `pbpaste`.
