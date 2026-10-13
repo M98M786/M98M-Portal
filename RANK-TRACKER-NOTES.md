@@ -444,3 +444,94 @@ The count matching our own calls exactly proves nothing else shares this keyset.
    `pbpaste | grep -o 'PRD\|SBX'` gives the owner the same check in one second.
    Keep `/secret-shape` for Phase 2 — it turned an opaque 401 into a one-line diagnosis.
 3. `read -rs` does **not** work in Claude Code's inline bash mode (no TTY). Use `pbpaste`.
+
+### T6 — PASS, zero variance
+Three scans of all five keywords, BIN, depth 400:
+
+| Round | Time (UTC) | heavy duty | silicone magsafe | samsung s24 | motion sensor | wireless mouse |
+|---|---|---|---|---|---|---|
+| 1 | 21:21:55 | 9 | 1 | 20 | 1 | 9 |
+| 2 | 21:28:42 | 9 | 1 | 20 | 1 | 9 |
+| 3 | 21:41:23 | 9 | 1 | 20 | 1 | 9 |
+
+**Spread 0 on every keyword over 20 minutes**, sponsored counts identical too. So the §2C rank
+re-check tolerance can start at **±1**, and a once-a-day scan is defensible: nothing suggests
+rank wanders within a day in a way that would make a single reading unrepresentative. Worth
+re-testing across a *day* boundary in Phase 3 — 20 minutes is not 24 hours.
+
+### T8 — runtime, measured
+One run of the exact daily shape (5 keyword scans to depth 400 + 5 sold lookups on our own
+listings), via the manual trigger:
+
+| | |
+|---|---|
+| wall time | **21.1 s** |
+| eBay calls | 16 — 1 token, 10 search, 5 group |
+| our listings found | 5 of 5 |
+| status | ok, no errors |
+
+21.1 s is **2.3 % of the 15-minute cron wall budget**, and ~4.2 s per keyword. CPU time is not
+readable from inside a Worker and nearly all of that 21 s is network wait; **observability is now
+enabled on the lab**, so per-invocation CPU is visible in the dash if it is ever in doubt.
+
+Batching guidance for Phase 2: at ~4.2 s per keyword, **10–20 keywords per cron tick** keeps an
+invocation at 40–85 s — far inside the 15-minute wall and leaving the 30 s CPU ceiling (crons
+under an hour) untouched, since almost none of that is CPU.
+
+### THE QUOTA PLAN — and why the §8.1 ruling made it a non-issue
+**Competitor rows cost nothing.** Item number, position, title and price all arrive inside the
+search response we already paid for. The per-item sold-count calls were the only thing that
+scaled with `RT_K`, and those are parked. So **`RT_K` no longer affects the call budget at all** —
+the prompt's "25 / 50 / 100 keywords with K = 20" question collapses to one number: **2 Browse
+calls per keyword per scan** (depth 400, page size 200).
+
+Measured quota: **5,000/day**, resetting 07:00 UTC, and T7 proved **nothing else shares this
+keyset** (eBay's used count matched our own calls exactly).
+
+| Keywords | Scans/day | Browse calls/day | % of 5,000 |
+|---|---|---|---|
+| 25 | 1 | 50 | 1.0 % |
+| 50 | 1 | 100 | 2.0 % |
+| 100 | 1 | 200 | 4.0 % |
+| 100 | 2 | 400 | 8.0 % |
+| 500 | 1 | 1,000 | 20 % |
+| **1,500** | 1 | 3,000 | **60 % — the `RT_MAX_QUOTA_SHARE` ceiling** |
+
+Add ~5 % for the §2C re-check sample and one token mint a day (cap 1,000/day). The pilot of 10
+keywords costs **20 calls a day, 0.4 % of the quota.**
+
+**We are nowhere near needing eBay's Application Growth Check.** The honest framing for the
+owner: the thing that would have made this expensive is the thing the licence ruling removed.
+
+### T2 — verified across a whole page, not inferred from one listing
+`/search?q=heavy duty iphone case&depth=200`:
+- **200 of 200** results priced **GBP**
+- **200 of 200** `itemWebUrl` on **www.ebay.co.uk**
+- `seller` absent from **every** hit — the §8.1 code guarantee confirmed by inspection, not claimed
+- 14 of 200 carry `priorityListing` (sponsored), 7 %
+- **198 of 200 are variation listings** — this is how the whole category lists, not just us
+
+### The multi-account finding that matters for the page design
+One keyword, `heavy duty iphone case`, returns **ten of our own listings inside the top 200**,
+across **all six accounts**:
+
+| Position | Item | Account |
+|---|---|---|
+| 9 | 236997583159 | Sir Hasib |
+| 12 | 366646968328 | HAFIZA BHAJI |
+| 36 | 336755872107 | AZHAR ABRT |
+| 47 | 336698987235 | AZHAR ABRT |
+| 61 | 236891747676 | Sir Hasib |
+| 65 | 188233983546 | Amna Baji |
+| 98 | 407254987195 | Azhar Bhai |
+| 100 | 406616696483 | Azhar Bhai |
+| 148 | 137540214464 | Saif Bhai |
+| 186 | 136979422410 | Saif Bhai |
+
+This is exactly the A/B-test situation §1 of the prompt describes, and it is live right now.
+Consequences for Phase 2:
+- `rt_rank_daily` must hold **one row per (keyword, item)**, never one per keyword — already the
+  design, now proven necessary rather than theoretical;
+- the Rank tab's "our share of page 1" is a real number with real movement in it;
+- the lab's `/search` already marks every one of ours with its account from `items_api` in a
+  single batched D1 SELECT, so Phase 2 needs no extra eBay calls to do this.

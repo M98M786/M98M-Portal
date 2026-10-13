@@ -284,13 +284,26 @@ const T8_KEYWORDS = [
   ['wireless mouse', '406966567912'],
 ];
 
-async function labScheduledRun(env) {
+async function labScheduledRun(env, how) {
   if (!env.DB) return;
   await env.DB.prepare(
     'CREATE TABLE IF NOT EXISTS rt_lab_runs (day TEXT PRIMARY KEY, started_at TEXT, finished_at TEXT, ' +
     'wall_ms INTEGER, calls_search INTEGER, calls_sold INTEGER, calls_total INTEGER, ' +
     'keywords INTEGER, items INTEGER, found INTEGER, status TEXT, note TEXT)'
   ).run();
+
+  /* THE HEARTBEAT, and the lesson behind it: the day-guard below makes a repeat tick a silent
+     no-op, which also made cron delivery undetectable — "nothing happened" read identically to
+     "the cron never arrived". This row is written BEFORE any guard, so the question "did the
+     tick fire?" is answered by evidence rather than inference. The Engine learned the same
+     thing and keeps `cron:beat` in KV for exactly this reason. */
+  await env.DB.prepare(
+    'CREATE TABLE IF NOT EXISTS rt_lab_beat (id INTEGER PRIMARY KEY, last_at TEXT, how TEXT, ticks INTEGER DEFAULT 0)'
+  ).run();
+  await env.DB.prepare(
+    "INSERT INTO rt_lab_beat (id, last_at, how, ticks) VALUES (1, ?1, ?2, 1) " +
+    "ON CONFLICT(id) DO UPDATE SET last_at = ?1, how = ?2, ticks = ticks + 1"
+  ).bind(new Date().toISOString(), String(how || 'cron')).run();
 
   const day = new Date().toISOString().slice(0, 10);
   const claimed = await env.DB.prepare(
@@ -330,7 +343,7 @@ async function labScheduledRun(env) {
 /* ---------------- router ---------------- */
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(labScheduledRun(env));
+    ctx.waitUntil(labScheduledRun(env, 'cron'));
   },
 
   async fetch(request, env) {
@@ -450,11 +463,32 @@ export default {
 
       if (path === '/quota') return done({ quota: await quota(env) });
 
-      /* T8 read-back: what the cron run actually cost. */
+      /* T8 read-back: what the cron run actually cost. The table error is surfaced rather than
+         swallowed — "no rows" and "no table" are different answers, and conflating them is how
+         a silent failure gets read as a quiet success. */
       if (path === '/lab-runs') {
         if (!env.DB) return fail(503, 'no D1 binding');
-        const rs = await env.DB.prepare('SELECT * FROM rt_lab_runs ORDER BY day DESC LIMIT 5').all().catch(() => ({ results: [] }));
-        return done({ runs: rs.results || [] });
+        try {
+          const rs = await env.DB.prepare('SELECT * FROM rt_lab_runs ORDER BY day DESC LIMIT 5').all();
+          const beat = await env.DB.prepare('SELECT last_at, how, ticks FROM rt_lab_beat WHERE id = 1').first().catch(() => null);
+          return done({ runs: rs.results || [], table: 'exists', beat: beat || 'never ticked' });
+        } catch (e) {
+          return done({ runs: [], table: 'missing — the scheduled handler has never run', detail: String((e && e.message) || e).slice(0, 160) });
+        }
+      }
+
+      /* T8 manual trigger: runs exactly what the cron runs, so a cron that never arrives cannot
+         block the runtime measurement. The day-guard is shared, so whichever fires first wins
+         and the other is a no-op — `reset=1` clears today's row to allow a re-run. */
+      if (path === '/lab-run-now') {
+        if (!env.DB) return fail(503, 'no D1 binding');
+        if (url.searchParams.get('reset') === '1') {
+          await env.DB.prepare('DELETE FROM rt_lab_runs WHERE day = ?1').bind(new Date().toISOString().slice(0, 10)).run().catch(() => {});
+        }
+        const t = Date.now();
+        await labScheduledRun(env, 'manual');
+        const rs = await env.DB.prepare('SELECT * FROM rt_lab_runs ORDER BY day DESC LIMIT 1').all().catch(() => ({ results: [] }));
+        return done({ triggered: 'manual', outer_wall_ms: Date.now() - t, run: (rs.results || [])[0] || null });
       }
 
       return fail(404, 'no such lab route');
