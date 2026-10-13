@@ -535,3 +535,27 @@ Consequences for Phase 2:
 - the Rank tab's "our share of page 1" is a real number with real movement in it;
 - the lab's `/search` already marks every one of ours with its account from `items_api` in a
   single batched D1 SELECT, so Phase 2 needs no extra eBay calls to do this.
+
+### T8's cron — everything that was ruled out
+Registered `*/5 * * * *` at 21:28:34, re-set clean at 22:05:11 after the final deploy. Seven-plus
+missed windows. Ruled out, each by evidence rather than assumption:
+
+| Hypothesis | Checked | Verdict |
+|---|---|---|
+| schedule not actually registered | `GET …/schedules` | present, both times |
+| the dash disagrees with the API | dash Settings → Trigger events | *"Runs: Every 5 minutes · Next: Tue, 13 Oct 2026 22:00:00"* |
+| a redeploy dropped it | re-read after each deploy | survived |
+| the deployed bundle has no `scheduled` export | fetched the live script from the API | `async scheduled` at line 348, `rt_lab_beat` present ×3 |
+| the handler throws before writing | the same code path ran fine via `/lab-run-now` | works |
+| plan or settings differ from the Engine | `GET …/settings` on both | identical (`usage_model: standard`) |
+| crons broken on this account | Engine has 15 triggers, all firing | account is fine |
+| schedule bound to a stale deployment | cleared and re-set AFTER the last deploy | still silent |
+
+Left standing: **a newly created Worker's first cron delivery is slow or unreliable here.** Not
+provable from the outside without `Account Analytics: Read` (the telemetry endpoint 401s for the
+current token), and not worth widening the token for.
+
+**What Phase 2 must do about it:** the collector writes a heartbeat on its very first tick and the
+health endpoint surfaces "last tick"; if that stays empty after two windows, fall back to the
+Engine's own proven scheduler poking the collector over HTTP (free slots at `*/10` and `:45`).
+Never let a daily pipeline depend on a cron whose delivery has not been observed at least once.
