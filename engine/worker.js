@@ -28,6 +28,13 @@ const PROFIT_ROLES = ['Management', 'Ops Head'];                 // collective p
 const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
 const MGMT_ROLES = ['Management', 'Ops Head'];
+/* 14 Oct (owner): the 7-day revision board is read by everyone the revision passes through —
+   the Advertising Manager who decides it, the Item Lister who does it, and Management who signs
+   it off. It carries no money, so the lister may read the whole board. */
+const REVISION_BOARD_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager', 'Item Lister'];
+/* The words a lister may put on a revision. Short, honest, and the same set everywhere, so a
+   manager reading twenty of these is reading one vocabulary rather than twenty. */
+const REVISION_STATUSES = ['Started', 'Title & keywords rewritten', 'Photos updated', 'Description & specifics updated', 'Price checked', 'Blocked — need help'];
 /* 4 Oct (owner): the go-live desk is shared between these people (portal_config go_live_publishers
    overrides; this is the fallback) — each sees every waiting listing draft and may make it live. */
 const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
@@ -13496,6 +13503,112 @@ const ROUTES = {
       if (!cols.length) throw new Error('SAY: give the columns list');
       await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('listing_research_columns', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=?1, updated_at=datetime('now')").bind(JSON.stringify(cols)).run();
       return { saved: cols.length };
+    },
+  },
+
+  /* ============ THE 7-DAY REVISION BOARD (owner, 14 Oct) ============
+   * "Make the 7-day revision page with proper representation — the item lister will work there
+   * and add the status, and management can see the update and the status of the revision; when
+   * the lister says it is done, revision done."
+   *
+   * One row per listing that has reached the 7-day mark, carrying its WHOLE journey rather than
+   * one desk's slice of it: the Advertising Manager's decision, the revision task that decision
+   * raised, every status the lister has posted against it, and the management decision at the
+   * end. The stage is computed here, once, so every reader — lister, manager, owner — is looking
+   * at the same word for the same thing.
+   *
+   *   decide      the Advertising Manager has not decided yet
+   *   parked      Tier 2, waiting for his call
+   *   revising    the task is with the lister
+   *   submitted   the lister says it is done; Management has the final word
+   *   done        approved — the revision is finished (and the campaign task is raised)
+   *   none        he decided no revision was needed
+   * Money never appears on this board, so an Item Lister may read all of it (RL-5). */
+  revisionBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const role = String(ctx.user.role || '');
+      if (REVISION_BOARD_ROLES.indexOf(role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const me = String(ctx.user.email || '').toLowerCase();
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
+      const canDecide = mgmt || role === 'Advertising Manager';
+
+      const rows = (await ctx.env.DB.prepare(
+        "SELECT l.item_id, l.account, l.title, l.lister_email, l.go_live_at, l.r72_at, l.r72_status, l.parked, " +
+        "COALESCE(i.image, '') AS image, COALESCE(i.price, 0) AS price, COALESCE(i.sold_qty, 0) AS sold_qty, " +
+        "COALESCE(i.status, 'ACTIVE') AS live_status, " +
+        '(SELECT COUNT(*) FROM listing_research r WHERE r.item_id = l.item_id) AS research_n ' +
+        'FROM listing_ladder l LEFT JOIN items_api i ON i.item_id = l.item_id ' +
+        "WHERE l.r72_status NOT IN ('', 'ENDED') AND COALESCE(i.status, 'ACTIVE') = 'ACTIVE' " +
+        'ORDER BY l.r72_at DESC LIMIT 400'
+      ).all()).results || [];
+      if (!rows.length) return { rows: [], counts: { decide: 0, parked: 0, revising: 0, submitted: 0, done: 0, none: 0 }, can_decide: canDecide, me, mgmt };
+
+      /* the revision task each decision raised — newest per item wins */
+      const ids = rows.map((r) => String(r.item_id));
+      const tasks = {};
+      for (let i = 0; i < ids.length; i += 80) {
+        const part = ids.slice(i, i + 80);
+        const ts = await ctx.env.DB.prepare(
+          'SELECT task_id, item_id, assigned_to, status, deadline_pkt, comments, submission_note, submitted_at, ' +
+          'approved_by, decided_at, created_at, title FROM tasks ' +
+          "WHERE type = 'listing_revision' AND item_id IN (" + part.map(() => '?').join(',') + ') ORDER BY created_at ASC'
+        ).bind(...part).all().catch(() => ({ results: [] }));
+        for (const t of (ts.results || [])) tasks[String(t.item_id)] = t;   // last write = newest
+      }
+      /* the Advertising Manager's own words for this stage */
+      const dec = {};
+      const ds = await ctx.env.DB.prepare(
+        "SELECT item_id, decision, tier, comment, title_keywords, desc_keywords, decided_by, decided_at FROM ladder_decisions WHERE stage = 'R72' ORDER BY decided_at ASC"
+      ).all().catch(() => ({ results: [] }));
+      for (const d of (ds.results || [])) dec[String(d.item_id)] = d;
+
+      const counts = { decide: 0, parked: 0, revising: 0, submitted: 0, done: 0, none: 0 };
+      const out = [];
+      for (const r of rows) {
+        const st = String(r.r72_status || '');
+        const t = tasks[String(r.item_id)] || null;
+        let stage;
+        if (st === 'QUEUED') stage = String(r.parked || '') === 'AM_CALL' ? 'parked' : 'decide';
+        else if (st === 'NO_REVISION') stage = 'none';
+        else if (!t) stage = 'decide';                               // decided, but the task never landed
+        else if (String(t.status) === 'Completed') stage = 'done';
+        else if (String(t.status) === 'Submitted — awaiting approval') stage = 'submitted';
+        else stage = 'revising';
+        counts[stage] = (counts[stage] || 0) + 1;
+
+        /* every status the lister has posted, oldest first — the trail management reads */
+        const updates = [];
+        for (const line of String((t && t.comments) || '').split('\n')) {
+          const m = line.match(/^\[([^\]]+)\]\s*STATUS:\s*([^·]+?)\s*(?:·\s*(.*))?$/);
+          if (m) updates.push({ at: m[1].trim(), status: m[2].trim(), note: (m[3] || '').trim() });
+          else if (/^\[[^\]]+\]/.test(line) && /returned:/.test(line)) {
+            const r2 = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+            if (r2) updates.push({ at: r2[1].trim(), status: 'Sent back by Management', note: r2[2].trim() });
+          }
+        }
+        const d = dec[String(r.item_id)] || null;
+        const dl = t ? Date.parse(String(t.deadline_pkt || '')) : NaN;
+        out.push({
+          item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''),
+          lister_email: String(r.lister_email || ''), go_live_at: String(r.go_live_at || ''),
+          r72_at: String(r.r72_at || ''), image: String(r.image || ''), research_n: Number(r.research_n) || 0,
+          tier: String(r.r72_status === 'T1' || r.r72_status === 'T2' ? r.r72_status : ''),
+          stage,
+          decision: d ? { comment: String(d.comment || ''), tier: String(d.tier || ''),
+            title_keywords: String(d.title_keywords || ''), desc_keywords: String(d.desc_keywords || ''),
+            by: String(d.decided_by || ''), at: String(d.decided_at || '') } : null,
+          task: t ? { task_id: String(t.task_id), assigned_to: String(t.assigned_to || ''), status: String(t.status || ''),
+            deadline_pkt: String(t.deadline_pkt || ''), submission_note: String(t.submission_note || ''),
+            submitted_at: String(t.submitted_at || ''), approved_by: String(t.approved_by || ''),
+            decided_at: String(t.decided_at || ''),
+            overdue: isFinite(dl) && dl < Date.now() + 5 * 3600000 && String(t.status) !== 'Completed' } : null,
+          updates,
+          mine: !!(t && String(t.assigned_to || '').toLowerCase() === me),
+        });
+      }
+      return { rows: out, counts, can_decide: canDecide, mgmt, me,
+        statuses: REVISION_STATUSES,
+        note: 'Every listing is shown at the step it is actually on. A revision is finished only when Management approves what the lister submitted — that is also what raises the campaign task for the Advertising Manager.' };
     },
   },
 
