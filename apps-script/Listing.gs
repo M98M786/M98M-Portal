@@ -1418,7 +1418,66 @@ function actionSaveListingResearch_(payload, ctx) {
   return out;
 }
 
+/* ---------- the lister's status on a revision (owner, 14 Oct) ----------
+ * "The item lister will properly work there and he will have to add the status there, and
+ * management can see the update and status of the revision."
+ *
+ * A progress note, not a decision: it appends one parseable line to the revision task's own
+ * comments — the column that is already the task's audit trail — and nudges the task to Working
+ * so the board and My tasks agree about who holds it. The task STAYS with the lister; only
+ * submitTask hands it on. Shape is fixed so the board can read the trail back:
+ *     [stamp] STATUS: <one of REVISION_STATUSES> · <the lister's own words>
+ * Anyone may read a revision; only its assignee (or Management) may write on it. */
+const REVISION_STATUSES = ['Started', 'Title & keywords rewritten', 'Photos updated',
+  'Description & specifics updated', 'Price checked', 'Blocked — need help'];
+
+function actionRevisionStatus_(payload, ctx) {
+  const status = String(payload.status || '').trim();
+  if (REVISION_STATUSES.indexOf(status) < 0) {
+    throw new Error(SAFE_ERROR_PREFIX + 'pick a status from the list');
+  }
+  const note = String(payload.note || '').trim().slice(0, 500);
+  const sh = tasksSheet_();
+  const pre = taskFind_(sh, payload.task_id);            // heavy read outside the lock
+  let rec = null, stamp = '';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = taskVerify_(sh, pre, payload.task_id);
+    rec = found.rec;
+    if (String(rec.type || '') !== 'listing_revision') throw new Error(SAFE_ERROR_PREFIX + 'that is not a revision task');
+    const mine = normalizeEmail(rec.assigned_to) === normalizeEmail(ctx.ident.email);
+    if (!mine && !isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'this revision is not yours');
+    const was = String(rec.status || '');
+    if (was === TASK_STATUS_COMPLETED) throw new Error(SAFE_ERROR_PREFIX + 'this revision is already finished');
+    stamp = now_();
+    const line = '[' + stamp + '] STATUS: ' + status + (note ? ' · ' + note : '');
+    const patch = {
+      comments: (String(rec.comments || '') ? String(rec.comments) + '\n' : '') + line,
+      updated_at: stamp,
+    };
+    /* A status while the task is still Pending starts the clock the same way the Start button
+       does — the lister has demonstrably begun. One already submitted is left alone: the note
+       rides along without quietly pulling it back off Management's desk. */
+    if (was === TASK_STATUS_PENDING) patch.status = TASK_STATUS_WORKING;
+    taskWrite_(sh, found, patch);
+    logActivity_(ctx.ident.email, 'REVISION_STATUS', String(rec.task_id), was, status, note.slice(0, 160));
+    var merged = Object.assign({}, rec, patch);
+  } finally { lock.releaseLock(); }
+  try { engineTaskPush_(rec.task_id, merged); } catch (e) {}
+
+  /* Blocked is the one status that must reach a human rather than just the board. */
+  if (/^Blocked/.test(status)) {
+    notifyManagement_('Revision blocked',
+      '🟠 ' + (ctx.user.name || ctx.ident.email) + ' is blocked on the 7-day revision of "' +
+      String(rec.title || rec.item_id).slice(0, 60) + '"' + (rec.account ? ' · ' + rec.account : '') +
+      (note ? ': ' + note : '') + ' — see the 7-day revision board.', 'task:' + String(rec.task_id));
+  }
+  return { task_id: String(rec.task_id), status: status, at: stamp };
+}
+
 const ACTIONS_LISTING = {
+  revisionStatus:   [actionRevisionStatus_, 'any'],
   myListingWork:    [actionMyListingWork_, 'any'],
   /* 4 Oct (owner): the shared go-live desk. Same answer as myListingWork (a publisher gets every
      publisher's waiting drafts) under a name the shell routes to THIS backend, not the engine mirror —
