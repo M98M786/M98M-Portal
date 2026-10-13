@@ -1,0 +1,8 @@
+{
+  "main_module": "worker.js",
+  "compatibility_date": "2024-09-23",
+  "bindings": [
+    { "type": "d1", "name": "DB", "id": "83a5bb0f-d2d8-4c25-93fe-477d6e6ae452" }
+  ],
+  "keep_bindings": ["secret_text"]
+}

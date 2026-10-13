@@ -5,18 +5,83 @@ Branch `feature/rank-tracker`. Updated after every step so a fresh session can r
 
 ---
 
-## 13 Oct 2026 — Phase 1A (recon) DONE · 1B/1C BLOCKED on Hasib
+# ⚠️ SCOPE CHANGE — owner's ruling, 13 Oct 2026. READ THIS BEFORE BUILDING ANYTHING.
+
+The eBay API Licence Agreement **§8.1 "Prohibited Use and Derivation of Information"** needs
+eBay's **written permission** for anything that derives seller performance, individually or in
+aggregate. **Our own data is exempt.** And **§3.3**: attempts to circumvent call limits can get
+API access suspended — and these keys run the live portal.
+
+So the tool that gets built is a **keyword rank tracker, not a BSR tool.**
+
+### One keyset only
+Browse calls use **one keyset: the global `ZAREENLT` application** — the keyset already bound to
+`m98m-engine` as `EBAY_APP_ID` / `EBAY_CERT_ID`, used for every account's consent links
+(`engine/README-DEPLOY.md:52`, `worker.js:17674`). The five per-account keysets are **not pooled.**
+If 5,000 calls/day is not enough we apply for higher limits on that one keyset
+(eBay Application Growth Check) — we do not spread load.
+
+### Parked until eBay gives written permission
+Build none of this. It is designed, named here, and left out:
+
+| Parked | Was |
+|---|---|
+| `rt_snapshots`, `rt_sales_daily`, `rt_bsr_daily` | §2A tables |
+| sold-count snapshots of any listing | §2B step 6 |
+| units 7d, units/day, est. revenue 7d | §2B step 7 |
+| Keyword BSR rank + the whole **BSR tab** | §2B step 7, §2E |
+| the competitor-surge alert ("enters BSR top 10 with units 7d ≥ 2× its previous week") | §2B step 8, 4th bullet |
+| `RT_STICKY_DAYS` (only existed to keep sold deltas continuous) | `rt_config` |
+| Number Register entries: units 7d, keyword BSR rank, est. revenue 7d | §2C |
+| sold-estimate calibration vs our orders | §2C — nothing left to calibrate |
+
+### What competitor rows may hold
+**Item number · position · title · price, as of the scan only.** Nothing else.
+- **No seller usernames** — not stored, not displayed, not even read out of the API response.
+- The page shows the **scan time** against every competitor row.
+- Retention **30 days** (the prompt said 90 for `rt_scan_hits` — 30 now).
+- `priority_listing` (eBay's own Sponsored flag) **is** kept: the counting method settled in T9
+  depends on it, and it is a property of the search result, not of a seller's performance.
+  Flagged for the owner rather than assumed.
+
+### Still built, in full
+Keyword rank, page number, change vs yesterday / 7 days, the 30-day sparkline, our share of
+page 1, the three rank alerts (drop ≥ `RT_ALERT_DROP`, left page 1, gone 400+), the rank
+re-check truth check, the Rank / Alerts / Manage tabs, the item view, CSV export, health.
+
+### Phase 1 test change
+**T5 runs on our own 5 listings only — no competitor sold counts.** Pass = **4 of 5**
+(was 7 of 8 across 5 ours + 3 competitors).
+
+The lab Worker enforces this in code, not by convention: `/sold` refuses any item number that is
+not in `items_api`, and fails closed if it cannot check. `/search` never reads `seller` from the
+response at all.
+
+---
+
+## 13 Oct 2026 — 1A recon DONE · 1B lab code WRITTEN · deploy BLOCKED on keys
 
 ### Done
 - Read the prompt in full. Created branch `feature/rank-tracker` off `main` @ `a121a54`.
 - Phase 1A recon, read-only. Findings below.
+- Owner's scope ruling recorded at the top of this file and of `M98M-RANK-TRACKER-PROMPT-v1.md`
+  (copied into the repo root, as that prompt's own header asks).
+- 1C test set **confirmed** by Hasib; filled into the prompt's §1C table.
+- 1B lab Worker **written and syntax-checked**: `rank-lab/worker.js` + `metadata.json` +
+  `deploy.sh` + `mint-lab-key.sh`. Not deployed — nothing has been sent to eBay yet.
+- T9 links generated; Hasib can do his half in parallel (see the T9 section).
 
-### Next (needs Hasib — see the gate list)
-1. Cloudflare API token at `~/.m98m/cf-token` (or he creates `m98m-rank-lab` himself).
-2. eBay keyset for the lab Worker — he sets the secrets, I never see them.
-3. Confirm the 1C test set + the API buyer postcode.
+### Blocked on, and only on
+1. **Cloudflare API token** with *Workers Scripts: Edit* at `~/.m98m/cf-token` (chmod 600) —
+   or Hasib creates an empty `m98m-rank-lab` himself. `rank-lab/deploy.sh` expects the token path.
+2. **The two eBay secrets on the lab Worker** — `EBAY_APP_ID`, `EBAY_CERT_ID` from the ZAREENLT
+   production keyset, added by Hasib in the dashboard. I never see them.
 
-Then: 1B lab Worker → 1D tests T1–T9 → 1E `RANK-LAB-REPORT.md` → **STOP for `GO PHASE 2`**.
+`LAB_KEY` needs nobody: `mint-lab-key.sh` generates it into `~/.m98m/rank-lab-key` and
+`deploy.sh` pipes it to the Worker as a secret without printing it.
+
+### Then
+1B deploy → 1D tests T1–T9 → 1E `RANK-LAB-REPORT.md` → **STOP for `GO PHASE 2`**.
 
 ---
 
@@ -204,33 +269,87 @@ API buyer postcode: `SW1A 1AA` unless Hasib says otherwise.
 
 ---
 
-## T9 manual-check protocol (Hasib's half — do this once the lab is up and I hand over the links)
+## T9 manual-check protocol — Hasib's half, ready to run NOW
+
+This does not wait for the lab. The links are final; the API side gets compared against whatever
+he writes down. Doing it today means T9 is not the thing holding up the Phase 1 gate.
 
 1. Private/incognito window, **logged out**, on `ebay.co.uk`.
 2. Set "Deliver to" / "Postage to" to the **same UK postcode the API uses** (`SW1A 1AA`).
    If you are outside the UK this step is the whole test — without it eBay ranks for delivery to
    your country and the comparison means nothing. A UK VPN works too.
-3. Open `https://www.ebay.co.uk/sch/i.html?_nkw=<keyword>`. Keep **Best Match**. Apply no filters.
-4. For each keyword record:
+3. Open each link below. Keep **Best Match**. Apply **no** filters. Do not change the view.
+4. Fill in the four right-hand columns:
 
-| Keyword | Our position (count every card) | Our card marked "Sponsored"? | Sponsored cards above ours | Results per page by default |
-|---|---|---|---|---|
-| heavy duty iphone case | | | | |
-| silicone iphone case magsafe | | | | |
-| samsung s24 ultra case | | | | |
-| motion sensor light under cabinet | | | | |
-| wireless mouse | | | | |
+| Keyword (link) | Our listing | Our position (count every card from the top) | Our card marked "Sponsored"? | Sponsored cards above ours | Results per page by default |
+|---|---|---|---|---|---|
+| [heavy duty iphone case](https://www.ebay.co.uk/sch/i.html?_nkw=heavy+duty+iphone+case) | `236997583159` · Sir Hasib | | | | |
+| [silicone iphone case magsafe](https://www.ebay.co.uk/sch/i.html?_nkw=silicone+iphone+case+magsafe) | `136854829678` · Saif Bhai | | | | |
+| [samsung s24 ultra case](https://www.ebay.co.uk/sch/i.html?_nkw=samsung+s24+ultra+case) | `406845460680` · Azhar Bhai | | | | |
+| [motion sensor light under cabinet](https://www.ebay.co.uk/sch/i.html?_nkw=motion+sensor+light+under+cabinet) | `236920889297` · Sir Hasib | | | | |
+| [wireless mouse](https://www.ebay.co.uk/sch/i.html?_nkw=wireless+mouse) | `406966567912` · Azhar Bhai | | | | |
+
+If a listing is not on the first few pages, keep going to roughly page 8 (≈400 cards) and then
+write "400+" — that is a real answer, not a failure.
 
 5. I then compare against the API using both counting methods (all cards / non-sponsored only)
-   and both modes (BIN-only / all), and keep whichever combination matches.
+   and both modes (BIN-only / all), and keep whichever combination matches. Pass = within ±3 on
+   4 of the 5 keywords.
 
 ---
 
-## Open questions for Hasib
-Listed in the gate message of 13 Oct; repeated here so a fresh session has them.
-1. Cloudflare API token, or does he create `m98m-rank-lab` himself?
-2. Which eBay keyset does the lab use — the global `ZAREENLT` one? And long-term, may the tracker
-   spread Browse calls across the per-account keysets (5,000/day each)?
-3. Confirm the test set + postcode.
-4. Confirm Workers Paid (I am reading it off the 15 cron triggers).
-5. Do `M98M-WRITE-PATH-DEPLOY-v1.md` / `NUMBER-CONTRACT.md` exist somewhere outside the repo?
+## The lab Worker as written (`rank-lab/`)
+
+| File | What it is |
+|---|---|
+| `worker.js` | the lab. 5 routes, all gated on an `x-lab-key` header (length-independent compare) |
+| `metadata.json` | bindings: D1 `DB` → `83a5bb0f-…` (the engine's own database, read with SELECT only). `keep_bindings: ["secret_text"]` so later deploys preserve the secrets |
+| `deploy.sh` | multipart PUT + turns on the workers.dev subdomain (`previews_enabled: false`) + pushes `LAB_KEY` + prints the surviving bindings. No custom route, ever |
+| `mint-lab-key.sh` | `openssl rand -hex 32` → `~/.m98m/rank-lab-key`, mode 600, outside the repo |
+
+Routes: `/` (health + which bindings landed) · `/token-check` · `/search?q=&depth=&mode=&postcode=`
+· `/find?q=&item=&mode=` · `/sold?item=` · `/quota`.
+
+Choices worth knowing before reading the code:
+- **`s.seller` is never read.** Not redacted later — never pulled out of the response. A
+  competitor-performance dataset cannot be assembled from this Worker's output.
+- **`/sold` fails closed.** It SELECTs the item out of `items_api` first. Not ours → 403.
+  Cannot reach D1 → **503, not a guess**. "I could not check" is not permission.
+- **`/sold` tries the item group first.** One call tells us the listing's shape, and it answers
+  T5's real question directly: if every variation reports the same `estimatedSoldQuantity` the
+  figure is the listing total repeated (take one); if they differ it is per variation (sum them).
+  The response says which, in words.
+- **`/find` reports both counting methods at once** — `position` (every card) and
+  `position_excl_sponsored`, plus `sponsored_above` and whether our own card is sponsored. T9
+  then picks the method that matches the site instead of needing a second round of scans.
+- **No `sort` parameter anywhere.** That is what makes it Best Match. Adding one would quietly
+  invalidate every comparison.
+- **`X-EBAY-C-MARKETPLACE-ID: EBAY_GB` on every Browse call.** Omit it and eBay silently serves
+  `EBAY_US` — the answer still looks plausible, which is what makes it dangerous.
+- Ceilings: depth capped at 1,000 (5 search calls), **24 eBay calls per HTTP request**,
+  exponential backoff 0.8 → 6.4 s on 429/5xx, four attempts then give up. Every response carries
+  a `calls` breakdown, so T7's "calls per keyword scan" is measured, not estimated.
+- `/quota` tries `api.ebay.com` **and** `apiz.ebay.com` for `getRateLimits` and reports which
+  base path accepted an application token — §3's open question, answered by the route itself.
+- No cron. T8 adds one temporarily and removes it.
+
+## Owner's answers, 13 Oct 2026
+1. **Keyset:** one only — the global **ZAREENLT** app. Never pool the five per-account keysets
+   (§3.3). Outgrow 5,000/day → apply for higher limits on that keyset.
+2. **Docs:** `M98M-WRITE-PATH-DEPLOY-v1.md` and `NUMBER-CONTRACT.md` are not needed. Follow
+   `engine/README-DEPLOY.md` + `docs/NUMBER_REGISTER.md`, and seed `rt_number_register` the same
+   way as `adtool_number_register`.
+3. **Scope:** the §8.1 ruling at the top of this file.
+4. **Test set + postcode `SW1A 1AA`:** confirmed.
+
+Still open: Workers Paid is inferred from the 15 registered cron triggers (Free caps at 5), not
+confirmed by anyone. It changes nothing about the design — eBay's budget is the binding
+constraint either way — so it is recorded, not chased.
+
+## Standing note on this clone
+`origin` is the **PUBLIC** GitHub repo (`M98M786/M98M-Portal`), `private` is the private mirror.
+`engine/worker.js`, `engine/README-DEPLOY.md` (CF account id, D1 and KV uuids) and the six account
+names are already on the public remote by the owner's own choice, so these notes expose nothing
+new — but **nothing here is pushed anywhere** without the owner saying so, and `scripts/rl-scan.sh`
+runs before every commit. Another session works from this same clone: check `git log` before any
+commit or deploy.
