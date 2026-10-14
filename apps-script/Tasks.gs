@@ -413,7 +413,10 @@ const RETIRED_TASK_TYPES = ['supplier_add', 'sourcing_link'];
 function retireSupplierAddTasksDryRun() { const r = retireSupplierAddTasks_(true); Logger.log(r); return r; }
 function retireSupplierAddTasks() { const r = retireSupplierAddTasks_(false); Logger.log(r); return r; }
 
+const RETIRE_BUDGET_MS = 240000;   // stop deleting here; the mirror push still needs room under the 6-minute ceiling
+
 function retireSupplierAddTasks_(dryRun) {
+  const t0 = Date.now();
   const sh = tasksSheet_();
   const lr = sh.getLastRow(), lc = sh.getLastColumn();
   if (lr < 2) return 'TASKS is empty';
@@ -440,18 +443,45 @@ function retireSupplierAddTasks_(dryRun) {
   if (dryRun) return 'DRY RUN · would delete ' + summary + ' · items: ' +
     hits.map(function (h) { return h.item || h.task_id; }).join(', ').slice(0, 900);
 
-  hits.forEach(function (h) {
-    try { logActivity_('system', 'RETIRE_SUPPLIER_ADD', h.task_id, h.status, 'deleted',
-      (h.item || '') + ' · ' + h.to + ' · ' + h.type + ' retired (owner, 14 Oct)'); } catch (e) {}
-  });
-  for (let i = hits.length - 1; i >= 0; i--) sh.deleteRow(hits[i].row);   // bottom-up: earlier rows keep their numbers
+  /* 15 Oct: the first live run TIMED OUT on the 6-minute ceiling at 419 rows. It was spending the
+     whole budget on round trips — one appendRow per row for the audit trail and one deleteRow per
+     row — 838 calls for 419 tasks. The ledger is now a single setValues, and the deletes are
+     grouped into CONTIGUOUS RUNS (retired tasks were created in batches, so they sit in blocks),
+     bottom-up so earlier rows keep their numbers. A budget still guards the ceiling: whatever a
+     run cannot reach is simply left behind, and because the scan is by type, re-running finishes
+     the job from wherever it stopped. */
+  const runs = [];
+  for (let i = 0; i < hits.length; i++) {
+    const last = runs.length ? runs[runs.length - 1] : null;
+    if (last && hits[i].row === last.start + last.count) last.count++;
+    else runs.push({ start: hits[i].row, count: 1, from: i });
+  }
+  const gone = [];
+  let stopped = 0;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (Date.now() - t0 > RETIRE_BUDGET_MS) { stopped += runs[i].count; continue; }
+    sh.deleteRows(runs[i].start, runs[i].count);
+    for (let k = 0; k < runs[i].count; k++) gone.push(hits[runs[i].from + k]);
+  }
   SpreadsheetApp.flush();
+
+  try {
+    const log = getPortalDb_(false).getSheetByName('ACTIVITY_LOG');
+    const stamp = now_();
+    const ledger = gone.map(function (h) {
+      return [stamp, 'system', 'RETIRE_SUPPLIER_ADD', h.task_id, h.status, 'deleted',
+        (h.item || '') + ' · ' + h.to + ' · ' + h.type + ' retired (owner, 14 Oct)'];
+    });
+    if (ledger.length) log.getRange(log.getLastRow() + 1, 1, ledger.length, 7).setValues(ledger);
+  } catch (e) {}
 
   let mirror;
   try { mirror = String(pushEngineTasks()); }
   catch (e) { mirror = 'MIRROR NOT RECONCILED — ' + String((e && e.message) || e) + ' (it self-heals on the next task sync)'; }
-  try { logActivity_('system', 'RETIRE_SUPPLIER_ADD_DONE', '', '', String(hits.length), mirror.slice(0, 180)); } catch (e) {}
-  return 'deleted ' + summary + ' · ' + mirror;
+  try { logActivity_('system', 'RETIRE_SUPPLIER_ADD_DONE', '', '', String(gone.length), mirror.slice(0, 180)); } catch (e) {}
+  return 'deleted ' + gone.length + ' of ' + summary +
+    (stopped ? ' · ' + stopped + ' LEFT (budget) — run it again to finish' : '') +
+    ' · in ' + runs.length + ' block(s) · ' + mirror;
 }
 
 function retire72hRevisionTasksDryRun() { const r = retire72hTasks_(true); Logger.log(r); return r; }
