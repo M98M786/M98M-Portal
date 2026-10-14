@@ -863,7 +863,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261014-0032';
+var BUILD = '20261014-1705';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -17318,7 +17318,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
       '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
-      '<div class="ls-what"><span class="ls-no">3</span><span><b>Order Processors get the supplier task.</b> supplier_add — Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3 on the Central Main Sheet.</span></div>' +
+
       '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
     '</div>';
   }
@@ -17613,7 +17613,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));
     }
     rows += lsMadeRow('Zain · campaign_set', made.campaign_set);
-    rows += lsMadeRow('Order Processor · supplier_add', made.supplier_add);
+
     rows += lsMadeRow('You · ' + LS_KIND_72H, made.revision);
     rows += lsReceiptRow('Central sheet', mirror && mirror.ok
       ? 'Marked <b>Listing Done </b> on the Selected Listing tab'
@@ -30499,8 +30499,9 @@ function saveSchedule() {
   var TK_UPDATED = 'Updated';
   var TK_SUBMITTED = 'Submitted — awaiting approval';
   var TK_COMPLETED = 'Completed';
-  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'sourcing_link'];
-  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'sourcing_link'];
+  /* 14 Oct (owner): supplier_add retired — the Central Main Sheet is kept by hand now. */
+  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'sourcing_link'];
+  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'sourcing_link'];
   /* A loss review is the one type the server closes on an EXACT string: Tasks.gs rejects any
      submission note that is not one of these three, verbatim. My tasks only ever offered the
      free-text box every other type uses, so every loss review submitted since the type shipped

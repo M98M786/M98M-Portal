@@ -295,7 +295,7 @@ function actionEnterItemId_(payload, ctx) {
   const chain = listingChain_(new Date());
   const stamp = now_();
   let rec = null, approver = '', idempotent = false;
-  const made = { campaign_set: null, supplier_add: null, revision: null };
+  const made = { campaign_set: null, revision: null };   // 14 Oct: supplier_add retired
   const postCalls = [];   // 1 Oct: every best-effort engine post rides ONE parallel fetchAll after the chain
 
   const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock (tranche 2)
@@ -381,27 +381,13 @@ function actionEnterItemId_(payload, ctx) {
       }
     } catch (subErr) { /* best-effort — the listing is already live */ }
 
-    // ② supplier_add → Order Processor (best-effort)
-    try {
-      const proc = listingPickForRole_('Order Processor', payload.supplier_assignee, all, 'supplier_add');
-      const haveSupplier = listingFindTask_(all, 'supplier_add', itemId);
-      if (haveSupplier) made.supplier_add = { task_id: String(haveSupplier.task_id), existing: true, assigned_to: String(haveSupplier.assigned_to) };
-      else if (proc) {
-        const sid = listingCreateTask_(sh, {
-          type: 'supplier_add', account: account, item_id: itemId, title: 'supplier_add — Item ID ' + itemId,
-          details: listingLines_([
-            'Item ID: ' + itemId, 'Listing: ' + product,
-            'Fill on the Central Main Sheet: Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3',
-            'Product Link 1: ' + String(limited['Product Link 1 Main supplier\n\n\nAdded in supplier sheet'] || ''),
-            'Product Link 2: ' + String(limited['Product Link 2\n\n'] || ''),
-            'Product Link 3: ' + String(limited['Product Link 3'] || ''),
-          ]),
-          assigned_by: String(rec.assigned_by || ''), assigned_to: proc.email,
-          priority: String(rec.priority || ''), deadline_pkt: chain.supplier_due_pkt, stamp: stamp,
-        });
-        if (sid) made.supplier_add = { task_id: sid, existing: false, assigned_to: proc.email };
-      }
-    } catch (subErr) { /* best-effort */ }
+    /* ② supplier_add — RETIRED (owner, 14 Oct): "remove all the supplier add tasking from the
+       portal — the central sheet system is working quite well." Every go-live used to hand an
+       Order Processor a task to copy the hunt's supplier links onto the Central Main Sheet. The
+       sheet is now kept properly by hand, so the task was asking for work already done. Nothing
+       about SUPPLIER LINKS changes: the hunt's links still ride into the go-live record, the
+       Sourcing page still saves and shows them, and the order screens still hand the processor
+       the buying link on the order itself — only the chasing task is gone. */
 
     /* the lister's keyword/SEO research was saved under task:<id> at draft time — move it onto
        the real Item ID the moment one exists, so Zain's desk shows it against the listing. */
@@ -430,7 +416,7 @@ function actionEnterItemId_(payload, ctx) {
   // A repeat entry re-reports the same tasks, but a downstream task that was never created
   // (a half-finished first attempt) is still created, notified and logged here.
   if (!idempotent) logActivity_(ctx.ident.email, 'ENTER_ITEM_ID', String(rec.task_id), '', itemId, 'go-live ' + chain.go_live_uk + ' ' + chain.day0_uk_date + ' · revision ' + chain.revision.uk_date);
-  ['campaign_set', 'supplier_add', 'revision'].forEach(function (k) {
+  ['campaign_set', 'revision'].forEach(function (k) {
     if (made[k] && !made[k].existing) logActivity_(ctx.ident.email, 'CREATE_TASK', made[k].task_id, '', TASK_STATUS_PENDING, k + ' → ' + made[k].assigned_to + ' (item ' + itemId + ')');
   });
 
@@ -452,18 +438,6 @@ function actionEnterItemId_(payload, ctx) {
     notifyManagement_('Task assigned',
       '🔴 Nobody to set the campaign · ' + String(rec.account || '') + ' · ' + itemId +
       ' — there is no approved Advertising Manager to route the campaign_set task to. The item will list but never advertise → approve or assign an Advertising Manager.',
-      'task:' + String(rec.task_id));
-  }
-  if (made.supplier_add && !made.supplier_add.existing) {
-    notify_(made.supplier_add.assigned_to, 'Task assigned',
-      '🔵 Supplier details needed · ' + String(rec.account || '') + ' · ' + itemId +
-      (rec.title ? ' · ' + String(rec.title).slice(0, 55) : '') +
-      ' — fill Current Supplier Working and Supplier 1/2/3 on the Central Main Sheet so the first order does not stall.',
-      'task:' + made.supplier_add.task_id);
-  } else if (!made.supplier_add) {
-    notifyManagement_('Task assigned',
-      '🔴 Nobody to add suppliers · ' + String(rec.account || '') + ' · ' + itemId +
-      ' — no approved Order Processor to route the supplier task to. The first order on this item will have no supplier link → approve or assign an Order Processor.',
       'task:' + String(rec.task_id));
   }
   if (made.revision && !made.revision.existing) {

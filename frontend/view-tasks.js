@@ -10,8 +10,9 @@
   var TK_UPDATED = 'Updated';
   var TK_SUBMITTED = 'Submitted — awaiting approval';
   var TK_COMPLETED = 'Completed';
-  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'sourcing_link'];
-  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'sourcing_link'];
+  /* 14 Oct (owner): supplier_add retired — the Central Main Sheet is kept by hand now. */
+  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'sourcing_link'];
+  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'sourcing_link'];
   /* A loss review is the one type the server closes on an EXACT string: Tasks.gs rejects any
      submission note that is not one of these three, verbatim. My tasks only ever offered the
      free-text box every other type uses, so every loss review submitted since the type shipped
