@@ -3,15 +3,15 @@
  * + mandatory comment). actionApproveTask_ is the ONLY path to Completed — nothing counts
  * toward targets, performance (§12.1) or shoutouts before an approval lands. */
 
-const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'loss_review', 'sourcing_link',
+const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'loss_review',
   /* 1 Oct: end_listing was CREATED by decisionAct (Listing decisions → END) but never registered here,
      so listingCreateTask_ refused it as 'unknown task type' — every END decision's task silently
      failed. replacement_order / refund_process carry the two new management-approved workflows. */
   /* 5 Oct: hunt_revision was created by the hunting and listing desks (which append straight to
      the tab) but was never registered, so a manager raising one by hand was refused. */
-  /* 14 Oct (owner): supplier_add is RETIRED — no new one may be created, by the go-live chain or
-     by hand. It stays OUT of this list on purpose: existing rows still read and complete fine,
-     but actionCreateTask_ now refuses the type outright. */
+  /* 14 Oct (owner): supplier_add AND sourcing_link are RETIRED — the Central Main Sheet is kept
+     by hand now, and neither task was ever once completed. Both stay OUT of this list on purpose:
+     existing rows still read and complete fine, but actionCreateTask_ refuses the types outright. */
   'end_listing', 'replacement_order', 'refund_process', 'hunt_revision'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
 /* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
 const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
@@ -409,6 +409,7 @@ function tasksSheet_() { return getPortalDb_(false).getSheetByName('TASKS'); }
  * never did and feed the performance counts a lie. Every deletion is written to the activity log
  * first, so the audit trail outlives the row, and the engine mirror — which is what the boards
  * actually read — is reconciled at the end. Idempotent; run the DryRun twin first. */
+const RETIRED_TASK_TYPES = ['supplier_add', 'sourcing_link'];
 function retireSupplierAddTasksDryRun() { const r = retireSupplierAddTasks_(true); Logger.log(r); return r; }
 function retireSupplierAddTasks() { const r = retireSupplierAddTasks_(false); Logger.log(r); return r; }
 
@@ -424,22 +425,24 @@ function retireSupplierAddTasks_(dryRun) {
   const hits = [];
   for (let i = 0; i < vals.length; i++) {
     const r = vals[i];
-    if (String(r[iType]) !== 'supplier_add') continue;
+    if (RETIRED_TASK_TYPES.indexOf(String(r[iType])) < 0) continue;
     if (String(r[iStatus]) === TASK_STATUS_COMPLETED) continue;   // finished work stays on the record
-    hits.push({ row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''),
+    hits.push({ row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''), type: String(r[iType]),
       item: String(r[iItem] || ''), status: String(r[iStatus] || '') });
   }
-  if (!hits.length) return 'nothing to clear — no open supplier_add tasks';
+  if (!hits.length) return 'nothing to clear — no open ' + RETIRED_TASK_TYPES.join('/') + ' tasks';
   const who = {};
   hits.forEach(function (h) { who[h.to] = (who[h.to] || 0) + 1; });
-  const summary = hits.length + ' open supplier_add task(s) · ' +
+  const byType = {};
+  hits.forEach(function (h) { byType[h.type] = (byType[h.type] || 0) + 1; });
+  const summary = hits.length + ' open task(s) [' + Object.keys(byType).map(function (t) { return t + ' ' + byType[t]; }).join(', ') + '] · ' +
     Object.keys(who).map(function (e) { return (e.split('@')[0] || '(nobody)') + ' ' + who[e]; }).join(', ');
   if (dryRun) return 'DRY RUN · would delete ' + summary + ' · items: ' +
     hits.map(function (h) { return h.item || h.task_id; }).join(', ').slice(0, 900);
 
   hits.forEach(function (h) {
     try { logActivity_('system', 'RETIRE_SUPPLIER_ADD', h.task_id, h.status, 'deleted',
-      (h.item || '') + ' · ' + h.to + ' · supplier tasking retired (owner, 14 Oct)'); } catch (e) {}
+      (h.item || '') + ' · ' + h.to + ' · ' + h.type + ' retired (owner, 14 Oct)'); } catch (e) {}
   });
   for (let i = hits.length - 1; i >= 0; i--) sh.deleteRow(hits[i].row);   // bottom-up: earlier rows keep their numbers
   SpreadsheetApp.flush();

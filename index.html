@@ -863,7 +863,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261014-1704';
+var BUILD = '20261014-1818';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -30499,9 +30499,10 @@ function saveSchedule() {
   var TK_UPDATED = 'Updated';
   var TK_SUBMITTED = 'Submitted — awaiting approval';
   var TK_COMPLETED = 'Completed';
-  /* 14 Oct (owner): supplier_add retired — the Central Main Sheet is kept by hand now. */
-  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'sourcing_link'];
-  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'sourcing_link'];
+  /* 14 Oct (owner): supplier_add and sourcing_link retired — the Central Main Sheet is kept by
+     hand now, and the Sourcing screen's Missing tab is the live list instead of a task. */
+  var TK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query'];
+  var TK_ITEM_TYPES = ['listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review'];
   /* A loss review is the one type the server closes on an EXACT string: Tasks.gs rejects any
      submission note that is not one of these three, verbatim. My tasks only ever offered the
      free-text box every other type uses, so every loss review submitted since the type shipped
