@@ -3,12 +3,15 @@
  * + mandatory comment). actionApproveTask_ is the ONLY path to Completed — nothing counts
  * toward targets, performance (§12.1) or shoutouts before an approval lands. */
 
-const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'supplier_add', 'potential_cpc_review', 'query', 'loss_review', 'sourcing_link',
+const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'loss_review', 'sourcing_link',
   /* 1 Oct: end_listing was CREATED by decisionAct (Listing decisions → END) but never registered here,
      so listingCreateTask_ refused it as 'unknown task type' — every END decision's task silently
      failed. replacement_order / refund_process carry the two new management-approved workflows. */
   /* 5 Oct: hunt_revision was created by the hunting and listing desks (which append straight to
      the tab) but was never registered, so a manager raising one by hand was refused. */
+  /* 14 Oct (owner): supplier_add is RETIRED — no new one may be created, by the go-live chain or
+     by hand. It stays OUT of this list on purpose: existing rows still read and complete fine,
+     but actionCreateTask_ now refuses the type outright. */
   'end_listing', 'replacement_order', 'refund_process', 'hunt_revision'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
 /* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
 const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
@@ -86,7 +89,7 @@ function taskCanCreate_(role, email, type) {
   if ((role === 'CS' || role === 'Order Processor') && type === 'listing_revision') return true;
   /* Hasib item 19: every approved staff member can hand a task or a lead to anyone. The open
      types only — the privileged types above keep their gates. */
-  return type === 'general' || type === 'query' || type === 'supplier_add';
+  return type === 'general' || type === 'query';
 }
 
 // ---------- employee flow ----------
@@ -397,6 +400,57 @@ function tasksSheet_() { return getPortalDb_(false).getSheetByName('TASKS'); }
  * anything the push no longer carries, so the boards clear in the same run.
  *
  * Idempotent: run it twice and the second run finds nothing. Run the DryRun twin first. */
+/* ---------- clear the retired supplier_add queue (owner, 14 Oct) ----------
+ * "Remove all the supplier add tasking from the portal, and delete current pending tasks — the
+ * central sheet system is working quite well."
+ *
+ * Same shape as the 72-hour cleanup below, and for the same reason: the rows are DELETED rather
+ * than marked Completed, because completing them would credit Order Processors with work they
+ * never did and feed the performance counts a lie. Every deletion is written to the activity log
+ * first, so the audit trail outlives the row, and the engine mirror — which is what the boards
+ * actually read — is reconciled at the end. Idempotent; run the DryRun twin first. */
+function retireSupplierAddTasksDryRun() { const r = retireSupplierAddTasks_(true); Logger.log(r); return r; }
+function retireSupplierAddTasks() { const r = retireSupplierAddTasks_(false); Logger.log(r); return r; }
+
+function retireSupplierAddTasks_(dryRun) {
+  const sh = tasksSheet_();
+  const lr = sh.getLastRow(), lc = sh.getLastColumn();
+  if (lr < 2) return 'TASKS is empty';
+  const head = sh.getRange(1, 1, 1, lc).getValues()[0].map(String);
+  const iType = head.indexOf('type'), iStatus = head.indexOf('status');
+  const iId = head.indexOf('task_id'), iTo = head.indexOf('assigned_to'), iItem = head.indexOf('item_id');
+  if (iType < 0 || iStatus < 0 || iId < 0) throw new Error('TASKS headers are not what this expects');
+  const vals = sh.getRange(2, 1, lr - 1, lc).getValues();
+  const hits = [];
+  for (let i = 0; i < vals.length; i++) {
+    const r = vals[i];
+    if (String(r[iType]) !== 'supplier_add') continue;
+    if (String(r[iStatus]) === TASK_STATUS_COMPLETED) continue;   // finished work stays on the record
+    hits.push({ row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''),
+      item: String(r[iItem] || ''), status: String(r[iStatus] || '') });
+  }
+  if (!hits.length) return 'nothing to clear — no open supplier_add tasks';
+  const who = {};
+  hits.forEach(function (h) { who[h.to] = (who[h.to] || 0) + 1; });
+  const summary = hits.length + ' open supplier_add task(s) · ' +
+    Object.keys(who).map(function (e) { return (e.split('@')[0] || '(nobody)') + ' ' + who[e]; }).join(', ');
+  if (dryRun) return 'DRY RUN · would delete ' + summary + ' · items: ' +
+    hits.map(function (h) { return h.item || h.task_id; }).join(', ').slice(0, 900);
+
+  hits.forEach(function (h) {
+    try { logActivity_('system', 'RETIRE_SUPPLIER_ADD', h.task_id, h.status, 'deleted',
+      (h.item || '') + ' · ' + h.to + ' · supplier tasking retired (owner, 14 Oct)'); } catch (e) {}
+  });
+  for (let i = hits.length - 1; i >= 0; i--) sh.deleteRow(hits[i].row);   // bottom-up: earlier rows keep their numbers
+  SpreadsheetApp.flush();
+
+  let mirror;
+  try { mirror = String(pushEngineTasks()); }
+  catch (e) { mirror = 'MIRROR NOT RECONCILED — ' + String((e && e.message) || e) + ' (it self-heals on the next task sync)'; }
+  try { logActivity_('system', 'RETIRE_SUPPLIER_ADD_DONE', '', '', String(hits.length), mirror.slice(0, 180)); } catch (e) {}
+  return 'deleted ' + summary + ' · ' + mirror;
+}
+
 function retire72hRevisionTasksDryRun() { const r = retire72hTasks_(true); Logger.log(r); return r; }
 function retire72hRevisionTasks() { const r = retire72hTasks_(false); Logger.log(r); return r; }
 

@@ -746,7 +746,7 @@
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
       '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
-      '<div class="ls-what"><span class="ls-no">3</span><span><b>Order Processors get the supplier task.</b> supplier_add — Current Supplier Working · Ali Express Link 1 · Suuplier 2 · Supplier 3 on the Central Main Sheet.</span></div>' +
+
       '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
     '</div>';
   }
@@ -1041,7 +1041,7 @@
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));
     }
     rows += lsMadeRow('Zain · campaign_set', made.campaign_set);
-    rows += lsMadeRow('Order Processor · supplier_add', made.supplier_add);
+
     rows += lsMadeRow('You · ' + LS_KIND_72H, made.revision);
     rows += lsReceiptRow('Central sheet', mirror && mirror.ok
       ? 'Marked <b>Listing Done </b> on the Selected Listing tab'
