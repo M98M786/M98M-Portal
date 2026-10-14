@@ -2598,15 +2598,15 @@ const ACTIONS_BRAIN = {
  * + mandatory comment). actionApproveTask_ is the ONLY path to Completed — nothing counts
  * toward targets, performance (§12.1) or shoutouts before an approval lands. */
 
-const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'loss_review', 'sourcing_link',
+const TASK_TYPES = ['general', 'listing_new', 'listing_revision', 'cpc_research', 'campaign_set', 'potential_cpc_review', 'query', 'loss_review',
   /* 1 Oct: end_listing was CREATED by decisionAct (Listing decisions → END) but never registered here,
      so listingCreateTask_ refused it as 'unknown task type' — every END decision's task silently
      failed. replacement_order / refund_process carry the two new management-approved workflows. */
   /* 5 Oct: hunt_revision was created by the hunting and listing desks (which append straight to
      the tab) but was never registered, so a manager raising one by hand was refused. */
-  /* 14 Oct (owner): supplier_add is RETIRED — no new one may be created, by the go-live chain or
-     by hand. It stays OUT of this list on purpose: existing rows still read and complete fine,
-     but actionCreateTask_ now refuses the type outright. */
+  /* 14 Oct (owner): supplier_add AND sourcing_link are RETIRED — the Central Main Sheet is kept
+     by hand now, and neither task was ever once completed. Both stay OUT of this list on purpose:
+     existing rows still read and complete fine, but actionCreateTask_ refuses the types outright. */
   'end_listing', 'replacement_order', 'refund_process', 'hunt_revision'];   // 13 Sept: sourcing_link = R8's hourly 'supplier link needed' task — was rejected as unknown every hour since R8 shipped
 /* V2 loss escalation (§4): a loss_review closes with one of exactly these, nothing else. */
 const LOSS_RESOLUTIONS = ['Changed advertising', 'Changed price', 'Decision by management — keep same'];
@@ -3004,6 +3004,7 @@ function tasksSheet_() { return getPortalDb_(false).getSheetByName('TASKS'); }
  * never did and feed the performance counts a lie. Every deletion is written to the activity log
  * first, so the audit trail outlives the row, and the engine mirror — which is what the boards
  * actually read — is reconciled at the end. Idempotent; run the DryRun twin first. */
+const RETIRED_TASK_TYPES = ['supplier_add', 'sourcing_link'];
 function retireSupplierAddTasksDryRun() { const r = retireSupplierAddTasks_(true); Logger.log(r); return r; }
 function retireSupplierAddTasks() { const r = retireSupplierAddTasks_(false); Logger.log(r); return r; }
 
@@ -3019,22 +3020,24 @@ function retireSupplierAddTasks_(dryRun) {
   const hits = [];
   for (let i = 0; i < vals.length; i++) {
     const r = vals[i];
-    if (String(r[iType]) !== 'supplier_add') continue;
+    if (RETIRED_TASK_TYPES.indexOf(String(r[iType])) < 0) continue;
     if (String(r[iStatus]) === TASK_STATUS_COMPLETED) continue;   // finished work stays on the record
-    hits.push({ row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''),
+    hits.push({ row: i + 2, task_id: String(r[iId] || ''), to: String(r[iTo] || ''), type: String(r[iType]),
       item: String(r[iItem] || ''), status: String(r[iStatus] || '') });
   }
-  if (!hits.length) return 'nothing to clear — no open supplier_add tasks';
+  if (!hits.length) return 'nothing to clear — no open ' + RETIRED_TASK_TYPES.join('/') + ' tasks';
   const who = {};
   hits.forEach(function (h) { who[h.to] = (who[h.to] || 0) + 1; });
-  const summary = hits.length + ' open supplier_add task(s) · ' +
+  const byType = {};
+  hits.forEach(function (h) { byType[h.type] = (byType[h.type] || 0) + 1; });
+  const summary = hits.length + ' open task(s) [' + Object.keys(byType).map(function (t) { return t + ' ' + byType[t]; }).join(', ') + '] · ' +
     Object.keys(who).map(function (e) { return (e.split('@')[0] || '(nobody)') + ' ' + who[e]; }).join(', ');
   if (dryRun) return 'DRY RUN · would delete ' + summary + ' · items: ' +
     hits.map(function (h) { return h.item || h.task_id; }).join(', ').slice(0, 900);
 
   hits.forEach(function (h) {
     try { logActivity_('system', 'RETIRE_SUPPLIER_ADD', h.task_id, h.status, 'deleted',
-      (h.item || '') + ' · ' + h.to + ' · supplier tasking retired (owner, 14 Oct)'); } catch (e) {}
+      (h.item || '') + ' · ' + h.to + ' · ' + h.type + ' retired (owner, 14 Oct)'); } catch (e) {}
   });
   for (let i = hits.length - 1; i >= 0; i--) sh.deleteRow(hits[i].row);   // bottom-up: earlier rows keep their numbers
   SpreadsheetApp.flush();
@@ -24986,78 +24989,29 @@ function actionHuntDesk_(payload, ctx) {
 }
 
 /* ---------- order-link requests (R8-2b) + hourly sweep ---------- */
-function r8OpenLinkTask_(all, itemId) {
-  for (let i = 0; i < all.length; i++) {
-    const t = all[i];
-    if (String(t.type) === 'sourcing_link' && String(t.item_id) === itemId &&
-        [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED].indexOf(String(t.status)) >= 0) return t;
-  }
-  return null;
-}
+/* 14 Oct (owner: "remove this from backend"): r8OpenLinkTask_, r8MakeLinkTask_ and the
+   requestItemLink action are GONE with the sourcing_link type they existed to raise. No screen
+   ever called the action, and the sweep above no longer raises tasks either — items with orders
+   and no supplier link live on the Sourcing screen's Missing tab, which is a list somebody works
+   rather than a task that chases them. */
 
-function r8MakeLinkTask_(itemId, account, title, hunterEmail, requestedBy, note) {
-  const sh = tasksSheet_();
-  const stamp = now_();
-  const deadline = taskPktIso_(new Date(Date.now() + 86400000));
-  const taskId = listingCreateTask_(sh, {
-    type: 'sourcing_link', account: account, item_id: itemId,
-    title: 'sourcing_link — Item ID ' + itemId,
-    details: listingLines_([
-      'Item ID: ' + itemId, 'Listing: ' + String(title || ''),
-      'Orders are arriving with NO supplier link on file — add the AliExpress link(s) on the Sourcing screen.',
-      requestedBy ? 'Requested by: ' + requestedBy : '', note ? 'Note: ' + note : '',
-    ]),
-    assigned_by: requestedBy || 'system', assigned_to: hunterEmail,
-    priority: 'high', deadline_pkt: deadline, stamp: stamp,
-  });
-  notify_(hunterEmail, 'Task assigned',
-    '🟠 Supplier link needed · ' + account + ' · ' + itemId + (title ? ' · ' + String(title).slice(0, 50) : '') +
-    ' — orders are waiting and the portal has NO purchase link for this item you hunted. Add it on the Sourcing screen now.',
-    'task:' + taskId);
-  return taskId;
-}
-
-function actionRequestItemLink_(payload, ctx) {
-  const roles = ['Order Processor', 'Ops Head', 'Management', 'Team Lead', 'CS'];
-  if (roles.indexOf(ctx.user.role) < 0 && !isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error('role may not request links');
-  const itemId = taskItemId_(payload.item_id);
-  const all = readTab_('TASKS');
-  const open = r8OpenLinkTask_(all, itemId);
-  if (open) return { task_id: String(open.task_id), existing: true, assigned_to: String(open.assigned_to) };
-  let hunter = '', title = '', account = String(payload.account || '');
-  try {
-    const p = enginePost_('provenanceGet', { item_id: itemId });
-    if (p && p.hunter_email) hunter = String(p.hunter_email);
-    if (p && p.account && !account) account = String(p.account);
-  } catch (e) {}
-  if (!hunter) {
-    notifyManagement_('Link request — hunter unknown',
-      '🟠 ' + (ctx.user.name || ctx.ident.email) + ' needs a supplier link for item ' + itemId + ' (' + (account || '?') +
-      ') but the portal has no record of who hunted it. Assign someone on the Sourcing screen.', 'r8:link:' + itemId);
-    return { task_id: '', existing: false, assigned_to: '', note: 'no hunter recorded — Management alerted' };
-  }
-  const taskId = r8MakeLinkTask_(itemId, account, String(payload.title || ''), hunter, ctx.ident.email, String(payload.note || '').slice(0, 200));
-  logActivity_(ctx.ident.email, 'R8_LINK_REQUEST', itemId, '', hunter, '');
-  return { task_id: taskId, existing: false, assigned_to: hunter };
-}
-
-/** Hourly ride: engine names the items with orders but no link; each with a known hunter gets ONE
- * open task; unknowns go to management as a single daily digest. Caps keep the run cheap. */
+/** Hourly ride. 14 Oct (owner): it no longer RAISES tasks — "remove all the supplier add tasking
+ * from the portal, the central sheet system is working quite well", and the same judgement applies
+ * to this one: it chased hunters for links the Central Main Sheet now carries, and like
+ * supplier_add not one of its tasks was ever completed. What survives is the part that tells a
+ * human something they cannot see elsewhere: items that have ORDERS, no supplier link and NO
+ * recorded hunter — nobody to chase — which still reaches Management once a day. The Sourcing
+ * screen's own Missing tab remains the live list, which is where this work belongs. */
 function orderLinkSweep() {
   let items = [];
   try { items = (enginePost_('missingLinkItems', {}) || {}).items || []; } catch (e) { return 'engine unreachable'; }
   if (!items.length) return 'nothing missing';
-  const all = readTab_('TASKS');
   let made = 0; const orphans = [];
-  for (let i = 0; i < items.length && made < 5; i++) {
+  for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const id = String(it.item_id || '');
     if (!/^\d{9,15}$/.test(id)) continue;
-    if (r8OpenLinkTask_(all, id)) continue;
-    const hunter = String(it.hunter_email || '');
-    if (!hunter) { orphans.push(id + ' (' + String(it.account || '') + ')'); continue; }
-    r8MakeLinkTask_(id, String(it.account || ''), String(it.title || ''), hunter, '', String(it.orders_n || 1) + ' order(s) waiting');
-    made++;
+    if (!String(it.hunter_email || '')) orphans.push(id + ' (' + String(it.account || '') + ')');
   }
   if (orphans.length) {
     const props = PropertiesService.getScriptProperties();
@@ -25066,10 +25020,10 @@ function orderLinkSweep() {
       props.setProperty(key, '1');
       notifyManagement_('Items with orders but no supplier link',
         '🟠 ' + orphans.length + ' item(s) have orders but NO supplier link and NO recorded hunter: ' +
-        orphans.slice(0, 6).join(', ') + ' — assign them on the Sourcing screen.', 'r8:orphans:' + key);
+        orphans.slice(0, 6).join(', ') + ' — add them on the Sourcing screen (Missing tab).', 'r8:orphans:' + key);
     }
   }
-  return 'made ' + made + ' task(s), ' + orphans.length + ' orphan(s)';
+  return 'raised 0 task(s) (retired 14 Oct), ' + orphans.length + ' orphan(s) reported';
 }
 
 /* ---------- listing desk (R8-3a / R8-8 CPC split) ---------- */
@@ -25798,7 +25752,6 @@ const ACTIONS_R8 = {
   huntReasonAdd:      [actionHuntReasonAdd_, 'any'],     // mgmt gated inside
   deptPending:        [actionDeptPending_, 'any'],
   huntDesk:           [actionHuntDesk_, 'any'],
-  requestItemLink:    [actionRequestItemLink_, 'any'],   // order roles gated inside
   listDesk:           [actionListDesk_, 'any'],
   listerRejectRequest: [actionListerRejectRequest_, 'any'],
   mgmtRejectDecide:   [actionMgmtRejectDecide_, 'any'],  // mgmt gated inside
