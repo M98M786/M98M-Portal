@@ -4084,10 +4084,10 @@ async function ensureAdtoolPhase1bSchema(env) {
   try { await adtBatch(env, seed); } catch (e) { /* the register is documentation; never let it stop a job */ }
 }
 const ADTOOL_REGISTER_P1B = [
-  ['TODAY_GRAIN', 'Today per listing, every 5 minutes', 'adtool_listing_today: ad columns = Σ over families of adtool_intraday_latest for today\'s UTC report day (NULL until the first same-day sample lands — Pacific midnight + 5 min: ~07:05 UTC in summer, ~08:05 in winter; a row whose report_day is not the current UTC day reads as unsampled); orders / units / revenue from `orders` since the UK day began, non-cancelled; actual_profit = Sales Analysis law over priced orders with cpc_spend = today\'s cost-per-click cumulative; unpriced_orders counts each order once; rows with neither ads nor orders are deleted', 'adtool_intraday_latest, orders → adtool_listing_today', 'adsIntraday every 5 min (flag adtool_today); skipped when no sample landed, no order changed and the UTC day has not turned', 'ADTOOL_TODAY_FRESHNESS: newest sample < 10 min old inside the sampling window (Pacific midnight + 5 min → 23:59 UTC)'],
-  ['PERIOD_PARAM', 'The period filter every rebuilt page reads', 'adtPeriod: today | yesterday | d7 | d14 | d30 | d90 (N full days to yesterday) | this_week | last_week (Mon start) | this_month | last_month | custom (≤ 120 days; one day = day-to-day); a window that includes today = adtool_listing_day for days ≤ yesterday + adtool_listing_today, never listing_day\'s own today row; "yesterday" carries report_status landing | final per account', 'adtool_listing_day, adtool_listing_today, ad_report_tasks', 'per request; every response echoes period:{key, from, to, days, includes_today, label, prev_from, prev_to}', 'unit tests on all 11 keys, week and month edges'],
-  ['KV_PAGE_CACHE', 'Page cache for the advertising read actions', 'KV (HOT) key adt:rt:<action>:<profit class>:<payload hash>, value {at, data}, TTL per action (today / live windows 60 s); adtoolToday and adtoolCommand for all accounts are pre-warmed by adsIntraday after the today grain; act-on actions are never cached; hits / misses per action in sync_state job adtoolCache', 'HOT (KV), sync_state', 'on every read; pre-warm every 5 min', 'adtoolCache counters move; the owner\'s first open of the Command centre is served from KV'],
-  ['CARRY_HOUR', 'First-sample carry on the hourly grain', 'adtool_listing_hour.carry_spend = the first intraday sample\'s cumulative spend for the (listing, family, report day), booked in the UK hour of that sample; spend_s / spend_r hold within-hour spend only. Rows rolled BEFORE this deploy (carry_spend NULL) still carry the spike inside spend_s of the ~08:00 UK hour until the next rollup of that day (today-2..today hourly, today-9..today-3 nightly); older history keeps it', 'adtool_ads_intraday → adtool_listing_hour.carry_spend', 'adtoolRollups', 'Σ(spend_s + carry_spend) per listing-day ≈ the day\'s sampled total'],
+  ['TODAY_GRAIN', 'Today\'s figures per listing', 'Today\'s spend, clicks, sales from ads and orders for each listing, refreshed every five minutes. eBay publishes no ad figures for today until around 08:00 UK, so before then a listing shows its orders only.', 'adtool_intraday_latest, orders → adtool_listing_today', 'Every five minutes, and skipped when nothing has changed', 'The newest reading is under ten minutes old through the day'],
+  ['PERIOD_PARAM', 'The period a page is showing', 'Today, yesterday, the last 7, 14, 30 or 90 days, this or last week, this or last month, or dates you pick. A period that includes today uses today\'s live figures for today and the finished figures for every earlier day.', 'adtool_listing_day, adtool_listing_today, ad_report_tasks', 'Read on every request, and every page says which period it used', 'Tested on all eleven choices and on the week and month edges'],
+  ['KV_PAGE_CACHE', 'Page cache', 'A page\'s answer is kept for a short while so opening it again is quick. What a page may show depends on who is asking, so an answer is kept separately for each kind of reader and is never shared across them. Nothing you act on is ever kept.', 'HOT (KV), sync_state', 'On every read, and the busiest pages are prepared in advance every five minutes', 'The first open of a page after a quiet spell comes back from the cache'],
+  ['CARRY_HOUR', 'The first ad reading of the day', 'eBay\'s first reading of the day is a running total since midnight, so it is booked against the hour it arrived rather than spread back over the night. Days rolled up before this was fixed still show that first reading sitting inside the 08:00 hour.', 'adtool_ads_intraday → adtool_listing_hour.carry_spend', 'With the hourly roll-up', 'The hours of a day add back up to the day\'s own total'],
 ];
 async function adtFlag(env, key) {
   const row = await env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(key).first().catch(() => null);
@@ -4450,39 +4450,39 @@ async function adtoolRollupsFull(env) {
 
 /* ---- job: register seed (spec §11.3) ---- */
 const ADTOOL_REGISTER = [
-  ['AD_SPEND_DAY', 'Ad spend per listing per report day', 'ads_daily.spend + ads_daily.cpc_spend (both billing families, £ incl. VAT as eBay bills)', 'ads_daily', 'adsReportPoll (T+1, kick 02:10 UTC, poll every 15 min)', 'sales_daily.ads equals the per-listing sum (completeness only)'],
-  ['AD_CLICKS_DAY', 'Ad clicks per listing per report day', 'ads_daily.clicks + cpc_clicks', 'ads_daily', 'same', 're-sum from raw rows'],
-  ['AD_ATTR_UNITS_DAY', 'Attributed sales (units) per listing per report day', 'ads_daily.sales + cpc_sales', 'ads_daily', 'same', 're-sum'],
-  ['AD_ATTR_REVENUE_DAY', 'Attributed revenue per listing per report day', 'ads_daily.sale_amount + cpc_sale_amount', 'ads_daily', 'same', 're-sum'],
-  ['ROAS', 'Return on ad spend', 'AD_ATTR_REVENUE ÷ AD_SPEND at any scope', 'adtool_listing_day, adtool_scope_day', 'adtoolRollups hourly', 'independent division on raw sums'],
-  ['MARGIN_BEFORE_ADS', 'Per-unit margin before ads', 'portal item fact (capped at 0.665 × price) → own orders 0.8 × (sold − cost − fees) ÷ qty, 90 days → 0.8 × (price − ali − 0.169 × price) → 0.353 × price (estimate)', 'items_facts, orders, items_api', 'adtoolListingsRefresh (every rollup run)', 'source tag on every listing; fixture parity'],
-  ['BREAKEVEN_ROAS', 'Break-even ROAS', 'price ÷ MARGIN_BEFORE_ADS', 'adtool_listings', 'same', 're-derive'],
-  ['EST_AD_PROFIT', 'Estimated ad profit (ads-attributed view) — NOT SHOWN since 27 Sep 2026', 'AD_ATTR_UNITS × MARGIN_BEFORE_ADS − AD_SPEND; kept in the tables for the parity fixture and the shadow scorer only, never returned to a client', 'adtool_listing_day.ad_profit', 'adtoolRollups', 'fixture: 17 Aug–15 Sep re-cut after the 13–20 Aug back-fill'],
-  ['PROFIT_SHEET_LAW', 'Profit (Sales Analysis law) per listing per day', '0.8 × Σ(sold − eBay fees − Ali cost) over non-cancelled orders with fees > 0 and cost known − 0.96 × cpc_spend − Σ refunds; replaces est. ad profit on every screen (owner, 27 Sep 2026)', 'adtool_orders (sale_price, ebay_fees, ali_cost, refunded), ads_daily.cpc_spend → adtool_listing_day.actual_profit; week / month / scope grains re-summed from it', 'adtoolRollups hourly :20 (today-2..today), nightly tail re-roll today-9..today-3 after 03:00 UTC; full history rebuilt whenever portal_config.adtool_profit_law ≠ ' + ADTOOL_PROFIT_LAW, 'ADTOOL_PROFIT_VS_SHEET: per account, profit before ads over the last 7 sheet days (PKT) vs Σ Actual Profit + 0.96 × typed Priority of sheet_rows excluding GRAND TOTAL, gate |Δ| ≤ max(£25, 10 %) of the window total; per-day max(£8, 8 %) flags informational'],
-  ['PENDING_FEE_ORDERS', 'Orders whose eBay fees have not landed', 'count of non-cancelled orders on the day with ebay_fees = 0 (fees arrive hourly via financeSync); such orders are left out of the profit sum and printed as "n orders unpriced" beside it, together with PENDING_COST_ORDERS', 'adtool_orders → adtool_listing_day.pending_fee_orders', 'adtoolRollups', 'falls to 0 for a day once financeSync has priced it; never negative'],
-  ['PROFIT_ITEM_ONLY', 'Profit leaves the engine per item only', 'rule: no row keyed by account, fleet, category, case type, weekday, slot or day-of-fleet that an adtool action returns carries a key matching /profit/i; adtStripCollectiveProfit runs on every adtool response and ad_profit is never returned', 'ADTOOL_ACTIONS (every phase)', 'every response', 'unit test: the strip removes profit keys from account rows and keeps them on item rows; grep of the views for ad_profit = 0'],
-  ['ORDERS_UK_DAY', 'Orders (all channels) per UK date', 'count of non-cancelled orders by created_at localised to Europe/London', 'adtool_orders', 'adtoolOrdersRoll hourly', 'SQL vs JS localisation on 3 dates'],
-  ['UNITS_UK_DAY', 'Units (all channels) per UK date', 'Σ qty of non-cancelled orders by UK date', 'adtool_orders', 'same', 'same'],
-  ['ORDERS_UK_HOUR', 'Orders per UK date × hour', 'count by local_date, local_hour', 'adtool_listing_hour', 'same', 'same'],
-  ['SLOT_SHARE', 'Share of orders per time slot', 'slot 0 night 00:00–05:59, 1 morning 06:00–11:59, 2 afternoon 12:00–16:59, 3 evening 17:00–23:59 UK', 'adtool_listing_slot', 'same', 'Σ shares = 1'],
-  ['ORGANIC_UNITS', 'Units not attributed to ads (approximate: two clocks)', 'UNITS_UK_DAY − AD_ATTR_UNITS, floored at 0', 'adtool_listing_day', 'adtoolRollups', 'never negative'],
-  ['TOE_ORDER', 'True Order Earning per order (Brain v17)', 'sold − eBay fees', 'adtool_orders', 'adtoolOrdersRoll', 'register R = H − I − N chain'],
-  ['VAT_EX_ADS_ORDER', 'VAT to HMRC per order before the ads leg', 'sold/6 − fees/6 − ali/6', 'adtool_orders', 'same', 'register S = C − G − J − M − Q chain'],
-  ['ACTUAL_PROFIT_LISTING_DAY', 'Profit (Sales Analysis law) per listing per day — see PROFIT_SHEET_LAW', 'since 27 Sep 2026 the Sales Analysis law (PROFIT_SHEET_LAW); the Brain v17 chain (Σ(TOE − ali − VAT_ex_ads) − 0.8 × cpc_spend ÷ 1.2 − refunds) is no longer used for this column', 'adtool_listing_day.actual_profit', 'adtoolRollups', 'ADTOOL_PROFIT_VS_SHEET'],
-  ['AD_SPEND_UK_HOUR_SAMPLED', 'Ad spend per UK hour, sampled', 'Δ of consecutive intraday cumulative samples per listing per family, booked to the UK hour of the later sample', 'adtool_ads_intraday → adtool_listing_hour.spend_s', 'adtoolRollups (last 3 days, hourly)', 'Σ hours ≈ the day’s final report (reconciliation factor stored)'],
-  ['AD_SPEND_UK_HOUR_RECONCILED', 'Ad spend per UK hour, reconciled', 'sampled hours × (final daily spend ÷ Σ sampled spend)', 'adtool_listing_hour.spend_r', 'adtoolRollups once the T+1 report exists', 'Σ hours = AD_SPEND_DAY exactly'],
-  ['HOURLY_STATUS', 'Provenance of an hourly ad figure', 'none | partial (< 20 samples in the day) | sampled | reconciled', 'adtool_listing_hour', 'adtoolRollups', 'tag shown on every hourly panel'],
-  ['AD_LIVE_MEMBERSHIPS', 'Live ad memberships per listing', 'existing liveMembershipRow: campaign RUNNING and (CPC ad ACTIVE or CPS ad exists and not ARCHIVED)', 'campaigns, campaign_ads', 'adsItems every 15 min', 'SPLIT_SUMS_TO_ACTIVE (existing)'],
-  ['AD_PAUSED_IN_CAMPAIGN', 'Ads paused inside a campaign per listing', 'campaign_ads.ad_status = PAUSED (CPC only; CPS carries no per-ad status)', 'campaign_ads', 'same', 'count vs eBay get_ads on 3 listings (owner check)'],
-  ['UNRESOLVED_CAMPAIGN_IDS', 'Campaign ids in the ad map that the campaigns table cannot name', 'campaign_ads.campaign_id NOT IN campaigns', 'campaign_ads, campaigns', 'marketingSync :50', 'fixture: 73 ids'],
-  ['ZERO_SALE_SPEND', 'Ad spend on days with no attributed sale', 'Σ spend where attr_units = 0, per scope per day', 'adtool_scope_day.zero_sale_spend', 'adtoolRollups', 're-sum'],
-  ['WEEKDAY_OF_REPORT_DAY', 'Weekday of an ads report day', 'weekday of the UTC report day label', 'adtool_listing_day.weekday', 'adtoolRollups', 'Mon 17 Aug 2026 = 0'],
-  ['SHIFTED_HOUR_SHARE', 'Orders in the hour the UTC report day assigns to the previous day', 'share of orders with UK hour 0 while BST', 'adtool_orders', 'daily', '1.70 % on the fixture window'],
-  ['PARITY_FLEET', 'Fixture parity, fleet totals', 'tool sums over the fixture window vs the stored fixture (spend, clicks, units, revenue exact; est. profit within 1 %)', 'ads_daily, adtool_listings, adtool_fixture', 'adtoolTruth daily 05:20 UTC', 'validation_runs ADTOOL_PARITY_FLEET'],
-  ['PARITY_WEEKDAY', 'Fixture parity, per weekday', 'same, per weekday', 'same', 'same', 'validation_runs ADTOOL_PARITY_WEEKDAY'],
-  ['PARITY_ACCOUNT_WEEKDAY', 'Fixture parity, per account × weekday', 'same, per account × weekday', 'same', 'same', 'validation_runs ADTOOL_PARITY_ACCT'],
-  ['PARITY_DATE', 'Fixture parity, per date', 'same, per date', 'same', 'same', 'validation_runs ADTOOL_PARITY_DATE'],
-  ['PARITY_LISTING', 'Fixture parity, per listing', 'spend/clicks/units/revenue exact for every fixture listing; est. profit within 1 % overall', 'same', 'same', 'validation_runs ADTOOL_PARITY_LISTING'],
+  ['AD_SPEND_DAY', 'Ad spend per listing per day', 'What eBay billed for that listing\'s ads that day, both kinds of campaign together, including VAT. It is eBay\'s own figure, not an estimate.', 'ads_daily', 'Once a day, when eBay publishes the previous day', 'The listing figures add up to the account\'s own daily total'],
+  ['AD_CLICKS_DAY', 'Ad clicks per listing per day', 'Clicks on that listing\'s ads that day, both kinds of campaign together.', 'ads_daily', 'Once a day, with the spend', 'Added up again from eBay\'s own rows'],
+  ['AD_ATTR_UNITS_DAY', 'Units sold through the ad, per listing per day', 'Units eBay credits to that listing\'s ads that day. eBay decides what counts, not us.', 'ads_daily', 'Once a day, with the spend', 'Added up again from eBay\'s own rows'],
+  ['AD_ATTR_REVENUE_DAY', 'Sales through the ad, per listing per day', 'The money eBay credits to that listing\'s ads that day.', 'ads_daily', 'Once a day, with the spend', 'Added up again from eBay\'s own rows'],
+  ['ROAS', 'Return on ad spend', 'Sales that came through the ad divided by what the ad cost. A ROAS of 4 means four pounds of sales for every pound spent.', 'adtool_listing_day, adtool_scope_day', 'With the hourly roll-up', 'Worked out again from the raw totals'],
+  ['MARGIN_BEFORE_ADS', 'Profit per unit before ads', 'What one unit earns before any ad cost. We use the cost on the Main Sheet where there is one, otherwise what this listing\'s own orders over the last 90 days actually earned, otherwise an estimate from the price. Every listing says which of those it used.', 'items_facts, orders, items_api', 'With every roll-up', 'The source is printed on every listing'],
+  ['BREAKEVEN_ROAS', 'The ROAS a listing needs to break even', 'The price divided by the profit per unit before ads. Below this the ad costs more than the sale earns.', 'adtool_listings', 'With the profit per unit', 'Worked out again from the price and the margin'],
+  ['EST_AD_PROFIT', 'Old estimated ad profit, no longer shown', 'An older estimate of ad profit, replaced by real profit on every screen in September 2026. It is kept only so the old and new figures can be compared, and is never sent to a page.', 'adtool_listing_day.ad_profit', 'With the roll-up', 'Compared against the frozen test set'],
+  ['PROFIT_SHEET_LAW', 'Profit per listing per day', 'Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.', 'adtool_orders (sale_price, ebay_fees, ali_cost, refunded), ads_daily.cpc_spend → adtool_listing_day.actual_profit; week / month / scope grains re-summed from it', 'Every hour for the last few days, and again overnight once eBay\'s fees have settled', 'Checked against the Sales Analysis sheet for every account each morning, over the last seven days'],
+  ['PENDING_FEE_ORDERS', 'Orders whose eBay fees have not arrived yet', 'Orders on that day that eBay has not charged fees for yet. They are left out of the profit figure and counted beside it as orders not costed yet, so a profit figure is never quietly wrong.', 'adtool_orders → adtool_listing_day.pending_fee_orders', 'With the roll-up. Fees arrive through the day', 'Falls to nothing for a day once all its fees have arrived'],
+  ['PROFIT_ITEM_ONLY', 'Profit only ever leaves per item', 'The owner\'s rule for the advertising portal: a profit figure may travel with a single item, never as an account or company total. Every answer these pages give is stripped of collective profit on the way out.', 'ADTOOL_ACTIONS (every phase)', 'On every answer', 'A test proves the strip takes profit off account rows and leaves it on item rows'],
+  ['ORDERS_UK_DAY', 'Orders a day, all channels', 'Orders placed that day by UK date, counting cancelled ones out.', 'adtool_orders', 'Every hour', 'The UK date is worked out two different ways and the two are compared'],
+  ['UNITS_UK_DAY', 'Units a day, all channels', 'Units on those orders, by UK date.', 'adtool_orders', 'Every hour', 'The same check as the order count'],
+  ['ORDERS_UK_HOUR', 'Orders by UK date and hour', 'The same orders, counted into the UK hour they were placed in.', 'adtool_listing_hour', 'Every hour', 'The same check as the order count'],
+  ['SLOT_SHARE', 'Share of orders by time of day', 'Orders split into night, morning, afternoon and evening in UK time, each as a share of the day.', 'adtool_listing_slot', 'Every hour', 'The four shares add up to the whole'],
+  ['ORGANIC_UNITS', 'Units not credited to ads', 'All units for the day less the units eBay credits to ads, never below zero. It is close rather than exact, because eBay dates ads and orders on different clocks.', 'adtool_listing_day', 'With the roll-up', 'Never negative'],
+  ['TOE_ORDER', 'What an order earns before costs', 'The sale price less eBay\'s fees.', 'adtool_orders', 'Every hour', 'Follows the same chain as the Sales Analysis sheet'],
+  ['VAT_EX_ADS_ORDER', 'VAT on an order, before the ad cost', 'A sixth of the sale, less a sixth of the fees and a sixth of the product cost.', 'adtool_orders', 'Every hour', 'Follows the same chain as the Sales Analysis sheet'],
+  ['ACTUAL_PROFIT_LISTING_DAY', 'Profit per listing per day, as stored', 'The same figure described under profit per listing per day. An older way of working it out was dropped in September 2026.', 'adtool_listing_day.actual_profit', 'With the roll-up', 'Checked against the Sales Analysis sheet'],
+  ['AD_SPEND_UK_HOUR_SAMPLED', 'Ad spend by UK hour, from readings', 'eBay gives no hourly ad figures, so its running total is read every few minutes and the difference booked to the hour it arrived in.', 'adtool_ads_intraday → adtool_listing_hour.spend_s', 'Every hour, for the last three days', 'The hours add up close to the day eBay finally publishes'],
+  ['AD_SPEND_UK_HOUR_RECONCILED', 'Ad spend by UK hour, corrected', 'The hourly readings scaled so they add up to exactly the day eBay published.', 'adtool_listing_hour.spend_r', 'Once eBay\'s figure for the day arrives', 'The hours add up to the day exactly'],
+  ['HOURLY_STATUS', 'How good an hourly ad figure is', 'One of four states: nothing read yet, too few readings to trust, read but not yet corrected, or corrected against the day eBay published.', 'adtool_listing_hour', 'With the roll-up', 'The state is shown on every hourly panel'],
+  ['AD_LIVE_MEMBERSHIPS', 'Ads live on a listing', 'A listing counts as advertised when its campaign is running and its ad is active, or, for pay-on-sale campaigns, simply exists and is not archived. The whole tool uses this one rule and never a second one.', 'campaigns, campaign_ads', 'Every fifteen minutes', 'The account totals only ever cover live ads'],
+  ['AD_PAUSED_IN_CAMPAIGN', 'Ads paused inside a campaign', 'Ads paused rather than removed. Only pay-per-click campaigns have this, as pay-on-sale ads carry no state of their own on eBay.', 'campaign_ads', 'Every fifteen minutes', 'Checked against eBay\'s own campaign screen on a few listings'],
+  ['UNRESOLVED_CAMPAIGN_IDS', 'Campaigns we have ads for but cannot name', 'Ads pointing at a campaign eBay no longer lists, so we have the spend but not the name it belongs to.', 'campaign_ads, campaigns', 'Every hour', 'Counted against a frozen baseline'],
+  ['ZERO_SALE_SPEND', 'Ad spend on days with no sale from the ad', 'Spend on days where the ad brought in nothing at all.', 'adtool_scope_day.zero_sale_spend', 'With the roll-up', 'Added up again'],
+  ['WEEKDAY_OF_REPORT_DAY', 'Which weekday an ad figure belongs to', 'The weekday of the day eBay dates its ad report to. eBay dates ads by its own clock while orders arrive on UK time, so the two are lined up here once rather than page by page.', 'adtool_listing_day.weekday', 'With the roll-up', 'Tested on a known Monday'],
+  ['SHIFTED_HOUR_SHARE', 'Orders in the hour the two clocks disagree about', 'Through British Summer Time, orders in the first UK hour of the day fall on eBay\'s previous ad day. This is how big that sliver is, so nobody mistakes it for a real pattern.', 'adtool_orders', 'Daily', 'Measured at under two per cent of orders'],
+  ['PARITY_FLEET', 'Checked against the frozen test set, company totals', 'Our totals over a fixed past period against figures checked by hand at the time. Spend, clicks, units and sales have to match exactly.', 'ads_daily, adtool_listings, adtool_fixture', 'Every morning', 'Recorded as a pass or a failure every morning'],
+  ['PARITY_WEEKDAY', 'Checked against the frozen test set, by weekday', 'The same comparison, split by weekday.', 'same', 'Every morning', 'Recorded as a pass or a failure every morning'],
+  ['PARITY_ACCOUNT_WEEKDAY', 'Checked against the frozen test set, by account and weekday', 'The same comparison, split by account and weekday.', 'same', 'Every morning', 'Recorded as a pass or a failure every morning'],
+  ['PARITY_DATE', 'Checked against the frozen test set, by date', 'The same comparison, split by date.', 'same', 'Every morning', 'Recorded as a pass or a failure every morning'],
+  ['PARITY_LISTING', 'Checked against the frozen test set, by listing', 'The same comparison for every listing in the set. Spend, clicks, units and sales have to match exactly.', 'same', 'Every morning', 'Recorded as a pass or a failure every morning'],
 ];
 async function adtoolRegisterSeed(env) {
   await ensureAdtoolPhase1Schema(env);
@@ -4769,11 +4769,14 @@ async function adtFresh(env, grain) {
     const t = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null);
     const o = await env.DB.prepare("SELECT MAX(last_ok) AS t FROM sync_state WHERE job = 'orderSync'").first().catch(() => null);
     const now = new Date(), inWin = adtInSamplingWindow(now), fromTxt = adtSamplingFromText(now);
-    return { grain: 'adtool_listing_today', sampled_at: t && t.t ? String(t.t) : null, orders_at: o && o.t ? String(o.t) : null, cadence: 'every 5 min (ads sampled ' + adtSamplingWindowText(now) + '; orders all day)', provisional: true,
-      in_window: inWin, next_sample_at: inWin ? null : fromTxt, note: inWin ? null : 'no same-day ad sample until ' + fromTxt + ' — orders live' };
+    return { grain: 'adtool_listing_today', sampled_at: t && t.t ? String(t.t) : null, orders_at: o && o.t ? String(o.t) : null, cadence: 'every 5 min', ads_window: adtSamplingWindowText(now), provisional: true,
+      in_window: inWin, next_sample_at: inWin ? null : fromTxt, note: inWin ? null : 'no ad figures from eBay until ' + fromTxt + ', orders are live now' };
   }
   const r = await env.DB.prepare("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND status = 'ok'").first().catch(() => null);
-  return { grain: 'adtool_listing_day', rolled_at: r && r.t ? String(r.t) : null, cadence: 'hourly :20 (today-2..today) + nightly 10-day re-roll' };
+  /* `cadence` is printed verbatim in a page header, so it says how often a reader sees new figures.
+     `grain` is NOT printed any more: the shell only pattern-matches it to decide whether to add
+     "still updating", so it stays a table name on purpose. */
+  return { grain: 'adtool_listing_day', rolled_at: r && r.t ? String(r.t) : null, cadence: 'every hour' };
 }
 async function adtReportStatus(env, day) {
   /* per account: both T+1 families INGESTED for the report day → 'final', else 'landing' (the samples stand in).
@@ -4988,7 +4991,11 @@ async function adtoolTodayPrewarm(env, rebuild) {
   if (rebuild && !rebuild.skipped) { try { await ctx_setSync(env, 'adtoolToday', '', JSON.stringify(Object.assign({}, rebuild, { prewarm: out.join('+'), prewarm_ms: Date.now() - t0 }))); } catch (e) { /* the note is best effort */ } }
   return out;
 }
-const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000 };
+/* adtoolDepts is a once-a-day classification: a listing's age turns over at midnight and the sales
+   windows behind it end yesterday, so nothing in its answer can move between two rollups. Half an
+   hour is therefore generous without ever being a day stale, and it is short enough that an owner
+   who edits one of the eight numbers sees the page follow within the half hour. */
+const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000, adtoolDepts: 1800000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -5130,7 +5137,7 @@ const ADTOOL_ACTIONS = {
         rollup_cursor: await adtFlag(env, 'adtool_rollup_cursor'),
         listing_days: await env.DB.prepare('SELECT COUNT(*) AS n, MIN(day) AS mn, MAX(day) AS mx FROM adtool_listing_day').first(),
       };
-      const register = (await env.DB.prepare('SELECT metric_id, name, phase FROM adtool_number_register ORDER BY phase, metric_id').all()).results || [];
+      const register = adtRegRows((await env.DB.prepare('SELECT metric_id, name, phase FROM adtool_number_register ORDER BY phase, metric_id').all()).results || []);
       const profitVsSheet = (await env.DB.prepare("SELECT scope_key, ran_at, shown, recomputed, delta, status, evidence FROM validation_runs WHERE metric_id = 'ADTOOL_PROFIT_VS_SHEET' AND ran_at = (SELECT MAX(ran_at) FROM validation_runs WHERE metric_id = 'ADTOOL_PROFIT_VS_SHEET') ORDER BY scope_key").all()).results || [];
       return { jobs, last_runs: lastNotes, flags, truth, profit_vs_sheet: profitVsSheet, sheet_law_check: adtSheetLawVerdict(profitVsSheet), gaps, register_count: register.length, register, computed_at: new Date().toISOString() };
     },
@@ -5141,7 +5148,9 @@ const ADTOOL_ACTIONS = {
       const id = String((p && p.metric) || '').toUpperCase();
       const row = id ? await ctx.env.DB.prepare('SELECT * FROM adtool_number_register WHERE metric_id = ?1').bind(id).first() : null;
       const all = id ? null : ((await ctx.env.DB.prepare('SELECT * FROM adtool_number_register ORDER BY phase, metric_id').all()).results || []);
-      return { entry: row || null, entries: all };
+      /* `internal` marks the entries that document the plumbing rather than a number a seller reads,
+         so the view can hide them instead of showing them to staff. Nothing is deleted. */
+      return { entry: row ? adtRegRows([row])[0] : null, entries: all ? adtRegRows(all) : null };
     },
   },
 };
@@ -5225,18 +5234,18 @@ async function ensureAdtoolPhase2Schema(env) {
   ADTOOL_P2_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P2 = [
-  ['CAMPAIGN_BID_BUDGET_DATES', 'Campaign bid %, daily budget, start and end dates', 'campaigns.bid_pct / budget / start_date / end_date as eBay returns them (fundingStrategy.bidPercentage, budget.daily, startDate, endDate)', 'campaigns', 'adsSync every 5 min (dates and bid only while adtool_campaign_truth is on)', 'compare with Seller Hub campaign settings on 3 campaigns (owner)'],
-  ['AD_STATE_LABEL', 'This ad\'s state inside a campaign', 'CPC: campaign_ads.ad_status (ACTIVE / PAUSED / ARCHIVED, blank = not yet stamped, treated as live); cost-per-sale: exists (live) unless ARCHIVED — the portal\'s liveMembershipRow', 'campaign_ads, campaigns', 'adsItems every 15 min (2 running campaigns per account per tick)', 'Seller Hub → campaign → ad status on 3 listings (owner)'],
-  ['AD_STATUS_EVENTS', 'Every change of an ad\'s state inside a campaign', 'adsItems diff of the previous stamped state vs the ad list eBay returns: from → to with seen_at; added ads from blank, removed ads to REMOVED', 'adtool_campaign_ad_events', 'adsItems every 15 min', 'count of PAUSED events vs Seller Hub pause history on 1 listing (owner)'],
-  ['CAMPAIGN_ARCHIVE', 'Campaigns that left eBay\'s list', 'a campaign missing from ad_campaign?limit=100 is archived with its last name / status / budget before the portal deletes its row, so old campaign ids still resolve', 'adtool_campaign_archive', 'adsSync every 5 min', 'unresolved ids that now resolve, counted on the Campaigns page'],
-  ['CAMPAIGN_SPEND_DAY', 'Ad spend / clicks / units / revenue per listing × campaign × report day', 'the same eBay report the daily poll ingests, read per campaign_id instead of summed per listing; both billing families', 'adtool_ads_daily', 'adsReportPoll every 15 min (T+1 reports; back-filled days too)', 'per-day sum over campaigns equals ads_daily for the listing (spend, clicks, units)'],
-  ['AD_REPORT_VINTAGE', 'Every pull of a report day, kept', 'each ingest appends (pulled_at, numbers) for the listing × campaign × day; the latest is CAMPAIGN_SPEND_DAY; days inside the parity fixture window are not re-pulled', 'adtool_ads_daily_vintage', 'adsReportPoll; nightly re-pull of D-2..D-7 from adsReportKick (its own cap of 12 per account)', 'vintages for one day differ only by eBay\'s late attribution'],
-  ['ISSUE_UNRESOLVED_IDS', 'Campaign ids in the ad map the campaigns table cannot name', 'campaign_ads.campaign_id with no row in campaigns; listings touched; their 30-day spend; how many now resolve through the archive', 'campaign_ads, campaigns, adtool_campaign_archive, ads_daily', 'live on the Campaigns page', 'review baseline 73 ids / 119 listings / £3,563.74'],
-  ['ISSUE_DUAL_FUNDING', 'Listings live in a CPC and a cost-per-sale campaign at once', 'liveMembershipRow true in at least one COST_PER_CLICK and one COST_PER_SALE campaign', 'campaign_ads, campaigns, items_api', 'live on the Campaigns page', 'review baseline 123 (by campaign name)'],
-  ['ISSUE_ZERO_SALE_SPEND', 'Listings spending with no attributed sale', '30-day spend > 0 and 0 attributed units (both families); A03 variant: ≥ £10 in 14 days', 'ads_daily', 'live on the Campaigns page', 'review baseline 95 listings on £429'],
-  ['ISSUE_ENDED_STILL_SPENDING', 'Ended or sold-out listings that still carried spend', 'items_api.status ≠ ACTIVE or qty = 0, with spend in the last 7 days', 'ads_daily, items_api', 'live on the Campaigns page', 'review baseline 21 listings'],
-  ['ISSUE_CAMPAIGN_OFF_STILL_SPENDING', 'Paused or ended campaigns with spend in the last 2 days', 'campaigns.status not RUNNING and adtool_ads_daily spend > 0 on the last 2 report days', 'campaigns, adtool_ads_daily', 'live on the Campaigns page', 'A06 rule; needs CAMPAIGN_SPEND_DAY'],
-  ['ISSUE_PAUSED_LONG', 'CPC ads paused inside a campaign for more than 7 days', 'campaign_ads.ad_status = PAUSED and the last PAUSED event (or the stamp) older than 7 days', 'campaign_ads, adtool_campaign_ad_events', 'live on the Campaigns page', 'A13 rule'],
+  ['CAMPAIGN_BID_BUDGET_DATES', 'A campaign\'s bid, daily budget and dates', 'The bid percentage, daily budget, start date and end date exactly as eBay returns them. The budget arrives as text and is read as a number wherever it is compared with anything.', 'campaigns', 'Every few minutes', 'Compared with eBay\'s own campaign settings on a few campaigns'],
+  ['AD_STATE_LABEL', 'An ad\'s state inside its campaign', 'For pay-per-click ads: active, paused or archived, with a blank state read as active because eBay has not stamped it yet. A pay-on-sale ad simply exists and is live unless it has been archived.', 'campaign_ads, campaigns', 'Every fifteen minutes', 'Compared with eBay\'s own campaign screen on a few listings'],
+  ['AD_STATUS_EVENTS', 'Every time an ad changes state', 'Each time eBay\'s answer differs from the state we last saw, the change is written down with the time we saw it. An ad appearing for the first time starts from blank, and one that disappears is recorded as removed.', 'adtool_campaign_ad_events', 'Every fifteen minutes', 'Pause history compared with eBay\'s own on one listing'],
+  ['CAMPAIGN_ARCHIVE', 'Campaigns that have left eBay\'s list', 'When a campaign stops appearing in eBay\'s list, its last known name, state and budget are kept, so old spend still has a campaign name against it.', 'adtool_campaign_archive', 'Every few minutes', 'Campaigns we could not name before and now can, counted on the Campaigns page'],
+  ['CAMPAIGN_SPEND_DAY', 'Ad spend per listing per campaign per day', 'The same daily report from eBay, read per campaign instead of added up per listing, so a listing in two campaigns can be told apart.', 'adtool_ads_daily', 'Once a day, when eBay publishes the previous day', 'The campaigns add back up to the listing\'s own day'],
+  ['AD_REPORT_VINTAGE', 'Every version of a day\'s ad report, kept', 'eBay keeps crediting late sales to a day for a while afterwards, so each pull of a day is kept rather than written over the last one. The newest is what the pages show.', 'adtool_ads_daily_vintage', 'Daily, with a re-pull of the previous week', 'Two pulls of the same day differ only by eBay\'s late credits'],
+  ['ISSUE_UNRESOLVED_IDS', 'Ads pointing at a campaign we cannot name', 'How many campaigns we hold ads for but cannot name, how many listings they touch, and what they spent over the last 30 days.', 'campaign_ads, campaigns, adtool_campaign_archive, ads_daily', 'Worked out when you open the Campaigns page', 'Compared with the baseline taken at review'],
+  ['ISSUE_DUAL_FUNDING', 'Listings advertised two ways at once', 'Listings live in a pay-per-click campaign and a pay-on-sale campaign at the same time, so the same sale is charged for twice.', 'campaign_ads, campaigns, items_api', 'Worked out when you open the Campaigns page', 'Compared with the baseline taken at review'],
+  ['ISSUE_ZERO_SALE_SPEND', 'Listings spending with nothing to show', 'Listings that have spent over the last 30 days and brought in no sale through the ad at all, counting both kinds of campaign.', 'ads_daily', 'Worked out when you open the Campaigns page', 'Compared with the baseline taken at review'],
+  ['ISSUE_ENDED_STILL_SPENDING', 'Ended or sold-out listings that still spent', 'Listings that are no longer active, or have nothing left to sell, yet still spent in the last week.', 'ads_daily, items_api', 'Worked out when you open the Campaigns page', 'Compared with the baseline taken at review'],
+  ['ISSUE_CAMPAIGN_OFF_STILL_SPENDING', 'Stopped campaigns that still spent', 'Campaigns paused or ended on eBay that still carry spend on the last couple of days eBay published.', 'campaigns, adtool_ads_daily', 'Worked out when you open the Campaigns page', 'Needs the per-campaign daily spend to be in first'],
+  ['ISSUE_PAUSED_LONG', 'Ads left paused for over a week', 'Pay-per-click ads paused inside a running campaign for more than seven days. Either they should be running or they should be out.', 'campaign_ads, adtool_campaign_ad_events', 'Worked out when you open the Campaigns page', 'Counted on the Campaigns page'],
 ];
 async function adtoolRegisterSeedP2(env) {
   const stmts = ADTOOL_REGISTER_P2.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 2, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 2").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -5605,14 +5614,14 @@ async function ensureAdtoolPhase3Schema(env) {
   ADTOOL_P3_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P3 = [
-  ['PROFILE_WEEKDAY', 'Weekday rate per listing (units/day), shrunk', '(Σ w·units_dow + 4·prior) ÷ (Σ w + 4), w = 0.5^(age/14); prior = account × M98M-category rate shrunk (κ 20) to the account rate', 'adtool_listing_day', 'adtoolProfiles daily 05:20 UTC (+ hourly catch-up when incomplete)', 'raw n and rate stored next to the shrunk rate; fixture window shuffle test'],
-  ['PROFILE_WEEKDAY_P', 'Weekday effect p-value per listing', 'permutation test: day labels shuffled 1,000 times (seeded by item id + day), spread = SD of the seven weekday means; label real weekday effect when p < 0.05', 'adtool_listing_day', 'same', 'fleet: Saturday significant, Tue/Thu not, on 17 Aug – 15 Sep (ADTOOL_SHUFFLE_FLEET)'],
-  ['PROFILE_SLOT', 'Slot share per listing, shrunk', '(orders_slot + 20·prior_share) ÷ (orders + 20), prior = account slot share', 'adtool_orders', 'same', 'shares sum to 1; n stored'],
-  ['PROFILE_HOUR_WEEKDAY', 'Hour × weekday cell share per listing, shrunk', '(orders_cell + 30·prior_cell) ÷ (orders + 30), prior = account cell share', 'adtool_orders', 'same', 'n stored'],
-  ['PROFILE_DOM', 'Date-of-month buckets and month-position bands', '31 buckets (κ 3), shown only with ≥ 90 days of history; bands 1–7 / 8–14 / 15–21 / 22–24 / 25–31 at fleet, account and category level', 'adtool_listing_day', 'same', 'review: 25th–31st best stretch, 1st–7th most spend'],
-  ['REGIME_CHANGE', 'Pattern change (A17 input)', 'Jensen–Shannon divergence of the last 7 days\' hourly order shape vs the prior 28 days > 0.05 on 3 consecutive days (≥ 20 orders in each window)', 'adtool_orders', 'same', 'synthetic shift test in the unit suite'],
-  ['STAGE', 'Lifecycle stage per listing per day', 'Dead / Dormant / Launch / Growth / Decline / Plateau in that order (§6.5) from Theil–Sen slope of log1p(7-day centred average) over 28 days, 28-day level vs previous segment and peak, PELT changepoints on weekly units; confidence = 1 − 1/√days − 0.5·CV clipped 0.2..0.95', 'adtool_listing_day, adtool_listings, campaign_ads', 'same', 'stage flips recorded in adtool_stage_events'],
-  ['DESCRIPTORS', 'Behaviour descriptors per listing', 'best/worst weekday + ratio + p; top slot share + HHI; CV of daily units (28 d); zero-sale day share (28 d); attributed ÷ total units (28 d); spend elasticity = median Δ attributed units ÷ Δ spend across weeks with ≥ 20 % spend difference', 'adtool_listing_day, adtool_listing_week, profiles', 'same', 'stored as JSON per day'],
+  ['PROFILE_WEEKDAY', 'How a listing sells on each weekday', 'Units a day for each weekday, with recent weeks counted more heavily. A listing with little history is pulled toward the average for its account and product type, so one thin week cannot swing it.', 'adtool_listing_day', 'Every morning, and caught up through the day if it falls behind', 'The raw count and rate are stored beside the smoothed one'],
+  ['PROFILE_WEEKDAY_P', 'Whether a weekday pattern is real', 'The weekday labels are shuffled a thousand times to see how often chance alone spreads the days this far apart. A pattern is only called real when chance rarely does.', 'adtool_listing_day', 'Every morning', 'Across the company Saturday comes out genuinely better, while Tuesday and Thursday do not'],
+  ['PROFILE_SLOT', 'How a listing sells by time of day', 'The share of a listing\'s orders falling in each quarter of the day, pulled toward the account\'s own shape where the listing has few orders.', 'adtool_orders', 'Every morning', 'The shares add up to the whole, and the order count is stored beside them'],
+  ['PROFILE_HOUR_WEEKDAY', 'How a listing sells by hour and weekday', 'The same idea an hour at a time, pulled toward the account\'s own shape where the listing has few orders.', 'adtool_orders', 'Every morning', 'The order count is stored beside it'],
+  ['PROFILE_DOM', 'How sales move through the month', 'Each date of the month, and the month split into five stretches, shown only once a listing has about three months of history behind it.', 'adtool_listing_day', 'Every morning', 'Across the company the last week of the month sells best and the first week spends most'],
+  ['REGIME_CHANGE', 'A listing\'s pattern has changed', 'The shape of the last week\'s selling hours against the four weeks before it. A real change has to hold for three days running and have enough orders behind it to mean anything.', 'adtool_orders', 'Every morning', 'Tested on made-up data where the shift is known in advance'],
+  ['STAGE', 'Where a listing is in its life', 'Dead, dormant, launching, growing, declining or settled, decided in that order from the trend of the last four weeks, how its level compares with its own past and its best, and the points where the trend visibly broke. Each comes with how sure we are.', 'adtool_listing_day, adtool_listings, campaign_ads', 'Every morning', 'Every change of stage is written down with its date'],
+  ['DESCRIPTORS', 'What a listing\'s selling looks like', 'Its best and worst weekday and whether that gap is real, its busiest quarter of the day and how concentrated it is, how steady its daily units are, how often it sells nothing, how much of it comes through ads, and how far extra spend has actually moved units.', 'adtool_listing_day, adtool_listing_week, profiles', 'Every morning', 'Stored for each day'],
 ];
 async function adtoolRegisterSeedP3(env) {
   const stmts = ADTOOL_REGISTER_P3.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 3, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 3").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -5855,7 +5864,11 @@ const ADTOOL_ACTIONS_P3 = {
       await adtProductCells(env, caps.slice(0, 40));
       const regimes = (await env.DB.prepare('SELECT scope, scope_id, detected_day, note FROM adtool_regimes ORDER BY detected_day DESC LIMIT 30').all()).results || [];
       const fleetSlot = await adtLatestProfiles(env, acct ? 'account' : 'fleet', 'slot');
-      return { window: { from: w.from, to: w.to }, period: w, fresh: await adtFresh(env, 'day'), account: acct, category: cat, sales_by_slot_weekday: sales, sampled_by_hour: sampled, sampled_from: '2026-09-17', carry_note: 'sampled hours hold within-hour spend; the first sample\'s carry (everything since 00:00 UTC) sits in carry_spend and is not in these bars — days rolled before 27 Sep 2026 still carry it inside the ~08:00 UK hour', products_by_concentration: products, cap_hours_yesterday: caps.slice(0, 40), cap_day: yday, regimes, slot_profile: fleetSlot, note: 'eBay cannot schedule ads by hour: slots drive bids, budgets and review timing; weekdays drive pauses', computed_at: new Date().toISOString(), source: 'adtool_orders, adtool_listing_hour (sampled from 17 Sep), adtool_descriptors, adtool_ads_intraday + campaigns (cap hours)' };
+      /* 14 Oct: this action sent no account list, so the page hard-coded six account names and would have
+         silently dropped a renamed or new account from its filter. The list is the accounts table, which is
+         the honest universe: it does not shrink when the caller narrows to one account. */
+      const slotAccounts = ((await env.DB.prepare('SELECT name FROM accounts ORDER BY name').all().catch(() => ({ results: [] }))).results || []).map(r => String(r.name));
+      return { window: { from: w.from, to: w.to }, period: w, fresh: await adtFresh(env, 'day'), account: acct, category: cat, accounts: slotAccounts, sales_by_slot_weekday: sales, sampled_by_hour: sampled, sampled_from: '2026-09-17', carry_note: 'Spend that had already built up before the first reading of the day is not in these bars.', products_by_concentration: products, cap_hours_yesterday: caps.slice(0, 40), cap_day: yday, regimes, slot_profile: fleetSlot, note: 'eBay cannot schedule ads by hour: slots drive bids, budgets and review timing; weekdays drive pauses', computed_at: new Date().toISOString(), source: 'adtool_orders, adtool_listing_hour (sampled from 17 Sep), adtool_descriptors, adtool_ads_intraday + campaigns (cap hours)' };
     },
   },
 };
@@ -6056,10 +6069,10 @@ async function ensureAdtoolPhase4Schema(env) {
   ADTOOL_P4_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P4 = [
-  ['FORECAST_UNITS', 'Forecast units per listing per day, 30-day horizon', 'chosen model (§6.6): TSB when ≥ 50 % zero days in 56, ridge Poisson GLM (trend + weekday, 84 days) for 20–50 %, Holt–Winters additive period 7 (grid α/β/γ) for ≥ 5 units/day with < 20 % zeros; seasonal naive when nothing beats MASE 1.1', 'adtool_listing_day, adtool_profiles', 'adtoolForecast daily 05:20 UTC (+ hourly catch-up)', 'rolling-origin backtest: MASE < 1 for ≥ 70 % of listings with ≥ 20 units/28 d (ADTOOL_FORECAST_MASE)'],
-  ['FORECAST_BAND', '10th / 90th percentile band', '200 bootstrap paths from the backtest residuals, seeded by item id + day, clipped at 0', 'adtool_forecast', 'same', '80 % coverage on the backtest folds, stored per model'],
-  ['FORECAST_MONEY', 'Forecast revenue, spend and est. ad profit', 'revenue = units × price; spend = units × (28-day spend ÷ 28-day units); ad profit = ad share × units × margin − spend', 'adtool_forecast, adtool_listings', 'same', 'realised vs forecast on the Forecast lab, last 14 days'],
-  ['MODEL_SCORE', 'Backtest score per model per listing', 'last 8 weeks, origin every 7 days, horizon 14; MASE vs seasonal naive; 80 % interval coverage', 'adtool_model_scores', 'same', 'scorecard on the Forecast lab'],
+  ['FORECAST_UNITS', 'Expected units per listing, 30 days ahead', 'A few ways of projecting are tried, from a simple one for listings that sell rarely to one that follows a weekly rhythm for listings that sell every day. Whichever did best on the listing\'s own past is the one shown, and if none of them beats simply repeating last week, last week is what you get.', 'adtool_listing_day, adtool_profiles', 'Every morning, and caught up through the day if it falls behind', 'Scored against simply repeating last week: a score under 1.0 beats it, and most listings with real sales do'],
+  ['FORECAST_BAND', 'The likely range around a forecast', 'The forecast is run again two hundred times with the size of its own past misses thrown back in, and the range covers the middle eight runs in ten. Never below zero.', 'adtool_forecast', 'Every morning', 'About eight in ten of the real days land inside the range'],
+  ['FORECAST_MONEY', 'Expected sales, spend and gain from a forecast', 'Expected units times the price for sales, expected units times what a unit has recently cost in ads for spend, and the expected gain from the ads, being the share that comes through ads times the margin, less that spend.', 'adtool_forecast, adtool_listings', 'Every morning', 'What actually happened is shown next to what was forecast, for the last fortnight'],
+  ['MODEL_SCORE', 'How well each way of forecasting did', 'Each way is tested on the listing\'s own last eight weeks, forecasting a fortnight ahead from a fresh start each week. It is scored against simply repeating last week, and on how often the real day landed inside its range.', 'adtool_model_scores', 'Every morning', 'The scores are shown on the Sales forecast page'],
 ];
 async function adtoolRegisterSeedP4(env) {
   const stmts = ADTOOL_REGISTER_P4.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 4, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 4").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -6401,10 +6414,10 @@ async function ensureAdtoolPhase5Schema(env) {
   ADTOOL_P5_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P5 = [
-  ['ALERT_RULES', 'Alert rules A01–A19', 'spec §6.10 rules with severity and cool-down; an alert stays open while its condition holds, clears when it stops, and cannot re-fire inside its cool-down', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'adtoolAlerts hourly :25', 'the three cases the spec names, configured privately in portal_config.adtool_fixture_alerts (ADTOOL_ALERTS_FIXTURE)'],
-  ['REPORT_YESTERDAY', "Yesterday's report", 'fleet and per-account spend / ad sales / ROAS / est. ad profit vs the 7-day average and the same weekday last week; orders + actual profit; hour by hour vs the fleet profile; winners / losers; what changed (rule-generated bullets)', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'adtoolReport daily 05:20 UTC chain (+ hourly catch-up)', '3 consecutive mornings without manual help (dates in the notes)'],
-  ['ROAS_LADDER', 'ROAS target, gap and the five levers', '§6.13 lever arithmetic on the last 30 report days with printed assumptions; cut-only ceiling; cost per sale; per-account gap', 'adtool_listing_day, adtool_listings', 'adtoolRoas daily in the chain', 'review numbers on the fixture window (lever 1 → 4.34× / £6,971 etc.)'],
-  ['BUDGET_CAPPED_DAY', 'Budget-capped listing-days', 'first sample of the day at ≥ 95 % of the summed running daily budget with flat clicks after (adtCapHour)', 'adtool_ads_intraday, campaigns', 'adtoolReport daily (yesterday)', 'A15 input; count on the Data health page'],
+  ['ALERT_RULES', 'The alert rules', 'Nineteen things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
+  ['REPORT_YESTERDAY', 'Yesterday\'s report', 'For the company and for each account: spend, sales from ads, ROAS and the expected gain from the ads against the last seven days and against the same weekday a week ago, with orders and profit, how the hours compared with the usual shape, the best and worst listings, and a short list of what changed.', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'Every morning, and caught up through the day if it falls behind', 'Three mornings running with no help by hand'],
+  ['ROAS_LADDER', 'ROAS target, and what you can change to reach it', 'The gap between the ROAS you have and the ROAS you want, and the five things you could change to close it, each worked out on the last 30 days with its assumptions printed beside it. Cuts only, never raises.', 'adtool_listing_day, adtool_listings', 'Every morning', 'The numbers were checked by hand over a fixed past period'],
+  ['BUDGET_CAPPED_DAY', 'Days a listing ran out of budget', 'A day whose first reading already showed the campaign\'s whole daily budget spent, with clicks flat after it. The ad stopped early.', 'adtool_ads_intraday, campaigns', 'Every morning, for yesterday', 'Counted on the Data health page'],
 ];
 async function adtoolRegisterSeedP5(env) {
   const stmts = ADTOOL_REGISTER_P5.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 5, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 5").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -6775,6 +6788,11 @@ const ADTOOL_ACTIONS_P5 = {
       return {
         period: todayPay.period, account: acct || 'all', fresh: todayPay.fresh, fresh_day: await adtFresh(env, 'day'),
         tiles, items_today: itemsToday.slice(0, 150), items_today_total: itemsToday.length, spend_today: round2(spendToday), hour_curve: todayPay.hour_curve, carry_spend: todayPay.carry_spend, carry_hour_uk: todayPay.carry_hour_uk, ads_sampled: todayPay.ads_sampled, today_note: todayPay.note,
+        /* 14 Oct: this one field was the only reason the page ALSO called adtoolToday. It forwarded seven
+           other fields off the same todayPay and not this one, so the landing page ran adtoolTodayCompute
+           twice per open and held two copies of the answer. Forwarding it costs nothing and removes a
+           whole round-trip from the slowest screen in the portal. */
+        totals_by_account: todayPay.totals_by_account,
         profit_label: 'Profit (Sales Analysis law)',
         yesterday: Object.assign({ day: yday, roas: y && y.spend > 0 ? round2(y.attr_revenue / y.spend) : null, cpc: y && y.clicks > 0 ? round2(y.spend / y.clicks) : null, cvr: y && y.clicks > 0 ? round2(y.attr_units / y.clicks) : null, report_status: reportStatus }, y),
         alerts, decisions_waiting: 0, report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
@@ -6919,7 +6937,7 @@ const ADTOOL_ACTIONS_P5 = {
       const truth = (await env.DB.prepare("SELECT metric_id, scope_key, status, substr(evidence, 1, 240) AS evidence, ran_at FROM validation_runs WHERE metric_id LIKE 'ADTOOL_%' AND ran_at >= (SELECT MAX(ran_at) FROM validation_runs WHERE metric_id LIKE 'ADTOOL_PARITY%') ORDER BY status, metric_id LIMIT 120").all()).results || [];
       const truthSummary = (await env.DB.prepare("SELECT metric_id, status, COUNT(*) AS n, MAX(ran_at) AS last FROM validation_runs WHERE metric_id LIKE 'ADTOOL_%' AND ran_at >= datetime('now', '-2 days') GROUP BY metric_id, status ORDER BY metric_id, status").all()).results || [];
       const flags = (await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_%' ORDER BY key").all()).results || [];
-      const register = (await env.DB.prepare('SELECT metric_id, name, formula, source_tables, recompute, recheck, phase FROM adtool_number_register ORDER BY phase, metric_id').all()).results || [];
+      const register = adtRegRows((await env.DB.prepare('SELECT metric_id, name, formula, source_tables, recompute, recheck, phase FROM adtool_number_register ORDER BY phase, metric_id').all()).results || []);
       const cursors = { rollup: await adtFlag(env, 'adtool_rollup_cursor'), profiles: await adtFlag(env, 'adtool_profiles_cursor'), forecast: await adtFlag(env, 'adtool_forecast_cursor'), profit_law: await adtFlag(env, 'adtool_profit_law'), tail_reroll_day: await adtFlag(env, 'adtool_tail_reroll_day') };
       /* the profit-vs-sheet gate is stamped a moment before the parity rows of the same run, so the window above
          would drop it; the page gets the latest run whole (fleet row + one per account, per-day table in evidence) */
@@ -6944,7 +6962,7 @@ const ADTOOL_ACTIONS_P5 = {
         { family: 'decisions', cadence: 'daily 05:55 UTC + 23:30 UTC boundary batch (shadow)', last_at: await maxOf('SELECT MAX(day) AS t FROM adtool_decisions') },
         { family: 'report', cadence: 'daily 05:20 UTC chain (+ hourly catch-up)', last_at: await maxOf('SELECT MAX(generated_at) AS t FROM adtool_reports') },
         { family: 'price clock', cadence: 'daily (first rollup of the day)', last_at: await maxOf('SELECT MAX(day) AS t FROM adtool_price_day') },
-        { family: 'page cache (KV)', cadence: 'today / live windows 60 s, other pages 1.5–3 min; today + Command centre pre-warmed every 5 min', hits: (await env.DB.prepare("SELECT account AS action, cursor AS hits_misses, last_ok FROM sync_state WHERE job = 'adtoolCache' ORDER BY account").all().catch(() => ({ results: [] }))).results || [] },
+        { family: 'page cache (KV)', cadence: 'Live figures update every minute. Other pages update every few minutes.', hits: (await env.DB.prepare("SELECT account AS action, cursor AS hits_misses, last_ok FROM sync_state WHERE job = 'adtoolCache' ORDER BY account").all().catch(() => ({ results: [] }))).results || [] },
       ];
       return { fresh: await adtFresh(env, 'today'), jobs, schedules, gaps, truth, truth_summary: truthSummary, profit_vs_sheet: profitVsSheet, sheet_law_check: adtSheetLawVerdict(profitVsSheet), profit_law: ADTOOL_PROFIT_LAW, freshness_map: freshnessMap, today_freshness: todayFresh, flags, register, cursors, runnable: ['adtoolRollups', 'adtoolProfiles', 'adtoolForecast', 'adtoolAlerts', 'adtoolReport', 'adtoolRoas', 'adtoolTruth', 'adtoolListingsRefresh'], computed_at: new Date().toISOString() };
     },
@@ -7013,16 +7031,25 @@ function adtDecide(I, basis) {
   }
   const why = [];
   const money = v => (v < 0 ? '−£' : '+£') + Math.abs(r2(v)).toFixed(2);
-  why.push('yesterday ' + money(pf(y)) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : '') + (I.y_source === 'sampled' ? ' (sampled — the report for that day has not landed; provisional)' : ''));
-  why.push('today expected ' + money(profileToday) + ' (EV ' + money(ev) + ', ' + evBasis + ')');
-  if (I.weekday_name) why.push(I.weekday_name + (I.weekday_p != null ? ' p=' + I.weekday_p : '') + (I.weekday_losing ? ' is a losing day for it' : I.weekday_winning ? ' is a winning day for it' : ''));
+  why.push('yesterday ' + money(pf(y)) + ' on £' + r2(Number(y.spend) || 0) + (roasOf(y) != null ? ' at ' + r2(roasOf(y)) + '×' : '') + (I.y_source === 'sampled' ? ' (our own reading, eBay has not sent the report for that day yet, so it is not final)' : ''));
+  /* `ev_basis` keeps its stored token; the sentence says it in words. */
+  why.push('today expected ' + money(profileToday) + ' (expected gain ' + money(ev) + ', ' + (evBasis === 'law' ? 'from the profit figures' : 'estimated') + ')');
+  if (I.weekday_name) {
+    /* the shuffle test's p-value used to be printed raw ("Saturday p=0.031"). A seller needs the
+       conclusion, so the number goes and the finding stays. */
+    const sure = I.weekday_p != null && Number(I.weekday_p) < 0.05 ? 'genuinely ' : '';
+    why.push(I.weekday_name + (I.weekday_losing ? ' is ' + sure + 'a losing day for it'
+      : I.weekday_winning ? ' is ' + sure + 'a winning day for it'
+      : I.weekday_p == null ? ' has too little history to judge'
+      : sure ? ' behaves genuinely differently' : ' is no different from its other days'));
+  }
   if (I.stage) why.push('stage ' + I.stage);
   if (stopWanted && !blocked) {
     let conf = (s1 && confidentStop) || s2 || s4 ? 'confident' : 'watch', unpricedWhy = '';
     if (unpriced > 0 && !hardStop) {
-      const n = unpriced + ' order' + (unpriced === 1 ? '' : 's') + ' unpriced in the window (cost or fees pending)';
-      if (unpricedCanFlip) { conf = 'watch'; unpricedWhy = ' · ' + n + ' — the loss is provisional'; }
-      else unpricedWhy = ' · ' + n + ' — at most +£' + r2(bound30).toFixed(2) + ' once priced, cannot change the sign';
+      const n = unpriced + ' order' + (unpriced === 1 ? '' : 's') + ' in the period we cannot cost yet';
+      if (unpricedCanFlip) { conf = 'watch'; unpricedWhy = ' · ' + n + ', so the loss is not final'; }
+      else unpricedWhy = ' · ' + n + ', worth at most +£' + r2(bound30).toFixed(2) + ' once costed, which cannot turn the loss around';
     }
     return { decision: 'STOP', rules: fired, confidence: conf, ev, ev_basis: evBasis, why: why.join(' · ') + unpricedWhy, action: 'pause the ad in every campaign it sits in', blocked: '', unpriced, unpriced_bound: bound30 };
   }
@@ -7123,10 +7150,10 @@ async function ensureAdtoolPhase6Schema(env) {
   ADTOOL_P6_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P6 = [
-  ['DECISION', 'Decision per advertised listing per day', '§6.11: first rule that fires wins (S1–S4 → STOP, R1–R4 → REDUCE, P1–P3 → PUSH, else KEEP) with guardrails, DECIDED ON REAL PROFIT (Sales Analysis law) as the primary basis; the old est. ad profit decision is computed in parallel and stored beside it (decision_adprofit + agree) for comparison; EV = 0.5 × today expected + 0.3 × 7-day profit/day + 0.2 × yesterday ON THE SAME BASIS as the rules (the law by default: the listing\'s law profit per weekday, its 7-day law profit per day, yesterday\'s law figure); a STOP that reads profit is never confident while the window\'s unpriced orders could still turn the loss (at most 0.8 × their sale price once priced; a loss even that cannot turn stays confident and says so); shadow only, nothing sent to eBay', 'adtool_listing_day, adtool_profiles, adtool_stages, adtool_cap_days, campaign_ads', 'adtoolDecisions: boundary batch 23:30 UTC, morning batch 05:55 UTC', '14 days of shadow scores published on real profit (ADTOOL_SHADOW_14D), clock restarted at portal_config.adtool_decision_basis = actual-v1'],
-  ['DECISION_SCORE', 'Was yesterday\'s decision right?', 'shadow, SCORED ON REAL PROFIT (Sales Analysis law): STOP/REDUCE right when the realised law profit that day was negative; PUSH right when realised ROAS ≥ 1.2 × break-even AND law profit positive; KEEP right when the day was not a law loss; the ad-profit score (outcome_score_adprofit) is kept beside it for the side-by-side', 'adtool_decisions, adtool_listing_day', 'adtoolDecisionScore daily 06:00 UTC', 'the Stop today page shows yesterday and the trailing 30 days'],
-  ['RULE_TRUST', 'Trailing 30-day score per rule', 'share of that rule\'s scored decisions that were right; a rule under the base rate is switched to watch automatically', 'adtool_rule_scores', 'same', 'shown on the Stop today page'],
-  ['CARRY_FORWARD', 'Does the rule repeat? (§6.12)', 'every Monday: the rule applied to days −28…−15 and scored on −14…−1, against the base rate of all spending listings; trusted needs rate ≥ base + 10 points', 'adtool_listing_day, adtool_carry', 'adtoolCarry weekly (Monday, morning chain)', "the review's own finding: Tue/Thu pause does not repeat, loses-across-the-week and Sunday winners do"],
+  ['DECISION', 'What to do with a listing today', 'The first rule that fits wins: stop, reduce, push, or leave it alone. It is decided on real profit, weighing what today is expected to earn, the last seven days and yesterday. A stop is never called certain while orders in the period are not costed yet and could still turn the loss around. Suggestion only, nothing is sent to eBay.', 'adtool_listing_day, adtool_profiles, adtool_stages, adtool_cap_days, campaign_ads', 'Twice a day, late evening and early morning', 'A fortnight of suggestions scored against what really happened'],
+  ['DECISION_SCORE', 'Was yesterday\'s suggestion right?', 'Judged on real profit. A stop or a reduce was right if the day lost money. A push was right if the ad earned comfortably more than it cost and the day made money. Leaving it alone was right if the day was not a loss.', 'adtool_decisions, adtool_listing_day', 'Every morning', 'Yesterday and the last 30 days are both shown on the Stop today page'],
+  ['RULE_TRUST', 'How each rule has been doing', 'The share of that rule\'s scored suggestions that turned out right over the last 30 days. A rule doing worse than the general run of listings is put on watch by itself.', 'adtool_rule_scores', 'Every morning', 'Shown on the Stop today page'],
+  ['CARRY_FORWARD', 'Does the rule hold up next time?', 'Each Monday the rule is applied to one fortnight and scored on the next, against how all spending listings did over the same period. It is only trusted if it beats that by a clear margin.', 'adtool_listing_day, adtool_carry', 'Every Monday', 'The review found that pausing Tuesdays and Thursdays does not hold up, while cutting listings that lose all week does'],
 ];
 async function adtoolRegisterSeedP6(env) {
   const stmts = ADTOOL_REGISTER_P6.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 6, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 6").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -7967,9 +7994,9 @@ function adtLever(camps) {
 /* ADTOOL-P9-PURE-END */
 
 const ADTOOL_REGISTER_P9 = [
-  ['FRONTIER', 'The war room frontier', 'listings with spend over the window ranked by their own ROAS (attributed revenue ÷ spend), best first; point n = cumulative spend per day and cumulative attributed revenue per day of the first n listings, cumulative ROAS = their ratio; marks 6× / 5× / 4× / 3.5× = the last n at which the cumulative ROAS still holds the target (falls_at = the first n below it); break-even mark = the first listing whose own Sales Analysis law profit per day < 0 AND own ROAS < its breakeven_roas (margin_source portal / portal (capped) / orders / ali cost) or < 1× when the margin is an estimate; per day = ÷ the days carrying data; no profit is summed anywhere on the frontier', 'adtool_listing_day, adtool_listing_today, adtool_listings, items_api', 'per request (adtoolPlan; KV page cache 180 s)', 'unit tests: ranking monotone, marks at the first n where the cumulative ROAS falls below the target, break-even by the stated rule, no profit key on any point'],
-  ['RUN_TODAY_VERDICT', 'Run / stop / watch per advertised listing today', 'weekday history = the listing\'s adtool_listing_day rows on the last 4 calendar occurrences of today\'s weekday (today − 7, 14, 21, 28); a day with an unpriced order is excluded; stop = law profit < 0 on ≥ 3 of the last 4 priced same weekdays with spend ≥ £2 each AND last-7-day law profit < 0 with every order in those 7 days priced (a negative 7 days that still holds an order without a cost or fees is watch, not stop — an unpriced sale counts nothing while its clicks count in full); run = law profit > 0 on ≥ 3 of 4 AND a confident weekday index ≥ 1.1 (index = the profile rate for today\'s weekday ÷ the mean of its seven rates; confident = permutation p < 0.05), OR last-7-day law profit > 0 AND own 7-day ROAS ≥ breakeven_roas (1× when the margin is an estimate); a weekday with no adtool_listing_day row is not a priced weekday; fewer than 2 priced weekdays → watch; otherwise watch. Advertised = spend in the last 7 days, spend today, or a cost-per-click ad (ACTIVE, or status not yet stamped) in a RUNNING campaign on an ACTIVE listing — the same membership rule as liveMembershipRow. Ads by eBay report day (UTC), orders by UK day', 'adtool_listing_day, adtool_listing_today, adtool_profiles, adtool_listings, adtool_listing_week, adtool_decisions, campaigns, campaign_ads', 'per request (adtoolRunToday; KV page cache 60 s); the war room prints the first 8 of each list', 'unit tests on every branch; the morning decision (shadow) is printed beside the verdict, never merged into it'],
-  ['HOUR_BANDS', 'Hours to run / not to run per listing', 'UK hour × listing over the last 28 days to yesterday from adtool_listing_hour (spend_r when reconciled, else spend_s; carry_spend is never read; UK hour 8 excluded for days before 27 Sep 2026, where the first sample\'s carry still sits inside the hour); hours with ≥ £0.50 in total are judged; mean = Σ spend ÷ judged hours; avoid = 0 attributed units and spend ≥ 15 % of the mean; run = attributed units per £ ≥ the listing\'s median over the judged hours and ≥ 1 unit; contiguous hours merge into [first, last]; advisory — eBay cannot schedule ads by hour', 'adtool_listing_hour, adtool_ads_intraday (sampled)', 'per request (adtoolRunToday, adtoolStopToday)', 'unit tests: the avoid and run thresholds, band merging, the £0.50 floor'],
+  ['FRONTIER', 'The spending limit', 'Listings that spent, best return first, adding up as you go down the list. It shows how far down you can keep spending before the running return falls below your target, and where the next pound starts losing money.', 'adtool_listing_day, adtool_listing_today, adtool_listings, items_api', 'Worked out when you open the page', 'Tested on worked examples, including where the running return first falls below target'],
+  ['RUN_TODAY_VERDICT', 'Run, stop or watch today', 'Stop means the listing lost money on at least three of the last four same weekdays and over the last seven days. Run means it made money, and either this weekday is genuinely its better one or the ad is earning more than it costs. Watch means some orders are not costed yet, or there is too little history, so we cannot say.', 'adtool_listing_day, adtool_listing_today, adtool_profiles, adtool_listings, adtool_listing_week, adtool_decisions, campaigns, campaign_ads', 'Worked out when you open the page', 'Every branch is covered by a test, and the morning suggestion is printed beside the answer rather than merged into it'],
+  ['HOUR_BANDS', 'Hours to run, and hours to avoid', 'Each UK hour over the last four weeks, judged only once it has had enough spend to mean anything. An hour to avoid has spent real money and sold nothing; an hour to run sells better per pound than the listing\'s usual. Neighbouring hours are shown as one stretch. A suggestion only, as eBay cannot schedule ads by the hour.', 'adtool_listing_hour, adtool_ads_intraday (sampled)', 'Worked out when you open the page', 'The thresholds and the way neighbouring hours join up are covered by tests'],
 ];
 let ADTOOL_P9_REG_OK = false;
 async function ensureAdtoolPhase9Register(env) {
@@ -8376,10 +8403,10 @@ function adtSaleTimeline(mdays, priceDays, today) {
    Written by the EXISTING marketingSync behind adtool_sale_snapshot='on' (no second cron). Every column that a
    missing brief field needs is one nullable/defaulted column here; nothing is sent to eBay. */
 const ADTOOL_REGISTER_P10 = [
-  ['SALE_MEMBERSHIP_DAY', 'Per-listing sale membership, one row per day', "written by marketingSync (:50) when adtool_sale_snapshot='on', for TODAY, for every ACTIVE listing of an account with a RUNNING MARKDOWN_SALE. in_sale=1 with basis 'list' when the item is in a BY_VALUE event's listing_ids, basis 'any' when the account runs a whole-shop (INVENTORY_ANY) event and the listing is ACTIVE (removal is NOT observable for these), else in_sale=0 basis 'none'. discount_pct = observed from the day's adtool_orders (buyers paid ~ (1-pct)x listed) when there is an order, else parsed from the event's discount text, else null. price = items_api listed price that day. OBSERVED, never asked of eBay", 'promotions, items_api, adtool_orders, adtool_price_day', "marketingSync :50 behind adtool_sale_snapshot (change-only writes)", 'unit tests: adtSaleDiscountObserved paid-vs-listed; the whole-shop / list / none basis rule'],
-  ['SALE_TIMELINE', 'Per-listing observed lifecycle', 'derived by pure adtSaleTimeline from the membership-day sequence + adtool_price_day: added_on = first day in_sale=1; removed_on = the first 1->0 flip after being in-sale OR the price-change day during a live run (whichever is earlier; a whole-shop item never flips so removed_on stays null while it runs); restriction_end = removed_on + 14; eligible_on = max(restriction_end, last price change + 14); status in {live, added-unconfirmed, not-discounted, removed, waiting, eligible, no-event}. Brief example holds: removed 10 Sep -> restriction_end 24 Sep -> eligible 24 Sep', 'adtool_sale_membership_day, adtool_price_day', 'marketingSync :50 — every changed listing, then the backlog (no timeline row, then timelines older than today) from a persisted cursor (portal_config.adtool_sale_tl_cursor), 400 per run, so successive runs cover the whole fleet; accounts whose event ended keep getting in_sale = 0 rows for 30 days so the end is observed', 'unit tests: the 1,1,0 example; a whole-shop item with removed_on null; a price change during a live event'],
-  ['SALE_TASKS', 'Sale-event tasks (engine-native)', "an 'eligible' task is opened when a listing's observed status first flips to 'eligible' (partial unique index keeps one open per account+item+kind); an 'event-ending' task when a running event ends within 2 days and no replacement covers the account (the old 2-day bell, as a task). Marketing marks a task done/dismissed on the Sale events page; each op writes an audit row. Tasks live only in D1 (the Apps Script task-board bridge is a noted follow-up, out of scope)", 'adtool_sale_timeline, promotions', 'marketingSync :50; ops via adtoolSales (task_done / task_dismiss)', 'unit tests cover the timeline that drives the eligible flip; the ending fold is asserted on the promotions shape'],
-  ['SALE_ELIGIBLE_ON', 'Active-listings "Eligible for Sale Event On" + "Currently in Sale Event"', "adtoolCpcListings rows and adtoolListing's header carry in_sale (today's membership) and eligible_on (the observed timeline). YES/NO and a date, both OBSERVED at one-day granularity; for whole-shop events removal is not observable so eligible_on reflects the last observed price change + 14 rather than an eBay removal date", 'adtool_sale_membership_day, adtool_sale_timeline', 'read per request (joined, batched)', 'the honest-limits block on the page states the one-day granularity and the whole-shop caveat'],
+  ['SALE_MEMBERSHIP_DAY', 'Whether a listing was in a sale event, day by day', 'One row a day for every active listing on an account running a sale. A listing is in the sale when the event names it, or when the event covers the whole shop and the listing is active, in which case eBay never tells us it left. The discount comes from what buyers actually paid that day where there was an order, otherwise from the event\'s own wording. All of it watched, never asked of eBay.', 'promotions, items_api, adtool_orders, adtool_price_day', 'Every hour, writing only what changed', 'Tested on paid against listed prices, and on the whole-shop, named-list and not-in-sale cases'],
+  ['SALE_TIMELINE', 'A listing\'s own sale-event history', 'When it went into a sale, when it came out, and the earliest it can go into another one. eBay makes a listing wait fourteen days after leaving a sale, and fourteen days after any price change, so the later of those two is the date shown. A whole-shop sale never shows a listing leaving, because eBay does not tell us.', 'adtool_sale_membership_day, adtool_price_day', 'Every hour, working through the fleet a few hundred listings at a time', 'Tested on a worked example, on a whole-shop item, and on a price change during a live event'],
+  ['SALE_TASKS', 'Sale-event tasks', 'A task opens when a listing first becomes able to join a sale again, and another when a running event is about to end with nothing lined up to follow it. Marketing marks a task done or dismissed on the Sale events page, and every action is logged.', 'adtool_sale_timeline, promotions', 'Every hour', 'The history that drives the task is covered by tests'],
+  ['SALE_ELIGIBLE_ON', 'In a sale now, and when it can join one', 'Yes or no for today, and a date for the next time this listing can join a sale. Both are what we have watched happen, accurate to the day. For a whole-shop sale eBay never tells us a listing left, so the date falls back on fourteen days after its last price change.', 'adtool_sale_membership_day, adtool_sale_timeline', 'Read when you open the page', 'The page itself states that it is accurate to the day, and says what a whole-shop sale hides'],
 ];
 let ADTOOL_SALE_SCHEMA_OK = false;
 async function ensureAdtoolSaleSchema(env) {
@@ -8728,10 +8755,10 @@ function adtTrend(cur, prev) {
 /* ADTOOL-P11-PURE-END */
 
 const ADTOOL_REGISTER_P11 = [
-  ['CPC_LISTINGS', 'CPC Active Listings — every listing with a live cost-per-click ad', 'membership = ADTOOL_LIVE_AD_SQL restricted to COST_PER_CLICK (a RUNNING campaign, an ACTIVE items_api listing, an ad ACTIVE or not yet stamped — the SQL twin of liveMembershipRow); per listing over the chosen window from adtDaySrc (the today grain spliced when the window includes today): spend, cpc_spend, clicks, ad sales (attr_units / attr_revenue), all-channel orders / units / revenue, Sales Analysis law profit (priced orders only, with pending counts); 7 / 14 / 30-day trailing all-channel units are three CASE sums over adtool_listing_day ending yesterday, in the same aggregate; ACoS = spend ÷ attr_revenue, avg CPC = spend ÷ clicks, CVR = attr_units ÷ clicks, ROAS = attr_revenue ÷ spend (each null when its denominator is 0); impressions summed from adtool_ads_daily only for days ≥ 2026-09-18 (null otherwise); product cost = items_facts.ali_cost (Main Sheet) else the average ali_cost of the item\'s own priced orders (source stated); listing date = items_api.start_time, sold since listed = items_api.sold_qty (resets on a quantity revision); lever = the campaign daily budget (CPC) via adtLever; totals carry NO profit; prev = the same window totals one comparable period earlier for the comparison graph', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today, adtool_ads_daily, items_facts, adtool_orders', 'per request (adtoolCpcListings; KV page cache 120 s, warmed hourly)', 'unit tests: adtCpcDerived zero-denominator guards and the acos / cvr / roas / avg_cpc formulas; no profit key on totals'],
-  ['CPC_POST', 'CPC Post Listings — listings no longer in an active CPC ad, and how they did', 'membership = a listing whose CPC ad is PAUSED / ARCHIVED (campaign_ads.ad_status) or whose CPC campaign has left eBay\'s list (adtool_campaign_archive) or is no longer RUNNING, EXCLUDING any listing currently CPC-active; last_active_day = the most recent adtool_campaign_ad_events row to PAUSED / ARCHIVED / REMOVED (else the campaign\'s gone_at, else null = "date unknown — before event tracking", tracking began 18 Sep); before / after = the 30 days ending on last_active_day and the up-to-30 days after it from adtool_listing_day (spend, ad units, ad revenue, law profit), computed only when last_active_day falls in the last 60 days; the window metrics are the same shape as CPC_LISTINGS', 'campaign_ads, campaigns, adtool_campaign_archive, adtool_campaign_ad_events, items_api, adtool_listing_day, adtool_ads_daily, items_facts, adtool_orders', 'per request (adtoolCpcListings mode=post; KV page cache 120 s, warmed hourly)', 'unit tests share CPC_LISTINGS\' ratio tests; the exclusion of currently-active listings is asserted'],
-  ['ADV_OVERVIEW', 'Advertising Overview — behaviour patterns, the trend not the single number', 'daily series from adtool_scope_day (fleet = scope "fleet"/"all", account = scope "account"/name): spend, attributed sales, ROAS, CPC, CVR, ad units, orders, units per day; last 7 vs previous 7 and last 10 vs previous 10 (each window ending yesterday) with a delta + percent + direction per metric (adtTrend); the profit view is COUNTS not a fleet total — profitable vs losing listings per ISO week over the last 4 weeks from adtool_listing_week (sign of actual_profit), plus the top item movers by the change in their own law profit from the previous ISO week to the current one (item rows only, where profit is allowed to leave the engine)', 'adtool_scope_day, adtool_listing_week, items_api', 'per request (adtoolOverview; KV page cache 120 s, warmed hourly)', 'unit tests: adtTrend delta / percent / direction incl. the zero-previous case; the profit_view counts survive the strip for a non-profit role while no fleet profit money does (ADTOOL_PROFIT_COUNT_KEYS exemption)'],
-  ['WARM_HOURLY', 'Hourly pre-warm of the heavy first-open pages', 'after adtoolRollups completes for the day, adtWarmHourly computes and stores the KV page cache (adtKvMemo keys, both profit classes p / np, default all-accounts payload) for adtoolPlan, adtoolReport, adtoolAccounts, adtoolCategories, adtoolForecastLab, adtoolCpcListings (active + post) and adtoolOverview, so the first open after the rollup is a KV read rather than a 7-10 s compute; guarded by a time budget (any page that would blow it is skipped and counted); recorded in sync_state job adtoolWarmHourly', 'ROUTES (the pages above), env.HOT (KV)', 'hourly at the tail of adtoolRollups (:20)', 'sync_state job adtoolWarmHourly names the pages warmed and any skipped for time'],
+  ['CPC_LISTINGS', 'Ads running', 'Every listing with a live pay-per-click ad, and for the period you choose: what it spent, its clicks, the sales and units that came through the ad, its orders and sales across all channels, and its profit. Also the units it sold over the last week, fortnight and month, the ad cost as a share of ad sales, the average cost of a click, how many clicks turn into a sale, and ROAS. The totals never carry a profit figure.', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today, adtool_ads_daily, items_facts, adtool_orders', 'Worked out when you open the page', 'The ratios and their zero cases are covered by tests, and the totals are checked for carrying no profit figure'],
+  ['CPC_POST', 'Ads stopped', 'Listings whose pay-per-click ad is paused, archived or gone, and how they sold afterwards. The thirty days before the ad stopped are shown against the days since, so you can see whether the sales held. Where we cannot tell when the ad stopped, the page says so rather than guessing.', 'campaign_ads, campaigns, adtool_campaign_archive, adtool_campaign_ad_events, items_api, adtool_listing_day, adtool_ads_daily, items_facts, adtool_orders', 'Worked out when you open the page', 'Shares the tests for Ads running, and the exclusion of listings whose ads are still live is checked'],
+  ['ADV_OVERVIEW', 'Advertising overview', 'Day by day for the company or one account: spend, sales from ads, ROAS, the cost of a click, how many clicks turn into a sale, ad units, orders and units. Then the last week against the week before and the last ten days against the ten before, each with the change and which way it went. Profit appears only as counts of listings making and losing money, never as a company total.', 'adtool_scope_day, adtool_listing_week, items_api', 'Worked out when you open the page', 'The comparisons and their zero cases are covered by tests, and the counts are checked for carrying no company profit figure'],
+  ['WARM_HOURLY', 'Preparing the slow pages in advance', 'Once the hourly figures are in, the pages that take longest to build are worked out ahead of time and kept, so the first person to open one gets it straight away instead of waiting. Anything that would take too long is skipped and counted.', 'ROUTES (the pages above), env.HOT (KV)', 'Every hour, after the figures land', 'A note records which pages were prepared and which were skipped for time'],
 ];
 let ADTOOL_BU3_REG_OK = false;
 async function ensureAdtoolPhaseBu3Register(env) {
@@ -8813,6 +8840,15 @@ async function adtCpcPrevTotals(env, ids, prevFrom, prevTo) {
   const d = adtCpcDerived(t);
   return { from: prevFrom, to: prevTo, spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), clicks: t.clicks, attr_units: t.attr_units, orders: t.orders, units: t.units, roas: d.roas, avg_cpc: d.avg_cpc, cvr: d.cvr };
 }
+/* The first day we hold an ad-status event. "Last active" cannot exist before it, so the page prints
+   this date instead of a typed one: when event recording started later the tooltip follows. */
+async function adtCpcEventsFrom(env, mode) {
+  if (mode !== 'post') return null;
+  try {
+    const r = await env.DB.prepare('SELECT MIN(substr(seen_at, 1, 10)) AS mn FROM adtool_campaign_ad_events').first();
+    return r && r.mn ? String(r.mn) : null;
+  } catch (e) { return null; }
+}
 async function adtCpcPostContext(env, ids, camp, today, yday) {
   /* per post listing: last_active_day (the most recent event to PAUSED / ARCHIVED / REMOVED, else the campaign's
      gone_at, else null = before tracking), and before / after totals around it — the 30 days ending on that day
@@ -8885,6 +8921,7 @@ async function adtoolCpcCompute(env, p) {
       period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
       rows: [], totals: adtCpcTotals([]), prev: await adtCpcPrevTotals(env, [], w.prev_from, w.prev_to),
       impressions_from: mode === 'active' || from <= to ? (from > ADTOOL_IMPRESSIONS_FROM ? from : ADTOOL_IMPRESSIONS_FROM) : null,
+      events_from: await adtCpcEventsFrom(env, mode),
       profit_label: 'Profit (Sales Analysis law) — item level only', computed_at: new Date().toISOString(),
       source: 'no ' + (mode === 'active' ? 'live cost-per-click' : 'paused / archived cost-per-click') + ' listing' + (acct ? ' on ' + acct : ''),
     };
@@ -8929,6 +8966,7 @@ async function adtoolCpcCompute(env, p) {
     period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
     rows, totals: adtCpcTotals(rows), prev: await adtCpcPrevTotals(env, ids, w.prev_from, w.prev_to),
     impressions_from: imp.available ? imp.from : null,
+    events_from: await adtCpcEventsFrom(env, mode),
     profit_label: 'Profit (Sales Analysis law) — item level only',
     note: (mode === 'active' ? 'live cost-per-click listings (ACTIVE ad in a RUNNING campaign on an ACTIVE listing)' : 'listings whose cost-per-click ad is paused, archived or whose campaign has ended, excluding any that are live again') + '; ads by eBay report day (UTC), orders by UK day' + (w.includes_today ? '; today is sampled and provisional' : '') + (imp.available ? '' : '; impressions unavailable before ' + ADTOOL_IMPRESSIONS_FROM),
     computed_at: new Date().toISOString(),
@@ -9027,7 +9065,11 @@ async function adtWarmHourly(env) {
      also sends account:''); adtKvCanon folds these onto the same key as {}, so both spellings are covered by the one
      entry. `hourly` = the page's default window ends yesterday and is honoured until the next rollup (adtWarmUntil);
      adtoolPlan carries the 5-minute Running-today block inside it, so it keeps the short 330 s horizon. */
-  const jobs = [['adtoolCpcListings', { period: 'd30', mode: 'active' }, true], ['adtoolCpcListings', { period: 'd30', mode: 'post' }, true], ['adtoolOverview', { period: 'd30' }, true], ['adtoolPlan', { period: 'd30' }, false], ['adtoolReport', {}, true], ['adtoolForecastLab', {}, true], ['adtoolAccounts', { account: '', period: 'd30' }, true], ['adtoolCategories', { period: 'd30' }, true]];
+  const jobs = [['adtoolCpcListings', { period: 'd30', mode: 'active' }, true], ['adtoolCpcListings', { period: 'd30', mode: 'post' }, true], ['adtoolOverview', { period: 'd30' }, true], ['adtoolPlan', { period: 'd30' }, false], ['adtoolReport', {}, true], ['adtoolForecastLab', {}, true], ['adtoolAccounts', { account: '', period: 'd30' }, true], ['adtoolCategories', { period: 'd30' }, true],
+    /* Listing departments classifies all ~990 active listings and joins three windows, so its first open after
+       the cache expires is one of the slow ones. Its answer cannot move between two rollups (ages turn over at
+       midnight and the windows end yesterday), so it takes the hourly horizon like the rest. */
+    ['adtoolDepts', {}, true]];
   const out = []; const skippedNames = [];
   for (const j of jobs) {
     const action = j[0], payload = j[1], hourly = !!j[2];
@@ -9061,8 +9103,340 @@ const ADTOOL_ACTIONS_P11 = {
       return adtoolOverviewCompute(ctx.env, p || {});
     },
   },
+  adtoolDepts: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* THE GATE RUNS BEFORE THE CACHE, AND MUST STAY THAT WAY. A cache hit that skipped the role
+         check has shipped in this codebase before: the cache key carries the caller's profit class,
+         not the caller's role, so a stored answer can never be the thing that decides who may read
+         the page. Refuse first, then look for a cached answer.
+         The role half runs before the seed too, so a caller who may not be here writes nothing at
+         all; the seed has to come before the page-flag half, because it is what puts the flag there. */
+      await adtGate(ctx, null);
+      await ensureAdtoolPhaseDeptsRegister(ctx.env);   // seeds adtool_page_depts ON before the gate reads it
+      await adtGate(ctx, 'adtool_page_depts');
+      const acct = String((p && p.account) || '').trim();
+      return adtKvMemo(ctx.env, 'adtoolDepts', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolDepts,
+        () => adtoolDeptsCompute(ctx.env, { account: acct }),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
 };
 /* ADTOOL-P11-END ================================================================================== */
+
+/* ADTOOL-P13-BEGIN ================================================================================
+   The advertising departments (owner's batch, 14 Oct 2026). The owner asked for a ladder every
+   active listing sits on, and a budget law on top of it: three pounds a day for every item, ten
+   pounds a week for a new one. This section answers both for every ACTIVE listing and writes
+   nothing anywhere. Nothing here is ever sent to eBay. */
+/* ADTOOL-P13-PURE-BEGIN */
+const ADTOOL_DEPT_DEFAULTS = { new_days: 14, scale_sold: 20, top_30d: 30, grow_pct: 20, fall_pct: 30, min_move: 2, day_cap: 3, new_week_cap: 10 };
+const ADTOOL_DEPT_CONFIG_KEYS = {
+  new_days: 'adtool_dept_new_days', scale_sold: 'adtool_dept_scale_sold', top_30d: 'adtool_dept_top_30d',
+  grow_pct: 'adtool_dept_grow_pct', fall_pct: 'adtool_dept_fall_pct', min_move: 'adtool_dept_min_move',
+  day_cap: 'adtool_dept_day_cap', new_week_cap: 'adtool_dept_new_week_cap',
+};
+const ADTOOL_DEPT_ORDER = ['new', 'top', 'scaling', 'declining', 'average'];
+const ADTOOL_DEPT_NAMES = { new: 'New listing', top: 'Top listing', scaling: 'Scaling listing', declining: 'Declining listing', average: 'Average listing' };
+function adtDeptRules(cfg) {
+  /* The eight numbers the ladder and the budget caps run on, every one of them the owner's to change.
+     `cfg` is a plain key to value map read out of the config table. A key that is absent, blank, not a
+     number or negative keeps its default, so one bad edit cannot blank the page. Pure. */
+  const c = cfg || {}, out = {};
+  for (const k of Object.keys(ADTOOL_DEPT_DEFAULTS)) {
+    const raw = c[ADTOOL_DEPT_CONFIG_KEYS[k]];
+    const n = (raw === undefined || raw === null || String(raw).trim() === '') ? NaN : Number(raw);
+    out[k] = (isFinite(n) && n >= 0) ? n : ADTOOL_DEPT_DEFAULTS[k];
+  }
+  return out;
+}
+function adtDeptSentences(rules) {
+  /* one plain sentence per department, printing the numbers actually in force rather than the
+     defaults, so the page always states the law it just applied */
+  const R = rules || ADTOOL_DEPT_DEFAULTS;
+  const n = v => String(Math.round(Number(v) * 100) / 100);
+  return {
+    new: 'Live ' + n(R.new_days) + ' days or fewer.',
+    top: 'More than ' + n(R.top_30d) + ' sold in the last 30 days.',
+    scaling: 'More than ' + n(R.scale_sold) + ' sold since it was listed, and the last 30 days are up on the 30 before.',
+    declining: 'It has sold before, and the last 30 days are down on the 30 before.',
+    average: 'Past its first ' + n(R.new_days) + ' days and none of the above. This is where a steady listing sits.',
+  };
+}
+/* THE OWNER'S READING, AND WHY AVERAGE IS THE DEFAULT.
+   He named five labels and said there would be four departments:
+     New listing / Average listing / Scaling listing / Top listings / Declining listings
+   Those two counts reconcile exactly one way. New is the entry window every listing passes through
+   for its first `new_days` days; the four graded departments it then falls into are Average,
+   Scaling, Top and Declining. Average is therefore the DEFAULT, the place a listing sits when
+   nothing else is true of it.
+   Average is NOT a "more than 20 sold" gate. Read that way, 54 % of the live listings match no
+   stage at all and a sixth bucket has to be invented, which contradicts the owner's own count of
+   four. This is settled. Please do not "fix" Average back into a sold-count gate.
+   The ladder is read top down and every listing lands in exactly one department. */
+function adtDeptOf(input, rules) {
+  /* input: { age_days, sold_life, units_30d, units_prev30 }. Pure: no database, no clock, no
+     globals, so the whole ladder is unit tested from worked examples. */
+  const R = rules || ADTOOL_DEPT_DEFAULTS, i = input || {};
+  const S = adtDeptSentences(R);
+  /* Number(null) is 0, not NaN, so a missing age would otherwise read as day zero and put a listing
+     we know nothing about straight into the new window. Absent means absent. */
+  const ageRaw = i.age_days;
+  const age = (ageRaw === null || ageRaw === undefined || String(ageRaw).trim() === '') ? NaN : Number(ageRaw);
+  const ageKnown = isFinite(age);
+  const sold = Math.max(0, Number(i.sold_life) || 0);
+  const u30 = Math.max(0, Number(i.units_30d) || 0);
+  const prev = Math.max(0, Number(i.units_prev30) || 0);
+  /* "Up" and "down" each have to clear BOTH a proportion and a whole number of units. The
+     proportion on its own calls one unit against two a 100 % rise; the units on their own call 68
+     against 70 a fall. Both tests are multiplications and never a division, so a previous window of
+     zero needs no special case and cannot divide by zero: growth from nothing then only has to clear
+     the minimum move. */
+  const up = u30 >= prev * (1 + R.grow_pct / 100) && (u30 - prev) >= R.min_move;
+  const down = u30 <= prev * (1 - R.fall_pct / 100) && (prev - u30) >= R.min_move;
+  /* has it ever sold: eBay's own count since listing, or either window having units. eBay's count
+     resets on a quantity revision, so the windows are the safety net under it. */
+  const everSold = sold > 0 || u30 > 0 || prev > 0;
+  const days = v => v + (Number(v) === 1 ? ' day' : ' days');
+  const vs = u30 + ' in the last 30 days against ' + prev + ' in the 30 before';
+  const out = (key, why) => ({ key: key, name: ADTOOL_DEPT_NAMES[key], rule_sentence: S[key], why: why });
+  /* an age we cannot establish is not treated as new: we would be claiming a listing date we do not have */
+  if (ageKnown && age <= R.new_days) return out('new', 'Live ' + days(age) + '. It stays here until day ' + R.new_days + '.');
+  if (u30 > R.top_30d) return out('top', 'Sold ' + u30 + ' in the last 30 days, past the ' + R.top_30d + ' a top listing needs.');
+  if (sold > R.scale_sold && up) return out('scaling', 'Sold ' + sold + ' since it was listed, and ' + vs + '.');
+  if (everSold && down) return out('declining', 'Sold ' + vs + '.');
+  if (!everSold) return out('average', ageKnown ? 'No sales yet, and it is past its first ' + days(R.new_days) + '.' : 'No sales yet, and we have no listing date for it.');
+  if (up) return out('average', 'Growing, but it has not sold more than ' + R.scale_sold + ' since it was listed.');
+  return out('average', 'Sold ' + vs + ', which is neither a rise nor a fall worth moving it for.');
+}
+/* Register entries that document the plumbing rather than a number a seller reads. The register view
+   hides these; they are NOT deleted, because the checks and the tests refer to them by name. */
+const ADTOOL_REGISTER_INTERNAL = {
+  EST_AD_PROFIT: 1, PROFIT_ITEM_ONLY: 1, KV_PAGE_CACHE: 1,
+  PARITY_FLEET: 1, PARITY_WEEKDAY: 1, PARITY_ACCOUNT_WEEKDAY: 1, PARITY_DATE: 1, PARITY_LISTING: 1,
+};
+function adtRegInternal(metricId) { return !!ADTOOL_REGISTER_INTERNAL[String(metricId || '').toUpperCase()]; }
+function adtRegRows(rows) {
+  /* every register payload carries `internal` so the view can hide the plumbing rather than show it
+     to staff. The flag is the code's own list, read at request time, so there is nothing to migrate. */
+  return (rows || []).map(r => Object.assign({}, r, { internal: adtRegInternal(r && r.metric_id) }));
+}
+/* ADTOOL-P13-PURE-END */
+
+const ADTOOL_REGISTER_P13 = [
+  ['DEPARTMENTS', 'Advertising departments, and the spend caps on them', 'Every active listing lands in one of five places, read in order: new for its first days, top if it sold more than the top figure in the last 30 days, scaling if it is over the scaling figure since listing and up on the 30 days before, declining if it has sold before and is down, and average for everything else. A rise or a fall must clear both a percentage and a whole number of units, so a one unit wobble moves nothing. Spend is checked against the daily cap, and the weekly cap for a new listing, on what was spent and on what the campaign budget is set to.', 'items_api, adtool_listing_day, adtool_orders, campaigns, campaign_ads', 'Once a day is enough. The sales and spend behind it only move when the previous day lands, and ages turn over at midnight', 'Unit tests: every department from a worked example, the day and unit edges, a collapse in sales staying out of average, and the five together placing every listing exactly once'],
+];
+let ADTOOL_P13_REG_OK = false;
+async function ensureAdtoolPhaseDeptsRegister(env) {
+  if (ADTOOL_P13_REG_OK) return;
+  await ensureAdtoolPhase1Schema(env);
+  const stmts = ADTOOL_REGISTER_P13.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 13, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 13").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* born ON: the page only reads. A manager can switch it off in Flags. */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_depts', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  ADTOOL_P13_REG_OK = true;
+}
+async function adtoolDeptConfig(env) {
+  /* the owner's eight numbers in one read. Anything he has not set is simply absent and keeps its default. */
+  const out = {};
+  try { for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_dept_%'").all()).results || [])) out[String(r.key)] = r.value; } catch (e) { /* no rows: the defaults stand */ }
+  return out;
+}
+async function adtoolDeptsCompute(env, p) {
+  await ensureAdtoolPhase1Schema(env);
+  const rules = adtDeptRules(await adtoolDeptConfig(env));
+  const today = ukDate(''), yday = adtAddDays(today, -1), todayUtc = utcDate();
+  const acct = String((p && p.account) || '').trim();
+  /* Every window ENDS YESTERDAY. eBay's report for a day lands the day after, so a window reaching
+     into today would read every listing as having had a cheap day. adtDaySrc is asked for the source
+     rather than naming a table here, so the day the windows do move the splice comes for free. */
+  const w = adtPeriod({ period: 'd30' }, today), w7 = adtPeriod({ period: 'd7' }, today);
+  const src = adtDaySrc(w, today, todayUtc);
+  const ageExpr = "CASE WHEN i.start_time != '' THEN i.start_time ELSE i.first_seen END";
+  const clockExpr = "CASE WHEN i.start_time != '' THEN 'eBay start time' ELSE 'first seen by portal' END";
+  const B = await env.DB.batch([
+    env.DB.prepare('SELECT i.item_id, i.account, i.title, i.image, i.price, COALESCE(i.sold_qty, 0) AS sold_qty, ' +
+      ageExpr + ' AS born, ' + clockExpr + ' AS clock FROM items_api i ' +
+      "WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    /* one aggregate for both windows and both spend figures. `spend` already includes the
+       cost-per-click leg at source, so it is never added to again here. */
+    env.DB.prepare('SELECT d.item_id, ' +
+      'SUM(CASE WHEN d.day >= ?1 AND d.day <= ?2 THEN d.units ELSE 0 END) AS units_30d, ' +
+      'SUM(CASE WHEN d.day >= ?3 AND d.day <= ?4 THEN d.units ELSE 0 END) AS units_prev30, ' +
+      'ROUND(SUM(CASE WHEN d.day >= ?5 AND d.day <= ?2 THEN d.spend ELSE 0 END), 2) AS spend_7d, ' +
+      'ROUND(SUM(CASE WHEN d.day = ?2 THEN d.spend ELSE 0 END), 2) AS spend_yesterday ' +
+      'FROM ' + src + ' d WHERE d.day >= ?3 AND d.day <= ?2 GROUP BY d.item_id'
+    ).bind(w.from, yday, w.prev_from, w.prev_to, w7.from),
+    /* the single most expensive day in the last week, and which day it was. SQLite hands back the
+       `day` of the row that produced the MAX, which is exactly the day we want to name. */
+    env.DB.prepare('SELECT d.item_id, d.day AS worst_day_date, ROUND(MAX(d.spend), 2) AS worst_day FROM ' + src + ' d ' +
+      'WHERE d.day >= ?1 AND d.day <= ?2 AND d.spend > 0 GROUP BY d.item_id').bind(w7.from, yday),
+    env.DB.prepare('SELECT d.item_id, d.account, d.day, ROUND(d.spend, 2) AS spend FROM ' + src + ' d ' +
+      'WHERE d.day >= ?1 AND d.day <= ?2 AND d.spend > ?3 ORDER BY d.spend DESC LIMIT 300').bind(w7.from, yday, rules.day_cap),
+    /* is this listing being advertised: the one membership rule the whole tool shares */
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    /* units from our own order records, joined to the active listings so neither read drags back
+       every item we have ever sold. The first is all-time, the second is the previous window only. */
+    env.DB.prepare("SELECT o.item_id, SUM(o.qty) AS units FROM adtool_orders o JOIN items_api i ON i.item_id = o.item_id WHERE i.status = 'ACTIVE' AND o.status <> 'CANCELLED'" + (acct ? ' AND i.account = ?1' : '') + ' GROUP BY o.item_id').bind(...(acct ? [acct] : [])),
+    env.DB.prepare("SELECT o.item_id, SUM(o.qty) AS units FROM adtool_orders o JOIN items_api i ON i.item_id = o.item_id WHERE i.status = 'ACTIVE' AND o.status <> 'CANCELLED' AND o.local_date >= ?1 AND o.local_date <= ?2" + (acct ? ' AND i.account = ?3' : '') + ' GROUP BY o.item_id').bind(...[w.prev_from, w.prev_to].concat(acct ? [acct] : [])),
+    env.DB.prepare('SELECT MIN(day) AS mn, MAX(day) AS mx FROM adtool_listing_day'),
+    env.DB.prepare('SELECT MIN(local_date) AS mn FROM adtool_orders'),
+    /* how many breach DAYS there are in all. The list above is the 300 biggest; without this count the
+       page compares 300 rows against a count of ITEMS and silently drops the rest. One row is one day:
+       an item over the cap on five days is five of these and one of `totals.over_day`. */
+    env.DB.prepare('SELECT COUNT(*) AS n FROM ' + src + " d JOIN items_api i ON i.item_id = d.item_id AND i.status = 'ACTIVE' " +
+      'WHERE d.day >= ?1 AND d.day <= ?2 AND d.spend > ?3' + (acct ? ' AND i.account = ?4' : '')
+    ).bind(...[w7.from, yday, rules.day_cap].concat(acct ? [acct] : [])),
+    /* an INDEPENDENT count of the active listings, so "the five add up to the active total" is a check
+       and not the same number twice. The classified rows are counted in JS from the first read. */
+    env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])),
+  ]);
+  const dayBreachRows = Number((((B[9] || {}).results || [])[0] || {}).n);
+  const activeCounted = Number((((B[10] || {}).results || [])[0] || {}).n);
+  const items = B[0].results || [];
+  const agg = {}; for (const r of (B[1].results || [])) agg[String(r.item_id)] = r;
+  const worst = {}; for (const r of (B[2].results || [])) worst[String(r.item_id)] = r;
+  const live = B[4].results || [];
+  const lifeOrders = {}; for (const r of (B[5].results || [])) lifeOrders[String(r.item_id)] = Number(r.units) || 0;
+  const prevOrders = {}; for (const r of (B[6].results || [])) prevOrders[String(r.item_id)] = Number(r.units) || 0;
+  const cov = (B[7].results || [])[0] || {};
+  const ordCov = (B[8].results || [])[0] || {};
+  /* The day figures only start where they start. If they do not reach back over the 30 days before
+     last, that window comes from our own order records instead, and if neither reaches back the page
+     is told so outright. A window we cannot see is NEVER quietly returned as zero. */
+  const grainStart = cov.mn ? String(cov.mn) : null, orderStart = ordCov.mn ? String(ordCov.mn) : null;
+  const prevCovered = !!(grainStart && grainStart <= w.prev_from);
+  /* Four states, not three. With no order record at all there is nothing standing in for the window:
+     saying "order records" then claims a source we do not have, while every previous-window figure is
+     0 and the page reads that as "sold nothing". That state is named outright. */
+  const prevNone = !prevCovered && !orderStart;
+  const prevPartial = !prevCovered && !prevNone && orderStart > w.prev_from;
+  /* the live ad rows, one per listing per campaign: what it is in, and the biggest daily budget any
+     of those campaigns is SET to. The owner's rule is a budget rule, so the setting matters as much
+     as the spend. `campaigns.budget` is stored as text, so it is read as a number here. */
+  const adOf = {}, campSize = {};
+  for (const r of live) {
+    const id = String(r.item_id), ck = String(r.account || '') + '|' + String(r.campaign_id || '');
+    campSize[ck] = (campSize[ck] || 0) + 1;
+    const b = Number(String(r.budget == null ? '' : r.budget).replace(/[^0-9.\-]/g, ''));
+    const bud = (isFinite(b) && b > 0) ? round2(b) : null;
+    const cur = adOf[id];
+    if (!cur) adOf[id] = { campaign: String(r.name || r.campaign_id || ''), campaign_key: ck, budget_set: bud };
+    else if (bud != null && (cur.budget_set == null || bud > cur.budget_set)) { cur.budget_set = bud; cur.campaign = String(r.name || r.campaign_id || ''); cur.campaign_key = ck; }
+  }
+  /* age on the day grain, from noon on both ends, so no clock change can shift a listing in or out
+     of the new window by an hour */
+  const todayMs = Date.parse(today + 'T12:00:00Z');
+  const ageOf = born => { const s = String(born || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null; const ms = Date.parse(s + 'T12:00:00Z'); return isFinite(ms) ? Math.max(0, Math.round((todayMs - ms) / 86400000)) : null; };
+  const S = adtDeptSentences(rules);
+  const depts = {}; for (const k of ADTOOL_DEPT_ORDER) depts[k] = { key: k, name: ADTOOL_DEPT_NAMES[k], rule_sentence: S[k], listings: 0, advertised: 0, spend_7d: 0, spend_yesterday: 0, units_30d: 0, units_prev30: 0, over_day: 0, over_week: 0, never_sold: 0, share_pct: 0 };
+  const rows = [], byId = {}, accounts = {}, clocks = { ebay: 0, first_seen: 0 };
+  for (const it of items) {
+    const id = String(it.item_id), a = agg[id] || {}, ad = adOf[id] || null;
+    const u30 = Number(a.units_30d) || 0;
+    const prev = prevCovered ? (Number(a.units_prev30) || 0) : (prevOrders[id] || 0);
+    /* sold since listed: eBay's own count, or our order count where that is higher. eBay's resets on
+       a quantity revision and our orders do not reach back to the oldest listings, so neither alone. */
+    const soldLife = Math.max(Number(it.sold_qty) || 0, lifeOrders[id] || 0);
+    const ageDays = ageOf(it.born);
+    const d = adtDeptOf({ age_days: ageDays, sold_life: soldLife, units_30d: u30, units_prev30: prev }, rules);
+    const wst = worst[id] || null;
+    const spend7 = round2(a.spend_7d), spendY = round2(a.spend_yesterday);
+    const worstDay = wst ? round2(wst.worst_day) : 0;
+    const overDay = worstDay > rules.day_cap;
+    const overWeek = d.key === 'new' && spend7 > rules.new_week_cap;
+    const row = {
+      item_id: id, account: String(it.account || ''), title: String(it.title || ''), image: it.image ? String(it.image) : null,
+      dept: d.key, dept_name: d.name, why: d.why,
+      age_days: ageDays, clock: String(it.clock || ''), born: it.born ? String(it.born).slice(0, 10) : null,
+      sold_life: soldLife, units_30d: u30, units_prev30: prev,
+      spend_7d: spend7, spend_yesterday: spendY, worst_day: worstDay, worst_day_date: wst ? String(wst.worst_day_date) : null,
+      budget_set: ad ? ad.budget_set : null, campaign: ad ? ad.campaign : null, advertised: !!ad,
+      over_day: overDay, over_week: overWeek,
+    };
+    rows.push(row); byId[id] = row;
+    if (row.account) accounts[row.account] = 1;
+    if (String(it.clock || '').indexOf('eBay') === 0) clocks.ebay++; else clocks.first_seen++;
+    const g = depts[d.key];
+    g.listings++; if (row.advertised) g.advertised++;
+    g.spend_7d += spend7; g.spend_yesterday += spendY; g.units_30d += u30; g.units_prev30 += prev;
+    if (overDay) g.over_day++; if (overWeek) g.over_week++; if (soldLife === 0 && u30 === 0 && prev === 0) g.never_sold++;
+  }
+  for (const k of ADTOOL_DEPT_ORDER) { const g = depts[k]; g.spend_7d = round2(g.spend_7d); g.spend_yesterday = round2(g.spend_yesterday); g.share_pct = rows.length ? round2(100 * g.listings / rows.length) : 0; }
+  const cell = r => ({ item_id: r.item_id, account: r.account, title: r.title, image: r.image, dept: r.dept, dept_name: r.dept_name });
+  const dayBreaches = [];
+  for (const b of (B[3].results || [])) {
+    const r = byId[String(b.item_id)]; if (!r) continue;            // ended, or another account's
+    dayBreaches.push(Object.assign(cell(r), { day: String(b.day), spend: round2(b.spend), cap: rules.day_cap }));
+  }
+  const weekBreaches = rows.filter(r => r.over_week).sort((x, y) => y.spend_7d - x.spend_7d)
+    .map(r => Object.assign(cell(r), { spend_7d: r.spend_7d, cap: rules.new_week_cap }));
+  const budgetOver = rows.filter(r => r.budget_set != null && r.budget_set > rules.day_cap).sort((x, y) => y.budget_set - x.budget_set);
+  /* `campaign_listings` is why this list is not a per-item breach: one campaign budget is shared by
+     every listing in that campaign, so a £50 budget over 40 listings is about £1.25 each and inside
+     the cap. The page needs the share, so the count travels with each row. */
+  const budgetBreaches = budgetOver.slice(0, 300)
+    .map(r => Object.assign(cell(r), { campaign: r.campaign, budget_set: r.budget_set, cap: rules.day_cap, campaign_listings: campSize[(adOf[r.item_id] || {}).campaign_key] || 1 }));
+  const newItems = rows.filter(r => r.dept === 'new').sort((x, y) => (x.age_days || 0) - (y.age_days || 0));
+  const NEW_PAGE = 150;
+  const newWindow = {
+    last_7_days: rows.filter(r => r.age_days != null && r.age_days <= 7).length,
+    first_14_days: newItems.length,
+    items: newItems.slice(0, NEW_PAGE), items_held_back: Math.max(0, newItems.length - NEW_PAGE),
+    last_7_days_note: 'How many of those went live in the last 7 days, the owner\'s window for holding a brand new listing out of advertising altogether.',
+    note: 'A listing counts as new for its first ' + rules.new_days + ' days. While it is new its ad spend is capped at £' + rules.new_week_cap.toFixed(2) + ' for the week, on top of the £' + rules.day_cap.toFixed(2) + ' a day every listing gets.',
+  };
+  const PAGE = 300;
+  rows.sort((x, y) => (Number(y.over_day) - Number(x.over_day)) || (Number(y.over_week) - Number(x.over_week)) || (y.spend_7d - x.spend_7d) || (y.units_30d - x.units_30d));
+  const shown = rows.slice(0, PAGE);
+  return {
+    computed_at: new Date().toISOString(), today,
+    /* the same "updated at" tag every other advertising page carries, so the header reads alike */
+    fresh: await adtFresh(env, 'day'),
+    window: { from: w.from, to: w.to, days: w.days },
+    rules,
+    coverage: {
+      prev_window_source: prevCovered ? 'daily figures' : prevNone ? 'no records' : (prevPartial ? 'order records (incomplete)' : 'order records'),
+      prev_window_from: w.prev_from, prev_window_to: w.prev_to,
+      day_grain_starts: grainStart, order_records_start: orderStart,
+      prev_window_note: prevCovered
+        ? 'The 30 days before last come from our daily sales figures, the same place the last 30 days come from.'
+        : prevNone
+          ? 'We hold nothing at all for the 30 days before last, so every figure for it reads 0 because there is no record, not because nothing sold. Until that fills in, no listing can be called scaling or declining.'
+          : (prevPartial
+            ? 'Neither our daily sales figures nor our order records reach back over the whole of the 30 days before last, so a rise or a fall against it is understated for the oldest listings.'
+            : 'Our daily sales figures do not reach back that far, so the 30 days before last come from our order records instead.'),
+      age_clock: clocks,
+      age_clock_note: 'Age is counted from the date eBay started the listing. Where eBay never gave us one, it is counted from the day the portal first saw it, and the listing says so.',
+    },
+    totals: {
+      active: rows.length,
+      /* the same figure counted again straight from the table, so the page's "the five add up" line is
+         a real check rather than one number compared with itself */
+      active_counted: isFinite(activeCounted) ? activeCounted : null,
+      advertised: rows.filter(r => r.advertised).length,
+      spend_7d: round2(rows.reduce((t, r) => t + r.spend_7d, 0)),
+      spend_yesterday: round2(rows.reduce((t, r) => t + r.spend_yesterday, 0)),
+      /* over_day / over_week count ITEMS; over_day_rows counts the item-days behind over_day, which is
+         the figure the day table's rows are to be measured against. */
+      over_day: rows.filter(r => r.over_day).length,
+      over_day_rows: isFinite(dayBreachRows) ? dayBreachRows : null,
+      over_week: rows.filter(r => r.over_week).length,
+      over_budget_set: budgetOver.length,
+    },
+    depts: ADTOOL_DEPT_ORDER.map(k => depts[k]),
+    new_window: newWindow,
+    /* each list carries its own TOTAL, because each is a different grain and two of the three are
+       capped: day is one row per item per DAY, week and budget_set are one row per item. */
+    breaches: {
+      day: dayBreaches, day_total: isFinite(dayBreachRows) ? dayBreachRows : null,
+      week: weekBreaches, week_total: weekBreaches.length,
+      budget_set: budgetBreaches, budget_set_total: budgetOver.length,
+    },
+    items: shown, items_total: rows.length, items_shown: shown.length, items_held_back: Math.max(0, rows.length - shown.length),
+    accounts: Object.keys(accounts).sort(),
+  };
+}
+/* ADTOOL-P13-END ================================================================================== */
 
 
 

@@ -22,13 +22,14 @@ function run(argv) {
   const i10 = src.indexOf('/* ADTOOL-P10-PURE-BEGIN */'); const j10 = src.indexOf('/* ADTOOL-P10-PURE-END */');
   const i11 = src.indexOf('/* ADTOOL-P11-PURE-BEGIN */'); const j11 = src.indexOf('/* ADTOOL-P11-PURE-END */');
   const i12 = src.indexOf('/* ADTOOL-P12-PURE-BEGIN */'); const j12 = src.indexOf('/* ADTOOL-P12-PURE-END */');
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '');   /* pure helpers of every phase */
+  const i13 = src.indexOf('/* ADTOOL-P13-PURE-BEGIN */'); const j13 = src.indexOf('/* ADTOOL-P13-PURE-END */');
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '');   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -271,7 +272,7 @@ function run(argv) {
   const keep = F.adtDecide(Object.assign({}, base, { y: { spend: 3, attr_units: 1, attr_revenue: 12, ad_profit: 1 }, d7: { spend: 21, attr_units: 7, attr_revenue: 90, ad_profit: 6 }, d30: { spend: 90, attr_units: 30, attr_revenue: 380, ad_profit: 25 }, halves: [1, 1], profile_today: 1 }));
   t('decide: a profitable listing is left alone', keep.decision === 'KEEP' && keep.rules.length === 0, keep);
   const samp = F.adtDecide(Object.assign({}, base, { y_source: 'sampled', y: { spend: 4, attr_units: 0, attr_revenue: 0, ad_profit: -4 } }));
-  t('decide: a yesterday taken from the samples says so in its reason', /sampled — the report for that day has not landed/.test(samp.why) && !/sampled/.test(F.adtDecide(base).why), samp.why);
+  t('decide: a yesterday taken from our own readings says so in its reason, in plain words', /our own reading, eBay has not sent the report for that day yet/.test(samp.why) && !/our own reading/.test(F.adtDecide(base).why), samp.why);
   t('decide: EV weights today, the week and yesterday as the spec says', near(F.adtDecide(Object.assign({}, base, { profile_today: 10, d7: { spend: 7, attr_revenue: 0, ad_profit: 70 }, y: { spend: 1, attr_revenue: 0, ad_profit: 5 } })).ev, 0.5 * 10 + 0.3 * 10 + 0.2 * 5), null);
   /* Phase 4 big update: scoring is on REAL profit (actual_profit) by default; the ad-profit basis is kept for the side-by-side */
   t('score: a STOP is right when the day lost REAL money (law), wrong when it made real money', F.adtScoreDecision('STOP', { actual_profit: -4 }, 3) === 1 && F.adtScoreDecision('STOP', { actual_profit: 4 }, 3) === 0, null);
@@ -699,14 +700,14 @@ function run(argv) {
   const decLawNeg = Object.assign({}, decAgree, { y: { spend: 3, attr_units: 1, attr_revenue: 12, ad_profit: 4, actual_profit: -2 }, d7: { spend: 21, attr_units: 6, attr_revenue: 80, ad_profit: 10, actual_profit: -12, pending_cost_orders: 0, pending_fee_orders: 0 }, d30: { spend: 90, attr_units: 25, attr_revenue: 340, ad_profit: 35, actual_profit: -40, pending_cost_orders: 0, pending_fee_orders: 0 }, halves: [1, 1], halves_actual: [-1, -1], profile_today: 1, profile_today_actual: -1.5 });
   const dLaw = F.adtDecide(decLawNeg), dEst = F.adtDecide(decLawNeg, 'adprofit');
   t('decide: a listing losing REAL money for 30 days is STOP S1 on the law even though the old estimate reads positive (EV on the law, no estimate veto)', dLaw.decision === 'STOP' && dLaw.rules.indexOf('S1') >= 0 && dLaw.confidence === 'confident' && dLaw.ev < 0 && dLaw.ev_basis === 'law' && dEst.decision !== 'STOP', [dLaw.decision, dLaw.ev, dEst.decision]);
-  t('decide: the EV printed on the card is the law EV and says so', /EV −£\d+\.\d\d, law\)/.test(dLaw.why) && /today expected −£1\.50/.test(dLaw.why), dLaw.why);
+  t('decide: the expected gain printed on the card is the one from the profit figures, and says so without jargon', /expected gain −£\d+\.\d\d, from the profit figures\)/.test(dLaw.why) && /today expected −£1\.50/.test(dLaw.why) && !/\bEV\b/.test(dLaw.why) && !/ p=/.test(dLaw.why), dLaw.why);
   const decUnpriced = Object.assign({}, decLawNeg, { d30: Object.assign({}, decLawNeg.d30, { pending_cost_orders: 2, pending_fee_orders: 1 }) });
   const dUnp = F.adtDecide(decUnpriced);
-  t('decide: unpriced orders in the window → the S1 STOP is never confident (watch, with the reason), consistent with A02 / Running today', dUnp.decision === 'STOP' && dUnp.confidence === 'watch' && /3 orders unpriced in the window/.test(dUnp.why) && dUnp.unpriced === 3, [dUnp.confidence, dUnp.why]);
+  t('decide: unpriced orders in the window → the S1 STOP is never confident (watch, with the reason), consistent with A02 / Running today', dUnp.decision === 'STOP' && dUnp.confidence === 'watch' && /3 orders in the period we cannot cost yet/.test(dUnp.why) && dUnp.unpriced === 3, [dUnp.confidence, dUnp.why]);
   const dHard = F.adtDecide(Object.assign({}, decUnpriced, { margin: 0 }));
   t('decide: a hard stop (S4, no margin) stays confident regardless of unpriced orders — it does not read profit', dHard.decision === 'STOP' && dHard.rules.indexOf('S4') >= 0 && dHard.confidence === 'confident', [dHard.rules, dHard.confidence]);
-  t('decide: hand-built inputs without law windows keep the estimate EV and say so', F.adtDecide(base).ev_basis === 'estimate' && /, estimate\)/.test(F.adtDecide(base).why), F.adtDecide(base).why);
-  t('decide: a sampled yesterday is labelled provisional', /provisional/.test(F.adtDecide(Object.assign({}, base, { y_source: 'sampled' })).why), null);
+  t('decide: hand-built inputs without the profit windows keep the estimated expected gain and say so', F.adtDecide(base).ev_basis === 'estimate' && /, estimated\)/.test(F.adtDecide(base).why), F.adtDecide(base).why);
+  t('decide: a yesterday read by us, not reported by eBay, is said to be not final', /not final/.test(F.adtDecide(Object.assign({}, base, { y_source: 'sampled' })).why), null);
   /* (d) the BST hour: UK day rolled ahead of eBay's report day */
   const srcBst = F.adtDaySrc(F.adtPeriod({ period: 'today' }, '2026-09-28'), '2026-09-28', '2026-09-27');
   t('splice: at 00:30 UK BST (23:30 UTC) the live test needs uk_day = report_day too, so 27 Sep\'s whole ad day never lands on 28 Sep\'s row', (srcBst.match(/\(report_day = '2026-09-27' AND uk_day = report_day\)/g) || []).length >= 7, srcBst.slice(srcBst.indexOf('UNION')));
@@ -744,9 +745,9 @@ function run(argv) {
      inputs without the bound (older engines, hand-built) stay watch */
   const decBig = Object.assign({}, decLawNeg, { d7: Object.assign({}, decLawNeg.d7, { actual_profit: -40, pending_fee_orders: 1 }), d30: Object.assign({}, decLawNeg.d30, { actual_profit: -180, pending_fee_orders: 1 }), unpriced_bound_30: 9.6, unpriced_bound_7: 9.6 });
   const dBig = F.adtDecide(decBig);
-  t('decide: −£180 with one £12 order unpriced (bound +£9.60) is a CONFIDENT S1 stop — "cannot change the sign"', dBig.decision === 'STOP' && dBig.confidence === 'confident' && /1 order unpriced in the window/.test(dBig.why) && /at most \+£9\.60 once priced, cannot change the sign/.test(dBig.why) && dBig.unpriced_bound === 9.6, [dBig.confidence, dBig.why]);
+  t('decide: −£180 with one £12 order unpriced (bound +£9.60) is a CONFIDENT S1 stop — "cannot change the sign"', dBig.decision === 'STOP' && dBig.confidence === 'confident' && /1 order in the period we cannot cost yet/.test(dBig.why) && /worth at most \+£9\.60 once costed, which cannot turn the loss around/.test(dBig.why) && dBig.unpriced_bound === 9.6, [dBig.confidence, dBig.why]);
   const dFlip = F.adtDecide(Object.assign({}, decBig, { unpriced_bound_30: 200, unpriced_bound_7: 200 }));
-  t('decide: … but an unpriced sum that CAN turn the loss keeps the stop at watch, and so does a window with no bound at all', dFlip.confidence === 'watch' && /the loss is provisional/.test(dFlip.why) && F.adtDecide(Object.assign({}, decBig, { unpriced_bound_30: null, unpriced_bound_7: null })).confidence === 'watch' && dUnp.confidence === 'watch', [dFlip.confidence, dFlip.why]);
+  t('decide: … but an unpriced sum that CAN turn the loss keeps the stop at watch, and so does a window with no bound at all', dFlip.confidence === 'watch' && /so the loss is not final/.test(dFlip.why) && !/provisional/.test(dFlip.why) && F.adtDecide(Object.assign({}, decBig, { unpriced_bound_30: null, unpriced_bound_7: null })).confidence === 'watch' && dUnp.confidence === 'watch', [dFlip.confidence, dFlip.why]);
   const dFlip7 = F.adtDecide(Object.assign({}, decBig, { unpriced_bound_30: 9.6, unpriced_bound_7: 45 }));
   t('decide: the 7-day half can flip on its own (its bound is judged too) → watch', dFlip7.confidence === 'watch', dFlip7.why);
   /* (c) yesterday's sample stands in per ACCOUNT: law £24 on the row (cpc read 0) − 0.96 × £18 sampled cpc = £6.72,
@@ -773,6 +774,195 @@ function run(argv) {
 
   /* (h) CVR travels at 4 dp so 3.25 % is not printed as 3 % */
   t('cvr: 13 units on 400 clicks = 0.0325, not 0.03', F.adtCpcDerived({ spend: 10, clicks: 400, attr_units: 13, attr_revenue: 100 }).cvr === 0.0325 && F.round4(0.03249) === 0.0325 && F.adtCpcTotals([{ spend: 10, clicks: 400, attr_units: 13, attr_revenue: 100 }]).cvr === 0.0325, F.adtCpcDerived({ spend: 10, clicks: 400, attr_units: 13, attr_revenue: 100 }));
+
+  /* ---------------------------------------------------------------------------------------------
+     THE ADVERTISING DEPARTMENTS (owner's batch, 14 Oct 2026)
+     The ladder is read top down and every active listing lands in exactly one department:
+       new → top → scaling → declining → average (the default).
+     Average being the DEFAULT rather than a "more than 20 sold" gate is the settled reading of the
+     owner's "four departments" against his five labels. The partition test at the end of this block
+     is what stops anyone turning it back into a gate without noticing what that costs.
+     --------------------------------------------------------------------------------------------- */
+  const dpD0 = F.ADTOOL_DEPT_DEFAULTS;
+  const dpOf = (age, sold, u30, prev, rules) => F.adtDeptOf({ age_days: age, sold_life: sold, units_30d: u30, units_prev30: prev }, rules || dpD0);
+
+  /* (a) the eight numbers come out of config, and a bad edit cannot blank the page */
+  t('dept rules: no config at all gives the owner\'s defaults (14 / 20 / 30 / 20 % / 30 % / 2 / £3 / £10)', JSON.stringify(F.adtDeptRules({})) === JSON.stringify({ new_days: 14, scale_sold: 20, top_30d: 30, grow_pct: 20, fall_pct: 30, min_move: 2, day_cap: 3, new_week_cap: 10 }), F.adtDeptRules({}));
+  t('dept rules: every one of the eight reads its own config key', Object.keys(F.ADTOOL_DEPT_CONFIG_KEYS).length === 8 && Object.keys(dpD0).every(k => F.ADTOOL_DEPT_CONFIG_KEYS[k] === 'adtool_dept_' + k) && F.ADTOOL_DEPT_CONFIG_KEYS.new_week_cap === 'adtool_dept_new_week_cap', F.ADTOOL_DEPT_CONFIG_KEYS);
+  const dpCfg = F.adtDeptRules({ adtool_dept_new_days: '30', adtool_dept_top_30d: 5, adtool_dept_scale_sold: '8', adtool_dept_grow_pct: '10', adtool_dept_fall_pct: '50', adtool_dept_min_move: '1', adtool_dept_day_cap: '4.5', adtool_dept_new_week_cap: '12' });
+  t('dept rules: the owner\'s own values are taken, strings included', dpCfg.new_days === 30 && dpCfg.top_30d === 5 && dpCfg.scale_sold === 8 && dpCfg.grow_pct === 10 && dpCfg.fall_pct === 50 && dpCfg.min_move === 1 && dpCfg.day_cap === 4.5 && dpCfg.new_week_cap === 12, dpCfg);
+  const dpBad = F.adtDeptRules({ adtool_dept_new_days: '', adtool_dept_top_30d: 'thirty', adtool_dept_scale_sold: null, adtool_dept_grow_pct: '-5', adtool_dept_min_move: '0' });
+  t('dept rules: blank, not-a-number and negative all fall back to the default; a deliberate 0 is kept', dpBad.new_days === 14 && dpBad.top_30d === 30 && dpBad.scale_sold === 20 && dpBad.grow_pct === 20 && dpBad.min_move === 0, dpBad);
+
+  /* (b) one representative listing per department */
+  t('dept: a 3-day-old listing with no sales is New', dpOf(3, 0, 0, 0).key === 'new' && dpOf(3, 0, 0, 0).name === 'New listing', dpOf(3, 0, 0, 0));
+  t('dept: 45 sold in the last 30 days is Top', dpOf(200, 300, 45, 40).key === 'top', dpOf(200, 300, 45, 40));
+  t('dept: 35 sold since listed and 18 against 10 is Scaling', dpOf(60, 35, 18, 10).key === 'scaling', dpOf(60, 35, 18, 10));
+  t('dept: 8 against 68 is Declining', dpOf(300, 400, 8, 68).key === 'declining', dpOf(300, 400, 8, 68));
+  t('dept: 3 against 3 on a settled listing is Average, the default', dpOf(90, 12, 3, 3).key === 'average', dpOf(90, 12, 3, 3));
+  t('dept: every answer carries the department name, its rule in one sentence, and why THIS listing is in it', F.ADTOOL_DEPT_ORDER.length === 5 && ['new', 'top', 'scaling', 'declining', 'average'].every(k => F.ADTOOL_DEPT_NAMES[k] && typeof F.ADTOOL_DEPT_NAMES[k] === 'string'), F.ADTOOL_DEPT_ORDER);
+
+  /* (c) the new window: 14 is in, 15 is out */
+  t('dept: live exactly 14 days is still New; 15 days is not', dpOf(14, 0, 0, 0).key === 'new' && dpOf(15, 0, 0, 0).key !== 'new' && dpOf(15, 0, 0, 0).key === 'average' && dpOf(0, 0, 0, 0).key === 'new', [dpOf(14, 0, 0, 0).key, dpOf(15, 0, 0, 0).key]);
+  t('dept: New wins over everything else, so a listing selling hard in week one is not yet Top', dpOf(5, 300, 90, 10).key === 'new', dpOf(5, 300, 90, 10));
+  t('dept: a listing whose start date we do not have is never called New, and says so', dpOf(null, 0, 0, 0).key === 'average' && /no listing date/.test(dpOf(null, 0, 0, 0).why) && dpOf(undefined, 50, 2, 2).key === 'average', dpOf(null, 0, 0, 0));
+
+  /* (d) Top is MORE THAN 30, the owner's words. 30 itself is not Top. */
+  t('dept: exactly 30 sold in the last 30 days is NOT Top (the owner said more than 30); 31 is', dpOf(100, 100, 30, 30).key !== 'top' && dpOf(100, 100, 30, 30).key === 'average' && dpOf(100, 100, 31, 30).key === 'top', [dpOf(100, 100, 30, 30).key, dpOf(100, 100, 31, 30).key]);
+
+  /* (e) Scaling needs BOTH bars: more than 20 sold since listed AND the last 30 days up on the 30 before */
+  t('dept: exactly 20 sold since listed does NOT scale, however well it is growing; 21 does', dpOf(100, 20, 10, 2).key === 'average' && dpOf(100, 21, 10, 2).key === 'scaling', [dpOf(100, 20, 10, 2).key, dpOf(100, 21, 10, 2).key]);
+  t('dept: 50 sold since listed but flat month on month is Average, not Scaling', dpOf(100, 50, 10, 10).key === 'average', dpOf(100, 50, 10, 10));
+
+  /* (f) the minimum-move guard, so a one-unit wobble moves nothing */
+  t('dept: 1 unit to 2 is not Scaling even on a listing with 50 sold since it was listed', dpOf(100, 50, 2, 1).key === 'average', dpOf(100, 50, 2, 1));
+  t('dept: 2 units to 1 is not Declining either', dpOf(100, 50, 1, 2).key === 'average', dpOf(100, 50, 1, 2));
+  t('dept: drop the minimum move to 1 and both of those do move', dpOf(100, 50, 2, 1, F.adtDeptRules({ adtool_dept_min_move: 1 })).key === 'scaling' && dpOf(100, 50, 1, 2, F.adtDeptRules({ adtool_dept_min_move: 1 })).key === 'declining', null);
+
+  /* (g) nothing in the previous window: handled, and nothing divides by zero */
+  const dpZ = dpOf(100, 25, 5, 0);
+  t('dept: 5 sold against nothing at all in the 30 days before is Scaling, with no division by zero', dpZ.key === 'scaling' && /against 0 in the 30 before/.test(dpZ.why) && Object.keys(dpZ).every(k => typeof dpZ[k] === 'string' && dpZ[k].indexOf('NaN') < 0 && dpZ[k].indexOf('Infinity') < 0), dpZ);
+  t('dept: growth from nothing still has to clear the minimum move, so 1 against 0 stays Average', dpOf(100, 25, 1, 0).key === 'average', dpOf(100, 25, 1, 0));
+  t('dept: nothing in either window on a listing that has sold before is Average, never Declining (0 is not a fall of 2)', dpOf(100, 25, 0, 0).key === 'average', dpOf(100, 25, 0, 0));
+
+  /* (h) a listing that has never sold is Average, not Declining */
+  const dpNever = dpOf(400, 0, 0, 0);
+  t('dept: a listing past the new window that has NEVER sold is Average, not Declining', dpNever.key === 'average' && /No sales yet/.test(dpNever.why), dpNever);
+
+  /* (i) the collapse case. The first draft of these rules read 68 → 8 as Average; it is a Declining
+     listing and this test is here to keep it one. */
+  const dpCol = dpOf(300, 400, 8, 68);
+  t('dept: units collapsing 68 → 8 is Declining, NOT Average (a real misclassification, locked down)', dpCol.key === 'declining' && dpCol.name === 'Declining listing' && /8 in the last 30 days against 68 in the 30 before/.test(dpCol.why), dpCol);
+  t('dept: a smaller collapse 20 → 12 is Declining too, and 20 → 18 is not (it has not fallen 30 %)', dpOf(300, 400, 12, 20).key === 'declining' && dpOf(300, 400, 18, 20).key === 'average', [dpOf(300, 400, 12, 20).key, dpOf(300, 400, 18, 20).key]);
+  t('dept: Top is read before Declining, so 68 → 40 is still a Top listing', dpOf(300, 400, 40, 68).key === 'top', dpOf(300, 400, 40, 68));
+
+  /* (j) the owner changing a number changes the answer, and the page prints what it used */
+  const dpNew30 = F.adtDeptRules({ adtool_dept_new_days: 30 });
+  t('dept: raise the new window to 30 days and a 20-day-old listing becomes New again', dpOf(20, 0, 0, 0).key === 'average' && dpOf(20, 0, 0, 0, dpNew30).key === 'new', [dpOf(20, 0, 0, 0).key, dpOf(20, 0, 0, 0, dpNew30).key]);
+  const dpTop5 = F.adtDeptRules({ adtool_dept_top_30d: 5 });
+  t('dept: drop the top figure to 5 and a listing on 10 a month becomes Top', dpOf(100, 50, 10, 10).key === 'average' && dpOf(100, 50, 10, 10, dpTop5).key === 'top', null);
+  const dpScale2 = F.adtDeptRules({ adtool_dept_scale_sold: 2 });
+  t('dept: drop the scaling bar to 2 and a listing on 5 sold since listed can scale', dpOf(100, 5, 6, 2).key === 'average' && dpOf(100, 5, 6, 2, dpScale2).key === 'scaling', null);
+  const dpFall10 = F.adtDeptRules({ adtool_dept_fall_pct: 10 });
+  t('dept: soften the fall to 10 % and 20 → 18 becomes Declining', dpOf(300, 400, 18, 20).key === 'average' && dpOf(300, 400, 18, 20, dpFall10).key === 'declining', null);
+  const dpSent = F.adtDeptSentences(F.adtDeptRules({ adtool_dept_new_days: 21, adtool_dept_top_30d: 50, adtool_dept_scale_sold: 11 }));
+  t('dept: the rule sentences print the numbers in force, never the defaults', /^Live 21 days or fewer\.$/.test(dpSent.new) && /More than 50 sold in the last 30 days/.test(dpSent.top) && /More than 11 sold since it was listed/.test(dpSent.scaling) && /Live 14/.test(F.adtDeptSentences(dpD0).new), dpSent);
+  t('dept: the rule sentences and the reasons are plain British English, with no em-dash and no jargon', F.ADTOOL_DEPT_ORDER.every(k => { const s = F.adtDeptSentences(dpD0)[k]; return s.indexOf('—') < 0 && !/attributed|provisional|shadow|frontier|normalised|elasticity|horizon|acceptance|\bgrain\b|\bcadence\b|adtool_|§/i.test(s); }) && [dpOf(3, 0, 0, 0), dpOf(200, 300, 45, 40), dpOf(60, 35, 18, 10), dpCol, dpNever].every(d => d.why.indexOf('—') < 0 && !/attributed|provisional|shadow|adtool_|§/i.test(d.why)), null);
+
+  /* (k) THE PARTITION. Over a dpGrid of 1,050 listings: every one lands in exactly one department,
+     none lands in none, and the one it lands in is the FIRST on the ladder whose own rule holds —
+     with the rules of every earlier department failing. The predicates below are written out again
+     here on purpose, so the test disagrees with the engine if the engine's ladder ever changes. */
+  const dpR = dpD0;
+  const dpPred = {
+    /* an age of null or '' is an age we do not have, NOT day zero. Number(null) being 0 is exactly
+       the trap this mirrors on purpose. */
+    new: i => i.age_days !== null && i.age_days !== undefined && String(i.age_days).trim() !== '' && isFinite(Number(i.age_days)) && Number(i.age_days) <= dpR.new_days,
+    top: i => i.units_30d > dpR.top_30d,
+    scaling: i => i.sold_life > dpR.scale_sold && i.units_30d >= i.units_prev30 * (1 + dpR.grow_pct / 100) && (i.units_30d - i.units_prev30) >= dpR.min_move,
+    declining: i => (i.sold_life > 0 || i.units_30d > 0 || i.units_prev30 > 0) && i.units_30d <= i.units_prev30 * (1 - dpR.fall_pct / 100) && (i.units_prev30 - i.units_30d) >= dpR.min_move,
+    average: () => true,
+  };
+  let dpGrid = 0, dpWrong = null, dpUnplaced = 0, dpDouble = 0, dpBadCopy = 0;
+  for (const age of [null, 0, 7, 14, 15, 60, 400]) {
+    for (const sold of [0, 1, 20, 21, 100]) {
+      for (const u30 of [0, 1, 2, 30, 31, 80]) {
+        for (const prev of [0, 1, 2, 30, 68]) {
+          dpGrid++;
+          const dpIn = { age_days: age, sold_life: sold, units_30d: u30, units_prev30: prev };
+          const dpGot = F.adtDeptOf(dpIn, dpR);
+          const dpWant = F.ADTOOL_DEPT_ORDER.filter(k => dpPred[k](dpIn));
+          if (!dpWant.length) { dpUnplaced++; continue; }
+          if (dpGot.key !== dpWant[0]) { dpWrong = dpWrong || { dpIn: dpIn, dpGot: dpGot.key, dpWant: dpWant[0] }; continue; }
+          /* nothing earlier on the ladder may also claim it */
+          if (F.ADTOOL_DEPT_ORDER.slice(0, F.ADTOOL_DEPT_ORDER.indexOf(dpGot.key)).some(k => dpPred[k](dpIn))) dpDouble++;
+          if (!dpGot.name || !dpGot.rule_sentence || !dpGot.why || dpGot.why.indexOf('undefined') >= 0 || dpGot.why.indexOf('NaN') >= 0) dpBadCopy++;
+        }
+      }
+    }
+  }
+  t('dept partition: 1,050 listings, every one placed in exactly one department and none left out', dpGrid === 1050 && dpUnplaced === 0 && !dpWrong && dpDouble === 0, { dpGrid: dpGrid, dpUnplaced: dpUnplaced, dpWrong: dpWrong, dpDouble: dpDouble });
+  t('dept partition: and every one of them comes back with a name, its rule and a readable reason', dpBadCopy === 0, dpBadCopy);
+
+  /* (l) the route: the role gate runs BEFORE the cache is read, and the cache is keyed per profit
+     class with a TTL fit for a once-a-day answer. A cache hit that skipped the gate has shipped
+     here before, so the ordering is asserted against the source. */
+  /* read as POSITIONS in the source rather than one long regex, so the assertion survives anybody
+     editing the comment above the gate */
+  const dpRoute = src.slice(src.indexOf('  adtoolDepts: {'), src.indexOf('/* ADTOOL-P11-END'));
+  const dpAt = needle => dpRoute.indexOf(needle);
+  t('depts route: the role check, then the page gate, then the cache. In that order, never the other way round.', dpAt('await adtGate(ctx, null)') > 0 && dpAt('await adtGate(ctx, null)') < dpAt("ensureAdtoolPhaseDeptsRegister") && dpAt('ensureAdtoolPhaseDeptsRegister') < dpAt("await adtGate(ctx, 'adtool_page_depts')") && dpAt("await adtGate(ctx, 'adtool_page_depts')") < dpAt('adtKvMemo(') && dpAt('adtKvMemo(') > 0, [dpAt('await adtGate(ctx, null)'), dpAt('ensureAdtoolPhaseDeptsRegister'), dpAt("await adtGate(ctx, 'adtool_page_depts')"), dpAt('adtKvMemo(')]);
+  t('depts route: a caller who may not be here writes nothing, because the role check precedes the seed', /await adtGate\(ctx, null\);\s*\n\s*await ensureAdtoolPhaseDeptsRegister\(ctx\.env\);/.test(dpRoute), null);
+  t('depts route: the cache is keyed by the caller\'s profit class and holds for half an hour', /adtKvMemo\(ctx\.env, 'adtoolDepts', adtProfitClass\(ctx\.user\)/.test(src) && /adtoolDepts: 1800000/.test(src), null);
+  t('depts route: the name starts with adtool, so the no-collective-profit strip wraps it', 'adtoolDepts'.indexOf('adtool') === 0 && /ADTOOL_ACTIONS_P11 = \{[\s\S]*?adtoolDepts:/.test(src), null);
+  t('depts: the spend read is `spend` alone, never spend plus cpc_spend (that would count the clicks twice)', /ADTOOL-P13-BEGIN[\s\S]*?ADTOOL-P13-END/.test(src) && !/cpc_spend/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
+  t('depts: impressions are declared but never written, so the page never reads them', !/impressions/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
+  t('depts: the windows end yesterday, because today carries no ad cost', /ROUND\(SUM\(CASE WHEN d\.day = \?2 THEN d\.spend ELSE 0 END\), 2\) AS spend_yesterday/.test(src) && /const w = adtPeriod\(\{ period: 'd30' \}, today\), w7 = adtPeriod\(\{ period: 'd7' \}, today\);/.test(src), null);
+  t('depts: the previous window names the source it used, with a state of its own for "we hold nothing at all" rather than claiming order records there are none of', /prev_window_source: prevCovered \? 'daily figures' : prevNone \? 'no records' : \(prevPartial \? 'order records \(incomplete\)' : 'order records'\)/.test(src) && /const prevNone = !prevCovered && !orderStart;/.test(src) && /const prevPartial = !prevCovered && !prevNone && orderStart > w\.prev_from;/.test(src) && /understated for the oldest listings/.test(src) && /there is no record, not because nothing sold/.test(src), null);
+  t('depts: only ACTIVE listings are classified, on the canonical listing-date pair', /i\.status = 'ACTIVE'/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))) && /CASE WHEN i\.start_time != '' THEN 'eBay start time' ELSE 'first seen by portal' END/.test(src), null);
+  t('depts: membership of "being advertised" reuses the one shared rule, never a second one', /env\.DB\.prepare\(ADTOOL_LIVE_AD_SQL \+ \(acct \? ' AND c\.account = \?1' : ''\)\)/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
+  t('depts: the campaign daily budget is checked as well as the spend, read as a number out of text', /budget_set: r\.budget_set, cap: rules\.day_cap/.test(src) && /replace\(\/\[\^0-9\.\\-\]\/g, ''\)/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
+  t('depts: the compute produces no profit figure at all, per the owner\'s no-collective-profit rule', !/profit/i.test(src.slice(src.indexOf('async function adtoolDeptsCompute'), src.indexOf('/* ADTOOL-P13-END'))), null);
+
+  /* ---------------------------------------------------------------------------------------------
+     THE NUMBER REGISTER'S COPY. The register supplies the "how is this made" text the portal shows
+     when somebody clicks a source tag, so it is read by staff, not by engineers. The audit found it
+     was the worst copy in the product: spec section numbers, rule codes, job names, table and
+     column names, statistics notation, and notes that ran past 200 words.
+     These tests parse the register arrays straight out of the engine and hold the copy to the
+     house style, so the next entry anybody adds has to meet it too. `source_tables` is deliberately
+     NOT judged: that column IS the technical provenance list, which is what it is for.
+     --------------------------------------------------------------------------------------------- */
+  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13'];
+  const rgAll = []; let rgParseFail = null;
+  for (const nm of rgNames) {
+    const i = src.indexOf('const ' + nm + ' = [');
+    if (i < 0) { rgParseFail = rgParseFail || nm + ' is missing'; continue; }
+    const j = src.indexOf('\n];', i);
+    try {
+      for (const row of new Function('return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))()) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
+    } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
+  }
+  t('register: all eleven arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
+
+  /* the words the audit found live in production copy, and what to say instead. Judged on the four
+     prose fields only. */
+  const rgProse = r => [r.name, r.formula, r.recompute, r.recheck].join(' · ');
+  const rgFaults = {
+    'spec section reference': /§/,
+    'a rule code': /\b(A0\d|A1\d|S[1-4]|R[1-4]|P[1-3])\b/,
+    'a phase name': /\bPhase \d/,
+    'a job name': /\b(adsItems|adsIntraday|adsSync|adsReportPoll|adsReportKick|marketingSync|financeSync|listingSync|orderSync|adtool[A-Z]\w*|adt[A-Z]\w*|ensureAdtool\w*|liveMembershipRow)\b/,
+    'a table name': /\b(adtool_[a-z_]+|ads_daily|ads_today|sync_state|portal_config|items_api|items_facts|campaign_ads|sheet_rows|validation_runs|sales_daily|listing_decisions)\b/,
+    'a column name': /\b(attr_units|attr_revenue|cpc_spend|cpc_clicks|cpc_sales|sale_amount|sold_qty|start_time|first_seen|ali_cost|actual_profit|ad_status|in_sale|eligible_on|local_date|spend_s|spend_r|carry_spend|report_day|uk_day|raw_priced_sum|margin_source|breakeven_roas|funding_model|bid_pct|discount_pct|ad_profit|hourly_status)\b/,
+    'a check or flag name': /ADTOOL_[A-Z_]+|adtool_(page|dept|sale|today|profit)_[a-z_]*/,
+    'statistics notation': /(p\s*[<=]\s*0?\.\d|\bp-value\b|σ|\bMASE\b|\bMAPE\b|\bHHI\b|Herfindahl|κ|log1p|Theil|PELT|Jensen|\bTSB\b|Poisson|Holt|\bGLM\b|Δ|Σ)/,
+    'a banned word': /\b(attributed|provisional|shadow|frontier|acceptance|horizon|normalised|elasticity|vintage|unpriced|CVR|levers?|grain|cadence|granularity)\b/i,
+    'an em-dash': /—/,
+  };
+  for (const label of Object.keys(rgFaults)) {
+    const re = rgFaults[label];
+    const hits = rgAll.filter(r => re.test(rgProse(r))).map(r => r.id);
+    t('register copy: not one entry contains ' + label, hits.length === 0, hits.slice(0, 6));
+  }
+  t('register copy: no entry runs past 120 words, where the worst used to run to 218', rgAll.every(r => String(r.formula).split(/\s+/).length <= 120), rgAll.map(r => [String(r.formula).split(/\s+/).length, r.id]).sort((a, b) => b[0] - a[0]).slice(0, 3));
+  t('register copy: the nine entries a seller actually opens are each down to a sentence or two', ['AD_SPEND_DAY', 'PROFIT_SHEET_LAW', 'MARGIN_BEFORE_ADS', 'BREAKEVEN_ROAS', 'ORGANIC_UNITS', 'FRONTIER', 'RUN_TODAY_VERDICT', 'HOUR_BANDS', 'CARRY_HOUR'].every(id => { const r = rgAll.filter(x => x.id === id)[0]; return r && String(r.formula).split(/\s+/).length <= 70 && String(r.formula).split('.').filter(x => x.trim()).length <= 4; }), ['AD_SPEND_DAY', 'PROFIT_SHEET_LAW', 'MARGIN_BEFORE_ADS', 'BREAKEVEN_ROAS', 'ORGANIC_UNITS', 'FRONTIER', 'RUN_TODAY_VERDICT', 'HOUR_BANDS', 'CARRY_HOUR'].map(id => { const r = rgAll.filter(x => x.id === id)[0]; return [id, r ? String(r.formula).split(/\s+/).length : 'missing']; }));
+  t('register copy: the four metaphor titles are now plain nouns a person would say out loud', rgAll.filter(r => r.id === 'FRONTIER')[0].name === 'The spending limit' && rgAll.filter(r => r.id === 'CPC_LISTINGS')[0].name === 'Ads running' && rgAll.filter(r => r.id === 'CPC_POST')[0].name === 'Ads stopped' && !/war room|command centre|behaviour lab/i.test(rgAll.map(rgProse).join(' ')), null);
+  t('register copy: the profit formula is described in words, never printed as arithmetic', /the same way the Sales Analysis sheet works it out/.test(rgAll.filter(r => r.id === 'PROFIT_SHEET_LAW')[0].formula) && !/0\.8 ?[×x*]|0\.96 ?[×x*]/.test(rgAll.map(rgProse).join(' ')), null);
+
+  /* the plumbing entries are MARKED, not deleted: the checks and the tests refer to them by name */
+  t('register: the eight plumbing entries are marked internal so the view can hide them', Object.keys(F.ADTOOL_REGISTER_INTERNAL).length === 8 && ['EST_AD_PROFIT', 'PROFIT_ITEM_ONLY', 'KV_PAGE_CACHE', 'PARITY_FLEET', 'PARITY_WEEKDAY', 'PARITY_ACCOUNT_WEEKDAY', 'PARITY_DATE', 'PARITY_LISTING'].every(F.adtRegInternal), Object.keys(F.ADTOOL_REGISTER_INTERNAL));
+  t('register: and every one of them still EXISTS, because other code names them', ['EST_AD_PROFIT', 'PROFIT_ITEM_ONLY', 'KV_PAGE_CACHE', 'PARITY_FLEET', 'PARITY_WEEKDAY', 'PARITY_ACCOUNT_WEEKDAY', 'PARITY_DATE', 'PARITY_LISTING'].every(id => rgAll.some(r => r.id === id)), null);
+  t('register: nothing a seller reads is marked internal by accident', ['AD_SPEND_DAY', 'PROFIT_SHEET_LAW', 'ROAS', 'DEPARTMENTS', 'FRONTIER', 'RUN_TODAY_VERDICT', 'CPC_LISTINGS'].every(id => F.adtRegInternal(id) === false), null);
+  t('register: the flag is case-insensitive and safe on rubbish input', F.adtRegInternal('parity_date') === true && F.adtRegInternal('') === false && F.adtRegInternal(null) === false && F.adtRegInternal(undefined) === false, null);
+  const rgRows = F.adtRegRows([{ metric_id: 'PARITY_DATE', name: 'x' }, { metric_id: 'DEPARTMENTS', name: 'y' }]);
+  t('register: every payload row carries internal, and the original row is left alone', rgRows[0].internal === true && rgRows[1].internal === false && rgRows[0].name === 'x' && F.adtRegRows(null).length === 0 && F.adtRegRows([null])[0].internal === false, rgRows);
+  t('register: all three payloads that feed the view carry the flag', (src.match(/adtRegRows\(/g) || []).length >= 4 && /entry: row \? adtRegRows\(\[row\]\)\[0\] : null, entries: all \? adtRegRows\(all\) : null/.test(src), (src.match(/adtRegRows\(/g) || []).length);
+
+  /* the new page's own entry */
+  const rgDept = rgAll.filter(r => r.id === 'DEPARTMENTS')[0];
+  t('register: the departments page has an entry naming its rule, its sources, when it recomputes and how it is rechecked', !!rgDept && /lands in one of five places/.test(rgDept.formula) && /items_api/.test(rgDept.sources) && /Once a day/.test(rgDept.recompute) && /Unit tests/.test(rgDept.recheck), rgDept && rgDept.name);
+  t('register: and it names no threshold it reads from config, because those are printed on the page instead', !!rgDept && !/\b(14|20|30|£3|£10)\b/.test(rgDept.formula.replace(/last 30 days|30 days before/g, '')), rgDept && rgDept.formula.slice(0, 80));
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

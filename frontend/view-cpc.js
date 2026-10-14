@@ -227,7 +227,12 @@
           var host = document.createElement('div'); host.id = 'cpcToolDock';
           hg.appendChild(b);
           hg.parentNode.insertBefore(host, hg.nextSibling);
-          b.onclick = function () { window.toolDock(host, 'tool_cpc_keyword', 'CPC Keyword Decision Engine'); };
+          /* The dock lives in view-tools.js, which the advertising portal does not carry. Without this
+             guard the button throws there instead of saying why nothing happened. */
+          b.onclick = function () {
+            if (typeof window.toolDock !== 'function') { toast('The Decision Engine opens from the main portal.'); return; }
+            window.toolDock(host, 'tool_cpc_keyword', 'CPC Keyword Decision Engine');
+          };
         }
       })();
 

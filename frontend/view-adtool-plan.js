@@ -64,17 +64,17 @@
   function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
   function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
   function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
-  function src(t) { return '<span class="wr-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  function src(t, shown) { return '<span class="wr-src" data-adtreg="' + esc(t) + '" title="how is this worked out">' + esc(shown || t) + '</span>'; }
   function wdName(w) { var n = num(w); if (n != null && DOW[n]) return DOW[n]; return w == null ? '' : String(w).slice(0, 3); }
   function hhmm(at) { if (!at) return ''; var d = new Date(String(at).replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(String(at)) ? '' : 'Z')); if (isNaN(d.getTime())) return String(at).slice(11, 16); try { return d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }) + ' UK'; } catch (e) { return d.toISOString().slice(11, 16) + ' UTC'; } }
 
   VIEWS.adtoolPlan = {
-    label: 'War room (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
+    label: 'What to do today (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
     icon: '<path d="M3 3v18h18"/><path d="m7 14 4-5 4 3 5-8"/><circle cx="11" cy="9" r="1.6"/>',
     render: function () {
-      return '<div class="wr-wrap">' + adtHgroup('War room', 'what is happening, why, on which account and listing — and what to do today', 'wrFresh') +
+      return '<div class="wr-wrap">' + adtHgroup('What to do today', 'Where the ad money went, and which listings to change', 'wrFresh') +
         '<div id="wrBar"></div><div id="wrAcct" class="wr-acct"></div>' +
-        '<div id="wrBody"><div class="wr-empty">Reading the window…</div></div></div>';
+        '<div id="wrBody"><div class="wr-empty">Loading…</div></div></div>';
     },
     init: function () {
       WR.period = adtPeriodBar('wrBar', { page: 'adtoolPlan', def: 'd30', onChange: function (v) { WR.period = v; load(false); } });
@@ -101,7 +101,7 @@
       if (adtIncludesToday(d && d.period, WR.period)) { adtPoll('wrBody', 300000, function () { return load(true); }); } else { adtPollStop('wrBody'); }
     }).catch(function (e) {
       if (!quiet && $('wrBody')) $('wrBody').innerHTML = '<div class="wr-panel"><div class="wr-note">' +
-        esc(e && e.message ? e.message : 'the war room could not be read') + '</div></div>';
+        esc(e && e.message ? e.message : 'This page could not load.') + '</div></div>';
       throw e;
     });
   }
@@ -137,7 +137,7 @@
 
   function draw() {
     var D = WR.data, h = '';
-    if (!D || typeof D !== 'object') { $('wrBody').innerHTML = '<div class="wr-empty">No answer for this window.</div>'; return; }
+    if (!D || typeof D !== 'object') { $('wrBody').innerHTML = '<div class="wr-empty">No data for this period.</div>'; return; }
     h += heroTiles(D);
     h += accountPanel(D);
     h += byDayPanel(D);
@@ -151,8 +151,8 @@
     h += weekdayPanel(D);
     var W = D.period && D.period.from ? D.period : (D.window || null);
     h += '<div class="wr-note" style="margin-top:6px">' + esc(D.source || '') + (W ? ' · ' + esc(W.from || '') + ' to ' + esc(W.to || '') +
-      ' (' + (num(W.days) != null ? W.days : '?') + ' days' + (W.includes_today ? ', includes today — sampled, provisional, refreshed every 5 min' : '') + ')' : '') +
-      (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
+      ' (' + (num(W.days) != null ? W.days : '?') + ' days' + (W.includes_today ? ', includes today, still updating, refreshed every 5 minutes' : '') + ')' : '') +
+      (D.computed_at ? ' · updated ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
     $('wrBody').innerHTML = h;
     var rs = document.querySelectorAll('#wrBody tr.acct[data-a]');
     for (var i = 0; i < rs.length; i++) rs[i].onclick = function () { var a = this.getAttribute('data-a'); WR.account = WR.account === a ? '' : a; acctChips(); load(false); };
@@ -174,13 +174,13 @@
     if (salesDay == null && num(H.attr_revenue) != null) salesDay = num(H.attr_revenue) / days;
     var acct = D.account && D.account !== 'all' ? D.account : 'all accounts';
     var h = '<div class="wr-win"><b>' + esc(acct) + '</b> · ' + esc(windowText(D)) + (num(H.listings) != null ? ' · ' + cnt(H.listings) + ' listings with spend' : '') +
-      (includesToday(D) ? ' · today is sampled and provisional' : '') + src('eBay ads report') + '</div>';
+      (includesToday(D) ? ' · today is still updating' : '') + src('eBay ads report') + '</div>';
     h += '<div class="wr-tiles">' +
       tile('Spend', gbp0(H.spend), gbp(spendDay) + ' a day over ' + days + ' day' + (days === 1 ? '' : 's'), 'gold') +
-      tile('Attributed sales', gbp0(H.attr_revenue), gbp(salesDay) + ' a day · revenue eBay credits to the ads') +
-      tile('ROAS', roasTxt(roas), 'attributed revenue ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
+      tile('Sales from ads', gbp0(H.attr_revenue), gbp(salesDay) + ' a day · the sales eBay credits to the ads') +
+      tile('ROAS', roasTxt(roas), 'sales from ads ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
       tile('CPC', gbp(H.cpc), cnt(H.clicks) + ' clicks') +
-      tile('CVR', pct(H.cvr), cnt(H.attr_units) + ' attributed units ÷ clicks') +
+      tile('Conversion rate', pct(H.cvr), cnt(H.attr_units) + ' units from ads ÷ clicks') +
       tile('Orders', cnt(H.orders), cnt(H.units) + ' units, all channels') +
       '</div>';
     return h;
@@ -193,8 +193,8 @@
     var days = windowDays(D), maxShare = 0;
     rows.forEach(function (r) { maxShare = Math.max(maxShare, num(r.share) || 0); });
     return '<div class="wr-panel"><h3>Account to account' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Every account over the same window. Click a row to look at that account alone; profit is not summed per account — it lives on each listing below.</div>' +
-      '<div class="wr-scroll"><table class="wr-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">/ day</th><th class="r">Attributed sales</th><th class="r">ROAS</th><th class="r">CPC</th><th class="r">CVR</th><th class="r">Orders</th><th>Share of spend</th></tr></thead><tbody>' +
+      '<div class="wr-note">Every account over the same period. Click a row to see that account alone. Profit is not added up per account, it sits on each listing below.</div>' +
+      '<div class="wr-scroll"><table class="wr-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">/ day</th><th class="r">Sales from ads</th><th class="r">ROAS</th><th class="r">CPC</th><th class="r">Conv. rate</th><th class="r">Orders</th><th>Share of spend</th></tr></thead><tbody>' +
       rows.map(function (r) {
         var ro = ownRoas(r), sh = num(r.share), pick = WR.account && r.account === WR.account;
         return '<tr class="acct' + (pick ? ' pick' : '') + '" data-a="' + esc(r.account || '') + '"><td><b>' + esc(r.account || '—') + '</b></td>' +
@@ -215,10 +215,10 @@
       var prov = !!(r.provisional || r.today); if (prov) anyProv = true;
       var ro = ownRoas(r);
       return { label: String(r.day || '').slice(5) + (r.weekday != null ? ' ' + wdName(r.weekday) : ''), value: num(r.spend) || 0, strong: prov,
-        title: (r.day || '') + (r.weekday != null ? ' (' + wdName(r.weekday) + ')' : '') + ' — spend ' + gbp(r.spend) + ' · attributed sales ' + gbp(revOf(r)) + ' · ROAS ' + roasTxt(ro) + ' · ' + cnt(r.attr_units) + ' attributed units · ' + cnt(r.orders) + ' orders' + (prov ? ' · today so far, provisional' : '') };
+        title: (r.day || '') + (r.weekday != null ? ' (' + wdName(r.weekday) + ')' : '') + ' · spend ' + gbp(r.spend) + ' · sales from ads ' + gbp(revOf(r)) + ' · ROAS ' + roasTxt(ro) + ' · ' + cnt(r.attr_units) + ' units from ads · ' + cnt(r.orders) + ' orders' + (prov ? ' · today so far, still updating' : '') };
     });
     return '<div class="wr-panel"><h3>Day by day' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Spend per report day; hover a bar for that day\'s attributed sales, ROAS and orders.' + (anyProv ? ' The pale bar is <b>today so far</b> — sampled every 5 minutes, provisional until eBay\'s report lands.' : '') + '</div>' +
+      '<div class="wr-note">Spend per day. Hover a bar for that day\'s sales from ads, ROAS and orders.' + (anyProv ? ' The pale bar is <b>today so far</b>, still updating until eBay\'s report lands.' : '') + '</div>' +
       chartBars(pts, { height: 180, everyNth: every, minGap: every ? 60 : 44 }) + '</div>';
   }
 
@@ -226,8 +226,8 @@
   function frontierPanel(D) {
     var F = D.frontier;
     if (!F || typeof F !== 'object' || !(F.points && F.points.length)) {
-      return '<div class="wr-panel"><h3>How far it is worth spending' + src('frontier') + '</h3><div class="wr-empty">' +
-        (F && F.note ? esc(String(F.note)) : 'No frontier in this answer — it needs listings with spend in the window.') + '</div></div>';
+      return '<div class="wr-panel"><h3>How far it is worth spending' + src('frontier', 'spending limit') + '</h3><div class="wr-empty">' +
+        (F && F.note ? esc(String(F.note)) : 'No spending limit yet. It needs listings with spend in this period.') + '</div></div>';
     }
     var pts = F.points.filter(function (p) { return p && num(p.cum_spend_day) != null && num(p.cum_revenue_day) != null; });
     var marks = (F.marks || []).filter(function (m) { return m && num(m.cum_spend_day) != null && num(m.cum_revenue_day) != null; });
@@ -248,40 +248,40 @@
     var one = Math.min(maxX, maxY);
     s += '<line x1="' + x(0).toFixed(1) + '" y1="' + y(0).toFixed(1) + '" x2="' + x(one).toFixed(1) + '" y2="' + y(one).toFixed(1) + '" stroke="rgba(224,86,63,.45)" stroke-width="1" stroke-dasharray="5 4"/>' +
       '<text x="' + (x(one) + 4).toFixed(1) + '" y="' + (y(one) + 3).toFixed(1) + '" font-size="9" fill="rgba(224,86,63,.8)">1×</text>';
-    s += '<text x="' + ((L + W - R) / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#66707c">cumulative spend per day, listings ranked by their own ROAS →</text>';
-    s += '<text x="12" y="' + ((T + H - B) / 2).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#66707c" transform="rotate(-90 12 ' + ((T + H - B) / 2).toFixed(1) + ')">cumulative attributed revenue per day ↑</text>';
+    s += '<text x="' + ((L + W - R) / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#66707c">spend per day, added up, best listings first →</text>';
+    s += '<text x="12" y="' + ((T + H - B) / 2).toFixed(1) + '" text-anchor="middle" font-size="10" font-weight="800" fill="#66707c" transform="rotate(-90 12 ' + ((T + H - B) / 2).toFixed(1) + ')">sales from ads per day, added up ↑</text>';
     var line = pts.map(function (p) { return { x: x(num(p.cum_spend_day)), y: y(num(p.cum_revenue_day)), label: null }; });
     line.unshift({ x: x(0), y: y(0), label: null });
     s += chartLineSeries(line, { color: 'var(--gold-b)', width: 2.4 });
     pts.forEach(function (p) {
       s += '<circle cx="' + x(num(p.cum_spend_day)).toFixed(1) + '" cy="' + y(num(p.cum_revenue_day)).toFixed(1) + '" r="2.2" fill="var(--gold-a)" opacity=".7"><title>' +
-        esc('#' + (p.n != null ? p.n : '') + ' ' + (p.title || p.item_id || '') + (p.account ? ' · ' + p.account : '') + ' — own ROAS ' + roasTxt(p.own_roas) + ' · cumulative ' + gbp(p.cum_spend_day) + ' → ' + gbp(p.cum_revenue_day) + ' a day (' + roasTxt(p.cum_roas) + ')') + '</title></circle>';
+        esc('#' + (p.n != null ? p.n : '') + ' ' + (p.title || p.item_id || '') + (p.account ? ' · ' + p.account : '') + ' · own ROAS ' + roasTxt(p.own_roas) + ' · running total ' + gbp(p.cum_spend_day) + ' → ' + gbp(p.cum_revenue_day) + ' a day (' + roasTxt(p.cum_roas) + ')') + '</title></circle>';
     });
-    var markPts = marks.map(function (m) { return { x: x(num(m.cum_spend_day)), y: y(num(m.cum_revenue_day)), label: num(m.roas) + '× · ' + chartMoney(m.cum_spend_day) + '/d', title: 'cumulative ROAS ' + roasTxt(m.roas) + ' at ' + cnt(m.n) + ' listings: ' + gbp(m.cum_spend_day) + ' spend → ' + gbp(m.cum_revenue_day) + ' attributed a day' }; });
+    var markPts = marks.map(function (m) { return { x: x(num(m.cum_spend_day)), y: y(num(m.cum_revenue_day)), label: num(m.roas) + '× · ' + chartMoney(m.cum_spend_day) + '/d', title: 'running ROAS ' + roasTxt(m.roas) + ' at ' + cnt(m.n) + ' listings: ' + gbp(m.cum_spend_day) + ' spend → ' + gbp(m.cum_revenue_day) + ' of sales from ads a day' }; });
     s += chartValueDots(markPts, { color: 'var(--gold-b)', ink: '#1c1200', fontSize: 9.5, minGap: 0, nudge: -16 });
     if (be) {
       var bx = x(num(be.cum_spend_day)), by = y(num(be.cum_revenue_day));
       s += '<line x1="' + bx.toFixed(1) + '" y1="' + T + '" x2="' + bx.toFixed(1) + '" y2="' + (H - B) + '" stroke="' + LOSS + '" stroke-width="1.2" stroke-dasharray="4 3"/>';
       s += '<circle cx="' + bx.toFixed(1) + '" cy="' + by.toFixed(1) + '" r="5" fill="' + LOSS + '" stroke="#fff" stroke-width="1.2"/>';
-      s += chartValueDots([{ x: bx, y: by, label: 'break-even · #' + cnt(be.n) + ' is the first loser', title: be.rule || '' }], { color: LOSS, ink: '#fff', fontSize: 9.5, minGap: 0, nudge: 18 });
+      s += chartValueDots([{ x: bx, y: by, label: 'break-even · #' + cnt(be.n) + ' is the first that loses money', title: be.rule || '' }], { color: LOSS, ink: '#fff', fontSize: 9.5, minGap: 0, nudge: 18 });
     }
     s += '</svg>';
     /* the engine's mark sits ON the first losing listing (its own spend inside cum_spend_day); the listings still
        worth keeping are the n − 1 before it, whose cumulative figures are the previous point (or £0 when n = 1) */
     var beN = be && num(be.n) != null ? num(be.n) : null, beyond = beN != null ? pts.length - beN : null;
     var kept = beN != null ? (beN > 1 ? pts.filter(function (p) { return num(p.n) === beN - 1; })[0] || null : { n: 0, cum_spend_day: 0, cum_revenue_day: 0, cum_roas: null }) : null;
-    var tbl = '<div class="wr-scroll"><table class="wr-tbl" style="margin-top:8px"><thead><tr><th>Mark</th><th class="r">Listings kept</th><th class="r">Spend / day</th><th class="r">Attributed sales / day</th><th class="r">Cumulative ROAS</th></tr></thead><tbody>' +
+    var tbl = '<div class="wr-scroll"><table class="wr-tbl" style="margin-top:8px"><thead><tr><th>Mark</th><th class="r">Listings kept</th><th class="r">Spend / day</th><th class="r">Sales from ads / day</th><th class="r">Running ROAS</th></tr></thead><tbody>' +
       marks.map(function (m) { var ro = num(m.cum_spend_day) > 0 ? num(m.cum_revenue_day) / num(m.cum_spend_day) : null; return '<tr><td><b>' + esc(num(m.roas) + '×') + '</b></td><td class="r">' + cnt(m.n) + '</td><td class="r">' + gbp(m.cum_spend_day) + '</td><td class="r">' + gbp(m.cum_revenue_day) + '</td><td class="r">' + roasTxt(ro) + '</td></tr>'; }).join('') +
-      (be && kept ? '<tr class="pick"><td><b class="wr-neg">break-even</b><div class="adt-pf-p">the listings before #' + cnt(beN) + ', the first loser</div></td><td class="r">' + cnt(kept.n != null ? kept.n : beN - 1) + '</td><td class="r">' + gbp(kept.cum_spend_day) + '</td><td class="r">' + gbp(kept.cum_revenue_day) + '</td><td class="r">' + roasTxt(num(kept.cum_spend_day) > 0 ? num(kept.cum_revenue_day) / num(kept.cum_spend_day) : null) + '</td></tr>' : '') +
-      (be ? '<tr><td><span class="wr-neg">#' + cnt(beN) + ' included</span><div class="adt-pf-p">' + esc(String(be.title || be.item_id || '')) + (be.account ? ' · ' + esc(String(be.account)) : '') + ' — own ROAS ' + esc(roasTxt(be.own_roas)) + (num(be.threshold) != null ? ' vs ' + esc(roasTxt(be.threshold)) + ' (' + esc(String(be.threshold_source || 'break-even')) + ')' : '') + '</div></td><td class="r">' + cnt(beN) + '</td><td class="r">' + gbp(be.cum_spend_day) + '</td><td class="r">' + gbp(be.cum_revenue_day) + '</td><td class="r">' + roasTxt(num(be.cum_spend_day) > 0 ? num(be.cum_revenue_day) / num(be.cum_spend_day) : null) + '</td></tr>' : '') +
+      (be && kept ? '<tr class="pick"><td><b class="wr-neg">break-even</b><div class="adt-pf-p">the listings before #' + cnt(beN) + ', the first that loses money</div></td><td class="r">' + cnt(kept.n != null ? kept.n : beN - 1) + '</td><td class="r">' + gbp(kept.cum_spend_day) + '</td><td class="r">' + gbp(kept.cum_revenue_day) + '</td><td class="r">' + roasTxt(num(kept.cum_spend_day) > 0 ? num(kept.cum_revenue_day) / num(kept.cum_spend_day) : null) + '</td></tr>' : '') +
+      (be ? '<tr><td><span class="wr-neg">#' + cnt(beN) + ' included</span><div class="adt-pf-p">' + esc(String(be.title || be.item_id || '')) + (be.account ? ' · ' + esc(String(be.account)) : '') + ' · own ROAS ' + esc(roasTxt(be.own_roas)) + (num(be.threshold) != null ? ' vs ' + esc(roasTxt(be.threshold)) + ' (' + esc(String(be.threshold_source || 'break-even')) + ')' : '') + '</div></td><td class="r">' + cnt(beN) + '</td><td class="r">' + gbp(be.cum_spend_day) + '</td><td class="r">' + gbp(be.cum_revenue_day) + '</td><td class="r">' + roasTxt(num(be.cum_spend_day) > 0 ? num(be.cum_revenue_day) / num(be.cum_spend_day) : null) + '</td></tr>' : '') +
       '<tr><td>everything</td><td class="r">' + pts.length + '</td><td class="r">' + gbp(pts[pts.length - 1].cum_spend_day) + '</td><td class="r">' + gbp(pts[pts.length - 1].cum_revenue_day) + '</td><td class="r">' + roasTxt(pts[pts.length - 1].cum_roas != null ? pts[pts.length - 1].cum_roas : (num(pts[pts.length - 1].cum_spend_day) > 0 ? num(pts[pts.length - 1].cum_revenue_day) / num(pts[pts.length - 1].cum_spend_day) : null)) + '</td></tr>' +
       '</tbody></table></div>';
-    return '<div class="wr-panel"><h3>How far it is worth spending' + src('frontier') + '</h3>' +
-      '<div class="wr-note">Each dot is one listing, added in order of its own ROAS over ' + esc(windowText(D)) + '; the line is what the fleet spends and gets back per day once that listing is included. Gold pills mark where the cumulative return passes 6×, 5×, 4× and 3.5×.</div>' +
-      '<div class="wr-legend"><span><i style="background:var(--gold-b)"></i>cumulative spend → attributed revenue, per day</span><span><i style="background:' + LOSS + '"></i>break-even mark</span><span><i style="background:rgba(224,86,63,.45)"></i>1× line</span></div>' +
+    return '<div class="wr-panel"><h3>How far it is worth spending' + src('frontier', 'spending limit') + '</h3>' +
+      '<div class="wr-note">Each dot is one listing, best return first, over ' + esc(windowText(D)) + '. The line is what we spend and get back per day once that listing is included, and a gold pill marks each return level.</div>' +
+      '<div class="wr-legend"><span><i style="background:var(--gold-b)"></i>spend → sales from ads, per day</span><span><i style="background:' + LOSS + '"></i>break-even mark</span><span><i style="background:rgba(224,86,63,.45)"></i>1× line</span></div>' +
       s +
-      '<div class="wr-rule">Listings ranked by their own return; ' +
-      (be ? '<b class="be">the red mark is listing #' + cnt(beN) + ', the first that loses money on its own numbers</b> — the ' + cnt(beN - 1) + ' before it are the ones still worth keeping' + (beyond != null ? ', and ' + beyond + ' more listing' + (beyond === 1 ? '' : 's') + ' sit after it at a lower return' : '') : '<b class="be">no listing in this window loses money on its own numbers</b>') + '.' +
+      '<div class="wr-rule">Listings ranked by their own return. ' +
+      (be ? '<b class="be">The red mark is listing #' + cnt(beN) + ', the first that loses money on its own numbers.</b> The ' + cnt(beN - 1) + ' before it are the ones still worth keeping' + (beyond != null ? ', and ' + beyond + ' more listing' + (beyond === 1 ? '' : 's') + ' sit after it at a lower return' : '') : '<b class="be">No listing in this period loses money on its own numbers</b>') + '.' +
       (be && be.rule ? ' <span class="adt-pf-p">' + esc(String(be.rule)) + '</span>' : '') + '</div>' + tbl + '</div>';
   }
 
@@ -299,14 +299,14 @@
       '<div class="wr-vk">' + (freed != null ? '<span class="loss">spend freed <b>' + esc(gbp(freed)) + ' a day</b></span>' : '') +
       '<span>switch off <b>' + esc(cnt(cutN)) + '</b></span>' +
       '<span>improving, keep <b>' + esc(cnt(impN)) + '</b></span>' +
-      (withheld ? '<span>withheld, unpriced <b>' + esc(cnt(withheld)) + '</b></span>' : '') +
+      (withheld ? '<span>left out, not costed <b>' + esc(cnt(withheld)) + '</b></span>' : '') +
       '</div></div>';
   }
 
   /* ── what to run / stop today: the first rows of the Running today page, with its sentence ── */
   function todayCard(r) {
     var v = String(r.verdict || '').toLowerCase(), T = r.today || {};
-    var todayTxt = 'today so far: ' + gbp(T.spend) + ' spend · ' + cnt(T.clicks) + ' clicks · ' + cnt(T.attr_units) + ' attributed units · ' + cnt(T.orders) + ' orders · profit ' + adtProfitCell(T.actual_profit, 0, 0, T.unpriced) + (T.sampled_at ? ' · sampled ' + esc(hhmm(T.sampled_at)) : '');
+    var todayTxt = 'today so far: ' + gbp(T.spend) + ' spend · ' + cnt(T.clicks) + ' clicks · ' + cnt(T.attr_units) + ' units from ads · ' + cnt(T.orders) + ' orders · profit ' + adtProfitCell(T.actual_profit, 0, 0, T.unpriced) + (T.sampled_at ? ' · sampled ' + esc(hhmm(T.sampled_at)) : '');
     return '<div class="wr-card ' + esc(v) + '">' + adtVerdictPill(v) + '<div style="margin-top:6px">' + adtProductCell(r) + '</div>' +
       (r.sentence ? '<div class="s">' + esc(String(r.sentence)) + '</div>' : '') +
       '<div class="t">' + todayTxt + '</div>' +
@@ -317,25 +317,25 @@
     var more = '<a class="wr-more" href="#adtoolRunToday">All of today\'s verdicts on Running today →</a>';
     /* an off flag returns empty lists with run_today.enabled = false — that is "not computed", never "nothing to do" */
     var off = !!(D.run_today && D.run_today.enabled === false);
-    var missing = off ? '<div class="wr-empty">Running today is switched off in Flags (adtool_page_runtoday) — nothing was judged.</div>' : (!D.run_today_top && !D.stop_today_top ? '<div class="wr-empty">Not in this answer.</div>' : '');
+    var missing = off ? '<div class="wr-empty">Running today is switched off, so nothing was judged.</div>' : (!D.run_today_top && !D.stop_today_top ? '<div class="wr-empty">No verdicts in this data.</div>' : '');
     return '<div class="wr-grid2">' +
       '<div class="wr-panel"><h3>What to run today' + src('run today verdict') + '</h3><div class="wr-note">Listings that earned on the last same weekdays, or are earning over the last 7 days above their own break-even.</div>' +
       (missing || (run.length ? run.map(todayCard).join('') + more : '<div class="wr-empty">Nothing stands out to push today.</div>')) + '</div>' +
-      '<div class="wr-panel"><h3>What to stop today' + src('run today verdict') + '</h3><div class="wr-note">Listings that lost on at least three of the last four same weekdays and over the last 7 days, with every order in those 7 days priced.</div>' +
+      '<div class="wr-panel"><h3>What to stop today' + src('run today verdict') + '</h3><div class="wr-note">Listings that lost on at least three of the last four same weekdays and over the last 7 days, with every order in those 7 days costed.</div>' +
       (missing || (stop.length ? stop.map(todayCard).join('') + more : '<div class="wr-empty">Nothing needs stopping on today\'s weekday history.</div>')) + '</div>' +
       '</div>';
   }
 
   /* ── item lists: the window's own profit, the last 7 days inside it, stage, lever, who ── */
   function listHead(rows, first, D) {
-    return '<thead><tr><th>' + first + '</th><th class="r">Spend / day</th><th class="r">Attributed sales / day</th>' +
-      '<th class="r">Own ROAS</th><th class="r">Break-even</th><th class="r">Profit (Sales Analysis law) · ' + esc(winShort(D)) + '</th>' +
-      (hasD7(rows) ? '<th class="r">· last 7 d</th>' : '') + (hasStage(rows) ? '<th>Stage</th>' : '') + (hasLever(rows) ? '<th>Lever · who</th>' : '') + '</tr></thead>';
+    return '<thead><tr><th>' + first + '</th><th class="r">Spend / day</th><th class="r">Sales from ads / day</th>' +
+      '<th class="r">Own ROAS</th><th class="r">Break-even</th><th class="r">Profit · ' + esc(winShort(D)) + '</th>' +
+      (hasD7(rows) ? '<th class="r">· last 7 d</th>' : '') + (hasStage(rows) ? '<th>Stage</th>' : '') + (hasLever(rows) ? '<th>What to change · who</th>' : '') + '</tr></thead>';
   }
   function listRow(rows, r, days, tag) {
     var p = pending(r), w = lawWin(r), d7 = lawD7(r), be = breakeven(r), ro = ownRoas(r);
     var improving = tag === 'improving' || (tag === 'cut' && isImproving(r));
-    return '<tr><td>' + adtProductCell(r) + (improving ? '<div style="margin-top:4px"><span class="adt-vp improving">improving — keep</span></div>' : '') + '</td>' +
+    return '<tr><td>' + adtProductCell(r) + (improving ? '<div style="margin-top:4px"><span class="adt-vp improving">improving, keep</span></div>' : '') + '</td>' +
       '<td class="r">' + gbp(perDay(r, 'spend', days)) + '</td>' +
       '<td class="r">' + gbp(r.attr_revenue_day !== undefined ? r.attr_revenue_day : perDay(r, r.attr_revenue != null ? 'attr_revenue' : 'rev', days)) + '</td>' +
       '<td class="r ' + (ro != null && be != null ? (ro < be ? 'wr-neg' : 'wr-pos') : '') + '">' + roasTxt(ro) + '</td>' +
@@ -347,14 +347,14 @@
   }
   function cutPanel(D) {
     var cut = D.cut || [], days = windowDays(D), withheld = num(D.cut_withheld_unpriced); if (withheld == null) withheld = num(D.verdict && D.verdict.withheld_unpriced) || 0;
-    var withheldTxt = withheld ? ' ' + withheld + ' losing row' + (withheld === 1 ? ' is' : 's are') + ' withheld: an order in the window is not priced yet (today\'s never are), so the loss is not ' + (withheld === 1 ? 'its' : 'theirs') + ' to carry.' : '';
-    if (!cut.length) return '<div class="wr-panel"><h3>Switch off — ' + esc(windowText(D)) + '</h3><div class="wr-note">Nothing is losing enough on priced numbers to be worth switching off.' + esc(withheldTxt) + '</div></div>';
+    var withheldTxt = withheld ? ' ' + withheld + ' losing row' + (withheld === 1 ? ' is' : 's are') + ' left out because an order is not costed yet, so the loss may not be real.' : '';
+    if (!cut.length) return '<div class="wr-panel"><h3>Switch off · ' + esc(windowText(D)) + '</h3><div class="wr-note">Nothing is losing enough money to be worth switching off.' + esc(withheldTxt) + '</div></div>';
     var total = num(D.cut_total) != null ? D.cut_total : cut.length, imp = (D.improving || []).length;
-    return '<div class="wr-panel"><h3>Switch off — ' + esc(String(total)) + ' listings, ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Worst first, on the listing\'s own profit under the Sales Analysis law over the window in the heading' +
-      (num(D.cut_frees) != null ? '. Together they spent <b>' + gbp(D.cut_frees) + '</b> in the window' : '') + '. ' +
-      (imp ? '<b>' + imp + '</b> more lost over the window but earned over the last 7 days — they are listed under <b>Improving</b> below, not here. ' : '') +
-      'Cutting a listing does not take its sales to zero — some would have come without the ad — so this is the floor on what switching off is worth, not the ceiling. ' +
+    return '<div class="wr-panel"><h3>Switch off · ' + esc(String(total)) + ' listings, ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note">Worst first, on each listing\'s own profit over the period in the heading' +
+      (num(D.cut_frees) != null ? '. Together they spent <b>' + gbp(D.cut_frees) + '</b>' : '') + '. ' +
+      'Some of those sales would have come without the ad, so treat the saving as a floor, not a ceiling. ' +
+      (imp ? '<b>' + imp + '</b> more lost over the period but earned last week; they are under <b>Improving</b> below. ' : '') +
       (cut.length < total ? 'Showing the ' + cut.length + ' worst.' : '') + esc(withheldTxt) + '</div>' +
       '<div class="wr-scroll"><table class="wr-tbl">' + listHead(cut, 'Listing', D) + '<tbody>' +
       cut.map(function (r) { return listRow(cut, r, days, 'cut'); }).join('') + '</tbody></table></div></div>';
@@ -364,16 +364,16 @@
   function improvingPanel(D) {
     var rows = Array.isArray(D.improving) ? D.improving : [], days = windowDays(D);
     if (!rows.length) return '';
-    return '<div class="wr-panel"><h3>Improving — keep running: ' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + ', ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Each lost money over the whole window but earned over the last 7 days on at least £5 of spend, so the recent week is the better guide. Leave them running and look again next week; best last-7-day profit first.</div>' +
+    return '<div class="wr-panel"><h3>Improving · keep running: ' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + ', ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note">Each lost money over the whole period but earned last week, so the recent week is the better guide. Leave them running and look again next week.</div>' +
       '<div class="wr-scroll"><table class="wr-tbl">' + listHead(rows, 'Listing', D) + '<tbody>' +
       rows.map(function (r) { return listRow(rows, r, days, 'improving'); }).join('') + '</tbody></table></div></div>';
   }
   function pushPanel(D) {
     var push = D.push || [], days = windowDays(D);
     if (!push.length) return '';
-    return '<div class="wr-panel"><h3>Worth more money — ' + push.length + ' listings, ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">Already earning under the Sales Analysis law with every order priced, and running at least half again above their own break-even, so more spend on these is the least speculative bet on the board. Move the lever named on the row before you touch anything else.</div>' +
+    return '<div class="wr-panel"><h3>Worth more money · ' + push.length + ' listings, ' + esc(windowText(D)) + src('eBay ads report') + '</h3>' +
+      '<div class="wr-note">Already earning with every order costed, and well clear of their own break-even, so these are the safest place to spend more. Change what the row names before you touch anything else.</div>' +
       '<div class="wr-scroll"><table class="wr-tbl">' + listHead(push, 'Listing', D) + '<tbody>' +
       push.map(function (r) { return listRow(push, r, days, 'push'); }).join('') + '</tbody></table></div></div>';
   }
@@ -393,12 +393,12 @@
     } else { earn = []; lose = []; N = N || {}; }
     var capped = num(N.capped); if (capped == null) capped = earn.length + lose.length;
     var seen = num(N.days_observed);
-    var out = '<div class="wr-panel"><h3>Budget — who actually ran out of money' + src('eBay ads report') + '</h3>' +
+    var out = '<div class="wr-panel"><h3>Budget · who ran out of money' + src('eBay ads report') + '</h3>' +
       '<div class="wr-note"><b>' + esc(N.verdict || (capped ? capped + ' listings ran out of money in the window.' : '')) + '</b></div>';
     if (!capped) return out + '<div class="wr-empty">Nothing hit its cap in the window.</div></div>';
     out += '<div class="wr-note">' + (seen != null ? 'Seen over ' + seen + ' day' + (seen === 1 ? '' : 's') + ' of cap data, so read the lists as a direction rather than a verdict. ' : '') +
       (num(N.earning_n) != null ? cnt(N.earning_n) + ' were earning when they ran out, ' + cnt(N.losing_n) + ' were losing' + (lose.length < num(N.losing_n) ? ' (the ' + lose.length + ' worst shown)' : '') + '. ' : '') +
-      'Profit is the listing\'s own, under the Sales Analysis law.</div>';
+      'Profit is the listing\'s own.</div>';
     var row = function (r, pick) {
       var p = pending(r), bud = r.budget_capped != null ? r.budget_capped : r.budget;
       return '<tr' + (pick ? ' class="pick"' : '') + '><td>' + adtProductCell(r) + '</td>' +
@@ -411,10 +411,10 @@
         (lev ? '<td>' + adtLeverLine(r.lever, r.who) + '</td>' : '') + '</tr>';
     };
     var all = earn.concat(lose), d7 = hasD7(all), lev = hasLever(all);
-    var head = function (first) { return '<thead><tr><th>' + first + '</th><th class="r">Budget</th><th class="r">Ran out at</th><th class="r">Days</th><th class="r">Spend (capped days)</th><th class="r">Profit (Sales Analysis law) · capped days</th>' + (d7 ? '<th class="r">· last 7 d</th>' : '') + (lev ? '<th>Lever · who</th>' : '') + '</tr></thead>'; };
+    var head = function (first) { return '<thead><tr><th>' + first + '</th><th class="r">Budget</th><th class="r">Ran out at</th><th class="r">Days</th><th class="r">Spend (capped days)</th><th class="r">Profit · capped days</th>' + (d7 ? '<th class="r">· last 7 d</th>' : '') + (lev ? '<th>What to change · who</th>' : '') + '</tr></thead>'; };
     if (earn.length) out += '<div class="wr-scroll"><table class="wr-tbl">' + head('Raise these') + '<tbody>' + earn.map(function (r) { return row(r, true); }).join('') + '</tbody></table></div>';
     if (lose.length) {
-      out += '<div class="wr-note" style="margin-top:12px">These also ran out, and were losing money when they did. Leave them capped — most are on the switch-off list above.</div>' +
+      out += '<div class="wr-note" style="margin-top:12px">These also ran out, and were losing money when they did. Leave them capped, most are on the switch-off list above.</div>' +
         '<div class="wr-scroll"><table class="wr-tbl">' + head('Leave capped') + '<tbody>' + lose.map(function (r) { return row(r, false); }).join('') + '</tbody></table></div>';
     }
     return out + '</div>';
@@ -427,9 +427,9 @@
     rows = rows.slice().sort(function (a, b) { return (num(a.weekday) || 0) - (num(b.weekday) || 0); });
     var pts = rows.map(function (r) {
       var ro = ownRoas(r), d = num(r.days) || 1;
-      return { label: wdName(r.weekday), value: ro || 0, title: wdName(r.weekday) + ' — ROAS ' + roasTxt(ro) + ' · spend ' + gbp(num(r.spend) / d) + ' a day over ' + d + ' day' + (d === 1 ? '' : 's') + ' · attributed sales ' + gbp(revOf(r)) + ' · ' + cnt(r.orders) + ' orders' };
+      return { label: wdName(r.weekday), value: ro || 0, title: wdName(r.weekday) + ' · ROAS ' + roasTxt(ro) + ' · spend ' + gbp(num(r.spend) / d) + ' a day over ' + d + ' day' + (d === 1 ? '' : 's') + ' · sales from ads ' + gbp(revOf(r)) + ' · ' + cnt(r.orders) + ' orders' };
     });
-    return '<div class="wr-panel"><h3>Weekdays in the window' + src('eBay ads report') + '</h3>' +
+    return '<div class="wr-panel"><h3>Weekdays in this period' + src('eBay ads report') + '</h3>' +
       '<div class="wr-note">ROAS per weekday for ' + esc(D.account && D.account !== 'all' ? D.account : 'all accounts') + ' over ' + esc(windowText(D)) + '; hover for spend a day and orders. Which listing should run on which day is decided per listing on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Running today</a>, not from this fleet average.</div>' +
       chartBars(pts, { height: 150, fmt: function (v) { return (Math.round(v * 10) / 10) + '×'; } }) + '</div>';
   }

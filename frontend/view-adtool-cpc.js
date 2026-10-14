@@ -54,7 +54,7 @@
   function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
   function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
   function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
-  function src(t) { return '<span class="cpc-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  function src(t, shown) { return '<span class="cpc-src" data-adtreg="' + esc(t) + '" title="how is this worked out">' + esc(shown || t) + '</span>'; }
   function dayTxt(d) { d = String(d || '').slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(d) ? d : '—'; }
 
   /* a metric printed "—" the moment its denominator is zero — never a divide-by-nothing figure.
@@ -69,13 +69,13 @@
     label: 'CPC listings (ads)', hidden: true, order: 40, roles: ROLES,
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 14h5"/>',
     render: function () {
-      return '<div class="cpc-wrap">' + adtHgroup('CPC listings', 'every cost-per-click listing and exactly how it did — active now, or after the ad stopped', 'cpcFresh') +
+      return '<div class="cpc-wrap">' + adtHgroup('CPC listings', 'Every cost-per-click listing and how it did, while the ad ran and after it stopped', 'cpcFresh') +
         '<div class="cpc-mode" id="cpcMode">' +
-          '<button data-m="active"' + (CP.mode === 'active' ? ' class="on"' : '') + '>CPC active</button>' +
-          '<button data-m="post"' + (CP.mode === 'post' ? ' class="on"' : '') + '>CPC post</button>' +
+          '<button data-m="active"' + (CP.mode === 'active' ? ' class="on"' : '') + '>Ads running</button>' +
+          '<button data-m="post"' + (CP.mode === 'post' ? ' class="on"' : '') + '>Ads stopped</button>' +
         '</div>' +
         '<div id="cpcBar"></div><div id="cpcAcct" class="an-filters"></div>' +
-        '<div id="cpcBody"><div class="cpc-empty">Reading the window…</div></div></div>';
+        '<div id="cpcBody"><div class="cpc-empty">Loading…</div></div></div>';
     },
     init: function () {
       try { var m = localStorage.getItem('m98m:adtCpcMode'); if (m === 'active' || m === 'post') CP.mode = m; } catch (e) {}
@@ -119,7 +119,7 @@
          tabs and stops on an 'auth' refusal (the session-expiry law). */
       if (adtIncludesToday(d && d.period, CP.period)) { adtPoll('cpcBody', 300000, function () { return load(true); }); } else { adtPollStop('cpcBody'); }
     }).catch(function (e) {
-      if (!quiet && $('cpcBody')) $('cpcBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the CPC listings could not be read') + '</div></div>';
+      if (!quiet && $('cpcBody')) $('cpcBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'This page could not load.') + '</div></div>';
       throw e;
     });
   }
@@ -128,23 +128,26 @@
     var D = CP.data, rows = (D.rows || []).filter(function (r) { return r && typeof r === 'object'; });
     var post = CP.mode === 'post';
     var h = '';
-    var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'the window';
-    h += '<div class="cpc-top"><span><b>' + (post ? 'CPC post' : 'CPC active') + '</b></span><span>·</span><span>' + esc(when) + '</span><span>·</span><span>' + esc(CP.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span>' + src('cpc listings') + '</div>';
+    var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'this period';
+    h += '<div class="cpc-top"><span><b>' + (post ? 'Ads stopped' : 'Ads running') + '</b></span><span>·</span><span>' + esc(when) + '</span><span>·</span><span>' + esc(CP.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span>' + src('cpc listings') + '</div>';
     h += totalsTiles(D);
     h += comparePanel(D);
     h += '<div class="cpc-note">' + (post
-      ? '<b>CPC post.</b> Listings whose cost-per-click ad is now paused, archived or ended — and how the listing did around the day the ad stopped. <b>Before</b> is the ad\'s own last window; <b>after</b> is all-channel sales since. A listing whose sales held after the ad stopped was carrying ad spend it may not have needed; one whose sales fell relied on the ad. <b>Sales</b> compares units <i>per day</i> — since the stop against while advertised — and reads "held" at 60 % of the advertised rate or better; under 7 days since the stop it is too early to tell. "Last active" is the ad\'s last status event; before 18 Sep there is no event, so it reads "date unknown". Listings currently CPC-active are excluded — they are on the Active tab.'
-      : '<b>CPC active.</b> Every listing with an ACTIVE ad in a RUNNING cost-per-click campaign. Ads are counted by eBay\'s report day (UTC); all-channel orders and units by the UK day. Impressions exist only from 18 Sep, so an earlier window shows "—". Profit is the listing\'s own figure under the Sales Analysis law; there is no collective profit. avg CPC, CVR, ROAS and ACoS read "—" when their denominator is zero.') +
-      ' The lever a hand can move is the campaign\'s daily budget (eBay exposes no per-click bid). Nothing on this page is sent to eBay.</div>';
+      ? '<b>Ads stopped.</b> Listings whose cost-per-click ad has stopped, and how they sold before and after. <b>Sales</b> reads "held" when the listing still sells at least 60% of the units a day it sold while advertised; under 7 days since the stop it is too early to tell.'
+      : '<b>Ads running.</b> Every listing with a live cost-per-click ad. Profit is each listing\'s own, never a total, and avg CPC, conversion rate, ROAS and ACoS show "—" when there is nothing to divide by.') +
+      ' What you can change is the campaign\'s daily budget, as eBay gives no per-click bid. Nothing on this page is sent to eBay.</div>';
 
     var cols = post ? POST_COLS : ACTIVE_COLS;
     var shown = rows.slice().sort(sorter(cols));
     if (!shown.length) {
-      h += '<div class="cpc-empty">' + (post ? 'No listing has left a CPC ad in this window.' : 'No listing has a live cost-per-click ad right now.') + '</div>';
+      h += '<div class="cpc-empty">' + (post ? 'No listing has stopped a cost-per-click ad in this period.' : 'No listing has a live cost-per-click ad right now.') + '</div>';
     } else {
       h += '<div class="an-scroll"><table class="cpc-tbl"><thead><tr>' + cols.map(function (c) {
         var on = CP.sort.key === c.key;
-        return '<th class="' + (c.cls || '') + '" data-k="' + esc(c.key) + '" title="' + esc(c.title || c.label) + '">' + esc(c.label) + (on ? '<span class="ar">' + (CP.sort.dir < 0 ? '▼' : '▲') + '</span>' : '') + (c.src ? src(c.src) : '') + '</th>';
+        /* a title may be a function of the payload: two of them name the first day we hold the
+           figure, and that day is sent by the action, never typed here */
+        var ttl = typeof c.title === 'function' ? c.title(D) : c.title;
+        return '<th class="' + (c.cls || '') + '" data-k="' + esc(c.key) + '" title="' + esc(ttl || c.label) + '">' + esc(c.label) + (on ? '<span class="ar">' + (CP.sort.dir < 0 ? '▼' : '▲') + '</span>' : '') + (c.src ? src(c.src, c.srcLabel) : '') + '</th>';
       }).join('') + '</tr></thead><tbody>' +
         shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td class="' + (c.cls || '') + '">' + c.cell(r) + '</td>'; }).join('') + '</tr>'; }).join('') +
         '</tbody></table></div>';
@@ -174,11 +177,11 @@
     function tile(k, v, d, cls) { return '<div class="cpc-tile ' + (cls || '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
     return '<div class="cpc-tiles">' +
       tile('Spend', gbp0(T.spend), (num(T.orders) != null ? cnt(T.orders) + ' orders' : 'ad spend'), 'gold') +
-      tile('Attributed sales', gbp0(T.attr_revenue), cnt(T.attr_units) + ' ad units', '') +
-      tile('ROAS', roasTxt(roas), 'attributed ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
-      tile('Clicks', cnt(T.clicks), 'cost-per-click', '') +
+      tile('Sales from ads', gbp0(T.attr_revenue), cnt(T.attr_units) + ' units from ads', '') +
+      tile('ROAS', roasTxt(roas), 'sales from ads ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
+      tile('Clicks', cnt(T.clicks), 'paid clicks', '') +
       tile('Avg CPC', gbp(acpc), acpc == null ? 'no clicks' : 'spend ÷ clicks', '') +
-      tile('CVR', pct(cvr), cvr == null ? 'no clicks' : 'ad units ÷ clicks', '') +
+      tile('Conversion rate', pct(cvr), cvr == null ? 'no clicks' : 'units from ads ÷ clicks', '') +
       '</div>';
   }
 
@@ -190,7 +193,7 @@
     var Pn = D.period, plabel = Pn && Pn.label ? String(Pn.label).replace(/ \(.*\)$/, '') : 'this window';
     var metrics = [
       { key: 'spend', title: 'Spend', fmt: function (v) { return chartMoney(v); } },
-      { key: 'attr_revenue', title: 'Attributed sales', fmt: function (v) { return chartMoney(v); } },
+      { key: 'attr_revenue', title: 'Sales from ads', fmt: function (v) { return chartMoney(v); } },
       { key: 'roas', title: 'ROAS', fmt: function (v) { return (Math.round(v * 100) / 100) + '×'; }, ratio: ['attr_revenue', 'spend'] }
     ];
     var cards = metrics.map(function (m) {
@@ -204,7 +207,7 @@
       var good = m.key === 'spend' ? 0 : 1; /* spend up is neither win nor loss on its own */
       var arrow = d == null ? '' : (d > 0.0005 ? '▲' : (d < -0.0005 ? '▼' : '■'));
       var red = d != null && ((good > 0 && d < 0));
-      var sub = d == null ? 'no previous window to compare' : m.fmt(now || 0) + ' vs ' + m.fmt(was || 0) + ' · <span class="' + (red ? 'cpc-neg' : (d > 0 && good > 0 ? 'cpc-pos' : '')) + '">' + arrow + ' ' + pct(Math.abs(d)) + '</span>';
+      var sub = d == null ? 'no earlier period to compare' : m.fmt(now || 0) + ' vs ' + m.fmt(was || 0) + ' · <span class="' + (red ? 'cpc-neg' : (d > 0 && good > 0 ? 'cpc-pos' : '')) + '">' + arrow + ' ' + pct(Math.abs(d)) + '</span>';
       return '<div class="cpc-cmp-card"><h4>' + esc(m.title) + '</h4><div class="sub">' + sub + '</div>' +
         chartBars(pts, { height: 120, fmt: m.fmt, minGap: 0 }) + '</div>';
     }).join('');
@@ -225,12 +228,12 @@
 
   function costCell(r) {
     var c = r.product_cost || {}; var v = num(c.value);
-    return '<div class="cpc-cost">' + (v == null ? '—' : gbp(v)) + '<span class="s">' + esc(c.source || (v == null ? 'not costed' : '')) + '</span></div>';
+    return '<div class="cpc-cost">' + (v == null ? '—' : gbp(v)) + '<span class="s">' + esc(c.source || (v == null ? 'not costed yet' : '')) + '</span></div>';
   }
   function profitCell(r) { return adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders); }
   function impCell(r) { var v = num(r.impressions); return v == null ? '<span class="cpc-sub">—</span>' : cnt(v); }
   function unitsWindow(r) {
-    return '<span title="all-channel units — 7 / 14 / 30 days to the window end">' + cnt(r.units_7d) + ' · ' + cnt(r.units_14d) + ' · ' + cnt(r.units_30d) + '</span>';
+    return '<span title="units sold everywhere, 7 / 14 / 30 days to the end of the period">' + cnt(r.units_7d) + ' · ' + cnt(r.units_14d) + ' · ' + cnt(r.units_30d) + '</span>';
   }
   /* Sale-event fields (Phase 5): observed membership + when eligible again. Null → "—". */
   function inSaleCell(r) {
@@ -244,21 +247,21 @@
   var ACTIVE_COLS = [
     { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
     { key: 'listing_date', label: 'Listed', cell: function (r) { return '<span class="cpc-sub">' + dayTxt(r.listing_date) + '</span>'; }, sortVal: function (r) { return dayTxt(r.listing_date); } },
-    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', title: 'eBay Quantity − QuantityAvailable; resets on a quantity revision — not a lifetime total', cell: function (r) { return cnt(r.sold_since_listed); } },
-    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'all-channel units — 7 / 14 / 30 days to the window end', cell: unitsWindow },
-    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
+    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', srcLabel: 'eBay listing data', title: 'eBay\'s own count since the listing went up. It resets if the quantity is changed, so it is not a lifetime total.', cell: function (r) { return cnt(r.sold_since_listed); } },
+    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'units sold everywhere, 7 / 14 / 30 days to the end of the period', cell: unitsWindow },
+    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', srcLabel: 'eBay listing data', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
     { key: 'spend', label: 'Spend', cls: 'r', cell: function (r) { return gbp(r.spend); } },
     { key: 'clicks', label: 'Clicks', cls: 'r', cell: function (r) { return cnt(r.clicks); } },
-    { key: 'attr_units', label: 'Ad sales', cls: 'r', title: 'attributed units · attributed revenue', cell: function (r) { return cnt(r.attr_units) + '<div class="cpc-sub">' + gbp(r.attr_revenue) + '</div>'; } },
-    { key: 'impressions', label: 'Impr.', cls: 'r', title: 'impressions (from 18 Sep only)', cell: impCell },
-    { key: 'acos', label: 'ACoS', cls: 'r', title: 'spend ÷ attributed revenue', cell: function (r) { return pct(acosOf(r)); }, sortVal: acosOf },
+    { key: 'attr_units', label: 'Units from ads', cls: 'r', title: 'units from ads, with the sales from ads underneath', cell: function (r) { return cnt(r.attr_units) + '<div class="cpc-sub">' + gbp(r.attr_revenue) + '</div>'; } },
+    { key: 'impressions', label: 'Times shown', cls: 'r', title: function (D) { return 'how often the ad was shown' + (D && D.impressions_from ? '. We only have this from ' + dayTxt(D.impressions_from) : '. We do not have this for the whole period') + '.'; }, cell: impCell },
+    { key: 'acos', label: 'ACoS', cls: 'r', title: 'spend ÷ sales from ads', cell: function (r) { return pct(acosOf(r)); }, sortVal: acosOf },
     { key: 'avg_cpc', label: 'Avg CPC', cls: 'r', title: 'spend ÷ clicks', cell: function (r) { return gbp(avgCpcOf(r)); }, sortVal: avgCpcOf },
-    { key: 'cvr', label: 'CVR', cls: 'r', title: 'attributed units ÷ clicks', cell: function (r) { return pct(cvrOf(r)); }, sortVal: cvrOf },
-    { key: 'roas', label: 'ROAS', cls: 'r', title: 'attributed revenue ÷ spend', cell: function (r) { var v = roasOf(r); return '<span class="' + (v != null ? (v < 1 ? 'cpc-neg' : 'cpc-pos') : '') + '">' + roasTxt(v) + '</span>'; }, sortVal: roasOf },
-    { key: 'actual_profit', label: 'Profit (law)', cls: 'r', src: 'orders', title: 'this listing under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } },
-    { key: 'in_sale', label: 'In sale event', cls: 'r', src: 'sale events', title: 'Currently in a running Sale Event — observed at one-day granularity; whole-shop events auto-enrol', cell: inSaleCell, sortVal: function (r) { return r.in_sale ? 1 : 0; } },
-    { key: 'eligible_on', label: 'Eligible on', cls: 'r', src: 'sale events', title: 'Eligible for a Sale Event again on this date (after the 14-day restriction)', cell: eligibleCell, sortVal: function (r) { return r.eligible_on || ''; } },
-    { key: 'lever', label: 'Lever', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
+    { key: 'cvr', label: 'Conv. rate', cls: 'r', title: 'units from ads ÷ clicks', cell: function (r) { return pct(cvrOf(r)); }, sortVal: cvrOf },
+    { key: 'roas', label: 'ROAS', cls: 'r', title: 'sales from ads ÷ spend', cell: function (r) { var v = roasOf(r); return '<span class="' + (v != null ? (v < 1 ? 'cpc-neg' : 'cpc-pos') : '') + '">' + roasTxt(v) + '</span>'; }, sortVal: roasOf },
+    { key: 'actual_profit', label: 'Profit', cls: 'r', src: 'orders', title: 'this listing on its own, worked out the same way as the Sales Analysis sheet', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } },
+    { key: 'in_sale', label: 'In sale event', cls: 'r', src: 'sale events', title: 'In a running sale event now. We check once a day, and a whole-shop event takes in every listing.', cell: inSaleCell, sortVal: function (r) { return r.in_sale ? 1 : 0; } },
+    { key: 'eligible_on', label: 'Eligible on', cls: 'r', src: 'sale events', title: 'In a sale event again from this date, after the 14-day wait.', cell: eligibleCell, sortVal: function (r) { return r.eligible_on || ''; } },
+    { key: 'lever', label: 'What to change', cell: function (r) { return adtLeverLine(r.lever, r.who); }, sortVal: function (r) { return String(r.lever && r.lever.kind || ''); } }
   ];
 
   /* CPC post: before the ad stopped vs after, and whether sales held — judged on per-day units RATES, never on
@@ -295,9 +298,9 @@
   function heldCell(r) {
     var j = heldJudge(r);
     if (!j) return '<span class="cpc-held">—</span>';
-    if (j.v === 'na') return '<span class="cpc-held" title="no units while advertised or since — nothing to hold">n/a</span>';
-    if (j.v === 'early') return '<span class="cpc-held early" title="under 7 days since the ad stopped — not enough to judge">too early' + (j.days != null ? ' (' + Math.round(j.days) + ' d)' : '') + '</span>';
-    var t = j.rule || (j.br != null ? 'since the stop ' + rate(j.ar) + ' vs ' + rate(j.br) + ' while advertised (units per day over ' + Math.round(j.days) + ' d after)' : '');
+    if (j.v === 'na') return '<span class="cpc-held" title="no sales while advertised or since, so there is nothing to compare">n/a</span>';
+    if (j.v === 'early') return '<span class="cpc-held early" title="under 7 days since the ad stopped, too early to tell">too early' + (j.days != null ? ' (' + Math.round(j.days) + ' d)' : '') + '</span>';
+    var t = j.rule || (j.br != null ? 'since the stop ' + rate(j.ar) + ' against ' + rate(j.br) + ' while advertised, over ' + Math.round(j.days) + ' days' : '');
     return '<span class="cpc-held ' + (j.v === 'held' ? 'up' : 'down') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (j.v === 'held' ? 'held' : 'fell') + '</span>';
   }
   function beforeCell(r) { var b = r.before || {}; return '<div class="cpc-sub">spend ' + gbp(b.spend) + '</div>' + cnt(b.attr_units) + ' units · ' + gbp0(b.attr_revenue) + '<div>' + adtProfitCell(b.actual_profit, b.pending_cost_orders, b.pending_fee_orders) + '</div>'; }
@@ -305,13 +308,13 @@
 
   var POST_COLS = [
     { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
-    { key: 'last_active_day', label: 'Last active', cls: 'r', title: 'the ad\'s last status event; "—" before 18 Sep', cell: function (r) { return r.last_active_day ? '<span class="cpc-sub">' + dayTxt(r.last_active_day) + '</span>' : '<span class="cpc-sub" title="before event tracking">date unknown</span>'; }, sortVal: function (r) { return dayTxt(r.last_active_day); } },
-    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', title: 'eBay Quantity − QuantityAvailable; resets on a quantity revision — not a lifetime total', cell: function (r) { return cnt(r.sold_since_listed); } },
-    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'all-channel units — 7 / 14 / 30 days to the window end', cell: unitsWindow },
-    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
-    { key: 'before', label: 'While advertised', cls: 'r', title: 'the ad\'s own last window', cell: beforeCell, sortVal: function (r) { return num(r.before && r.before.spend); } },
-    { key: 'after', label: 'Since it stopped', cls: 'r', title: 'all-channel sales after the ad stopped', cell: afterCell, sortVal: function (r) { return num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); } },
-    { key: 'held', label: 'Sales', cls: 'r', title: 'did all-channel sales hold after the ad stopped? per-day units rate since the stop vs while advertised; too early under 7 days', cell: heldCell, sortVal: function (r) { var j = heldJudge(r); return j && j.ratio != null ? j.ratio : null; } },
-    { key: 'actual_profit', label: 'Profit now (law)', cls: 'r', src: 'orders', title: 'the listing now, under the Sales Analysis law', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } }
+    { key: 'last_active_day', label: 'Last active', cls: 'r', title: function (D) { return 'the last day the ad was seen running' + (D && D.events_from ? '. Blank before ' + dayTxt(D.events_from) + ', when we started recording ad switches' : ', where we have a record of it') + '.'; }, cell: function (r) { return r.last_active_day ? '<span class="cpc-sub">' + dayTxt(r.last_active_day) + '</span>' : '<span class="cpc-sub" title="we have no record this far back">date unknown</span>'; }, sortVal: function (r) { return dayTxt(r.last_active_day); } },
+    { key: 'sold_since_listed', label: 'Sold since listed', cls: 'r', src: 'items sync', srcLabel: 'eBay listing data', title: 'eBay\'s own count since the listing went up. It resets if the quantity is changed, so it is not a lifetime total.', cell: function (r) { return cnt(r.sold_since_listed); } },
+    { key: 'units_30d', label: 'Sold 7·14·30 d', cls: 'r', title: 'units sold everywhere, 7 / 14 / 30 days to the end of the period', cell: unitsWindow },
+    { key: 'product_cost', label: 'Product cost', cls: 'r', src: 'items sync', srcLabel: 'eBay listing data', cell: costCell, sortVal: function (r) { return num(r.product_cost && r.product_cost.value); } },
+    { key: 'before', label: 'While advertised', cls: 'r', title: 'the last period the ad ran', cell: beforeCell, sortVal: function (r) { return num(r.before && r.before.spend); } },
+    { key: 'after', label: 'Since it stopped', cls: 'r', title: 'sales everywhere after the ad stopped', cell: afterCell, sortVal: function (r) { return num(r.after && (r.after.units != null ? r.after.units : r.after.attr_units)); } },
+    { key: 'held', label: 'Sales', cls: 'r', title: 'did sales hold after the ad stopped? units a day since, against units a day while advertised', cell: heldCell, sortVal: function (r) { var j = heldJudge(r); return j && j.ratio != null ? j.ratio : null; } },
+    { key: 'actual_profit', label: 'Profit now', cls: 'r', src: 'orders', title: 'this listing now, worked out the same way as the Sales Analysis sheet', cell: profitCell, sortVal: function (r) { return num(r.actual_profit); } }
   ];
 })();

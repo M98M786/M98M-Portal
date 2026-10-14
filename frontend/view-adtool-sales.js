@@ -57,15 +57,15 @@
     label: 'Sale events (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
     icon: '<path d="M3 9h18M7 3v4M17 3v4"/><rect x="3" y="5" width="18" height="16" rx="2"/><path d="m9 14 6-3"/>',
     render: function () {
-      return adtHgroup('Sale events', 'the observed lifecycle: in a sale, removed, waiting out the 14 days, eligible again', 'svFresh') +
-        '<div id="svBody"><div class="sv-note">Reading every advertised and active listing against the running sale events…</div></div>';
+      return adtHgroup('Sale events', 'Which listings are in a sale, which are waiting, and when each is eligible again', 'svFresh') +
+        '<div id="svBody"><div class="sv-note">Loading…</div></div>';
     },
     init: function () { load(); }
   };
 
   function load() {
     api('adtoolSales', {}).then(function (d) { SV.data = d; adtFreshShow('svFresh', d && d.fresh); draw(); })
-      .catch(function (e) { $('svBody').innerHTML = '<div class="sv-panel"><div class="sv-note">' + esc(e && e.message ? e.message : 'could not read') + '</div></div>'; });
+      .catch(function (e) { $('svBody').innerHTML = '<div class="sv-panel"><div class="sv-note">' + esc(e && e.message ? e.message : 'This page could not load.') + '</div></div>'; });
   }
 
   /* one of the six filter buckets a row's status falls into */
@@ -79,7 +79,7 @@
   }
   var CHIPS = [['', 'All'], ['live', 'Live'], ['eligible', 'Eligible'], ['waiting', 'Waiting'], ['removed', 'Removed'], ['notinsale', 'Not in sale']];
   var STATUS_LABEL = {
-    'live': 'live', 'added-unconfirmed': 'added — unconfirmed', 'not-discounted': 'not discounted',
+    'live': 'live', 'added-unconfirmed': 'added, not confirmed', 'not-discounted': 'not discounted',
     'removed': 'removed', 'waiting': 'waiting', 'eligible': 'eligible', 'no-event': 'no event'
   };
 
@@ -90,22 +90,21 @@
     var cover = D.covers_whole_shop || [];
     if (cover.length) {
       h += '<div class="sv-panel" style="border-color:var(--gold-b)"><h3>You already have this</h3>' +
-        '<div class="sv-note">All ' + cover.length + ' of your accounts with a sale run it on <b>ALL INVENTORY</b> — the whole shop, not a chosen ' +
-        'list. eBay enrols every eligible listing itself and drops each one when it stops, so a sale is always running and covers ' +
-        'far more than half the listings. What limits coverage is the 14-day price rule below — a revision problem, not a scheduling one.</div></div>';
+        '<div class="sv-note">All ' + cover.length + ' of your accounts with a sale run it across the <b>whole shop</b>, so eBay adds every ' +
+        'eligible listing itself and drops each one when it stops. What limits coverage is the 14-day price rule below.</div></div>';
     }
 
     /* the honest estimate banner, kept until the price record is long enough for eBay's real 14-day clock */
     if (!D.clock_is_real) {
       h += '<div class="sv-warn"><b>The eligible-again dates below are an estimate for now.</b> eBay counts 14 days at the same ' +
-        '<b>price</b>. A full daily price record only exists from ' + esc(D.observed_since || 'the first snapshot') + ', so early dates lean ' +
-        'on the last revision of any kind (a title edit counts the same as a price cut). Each date firms up on its own as the record lengthens.</div>';
+        '<b>price</b>, and our daily price record only starts on ' + esc(D.observed_since || 'the first snapshot') + ', so earlier dates ' +
+        'use the last change of any kind. Each date firms up as the record lengthens.</div>';
     }
 
     /* running events, straight from eBay's markdown sales */
     var ev = D.running_events || [];
     h += '<div class="sv-panel"><h3>Running on eBay right now</h3>' +
-      '<div class="sv-note">' + (ev.length ? 'These markdown sale events are live. A whole-shop event returns no listing list — eBay auto-enrols by rule.' : 'No markdown sale event is running on any account.') + '</div>' +
+      '<div class="sv-note">' + (ev.length ? 'These sale events are live now. A whole-shop event has no listing list, as eBay adds the listings by rule.' : 'No sale event is running on any account.') + '</div>' +
       (ev.length ? '<div class="sv-run">' + ev.map(function (e) {
         return '<div class="sv-runc"><div class="a">' + esc(e.account || '') + '</div>' +
           '<div class="m"><b style="color:var(--text)">' + esc(e.name || 'Sale') + '</b>' + (e.discount ? ' · ' + esc(e.discount) : '') + '<br>' +
@@ -122,11 +121,11 @@
     /* the lifecycle table */
     var shown = SV.filter ? rows.filter(function (r) { return bucket(r.status) === SV.filter; }) : rows;
     h += '<div class="sv-panel"><h3>Every advertised &amp; active listing' +
-      '<span class="sv-src" data-adtreg="sale events" title="how is this computed" style="margin-left:8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;font-weight:800;cursor:pointer">sale events</span></h3>' +
-      '<div class="sv-note">Where each listing sits in the cycle — in a sale, dropped, waiting out the 14 days, or eligible again — with the price the buyer actually paid where an order let us see it. ' +
-      (D.observed_since ? 'Observed since <b>' + esc(D.observed_since) + '</b>.' : '') + '</div>';
+      '<span class="sv-src" data-adtreg="sale events" title="how is this worked out" style="margin-left:8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;font-weight:800;cursor:pointer">sale events</span></h3>' +
+      '<div class="sv-note">Where each listing sits: in a sale, dropped, waiting out the 14 days, or eligible again. The price is what the buyer paid where an order shows it. ' +
+      (D.observed_since ? 'Checked daily since <b>' + esc(D.observed_since) + '</b>.' : '') + '</div>';
     if (!shown.length) {
-      h += '<div class="sv-empty">No listing in this bucket.</div>';
+      h += '<div class="sv-empty">No listing in this group.</div>';
     } else {
       h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr><th>Listing</th><th>Status</th><th>Event</th>' +
         '<th>Dropped</th><th>Restriction ends</th><th>Eligible again</th><th class="r">Price</th><th>Observed</th></tr></thead><tbody>' +
@@ -136,16 +135,14 @@
 
     /* tasks — one open per listing, with the five flags the brief asks for */
     var tasks = D.tasks || [];
-    h += '<div class="sv-panel"><h3>Tasks — ' + tasks.length + ' open</h3>' +
-      '<div class="sv-note">Raised automatically when a listing becomes eligible again, or when a running event ends within two days with no replacement. Each carries the product, the account, when it becomes eligible, when to act, and whether it is already added, currently live, and had a price change.</div>' +
+    h += '<div class="sv-panel"><h3>Tasks · ' + tasks.length + ' open</h3>' +
+      '<div class="sv-note">Raised when a listing becomes eligible again, or when an event is about to end with nothing to replace it.</div>' +
       (tasks.length ? tasks.map(taskHtml).join('') : '<div class="sv-empty">Nothing needs a hand today.</div>') + '</div>';
 
     /* the honest limits, printed not buried */
-    h += '<div class="sv-limits"><b>How to read these dates.</b> Everything is observed at one-day granularity' +
-      (D.observed_since ? ' from <b>' + esc(D.observed_since) + '</b>' : '') + '. For a whole-shop (ALL INVENTORY) event eBay gives no per-item list, so an ' +
-      'individual listing\'s removal cannot be seen directly — it counts as in the sale while the event runs and the listing is active, with a ' +
-      'price-history dip as corroboration. The sale price is computed from the event\'s discount unless an actual order proves the marked-down price. ' +
-      '<b>Nothing on this page is ever sent to eBay</b> — the tool only records what eBay already did.</div>';
+    h += '<div class="sv-limits"><b>How to read these dates.</b> Everything here is checked once a day' +
+      (D.observed_since ? ' from <b>' + esc(D.observed_since) + '</b>' : '') + ', and a whole-shop event gives no per-item list, so we cannot see one ' +
+      'listing being dropped. <b>Nothing on this page is ever sent to eBay</b>, the tool only records what eBay already did.</div>';
 
     $('svBody').innerHTML = h;
     wire();
@@ -204,14 +201,14 @@
       /* an ACCOUNT task (item_id ''): the ending event and its date, never a product cell */
       var ev = endingEvent(t), ends = String(t.ends || t.eligible_on || (ev && ev.ends) || '').slice(0, 10);
       var cd = ends ? countdown(D_today(), ends) : null;
-      kindTxt = 'Create the next sale event on ' + (t.account || '—') + (ends ? ' — ends ' + ends : '');
+      kindTxt = 'Create the next sale event on ' + (t.account || '—') + (ends ? ' · ends ' + ends : '');
       head = '<div class="sv-acct"><div class="a">' + esc(t.account || 'account —') + '</div><div class="m">' +
         (ev ? '<b>' + esc(ev.name || 'Sale') + '</b>' + (ev.discount ? ' · ' + esc(ev.discount) : '') + ' · ' + esc(ev.covers || ev.criterion || 'whole shop') + '<br>' : '') +
         'ends <b>' + esc(ends || '—') + '</b>' + (cd ? ' · ' + esc(cd.txt.replace('eligible now', 'ended')) : '') + ' · no replacement event seen for this account</div></div>';
       flags = '<div class="sv-flags">' +
         '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
         '<span class="sv-flag warn">event ends <b>' + esc(ends || '—') + '</b></span>' +
-        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '<span class="sv-flag">act by <b>' + esc(perform || '—') + '</b></span>' +
         '</div>';
     } else {
       kindTxt = kind === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event';
@@ -219,7 +216,7 @@
       flags = '<div class="sv-flags">' +
         '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
         '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
-        '<span class="sv-flag">perform <b>' + esc(perform || '—') + '</b></span>' +
+        '<span class="sv-flag">act by <b>' + esc(perform || '—') + '</b></span>' +
         '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
         '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
         '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
@@ -231,7 +228,7 @@
       flags +
       '<div class="sv-task-btns"><button class="sv-btn" data-act="task_done">Done</button>' +
       '<button class="sv-btn ghost" data-act="task_dismiss">Dismiss</button></div>' +
-      '<div class="sv-notebox" hidden><textarea placeholder="Add a note (optional) — what you did"></textarea>' +
+      '<div class="sv-notebox" hidden><textarea placeholder="Add a note (optional): what you did"></textarea>' +
       '<div class="row"><button class="sv-btn" data-confirm>Confirm</button><button class="sv-btn ghost" data-cancel>Cancel</button></div></div>' +
       '</div>';
   }

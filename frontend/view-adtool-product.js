@@ -51,19 +51,30 @@
     '.at-list{list-style:none;padding:0;margin:8px 0 0}.at-list li{padding:6px 0;border-top:1px solid var(--gold-line);font-size:12.5px}.at-list li:first-child{border-top:0}.at-list .m{color:var(--text-3);font-size:11px}'
   );
 
-  function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
+  /* ONE money format across the four advertising view files: thousands separated, two decimals
+     unless the caller asks for fewer. The same figure must not read £1,234 on one page and
+     £1234.00 on the next. This function is byte-identical in view-adtool-morning.js,
+     view-adtool-analytics.js and view-adtool-overview.js — change one and change all four.
+     This page is per listing, so pence matter nearly everywhere here. */
+  function gbp(v, d) {
+    if (v == null || v === '' || isNaN(Number(v))) return '—';
+    var n = Number(v), p = d == null ? 2 : Number(d);
+    return (n < 0 ? '−£' : '£') + Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: p, maximumFractionDigits: p });
+  }
   function pm(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : '+' + s; }
   function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
   function cls(v) { return v == null ? '' : (Number(v) < 0 ? 'at-neg' : Number(v) > 0 ? 'at-pos' : ''); }
   function dfmt(d) { if (!d) return ''; var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return Number(d.slice(8, 10)) + ' ' + m[Number(d.slice(5, 7)) - 1]; }
-  function src(t, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
+  /* `t` is the LOOKUP key the register box matches on and must stay stable when the wording changes;
+     `shown` is what the reader sees. Rewording arg 1 silently empties the box, so reword arg 2. */
+  function src(t, shown, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this worked out">' + esc(shown || t) + '</span>'; }
   /* Phase 4: week-to-week behaviour. The engine sends weeks_behaviour[] = {iso_week, label,
      descriptors, changed:[{descriptor, from, to, direction}], sentence}; the descriptor names are the
      ones from adtool_descriptors. A plain-English label per descriptor and a value formatter so the
      'what changed' cell reads as prose, not raw keys. */
-  var DESC_LABEL = { weekday_ratio: 'Weekday concentration', slot_hhi: 'Time-of-day concentration', concentration: 'Time-of-day concentration', slot_concentration: 'Time-of-day concentration', volatility: 'Volatility', cv28: 'Volatility', volatility_cv28: 'Volatility', ad_dependence28: 'Ad dependence', ad_dependence: 'Ad dependence', spend_elasticity: 'Spend elasticity', intermittency28: 'Zero-sale days', level28: 'Units/day', slope28: '28-day slope' };
+  var DESC_LABEL = { weekday_ratio: 'Best day against worst', slot_hhi: 'Time-of-day concentration', concentration: 'Time-of-day concentration', slot_concentration: 'Time-of-day concentration', volatility: 'Day-to-day swing', cv28: 'Day-to-day swing', volatility_cv28: 'Day-to-day swing', ad_dependence28: 'Ad dependence', ad_dependence: 'Ad dependence', spend_elasticity: 'Extra units per £1', intermittency28: 'Days with no sale', level28: 'Units/day', slope28: 'Trend' };
   function descLabel(k) { return DESC_LABEL[k] || String(k).replace(/_?\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); }); }
-  function descVal(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/dependence|intermittency|share|_pct$/.test(k)) return Math.round(n * 100) + '%'; if (/elasticity/.test(k)) return n + ' u/£'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; if (/level/.test(k)) return n + '/day'; return String(Math.round(n * 100) / 100); }
+  function descVal(k, v) { if (v == null || v === '') return '—'; var n = Number(v); if (isNaN(n)) return String(v); if (/dependence|intermittency|share|_pct$/.test(k)) return Math.round(n * 100) + '%'; if (/elasticity/.test(k)) return n + ' per £1'; if (/slope/.test(k)) return (n > 0 ? '+' : '') + n + ' %/day'; if (/level/.test(k)) return n + '/day'; return String(Math.round(n * 100) / 100); }
   function trendTag(label) { var l = String(label || '').toLowerCase(); if (/improv|recover|rising|up/.test(l)) return '<span class="at-tag gold">' + esc(label || 'improving') + '</span>'; if (/declin|worse|falling|down|slowing/.test(l)) return '<span class="at-tag loss">' + esc(label || 'declining') + '</span>'; return '<span class="at-tag">' + esc(label || 'steady') + '</span>'; }
 
   function loadECharts() {
@@ -71,7 +82,7 @@
     if (AT.loading) return AT.loading;
     AT.loading = new Promise(function (resolve, reject) {
       var s = document.createElement('script'); s.src = 'assets/echarts.min.js'; s.async = true;
-      s.onload = function () { resolve(window.echarts); }; s.onerror = function () { reject(new Error('charts library did not load')); };
+      s.onload = function () { resolve(window.echarts); }; s.onerror = function () { reject(new Error('The chart library did not load.')); };
       document.head.appendChild(s);
     });
     return AT.loading;
@@ -101,10 +112,10 @@
     icon: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/>',
     render: function () {
       return '<div class="at-wrap">' +
-        adtHgroup('Product history', 'Advertising tool · every number from the engine\'s own rollups (eBay ads report · orders · profit under the Sales Analysis law)', 'atFresh') +
-        '<div class="at-search"><input id="atQ" type="search" placeholder="Item id or title — press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
+        adtHgroup('Product history', 'One listing\'s spend, sales and profit, day by day since our figures begin', 'atFresh') +
+        '<div class="at-search"><input id="atQ" type="search" placeholder="Item id or title, then press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
         '<div class="at-recent" id="atRecent"></div>' +
-        '<div id="atBody"><div class="at-empty">Type an item id or part of a title. Recent advertised listings appear above once the rollup has run.</div></div>' +
+        '<div id="atBody"><div class="at-empty">Type an item id or part of a title. Recently advertised listings appear above.</div></div>' +
         '</div>';
     },
     init: function () {
@@ -115,7 +126,7 @@
       if (/^\d{9,13}$/.test(last)) { AT.item = last; q.value = last; }
       go.onclick = function () { AT.item = q.value.trim(); if (/^\d{9,13}$/.test(AT.item)) { load(AT.item); } else { search(AT.item); } };
       q.onkeydown = function (e) { if (e.key === 'Enter') go.onclick(); };
-      api('adtoolSearch', { q: '' }).then(function (d) { recent(d.results || []); }).catch(function (e) { $('atRecent').innerHTML = '<span class="at-empty">' + esc(e.message || 'search unavailable') + '</span>'; });
+      api('adtoolSearch', { q: '' }).then(function (d) { recent(d.results || []); }).catch(function (e) { $('atRecent').innerHTML = '<span class="at-empty">' + esc(e.message || 'Search is not available.') + '</span>'; });
       if (AT.item) load(AT.item);
     }
   };
@@ -133,7 +144,7 @@
       if (!rows.length) { $('atBody').innerHTML = '<div class="at-empty">No listing matches “' + esc(q) + '”.</div>'; return; }
       $('atBody').innerHTML = '<div class="at-panel"><h3>Matches</h3><table class="at-tbl"><thead><tr><th>Listing</th><th class="r">Price</th><th>Last ad day</th></tr></thead><tbody>' +
         rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.price) + '</td><td>' + esc(r.last_ad_day || '—') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-    }).catch(function (e) { $('atBody').innerHTML = '<div class="at-empty">' + esc(e.message || 'search failed') + '</div>'; });
+    }).catch(function (e) { $('atBody').innerHTML = '<div class="at-empty">' + esc(e.message || 'The search could not run.') + '</div>'; });
   }
 
   function load(id) {
@@ -144,10 +155,30 @@
     Promise.all([api('adtoolListing', { item_id: id }), loadECharts().catch(function () { return null; })]).then(function (res) {
       AT.data = res[0]; AT.ms = Date.now() - t0;
       draw();
-    }).catch(function (e) { $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'failed') + '</div></div>'; });
+    }).catch(function (e) { $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'This listing could not load.') + '</div></div>'; });
   }
 
   function kpi(k, v, d, c) { return '<div class="at-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
+  /* the stage badge's hover, in words. It used to read "confidence 0.82 · 28-day slope 3.1 %/day ·
+     level 1.4/day vs peak 2.1", which is notation, not a sentence a seller can act on. */
+  function stageWhy(st) {
+    var c = Number(st && st.confidence);
+    var word = isNaN(c) ? 'we cannot say how sure we are' : (c >= 0.8 ? 'we are confident' : c >= 0.5 ? 'we are fairly confident' : 'we are not very confident');
+    var lv = st && st.level28 != null ? Number(st.level28) : null, pk = st && st.peak_level != null ? Number(st.peak_level) : null;
+    if (lv == null) return word + '.';
+    return word + '. Selling ' + lv + ' a day' + (pk == null ? '' : ', against a best of ' + pk) + '.';
+  }
+  /* the weekday panel's note. It used to read "Shrunk rates (κ 4 days, prior: account, half-life 14
+     days) next to the plain 30-day averages. Shuffle test: p = 0.03 → real weekday effect" — the
+     conclusion is what a seller needs, and it has to stay true when the test says the opposite. */
+  function weekdayNote(D) {
+    var wk = D.profile && D.profile.weekday;
+    if (!wk || !wk.rates) return 'Each weekday\'s average over the last 30 days.';
+    var p = wk.spread && wk.spread.p != null ? Number(wk.spread.p) : null;
+    var verdict = p == null ? 'There are not enough days yet to say whether the weekday pattern is real.'
+      : (p < 0.05 ? 'The weekday pattern here is real.' : 'There is no real weekday pattern here.');
+    return 'Each weekday\'s average, smoothed to allow for thin days. ' + verdict;
+  }
 
   function draw() {
     var D = AT.data, H = D.header, K = D.kpis || {};
@@ -157,7 +188,7 @@
     h += '<div class="at-panel"><div class="at-head"><div style="flex:1 1 420px"><div style="font-size:15px">' + adtProductCell({ item_id: H.item_id, account: H.account, title: H.title, image: H.image }, { open: false }) + '</div>' +
       '<div class="at-meta"><span class="at-tag">' + esc(H.category || 'Unclassified') + (H.category_source === 'manual' ? ' · manual' : '') + '</span>' +
       (H.is_case ? '<span class="at-tag">' + esc(H.case_type) + '</span>' : '') + '<span class="at-tag">' + esc(H.status || '') + '</span>' +
-      (D.profile && D.profile.stage ? '<span class="at-tag ' + (/Decline|Dormant|Dead/.test(D.profile.stage.stage) ? 'loss' : 'gold') + '" title="confidence ' + esc(String(D.profile.stage.confidence)) + ' · 28-day slope ' + esc(String(D.profile.stage.slope28)) + ' %/day · level ' + esc(String(D.profile.stage.level28)) + '/day vs peak ' + esc(String(D.profile.stage.peak_level)) + '">Stage: ' + esc(D.profile.stage.label || D.profile.stage.stage) + ' · ' + Math.round(Number(D.profile.stage.confidence) * 100) + '% · day ' + esc(String(D.profile.stage.days_in_stage)) + '</span>' : '<span class="at-tag">Stage: not computed yet</span>') + '</div></div>' +
+      (D.profile && D.profile.stage ? '<span class="at-tag ' + (/Decline|Dormant|Dead/.test(D.profile.stage.stage) ? 'loss' : 'gold') + '" title="' + esc(stageWhy(D.profile.stage)) + '">Stage: ' + esc(D.profile.stage.label || D.profile.stage.stage) + ' · ' + Math.round(Number(D.profile.stage.confidence) * 100) + '% · day ' + esc(String(D.profile.stage.days_in_stage)) + '</span>' : '<span class="at-tag">Stage: not worked out yet</span>') + '</div></div>' +
       '<div style="flex:0 0 auto;min-width:230px;font-size:12.5px;color:var(--text-2);line-height:1.7">' +
       '<div>Price <b style="color:var(--text)">' + gbp(H.price) + '</b></div>' +
       '<div>Margin before ads <b style="color:var(--text)">' + gbp(H.margin) + '</b> <span class="at-src">' + esc(H.margin_source || '') + '</span></div>' +
@@ -167,80 +198,99 @@
       /* Phase 5 sale-event fields — observed at one-day granularity; null → not known yet */
       '<div>Currently in Sale Event: <b style="color:var(--text)">' + (H.in_sale == null ? '—' : (H.in_sale ? 'YES' : 'NO')) + '</b></div>' +
       '<div>Eligible for Sale Event On <b style="color:var(--text)">' + esc(H.eligible_on ? String(H.eligible_on).slice(0, 10) : '—') + '</b></div></div></div></div>';
-    /* KPIs */
-    /* one profit per window, the Sales Analysis law; `actual` is the engine's item-level key and
-       `pending` / `pending_fee` count the orders it could not price */
-    var law = function (s) { return s ? adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending, s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) : '—'; };
-    var w = [['Yesterday', K.yesterday || {}], ['Last 7 days', K.d7 || {}], ['Last 30 days', K.d30 || {}], ['All time (from 13 Aug)', K.all || {}]];
-    /* Phase 1B: the 5-minute today grain, when the engine sends it — ad figures sampled and provisional */
+    /* The five periods print ONCE. This page used to show them as a tile strip and then AGAIN, lower
+       down, as a "Profit & loss" table carrying the same measures over the same five periods. The table
+       is the home: it holds orders, units and units-not-from-ads as well, so nothing was lost when the
+       tiles went, and the old "Orders, all channels · 30d" tile is now the last-30-days row.
+       `actual` is the engine's item-level profit key; `pending` / `pending_fee` count the orders it
+       could not cost. */
+    /* "All time" splices today's own figures in, so when there is a today row it carries the same
+       part-day ad spend as "Today so far" while every other row stops at yesterday. Both rows are
+       therefore tagged, or the all-time figure reads as settled when it is not. The start is the
+       first day we actually hold for this listing, never a typed date. */
+    var firstDay = (D.days && D.days.length && D.days[0] && D.days[0].day) ? dfmt(String(D.days[0].day)) : '';
+    var w = [['Yesterday', K.yesterday || {}], ['Last 7 days', K.d7 || {}], ['Last 30 days', K.d30 || {}], ['All time' + (firstDay ? ' (from ' + firstDay + ')' : ''), K.all || {}]];
     if (K.today && typeof K.today === 'object') w.unshift(['Today so far', K.today]);
-    h += '<div class="at-kpis">' + w.map(function (x) { var s = x[1]; return kpi(x[0], (s.attr_units || 0) + ' ad sales', gbp(s.spend, 0) + ' spend · ROAS ' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + ' · profit (Sales Analysis law) ' + law(s) + (x[0] === 'Today so far' ? '<div class="at-src s" style="margin-top:3px">sampled, provisional</div>' : '')); }).join('') +
-      kpi('Orders, all channels · 30d', String((K.d30 && K.d30.orders) || 0), Math.max(0, ((K.d30 && K.d30.units) || 0) - ((K.d30 && K.d30.attr_units) || 0)) + ' units not from ads') + '</div>';
+    var pcOf = function (s) { return Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0; };
+    var pfOf = function (s) { return Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; };
+    h += '<div class="at-panel"><h3>By period' + src('eBay ads report') + src('orders') + '</h3>' +
+      '<div class="at-sub">Today so far, yesterday, the last 7 and 30 days, and all time. Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.</div>' +
+      '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Period</th><th class="r">Ad spend</th><th class="r">Units from ads</th><th class="r">ROAS</th><th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th><th class="r">Profit</th></tr></thead><tbody>' +
+      w.map(function (x) {
+        var s = x[1], pc = pcOf(s), pf = pfOf(s);
+        var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
+        var moving = x[0] === 'Today so far' || !!s.includes_today;
+        return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
+          '<td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td>' +
+          '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>' +
+          '<td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td><td class="r">' + notAds + '</td>' +
+          '<td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) +
+          (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' order' + (pc + pf === 1 ? '' : 's') + ' not costed yet</div>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
     /* where its ads sit — live rows when the campaign-truth phase has them, the refresh's snapshot otherwise */
     var Wr = D.where && D.where.rows ? D.where.rows : null; var C = D.campaigns || [];
-    h += '<div class="at-panel"><h3>Where its ads sit right now' + src('campaign map, synced every 15 min') + '</h3><div class="at-sub">Campaign, type, campaign status and this listing\'s ad status inside it. Cost-per-sale ads carry no per-ad status on eBay; "exists" means live unless archived.' + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
-      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yday</th><th class="r">Sales yday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
+    h += '<div class="at-panel"><h3>Where its ads sit right now' + src('campaigns · every 15 min') + '</h3><div class="at-sub">Which campaigns this listing is in, and whether its own ad is running. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
+      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
         Wr.map(function (c) { return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="at-tag ' + (c.live ? 'gold' : 'loss') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
-        (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign the map knows.</div>') :
+        (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign we know about.</div>') :
       (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
-        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign the map knows.</div>')) + '</div>';
+        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign we know about.</div>')) + '</div>';
     /* yesterday hour by hour + all-time daily */
     h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday\'s hour profile expected.</div><div id="atHour" class="at-chart"></div></div>' +
-      '<div class="at-panel"><h3>Time slots, last 28 days' + src('orders') + '</h3><div class="at-sub">Orders landing in each UK slot; ad spend per hour joins as the sampled history grows.</div><table class="at-tbl"><thead><tr><th>Slot</th><th class="r">Share</th><th class="r">Orders / day</th><th class="r">Revenue / day</th></tr></thead><tbody>' +
+      '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday usually does by that hour.</div><div id="atHour" class="at-chart"></div></div>' +
+      '<div class="at-panel"><h3>Time slots, last 28 days' + src('orders') + '</h3><div class="at-sub">Orders in each UK time slot. Ad spend by hour joins as we gather more readings.</div><table class="at-tbl"><thead><tr><th>Slot</th><th class="r">Share</th><th class="r">Orders / day</th><th class="r">Revenue / day</th></tr></thead><tbody>' +
       D.slots.map(function (s) { return '<tr><td>' + SLOTS[s.slot] + '</td><td class="r">' + (s.share == null ? '—' : Math.round(s.share * 100) + '%') + '</td><td class="r">' + s.orders_day + '</td><td class="r">' + gbp(s.revenue_day) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
-    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units all channels (gold), 7-day average (white), ad-attributed units (dots), ad spend (bars, faint). Paused periods, budget-capped days and the forecast band arrive with Phases 2–4.</div><div id="atDaily" class="at-chart tall"></div></div>';
+    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units from all channels (gold), the 7-day average (white), units from ads (dots) and ad spend (faint bars).</div><div id="atDaily" class="at-chart tall"></div></div>';
     /* week / month */
     h += '<div class="at-panel"><div class="at-tabs"><button class="' + (AT.tab === 'week' ? 'on' : '') + '" data-tab="week">Week to week</button><button class="' + (AT.tab === 'month' ? 'on' : '') + '" data-tab="month">Month to month</button></div><div id="atWM" class="at-chart short"></div></div>';
     /* weekday profile + heat map */
     h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Weekday profile, last 30 days' + src('eBay ads report') + '</h3><div class="at-sub">' + (D.profile && D.profile.weekday && D.profile.weekday.rates ? 'Shrunk rates (κ 4 days, prior: ' + esc(D.profile.weekday.prior_source || 'account') + ', half-life 14 days) next to the plain 30-day averages. Shuffle test: ' + (D.profile.weekday.spread && D.profile.weekday.spread.p != null ? 'p = ' + D.profile.weekday.spread.p + ' → <b>' + (D.profile.weekday.spread.p < 0.05 ? 'real weekday effect' : 'within noise') + '</b>' : 'not enough dates yet') + '.' : 'Plain averages per weekday; the shrunk profile and the shuffle test arrive with the first profiles run.') + '</div><div id="atWd" class="at-chart short"></div>' +
-      '<table class="at-tbl"><thead><tr><th>Day</th><th class="r">Dates</th><th class="r">Units/day</th><th class="r">Ad sales/day</th><th class="r">Spend/day</th><th class="r">Profit/day (law)</th></tr></thead><tbody>' +
-      D.weekday.map(function (x, i) { var pr = D.profile && D.profile.weekday && D.profile.weekday.rates ? D.profile.weekday.rates[i] : null; return '<tr><td>' + x.day + '</td><td class="r">' + x.dates + '</td><td class="r">' + (x.units_day == null ? '—' : x.units_day) + (pr ? ' <span class="at-src" title="shrunk rate, all history, decayed">' + (Math.round(pr.rate * 100) / 100) + '</span>' : '') + '</td><td class="r">' + (x.attr_units_day == null ? '—' : x.attr_units_day) + '</td><td class="r">' + gbp(x.spend_day) + '</td><td class="r">' + adtProfitCell(x.profit_day, x.pending_cost_orders, x.pending_fee_orders) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+      '<div class="at-panel"><h3>Weekday profile, last 30 days' + src('eBay ads report') + '</h3><div class="at-sub">' + weekdayNote(D) + '</div><div id="atWd" class="at-chart short"></div>' +
+      '<table class="at-tbl"><thead><tr><th>Day</th><th class="r">Dates</th><th class="r">Units/day</th><th class="r">Units from ads/day</th><th class="r">Spend/day</th><th class="r">Profit/day</th></tr></thead><tbody>' +
+      D.weekday.map(function (x, i) { var pr = D.profile && D.profile.weekday && D.profile.weekday.rates ? D.profile.weekday.rates[i] : null; return '<tr><td>' + x.day + '</td><td class="r">' + x.dates + '</td><td class="r">' + (x.units_day == null ? '—' : x.units_day) + (pr ? ' <span class="at-src" title="the smoothed average over all its history">' + (Math.round(pr.rate * 100) / 100) + '</span>' : '') + '</td><td class="r">' + (x.attr_units_day == null ? '—' : x.attr_units_day) + '</td><td class="r">' + gbp(x.spend_day) + '</td><td class="r">' + adtProfitCell(x.profit_day, x.pending_cost_orders, x.pending_fee_orders) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
       '<div class="at-panel"><h3>Hour × weekday, last 28 days' + src('orders') + '</h3><div class="at-sub">Units per hour cell, black → gold. Sunday is the last row.</div>' + heat(D.heat) + '</div></div>';
-    /* dom + P&L */
-    h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Best dates of the month' + src('orders') + '</h3><div class="at-sub">Average units per calendar date over the tool\'s history (from 13 Aug 2026).</div><div id="atDom" class="at-chart short"></div></div>' +
-      '<div class="at-panel"><h3>Profit &amp; loss' + src('eBay ads report') + src('orders') + '</h3><div class="at-sub">One profit figure: the Sales Analysis law — 0.8 × (sold − eBay fees − Ali cost) − 0.96 × click spend − returns, over the listing\'s priced orders. An order without its cost or fees yet is counted, not guessed.</div><table class="at-tbl"><thead><tr><th>Window</th><th class="r">Ad spend</th><th class="r">Ad sales</th><th class="r">ROAS</th><th class="r">Orders</th><th class="r">Units</th><th class="r">Profit (Sales Analysis law)</th></tr></thead><tbody>' +
-      w.map(function (x) { var s = x[1]; var pc = Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0, pf = Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; return '<tr><td>' + x[0] + '</td><td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td><td class="r">' + roas(s.roas) + '</td><td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td><td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) + (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' orders unpriced</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+    /* best dates of the month. The "Profit & loss" panel that used to sit beside it has gone: it
+       reprinted the same five periods and the same measures as the By period table at the top of the
+       page, which is now their one home. */
+    h += '<div class="at-panel"><h3>Best dates of the month' + src('orders') + '</h3><div class="at-sub">Average units per calendar date, over every day we hold for this listing' + (D.days && D.days.length && D.days[0] && D.days[0].day ? ' (from ' + esc(dfmt(String(D.days[0].day))) + ')' : '') + '.</div><div id="atDom" class="at-chart short"></div></div>';
     /* notes, decision, actions */
-    if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>Behaviour descriptors' + src('profiles · ' + (ds.day || '')) + '</h3><div class="at-sub">Spec §6.4, last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'ratio ' + ds.weekday_ratio + ' · ' : '') + esc(ds.weekday_label || '')], ['Slot concentration', SLOTS[ds.top_slot] || '—', 'top share ' + Math.round((ds.top_slot_share || 0) * 100) + '% · HHI ' + ds.slot_hhi], ['Volatility', ds.volatility_cv28 == null ? '—' : 'CV ' + ds.volatility_cv28, 'zero-sale days ' + Math.round((ds.intermittency28 || 0) * 100) + '%'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'attributed ÷ all units'], ['Spend elasticity', ds.spend_elasticity == null ? 'not enough levels' : ds.spend_elasticity + ' units/£', ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
+    if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>How this listing behaves' + src('profiles · ' + (ds.day || ''), 'listing patterns · ' + (ds.day || '')) + '</h3><div class="at-sub">Last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'best day is ' + ds.weekday_ratio + '× the worst · ' : '') + esc(ds.weekday_label || '')], ['Busiest time of day', SLOTS[ds.top_slot] || '—', Math.round((ds.top_slot_share || 0) * 100) + '% of its sales land there'], ['Day-to-day swing', ds.volatility_cv28 == null ? '—' : String(ds.volatility_cv28), 'no sale on ' + Math.round((ds.intermittency28 || 0) * 100) + '% of days. 0 is flat, above 1 is very uneven'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'units from ads ÷ all units'], ['Extra units per £1 of spend', ds.spend_elasticity == null ? 'not enough spend levels' : String(ds.spend_elasticity), ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
     /* Phase 4: week-to-week behaviour — the descriptors that moved week over week, with the reading
        and the recommended action (owner: "Make Behaviour Descriptors much larger and week-to-week:
        what changed, why, what to fix, what action, improving or declining"). */
     if (D.weeks_behaviour && D.weeks_behaviour.length) {
       h += '<div class="at-panel"><h3>Week-to-week behaviour' + src('week behaviour') + '</h3>' +
-        '<div class="at-sub">Each week against the one before: which descriptors moved, the likely reason, and what to do. Improving weeks are gold, declining weeks are red.</div>' +
+        '<div class="at-sub">Each week against the one before: what moved, the likely reason, and what to do. Improving weeks are gold, declining weeks are red.</div>' +
         '<table class="at-tbl"><thead><tr><th>Week</th><th>Trend</th><th>What changed</th><th>Reading &amp; action</th></tr></thead><tbody>' +
         D.weeks_behaviour.slice().reverse().map(function (wb) {
           var ch = (wb.changed || []).map(function (c) {
             var arrow = /up|\+|rise|increase/i.test(String(c.direction)) ? '▲' : /down|-|fall|decrease/i.test(String(c.direction)) ? '▼' : '→';
             return '<div>' + esc(descLabel(c.descriptor)) + ' <span class="at-src">' + descVal(c.descriptor, c.from) + ' ' + arrow + ' ' + descVal(c.descriptor, c.to) + '</span></div>';
           }).join('');
-          return '<tr><td>' + esc(wb.iso_week || '') + '</td><td>' + trendTag(wb.label) + '</td><td>' + (ch || '<span class="at-empty">no material change</span>') + '</td><td>' + esc(wb.sentence || '') + '</td></tr>';
+          return '<tr><td>' + esc(wb.iso_week || '') + '</td><td>' + trendTag(wb.label) + '</td><td>' + (ch || '<span class="at-empty">no real change</span>') + '</td><td>' + esc(wb.sentence || '') + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
     /* §7: pattern changes — the regime history, what moved and when. The rows come from adtool_regimes, the
        same detections A17 fires on, so the page and the alert can never tell different stories. */
     var rg = D.profile && D.profile.regime, rh = (D.profile && D.profile.regime_history) || [];
-    h += '<div class="at-panel"><h3>Pattern changes' + src('regimes · §6.3a') + '</h3>'
-      + '<div class="at-sub">' + (rg && rg.regime_change ? 'Today the shape of this listing\'s day has moved against its own prior 28 days.'
-          : rg && rg.reason ? 'Nothing detected today — ' + esc(rg.reason) + '.'
-          : 'Nothing detected today.') + '</div>'
+    h += '<div class="at-panel"><h3>Pattern changes' + src('regimes', 'pattern changes') + '</h3>'
+      + '<div class="at-sub">' + (rg && rg.regime_change ? 'Today this listing\'s pattern has moved away from its own recent weeks.'
+          : rg && rg.reason ? 'Nothing found today. ' + esc(rg.reason) + '.'
+          : 'Nothing found today.') + '</div>'
       + (rh.length
           ? '<table class="at-tbl"><thead><tr><th>Detected</th><th>What</th><th>What moved</th></tr></thead><tbody>'
             + rh.map(function (r) { return '<tr><td>' + esc(r.detected_day) + '</td><td>' + esc(r.kind) + '</td><td>' + esc(r.note || '') + '</td></tr>'; }).join('')
             + '</tbody></table>'
-          : '<div class="at-empty">No pattern change has been detected for this listing yet. Detection needs enough orders on both sides of the comparison; the reason above says when it could not run.</div>')
+          : '<div class="at-empty">No pattern change for this listing yet. We need enough orders on both sides of the comparison before we can tell.</div>')
       + '</div>';
 
     h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Behaviour notes' + (D.narrative ? src(D.narrative.model === 'template' ? 'written from the numbers' : 'model, validated') : '') + '</h3><div class="at-note" id="atNarr">' + (D.narrative ? esc(D.narrative.text) + (D.narrative.validated ? '' : ' <b>(a figure in this text is not in its inputs — held back)</b>') : 'No narrative yet. <a href="#" id="atNarrGo">Write one from the numbers</a>.') + '</div>' +
-      '<h3 style="margin-top:12px">Today\'s decision</h3><div class="at-note">' + (D.decision ? '<b>' + esc(D.decision.decision) + '</b> · ' + esc(D.decision.confidence) + ' · ' + esc(D.decision.action) + '<div class="at-sub" style="margin:4px 0 0">' + esc(D.decision.why) + '</div><div class="at-sub" style="margin:2px 0 0">' + esc(D.decision.day) + ' ' + esc(D.decision.batch) + ' batch · rules ' + esc((function () { try { return JSON.parse(D.decision.rules_json || '[]').join(', '); } catch (e) { return ''; } })() || '—') + ' · EV ' + pm(D.decision.expected_value) + (D.decision.outcome_score != null ? ' · scored ' + (D.decision.outcome_score ? 'right' : 'wrong') + (Number(D.decision.outcome_provisional) === 1 ? ' (provisional — unpriced orders / report pending, re-scored)' : '') : '') + ' · shadow, nothing sent to eBay</div>' : 'The decision engine has not run for this listing yet.') + '</div></div>' +
-      '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only; nothing here reaches eBay.</div>' +
+      '<div class="at-panel"><h3>Behaviour notes' + (D.narrative ? src('narrative', D.narrative.model === 'template' ? 'written from the numbers' : 'model, validated') : '') + '</h3><div class="at-note" id="atNarr">' + (D.narrative ? esc(D.narrative.text) + (D.narrative.validated ? '' : ' <b>(a figure in this text is not in the numbers behind it, so it is held back)</b>') : 'No notes yet. <a href="#" id="atNarrGo">Write some from the numbers</a>.') + '</div>' +
+      '<h3 style="margin-top:12px">Today\'s decision</h3><div class="at-note">' + (D.decision ? '<b>' + esc(D.decision.decision) + '</b> · ' + esc(D.decision.confidence) + ' · ' + esc(D.decision.action) + '<div class="at-sub" style="margin:4px 0 0">' + esc(D.decision.why) + '</div><div class="at-sub" style="margin:2px 0 0">' + esc(D.decision.day) + ' ' + esc(D.decision.batch) + ' batch · expected gain ' + pm(D.decision.expected_value) + (D.decision.outcome_score != null ? ' · scored ' + (D.decision.outcome_score ? 'right' : 'wrong') + (Number(D.decision.outcome_provisional) === 1 ? ' (not final: some orders are not costed yet, so it will be scored again)' : '') : '') + ' · a suggestion only, nothing sent to eBay</div>' : 'No suggestion for this listing yet.') + '</div></div>' +
+      '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only. Nothing here reaches eBay.</div>' +
       '<ul class="at-list" id="atActs">' + (D.actions.length ? D.actions.map(function (a) { return '<li>' + esc(a.note) + '<div class="m">' + esc(a.type) + ' · ' + esc(a.by_email) + ' · ' + esc(String(a.at).slice(0, 16)) + '</div></li>'; }).join('') : '<li class="at-empty">No actions logged yet.</li>') + '</ul>' +
       '<textarea id="atNote" placeholder="Add a note (what was changed, where, why)"></textarea><button class="at-btn" id="atNoteBtn">Log note</button></div></div>';
-    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days · answered in ' + AT.ms + ' ms</div>';
+    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms</div>';
     $('atBody').innerHTML = h;
     var tabs = document.querySelectorAll('.at-tabs button');
     for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { AT.tab = this.getAttribute('data-tab'); for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); drawWM(); };
@@ -249,17 +299,25 @@
       this.disabled = true;
       api('adtoolActionLog', { item_id: AT.item, type: 'note', note: n }).then(function () { toast('Logged'); load(AT.item); }).catch(function (e) { toast(e.message || 'failed'); $('atNoteBtn').disabled = false; });
     };
-    var ng = $('atNarrGo'); if (ng) ng.onclick = function (e) { e.preventDefault(); $('atNarr').textContent = 'Writing…'; api('adtoolNarrative', { scope: 'listing', scope_id: AT.item }).then(function (r) { $('atNarr').innerHTML = esc(r.text) + (r.validated ? '' : ' <b>(a figure is not in its inputs — held back)</b>'); }).catch(function (x) { $('atNarr').textContent = x.message || 'failed'; }); };
-    if (window.echarts) { drawHour(); drawDaily(); drawWM(); drawWd(); drawDom(); } else { var ids = ['atHour', 'atDaily', 'atWM', 'atWd', 'atDom']; ids.forEach(function (id) { var el = $(id); if (el) el.innerHTML = '<div class="at-empty">Charts need assets/echarts.min.js, which did not load.</div>'; }); }
+    var ng = $('atNarrGo'); if (ng) ng.onclick = function (e) { e.preventDefault(); $('atNarr').textContent = 'Writing…'; api('adtoolNarrative', { scope: 'listing', scope_id: AT.item }).then(function (r) { $('atNarr').innerHTML = esc(r.text) + (r.validated ? '' : ' <b>(a figure is not in the numbers behind it, so it is held back)</b>'); }).catch(function (x) { $('atNarr').textContent = x.message || 'failed'; }); };
+    if (window.echarts) { drawHour(); drawDaily(); drawWM(); drawWd(); drawDom(); } else { var ids = ['atHour', 'atDaily', 'atWM', 'atWd', 'atDom']; ids.forEach(function (id) { var el = $(id); if (el) el.innerHTML = '<div class="at-empty">The chart library did not load, so this chart is missing.</div>'; }); }
   }
 
+  /* The heat-map cell shade. BYTE-IDENTICAL with the copy in view-adtool-analytics.js: each view file is
+     its own closure, so neither can see the other's, and the shared shell is not ours to add to.
+     Change one and change the other. The grid wrappers differ on purpose — this one is 24 hours by
+     7 weekdays, the one there is any rows by any columns. */
+  function heatShade(v, mx) {
+    var a = mx ? (Number(v) || 0) / mx : 0;
+    return (Number(v) ? 'rgba(242,176,53,' + (0.15 + 0.85 * a).toFixed(2) + ')' : 'rgba(255,255,255,.05)');
+  }
   function heat(grid) {
     var mx = 0; grid.forEach(function (r) { r.forEach(function (v) { mx = Math.max(mx, v); }); });
     var h = '<div class="at-heat"><div class="lab"></div>';
     for (var x = 0; x < 24; x++) h += '<div class="lab" style="text-align:center">' + (x % 3 === 0 ? x : '') + '</div>';
     grid.forEach(function (r, d) {
       h += '<div class="lab">' + DOW[d] + '</div>';
-      r.forEach(function (v, x) { var a = mx ? v / mx : 0; h += '<div class="c" title="' + DOW[d] + ' ' + x + ':00 — ' + v + ' units" style="background:' + (v ? 'rgba(242,176,53,' + (0.15 + 0.85 * a).toFixed(2) + ')' : 'rgba(255,255,255,.05)') + '"></div>'; });
+      r.forEach(function (v, x) { h += '<div class="c" title="' + DOW[d] + ' ' + x + ':00, ' + v + ' units" style="background:' + heatShade(v, mx) + '"></div>'; });
     });
     return h + '</div>';
   }
@@ -269,9 +327,9 @@
     var ord = new Array(24).fill(0), sp = new Array(24).fill(0), anyS = false;
     hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; if (v) { sp[x.hour] = v; anyS = true; } });
     var series = [{ name: 'Units', type: 'bar', data: ord, label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
-    if (D.profile && D.profile.hour_weekday && D.profile.hour_weekday.shares && yday) { var wdi = dowOf(yday); var tot = ord.reduce(function (t, v) { return t + v; }, 0); var rowShares = D.profile.hour_weekday.shares.slice(wdi * 24, wdi * 24 + 24); var rs = rowShares.reduce(function (t, v) { return t + v; }, 0) || 1; series.push({ name: 'Profile (expected share × yesterday\'s total)', type: 'line', data: rowShares.map(function (v) { return Math.round(v / rs * tot * 100) / 100; }), lineStyle: { color: 'rgba(255,255,255,.35)', width: 1.5, type: 'dashed' }, symbol: 'none' }); }
+    if (D.profile && D.profile.hour_weekday && D.profile.hour_weekday.shares && yday) { var wdi = dowOf(yday); var tot = ord.reduce(function (t, v) { return t + v; }, 0); var rowShares = D.profile.hour_weekday.shares.slice(wdi * 24, wdi * 24 + 24); var rs = rowShares.reduce(function (t, v) { return t + v; }, 0) || 1; series.push({ name: 'What this weekday usually does', type: 'line', data: rowShares.map(function (v) { return Math.round(v / rs * tot * 100) / 100; }), lineStyle: { color: 'rgba(255,255,255,.35)', width: 1.5, type: 'dashed' }, symbol: 'none' }); }
     var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }];
-    if (anyS) { y.push({ type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend (sampled)', nameTextStyle: { color: '#66707c' } }); series.push({ name: 'Ad spend (sampled)', type: 'line', yAxisIndex: 1, data: sp.map(function (v) { return Math.round(v * 100) / 100; }), lineStyle: { color: WHITE55, width: 2 }, itemStyle: { color: WHITE55 }, symbolSize: 5, smooth: false }); }
+    if (anyS) { y.push({ type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend so far', nameTextStyle: { color: '#66707c' } }); series.push({ name: 'Ad spend so far', type: 'line', yAxisIndex: 1, data: sp.map(function (v) { return Math.round(v * 100) / 100; }), lineStyle: { color: WHITE55, width: 2 }, itemStyle: { color: WHITE55 }, symbolSize: 5, smooth: false }); }
     mount('atHour', chartBase({ xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: anyS, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
   }
   function dowOf(ymd) { var d = new Date(ymd + 'T12:00:00Z'); return (d.getUTCDay() + 6) % 7; }
@@ -284,17 +342,17 @@
     mount('atDaily', chartBase({ xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
       yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Ad spend', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: NEUTRAL }, barMaxWidth: 10 }, { name: 'Units (all channels)', type: 'line', data: units, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 4, areaStyle: { color: BAND } }, { name: '7-day average', type: 'line', data: avg, lineStyle: { color: WHITE55, width: 2 }, symbol: 'none' }, { name: 'Ad-attributed units', type: 'scatter', data: attr, itemStyle: { color: GOLD2 }, symbolSize: 5 }].concat(fc.length ? [{ name: 'band', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_lo; })), stack: 'fb', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '14-day forecast band (' + fc[0].model + ', made ' + AT.data.forecast.made_day + ')', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return Math.round((r.units_hi - r.units_lo) * 100) / 100; })), stack: 'fb', lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(255,255,255,.12)' }, symbol: 'none' }, { name: 'Forecast', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_mean; })), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbol: 'none' }] : []) }));
+      series: [{ name: 'Ad spend', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: NEUTRAL }, barMaxWidth: 10 }, { name: 'Units (all channels)', type: 'line', data: units, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 4, areaStyle: { color: BAND } }, { name: '7-day average', type: 'line', data: avg, lineStyle: { color: WHITE55, width: 2 }, symbol: 'none' }, { name: 'Units from ads', type: 'scatter', data: attr, itemStyle: { color: GOLD2 }, symbolSize: 5 }].concat(fc.length ? [{ name: 'band', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_lo; })), stack: 'fb', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '14-day forecast, made ' + AT.data.forecast.made_day, type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return Math.round((r.units_hi - r.units_lo) * 100) / 100; })), stack: 'fb', lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(255,255,255,.12)' }, symbol: 'none' }, { name: 'Forecast', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_mean; })), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbol: 'none' }] : []) }));
   }
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';
     mount('atWM', chartBase({ xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Ad sales', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Profit £ (Sales Analysis law)', type: 'line', data: rows.map(function (r) { return r.actual_profit == null ? null : Math.round(Number(r.actual_profit) * 100) / 100; }), lineStyle: { color: GOLD2, width: 2 }, itemStyle: { color: function (p) { return Number(p.value) < 0 ? LOSS : GOLD2; } }, symbolSize: 5 }] }));
+      series: [{ name: 'Units', type: 'bar', data: rows.map(function (r) { return r.units; }), label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, label: { show: true, position: 'top', color: '#9aa4b1', fontSize: 10 } }, { name: 'Units from ads', type: 'bar', data: rows.map(function (r) { return r.attr_units; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }, { name: 'Profit £', type: 'line', data: rows.map(function (r) { return r.actual_profit == null ? null : Math.round(Number(r.actual_profit) * 100) / 100; }), lineStyle: { color: GOLD2, width: 2 }, itemStyle: { color: function (p) { return Number(p.value) < 0 ? LOSS : GOLD2; } }, symbolSize: 5 }] }));
   }
   function drawWd() {
     var wd = AT.data.weekday;
     mount('atWd', chartBase({ xAxis: { type: 'category', data: wd.map(function (x) { return x.day; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Ad sales / day', type: 'bar', data: wd.map(function (x) { return x.attr_units_day; }), itemStyle: { color: function (p) { return p.dataIndex === 6 ? GOLD2 : GOLD; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }, { name: 'Ad spend / day £', type: 'bar', data: wd.map(function (x) { return x.spend_day == null ? null : Math.round(Number(x.spend_day) * 100) / 100; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }] }));
+      series: [{ name: 'Units from ads / day', type: 'bar', data: wd.map(function (x) { return x.attr_units_day; }), itemStyle: { color: function (p) { return p.dataIndex === 6 ? GOLD2 : GOLD; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }, { name: 'Ad spend / day £', type: 'bar', data: wd.map(function (x) { return x.spend_day == null ? null : Math.round(Number(x.spend_day) * 100) / 100; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }] }));
   }
   function drawDom() {
     var dom = AT.data.dom;

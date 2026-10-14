@@ -1,8 +1,9 @@
 /* view-adtool-overview.js — Advertising Tool · Advertising overview (owner's brief, 27 Sep 2026: a NEW
  * "behaviour patterns" page — "compare last 7 days, last 10 days, previous comparable periods; up/down
  * of ROAS, spend, sales, profit, CPC, CVR; the purpose is the trend, not single numbers"). One line per
- * metric over the window (value pills), an up/down summary strip (last 7 vs previous 7, last 10 vs
- * previous 10) with ▲/▼ and the delta, and — because the portal never shows a collective profit figure —
+ * metric over the window (value pills), ONE up/down summary strip with a period switch (last 7 or
+ * last 10, each against the comparable period before it) showing ▲/▼ and the delta, and, because the
+ * portal never shows a collective profit figure,
  * the profit trend is drawn as counts of profitable vs losing listings per week plus a top-movers list of
  * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. The daily series ends
  * yesterday (adtool_scope_day has no today row), so the page re-reads hourly — after each :20 rollup —
@@ -11,7 +12,7 @@
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
-  var OV = { account: '', period: null, accounts: [], data: null };
+  var OV = { account: '', period: null, accounts: [], data: null, win: 'w7' };
 
   VIEW_CSS.push([
     '.ov-wrap{max-width:1240px}',
@@ -45,8 +46,16 @@
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
-  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
-  function gbp0(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)).toLocaleString('en-GB'); }
+  /* ONE money format across the four advertising view files: thousands separated, two decimals
+     unless the caller asks for fewer. The same figure must not read £1,234 on one page and
+     £1234.00 on the next. This function is byte-identical in view-adtool-morning.js,
+     view-adtool-analytics.js and view-adtool-product.js — change one and change all four. */
+  function gbp(v, d) {
+    if (v == null || v === '' || isNaN(Number(v))) return '—';
+    var n = Number(v), p = d == null ? 2 : Number(d);
+    return (n < 0 ? '−£' : '£') + Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: p, maximumFractionDigits: p });
+  }
+  function gbp0(n) { return gbp(n, 0); }
   function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
   function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
   function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
@@ -57,17 +66,17 @@
   /* how each metric is drawn and judged. good: +1 higher is better, −1 lower is better (CPC), 0 neutral (spend). */
   var METRICS = [
     { key: 'spend', label: 'Spend', money: true, good: 0, fmt: function (v) { return chartMoney(v); } },
-    { key: 'attr_revenue', label: 'Attributed sales', money: true, good: 1, fmt: function (v) { return chartMoney(v); } },
+    { key: 'attr_revenue', label: 'Sales from ads', money: true, good: 1, fmt: function (v) { return chartMoney(v); } },
     { key: 'roas', label: 'ROAS', good: 1, ref: 1, fmt: function (v) { return (Math.round(v * 100) / 100) + '×'; }, ratio: ['attr_revenue', 'spend'] },
     { key: 'cpc', label: 'CPC', money: true, good: -1, fmt: function (v) { return chartMoney(v); }, ratio: ['spend', 'clicks'] },
-    { key: 'cvr', label: 'CVR', good: 1, fmt: function (v) { return (Math.round(v * 1000) / 10) + '%'; }, pctScale: true, ratio: ['attr_units', 'clicks'] }
+    { key: 'cvr', label: 'Conversion rate', good: 1, fmt: function (v) { return (Math.round(v * 1000) / 10) + '%'; }, pctScale: true, ratio: ['attr_units', 'clicks'] }
   ];
   var STRIP_METRICS = [
     { key: 'spend', label: 'Spend', good: 0, fmt: gbp0 },
-    { key: 'attr_revenue', label: 'Attributed sales', good: 1, fmt: gbp0 },
+    { key: 'attr_revenue', label: 'Sales from ads', good: 1, fmt: gbp0 },
     { key: 'roas', label: 'ROAS', good: 1, fmt: roasTxt, ratio: ['attr_revenue', 'spend'] },
     { key: 'cpc', label: 'CPC', good: -1, fmt: gbp, ratio: ['spend', 'clicks'] },
-    { key: 'cvr', label: 'CVR', good: 1, fmt: pct, ratio: ['attr_units', 'clicks'] },
+    { key: 'cvr', label: 'Conversion rate', good: 1, fmt: pct, ratio: ['attr_units', 'clicks'] },
     { key: 'orders', label: 'Orders', good: 1, fmt: cnt },
     { key: 'units', label: 'Units', good: 1, fmt: cnt }
   ];
@@ -76,9 +85,9 @@
     label: 'Advertising overview (ads)', hidden: true, order: 62, roles: ROLES,
     icon: '<path d="M3 3v18h18"/><path d="m6 15 4-4 3 3 5-7"/>',
     render: function () {
-      return '<div class="ov-wrap">' + adtHgroup('Advertising overview', 'the trend, not single numbers — where spend, sales, ROAS, CPC and CVR are heading', 'ovFresh') +
+      return '<div class="ov-wrap">' + adtHgroup('Advertising overview', 'Where spend, sales, return and cost per click are heading over the period you pick', 'ovFresh') +
         '<div id="ovBar"></div><div id="ovAcct" class="an-filters"></div>' +
-        '<div id="ovBody"><div class="ov-empty">Reading the trend…</div></div></div>';
+        '<div id="ovBody"><div class="ov-empty">Loading…</div></div></div>';
     },
     init: function () {
       OV.period = adtPeriodBar('ovBar', { page: 'adtoolOverview', def: 'd30', onChange: function (v) { OV.period = v; load(false); } });
@@ -107,21 +116,23 @@
          re-read is hourly, not every 5 minutes; adtPoll keeps the hidden-tab and 'auth' guards */
       if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 3600000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
     }).catch(function (e) {
-      if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'the overview could not be read') + '</div></div>';
+      if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'This page could not load.') + '</div></div>';
       throw e;
     });
   }
 
   function draw() {
     var D = OV.data, h = '';
-    if (!D || typeof D !== 'object') { $('ovBody').innerHTML = '<div class="ov-empty">No answer for this window.</div>'; return; }
-    h += windowStrip(D, 'last7', 'prev7', 'Last 7 days vs the previous 7');
-    h += windowStrip(D, 'last10', 'prev10', 'Last 10 days vs the previous 10');
+    if (!D || typeof D !== 'object') { $('ovBody').innerHTML = '<div class="ov-empty">No data for this period.</div>'; return; }
+    h += windowStrip(D);
     h += trendPanel(D);
     h += profitPanel(D);
     h += moversPanel(D);
     h += '<div class="an-sub" style="margin-top:8px">' + esc(D.source || '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
     $('ovBody').innerHTML = h;
+    /* the window buttons redraw from the answer already in hand — no second read */
+    var wb = document.querySelectorAll('#ovWin button');
+    for (var i = 0; i < wb.length; i++) wb[i].onclick = function () { OV.win = this.getAttribute('data-w'); draw(); };
   }
 
   function totalOf(w, m) {
@@ -134,10 +145,18 @@
   function dirOf(w, m) { var cell = w && w[m.key]; if (cell && typeof cell === 'object' && cell.dir) return String(cell.dir); return null; }
 
   /* the up/down strip: each metric's value now, the arrow, and the % move from the previous comparable
-     window. A decline in a "higher is better" metric (or a rise in CPC) is #e0563f; a favourable move is gold. */
-  function windowStrip(D, lastKey, prevKey, label) {
-    var W = D.windows || {}, last = W[lastKey], prev = W[prevKey];
+     period. A decline in a "higher is better" metric (or a rise in CPC) is #e0563f; a favourable move is gold.
+     ONE row, not two. This page used to print the same seven figures twice — last 7 against the previous 7,
+     then last 10 against the previous 10, stacked. The period is a choice now and each number appears once;
+     both periods are still here, one button apart. */
+  function windowStrip(D) {
+    var W = D.windows || {};
+    var ten = OV.win === 'w10';
+    var last = W[ten ? 'last10' : 'last7'], prev = W[ten ? 'prev10' : 'prev7'];
+    var has7 = !!(W.last7 || W.prev7), has10 = !!(W.last10 || W.prev10);
+    var label = ten ? 'Last 10 days against the previous 10' : 'Last 7 days against the previous 7';
     if (!last && !prev) return '';
+    var tabs = (has7 && has10) ? '<div class="an-filters" id="ovWin"><button class="' + (ten ? '' : 'on') + '" data-w="w7">Last 7 days</button><button class="' + (ten ? 'on' : '') + '" data-w="w10">Last 10 days</button></div>' : '';
     var chips = STRIP_METRICS.map(function (m) {
       var now = totalOf(last, m), was = totalOf(prev, m);
       var d = (now != null && was != null && was !== 0) ? (now - was) / Math.abs(was) : null;
@@ -151,21 +170,21 @@
       return '<div class="ov-chip"><div class="k">' + esc(m.label) + '</div><div class="v">' + esc(m.fmt(now)) + '</div>' +
         '<div class="d ' + cls + '">' + arrow + ' ' + (d == null ? '—' : pctSign(d)) + ' <span class="was">from ' + esc(m.fmt(was)) + '</span></div></div>';
     }).join('');
-    return '<div class="ov-winlbl">' + esc(label) + src('overview') + '</div><div class="ov-strip">' + chips + '</div>';
+    return tabs + '<div class="ov-winlbl">' + esc(label) + src('overview') + '</div><div class="ov-strip">' + chips + '</div>';
   }
 
   /* one line per metric over the window, value pills, a 1× reference on ROAS. The series is the fleet's
      (or the account's) daily figures from adtool_scope_day. */
   function trendPanel(D) {
     var series = (D.series || []).filter(function (r) { return r && r.day; });
-    if (!series.length) return '<div class="ov-panel"><h3>Trend</h3><div class="note">No daily series for this window yet.</div></div>';
+    if (!series.length) return '<div class="ov-panel"><h3>Trend</h3><div class="note">No daily figures for this period yet.</div></div>';
     var cards = METRICS.map(function (m) {
       return '<div class="ov-mcard"><h4>' + esc(m.label) + '</h4><div class="sub">' + esc(dayRange(series)) + '</div>' + lineChart(series, m) + '</div>';
     }).join('');
     /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
     var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
     return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure over the window; the pill on a point is its value. ROAS carries a 1× line — below it the ads cost more than the revenue eBay credits to them. The series ends yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + ' — the daily grain has no today row; today lives on the War room and the Command centre.</div>' +
+      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Today at a glance</b> or <b>What to do today</b>.</div>' +
       '<div class="ov-metrics">' + cards + '</div></div>';
   }
   function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
@@ -207,7 +226,7 @@
     var every = n > 8 ? Math.ceil(n / 6) : 1;
     var pill = pts.map(function (p, idx) {
       var showLabel = (idx % every === 0) || idx === pts.length - 1;
-      return { x: p.x, y: p.y, label: showLabel ? m.fmt(p._v) : null, title: String(p._day) + ' — ' + m.fmt(p._v) };
+      return { x: p.x, y: p.y, label: showLabel ? m.fmt(p._v) : null, title: String(p._day) + ': ' + m.fmt(p._v) };
     });
     s += chartLineSeries(pill, { color: 'var(--gold-b)', width: 2.2, minGap: 40 });
     /* x labels: first, middle, last */
@@ -242,12 +261,12 @@
       return chartBars(norm.map(function (w) {
         var lbl = (w.week || '').replace(/^\d{4}-?/, 'W');
         if (w.partial) lbl += w.days != null ? ' · ' + Math.round(w.days) + ' d' : ' · so far';
-        return { label: lbl, value: num(w[pick]) || 0, muted: w.partial, title: (w.week || '') + ' — ' + cnt(w[pick]) + ' ' + pick + ' listings' + (w.partial ? ' (week in progress' + (w.days != null ? ', ' + Math.round(w.days) + ' of 7 days rolled' : ', Monday to yesterday') + ')' : '') };
+        return { label: lbl, value: num(w[pick]) || 0, muted: w.partial, title: (w.week || '') + ': ' + cnt(w[pick]) + ' ' + pick + ' listings' + (w.partial ? ' (week in progress' + (w.days != null ? ', ' + Math.round(w.days) + ' of 7 days counted' : ', Monday to yesterday') + ')' : '') };
       }), { height: 140, color: color, pillColor: color, fmt: function (v) { return String(Math.round(v)); }, minGap: 0 });
     }
     return '<div class="ov-panel"><h3>Profit trend, as listing counts' + src('overview') + '</h3>' +
-      '<div class="note">The portal never sums profit across listings, so the profit trend is shown as how many listings <b>earned</b> and how many <b>lost</b> each ISO week, under the Sales Analysis law — plus the item movers below. A rising gold bar and a falling red bar week over week is the shape you want.' +
-      (anyPartial ? ' The hatched bar is the <b>week in progress</b> (Monday to yesterday) — it fills as the week goes on, so read it against the finished weeks only once it is complete.' : '') + '</div>' +
+      '<div class="note">Profit is never added up across listings, so the trend here is how many listings <b>made money</b> each week and how many <b>lost</b>. More gold and less red, week on week, is the shape you want.' +
+      (anyPartial ? ' The hatched bar is <b>this week so far</b>, Monday to yesterday, so read it against the finished weeks only once it is complete.' : '') + '</div>' +
       '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span>' +
       (anyPartial ? '<span><i class="ov-hatch"></i>Week in progress</span>' : '') + '</div>' +
       '<div class="ov-grid2"><div class="ov-mcard"><h4>Profitable listings / week</h4>' + bars('profitable', 'var(--gold-b)') + '</div>' +
@@ -263,7 +282,7 @@
     var risers = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) > num(r.prev_profit); }).sort(function (a, b) { return (b._pct || 0) - (a._pct || 0); }).slice(0, 8);
     var decliners = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) < num(r.prev_profit); }).sort(function (a, b) { return (a._pct || 0) - (b._pct || 0); }).slice(0, 8);
     function tbl(rows, riser) {
-      if (!rows.length) return '<div class="ov-empty">none in this window</div>';
+      if (!rows.length) return '<div class="ov-empty">none in this period</div>';
       return '<div class="an-scroll"><table class="ov-tbl"><thead><tr><th>Listing</th><th class="r">Was</th><th class="r">Now</th><th class="r">Change</th></tr></thead><tbody>' +
         rows.map(function (r) {
           var p = r._pct;
@@ -274,7 +293,7 @@
         }).join('') + '</tbody></table></div>';
     }
     return '<div class="ov-panel"><h3>Top movers, item by item' + src('overview') + '</h3>' +
-      '<div class="note">The listings whose own profit moved most between the previous comparable window and this one. Profit is per item, under the Sales Analysis law.</div>' +
+      '<div class="note">The listings whose own profit moved most against the period before. Profit is per listing, never added up.</div>' +
       '<div class="ov-grid2"><div class="ov-mcard"><h4>Top risers</h4>' + tbl(risers, true) + '</div>' +
       '<div class="ov-mcard"><h4>Top decliners</h4>' + tbl(decliners, false) + '</div></div></div>';
   }

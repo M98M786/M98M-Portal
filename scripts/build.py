@@ -151,6 +151,28 @@ def build_frontend():
     return views
 
 
+# The company portal's ADVERTISING group, brought into the advertising portal as the same pages
+# (owner, 14 Oct). Files, not keys, because a file may carry more than one page: view-truthAds.js
+# holds Live listings and Wrong advertising, view-cpc.js holds Keyword approvals, and
+# view-deptTasks.js registers Advertising tasks inside a per-department loop.
+ADS_MERGED_FILES = [
+    'view-deptTasks.js',        # Advertising tasks
+    'view-signals.js',          # Advertising signals
+    'view-adsCentre.js',        # Ads command centre
+    'view-marketing.js',        # Marketing
+    'view-campaignWatch.js',    # Campaign watch
+    'view-traffic.js',          # Traffic
+    'view-truthAds.js',         # Live listings + Wrong advertising
+    'view-advertisingMoney.js', # Advertising
+    'view-potential-cpc.js',    # Potential CPC
+    'view-cpc.js',              # Keyword approvals (and the hidden CPC research page)
+]
+# The eleven pages the owner named, which the shell's ADS_MERGED allowlist must also carry.
+ADS_MERGED_KEYS = ['tasksAds', 'adSignals', 'adsCentre', 'marketing', 'campaignWatch',
+                   'traffic', 'liveSplit', 'wrongAds', 'advertising', 'potentialCpc',
+                   'keywordApprovals']
+
+
 def build_ads():
     """ads/index.html — the advertising portal, served at portal.m98mltd.co.uk/ads/.
 
@@ -173,6 +195,15 @@ def build_ads():
     files = sorted(f for f in os.listdir(fdir) if f.startswith('view-adtool-') and f.endswith('.js'))
     if not files:
         sys.exit('ERROR: no view-adtool-*.js modules found')
+    # Owner, 14 Oct: the eleven screens of the company portal's ADVERTISING group must stand in this
+    # portal as the SAME pages. They are spliced from the same files rather than rewritten, so there
+    # is one implementation of each and the two front doors can never disagree about a number.
+    # Each file is a self-contained IIFE; the keys they bring that this portal does not want
+    # (signals, csSignals, cpc) stay hidden by the shell's own allowlist.
+    for name in ADS_MERGED_FILES:
+        if not os.path.exists(os.path.join(fdir, name)):
+            sys.exit('ERROR: the ads build wants %s and it is not there' % name)
+        files.append(name)
     blocks = ['window.M98M_ADS_ONLY = true;']
     declared = set()
     for name in files:
@@ -205,6 +236,15 @@ def build_ads():
     if missing:
         sys.exit('ERROR: the ads build dropped %d advertising view(s) the modules declare: %s'
                  % (len(missing), ', '.join(missing)))
+    # The same tripwire for the merged pages. `tasksAds` is registered as VIEWS[D.key] inside a
+    # loop, so the regex above cannot see it; it is asserted by the loop's own marker instead.
+    gone = [k for k in ADS_MERGED_KEYS if k != 'tasksAds' and ('VIEWS.%s =' % k) not in page]
+    if "key: 'tasksAds'" not in page:
+        gone.append('tasksAds')
+    if gone:
+        sys.exit('ERROR: the ads build is missing %d merged advertising page(s): %s'
+                 % (len(gone), ', '.join(sorted(gone))))
+    print('ads -> merged company pages: %d of %d present' % (len(ADS_MERGED_KEYS) - len(gone), len(ADS_MERGED_KEYS)))
     return views
 
 

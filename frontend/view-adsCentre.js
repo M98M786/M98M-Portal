@@ -6,7 +6,11 @@
   var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
   var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
 
-  VIEW_CSS.push(
+  /* `acc-tbl`, not `ac-tbl`: view-adtool-campaigns.js declares its OWN `.ac-tbl` with a different
+   body. VIEW_CSS is one array joined in splice order, and the two portals splice these files in a
+   different order, so sharing the name made the same class resolve differently in each portal. That
+   is precisely the drift the shared-shell design exists to prevent. Do not rename it back. */
+VIEW_CSS.push(
     '.ac-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px}' +
     '.ac-tile{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:var(--panel-2)}' +
     '.ac-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
@@ -16,11 +20,11 @@
     '.ac-acc{border:1px solid var(--gold-line);border-radius:11px;padding:10px 14px;background:var(--panel);font-size:12px;font-weight:700}' +
     '.ac-acc b{display:block;font-size:15px;font-variant-numeric:tabular-nums}' +
     '.ac-acc .w{color:var(--bad);font-size:10.5px;font-weight:800}' +
-    '.ac-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}' +
-    '.ac-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
-    '.ac-tbl th:first-child{text-align:left}' +
-    '.ac-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
-    '.ac-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
+    '.acc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}' +
+    '.acc-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.acc-tbl th:first-child{text-align:left}' +
+    '.acc-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+    '.acc-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
     '.ac-waste td:first-child{border-left:3px solid var(--bad)}' +
     /* R7-8 organic vs promoted split */
@@ -67,7 +71,7 @@
           '<span class="ac-lg-o"><b>Organic</b> ' + acGBP(sp.organic_rev) + ' · ' + orgPct.toFixed(1) + '%</span>' +
           '<span class="ac-bar-tot">Total ' + acGBP(sp.total_rev) + '</span></div>';
         if (spl.length > 1 && !AC.acct) {
-          h += '<div class="scroll" style="max-height:220px;margin-top:8px"><table class="ac-tbl" style="min-width:480px"><thead><tr>' +
+          h += '<div class="scroll" style="max-height:220px;margin-top:8px"><table class="acc-tbl" style="min-width:480px"><thead><tr>' +
             '<th style="text-align:left">Account</th><th>Total</th><th>Promoted</th><th>Organic</th><th>Promoted %</th></tr></thead><tbody>';
           spl.forEach(function (r) {
             h += '<tr><td style="text-align:left;font-weight:800">' + esc(String(r.account)) + '</td>' +
@@ -82,7 +86,7 @@
       var ser = d.series || [];
       if (ser.length) {
         h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · last ' + (d.days || 14) + '</div>' +
-          '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="ac-tbl" style="min-width:520px"><thead><tr>' +
+          '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="acc-tbl" style="min-width:520px"><thead><tr>' +
           '<th>Date</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
         ser.forEach(function (r) {
           h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
@@ -102,7 +106,7 @@
         var byA = {};
         sba.forEach(function (r) { (byA[r.account] = byA[r.account] || []).push(r); });
         h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Account to account \u00b7 spend / revenue / ROAS per day</div>' +
-          '<div class="scroll" style="max-height:260px;margin-bottom:14px"><table class="ac-tbl" style="min-width:560px"><thead><tr>' +
+          '<div class="scroll" style="max-height:260px;margin-bottom:14px"><table class="acc-tbl" style="min-width:560px"><thead><tr>' +
           '<th style="text-align:left">Account</th><th>Days</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Worst day</th><th>Best day</th></tr></thead><tbody>';
         Object.keys(byA).forEach(function (a) {
           var list = byA[a];
@@ -131,7 +135,7 @@
       if (!rows.length) {
         h += '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today — the first intraday report lands within ~10 minutes of the day starting.</div>';
       } else {
-        h += '<div class="scroll"><table class="ac-tbl"><thead><tr>' +
+        h += '<div class="scroll"><table class="acc-tbl"><thead><tr>' +
           '<th>Item</th><th>Spend today</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th>' +
           '<th>Spend ' + (d.days || 14) + 'd</th><th>Clicks ' + (d.days || 14) + 'd</th><th>Sold ' + (d.days || 14) + 'd</th></tr></thead><tbody>';
         rows.forEach(function (r) {

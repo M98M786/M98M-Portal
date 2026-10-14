@@ -1050,7 +1050,11 @@
       on home — unless the home screen called renderSignalCards itself, which it is meant to. Both
       requests are fired inside the same tick so the shell batches them into ONE round trip. */
   var sgPrevRender = (typeof renderView === 'function') ? renderView : null;
-  if (sgPrevRender) {
+  /* 14 Oct: this file is now spliced into the advertising portal as well, for its Advertising
+     signals page. The clock chip is NOT an advertising control: mounting it there would put an
+     unrequested clock-in / clock-out button in that portal's header and fire an attendance request
+     on every navigation. Attendance belongs to the company portal, so the wrapper stays there. */
+  if (sgPrevRender && !window.M98M_ADS_ONLY) {
     window.renderView = function (key) {
       SG.epoch++;
       sgPrevRender(key);
