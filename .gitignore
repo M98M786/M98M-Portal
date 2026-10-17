@@ -4,3 +4,6 @@ local/
 *.pyc
 scratchpad/
 build/
+
+# local deploy helper — reads ~/.m98m/cf-token; never commit tooling that names infra ids to a public repo
+scripts/deploy-engine.sh
