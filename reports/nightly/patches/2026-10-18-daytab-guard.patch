@@ -1,0 +1,18 @@
+--- /tmp/sb-head.gs	2026-10-18 02:27:42.000000000 +0500
++++ /tmp/sb-fixed.gs	2026-10-18 02:27:42.000000000 +0500
+@@ -389,6 +389,15 @@
+   const tabName = open.sheet.getName();
+   bridgeAssertWritableTab_(tabName);
+ 
++  /* 18 Oct night audit: a day-tab write that names NO tab used to fall through to
++     bridgePickSheet_'s "first visible sheet" — so a row meant for one particular day could
++     land on whatever tab happens to sit leftmost (a SAMPLE or an old September tab). Three
++     AZHAR ABRT tracking writes sat PENDING from 1 Oct retrying into such a sheet every pass
++     for 17 days. A write with no day named is a bug in the caller, not a sheet to guess at. */
++  if (String(whitelist || '') === 'orders_day' && !(Array.isArray(spec.tab) ? spec.tab.length : spec.tab)) {
++    return { ok: false, reason: 'no day tab named — refusing to guess a day tab' };
++  }
++
+   const matchCol = bridgeColumnFor_(open, matchHeader);
+   if (matchCol === -1) return { ok: false, reason: 'ambiguous match column', match_header: String(matchHeader || '') };
+   if (!matchCol) return { ok: false, reason: 'match column not on this sheet', match_header: String(matchHeader || '') };

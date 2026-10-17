@@ -1,0 +1,35 @@
+--- /tmp/worker-head.js	2026-10-18 02:25:20.000000000 +0500
++++ /tmp/worker-fixed.js	2026-10-18 02:25:20.000000000 +0500
+@@ -6258,6 +6258,14 @@
+ /* why_matters (Phase 4 big update): a plain sentence per rule on why it costs or makes money, shown on the Alerts
+    card beside what / where / do / urgency. A unit test asserts all 19 rules carry one. The profit-based rules read
+    real profit (Sales Analysis law) — A02 is the item-profit rule; no rule text says 'est. ad profit' any more. */
++/* A bell's ref is its identity: two different findings must never share one, and the word
++   "undefined" must never reach it. A rule that passes no meta (A16 truth-check) has no
++   account/item/campaign — fall back to its own scope key, which is unique per finding. */
++function adtAlertRefKey(f) {
++  const k = f.item_id || f.account || f.campaign_id || f.scope;
++  return (k === undefined || k === null || k === '') ? 'all' : String(k).replace(/[\s|]+/g, '_').slice(0, 80);
++}
++
+ const ADTOOL_ALERT_RULES = {
+   A01: { sev: 'high', cool: 3, text: 'ROAS below break-even on 5 consecutive days with spend ≥ £2/day', action: 'stop', why_matters: 'Five straight days paying more for clicks than the sales are worth — every extra day burns cash with no path to profit.' },
+   A02: { sev: 'high', cool: 3, text: 'real profit (Sales Analysis law) below −£10 over 7 days and below 0 over 30 days, every order priced (Ali cost typed and eBay fees landed)', action: 'stop', why_matters: 'The listing is losing real money after fees, cost and returns — not an estimate — so the ad spend is coming straight out of profit.' },
+@@ -6421,7 +6429,7 @@
+     const today = ukDate(''), yday = adtAddDays(today, -1), now = new Date().toISOString();
+     const disabled = {}; for (const r of ((await env.DB.prepare('SELECT rule_id, enabled FROM adtool_alert_rules').all()).results || [])) if (!Number(r.enabled)) disabled[r.rule_id] = true;
+     const found = {};   // alert_id → {rule, sev, account, item_id, campaign_id, payload}
+-    const put = (rule, scope, payload, meta) => { if (disabled[rule]) return; const id = rule + '|' + scope; found[id] = Object.assign({ rule, sev: ADTOOL_ALERT_RULES[rule].sev, payload: Object.assign({ rule_text: ADTOOL_ALERT_RULES[rule].text, suggested: ADTOOL_ALERT_RULES[rule].action }, payload) }, meta || {}); };
++    const put = (rule, scope, payload, meta) => { if (disabled[rule]) return; const id = rule + '|' + scope; found[id] = Object.assign({ rule, scope, sev: ADTOOL_ALERT_RULES[rule].sev, payload: Object.assign({ rule_text: ADTOOL_ALERT_RULES[rule].text, suggested: ADTOOL_ALERT_RULES[rule].action }, payload) }, meta || {}); };
+     /* listing rules */
+     const L = {}; for (const r of ((await env.DB.prepare('SELECT item_id, account, title, price, margin_before_ads, breakeven_roas, status, quantity FROM adtool_listings').all()).results || [])) L[r.item_id] = r;
+     const dayRows = (await env.DB.prepare('SELECT item_id, day, spend, attr_units, attr_revenue, actual_profit, pending_cost_orders, COALESCE(pending_fee_orders, 0) AS pending_fee_orders, clicks FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 ORDER BY item_id, day').bind(adtAddDays(today, -31), yday).all()).results || [];
+@@ -6485,7 +6493,7 @@
+     for (const id of Object.keys(open)) if (open[id].cleared_at === '' && !found[id]) { stmts.push(env.DB.prepare('UPDATE adtool_alerts SET cleared_at = ?2 WHERE alert_id = ?1').bind(id, now)); cleared++; }
+     await adtBatch(env, stmts); rows = stmts.length;
+     /* high alerts go to the portal inbox at once (advertising + management), capped per run */
+-    for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await adtNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); await adtNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + (f.item_id || f.account || f.campaign_id) + ':' + today); } catch (e) { /* inbox is best effort */ } }
++    for (const f of highNew.slice(0, 6)) { const msg = '🔴 Ads alert ' + f.rule + ' · ' + (f.account ? f.account + ' · ' : '') + (f.item_id ? f.item_id + ' ' : '') + ADTOOL_ALERT_RULES[f.rule].text + ' — ' + JSON.stringify(f.payload).slice(0, 160); try { await adtNotify(env, 'advertising', 'Ads alert ' + f.rule, msg, 'adtool:alert:' + f.rule + ':' + adtAlertRefKey(f) + ':' + today); await adtNotify(env, 'management', 'Ads alert ' + f.rule, msg, 'adtool:alertm:' + f.rule + ':' + adtAlertRefKey(f) + ':' + today); } catch (e) { /* inbox is best effort */ } }
+     if (highNew.length > 6) { try { await adtNotify(env, 'advertising', 'Ads alerts', '🟠 ' + (highNew.length - 6) + ' more high ads alerts this hour — open the Alerts page.', 'adtool:alertmore:' + today + ':' + ukNow.hour); } catch (e) {} }
+     /* the §12 phase 5 acceptance, once a day: do the three cases the spec names still fire? */
+     /* Runs every hour, not once a day. It is three small queries, and a once-a-day guard means a verdict
