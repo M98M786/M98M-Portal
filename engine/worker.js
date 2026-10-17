@@ -32,6 +32,10 @@ const MGMT_ROLES = ['Management', 'Ops Head'];
    the Advertising Manager who decides it, the Item Lister who does it, and Management who signs
    it off. It carries no money, so the lister may read the whole board. */
 const REVISION_BOARD_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead', 'Listing Manager', 'Item Lister'];
+/* 18 Oct (owner): the listing workload behind Hunt approvals and Hunt records. Lister emails are
+   staff, not buyers, and no money rides on it, so every role that may read the hunting archive
+   may read this too. */
+const LISTING_LOAD_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Listing Manager', 'Item Lister', 'Product Hunter', 'Sales Operations', 'Advertising Manager', 'Order Processor'];
 /* The words a lister may put on a revision. Short, honest, and the same set everywhere, so a
    manager reading twenty of these is reading one vocabulary rather than twenty. */
 const REVISION_STATUSES = ['Started', 'Title & keywords rewritten', 'Photos updated', 'Description & specifics updated', 'Price checked', 'Blocked — need help'];
@@ -13213,6 +13217,36 @@ const ROUTES = {
           r.born = String(r.start_time || r.first_seen || '');
         }
       }
+      /* Owner (18 Oct): "weekly average sales of all items in active listings — across all weeks".
+         eBay's own sold_qty resets on a quantity revision, so the rate is built from OUR orders:
+         every non-cancelled, non-refunded unit the item ever sold in the mirror, over the weeks the
+         listing has been live INSIDE the window the mirror actually holds — a listing older than
+         the order history is not punished for weeks we never saw. The denominator never drops
+         under one week, so a two-day-old listing with ten sales does not read as 35 a week; the
+         Listed column already says how young it is. */
+      {
+        const floorRow = await ctx.env.DB.prepare("SELECT MIN(created_at) AS f FROM orders WHERE status != 'CANCELLED'").first().catch(() => null);
+        const floorMs = Date.parse(String((floorRow && floorRow.f) || '')) || 0;
+        const all = await ctx.env.DB.prepare(
+          'SELECT item_id, SUM(MAX(qty,1)) AS u_all, MIN(created_at) AS first_order FROM orders ' +
+          "WHERE (refunded IS NULL OR refunded <= 0) AND status != 'CANCELLED' GROUP BY item_id"
+        ).all().catch(() => ({ results: [] }));
+        const allBy = {};
+        for (const r of (all.results || [])) allBy[r.item_id] = r;
+        const now = Date.now(), WEEK = 7 * 86400000;
+        for (const r of rows) {
+          const a = allBy[r.item_id];
+          const bornMs = Date.parse(String(r.born || '')) || 0;
+          const firstMs = a ? (Date.parse(String(a.first_order || '')) || 0) : 0;
+          let since = Math.max(bornMs, floorMs);
+          if (!since) since = firstMs;
+          const weeks = since ? Math.max(1, (now - since) / WEEK) : 0;
+          r.sold_all = a ? Number(a.u_all) || 0 : 0;
+          r.weeks_covered = weeks ? Math.round(weeks * 10) / 10 : 0;
+          r.avg_week = weeks ? Math.round((r.sold_all / weeks) * 10) / 10 : null;
+          r.rate_since = since ? new Date(since).toISOString().slice(0, 10) : '';
+        }
+      }
       /* Req 33 / Q9: Team Lead (and the other campaign roles) see PER-ITEM ad spend — never
          account totals. The 14-day per-item spend rides along only for those roles; the strip
          law stays the single gate. */
@@ -15393,6 +15427,50 @@ const ROUTES = {
       return { approved_today: Number(at && at.n) || 0, hunts, count: hunts.length, can_decide: mgmt,
         advertising_types: ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN', '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'],
         hunt_kinds: ['Seasonal', 'Consistent', 'Duplicated'] };
+    },
+  },
+
+  /* Owner (18 Oct): "in Hunt approvals I need how many new listings are currently assigned to
+     someone, how many for which account, with the breakdown of pending tasks and the dates — so I
+     can check it when approving items." The listing_new workload straight from the task mirror:
+     every OPEN task, plus the last 60 days of finished ones so an approved hunt in the archive can
+     say "assigned on → due → listed on". The hunt id rides in each task's details JSON (the
+     approval writes it there); statuses are the TASKS tab's own words, verbatim. */
+  listingLoad: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (LISTING_LOAD_ROLES.indexOf(String(ctx.user.role || '')) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const pkt = (ms) => new Date(ms + 5 * 3600000).toISOString();   // the mirror's stamps are Pakistan time, '+05:00'
+      const nowPkt = pkt(Date.now()).slice(0, 19);
+      const sinceDay = pkt(Date.now() - 60 * 86400000).slice(0, 10);
+      const rs = await ctx.env.DB.prepare(
+        'SELECT task_id, title, account, assigned_to, assigned_by, status, created_at, deadline_pkt, submitted_at, decided_at, updated_at, details ' +
+        "FROM tasks WHERE type = 'listing_new' AND (status != 'Completed' OR COALESCE(NULLIF(decided_at, ''), NULLIF(updated_at, ''), created_at) >= ?1) " +
+        'ORDER BY created_at DESC LIMIT 2500'
+      ).bind(sinceDay).all();
+      const users = await ctx.env.DB.prepare('SELECT email, name FROM users').all().catch(() => ({ results: [] }));
+      const names = {};
+      for (const u of (users.results || [])) names[String(u.email || '').toLowerCase()] = u.name || u.email;
+      const SUBMITTED = 'Submitted — awaiting approval';
+      const tasks = (rs.results || []).map((r) => {
+        let huntId = '';
+        try { huntId = String((JSON.parse(r.details || '{}') || {}).hunt_id || ''); } catch (e) {}
+        const status = String(r.status || '');
+        const open = status !== 'Completed';
+        const due = String(r.deadline_pkt || '');
+        const email = String(r.assigned_to || '').toLowerCase();
+        return {
+          task_id: r.task_id, title: String(r.title || ''), account: String(r.account || ''),
+          assigned_to: email, lister: names[email] || email,
+          status, open,
+          assigned_at: String(r.created_at || ''), assigned_day: String(r.created_at || '').slice(0, 10),
+          due, due_day: due.slice(0, 10),
+          /* late = past its deadline and not handed in; a submitted task is waiting on US, not the lister */
+          overdue: open && status !== SUBMITTED && !!due && due.slice(0, 19) < nowPkt,
+          submitted_at: String(r.submitted_at || ''), done_at: open ? '' : String(r.decided_at || r.updated_at || ''),
+          hunt_id: huntId,
+        };
+      });
+      return { tasks, as_of: new Date().toISOString(), now_pkt: nowPkt, history_days: 60 };
     },
   },
 

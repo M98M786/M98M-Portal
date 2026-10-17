@@ -49,7 +49,47 @@
     return '<a href="' + hrAttr(u) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
-  var HR = { tab: 'pending', cache: {}, counts: null, query: '', seq: 0 };
+  var HR = { tab: 'pending', cache: {}, counts: null, query: '', seq: 0, load: null, loadErr: '' };
+
+  /* Owner (18 Oct): "Product Hunting — which date listings were assigned, to which date." An
+     approved hunt's own listing task: assigned on → due → listed on, from the same engine feed
+     Hunt approvals uses (listingLoad: every open listing_new task plus 60 days of finished ones). */
+  function hrDay(d) {
+    d = hrStr(d);
+    if (d.length < 10) { return '—'; }
+    var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(d.slice(5, 7)) - 1] || '';
+    return Number(d.slice(8, 10)) + ' ' + m;
+  }
+  function hrLoadTasks() {
+    HR.load = null; HR.loadErr = '';
+    engineCall('listingLoad', {}, 20000).then(function (d) {
+      var map = {};
+      /* newest first from the server, so a hunt approved twice keeps its latest task */
+      ((d && d.tasks) || []).forEach(function (t) { var h = hrStr(t.hunt_id); if (h && !map[h]) { map[h] = t; } });
+      HR.load = map;
+      if (HR.tab === 'approved') { hrPaint(HR.tab); }
+    }).catch(function (e) {
+      HR.loadErr = String((e && e.message) || 'no answer');
+      HR.load = {};
+      if (HR.tab === 'approved') { hrPaint(HR.tab); }
+    });
+  }
+  function hrTaskCells(r) {
+    var dim = 'style="text-align:left;color:var(--text-3);font-size:11.5px"';
+    if (HR.load === null) { return '<td ' + dim + '>…</td><td ' + dim + '></td>'; }
+    var t = HR.load[hrStr(r.hunt_id)];
+    if (!t) {
+      return '<td ' + dim + '>—</td><td ' + dim + '>' + (HR.loadErr ? 'feed unavailable' : 'listed more than 60 days ago') + '</td>';
+    }
+    var st;
+    if (!t.open) { st = '<span class="pill hu-ok">Listed' + (t.done_at ? ' · ' + hrDay(t.done_at) : '') + '</span>'; }
+    else if (t.overdue) { st = '<span class="pill hu-no">Overdue · ' + esc(hrStr(t.status)) + '</span>'; }
+    else if (t.status === 'Submitted — awaiting approval') { st = '<span class="pill">Submitted · awaiting approval</span>'; }
+    else { st = '<span class="pill hu-rev">' + esc(hrStr(t.status) || 'Pending') + '</span>'; }
+    return '<td style="text-align:left;white-space:nowrap;font-size:11.5px;font-weight:700">' + hrDay(t.assigned_day) + ' → ' + hrDay(t.due_day) +
+      '<div style="font-size:10.5px;color:var(--text-3);font-weight:600">' + esc(hrStr(t.lister) || hrStr(t.assigned_to) || '—') + '</div></td>' +
+      '<td style="text-align:left;white-space:nowrap">' + st + '</td>';
+  }
 
   VIEWS.huntRecords = {
     label: 'Hunt records',
@@ -67,11 +107,12 @@
           '<div class="bd" id="hrBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
-      $('hrRefresh').onclick = function () { HR.cache = {}; HR.counts = null; hrLoad(HR.tab, true); };
+      $('hrRefresh').onclick = function () { HR.cache = {}; HR.counts = null; hrLoad(HR.tab, true); hrLoadTasks(); };
       var find = $('hrFind');
       if (find) { find.value = HR.query; find.oninput = function () { HR.query = this.value; hrPaint(HR.tab); }; }
       hrRenderTabs();
       hrLoad(HR.tab, false);
+      hrLoadTasks();
     }
   };
 
@@ -143,7 +184,7 @@
     var html = '<div class="scroll"><table class="ir-tbl" style="min-width:840px"><thead><tr>' +
       '<th style="text-align:left">Status</th><th style="text-align:left">Product</th>' +
       '<th style="text-align:left">Type</th><th style="text-align:left">Hunter</th>' +
-      (showAcct ? '<th style="text-align:left">Account</th>' : '') +
+      (showAcct ? '<th style="text-align:left">Account</th><th style="text-align:left" title="The listing task: the day it was assigned → its deadline, and the lister">Assigned → due</th><th style="text-align:left">Listing</th>' : '') +
       '<th style="text-align:left">' + (tabKey === 'rejected' ? 'Why it was turned away' : 'Comment') + '</th>' +
       '<th style="text-align:left">Links</th><th style="text-align:left">Submitted</th></tr></thead><tbody>' +
       rows.map(function (r) {
@@ -157,7 +198,7 @@
             '<span class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(hrStr(r.hunt_id)) + '</span></td>' +
           '<td style="text-align:left">' + (kind ? '<span class="hr-kind">' + esc(kind) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>' +
           '<td style="text-align:left">' + esc(hrStr(r.hunter_name) || hrStr(r.hunter_email) || '—') + '</td>' +
-          (showAcct ? '<td style="text-align:left">' + esc(hrStr(r['Account Selected']) || '—') + '</td>' : '') +
+          (showAcct ? '<td style="text-align:left">' + esc(hrStr(r['Account Selected']) || '—') + '</td>' + hrTaskCells(r) : '') +
           '<td style="text-align:left;max-width:300px;font-size:12px" title="' + hrAttr(c) + '">' +
             esc(c ? (c.length > 150 ? c.slice(0, 150) + '…' : c) : '—') + '</td>' +
           '<td style="text-align:left" class="hr-links">' + (links || '<span style="color:var(--text-3)">—</span>') + '</td>' +

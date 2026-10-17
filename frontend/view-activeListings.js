@@ -44,7 +44,8 @@
     { key: 'all', label: 'All listings' },
     { key: 'new7', label: 'New listings · 7d' },
     { key: 'nosale7', label: 'No sales in 7 days' },
-    { key: 'top', label: 'Top items · 30+ sold' }
+    { key: 'top', label: 'Top items · 30+ sold' },
+    { key: 'rate', label: 'Best weekly average' }   // 18 Oct (owner): weekly average across all weeks
   ];
   function alxBornMs(r) { var t = Date.parse(axStr(r.born)); return isFinite(t) ? t : 0; }
   function alxTabFilter(rows, tab) {
@@ -61,6 +62,10 @@
       return rows.filter(function (r) { return (Number(r.sold_qty) || 0) >= 30; })
         .sort(function (a, b) { return (Number(b.sold_qty) || 0) - (Number(a.sold_qty) || 0); });
     }
+    if (tab === 'rate') {
+      return rows.filter(function (r) { return Number(r.avg_week) > 0; })
+        .sort(function (a, b) { return (Number(b.avg_week) || 0) - (Number(a.avg_week) || 0); });
+    }
     return rows;
   }
   function alxDate(r) {
@@ -70,6 +75,18 @@
     var days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
     return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate() +
       '<div style="font-size:10px;color:var(--text-3)">' + (days === 0 ? 'today' : days + 'd live') + '</div>';
+  }
+
+  /* 18 Oct (owner): "weekly average sales of all items in active listings — across all weeks".
+     The engine does the arithmetic: our own orders for the item over the weeks it has been live
+     within the order history (eBay's sold_qty resets on a quantity revision, so it is not the
+     base). Under the rate: how many units that is, over how many weeks. */
+  function alxAvgWeek(r) {
+    if (r.avg_week === undefined) { return '<span style="color:var(--text-3)" title="The engine release carrying this column has not landed yet">—</span>'; }
+    var v = Number(r.avg_week), wk = Number(r.weeks_covered) || 0, tot = Number(r.sold_all) || 0;
+    var main = (r.avg_week === null || !isFinite(v)) ? '—' : (v >= 10 ? String(Math.round(v)) : v.toFixed(1));
+    return '<span' + (v > 0 ? '' : ' class="alx-neg"') + ' title="' + tot + ' unit(s) in our orders since ' + esc(axStr(r.rate_since) || 'the listing went live') + '">' + main + '</span>' +
+      '<div style="font-size:10px;color:var(--text-3);font-weight:600;white-space:nowrap">' + tot + ' sold · ' + (wk >= 1.05 ? Math.round(wk) + ' wks' : '1 wk') + '</div>';
   }
 
   function alxFetch() {
@@ -139,7 +156,7 @@
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>7d</th><th>14d</th><th>30d</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th>7d</th><th>14d</th><th>30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
@@ -159,6 +176,7 @@
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
+        '<td class="alx-num" style="font-weight:800">' + alxAvgWeek(r) + '</td>' +
         '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
         '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
         '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
@@ -243,7 +261,7 @@
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';

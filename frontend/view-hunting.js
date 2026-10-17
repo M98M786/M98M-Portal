@@ -1141,6 +1141,12 @@
         '<div class="card enter d2"><div class="hd">Hunting pulse — per hunter' +
           '<span class="hint">pending now · decided in the last 7 days</span></div>' +
           '<div class="bd" id="huQStats"><div class="spinner"></div></div></div>' +
+        /* Owner (18 Oct): "how many new listings are currently assigned to someone, how many for
+           which account, with the breakdown of pending tasks and the dates — so I can check it
+           when approving items." The listing_new workload, live from the task mirror. */
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Listers\u2019 load right now' +
+          '<span class="hint">open new-listing tasks \u00b7 who holds them \u00b7 which account \u00b7 assigned on \u2192 due</span></div>' +
+          '<div class="bd" id="huQLoad"><div class="spinner"></div></div></div>' +
         '<div class="card enter d2" style="margin-top:14px"><div class="hd">Waiting for a decision ' +
           '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
           '<div class="bd" id="huQBody"><div class="spinner"></div></div>' +
@@ -1157,11 +1163,12 @@
         '<datalist id="huListerList"></datalist>';
     },
     init: function () {
-      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); };
+      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); huLoadListingLoad(); };
       huEl('huQRecFind').oninput = function () { huPaintRecords(this.value); };
       huLoadPickers();
       huLoadQueue();
       huLoadQueueStats();
+      huLoadListingLoad();
       huPvArchLoad();
     }
   };
@@ -1196,6 +1203,225 @@
 
   /** The per-hunter pulse: one 'all' fetch, aggregated here — pending now, and the last 7 days'
       approved / rejected per person, newest business first. */
+  /* ---------- Owner (18 Oct): the listing workload beside the approvals ----------
+     "how much new listings are currently assigned to someone and how much for which account are
+     assigned right now, with the breakdown of pending tasks with the dates breakdown, so i can
+     check it when approving items." Engine `listingLoad`: every OPEN listing_new task plus 60 days
+     of finished ones; statuses are the TASKS tab's own words. Three cuts of the same rows — per
+     lister, per account, per day assigned — and a hint under every Lister box on the cards. */
+  var HU_LOAD = { tasks: [], by: {}, at: 0, err: '' };
+  var HU_TASK_SUBMITTED = 'Submitted — awaiting approval';   // §8.0b, verbatim (em dash)
+  var HU_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function huDayLabel(d) {   // '2026-10-17' → '17 Oct'
+    d = huStr(d);
+    if (d.length < 10) { return '—'; }
+    return Number(d.slice(8, 10)) + ' ' + (HU_MON[Number(d.slice(5, 7)) - 1] || '');
+  }
+  function huTodayPkt() { return new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10); }
+  /* one word per task: where it is in the lister's hands */
+  function huTaskWord(t) {
+    if (!t.open) { return 'listed'; }
+    if (t.status === HU_TASK_SUBMITTED) { return 'submitted'; }
+    if (t.status === 'Working' || t.status === 'Updated') { return 'working'; }
+    return 'pending';
+  }
+  function huListerName(email, tasks) {
+    var i;
+    for (i = 0; i < (tasks || []).length; i++) { if (huStr(tasks[i].lister)) { return huStr(tasks[i].lister); } }
+    for (i = 0; i < HU_LISTERS.length; i++) { if (huStr(HU_LISTERS[i].email).toLowerCase() === email) { return huStr(HU_LISTERS[i].name).split(' — ')[0]; } }
+    return email.split('@')[0] || email;
+  }
+
+  function huLoadListingLoad() {
+    engineCall('listingLoad', {}, 20000).then(function (d) {
+      HU_LOAD.tasks = (d && d.tasks) || []; HU_LOAD.at = Date.now(); HU_LOAD.err = '';
+      HU_LOAD.by = {};
+      HU_LOAD.tasks.forEach(function (t) {
+        if (!t.open) { return; }
+        var k = huStr(t.assigned_to).toLowerCase();
+        (HU_LOAD.by[k] = HU_LOAD.by[k] || []).push(t);
+      });
+      var box = huEl('huQLoad');
+      if (box) { huPaintLoad(box); }
+      huPaintListerHints(huQBox());
+    }).catch(function (e) {
+      HU_LOAD.err = String((e && e.message) || 'no answer');
+      var box = huEl('huQLoad');
+      if (box) {
+        box.innerHTML = '<div class="hu-empty">The listing workload could not be read just now.<span>' + esc(HU_LOAD.err) +
+          (/unknown action/i.test(HU_LOAD.err) ? ' — the engine release carrying it has not landed yet' : '') + '</span>' +
+          '<button class="minibtn" id="huQLoadRetry" style="margin-top:10px">Try again</button></div>';
+        var r = huEl('huQLoadRetry'); if (r) { r.onclick = huLoadListingLoad; }
+      }
+      huPaintListerHints(huQBox());
+    });
+  }
+
+  function huMixHtml(c) {   // pending · working · submitted, only the non-zero parts
+    var parts = [];
+    if (c.pending) { parts.push(c.pending + ' not started'); }
+    if (c.working) { parts.push(c.working + ' being listed'); }
+    if (c.submitted) { parts.push('<span style="color:var(--blue-2)">' + c.submitted + ' submitted</span>'); }
+    return parts.length ? parts.join(' · ') : '—';
+  }
+  function huCountMap(m) {   // {a: 3, b: 1} → 'a 3 · b 1', biggest first
+    return Object.keys(m).sort(function (a, b) { return m[b] - m[a]; })
+      .map(function (k) { return esc(k) + ' <b>' + m[k] + '</b>'; }).join(' · ') || '—';
+  }
+
+  function huPaintLoad(box) {
+    var open = HU_LOAD.tasks.filter(function (t) { return t.open; });
+    var today = huTodayPkt();
+    var n = { pending: 0, working: 0, submitted: 0, overdue: 0, dueToday: 0 };
+    open.forEach(function (t) {
+      n[huTaskWord(t)]++;
+      if (t.overdue) { n.overdue++; }
+      else if (t.due_day === today) { n.dueToday++; }
+    });
+    var wk = Date.now() - 7 * 86400000, done7 = {}, done7All = 0;
+    HU_LOAD.tasks.forEach(function (t) {
+      if (t.open) { return; }
+      var ts = Date.parse(huStr(t.done_at)) || 0;
+      if (ts >= wk) { done7[huStr(t.assigned_to).toLowerCase()] = (done7[huStr(t.assigned_to).toLowerCase()] || 0) + 1; done7All++; }
+    });
+    var tile = function (k, v, color, big) {
+      return '<div class="hu-tile' + (big ? ' big' : '') + '"><span class="k">' + k + '</span><b class="num' + (color === 'gold' ? ' goldtext' : '') + '"' +
+        (color && color !== 'gold' ? ' style="color:' + color + '"' : '') + '>' + v + '</b></div>';
+    };
+    var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
+      tile('Assigned &amp; open now', open.length, 'gold', true) +
+      tile('Not started', n.pending, '') +
+      tile('Being listed', n.working, '') +
+      tile('Submitted · awaiting approval', n.submitted, 'var(--blue-2)') +
+      tile('Overdue', n.overdue, n.overdue ? 'var(--bad)' : '') +
+      tile('Due today', n.dueToday, n.dueToday ? 'var(--warn)' : '') +
+      tile('Listed · 7 days', done7All, 'var(--ok)') +
+      '</div>';
+    if (!open.length) {
+      box.innerHTML = h + '<div class="hu-hint">No new-listing task is open right now — every approved hunt has been listed.</div>';
+      return;
+    }
+
+    /* per lister */
+    var byL = {};
+    open.forEach(function (t) {
+      var k = huStr(t.assigned_to).toLowerCase() || '(nobody)';
+      var L = byL[k] = byL[k] || { email: k, open: 0, pending: 0, working: 0, submitted: 0, overdue: 0, accounts: {}, oldest: '', nextDue: '', list: [] };
+      L.open++; L[huTaskWord(t)]++;
+      if (t.overdue) { L.overdue++; }
+      L.accounts[huStr(t.account) || '—'] = (L.accounts[huStr(t.account) || '—'] || 0) + 1;
+      if (!L.oldest || t.assigned_day < L.oldest) { L.oldest = t.assigned_day; }
+      if (t.due_day && (!L.nextDue || t.due_day < L.nextDue)) { L.nextDue = t.due_day; }
+      L.list.push(t);
+    });
+    var lKeys = Object.keys(byL).sort(function (a, b) { return byL[b].open - byL[a].open; });
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:4px 0 6px">Per lister</div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:820px"><thead><tr>' +
+      '<th style="text-align:left">Lister</th><th>Open</th><th style="text-align:left">Where they stand</th><th>Overdue</th>' +
+      '<th style="text-align:left">Accounts</th><th style="text-align:left">Oldest assigned</th><th style="text-align:left">Next due</th><th>Listed · 7d</th></tr></thead><tbody>' +
+      lKeys.map(function (k) {
+        var L = byL[k];
+        return '<tr><td style="text-align:left;font-weight:800">' + esc(huListerName(k, L.list)) + '<div class="mono" style="font-size:10px;color:var(--text-3);font-weight:600">' + esc(k) + '</div></td>' +
+          '<td style="font-weight:800">' + L.open + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(L) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (L.overdue ? 'bad' : 'text-3') + ')">' + (L.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(L.accounts) + '</td>' +
+          '<td style="text-align:left;white-space:nowrap">' + huDayLabel(L.oldest) + (L.oldest && L.oldest < today ? '<div style="font-size:10px;color:var(--text-3)">' + Math.round((Date.parse(today) - Date.parse(L.oldest)) / 86400000) + ' day(s) ago</div>' : '') + '</td>' +
+          '<td style="text-align:left;white-space:nowrap;color:var(--' + (L.nextDue && L.nextDue < today ? 'bad' : (L.nextDue === today ? 'warn' : 'text')) + ')">' + huDayLabel(L.nextDue) + '</td>' +
+          '<td style="color:var(--ok);font-weight:800">' + (done7[k] || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    /* per account */
+    var byA = {};
+    open.forEach(function (t) {
+      var k = huStr(t.account) || '(no account)';
+      var A = byA[k] = byA[k] || { open: 0, pending: 0, working: 0, submitted: 0, overdue: 0, listers: {} };
+      A.open++; A[huTaskWord(t)]++;
+      if (t.overdue) { A.overdue++; }
+      var who = huListerName(huStr(t.assigned_to).toLowerCase(), [t]);
+      A.listers[who] = (A.listers[who] || 0) + 1;
+    });
+    var aKeys = Object.keys(byA).sort(function (a, b) { return byA[b].open - byA[a].open; });
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:14px 0 6px">Per account</div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:640px"><thead><tr>' +
+      '<th style="text-align:left">Account</th><th>Open</th><th style="text-align:left">Where they stand</th><th>Overdue</th><th style="text-align:left">Listers</th></tr></thead><tbody>' +
+      aKeys.map(function (k) {
+        var A = byA[k];
+        return '<tr><td style="text-align:left;font-weight:800">' + esc(k) + '</td><td style="font-weight:800">' + A.open + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(A) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (A.overdue ? 'bad' : 'text-3') + ')">' + (A.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(A.listers) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    /* by the day they were assigned — "which date listings assigned to which date" */
+    var byD = {};
+    open.forEach(function (t) {
+      var k = huStr(t.assigned_day) || '(no date)';
+      var D = byD[k] = byD[k] || { n: 0, pending: 0, working: 0, submitted: 0, overdue: 0, due: {}, items: [] };
+      D.n++; D[huTaskWord(t)]++;
+      if (t.overdue) { D.overdue++; }
+      D.due[t.due_day ? huDayLabel(t.due_day) : '—'] = (D.due[t.due_day ? huDayLabel(t.due_day) : '—'] || 0) + 1;
+      D.items.push(t);
+    });
+    var dKeys = Object.keys(byD).sort().reverse();
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:14px 0 6px">By the day they were assigned <span style="font-weight:600;color:var(--text-3)">· open the row for every task</span></div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+      '<th style="text-align:left">Assigned on</th><th>Tasks</th><th style="text-align:left">Where they stand</th><th>Overdue</th><th style="text-align:left">Due on</th></tr></thead><tbody>' +
+      dKeys.map(function (k) {
+        var D = byD[k];
+        var items = D.items.slice().sort(function (a, b) { return String(a.due).localeCompare(String(b.due)); }).map(function (t) {
+          var w = huTaskWord(t);
+          return '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;padding:4px 0;border-top:1px solid var(--gold-line);font-size:12px">' +
+            '<span style="flex:1 1 260px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + huAttr(t.title) + '">' + esc(t.title || t.task_id) + '</span>' +
+            '<span style="color:var(--text-2)">' + esc(huListerName(huStr(t.assigned_to).toLowerCase(), [t])) + '</span>' +
+            '<span style="color:var(--text-2)">' + esc(t.account || '—') + '</span>' +
+            '<span style="white-space:nowrap;color:var(--' + (t.overdue ? 'bad' : (t.due_day === today ? 'warn' : 'text-2')) + ')">due ' + huDayLabel(t.due_day) + (t.overdue ? ' · overdue' : '') + '</span>' +
+            '<span class="pill' + (w === 'submitted' ? '' : (w === 'working' ? ' hu-rev' : ' hu-wait')) + '" style="font-size:10px">' + esc(t.status || 'Pending') + '</span>' +
+            '</div>';
+        }).join('');
+        return '<tr><td style="text-align:left;white-space:nowrap;font-weight:800">' +
+            '<details><summary style="cursor:pointer;list-style:none">' + huDayLabel(k) + (k === today ? ' <span style="color:var(--text-3);font-weight:600">today</span>' : '') + ' <span style="color:var(--text-3)">▾</span></summary>' +
+            '<div style="margin-top:6px;font-weight:600;white-space:normal;min-width:560px">' + items + '</div></details></td>' +
+          '<td style="font-weight:800">' + D.n + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(D) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (D.overdue ? 'bad' : 'text-3') + ')">' + (D.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(D.due) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<div class="hu-hint">Read from the task mirror ' + esc(fmtPkt(new Date(HU_LOAD.at).toISOString(), true) || '') + ' · a task just approved appears within a minute · finished tasks are kept 60 days for the hunt records.</div>';
+    box.innerHTML = h;
+  }
+
+  /* the hint under a card's Lister box: what that person is holding right now */
+  function huListerHint(box, inp) {
+    var id = inp.getAttribute('data-lister');
+    var hint = huPick(box, 'data-ldhint', id);
+    if (!hint) { return; }
+    var email = huStr(inp.value).toLowerCase();
+    hint.style.color = '';
+    if (!email) { hint.textContent = 'The listing_new task goes to this person.'; return; }
+    if (!HU_LOAD.at) { hint.textContent = HU_LOAD.err ? 'Workload unknown right now — ' + HU_LOAD.err : 'Checking this lister’s workload…'; return; }
+    var L = HU_LOAD.by[email] || [];
+    var name = huListerName(email, L);
+    if (!L.length) { hint.textContent = name + ' has no open listing task right now.'; hint.style.color = 'var(--ok)'; return; }
+    var od = 0, sub = 0, accts = {}, oldest = '';
+    L.forEach(function (t) {
+      if (t.overdue) { od++; }
+      if (huTaskWord(t) === 'submitted') { sub++; }
+      accts[huStr(t.account) || '—'] = (accts[huStr(t.account) || '—'] || 0) + 1;
+      if (!oldest || t.assigned_day < oldest) { oldest = t.assigned_day; }
+    });
+    hint.innerHTML = '<b>' + esc(name) + '</b> holds <b>' + L.length + '</b> open' +
+      (od ? ' · <b style="color:var(--bad)">' + od + ' overdue</b>' : '') +
+      (sub ? ' · ' + sub + ' submitted' : '') +
+      ' · ' + huCountMap(accts) + ' · oldest ' + huDayLabel(oldest);
+    hint.style.color = od ? 'var(--bad)' : (L.length >= 5 ? 'var(--warn)' : '');
+  }
+  function huPaintListerHints(box) {
+    if (!box) { return; }
+    var ins = box.querySelectorAll('input[data-lister]'), i;
+    for (i = 0; i < ins.length; i++) { huListerHint(box, ins[i]); }
+  }
+
   function huLoadQueueStats() {
     var box = huEl('huQStats');
     if (!box) { return; }
@@ -1483,7 +1709,7 @@
           '<div class="hu-hint">The account this item is listed on.</div></div>' +
         '<div class="field"><label>Lister</label>' +
           '<input class="hu-in" type="email" list="huListerList" autocomplete="off" data-lister="' + huAttr(id) + '">' +
-          '<div class="hu-hint">The listing_new task goes to this person.</div></div>' +
+          '<div class="hu-hint" data-ldhint="' + huAttr(id) + '">The listing_new task goes to this person.</div></div>' +
         '<div class="field"><label>CPC Selling Chance</label>' +
           '<select class="hu-sel" data-adv="' + huAttr(id) + '"><option value=""></option>' +
             types.map(function (t) {
@@ -1524,6 +1750,16 @@
     for (i = 0; i < chips.length; i++) {
       (function (c) { c.onclick = function () { huChipToggle(box, c); }; })(chips[i]);
     }
+    /* 18 Oct: as the approver picks a lister, the hint under the box says what that person is
+       already holding — so the check happens at the moment of assigning, not afterwards. */
+    var listers = box.querySelectorAll('input[data-lister]');
+    for (i = 0; i < listers.length; i++) {
+      (function (inp) {
+        inp.oninput = function () { huListerHint(box, inp); };
+        inp.onchange = function () { huListerHint(box, inp); };
+      })(listers[i]);
+    }
+    huPaintListerHints(box);
   }
 
   /** A chip toggles its phrase in the card's comment box — '; '-joined, hand-typed text kept. */
@@ -1592,6 +1828,7 @@
         ((res.central_copy && res.central_copy.ok === false) ? ' · the sheet copy is still pending' : ''));
       huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
       huLoadQueueStats();
+      setTimeout(huLoadListingLoad, 4000);   // the new task reaches the mirror a few seconds after the sheet
     }).catch(function (e) { huDecideCatch(box, id, e, 'the approval'); });
   }
 

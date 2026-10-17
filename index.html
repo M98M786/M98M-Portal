@@ -718,7 +718,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard'];
+var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -863,7 +863,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261014-1847';
+var BUILD = '20261017-2240';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2046,7 +2046,8 @@ VIEWS.home = {
     { key: 'all', label: 'All listings' },
     { key: 'new7', label: 'New listings · 7d' },
     { key: 'nosale7', label: 'No sales in 7 days' },
-    { key: 'top', label: 'Top items · 30+ sold' }
+    { key: 'top', label: 'Top items · 30+ sold' },
+    { key: 'rate', label: 'Best weekly average' }   // 18 Oct (owner): weekly average across all weeks
   ];
   function alxBornMs(r) { var t = Date.parse(axStr(r.born)); return isFinite(t) ? t : 0; }
   function alxTabFilter(rows, tab) {
@@ -2063,6 +2064,10 @@ VIEWS.home = {
       return rows.filter(function (r) { return (Number(r.sold_qty) || 0) >= 30; })
         .sort(function (a, b) { return (Number(b.sold_qty) || 0) - (Number(a.sold_qty) || 0); });
     }
+    if (tab === 'rate') {
+      return rows.filter(function (r) { return Number(r.avg_week) > 0; })
+        .sort(function (a, b) { return (Number(b.avg_week) || 0) - (Number(a.avg_week) || 0); });
+    }
     return rows;
   }
   function alxDate(r) {
@@ -2072,6 +2077,18 @@ VIEWS.home = {
     var days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
     return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate() +
       '<div style="font-size:10px;color:var(--text-3)">' + (days === 0 ? 'today' : days + 'd live') + '</div>';
+  }
+
+  /* 18 Oct (owner): "weekly average sales of all items in active listings — across all weeks".
+     The engine does the arithmetic: our own orders for the item over the weeks it has been live
+     within the order history (eBay's sold_qty resets on a quantity revision, so it is not the
+     base). Under the rate: how many units that is, over how many weeks. */
+  function alxAvgWeek(r) {
+    if (r.avg_week === undefined) { return '<span style="color:var(--text-3)" title="The engine release carrying this column has not landed yet">—</span>'; }
+    var v = Number(r.avg_week), wk = Number(r.weeks_covered) || 0, tot = Number(r.sold_all) || 0;
+    var main = (r.avg_week === null || !isFinite(v)) ? '—' : (v >= 10 ? String(Math.round(v)) : v.toFixed(1));
+    return '<span' + (v > 0 ? '' : ' class="alx-neg"') + ' title="' + tot + ' unit(s) in our orders since ' + esc(axStr(r.rate_since) || 'the listing went live') + '">' + main + '</span>' +
+      '<div style="font-size:10px;color:var(--text-3);font-weight:600;white-space:nowrap">' + tot + ' sold · ' + (wk >= 1.05 ? Math.round(wk) + ' wks' : '1 wk') + '</div>';
   }
 
   function alxFetch() {
@@ -2141,7 +2158,7 @@ VIEWS.home = {
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th>7d</th><th>14d</th><th>30d</th>' +
+      '<th></th><th>Item</th><th>Account</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th>7d</th><th>14d</th><th>30d</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
@@ -2161,6 +2178,7 @@ VIEWS.home = {
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
+        '<td class="alx-num" style="font-weight:800">' + alxAvgWeek(r) + '</td>' +
         '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
         '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
         '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
@@ -2245,7 +2263,7 @@ VIEWS.home = {
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';
@@ -13172,7 +13190,47 @@ VIEWS.dashboard = {
     return '<a href="' + hrAttr(u) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
-  var HR = { tab: 'pending', cache: {}, counts: null, query: '', seq: 0 };
+  var HR = { tab: 'pending', cache: {}, counts: null, query: '', seq: 0, load: null, loadErr: '' };
+
+  /* Owner (18 Oct): "Product Hunting — which date listings were assigned, to which date." An
+     approved hunt's own listing task: assigned on → due → listed on, from the same engine feed
+     Hunt approvals uses (listingLoad: every open listing_new task plus 60 days of finished ones). */
+  function hrDay(d) {
+    d = hrStr(d);
+    if (d.length < 10) { return '—'; }
+    var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(d.slice(5, 7)) - 1] || '';
+    return Number(d.slice(8, 10)) + ' ' + m;
+  }
+  function hrLoadTasks() {
+    HR.load = null; HR.loadErr = '';
+    engineCall('listingLoad', {}, 20000).then(function (d) {
+      var map = {};
+      /* newest first from the server, so a hunt approved twice keeps its latest task */
+      ((d && d.tasks) || []).forEach(function (t) { var h = hrStr(t.hunt_id); if (h && !map[h]) { map[h] = t; } });
+      HR.load = map;
+      if (HR.tab === 'approved') { hrPaint(HR.tab); }
+    }).catch(function (e) {
+      HR.loadErr = String((e && e.message) || 'no answer');
+      HR.load = {};
+      if (HR.tab === 'approved') { hrPaint(HR.tab); }
+    });
+  }
+  function hrTaskCells(r) {
+    var dim = 'style="text-align:left;color:var(--text-3);font-size:11.5px"';
+    if (HR.load === null) { return '<td ' + dim + '>…</td><td ' + dim + '></td>'; }
+    var t = HR.load[hrStr(r.hunt_id)];
+    if (!t) {
+      return '<td ' + dim + '>—</td><td ' + dim + '>' + (HR.loadErr ? 'feed unavailable' : 'listed more than 60 days ago') + '</td>';
+    }
+    var st;
+    if (!t.open) { st = '<span class="pill hu-ok">Listed' + (t.done_at ? ' · ' + hrDay(t.done_at) : '') + '</span>'; }
+    else if (t.overdue) { st = '<span class="pill hu-no">Overdue · ' + esc(hrStr(t.status)) + '</span>'; }
+    else if (t.status === 'Submitted — awaiting approval') { st = '<span class="pill">Submitted · awaiting approval</span>'; }
+    else { st = '<span class="pill hu-rev">' + esc(hrStr(t.status) || 'Pending') + '</span>'; }
+    return '<td style="text-align:left;white-space:nowrap;font-size:11.5px;font-weight:700">' + hrDay(t.assigned_day) + ' → ' + hrDay(t.due_day) +
+      '<div style="font-size:10.5px;color:var(--text-3);font-weight:600">' + esc(hrStr(t.lister) || hrStr(t.assigned_to) || '—') + '</div></td>' +
+      '<td style="text-align:left;white-space:nowrap">' + st + '</td>';
+  }
 
   VIEWS.huntRecords = {
     label: 'Hunt records',
@@ -13190,11 +13248,12 @@ VIEWS.dashboard = {
           '<div class="bd" id="hrBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
-      $('hrRefresh').onclick = function () { HR.cache = {}; HR.counts = null; hrLoad(HR.tab, true); };
+      $('hrRefresh').onclick = function () { HR.cache = {}; HR.counts = null; hrLoad(HR.tab, true); hrLoadTasks(); };
       var find = $('hrFind');
       if (find) { find.value = HR.query; find.oninput = function () { HR.query = this.value; hrPaint(HR.tab); }; }
       hrRenderTabs();
       hrLoad(HR.tab, false);
+      hrLoadTasks();
     }
   };
 
@@ -13266,7 +13325,7 @@ VIEWS.dashboard = {
     var html = '<div class="scroll"><table class="ir-tbl" style="min-width:840px"><thead><tr>' +
       '<th style="text-align:left">Status</th><th style="text-align:left">Product</th>' +
       '<th style="text-align:left">Type</th><th style="text-align:left">Hunter</th>' +
-      (showAcct ? '<th style="text-align:left">Account</th>' : '') +
+      (showAcct ? '<th style="text-align:left">Account</th><th style="text-align:left" title="The listing task: the day it was assigned → its deadline, and the lister">Assigned → due</th><th style="text-align:left">Listing</th>' : '') +
       '<th style="text-align:left">' + (tabKey === 'rejected' ? 'Why it was turned away' : 'Comment') + '</th>' +
       '<th style="text-align:left">Links</th><th style="text-align:left">Submitted</th></tr></thead><tbody>' +
       rows.map(function (r) {
@@ -13280,7 +13339,7 @@ VIEWS.dashboard = {
             '<span class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(hrStr(r.hunt_id)) + '</span></td>' +
           '<td style="text-align:left">' + (kind ? '<span class="hr-kind">' + esc(kind) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>' +
           '<td style="text-align:left">' + esc(hrStr(r.hunter_name) || hrStr(r.hunter_email) || '—') + '</td>' +
-          (showAcct ? '<td style="text-align:left">' + esc(hrStr(r['Account Selected']) || '—') + '</td>' : '') +
+          (showAcct ? '<td style="text-align:left">' + esc(hrStr(r['Account Selected']) || '—') + '</td>' + hrTaskCells(r) : '') +
           '<td style="text-align:left;max-width:300px;font-size:12px" title="' + hrAttr(c) + '">' +
             esc(c ? (c.length > 150 ? c.slice(0, 150) + '…' : c) : '—') + '</td>' +
           '<td style="text-align:left" class="hr-links">' + (links || '<span style="color:var(--text-3)">—</span>') + '</td>' +
@@ -14732,6 +14791,12 @@ VIEWS.dashboard = {
         '<div class="card enter d2"><div class="hd">Hunting pulse — per hunter' +
           '<span class="hint">pending now · decided in the last 7 days</span></div>' +
           '<div class="bd" id="huQStats"><div class="spinner"></div></div></div>' +
+        /* Owner (18 Oct): "how many new listings are currently assigned to someone, how many for
+           which account, with the breakdown of pending tasks and the dates — so I can check it
+           when approving items." The listing_new workload, live from the task mirror. */
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Listers\u2019 load right now' +
+          '<span class="hint">open new-listing tasks \u00b7 who holds them \u00b7 which account \u00b7 assigned on \u2192 due</span></div>' +
+          '<div class="bd" id="huQLoad"><div class="spinner"></div></div></div>' +
         '<div class="card enter d2" style="margin-top:14px"><div class="hd">Waiting for a decision ' +
           '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
           '<div class="bd" id="huQBody"><div class="spinner"></div></div>' +
@@ -14748,11 +14813,12 @@ VIEWS.dashboard = {
         '<datalist id="huListerList"></datalist>';
     },
     init: function () {
-      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); };
+      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); huLoadListingLoad(); };
       huEl('huQRecFind').oninput = function () { huPaintRecords(this.value); };
       huLoadPickers();
       huLoadQueue();
       huLoadQueueStats();
+      huLoadListingLoad();
       huPvArchLoad();
     }
   };
@@ -14787,6 +14853,225 @@ VIEWS.dashboard = {
 
   /** The per-hunter pulse: one 'all' fetch, aggregated here — pending now, and the last 7 days'
       approved / rejected per person, newest business first. */
+  /* ---------- Owner (18 Oct): the listing workload beside the approvals ----------
+     "how much new listings are currently assigned to someone and how much for which account are
+     assigned right now, with the breakdown of pending tasks with the dates breakdown, so i can
+     check it when approving items." Engine `listingLoad`: every OPEN listing_new task plus 60 days
+     of finished ones; statuses are the TASKS tab's own words. Three cuts of the same rows — per
+     lister, per account, per day assigned — and a hint under every Lister box on the cards. */
+  var HU_LOAD = { tasks: [], by: {}, at: 0, err: '' };
+  var HU_TASK_SUBMITTED = 'Submitted — awaiting approval';   // §8.0b, verbatim (em dash)
+  var HU_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function huDayLabel(d) {   // '2026-10-17' → '17 Oct'
+    d = huStr(d);
+    if (d.length < 10) { return '—'; }
+    return Number(d.slice(8, 10)) + ' ' + (HU_MON[Number(d.slice(5, 7)) - 1] || '');
+  }
+  function huTodayPkt() { return new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10); }
+  /* one word per task: where it is in the lister's hands */
+  function huTaskWord(t) {
+    if (!t.open) { return 'listed'; }
+    if (t.status === HU_TASK_SUBMITTED) { return 'submitted'; }
+    if (t.status === 'Working' || t.status === 'Updated') { return 'working'; }
+    return 'pending';
+  }
+  function huListerName(email, tasks) {
+    var i;
+    for (i = 0; i < (tasks || []).length; i++) { if (huStr(tasks[i].lister)) { return huStr(tasks[i].lister); } }
+    for (i = 0; i < HU_LISTERS.length; i++) { if (huStr(HU_LISTERS[i].email).toLowerCase() === email) { return huStr(HU_LISTERS[i].name).split(' — ')[0]; } }
+    return email.split('@')[0] || email;
+  }
+
+  function huLoadListingLoad() {
+    engineCall('listingLoad', {}, 20000).then(function (d) {
+      HU_LOAD.tasks = (d && d.tasks) || []; HU_LOAD.at = Date.now(); HU_LOAD.err = '';
+      HU_LOAD.by = {};
+      HU_LOAD.tasks.forEach(function (t) {
+        if (!t.open) { return; }
+        var k = huStr(t.assigned_to).toLowerCase();
+        (HU_LOAD.by[k] = HU_LOAD.by[k] || []).push(t);
+      });
+      var box = huEl('huQLoad');
+      if (box) { huPaintLoad(box); }
+      huPaintListerHints(huQBox());
+    }).catch(function (e) {
+      HU_LOAD.err = String((e && e.message) || 'no answer');
+      var box = huEl('huQLoad');
+      if (box) {
+        box.innerHTML = '<div class="hu-empty">The listing workload could not be read just now.<span>' + esc(HU_LOAD.err) +
+          (/unknown action/i.test(HU_LOAD.err) ? ' — the engine release carrying it has not landed yet' : '') + '</span>' +
+          '<button class="minibtn" id="huQLoadRetry" style="margin-top:10px">Try again</button></div>';
+        var r = huEl('huQLoadRetry'); if (r) { r.onclick = huLoadListingLoad; }
+      }
+      huPaintListerHints(huQBox());
+    });
+  }
+
+  function huMixHtml(c) {   // pending · working · submitted, only the non-zero parts
+    var parts = [];
+    if (c.pending) { parts.push(c.pending + ' not started'); }
+    if (c.working) { parts.push(c.working + ' being listed'); }
+    if (c.submitted) { parts.push('<span style="color:var(--blue-2)">' + c.submitted + ' submitted</span>'); }
+    return parts.length ? parts.join(' · ') : '—';
+  }
+  function huCountMap(m) {   // {a: 3, b: 1} → 'a 3 · b 1', biggest first
+    return Object.keys(m).sort(function (a, b) { return m[b] - m[a]; })
+      .map(function (k) { return esc(k) + ' <b>' + m[k] + '</b>'; }).join(' · ') || '—';
+  }
+
+  function huPaintLoad(box) {
+    var open = HU_LOAD.tasks.filter(function (t) { return t.open; });
+    var today = huTodayPkt();
+    var n = { pending: 0, working: 0, submitted: 0, overdue: 0, dueToday: 0 };
+    open.forEach(function (t) {
+      n[huTaskWord(t)]++;
+      if (t.overdue) { n.overdue++; }
+      else if (t.due_day === today) { n.dueToday++; }
+    });
+    var wk = Date.now() - 7 * 86400000, done7 = {}, done7All = 0;
+    HU_LOAD.tasks.forEach(function (t) {
+      if (t.open) { return; }
+      var ts = Date.parse(huStr(t.done_at)) || 0;
+      if (ts >= wk) { done7[huStr(t.assigned_to).toLowerCase()] = (done7[huStr(t.assigned_to).toLowerCase()] || 0) + 1; done7All++; }
+    });
+    var tile = function (k, v, color, big) {
+      return '<div class="hu-tile' + (big ? ' big' : '') + '"><span class="k">' + k + '</span><b class="num' + (color === 'gold' ? ' goldtext' : '') + '"' +
+        (color && color !== 'gold' ? ' style="color:' + color + '"' : '') + '>' + v + '</b></div>';
+    };
+    var h = '<div class="hu-tiles" style="margin-bottom:12px">' +
+      tile('Assigned &amp; open now', open.length, 'gold', true) +
+      tile('Not started', n.pending, '') +
+      tile('Being listed', n.working, '') +
+      tile('Submitted · awaiting approval', n.submitted, 'var(--blue-2)') +
+      tile('Overdue', n.overdue, n.overdue ? 'var(--bad)' : '') +
+      tile('Due today', n.dueToday, n.dueToday ? 'var(--warn)' : '') +
+      tile('Listed · 7 days', done7All, 'var(--ok)') +
+      '</div>';
+    if (!open.length) {
+      box.innerHTML = h + '<div class="hu-hint">No new-listing task is open right now — every approved hunt has been listed.</div>';
+      return;
+    }
+
+    /* per lister */
+    var byL = {};
+    open.forEach(function (t) {
+      var k = huStr(t.assigned_to).toLowerCase() || '(nobody)';
+      var L = byL[k] = byL[k] || { email: k, open: 0, pending: 0, working: 0, submitted: 0, overdue: 0, accounts: {}, oldest: '', nextDue: '', list: [] };
+      L.open++; L[huTaskWord(t)]++;
+      if (t.overdue) { L.overdue++; }
+      L.accounts[huStr(t.account) || '—'] = (L.accounts[huStr(t.account) || '—'] || 0) + 1;
+      if (!L.oldest || t.assigned_day < L.oldest) { L.oldest = t.assigned_day; }
+      if (t.due_day && (!L.nextDue || t.due_day < L.nextDue)) { L.nextDue = t.due_day; }
+      L.list.push(t);
+    });
+    var lKeys = Object.keys(byL).sort(function (a, b) { return byL[b].open - byL[a].open; });
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:4px 0 6px">Per lister</div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:820px"><thead><tr>' +
+      '<th style="text-align:left">Lister</th><th>Open</th><th style="text-align:left">Where they stand</th><th>Overdue</th>' +
+      '<th style="text-align:left">Accounts</th><th style="text-align:left">Oldest assigned</th><th style="text-align:left">Next due</th><th>Listed · 7d</th></tr></thead><tbody>' +
+      lKeys.map(function (k) {
+        var L = byL[k];
+        return '<tr><td style="text-align:left;font-weight:800">' + esc(huListerName(k, L.list)) + '<div class="mono" style="font-size:10px;color:var(--text-3);font-weight:600">' + esc(k) + '</div></td>' +
+          '<td style="font-weight:800">' + L.open + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(L) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (L.overdue ? 'bad' : 'text-3') + ')">' + (L.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(L.accounts) + '</td>' +
+          '<td style="text-align:left;white-space:nowrap">' + huDayLabel(L.oldest) + (L.oldest && L.oldest < today ? '<div style="font-size:10px;color:var(--text-3)">' + Math.round((Date.parse(today) - Date.parse(L.oldest)) / 86400000) + ' day(s) ago</div>' : '') + '</td>' +
+          '<td style="text-align:left;white-space:nowrap;color:var(--' + (L.nextDue && L.nextDue < today ? 'bad' : (L.nextDue === today ? 'warn' : 'text')) + ')">' + huDayLabel(L.nextDue) + '</td>' +
+          '<td style="color:var(--ok);font-weight:800">' + (done7[k] || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    /* per account */
+    var byA = {};
+    open.forEach(function (t) {
+      var k = huStr(t.account) || '(no account)';
+      var A = byA[k] = byA[k] || { open: 0, pending: 0, working: 0, submitted: 0, overdue: 0, listers: {} };
+      A.open++; A[huTaskWord(t)]++;
+      if (t.overdue) { A.overdue++; }
+      var who = huListerName(huStr(t.assigned_to).toLowerCase(), [t]);
+      A.listers[who] = (A.listers[who] || 0) + 1;
+    });
+    var aKeys = Object.keys(byA).sort(function (a, b) { return byA[b].open - byA[a].open; });
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:14px 0 6px">Per account</div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:640px"><thead><tr>' +
+      '<th style="text-align:left">Account</th><th>Open</th><th style="text-align:left">Where they stand</th><th>Overdue</th><th style="text-align:left">Listers</th></tr></thead><tbody>' +
+      aKeys.map(function (k) {
+        var A = byA[k];
+        return '<tr><td style="text-align:left;font-weight:800">' + esc(k) + '</td><td style="font-weight:800">' + A.open + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(A) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (A.overdue ? 'bad' : 'text-3') + ')">' + (A.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(A.listers) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    /* by the day they were assigned — "which date listings assigned to which date" */
+    var byD = {};
+    open.forEach(function (t) {
+      var k = huStr(t.assigned_day) || '(no date)';
+      var D = byD[k] = byD[k] || { n: 0, pending: 0, working: 0, submitted: 0, overdue: 0, due: {}, items: [] };
+      D.n++; D[huTaskWord(t)]++;
+      if (t.overdue) { D.overdue++; }
+      D.due[t.due_day ? huDayLabel(t.due_day) : '—'] = (D.due[t.due_day ? huDayLabel(t.due_day) : '—'] || 0) + 1;
+      D.items.push(t);
+    });
+    var dKeys = Object.keys(byD).sort().reverse();
+    h += '<div style="font-weight:800;font-size:12px;color:var(--text-2);margin:14px 0 6px">By the day they were assigned <span style="font-weight:600;color:var(--text-3)">· open the row for every task</span></div>' +
+      '<div class="scroll"><table class="ir-tbl" style="min-width:760px"><thead><tr>' +
+      '<th style="text-align:left">Assigned on</th><th>Tasks</th><th style="text-align:left">Where they stand</th><th>Overdue</th><th style="text-align:left">Due on</th></tr></thead><tbody>' +
+      dKeys.map(function (k) {
+        var D = byD[k];
+        var items = D.items.slice().sort(function (a, b) { return String(a.due).localeCompare(String(b.due)); }).map(function (t) {
+          var w = huTaskWord(t);
+          return '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;padding:4px 0;border-top:1px solid var(--gold-line);font-size:12px">' +
+            '<span style="flex:1 1 260px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + huAttr(t.title) + '">' + esc(t.title || t.task_id) + '</span>' +
+            '<span style="color:var(--text-2)">' + esc(huListerName(huStr(t.assigned_to).toLowerCase(), [t])) + '</span>' +
+            '<span style="color:var(--text-2)">' + esc(t.account || '—') + '</span>' +
+            '<span style="white-space:nowrap;color:var(--' + (t.overdue ? 'bad' : (t.due_day === today ? 'warn' : 'text-2')) + ')">due ' + huDayLabel(t.due_day) + (t.overdue ? ' · overdue' : '') + '</span>' +
+            '<span class="pill' + (w === 'submitted' ? '' : (w === 'working' ? ' hu-rev' : ' hu-wait')) + '" style="font-size:10px">' + esc(t.status || 'Pending') + '</span>' +
+            '</div>';
+        }).join('');
+        return '<tr><td style="text-align:left;white-space:nowrap;font-weight:800">' +
+            '<details><summary style="cursor:pointer;list-style:none">' + huDayLabel(k) + (k === today ? ' <span style="color:var(--text-3);font-weight:600">today</span>' : '') + ' <span style="color:var(--text-3)">▾</span></summary>' +
+            '<div style="margin-top:6px;font-weight:600;white-space:normal;min-width:560px">' + items + '</div></details></td>' +
+          '<td style="font-weight:800">' + D.n + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huMixHtml(D) + '</td>' +
+          '<td style="font-weight:800;color:var(--' + (D.overdue ? 'bad' : 'text-3') + ')">' + (D.overdue || '—') + '</td>' +
+          '<td style="text-align:left;font-size:12px">' + huCountMap(D.due) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<div class="hu-hint">Read from the task mirror ' + esc(fmtPkt(new Date(HU_LOAD.at).toISOString(), true) || '') + ' · a task just approved appears within a minute · finished tasks are kept 60 days for the hunt records.</div>';
+    box.innerHTML = h;
+  }
+
+  /* the hint under a card's Lister box: what that person is holding right now */
+  function huListerHint(box, inp) {
+    var id = inp.getAttribute('data-lister');
+    var hint = huPick(box, 'data-ldhint', id);
+    if (!hint) { return; }
+    var email = huStr(inp.value).toLowerCase();
+    hint.style.color = '';
+    if (!email) { hint.textContent = 'The listing_new task goes to this person.'; return; }
+    if (!HU_LOAD.at) { hint.textContent = HU_LOAD.err ? 'Workload unknown right now — ' + HU_LOAD.err : 'Checking this lister’s workload…'; return; }
+    var L = HU_LOAD.by[email] || [];
+    var name = huListerName(email, L);
+    if (!L.length) { hint.textContent = name + ' has no open listing task right now.'; hint.style.color = 'var(--ok)'; return; }
+    var od = 0, sub = 0, accts = {}, oldest = '';
+    L.forEach(function (t) {
+      if (t.overdue) { od++; }
+      if (huTaskWord(t) === 'submitted') { sub++; }
+      accts[huStr(t.account) || '—'] = (accts[huStr(t.account) || '—'] || 0) + 1;
+      if (!oldest || t.assigned_day < oldest) { oldest = t.assigned_day; }
+    });
+    hint.innerHTML = '<b>' + esc(name) + '</b> holds <b>' + L.length + '</b> open' +
+      (od ? ' · <b style="color:var(--bad)">' + od + ' overdue</b>' : '') +
+      (sub ? ' · ' + sub + ' submitted' : '') +
+      ' · ' + huCountMap(accts) + ' · oldest ' + huDayLabel(oldest);
+    hint.style.color = od ? 'var(--bad)' : (L.length >= 5 ? 'var(--warn)' : '');
+  }
+  function huPaintListerHints(box) {
+    if (!box) { return; }
+    var ins = box.querySelectorAll('input[data-lister]'), i;
+    for (i = 0; i < ins.length; i++) { huListerHint(box, ins[i]); }
+  }
+
   function huLoadQueueStats() {
     var box = huEl('huQStats');
     if (!box) { return; }
@@ -15074,7 +15359,7 @@ VIEWS.dashboard = {
           '<div class="hu-hint">The account this item is listed on.</div></div>' +
         '<div class="field"><label>Lister</label>' +
           '<input class="hu-in" type="email" list="huListerList" autocomplete="off" data-lister="' + huAttr(id) + '">' +
-          '<div class="hu-hint">The listing_new task goes to this person.</div></div>' +
+          '<div class="hu-hint" data-ldhint="' + huAttr(id) + '">The listing_new task goes to this person.</div></div>' +
         '<div class="field"><label>CPC Selling Chance</label>' +
           '<select class="hu-sel" data-adv="' + huAttr(id) + '"><option value=""></option>' +
             types.map(function (t) {
@@ -15115,6 +15400,16 @@ VIEWS.dashboard = {
     for (i = 0; i < chips.length; i++) {
       (function (c) { c.onclick = function () { huChipToggle(box, c); }; })(chips[i]);
     }
+    /* 18 Oct: as the approver picks a lister, the hint under the box says what that person is
+       already holding — so the check happens at the moment of assigning, not afterwards. */
+    var listers = box.querySelectorAll('input[data-lister]');
+    for (i = 0; i < listers.length; i++) {
+      (function (inp) {
+        inp.oninput = function () { huListerHint(box, inp); };
+        inp.onchange = function () { huListerHint(box, inp); };
+      })(listers[i]);
+    }
+    huPaintListerHints(box);
   }
 
   /** A chip toggles its phrase in the card's comment box — '; '-joined, hand-typed text kept. */
@@ -15183,6 +15478,7 @@ VIEWS.dashboard = {
         ((res.central_copy && res.central_copy.ok === false) ? ' · the sheet copy is still pending' : ''));
       huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
       huLoadQueueStats();
+      setTimeout(huLoadListingLoad, 4000);   // the new task reaches the mirror a few seconds after the sheet
     }).catch(function (e) { huDecideCatch(box, id, e, 'the approval'); });
   }
 
@@ -20120,7 +20416,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, truthY: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
   /* Page-level account filter (owner, 6 Sept: "update the whole page with a selection option,
      account to account by name, and an all-accounts option which is the default"). O.acct === ''
      means ALL ACCOUNTS — every section then behaves EXACTLY as before (zero change, zero risk to
@@ -20196,6 +20492,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         b.profit = oN(b.oe) - oN(b.cost);
       });
       oPaintDated();
+      oPaintToday();          // the ad-spend · ROAS card reads these book rows — repaint once they land
     })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
@@ -20225,6 +20522,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
       .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
       .catch(function () { O.truth = null; oPaintMoney(); });
+    /* Owner (18 Oct, both screenshots side by side): "yesterday's profit per account is showing a
+       wrong number — fix it, take it from Sales analysis." One day, the same scope, the SAME
+       truthPage call Sales analysis makes for its Yesterday chip; oPaintToday sums it exactly the
+       way sxAcctAgg does. The month-wide call above is not reused for this: on the 1st of a month
+       it does not contain yesterday at all. */
+    var ydY = dShift(ukToday(), -1);
+    truthPage(oAcctParam({ from: ydY, to: ydY }))
+      .then(function (d) { O.truthY = d || { failed: true }; oPaintToday(); })
+      .catch(function () { O.truthY = { failed: true }; oPaintToday(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
@@ -20587,28 +20893,53 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var booksY = oAcctRows(O.days || []).filter(function (r0) { return r0.date === yd; });
     /* Column choice (owner, 11 Sept): the raw books 'actual' turns to garbage when a day's costs
        are not yet entered (Sir Hasib: sold £700, cost 0 → actual −171). Sales analysis speaks the
-       money-law 'profit' column (ratio-estimated where costs are missing) — this strip now shows
-       EXACTLY that number, with a chip when the costs are still owed. */
-    var y = booksY.map(function (r0) {
-      return { account: r0.account, profit: oN(r0.profit),
-        costsMissing: oN(r0.cost) < 0.005 && oN(r0.sold) > 1 };
-    }).sort(function (a, b) { return b.profit - a.profit; });
+       money-law 'profit' column (ratio-estimated where costs are missing).
+       18 Oct (owner, both screenshots side by side: £212.09 here against £55.32 there for the same
+       account and day): sales_daily.profit was STILL not the number Sales analysis shows. That page
+       reads the register's DAYS_UPTODATE series — the books where the day is written, the eBay API
+       through the books' own ratios where it is not — and sums it per account (sxAcctAgg). This is
+       now that same series, from the same one-day truthPage call, summed the same way. Whatever
+       Sales analysis shows for yesterday, this shows; nothing is computed here any more. */
+    var y = [], liveAccts = [];
+    var TY = (O.truthY && !O.truthY.failed) ? (O.truthY.metrics || {}) : null;
+    if (TY) {
+      var agg = {};
+      var ser = TY.DAYS_UPTODATE && TY.DAYS_UPTODATE.value;
+      if (ser && ser.length) {
+        ser.forEach(function (r0) {
+          if (oS(r0.day) !== yd) { return; }
+          var acc0 = oS(r0.account);
+          if (!acc0) { return; }
+          var b0 = agg[acc0] = agg[acc0] || { profit: 0, live: false };
+          b0.profit += oN(r0.actual);
+          if (r0.src === 'live') { b0.live = true; }
+        });
+      } else {
+        var byA = (TY.MONEY_BY_ACCOUNT && TY.MONEY_BY_ACCOUNT.value) || {};
+        Object.keys(byA).forEach(function (a0) {
+          var m0 = byA[a0] || {};
+          agg[a0] = { profit: oN(m0.actual_after_returns != null ? m0.actual_after_returns : m0.actual), live: false };
+        });
+      }
+      y = Object.keys(agg).map(function (a0) { return { account: a0, profit: agg[a0].profit, live: agg[a0].live }; })
+        .sort(function (a, b) { return b.profit - a.profit; });
+      liveAccts = y.filter(function (a) { return a.live; }).map(function (a) { return a.account; });
+    }
+    var yNote = !O.truthY
+      ? '<div class="empty" style="margin-top:6px">Reading the Sales analysis register…</div>'
+      : (O.truthY.failed
+        ? '<div class="empty" style="margin-top:6px">Sales analysis did not answer — press Refresh.</div>'
+        : (liveAccts.length
+          ? '<div class="empty" style="margin-top:6px">' + esc(liveAccts.join(', ')) + ' — book not written yet · eBay API through the books\' own ratios, exactly as on Sales analysis</div>'
+          : ''));
     var ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
       .filter(function (a) { return a.spend > 0; })
       .sort(function (a, b) { return b.spend - a.spend; });
-    var haveY = {};
-    booksY.forEach(function (r0) { haveY[oS(r0.account)] = 1; });
-    var pendingY = oAcctRows(O.ov.yesterday_by_account || []).map(function (a) { return oS(a.account); })
-      .filter(function (n0) { return n0 && !haveY[n0]; });
-    var pendNote = pendingY.length
-      ? '<div class="empty" style="margin-top:6px">' + esc(pendingY.join(', ')) + ' — books still rolling up · the number lands after the nightly close, exactly as on Sales analysis</div>'
-      : '';
     box.innerHTML =
       '<div class="o-card"><span class="card-t">Today\'s sales — ' + esc(O.acct || 'all accounts') + ' · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s profit — per account · the books\' law, same as Sales analysis</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) +
-        (y.some(function (a) { return a.costsMissing; })
-          ? '<div class="empty" style="margin-top:6px">' + esc(y.filter(function (a) { return a.costsMissing; }).map(function (a) { return a.account; }).join(', ')) + ' — day costs not entered yet · profit is the law\'s estimate until the processor fills them</div>'
-          : '') + pendNote + '</div>' +
+      '<div class="o-card"><span class="card-t">Yesterday\'s profit — per account · actual profit, the same number as Sales analysis</span>' +
+        (y.length ? rows(y, function (a) { return a.profit; }, true, oGBP)
+          : (TY ? '<div class="empty">No account has rows for ' + esc(yd) + ' yet.</div>' : '')) + yNote + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
         var a0 = null;
         ad.forEach(function (x) { if (Math.abs(oN(x.spend) - v) < 0.005 && !a0) { a0 = x; } });
@@ -21057,7 +21388,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         if (t0 && O.to) t0.value = O.to;
       }
       var rf = $('o2Refresh');
-      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); oPulse(); }; }
+      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; O.truthY = null; oFetchAll(); oPulse(); }; }
       var acctSel = $('o2Acct');
       if (acctSel) {
         fillAccountSelect(acctSel, O.acct, function () {
@@ -21065,7 +21396,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           oScopeLabels();
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
-          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.extras = null;
+          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null;
           oFetchAll(); oPulse();
         });
       }

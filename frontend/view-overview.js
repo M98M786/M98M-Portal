@@ -128,7 +128,7 @@
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, extras: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, truthY: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
   /* Page-level account filter (owner, 6 Sept: "update the whole page with a selection option,
      account to account by name, and an all-accounts option which is the default"). O.acct === ''
      means ALL ACCOUNTS — every section then behaves EXACTLY as before (zero change, zero risk to
@@ -204,6 +204,7 @@
         b.profit = oN(b.oe) - oN(b.cost);
       });
       oPaintDated();
+      oPaintToday();          // the ad-spend · ROAS card reads these book rows — repaint once they land
     })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
@@ -233,6 +234,15 @@
     truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
       .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
       .catch(function () { O.truth = null; oPaintMoney(); });
+    /* Owner (18 Oct, both screenshots side by side): "yesterday's profit per account is showing a
+       wrong number — fix it, take it from Sales analysis." One day, the same scope, the SAME
+       truthPage call Sales analysis makes for its Yesterday chip; oPaintToday sums it exactly the
+       way sxAcctAgg does. The month-wide call above is not reused for this: on the 1st of a month
+       it does not contain yesterday at all. */
+    var ydY = dShift(ukToday(), -1);
+    truthPage(oAcctParam({ from: ydY, to: ydY }))
+      .then(function (d) { O.truthY = d || { failed: true }; oPaintToday(); })
+      .catch(function () { O.truthY = { failed: true }; oPaintToday(); });
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
@@ -595,28 +605,53 @@
     var booksY = oAcctRows(O.days || []).filter(function (r0) { return r0.date === yd; });
     /* Column choice (owner, 11 Sept): the raw books 'actual' turns to garbage when a day's costs
        are not yet entered (Sir Hasib: sold £700, cost 0 → actual −171). Sales analysis speaks the
-       money-law 'profit' column (ratio-estimated where costs are missing) — this strip now shows
-       EXACTLY that number, with a chip when the costs are still owed. */
-    var y = booksY.map(function (r0) {
-      return { account: r0.account, profit: oN(r0.profit),
-        costsMissing: oN(r0.cost) < 0.005 && oN(r0.sold) > 1 };
-    }).sort(function (a, b) { return b.profit - a.profit; });
+       money-law 'profit' column (ratio-estimated where costs are missing).
+       18 Oct (owner, both screenshots side by side: £212.09 here against £55.32 there for the same
+       account and day): sales_daily.profit was STILL not the number Sales analysis shows. That page
+       reads the register's DAYS_UPTODATE series — the books where the day is written, the eBay API
+       through the books' own ratios where it is not — and sums it per account (sxAcctAgg). This is
+       now that same series, from the same one-day truthPage call, summed the same way. Whatever
+       Sales analysis shows for yesterday, this shows; nothing is computed here any more. */
+    var y = [], liveAccts = [];
+    var TY = (O.truthY && !O.truthY.failed) ? (O.truthY.metrics || {}) : null;
+    if (TY) {
+      var agg = {};
+      var ser = TY.DAYS_UPTODATE && TY.DAYS_UPTODATE.value;
+      if (ser && ser.length) {
+        ser.forEach(function (r0) {
+          if (oS(r0.day) !== yd) { return; }
+          var acc0 = oS(r0.account);
+          if (!acc0) { return; }
+          var b0 = agg[acc0] = agg[acc0] || { profit: 0, live: false };
+          b0.profit += oN(r0.actual);
+          if (r0.src === 'live') { b0.live = true; }
+        });
+      } else {
+        var byA = (TY.MONEY_BY_ACCOUNT && TY.MONEY_BY_ACCOUNT.value) || {};
+        Object.keys(byA).forEach(function (a0) {
+          var m0 = byA[a0] || {};
+          agg[a0] = { profit: oN(m0.actual_after_returns != null ? m0.actual_after_returns : m0.actual), live: false };
+        });
+      }
+      y = Object.keys(agg).map(function (a0) { return { account: a0, profit: agg[a0].profit, live: agg[a0].live }; })
+        .sort(function (a, b) { return b.profit - a.profit; });
+      liveAccts = y.filter(function (a) { return a.live; }).map(function (a) { return a.account; });
+    }
+    var yNote = !O.truthY
+      ? '<div class="empty" style="margin-top:6px">Reading the Sales analysis register…</div>'
+      : (O.truthY.failed
+        ? '<div class="empty" style="margin-top:6px">Sales analysis did not answer — press Refresh.</div>'
+        : (liveAccts.length
+          ? '<div class="empty" style="margin-top:6px">' + esc(liveAccts.join(', ')) + ' — book not written yet · eBay API through the books\' own ratios, exactly as on Sales analysis</div>'
+          : ''));
     var ad = booksY.map(function (r0) { return { account: r0.account, spend: oN(r0.ads), roas: oN(r0.ads) > 0.005 ? oN(r0.ads_rev) / oN(r0.ads) : 0 }; })
       .filter(function (a) { return a.spend > 0; })
       .sort(function (a, b) { return b.spend - a.spend; });
-    var haveY = {};
-    booksY.forEach(function (r0) { haveY[oS(r0.account)] = 1; });
-    var pendingY = oAcctRows(O.ov.yesterday_by_account || []).map(function (a) { return oS(a.account); })
-      .filter(function (n0) { return n0 && !haveY[n0]; });
-    var pendNote = pendingY.length
-      ? '<div class="empty" style="margin-top:6px">' + esc(pendingY.join(', ')) + ' — books still rolling up · the number lands after the nightly close, exactly as on Sales analysis</div>'
-      : '';
     box.innerHTML =
       '<div class="o-card"><span class="card-t">Today\'s sales — ' + esc(O.acct || 'all accounts') + ' · live</span>' + rows(t, function (a) { return a.revenue; }, false, oGBP) + '</div>' +
-      '<div class="o-card"><span class="card-t">Yesterday\'s profit — per account · the books\' law, same as Sales analysis</span>' + rows(y, function (a) { return a.profit; }, true, oGBP) +
-        (y.some(function (a) { return a.costsMissing; })
-          ? '<div class="empty" style="margin-top:6px">' + esc(y.filter(function (a) { return a.costsMissing; }).map(function (a) { return a.account; }).join(', ')) + ' — day costs not entered yet · profit is the law\'s estimate until the processor fills them</div>'
-          : '') + pendNote + '</div>' +
+      '<div class="o-card"><span class="card-t">Yesterday\'s profit — per account · actual profit, the same number as Sales analysis</span>' +
+        (y.length ? rows(y, function (a) { return a.profit; }, true, oGBP)
+          : (TY ? '<div class="empty">No account has rows for ' + esc(yd) + ' yet.</div>' : '')) + yNote + '</div>' +
       '<div class="o-card"><span class="card-t">Yesterday\'s ad spend · ROAS — per account</span>' + rows(ad, function (a) { return a.spend; }, true, function (v) {
         var a0 = null;
         ad.forEach(function (x) { if (Math.abs(oN(x.spend) - v) < 0.005 && !a0) { a0 = x; } });
@@ -1065,7 +1100,7 @@
         if (t0 && O.to) t0.value = O.to;
       }
       var rf = $('o2Refresh');
-      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; oFetchAll(); oPulse(); }; }
+      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; O.truthY = null; oFetchAll(); oPulse(); }; }
       var acctSel = $('o2Acct');
       if (acctSel) {
         fillAccountSelect(acctSel, O.acct, function () {
@@ -1073,7 +1108,7 @@
           oScopeLabels();
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
-          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.extras = null;
+          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null;
           oFetchAll(); oPulse();
         });
       }
