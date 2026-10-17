@@ -36,7 +36,9 @@
   function whenS(s) { return s ? esc(String(s).replace('T', ' ').slice(0, 16)) : '—'; }
 
   VIEWS.adtoolCampaigns = {
-    label: 'Campaigns live', hidden: true, order: 96, roles: ROLES,
+    /* 18 Oct: renamed. This page is the six campaign FAULTS, and it sat in the sidebar next to the
+       new Campaigns page reading as a second copy of it. The name now says what it carries. */
+    label: 'Campaign problems', hidden: true, order: 96, roles: ROLES,
     icon: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/><circle cx="18" cy="16" r="3"/>',
     render: function () {
       return '<div class="ac-wrap">' +
@@ -69,7 +71,7 @@
   }
   function whereTable(rows) {
     return '<div class="ac-scroll"><table class="ac-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
-      rows.map(function (c) { return '<tr><td>' + esc(c.name) + (c.start_date ? '<div class="ac-empty" style="padding:0">' + esc(c.start_date.slice(0, 10)) + (c.end_date ? ' → ' + esc(c.end_date.slice(0, 10)) : '') + '</div>' : '') + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="ac-tag ' + (c.live ? 'live' : 'off') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      rows.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + (c.start_date ? '<div class="ac-empty" style="padding:0">' + esc(c.start_date.slice(0, 10)) + (c.end_date ? ' → ' + esc(c.end_date.slice(0, 10)) : '') + '</div>' : '') + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="ac-tag ' + (c.live ? 'live' : 'off') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
   }
   function draw() {
     var D = AC.data, I = D.issues;
@@ -83,14 +85,18 @@
     ];
     var h = '<div class="ac-issues">' + cards.map(function (c) { return '<div class="ac-issue" data-k="' + c[0] + '"><div class="k">' + esc(c[1]) + '</div><div class="v' + (c[4] ? ' loss' : '') + '">' + c[2] + '</div><div class="d">' + esc(c[3]) + '</div></div>'; }).join('') + '</div>';
     h += '<div id="acIssue"></div>';
-    var accts = []; D.campaigns.forEach(function (c) { if (accts.indexOf(c.account) < 0) accts.push(c.account); });
-    h += '<div class="ac-panel"><h3>All campaigns' + src('campaign map · 15 min') + '</h3><div class="ac-sub">Every campaign, its ad counts, and its spend and ROAS over the last 7 days (blank until eBay\'s campaign report lands). We keep our own copy of ' + D.archive_count + ' closed campaigns so old ids can still be named; ' + (D.ad_events && D.ad_events.n ? D.ad_events.n + ' ad status changes recorded since ' + String(D.ad_events.first).slice(0, 10) : 'no ad status changes recorded yet') + '.</div>' +
-      '<div class="ac-filters"><button class="' + (AC.acct === '' ? 'on' : '') + '" data-a="">All accounts</button>' + accts.map(function (a) { return '<button class="' + (AC.acct === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') + '</div><div id="acCamps"></div></div>';
+    /* 18 Oct: the campaign LIST moved to the Campaigns page, which carries the same rows with real
+       spend, clicks, sales and ROAS over any period, the listings inside each campaign, and an
+       account-to-account roll-up. Its spend and ROAS columns were blank here. Per the owner's
+       "show data only for once", this page keeps the faults and points at the other for the list. */
+    h += '<div class="ac-panel"><h3>The campaign list</h3><div class="ac-sub">Every campaign with its'
+      + ' spend, clicks, sales and return, the listings inside it, and account by account, is on the'
+      + ' <a href="#adtoolCampaignBoard" style="color:var(--gold-a);font-weight:800">Campaigns</a> page.'
+      + ' We keep our own copy of ' + (D.archive_count || 0) + ' closed campaigns so old campaign'
+      + ' numbers can still be named.</div></div>';
     h += '<div class="ac-note">Updated ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · nothing on this page is sent to eBay.</div>';
     $('acBody').innerHTML = h;
     var cs = document.querySelectorAll('.ac-issue'); for (var i = 0; i < cs.length; i++) cs[i].onclick = function () { for (var j = 0; j < cs.length; j++) cs[j].classList.toggle('on', cs[j] === this); showIssue(this.getAttribute('data-k')); };
-    var fs = document.querySelectorAll('.ac-filters button'); for (var k = 0; k < fs.length; k++) fs[k].onclick = function () { AC.acct = this.getAttribute('data-a'); for (var j = 0; j < fs.length; j++) fs[j].classList.toggle('on', fs[j] === this); drawCamps(); };
-    drawCamps();
   }
   function showIssue(k) {
     var I = AC.data.issues, h = '';
@@ -106,10 +112,5 @@
     if (k === 'paused') h = '<h3>CPC ads paused inside a running campaign for more than 7 days</h3><div class="ac-sub">' + esc(I.paused_long.note) + '</div><table class="ac-tbl"><thead><tr><th>Listing</th><th>Campaign</th><th>Paused since</th></tr></thead><tbody>' + I.paused_long.sample.map(function (x) { return '<tr><td>' + cell(x) + '</td><td>' + esc(x.name) + '</td><td>' + whenS(x.paused_since) + '</td></tr>'; }).join('') + '</tbody></table>';
     $('acIssue').innerHTML = '<div class="ac-panel">' + h + '</div>';
     var ls = document.querySelectorAll('.ac-open'); for (var i = 0; i < ls.length; i++) ls[i].onclick = function (e) { e.preventDefault(); $('acQ').value = this.getAttribute('data-id'); whereIs(this.getAttribute('data-id')); window.scrollTo(0, 0); };
-  }
-  function drawCamps() {
-    var rows = AC.data.campaigns.filter(function (c) { return !AC.acct || c.account === AC.acct; });
-    $('acCamps').innerHTML = '<div class="ac-scroll"><table class="ac-tbl"><thead><tr><th>Account</th><th>Campaign</th><th>Type</th><th>Status</th><th class="r">Budget</th><th class="r">Bid</th><th>Dates</th><th class="r">Ads</th><th class="r">Active</th><th class="r">Paused</th><th class="r">Archived</th><th class="r">7-day spend</th><th class="r">ROAS</th><th>Last change</th></tr></thead><tbody>' +
-      rows.map(function (c) { var running = /RUNNING|ENDING_SOON/.test(String(c.status)); return '<tr><td>' + esc(c.account) + '</td><td>' + esc(c.name) + '</td><td>' + esc(c.funding_model === 'COST_PER_CLICK' ? 'CPC' : c.funding_model === 'COST_PER_SALE' ? 'CPS' : c.funding_model || '?') + '</td><td><span class="ac-tag ' + (running ? 'live' : 'off') + '">' + esc(c.status) + '</span></td><td class="r">' + (c.budget ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + esc(c.bid_pct ? c.bid_pct + '%' : '—') + '</td><td>' + (c.start_date ? esc(String(c.start_date).slice(0, 10)) + (c.end_date ? ' → ' + esc(String(c.end_date).slice(0, 10)) : ' →') : '—') + '</td><td class="r">' + c.ads + '</td><td class="r">' + c.ads_active + (c.ads_unstamped ? ' <span class="ac-src" title="seen in a campaign but not yet matched to a listing">+' + c.ads_unstamped + '</span>' : '') + '</td><td class="r">' + c.ads_paused + '</td><td class="r">' + c.ads_archived + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
   }
 })();

@@ -113,7 +113,7 @@
       return '<div class="hgroup enter d1"><h1>Advertising <span class="goldtext">money</span></h1>' +
         '<span class="sub">what the ads cost against what they brought back — per day, per account, against the 5× target</span>' +
         '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
-        [7, 14, 30, 60].map(function (n) {
+        [3, 7, 14, 30, 60].map(function (n) {
           return '<button class="minibtn' + (AM.days === n && !AM.from ? ' on' : '') + '" data-am-d="' + n + '">' + n + 'd</button>';
         }).join('') +
         '<select id="amAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +

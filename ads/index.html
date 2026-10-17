@@ -95,6 +95,9 @@ a.adt-pc-t:hover{color:var(--gold-a)}
 .adt-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--gold-b)}
 .adt-fresh.stale{color:#ffb3a6;border-color:rgba(224,86,63,.5)}.adt-fresh.stale::before{background:#e0563f}
 .adt-fresh .p{color:var(--text-3);font-weight:600}
+/* Campaign name as a link into eBay (adtCampaignLink) */
+.adt-camplink{color:inherit;text-decoration:none;border-bottom:1px dotted var(--gold-line-hi)}
+.adt-camplink:hover{color:var(--gold-a);border-bottom-color:var(--gold-a)}
 
 /* ── Shared across departments (14 Oct) ──────────────────────────────────────────────────────
    These five class families were each declared inside ONE view file and then used from three or
@@ -718,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -863,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261017-2240';
+var BUILD = '20261017-2339';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1696,6 +1699,551 @@ window.M98M_ADS_ONLY = true;
   }
 })();
 
+/* ---------- view-adtool-campaignboard.js ---------- */
+/* view-adtool-campaignboard.js — Advertising · Campaigns (owner's batch, 18 Oct 2026).
+ *
+ * The owner asked for four things that are really one page: an active campaigns page, a page showing
+ * all active and paused campaigns with the listings inside them, campaign-to-campaign data, and
+ * account-to-account "eBay style" with custom dates. So this page reads as a report: the period's
+ * totals, then one row per account, then one row per campaign, and a campaign row opens to show the
+ * listings inside it.
+ *
+ * The honesty block at the foot is the point of the page, not a footnote. Per-campaign money has to
+ * be added up from the listings in each campaign until eBay's own campaign report lands, and some
+ * listings are live in two campaigns at once, so their spend shows on both rows. The page prints
+ * which source it used, how much spend is counted twice, and marks every campaign row affected.
+ * A campaign's daily budget is shared by its listings, so the budget is judged per listing, never
+ * as the whole budget against a per-listing cap.
+ *
+ * Read-only: nothing on this page is ever sent to eBay. No collective profit anywhere, by the
+ * Sales Analysis law. Galaxy tokens only, gold the accent, #e0563f the loss colour.
+ * Engine actions: adtoolCampaignBoard, adtoolCampaignListings. Own class prefix: .cbd-
+ */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+  var CB = {
+    period: null, account: '', status: 'active', accounts: [], data: null,
+    sort: { key: 'spend', dir: -1 },
+    open: {},          /* account||campaign_id → true while its listings panel is open */
+    inside: {}         /* account||campaign_id → the adtoolCampaignListings payload, cached per load */
+  };
+
+  VIEW_CSS.push([
+    '.cbd-wrap{max-width:1420px}',
+    '.cbd-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}',
+    '.cbd-filters button{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}',
+    '.cbd-filters button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.cbd-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}',
+    '.cbd-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:5px 14px;font:inherit;font-size:12px;color:var(--text-2);font-weight:700;cursor:pointer}',
+    '.cbd-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.cbd-chip .n{opacity:.7;margin-left:6px;font-weight:700;font-variant-numeric:tabular-nums}',
+    '.cbd-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
+    '.cbd-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.cbd-sub{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}',
+    '.cbd-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--text-2);font-weight:600}',
+    '.cbd-tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
+    '.cbd-tile{flex:1 1 130px;border:1px solid var(--gold-line);border-radius:12px;padding:9px 13px;background:var(--panel-2)}',
+    '.cbd-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.cbd-tile .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.cbd-tile.gold .v{color:var(--gold-a)}.cbd-tile.loss .v{color:' + LOSS + '}',
+    '.cbd-tile .d{font-size:11px;color:var(--text-2);margin-top:2px}',
+    '.cbd-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.cbd-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.cbd-tbl th.s{cursor:pointer;user-select:none}.cbd-tbl th.r{text-align:right}.cbd-tbl th .ar{color:var(--gold-a);margin-left:3px}',
+    '.cbd-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.cbd-tbl td.r{text-align:right;white-space:nowrap}',
+    '.cbd-tbl tr.cbd-row{cursor:pointer}.cbd-tbl tr.cbd-row:hover td{background:rgba(255,255,255,.03)}',
+    '.cbd-tbl tr.cbd-tot td{border-top:1px solid var(--gold-line);border-bottom:0;font-weight:800;background:rgba(242,176,53,.06)}',
+    '.cbd-scroll{overflow-x:auto}',
+    '.cbd-cap{width:18px;color:var(--gold-a);font-weight:800;display:inline-block}',
+    '.cbd-name{font-weight:700;color:var(--text)}',
+    '.cbd-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
+    '.cbd-tag.live{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
+    '.cbd-tag.off{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
+    '.cbd-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(224,86,63,.55);color:' + LOSS + ';white-space:nowrap}',
+    '.cbd-mark.cap{border-color:var(--gold-line-hi);color:var(--gold-a)}',
+    '.cbd-sub2{font-size:10.5px;color:var(--text-3)}',
+    '.cbd-neg{color:' + LOSS + ';font-weight:700}.cbd-pos{color:var(--gold-a);font-weight:700}',
+    '.cbd-inside{background:rgba(255,255,255,.02)}',
+    '.cbd-inside td{padding:10px 12px}',
+    '.cbd-honest{border:1px solid rgba(224,86,63,.45);border-radius:14px;padding:14px 16px;margin-bottom:12px;background:rgba(224,86,63,.07);color:var(--text-2);font-size:12.5px;line-height:1.6}',
+    '.cbd-honest h3{margin:0 0 8px;font-size:14px;font-weight:800;color:var(--text)}',
+    '.cbd-honest p{margin:0 0 8px}.cbd-honest p:last-child{margin-bottom:0}',
+    '.cbd-honest b{color:var(--text)}.cbd-honest .big{color:' + LOSS + ';font-weight:800}',
+    '.cbd-note{font-size:12px;color:var(--text-2);background:var(--panel-2);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5}',
+    '.cbd-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
+    '.cbd-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:help}'
+  ].join(''));
+
+  /* ── small formatters. a figure with nothing to divide by prints the empty marker, never a zero ── */
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function gbp0(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.round(Math.abs(v)).toLocaleString('en-GB'); }
+  function cnt(n) { var v = num(n); return v == null ? '—' : Math.round(v).toLocaleString('en-GB'); }
+  function roasTxt(n) { var v = num(n); return v == null ? '—' : v.toFixed(2) + '×'; }
+  function ratio(a, b) { var t = num(a), d = num(b); if (d == null || d === 0 || t == null) return null; return t / d; }
+  function dayTxt(d) { d = String(d == null ? '' : d).slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(d) ? d : '—'; }
+  function pctTxt(n) { var v = num(n); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
+  function rateTxt(n) { var v = num(n); return v == null ? '—' : (Math.round(v * 100) / 100) + '%'; }
+  /* the owner's words for the number, and one unit reads 'unit' */
+  function unitsTxt(n) { var v = num(n); return cnt(n) + ' unit' + (v === 1 ? '' : 's') + ' from ads'; }
+  function src(t) { return '<span class="cbd-src" title="' + esc(t) + '">' + esc(t) + '</span>'; }
+  function keyOf(c) { return String(c.account || '') + '||' + String(c.campaign_id || ''); }
+  function typeTxt(f) {
+    f = String(f || '');
+    return f === 'COST_PER_CLICK' ? 'CPC' : f === 'COST_PER_SALE' ? 'Cost per sale' : (f || '—');
+  }
+  function isRunning(s) { return /RUNNING|ENDING_SOON/i.test(String(s || '')); }
+  /* the engine sends roas and cpc; the safe ratio is the fallback so a row never prints a stale blank */
+  function roasOf(r) { var v = num(r.roas); return v == null ? ratio(r.sales_money, r.spend) : v; }
+  function cpcOf(r) { var v = num(r.cpc); return v == null ? ratio(r.spend, r.clicks) : v; }
+
+  VIEWS.adtoolCampaignBoard = {
+    label: 'Campaigns', hidden: true, order: 96, roles: ROLES,
+    icon: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="11" height="6" rx="1.5"/><path d="M17 17h4"/>',
+    render: function () {
+      return '<div class="cbd-wrap">' +
+        adtHgroup('Campaigns', 'Every campaign, the listings inside it, and what each spends over the period', 'cbdFresh') +
+        '<div id="cbdBar"></div>' +
+        '<div id="cbdAcct" class="cbd-filters"></div>' +
+        '<div id="cbdBody"><div class="cbd-empty">Loading…</div></div></div>';
+    },
+    init: function () {
+      CB.period = adtPeriodBar('cbdBar', {
+        page: 'adtoolCampaignBoard', def: 'd7', allowCustom: true,
+        onChange: function (v) { CB.period = v; CB.inside = {}; load(false); }
+      });
+      acctChips();
+      load(false).catch(function () {});
+    }
+  };
+
+  function acctChips() {
+    var el = $('cbdAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (CB.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      CB.accounts.map(function (a) { return '<button class="' + (CB.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+      CB.account = this.getAttribute('data-a'); CB.inside = {}; CB.open = {}; acctChips(); load(false);
+    };
+  }
+
+  /* The page asks for EVERY status in one read and filters the campaign table in the browser, so the
+     status chips carry exact counts from the payload's own rows and switching between them is instant.
+     The account table and the period totals are deliberately over every campaign, not the chosen chip. */
+  function params() {
+    var p = adtPeriodParams(CB.period);
+    if (CB.account) p.account = CB.account;
+    p.status = '';
+    return p;
+  }
+
+  function load(quiet) {
+    return api('adtoolCampaignBoard', params()).then(function (d) {
+      CB.data = d || {};
+      /* accounts_list is every account that has a campaign, whatever is filtered; `accounts` is the
+         table of per-account rows, which holds ONE row once an account is chosen. Building the chips
+         from that one row left the reader with no way back to the others. */
+      var names = (d && d.accounts_list) || [];
+      if (!names.length && !CB.account) { names = ((d && d.accounts) || []).map(function (a) { return a && a.account; }); }
+      names = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
+      if (names.length) { CB.accounts = names; acctChips(); }
+      if (!$('cbdBody')) return;
+      draw();
+      adtPeriodEcho('cbdBar', d && d.period);
+      adtFreshShow('cbdFresh', d && d.fresh);
+      if (adtIncludesToday(d && d.period, CB.period)) { adtPoll('cbdBody', 300000, function () { return load(true); }); }
+      else { adtPollStop('cbdBody'); }
+    }).catch(function (e) {
+      if (!quiet && $('cbdBody')) {
+        $('cbdBody').innerHTML = '<div class="cbd-panel"><h3>Not available</h3><div class="cbd-sub">' +
+          esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      }
+      throw e;
+    });
+  }
+
+  /* ── 1 · the period's totals, then account to account ───────────────────────────────────────── */
+  function tile(k, v, d, cls) {
+    return '<div class="cbd-tile ' + (cls || '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div><div class="d">' + esc(d) + '</div></div>';
+  }
+  function totalsTiles(D) {
+    var T = D.totals || {};
+    var roas = num(T.roas); if (roas == null) roas = ratio(T.sales_money, T.spend);
+    var cpc = num(T.cpc); if (cpc == null) cpc = ratio(T.spend, T.clicks);
+    return '<div class="cbd-tiles">' +
+      tile('Campaigns', cnt(T.campaigns), cnt(T.running) + ' running · ' + cnt(T.paused) + ' paused · ' + cnt(T.ended) + ' ended', 'gold') +
+      tile('Listings', cnt(T.listings), 'inside those campaigns', '') +
+      tile('Spend', gbp0(T.spend), cnt(T.clicks) + ' clicks', 'gold') +
+      tile('Sales from ads', gbp0(T.sales_money), unitsTxt(T.sales_units), '') +
+      tile('ROAS', roasTxt(roas), 'sales from ads ÷ spend', roas != null && roas < 1 ? 'loss' : 'gold') +
+      tile('Cost per click', gbp(cpc), cpc == null ? 'no clicks' : 'spend ÷ clicks', '') +
+      '</div>';
+  }
+
+  var ACCT_COLS = [
+    { k: 'account', l: 'Account', cell: function (a) { return '<span class="cbd-name">' + esc(a.account || '—') + '</span>'; } },
+    { k: 'campaigns', l: 'Campaigns', r: 1, cell: function (a) { return cnt(a.campaigns); } },
+    { k: 'running', l: 'Running', r: 1, cell: function (a) { return '<span class="cbd-pos">' + cnt(a.running) + '</span>'; } },
+    { k: 'paused', l: 'Paused', r: 1, cell: function (a) { return cnt(a.paused); } },
+    { k: 'ended', l: 'Ended', r: 1, cell: function (a) { return cnt(a.ended); } },
+    { k: 'listings', l: 'Listings', r: 1, cell: function (a) { return cnt(a.listings); } },
+    { k: 'budget_day', l: 'Daily budget', r: 1, cell: function (a) { return gbp0(a.budget_day); } },
+    { k: 'spend', l: 'Spend', r: 1, cell: function (a) { return gbp(a.spend); } },
+    { k: 'clicks', l: 'Clicks', r: 1, cell: function (a) { return cnt(a.clicks); } },
+    { k: 'sales_money', l: 'Sales from ads', r: 1, cell: function (a) { return gbp(a.sales_money); } },
+    { k: 'sales_units', l: 'Units from ads', r: 1, cell: function (a) { return cnt(a.sales_units); } },
+    { k: 'roas', l: 'ROAS', r: 1, cell: function (a) { var v = roasOf(a); return '<span class="' + (v == null ? '' : (v < 1 ? 'cbd-neg' : 'cbd-pos')) + '">' + roasTxt(v) + '</span>'; } },
+    { k: 'cpc', l: 'Cost per click', r: 1, cell: function (a) { return gbp(cpcOf(a)); } }
+  ];
+
+  function accountPanel(D) {
+    var rows = (D.accounts || []).filter(function (a) { return a && typeof a === 'object' && a.account; });
+    if (!rows.length) return '';
+    var T = D.totals || {};
+    var budgetSum = 0, haveBudget = false;
+    rows.forEach(function (a) { var v = num(a.budget_day); if (v != null) { budgetSum += v; haveBudget = true; } });
+    var totRoas = num(T.roas); if (totRoas == null) totRoas = ratio(T.sales_money, T.spend);
+    var totCpc = num(T.cpc); if (totCpc == null) totCpc = ratio(T.spend, T.clicks);
+
+    var h = '<div class="cbd-panel"><h3>Account to account</h3>' +
+      '<div class="cbd-sub">Every account side by side over the period, with every campaign counted whatever its status.</div>' +
+      '<div class="cbd-scroll"><table class="cbd-tbl"><thead><tr>' +
+      ACCT_COLS.map(function (c) { return '<th class="' + (c.r ? 'r' : '') + '">' + esc(c.l) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.slice().sort(function (x, y) { return (num(y.spend) || 0) - (num(x.spend) || 0); })
+        .map(function (a) { return '<tr>' + ACCT_COLS.map(function (c) { return '<td class="' + (c.r ? 'r' : '') + '">' + c.cell(a) + '</td>'; }).join('') + '</tr>'; }).join('') +
+      '<tr class="cbd-tot"><td>All accounts</td><td class="r">' + cnt(T.campaigns) + '</td><td class="r">' + cnt(T.running) + '</td>' +
+      '<td class="r">' + cnt(T.paused) + '</td><td class="r">' + cnt(T.ended) + '</td><td class="r">' + cnt(T.listings) + '</td>' +
+      '<td class="r" title="added up from the account rows above">' + (haveBudget ? gbp0(budgetSum) : '—') + '</td>' +
+      '<td class="r">' + gbp(T.spend) + '</td><td class="r">' + cnt(T.clicks) + '</td><td class="r">' + gbp(T.sales_money) + '</td>' +
+      '<td class="r">' + cnt(T.sales_units) + '</td><td class="r">' + roasTxt(totRoas) + '</td><td class="r">' + gbp(totCpc) + '</td></tr>' +
+      '</tbody></table></div>';
+
+    /* spend by account, the same figure as the Spend column, drawn so the shape of the fleet reads at a glance */
+    var bars = rows.filter(function (a) { return (num(a.spend) || 0) > 0; })
+      .sort(function (x, y) { return (num(y.spend) || 0) - (num(x.spend) || 0); }).slice(0, 10)
+      .map(function (a) {
+        return { label: String(a.account || ''), value: num(a.spend) || 0, strong: CB.account === a.account,
+          title: a.account + ': ' + gbp(a.spend) + ' spend, ' + gbp(a.sales_money) + ' sales from ads' };
+      });
+    if (bars.length > 1) {
+      h += '<div style="margin-top:10px">' + chartBars(bars, { height: 150, fmt: chartMoney, everyNth: 1 }) + '</div>';
+    }
+    return h + '</div>';
+  }
+
+  /* ── 2 · status chips, counted from the payload's own campaign rows ─────────────────────────── */
+  var STATUS_CHIPS = [['', 'All'], ['active', 'Active'], ['paused', 'Paused'], ['ended', 'Ended']];
+  function statusOf(c) {
+    var s = String(c.status || '').toUpperCase();
+    if (isRunning(s)) return 'active';
+    if (/PAUSE/.test(s)) return 'paused';
+    if (/END/.test(s)) return 'ended';
+    return '';
+  }
+  function statusChips(D) {
+    var rows = D.campaigns || [], counts = { '': rows.length, active: 0, paused: 0, ended: 0 };
+    rows.forEach(function (c) { var b = statusOf(c); if (b) counts[b]++; });
+    return '<div class="cbd-chips">' + STATUS_CHIPS.map(function (c) {
+      return '<button class="cbd-chip' + (CB.status === c[0] ? ' on' : '') + '" data-s="' + c[0] + '">' +
+        esc(c[1]) + '<span class="n">' + cnt(counts[c[0]]) + '</span></button>';
+    }).join('') + '</div>';
+  }
+
+  /* ── 3 · campaign to campaign, sortable on every column, spend first ────────────────────────── */
+  function marks(c) {
+    var m = '';
+    var shared = num(c.shares_listings);
+    if (shared != null && shared > 0) {
+      m += '<span class="cbd-mark" title="' + esc(shared + ' of this campaign\'s listings are also live in another campaign, so their spend shows on both rows') + '">shares ' + shared + '</span>';
+    }
+    if (c.over_day_cap_per_listing || c.over_day_cap) {
+      var pl = perListing(c), cap = num(c.day_cap);
+      m += '<span class="cbd-mark cap" title="' + esc('the budget shared across this campaign\'s listings leaves each one ' +
+        (pl == null ? 'more' : gbp(pl)) + ' a day' + (cap == null ? '' : ', which is over the ' + gbp(cap) + ' a listing is allowed')) +
+        '">over the cap</span>';
+    }
+    return m;
+  }
+  /* The share the engine compared, never a second division of our own: the engine divides the budget
+     by the listings SHARING it, which is the advertised ones where a campaign has any, and dividing
+     by the whole listing count here instead printed a figure below the cap on a row marked over it. */
+  function perListing(c) {
+    var v = num(c.budget_per_listing_day);
+    if (v != null) return v;
+    var b = num(c.budget_day), n = num(c.listings_advertised);
+    if (n == null || n === 0) n = num(c.listings);
+    if (b == null || n == null || n <= 0) return null;
+    return b / n;
+  }
+
+  var CAMP_COLS = [
+    { key: 'name', label: 'Campaign', cell: function (c) {
+        return '<span class="cbd-cap">' + (CB.open[keyOf(c)] ? '▾' : '▸') + '</span><span class="cbd-name">' + adtCampaignLink(c.campaign_id, c.name || c.campaign_id || '—') + '</span>' + marks(c) +
+          '<div class="cbd-sub2">' + esc(c.account || '') + '</div>';
+      }, sortVal: function (c) { return String(c.name || ''); } },
+    { key: 'account', label: 'Account', cell: function (c) { return esc(c.account || '—'); }, sortVal: function (c) { return String(c.account || ''); } },
+    { key: 'funding_model', label: 'Type', cell: function (c) { return esc(typeTxt(c.funding_model)); }, sortVal: function (c) { return typeTxt(c.funding_model); } },
+    { key: 'status', label: 'Status', cell: function (c) {
+        return '<span class="cbd-tag ' + (isRunning(c.status) ? 'live' : 'off') + '">' + esc(c.status || '—') + '</span>';
+      }, sortVal: function (c) { return String(c.status || ''); } },
+    { key: 'budget_day', label: 'Daily budget', cls: 'r', cell: function (c) {
+        var pl = perListing(c);
+        return gbp0(c.budget_day) + (pl == null ? '' : '<div class="cbd-sub2" title="the daily budget shared across this campaign\'s listings">' + gbp(pl) + ' a listing</div>');
+      }, sortVal: function (c) { return num(c.budget_day); } },
+    { key: 'bid_pct', label: 'Ad rate', cls: 'r', cell: function (c) { return rateTxt(c.bid_pct); }, sortVal: function (c) { return num(c.bid_pct); } },
+    { key: 'listings', label: 'Listings', cls: 'r', cell: function (c) { return cnt(c.listings); }, sortVal: function (c) { return num(c.listings); } },
+    { key: 'listings_advertised', label: 'Advertised', cls: 'r', cell: function (c) { return cnt(c.listings_advertised); }, sortVal: function (c) { return num(c.listings_advertised); } },
+    { key: 'spend', label: 'Spend', cls: 'r', cell: function (c) { return gbp(c.spend); }, sortVal: function (c) { return num(c.spend); } },
+    { key: 'clicks', label: 'Clicks', cls: 'r', cell: function (c) { return cnt(c.clicks); }, sortVal: function (c) { return num(c.clicks); } },
+    { key: 'sales_money', label: 'Sales from ads', cls: 'r', cell: function (c) {
+        return gbp(c.sales_money) + '<div class="cbd-sub2">' + unitsTxt(c.sales_units) + '</div>';
+      }, sortVal: function (c) { return num(c.sales_money); } },
+    { key: 'roas', label: 'ROAS', cls: 'r', cell: function (c) {
+        var v = roasOf(c); return '<span class="' + (v == null ? '' : (v < 1 ? 'cbd-neg' : 'cbd-pos')) + '">' + roasTxt(v) + '</span>';
+      }, sortVal: roasOf },
+    { key: 'cpc', label: 'Cost per click', cls: 'r', cell: function (c) { return gbp(cpcOf(c)); }, sortVal: cpcOf },
+    { key: 'start_date', label: 'Started', cls: 'r', cell: function (c) { return '<span class="cbd-sub2">' + dayTxt(c.start_date) + '</span>'; }, sortVal: function (c) { return dayTxt(c.start_date); } },
+    { key: 'end_date', label: 'Ends', cls: 'r', cell: function (c) { return '<span class="cbd-sub2">' + dayTxt(c.end_date) + '</span>'; }, sortVal: function (c) { return dayTxt(c.end_date); } }
+  ];
+
+  function sorter() {
+    var key = CB.sort.key, dir = CB.sort.dir, col = null;
+    for (var i = 0; i < CAMP_COLS.length; i++) if (CAMP_COLS[i].key === key) { col = CAMP_COLS[i]; break; }
+    var val = (col && col.sortVal) ? col.sortVal : function (r) { return num(r[key]); };
+    return function (a, b) {
+      var va = val(a), vb = val(b);
+      if (typeof va === 'string' || typeof vb === 'string') {
+        va = String(va == null ? '' : va).toLowerCase(); vb = String(vb == null ? '' : vb).toLowerCase();
+        return va < vb ? -dir : (va > vb ? dir : 0);
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1; if (vb == null) return -1;      /* nulls sink whichever way we sort */
+      return (va - vb) * dir;
+    };
+  }
+
+  function campaignPanel(D) {
+    var all = (D.campaigns || []).filter(function (c) { return c && typeof c === 'object'; });
+    var rows = CB.status ? all.filter(function (c) { return statusOf(c) === CB.status; }) : all;
+    rows = rows.slice().sort(sorter());
+    var h = '<div class="cbd-panel"><h3>Campaign to campaign' + src(moneyTag(D)) + '</h3>' +
+      '<div class="cbd-sub">One row per campaign over the period. Open a row to see the listings inside it. ' +
+      'Sort on any column by clicking its heading.</div>';
+    if (!rows.length) {
+      h += '<div class="cbd-empty">No campaign in this group for the period.</div></div>';
+      return h;
+    }
+    h += '<div class="cbd-scroll"><table class="cbd-tbl"><thead><tr>' + CAMP_COLS.map(function (c) {
+      var on = CB.sort.key === c.key;
+      return '<th class="s ' + (c.cls || '') + '" data-k="' + esc(c.key) + '">' + esc(c.label) +
+        (on ? '<span class="ar">' + (CB.sort.dir < 0 ? '▼' : '▲') + '</span>' : '') + '</th>';
+    }).join('') + '</tr></thead><tbody>' + rows.map(function (c) {
+      var k = keyOf(c);
+      return '<tr class="cbd-row" data-c="' + esc(k) + '">' +
+        CAMP_COLS.map(function (col) { return '<td class="' + (col.cls || '') + '">' + col.cell(c) + '</td>'; }).join('') + '</tr>' +
+        '<tr class="cbd-inside" data-inside="' + esc(k) + '"' + (CB.open[k] ? '' : ' hidden') + '><td colspan="' + CAMP_COLS.length + '">' +
+        insideHtml(k) + '</td></tr>';
+    }).join('') + '</tbody></table></div></div>';
+    return h;
+  }
+
+  /* ── 4 · the listings inside one campaign, from adtoolCampaignListings ──────────────────────── */
+  function insideHtml(k) {
+    var got = CB.inside[k];
+    if (!got) return '<div class="cbd-empty">Loading the listings in this campaign…</div>';
+    if (got.error) return '<div class="cbd-empty">' + esc(got.error) + '</div>';
+    var rows = got.rows || [], T = got.totals || {};
+    if (!rows.length) return '<div class="cbd-empty">No listing in this campaign over the period.</div>';
+    var held = num(got.held_back);
+    /* the listings add back up to the campaign row above them, and this line is where a reader can
+       see that they do rather than take it on trust */
+    return '<div class="cbd-scroll"><table class="cbd-tbl"><thead><tr>' +
+      '<th>Listing</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Spend</th><th class="r">Clicks</th>' +
+      '<th class="r">Sales from ads</th><th class="r">ROAS</th><th class="r">Cost per click</th><th>Also in</th>' +
+      '</tr></thead><tbody>' + rows.map(insideRow).join('') +
+      '<tr class="cbd-tot"><td>' + cnt(T.listings != null ? T.listings : rows.length) + ' listings in this campaign</td><td></td><td></td>' +
+      '<td class="r">' + gbp(T.spend) + '</td><td class="r">' + cnt(T.clicks) + '</td>' +
+      '<td class="r">' + gbp(T.sales_money) + '</td><td class="r">' + roasTxt(roasOf(T)) + '</td>' +
+      '<td class="r">' + gbp(cpcOf(T)) + '</td>' +
+      '<td>' + (num(T.shared_with_another_campaign) ? cnt(T.shared_with_another_campaign) + ' shared' : '') + '</td></tr>' +
+      '</tbody></table></div>' +
+      (held != null && held > 0 ? '<div class="cbd-sub2" style="margin-top:6px">' + cnt(held) + ' more listing' + (held === 1 ? '' : 's') + ' in this campaign are not shown, though the row above counts them all.</div>' : '');
+  }
+  function insideRow(r) {
+    var live = r.live != null ? !!r.live : /ACTIVE|ELIGIBLE/i.test(String(r.ad_status || ''));
+    /* the engine names these other_campaigns and ad_rate. Reading shared_with and bid_pct printed an
+       empty cell in both columns, which a reader takes for "none" and "no ad rate". */
+    var shared = num(r.other_campaigns);
+    if (shared == null) shared = r.shared_with_another_campaign ? 1 : 0;
+    var roas = roasOf(r), cpc = cpcOf(r);
+    return '<tr><td>' + adtProductCell(r) + '</td>' +
+      '<td><span class="cbd-tag ' + (live ? 'live' : 'off') + '">' + esc(r.ad_status || '—') + (live ? ' · live' : '') + '</span></td>' +
+      '<td class="r">' + rateTxt(r.ad_rate != null ? r.ad_rate : r.bid_pct) + '</td>' +
+      '<td class="r">' + gbp(r.spend) + '</td>' +
+      '<td class="r">' + cnt(r.clicks) + '</td>' +
+      '<td class="r">' + gbp(r.sales_money) + '<div class="cbd-sub2">' + unitsTxt(r.sales_units) + '</div></td>' +
+      '<td class="r"><span class="' + (roas == null ? '' : (roas < 1 ? 'cbd-neg' : 'cbd-pos')) + '">' + roasTxt(roas) + '</span></td>' +
+      '<td class="r">' + gbp(cpc) + '</td>' +
+      '<td>' + (shared > 0
+        ? '<span class="cbd-mark" title="this listing is also live in another campaign, so its spend shows on that campaign too">' + shared + ' more campaign' + (shared === 1 ? '' : 's') + '</span>'
+        : '<span class="cbd-sub2">this campaign only</span>') + '</td></tr>';
+  }
+  /* found by walking the rows, not by an attribute selector: an account name is free text and a
+     quote in it would make a selector string either miss or throw */
+  function insideEl(k) {
+    var all = document.querySelectorAll('#cbdBody tr[data-inside]');
+    for (var i = 0; i < all.length; i++) if (all[i].getAttribute('data-inside') === k) return all[i];
+    return null;
+  }
+  function paint(k) {
+    var t = insideEl(k);
+    if (t && t.cells[0] && CB.open[k]) t.cells[0].innerHTML = insideHtml(k);
+  }
+  function openInside(k) {
+    var tr = insideEl(k); if (!tr) return;
+    tr.hidden = false;
+    if (tr.cells[0]) tr.cells[0].innerHTML = insideHtml(k);
+    if (CB.inside[k]) return;
+    var parts = k.split('||'), p = adtPeriodParams(CB.period);
+    p.account = parts[0]; p.campaign_id = parts[1];
+    api('adtoolCampaignListings', p).then(function (d) {
+      CB.inside[k] = {
+        rows: ((d && (d.listings || d.rows)) || []),
+        totals: (d && d.totals) || null,
+        held_back: d ? d.listings_held_back : null
+      };
+      paint(k);
+    }).catch(function (e) {
+      CB.inside[k] = { error: (e && e.message) || 'The listings in this campaign could not load.' };
+      paint(k);
+    });
+  }
+
+  /* ── 5 · the honesty block. where the campaign money comes from, and what is counted twice ──── */
+  function addedUp(D) { return !/ebay/i.test(String((D && D.money_source) || '')); }
+  function moneyTag(D) { return addedUp(D) ? 'added up from the listings' : 'eBay campaign report'; }
+  /* The per-listing daily cap is the owner's own figure, read from config by the engine and sent on
+     rules.day_cap (and again on every campaign row). Print the live value or nothing; never a
+     number typed in here. */
+  function dayCap(D) {
+    var c = num(D.rules && D.rules.day_cap);
+    if (c == null) { ((D.campaigns || [])).some(function (r) { var v = num(r && r.day_cap); if (v != null) { c = v; return true; } return false; }); }
+    return c;
+  }
+  function honesty(D) {
+    var h = '<div class="cbd-honest"><h3>How to read the campaign figures</h3>';
+
+    var R = D.campaign_report_rows || {};
+    if (addedUp(D)) {
+      h += '<p><b>Where the campaign money comes from.</b> The spend, clicks and sales on every campaign row are ' +
+        'added up from the listings in that campaign. That is our own addition, not a figure eBay reported for the ' +
+        'campaign. Each listing figure is eBay\'s own.' +
+        /* the case the owner must never mistake for a collapse in spend: eBay's own per-campaign rows
+           have started landing but do not yet reach across the whole window, so they are not used */
+        (num(R.rows_in_window) ? ' eBay\'s own campaign report has started landing but does not yet cover' +
+          (num(R.accounts_short) ? ' every account over' : '') + ' this period' +
+          (R.from && R.to ? ' (it holds ' + dayTxt(R.from) + ' to ' + dayTxt(R.to) + ')' : '') +
+          ', so it is left alone rather than shown as a part of the period standing for the whole of it. ' +
+          'Pick a shorter period inside those dates and the rows become eBay\'s own.' : '') + '</p>';
+    } else {
+      h += '<p><b>Where the campaign money comes from.</b> eBay\'s own campaign report, per campaign and per day, ' +
+        'so each campaign row is the figure eBay reported for that campaign. A campaign the report does not mention ' +
+        'spent nothing over the period.</p>';
+    }
+
+    /* THE RECONCILIATION. The difference between the campaign column and the company total is
+       measured from the figures on screen, so subtracting it always lands on the total exactly. */
+    var C = D.column || {}, colSpend = num(C.spend), twice = num(C.spend_counted_twice);
+    var T2 = D.totals || {}, tot = num(T2.spend);
+    var O = D.overlap || {};
+    var many = num(O.listings_in_two_or_more), of = num(O.of_live_advertised), dbl = num(C.listings_counted_more_than_once);
+    if (twice != null && twice > 0) {
+      h += '<p><b>Some listings are counted twice.</b> The campaign rows add up to <span class="big">' + gbp(colSpend) +
+        '</span>. Take off the <span class="big">' + gbp(twice) + '</span> that is the same spend landing on more than one ' +
+        'campaign and you have <b>' + gbp(tot) + '</b>, the figure in the totals row and on the account lines. ' +
+        (dbl != null && dbl > 0 ? cnt(dbl) + ' listing' + (dbl === 1 ? ' sits' : 's sit') + ' in more than one of these campaigns' : '') +
+        (many != null && many > 0 ? (dbl != null && dbl > 0 ? ', and ' : '') + cnt(many) + ' of the ' + cnt(of) +
+          ' listings with a live ad are being advertised in two or more campaigns at once' +
+          ((of != null && of > 0) ? ', which is ' + pctTxt(many / of) + ' of them' : '') : '') + '. ' +
+        'Every campaign row holding one of them is marked <span class="cbd-mark">shares</span> above. ' +
+        'The totals and the account rows count each listing once.</p>';
+    } else {
+      h += '<p><b>Nothing is counted twice.</b> The campaign rows add up to <b>' + gbp(colSpend) + '</b>, which is the ' +
+        'figure in the totals row: no listing\'s spend lands on two campaign rows over this period.</p>';
+    }
+    var heldC = num(D.campaigns_held_back);
+    if (heldC != null && heldC > 0) {
+      h += '<p><b>' + cnt(heldC) + ' campaigns are not on the page.</b> The biggest spenders are shown. The totals row, ' +
+        'the account lines and the two figures above cover every campaign, shown or not. Choose one account to see more of them.</p>';
+    }
+
+    var cap = dayCap(D);
+    h += '<p><b>Budget against the cap.</b> A campaign\'s daily budget is shared by every listing inside it, so the ' +
+      'figure to judge is the budget divided by the listings sharing it, printed under each budget. ' +
+      (cap != null
+        ? 'A listing is allowed ' + gbp(cap) + ' a day, so a row is marked <span class="cbd-mark cap">over the cap</span> when that per-listing share is above it.'
+        : 'A row is marked <span class="cbd-mark cap">over the cap</span> when that per-listing share is above the daily cap a listing is allowed.') +
+      ' The whole budget is never judged against a per-listing cap.</p>';
+
+    h += '<p>Nothing on this page is ever sent to eBay.' +
+      (D.computed_at ? ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.' : '') + '</p>';
+    return h + '</div>';
+  }
+
+  /* ── draw and wire ─────────────────────────────────────────────────────────────────────────── */
+  function draw() {
+    var D = CB.data || {};
+    var P = D.period, when = (P && (P.label || P.from)) ? adtPeriodText(P) : 'this period';
+    var h = '<div class="cbd-top"><span><b>Campaigns</b></span><span>·</span><span>' + esc(when) + '</span>' +
+      '<span>·</span><span>' + esc(CB.account || 'all accounts') + '</span>' +
+      '<span>·</span><span>' + cnt(num(D.campaigns_total) != null ? D.campaigns_total : (D.campaigns || []).length) + ' campaigns</span>' +
+      src(moneyTag(D)) + '</div>';
+    h += totalsTiles(D);
+    h += accountPanel(D);
+    h += statusChips(D);
+    h += campaignPanel(D);
+    h += honesty(D);
+    $('cbdBody').innerHTML = h;
+    wire();
+    /* a row left open before a sort or a refresh comes back open, with its listings from the cache */
+    Object.keys(CB.open).forEach(function (k) { if (CB.open[k]) openInside(k); });
+  }
+
+  function wire() {
+    var chips = document.querySelectorAll('#cbdBody .cbd-chip');
+    for (var i = 0; i < chips.length; i++) chips[i].onclick = function () { CB.status = this.getAttribute('data-s'); draw(); };
+
+    var ths = document.querySelectorAll('#cbdBody th[data-k]');
+    for (var t = 0; t < ths.length; t++) ths[t].onclick = function () {
+      var k = this.getAttribute('data-k');
+      if (CB.sort.key === k) { CB.sort.dir = -CB.sort.dir; }
+      else { CB.sort.key = k; CB.sort.dir = (k === 'name' || k === 'account' || k === 'status' || k === 'funding_model') ? 1 : -1; }
+      draw();
+    };
+
+    var rows = document.querySelectorAll('#cbdBody tr.cbd-row');
+    for (var r = 0; r < rows.length; r++) rows[r].onclick = function (ev) {
+      /* the row opens the listings inside it, but the campaign name is now a link to eBay and the
+         expanded block carries listing links. A click that started on a link is the link's. */
+      var t = ev && (ev.target || ev.srcElement);
+      while (t && t !== this) { if (t.tagName === 'A') { return; } t = t.parentNode; }
+      var k = this.getAttribute('data-c');
+      if (CB.open[k]) {
+        CB.open[k] = false;
+        var tr = insideEl(k); if (tr) tr.hidden = true;
+      } else {
+        CB.open[k] = true;
+        openInside(k);
+      }
+      /* the caret in the name cell flips without redrawing the whole table */
+      var cap = this.querySelector('.cbd-cap'); if (cap) cap.textContent = CB.open[k] ? '▾' : '▸';
+    };
+  }
+})();
+
 /* ---------- view-adtool-campaigns.js ---------- */
 /* view-adtool-campaigns.js — Advertising Tool · Campaigns live (spec §7, Phase 2).
  * Hidden from every sidebar (hidden:true); data only while portal_config.adtool_page_campaigns is on.
@@ -1735,7 +2283,9 @@ window.M98M_ADS_ONLY = true;
   function whenS(s) { return s ? esc(String(s).replace('T', ' ').slice(0, 16)) : '—'; }
 
   VIEWS.adtoolCampaigns = {
-    label: 'Campaigns live', hidden: true, order: 96, roles: ROLES,
+    /* 18 Oct: renamed. This page is the six campaign FAULTS, and it sat in the sidebar next to the
+       new Campaigns page reading as a second copy of it. The name now says what it carries. */
+    label: 'Campaign problems', hidden: true, order: 96, roles: ROLES,
     icon: '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/><circle cx="18" cy="16" r="3"/>',
     render: function () {
       return '<div class="ac-wrap">' +
@@ -1768,7 +2318,7 @@ window.M98M_ADS_ONLY = true;
   }
   function whereTable(rows) {
     return '<div class="ac-scroll"><table class="ac-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
-      rows.map(function (c) { return '<tr><td>' + esc(c.name) + (c.start_date ? '<div class="ac-empty" style="padding:0">' + esc(c.start_date.slice(0, 10)) + (c.end_date ? ' → ' + esc(c.end_date.slice(0, 10)) : '') + '</div>' : '') + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="ac-tag ' + (c.live ? 'live' : 'off') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      rows.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + (c.start_date ? '<div class="ac-empty" style="padding:0">' + esc(c.start_date.slice(0, 10)) + (c.end_date ? ' → ' + esc(c.end_date.slice(0, 10)) : '') + '</div>' : '') + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="ac-tag ' + (c.live ? 'live' : 'off') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
   }
   function draw() {
     var D = AC.data, I = D.issues;
@@ -1782,14 +2332,18 @@ window.M98M_ADS_ONLY = true;
     ];
     var h = '<div class="ac-issues">' + cards.map(function (c) { return '<div class="ac-issue" data-k="' + c[0] + '"><div class="k">' + esc(c[1]) + '</div><div class="v' + (c[4] ? ' loss' : '') + '">' + c[2] + '</div><div class="d">' + esc(c[3]) + '</div></div>'; }).join('') + '</div>';
     h += '<div id="acIssue"></div>';
-    var accts = []; D.campaigns.forEach(function (c) { if (accts.indexOf(c.account) < 0) accts.push(c.account); });
-    h += '<div class="ac-panel"><h3>All campaigns' + src('campaign map · 15 min') + '</h3><div class="ac-sub">Every campaign, its ad counts, and its spend and ROAS over the last 7 days (blank until eBay\'s campaign report lands). We keep our own copy of ' + D.archive_count + ' closed campaigns so old ids can still be named; ' + (D.ad_events && D.ad_events.n ? D.ad_events.n + ' ad status changes recorded since ' + String(D.ad_events.first).slice(0, 10) : 'no ad status changes recorded yet') + '.</div>' +
-      '<div class="ac-filters"><button class="' + (AC.acct === '' ? 'on' : '') + '" data-a="">All accounts</button>' + accts.map(function (a) { return '<button class="' + (AC.acct === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') + '</div><div id="acCamps"></div></div>';
+    /* 18 Oct: the campaign LIST moved to the Campaigns page, which carries the same rows with real
+       spend, clicks, sales and ROAS over any period, the listings inside each campaign, and an
+       account-to-account roll-up. Its spend and ROAS columns were blank here. Per the owner's
+       "show data only for once", this page keeps the faults and points at the other for the list. */
+    h += '<div class="ac-panel"><h3>The campaign list</h3><div class="ac-sub">Every campaign with its'
+      + ' spend, clicks, sales and return, the listings inside it, and account by account, is on the'
+      + ' <a href="#adtoolCampaignBoard" style="color:var(--gold-a);font-weight:800">Campaigns</a> page.'
+      + ' We keep our own copy of ' + (D.archive_count || 0) + ' closed campaigns so old campaign'
+      + ' numbers can still be named.</div></div>';
     h += '<div class="ac-note">Updated ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · nothing on this page is sent to eBay.</div>';
     $('acBody').innerHTML = h;
     var cs = document.querySelectorAll('.ac-issue'); for (var i = 0; i < cs.length; i++) cs[i].onclick = function () { for (var j = 0; j < cs.length; j++) cs[j].classList.toggle('on', cs[j] === this); showIssue(this.getAttribute('data-k')); };
-    var fs = document.querySelectorAll('.ac-filters button'); for (var k = 0; k < fs.length; k++) fs[k].onclick = function () { AC.acct = this.getAttribute('data-a'); for (var j = 0; j < fs.length; j++) fs[j].classList.toggle('on', fs[j] === this); drawCamps(); };
-    drawCamps();
   }
   function showIssue(k) {
     var I = AC.data.issues, h = '';
@@ -1805,11 +2359,6 @@ window.M98M_ADS_ONLY = true;
     if (k === 'paused') h = '<h3>CPC ads paused inside a running campaign for more than 7 days</h3><div class="ac-sub">' + esc(I.paused_long.note) + '</div><table class="ac-tbl"><thead><tr><th>Listing</th><th>Campaign</th><th>Paused since</th></tr></thead><tbody>' + I.paused_long.sample.map(function (x) { return '<tr><td>' + cell(x) + '</td><td>' + esc(x.name) + '</td><td>' + whenS(x.paused_since) + '</td></tr>'; }).join('') + '</tbody></table>';
     $('acIssue').innerHTML = '<div class="ac-panel">' + h + '</div>';
     var ls = document.querySelectorAll('.ac-open'); for (var i = 0; i < ls.length; i++) ls[i].onclick = function (e) { e.preventDefault(); $('acQ').value = this.getAttribute('data-id'); whereIs(this.getAttribute('data-id')); window.scrollTo(0, 0); };
-  }
-  function drawCamps() {
-    var rows = AC.data.campaigns.filter(function (c) { return !AC.acct || c.account === AC.acct; });
-    $('acCamps').innerHTML = '<div class="ac-scroll"><table class="ac-tbl"><thead><tr><th>Account</th><th>Campaign</th><th>Type</th><th>Status</th><th class="r">Budget</th><th class="r">Bid</th><th>Dates</th><th class="r">Ads</th><th class="r">Active</th><th class="r">Paused</th><th class="r">Archived</th><th class="r">7-day spend</th><th class="r">ROAS</th><th>Last change</th></tr></thead><tbody>' +
-      rows.map(function (c) { var running = /RUNNING|ENDING_SOON/.test(String(c.status)); return '<tr><td>' + esc(c.account) + '</td><td>' + esc(c.name) + '</td><td>' + esc(c.funding_model === 'COST_PER_CLICK' ? 'CPC' : c.funding_model === 'COST_PER_SALE' ? 'CPS' : c.funding_model || '?') + '</td><td><span class="ac-tag ' + (running ? 'live' : 'off') + '">' + esc(c.status) + '</span></td><td class="r">' + (c.budget ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + esc(c.bid_pct ? c.bid_pct + '%' : '—') + '</td><td>' + (c.start_date ? esc(String(c.start_date).slice(0, 10)) + (c.end_date ? ' → ' + esc(String(c.end_date).slice(0, 10)) : ' →') : '—') + '</td><td class="r">' + c.ads + '</td><td class="r">' + c.ads_active + (c.ads_unstamped ? ' <span class="ac-src" title="seen in a campaign but not yet matched to a listing">+' + c.ads_unstamped + '</span>' : '') + '</td><td class="r">' + c.ads_paused + '</td><td class="r">' + c.ads_archived + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + whenS(c.last_change) + '</td></tr>'; }).join('') + '</tbody></table></div>';
   }
 })();
 
@@ -2889,6 +3438,253 @@ window.M98M_ADS_ONLY = true;
         window.echarts.init(el).setOption(Object.assign({}, base, { xAxis: { type: 'category', data: rows.map(function (x) { return String(x.day).slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: rows.map(function (x) { return x.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: rows.map(function (x) { return x.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(fmt), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: rows.map(function (x) { return x.actual == null || x.forecast == null ? null : Math.round((x.actual - x.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] }));
       });
     } else if (D.realised && D.realised.length) { var c2 = window.echarts.init($('flReal')); c2.setOption(Object.assign({}, base, { xAxis: { type: 'category', data: D.realised.map(function (r) { return r.day.slice(5); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, series: [{ name: 'Forecast', type: 'line', data: D.realised.map(function (r) { return r.forecast; }), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbolSize: 3, itemStyle: { color: WHITE55 } }, { name: 'Actual', type: 'line', data: D.realised.map(function (r) { return r.actual; }), lineStyle: { color: GOLD, width: 2 }, symbolSize: 3, itemStyle: { color: GOLD }, label: pill(function (o) { return o.value == null ? '' : Math.round(o.value); }), labelLayout: LAYOUT }, { name: 'Miss', type: 'bar', data: D.realised.map(function (r) { return r.actual == null ? null : Math.round((r.actual - r.forecast) * 10) / 10; }), itemStyle: { color: function (p) { return p.value < 0 ? LOSS : GOLD2; } }, barMaxWidth: 10 }] })); } else { var fr = $('flReal'); if (fr) fr.innerHTML = '<div class="an-empty">Nothing to compare yet.</div>'; }
+  }
+})();
+
+/* ---------- view-adtool-itemcampaigns.js ---------- */
+/* view-adtool-itemcampaigns.js — Advertising · Where each listing advertises (owner's batch, 18 Oct 2026).
+ *
+ * The owner's words: "I need a proper seperate page which tells me in which campaign this item is
+ * right now." So this page is the item-to-campaign lookup for the whole shop at once: every active
+ * listing, the campaign or campaigns it is in right now, and the ones in no campaign at all.
+ *
+ * A listing live in more than one campaign is the thing that costs money twice, so that state is
+ * marked in the loss colour and gets its own chip. Each listing's last 3 and 7 days of spend sit on
+ * the same row, so "which campaign is this in" and "what is it costing" are answered together.
+ *
+ * Read-only: nothing on this page is ever sent to eBay. No collective profit anywhere, by the
+ * Sales Analysis law. Galaxy tokens only, gold the accent, #e0563f the loss colour.
+ * Engine action: adtoolItemCampaigns. Own class prefix: .wla-
+ */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+  var WL = { account: '', q: '', state: '', accounts: [], data: null, busy: false };
+
+  VIEW_CSS.push([
+    '.wla-wrap{max-width:1420px}',
+    '.wla-search{display:flex;gap:8px;align-items:center;margin:8px 0 12px;flex-wrap:wrap}',
+    '.wla-search input{flex:1 1 320px;min-width:200px;background:var(--panel);border:1px solid var(--gold-line);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}',
+    '.wla-search input:focus{outline:2px solid var(--gold-b);outline-offset:1px}',
+    '.wla-btn{background:var(--gold-b);color:var(--gold-ink);border:0;border-radius:8px;padding:9px 14px;font:inherit;font-weight:800;font-size:12.5px;cursor:pointer}',
+    '.wla-btn.ghost{background:transparent;color:var(--text-2);border:1px solid var(--gold-line)}',
+    '.wla-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}',
+    '.wla-filters button{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}',
+    '.wla-filters button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.wla-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}',
+    '.wla-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:5px 14px;font:inherit;font-size:12px;color:var(--text-2);font-weight:700;cursor:pointer}',
+    '.wla-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.wla-chip.multi{border-color:rgba(224,86,63,.55);color:' + LOSS + '}',
+    '.wla-chip.multi.on{background:' + LOSS + ';border-color:' + LOSS + ';color:#fff}',
+    '.wla-chip .n{opacity:.75;margin-left:6px;font-weight:700;font-variant-numeric:tabular-nums}',
+    '.wla-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
+    '.wla-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.wla-sub{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}',
+    '.wla-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.wla-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.wla-tbl th.r{text-align:right}',
+    '.wla-tbl td{padding:9px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.wla-tbl td.r{text-align:right;white-space:nowrap}',
+    '.wla-tbl tr:hover td{background:rgba(255,255,255,.03)}',
+    '.wla-tbl tr.multi td:first-child{box-shadow:inset 3px 0 0 ' + LOSS + '}',
+    '.wla-scroll{overflow-x:auto}',
+    '.wla-cmp{display:flex;flex-direction:column;gap:6px;min-width:300px}',
+    '.wla-c{border:1px solid var(--gold-line);border-radius:10px;padding:7px 10px;background:rgba(255,255,255,.02)}',
+    '.wla-c.live{border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.08)}',
+    '.wla-c .n{font-size:12px;font-weight:800;color:var(--text)}',
+    '.wla-c .m{font-size:10.5px;color:var(--text-3);margin-top:3px;line-height:1.5}',
+    '.wla-c .m b{color:var(--text-2);font-weight:700}',
+    '.wla-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
+    '.wla-pill.live{background:var(--gold-b);border-color:var(--gold-b);color:var(--gold-ink)}',
+    '.wla-pill.off{border-color:rgba(224,86,63,.5);color:' + LOSS + '}',
+    '.wla-mark{display:inline-block;padding:2px 9px;border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:' + LOSS + ';color:#fff;white-space:nowrap}',
+    '.wla-none{display:inline-block;padding:2px 9px;border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px dashed var(--gold-line);color:var(--text-3);white-space:nowrap}',
+    '.wla-sub2{font-size:10.5px;color:var(--text-3)}',
+    '.wla-warn{background:rgba(224,86,63,.1);border:1px solid rgba(224,86,63,.45);border-radius:12px;padding:11px 14px;margin-bottom:12px;color:' + LOSS + ';font-size:12.5px;line-height:1.55;font-weight:700}',
+    '.wla-note{font-size:12px;color:var(--text-2);background:var(--panel-2);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5}',
+    '.wla-empty{color:var(--text-3);font-size:13px;padding:10px 0}'
+  ].join(''));
+
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function cnt(n) { var v = num(n); return v == null ? '—' : Math.round(v).toLocaleString('en-GB'); }
+  function rateTxt(n) { var v = num(n); return v == null ? '—' : (Math.round(v * 100) / 100) + '%'; }
+  function typeTxt(f) {
+    f = String(f || '');
+    return f === 'COST_PER_CLICK' ? 'CPC' : f === 'COST_PER_SALE' ? 'Cost per sale' : (f || '—');
+  }
+
+  VIEWS.adtoolItemCampaigns = {
+    label: 'Where each listing advertises', hidden: true, order: 96, roles: ROLES,
+    icon: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6M8 11h6"/>',
+    render: function () {
+      return '<div class="wla-wrap">' +
+        adtHgroup('Where each listing advertises', 'Every active listing and the campaigns it is in right now', 'wlaFresh') +
+        '<div class="wla-search">' +
+          '<input id="wlaQ" type="search" placeholder="Search an item number or a title" autocomplete="off">' +
+          '<button class="wla-btn" id="wlaGo">Search</button>' +
+          '<button class="wla-btn ghost" id="wlaClear">Clear</button>' +
+        '</div>' +
+        '<div id="wlaAcct" class="wla-filters"></div>' +
+        '<div id="wlaChips"></div>' +
+        '<div id="wlaBody"><div class="wla-empty">Loading…</div></div></div>';
+    },
+    init: function () {
+      var q = $('wlaQ'), go = $('wlaGo'), clear = $('wlaClear');
+      go.onclick = function () { WL.q = q.value.trim(); load(); };
+      clear.onclick = function () { q.value = ''; WL.q = ''; load(); };
+      q.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); go.onclick(); } };
+      acctChips();
+      load();
+    }
+  };
+
+  function acctChips() {
+    var el = $('wlaAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (WL.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      WL.accounts.map(function (a) { return '<button class="' + (WL.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { WL.account = this.getAttribute('data-a'); acctChips(); load(); };
+  }
+
+  /* All, In one campaign, In more than one, In no campaign — the engine's own four counts */
+  var STATE_CHIPS = [
+    ['', 'All', 'active'],
+    ['in', 'In one campaign', 'in_one'],
+    ['multi', 'In more than one', 'in_many'],
+    ['none', 'In no campaign', 'in_none']
+  ];
+  function stateChips() {
+    var el = $('wlaChips'); if (!el) return;
+    var C = (WL.data && WL.data.counts) || {};
+    el.innerHTML = '<div class="wla-chips">' + STATE_CHIPS.map(function (c) {
+      var n = num(C[c[2]]);
+      return '<button class="wla-chip' + (c[0] === 'multi' ? ' multi' : '') + (WL.state === c[0] ? ' on' : '') + '" data-s="' + c[0] + '">' +
+        esc(c[1]) + (n == null ? '' : '<span class="n">' + cnt(n) + '</span>') + '</button>';
+    }).join('') + '</div>';
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { WL.state = this.getAttribute('data-s'); stateChips(); load(); };
+  }
+
+  function load() {
+    if (WL.busy) return;
+    WL.busy = true;
+    var p = {};
+    if (WL.account) p.account = WL.account;
+    if (WL.q) p.q = WL.q;
+    if (WL.state) p.state = WL.state;
+    return api('adtoolItemCampaigns', p).then(function (d) {
+      WL.busy = false;
+      WL.data = d || {};
+      var names = (d && d.accounts) || [];
+      if (names.length) {
+        WL.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
+        acctChips();
+      }
+      if (!$('wlaBody')) return;
+      stateChips();
+      draw();
+      adtFreshShow('wlaFresh', d && d.fresh);
+    }).catch(function (e) {
+      WL.busy = false;
+      if ($('wlaBody')) {
+        $('wlaBody').innerHTML = '<div class="wla-panel"><h3>Not available</h3><div class="wla-sub">' +
+          esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      }
+    });
+  }
+
+  /* the campaign or campaigns one listing is in right now. "live" is the state that spends money,
+     so it is the one made obvious; a membership that is not live is printed plainly beside it. */
+  function campaignsCell(it) {
+    var cs = it.campaigns || [];
+    if (!cs.length) return '<span class="wla-none">in no campaign</span>';
+    return '<div class="wla-cmp">' + cs.map(function (c) {
+      var live = !!c.live;
+      return '<div class="wla-c' + (live ? ' live' : '') + '">' +
+        '<div class="n">' + adtCampaignLink(c.campaign_id, c.name || c.campaign_id || 'Campaign') +
+          ' <span class="wla-pill ' + (live ? 'live' : 'off') + '">' + (live ? 'live' : 'not live') + '</span></div>' +
+        '<div class="m">' + esc(c.status || '—') + ' · ' + esc(typeTxt(c.funding_model)) +
+          /* the budget belongs to the CAMPAIGN and is shared by every listing in it, so it must not
+             read on a listing's own card as this listing's daily allowance */
+          ' · campaign budget <b>' + gbp(c.budget_day) + '</b> a day, shared' +
+          ' · ad rate <b>' + rateTxt(c.bid_pct) + '</b>' +
+          ' · this ad <b>' + esc(c.ad_status || '—') + '</b></div></div>';
+    }).join('') + '</div>';
+  }
+
+  function stateCell(it) {
+    var n = num(it.live_count);
+    if (n != null && n > 1) {
+      return '<span class="wla-mark" title="this listing is live in ' + n + ' campaigns at once, so its spend is charged by each of them">in ' + n + ' campaigns</span>';
+    }
+    if (n === 1) return '<span class="wla-pill live">in one campaign</span>';
+    return '<span class="wla-none">in no campaign</span>';
+  }
+
+  function row(it) {
+    var n = num(it.live_count), multi = n != null && n > 1;
+    return '<tr class="' + (multi ? 'multi' : '') + '">' +
+      '<td>' + adtProductCell(it) + '</td>' +
+      '<td>' + stateCell(it) + '</td>' +
+      '<td class="r">' + gbp(it.price) + '</td>' +
+      '<td class="r">' + cnt(it.sold_30d) + '</td>' +
+      '<td class="r">' + gbp(it.spend_3d) + '</td>' +
+      '<td class="r">' + gbp(it.spend_7d) + '</td>' +
+      '<td>' + campaignsCell(it) + '</td></tr>';
+  }
+
+  function draw() {
+    var D = WL.data || {}, items = (D.items || []).filter(function (i) { return i && typeof i === 'object'; });
+    var C = D.counts || {}, h = '';
+
+    /* the state that costs money twice, said first */
+    var many = num(C.in_many);
+    if (many != null && many > 0) {
+      h += '<div class="wla-warn">' + cnt(many) + ' active listing' + (many === 1 ? ' is' : 's are') +
+        ' live in more than one campaign right now, so each of those campaigns charges for the same listing.' +
+        ' Use the <b>In more than one</b> chip to see them.</div>';
+    }
+
+    var held = num(D.items_held_back);
+    var total = num(D.items_total);
+    h += '<div class="wla-note">' +
+      'Showing <b>' + cnt(items.length) + '</b> listing' + (items.length === 1 ? '' : 's') +
+      (total != null ? ' of ' + cnt(total) + ' that match' : '') +
+      (WL.q ? ' for "' + esc(WL.q) + '"' : '') +
+      (WL.account ? ' on ' + esc(WL.account) : ' across all accounts') + '. ' +
+      (held != null && held > 0
+        ? '<b>' + cnt(held) + ' more ' + (held === 1 ? 'listing is' : 'listings are') + ' not on this page.</b> ' +
+          'Narrow it with the search box, an account or a chip to reach them.'
+        : 'Every listing that matches is on this page.') +
+      ' Active listings only. Nothing on this page is ever sent to eBay.' +
+      /* the three chips must add up to the active listing count, and the engine counts that again
+         straight from the listing table. If the two ever disagree the page says so rather than
+         quietly showing a short list as though it were the whole shop. */
+      (function () {
+        var a = num(C.active), real = num(D.active_counted);
+        if (WL.q || a == null || real == null || a === real) return '';
+        return ' <b>The chips cover ' + cnt(a) + ' listings and there are ' + cnt(real) +
+          ' active, so ' + cnt(real - a) + ' did not come back in this read.</b>';
+      })() +
+      (D.computed_at ? ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.' : '') +
+      '</div>';
+
+    h += '<div class="wla-panel"><h3>Active listings and their campaigns</h3>' +
+      '<div class="wla-sub">Where each listing is advertising right now, and what it has spent over the last 3 and 7 days.</div>';
+    if (!items.length) {
+      h += '<div class="wla-empty">' + (WL.q || WL.state || WL.account
+        ? 'No active listing matches. Try a different search, chip or account.'
+        : 'No active listing came back.') + '</div></div>';
+      $('wlaBody').innerHTML = h;
+      return;
+    }
+    h += '<div class="wla-scroll"><table class="wla-tbl"><thead><tr>' +
+      '<th>Listing</th><th>Right now</th><th class="r">Price</th><th class="r">Sold 30 d</th>' +
+      '<th class="r">Spend 3 d</th><th class="r">Spend 7 d</th><th>Campaigns it is in</th>' +
+      '</tr></thead><tbody>' + items.map(row).join('') + '</tbody></table></div></div>';
+
+    $('wlaBody').innerHTML = h;
   }
 })();
 
@@ -4280,10 +5076,10 @@ window.M98M_ADS_ONLY = true;
     var Wr = D.where && D.where.rows ? D.where.rows : null; var C = D.campaigns || [];
     h += '<div class="at-panel"><h3>Where its ads sit right now' + src('campaigns · every 15 min') + '</h3><div class="at-sub">Which campaigns this listing is in, and whether its own ad is running. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
       (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
-        Wr.map(function (c) { return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="at-tag ' + (c.live ? 'gold' : 'loss') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="at-tag ' + (c.live ? 'gold' : 'loss') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
         (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign we know about.</div>') :
       (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
-        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign we know about.</div>')) + '</div>';
+        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign we know about.</div>')) + '</div>';
     /* yesterday hour by hour + all-time daily */
     h += '<div class="at-grid2">' +
       '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday usually does by that hour.</div><div id="atHour" class="at-chart"></div></div>' +
@@ -5001,186 +5797,6 @@ window.M98M_ADS_ONLY = true;
       var un = document.querySelectorAll('[data-undo]'); for (var j = 0; j < un.length; j++) un[j].onclick = function () { var id = this.getAttribute('data-undo'); if (!confirm('Undo this action on eBay?')) return; api('adtoolApplyPage', { op: 'undo', id: Number(id) }).then(function () { toast('Undone'); loadLive(); }).catch(function (e) { toast(e.message); }); };
     }).catch(function (e) { $('stLive').innerHTML = '<div class="an-note">This panel could not load: ' + esc(e.message || '') + '</div>'; });
   }
-})();
-
-/* ---------- view-deptTasks.js ---------- */
-/* view-deptTasks.js — Hasib (25 Aug): "I need separate task dashboard of each department as the
- * first page in menu of that specific department, which is getting updated timely."
- *
- * One page per department, each the FIRST entry in its own nav group, each showing that
- * department's live task load — and each REFRESHING ITSELF every 45 seconds with a visible
- * "updated HH:MM" stamp, so nobody has to wonder whether the number in front of them is stale.
- * Backend: deptPending (AS) — the same feed the combined Departments board uses. */
-(function () {
-  'use strict';
-
-  /* dept name (as R8_DEPT_OF_TYPE names it) → view key, label, icon, roles that live there */
-  var DT_DEPTS = [
-    { dept: 'Listing', key: 'tasksListing', label: 'Listing tasks',
-      icon: '<path d="M4 5h16M4 10h16M4 15h10"/><path d="m15 17 2 2 4-4"/>',
-      roles: ['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'Hunting', key: 'tasksHunting', label: 'Hunting tasks',
-      icon: '<path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/><path d="M16 16l4.5 4.5"/>',
-      roles: ['Product Hunter', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'Orders', key: 'tasksOrders', label: 'Order tasks',
-      icon: '<path d="M3 6h18l-2 12H5z"/><path d="M9 10h6"/>',
-      roles: ['Order Processor', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'Advertising', key: 'tasksAds', label: 'Advertising tasks',
-      icon: '<path d="M3 11l18-8-8 18-2-8-8-2z"/>',
-      roles: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-    { dept: 'CS', key: 'tasksCS', label: 'Customer Service tasks',
-      icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-      roles: ['CS', 'Team Lead', 'Management', 'Ops Head', 'Sales Operations'] },
-  ];
-
-  VIEW_CSS.push(
-    '.dt-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}' +
-    '.dt-live{font-size:11px;font-weight:800;color:var(--ok);display:flex;align-items:center;gap:6px}' +
-    '.dt-live i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;animation:dtPulse 2s infinite}' +
-    '@keyframes dtPulse{0%,100%{opacity:1}50%{opacity:.25}}' +
-    '.dt-tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));margin-bottom:16px}' +
-    '.dt-t{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
-    '.dt-t .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
-    '.dt-t b{display:block;font-size:25px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
-    '.dt-t .s{font-size:10.5px;color:var(--text-3);font-weight:700}' +
-    '.dt-t.gold b{color:var(--gold-a)}.dt-t.bad b{color:var(--bad)}.dt-t.warn b{color:var(--warn)}.dt-t.ok b{color:var(--ok)}' +
-    '.dt-who{display:flex;flex-direction:column;gap:7px}' +
-    '.dt-row{display:flex;align-items:center;gap:11px;font-size:12.5px;font-weight:700}' +
-    '.dt-row .n{min-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '.dt-row .bar{flex:1;height:10px;border-radius:5px;background:rgba(120,132,152,.15);overflow:hidden}' +
-    '.dt-row .bar i{display:block;height:100%;background:var(--gold-a);border-radius:5px}' +
-    '.dt-row b{min-width:30px;text-align:right;font-variant-numeric:tabular-nums}' +
-    '.dt-src{display:flex;gap:9px;flex-wrap:wrap;margin-top:10px}' +
-    '.dt-chip{font-size:11px;font-weight:800;padding:5px 11px;border-radius:9px;border:1px solid var(--gold-line);background:var(--panel)}' +
-    '.dt-hist{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--gold-line);font-size:12px}' +
-    '.dt-hist .o{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:7px}' +
-    '.dt-hist .o.sys{background:var(--blue-soft);color:var(--blue-2)}' +
-    '.dt-hist .o.mgm{background:var(--warn-soft);color:var(--warn)}'
-  );
-
-  function dtS(v) { return String(v == null ? '' : v); }
-  function dtClock() { return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
-
-  /* One live timer for whichever department page is open. renderView() replaces the DOM, so the
-     timer must die with it — otherwise five pages' timers pile up and hammer the backend. */
-  var DT_TIMER = null;
-  /* 20 seconds, not 45: a processor finishing a task wants the board to agree with them while
-     they are still looking at it. The read is cheap and the page paints from the last answer
-     first, so a tick costs a background request, not a spinner. */
-  var DT_REFRESH_MS = 20000;
-  function dtStopTimer() { if (DT_TIMER) { clearInterval(DT_TIMER); DT_TIMER = null; } }
-
-  /* 27 Aug ("everything is stuck"): with no guard, a 30-150s backend answer let the 20s timer
-     STACK requests — every open board multiplied the very load that made the backend slow.
-     One fetch in flight PER DEPARTMENT (a shared flag left the next board stuck on its spinner
-     when Management switched pages mid-fetch), and a hidden tab does not poll at all.
-     DT_SHOWING names the department whose page is actually open, so a late answer for the page
-     someone already left can never paint itself onto the wrong board. */
-  var DT_BUSY = {};
-  var DT_SHOWING = '';
-  function dtPaint(deptName) {
-    var host = $('dtBody');
-    if (!host) { dtStopTimer(); return; }                 // the user navigated away
-    if (DT_BUSY[deptName]) { return; }
-    DT_BUSY[deptName] = true;
-    var hc = cachedCall('deptPending', {}, function (d, cached) {
-      if (!$('dtBody')) { dtStopTimer(); return; }
-      if (DT_SHOWING !== deptName) { return; }            // the user switched boards mid-fetch
-      /* The page may have re-rendered while the fetch was out — the `host` captured at call
-         time would then be a DETACHED node: the stamp updates (looked up fresh) while the
-         board paints into thin air and the visible spinner never clears. Paint into the
-         element that is on screen NOW. */
-      host = $('dtBody');
-      if (cached) { var st0 = $('dtStamp'); if (st0) { st0.textContent = 'last answer · refreshing…'; } }
-      var all = (d && d.departments) || [];
-      var mine = null;
-      all.forEach(function (x) { if (x.dept === deptName) { mine = x; } });
-      var stamp = $('dtStamp');
-      if (stamp) { stamp.textContent = 'updated ' + dtClock(); }
-
-      if (!mine) {
-        host.innerHTML = '<div class="hu-hint" style="margin-top:0">No open tasks for ' + esc(deptName) + ' right now — this page checks again every 45 seconds.</div>';
-        return;
-      }
-      var by = Object.keys(mine.by_assignee || {}).map(function (k) { return { who: k, n: mine.by_assignee[k] }; })
-        .sort(function (a, b) { return b.n - a.n; });
-      var mx = by.length ? by[0].n : 1;
-      var hist = ((d && d.history) || []).filter(function (h) { return h.dept === deptName; }).slice(0, 12);
-
-      host.innerHTML =
-        '<div class="dt-tiles">' +
-          '<div class="dt-t gold"><span class="k">Open now</span><b>' + mine.open + '</b><span class="s">waiting to be done</span></div>' +
-          '<div class="dt-t ' + (mine.overdue ? 'bad' : 'ok') + '"><span class="k">Overdue</span><b>' + mine.overdue + '</b>' +
-            '<span class="s">' + (mine.overdue ? 'past their deadline' : 'nothing late') + '</span></div>' +
-          '<div class="dt-t"><span class="k">Oldest waiting</span><b style="font-size:15px">' +
-            esc(fmtPkt(mine.oldest, true) || '—') + '</b></div>' +
-          '<div class="dt-t"><span class="k">People on it</span><b>' + by.length + '</b></div>' +
-        '</div>' +
-        '<div class="dt-src">' +
-          '<span class="dt-chip">Created by the system: <b>' + (mine.system_made || 0) + '</b></span>' +
-          '<span class="dt-chip">Created by Management: <b>' + (mine.mgmt_made || 0) + '</b></span>' +
-        '</div>' +
-        (by.length ? '<div class="hd" style="margin:18px 0 8px;padding:0;border:0;background:none">Who is carrying it</div>' +
-          '<div class="dt-who">' + by.map(function (p) {
-            return '<div class="dt-row"><span class="n">' + esc(dtS(p.who).split('@')[0]) + '</span>' +
-              '<span class="bar"><i style="width:' + Math.max(5, Math.round(p.n / mx * 100)) + '%"></i></span>' +
-              '<b>' + p.n + '</b></div>';
-          }).join('') + '</div>' : '') +
-        (hist.length ? '<div class="hd" style="margin:18px 0 8px;padding:0;border:0;background:none">Recently finished</div>' +
-          hist.map(function (h) {
-            return '<div class="dt-hist"><span class="o ' + (h.origin === 'system' ? 'sys' : 'mgm') + '">' +
-              (h.origin === 'system' ? 'system' : 'mgmt') + '</span>' +
-              '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(dtS(h.title)) + '</span>' +
-              '<span style="color:var(--text-3);font-size:11px;white-space:nowrap">' + esc(dtS(h.assigned_to).split('@')[0]) +
-              ' · ' + esc(fmtPkt(h.decided_at, true) || '') + '</span></div>';
-          }).join('') : '');
-    });
-    /* cachedCall answers {painted, done} — the promise lives on .done, and a refresh failure on
-       an already-painted screen is a toast, not a wipe of good data. */
-    if (!hc.painted && host) { host.innerHTML = '<div class="spinner"></div>'; }
-    hc.done.then(function () { DT_BUSY[deptName] = false; }, function () { DT_BUSY[deptName] = false; });
-    hc.done.catch(function (e) {
-      if (hc.painted) { return; }
-      if ($('dtBody')) { $('dtBody').innerHTML = '<div class="hu-hint" style="margin-top:0">Could not load: ' + esc(e.message) + '</div>'; }
-    });
-  }
-
-  DT_DEPTS.forEach(function (D) {
-    VIEWS[D.key] = {
-      label: D.label,
-      icon: D.icon,
-      roles: D.roles,
-      order: 0.1,                                        // first inside its own nav group
-      render: function () {
-        return '<div class="hgroup enter d1"><h1>' + esc(D.dept) + ' <span class="goldtext">tasks</span></h1>' +
-            '<span class="sub">everything this department owes right now — this page refreshes itself</span>' +
-            '<span class="dt-live" style="margin-left:auto"><i></i><span id="dtStamp">loading…</span></span>' +
-            '<button class="minibtn" id="dtRefresh">Refresh now</button>' +
-          '</div>' +
-          '<div id="dtBody"><div class="spinner"></div></div>';
-      },
-      init: function () {
-        dtStopTimer();
-        DT_SHOWING = D.dept;
-        var go = function () { dtPaint(D.dept); };
-        $('dtRefresh').onclick = go;
-        go();
-        /* "getting updated timely" — the number in front of you is never more than 45s old */
-        /* The hidden-tab guard lives on the TICKS only — 28 Aug it sat inside dtPaint and
-           blocked even the FIRST paint of a background-opened tab, which then showed a spinner
-           until the next visible tick. First paint always runs; returning to the tab repaints. */
-        DT_TIMER = setInterval(function () {
-          if (!$('dtBody')) { dtStopTimer(); return; }
-          if (document.hidden) { return; }
-          go();
-        }, DT_REFRESH_MS);
-        document.addEventListener('visibilitychange', function () {
-          if (!document.hidden && $('dtBody')) { go(); }
-        });
-      }
-    };
-  });
-
 })();
 
 /* ---------- view-signals.js ---------- */
@@ -6425,6 +7041,7 @@ VIEW_CSS.push(
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
           '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day — combined, per account, per item</span>' +
           '<span style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn" data-ac-d="3">3d</button>' +
             '<button class="minibtn" data-ac-d="7">7d</button>' +
             '<button class="minibtn on" data-ac-d="14">14d</button>' +
             '<button class="minibtn" data-ac-d="30">30d</button>' +
@@ -6752,7 +7369,7 @@ VIEW_CSS.push(
             : paused ? 'background:rgba(120,132,152,.12);border:1px solid rgba(120,132,152,.35);color:var(--text-3)'
             : 'background:rgba(120,132,152,.08);border:1px solid rgba(120,132,152,.25);color:var(--text-3);opacity:.7';
           return '<span class="cw-pill" style="margin:2px 6px 2px 0;display:inline-block;' + tone + '">' +
-            esc(cwStr(r.name) || cwStr(r.campaign_id)) +
+            adtCampaignLink(r.campaign_id, cwStr(r.name)) +
             ' <b style="font-size:9px;letter-spacing:.05em">' + esc(chip) + '</b>' +
             (live ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
             '</span>';
@@ -6767,9 +7384,23 @@ VIEW_CSS.push(
       h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ No item sits in more than one running campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
     }
 
-    /* Hasib item 9, the other half: ACTIVE listings sitting in NO campaign at all. */
+    /* Hasib item 9, the other half: ACTIVE listings sitting in NO campaign at all.
+       Owner, 18 Oct, "one home per number": in the ADVERTISING portal this list now lives on
+       "Where each listing advertises", which holds every active listing, the campaigns each one is
+       in, and the in-no-campaign group as a chip with the same count from the same membership rule.
+       So that portal keeps the COUNT and points at the page for the rows, and this page stays whole
+       on the company portal, where those pages do not exist and the rows have nowhere else to go. */
     var unc = (d.uncampaigned || []).filter(function (r) { return !acc || r.account === acc; });
-    if (unc.length) {
+    if (window.M98M_ADS_ONLY) {
+      h += '<div class="cw-dupbox"' + (unc.length ? ' style="border-color:var(--warn)"' : ' style="border-color:var(--ok);background:var(--ok-soft)"') + '>' +
+        '<h3' + (unc.length ? ' style="color:var(--warn)"' : ' style="color:var(--ok)"') + '>' +
+        (unc.length ? '🟡 ' + unc.length + ' active listing(s) in NO campaign' + (acc ? ' on ' + esc(acc) : '')
+                    : '✓ Every active listing sits in at least one campaign' + (acc ? ' on ' + esc(acc) : '')) + '</h3>' +
+        '<p style="margin:4px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">' +
+        (unc.length ? 'The listings themselves, with their price, what they have sold and the campaigns every other listing is in, are on the <a href="#adtoolItemCampaigns" style="color:var(--gold-a);font-weight:800">Where each listing advertises</a> page under its <b>In no campaign</b> chip. The Advertising Manager gets one digest bell a day while that list is not empty.'
+                    : 'Where each listing advertises carries the same check listing by listing.') +
+        '</p></div>';
+    } else if (unc.length) {
       h += '<div class="cw-dupbox" style="border-color:var(--warn)"><h3 style="color:var(--warn)">🟡 ' + unc.length + ' active listing(s) in NO campaign — unadvertised reach</h3>' +
         '<div class="scroll" style="max-height:280px"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Price</th><th>Sold 30d</th></tr></thead><tbody>';
       unc.forEach(function (r) {
@@ -6785,19 +7416,29 @@ VIEW_CSS.push(
       h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ Every active listing sits in at least one campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
     }
 
+    /* Owner, 18 Oct, "one home per number": in the ADVERTISING portal the campaign LIST is the
+       Campaigns page, which carries these same rows with real spend, clicks, sales and return over
+       any period, the listings inside each campaign, and an account-to-account roll-up. This page is
+       the campaign FAULTS, so it keeps the count and points at the list. The company portal has no
+       such page, so there it keeps the table. */
+    if (window.M98M_ADS_ONLY) {
+      h += '<div class="cw-dupbox"><h3>' + camps.length + ' campaign(s)' + (acc ? ' on ' + esc(acc) : ' across the fleet') + '</h3>' +
+        '<p style="margin:4px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">Every campaign with its status, daily budget, listings, spend, clicks, sales from ads and return on ad spend over any period, and account by account, is on the <a href="#adtoolCampaignBoard" style="color:var(--gold-a);font-weight:800">Campaigns</a> page.</p></div>';
+    } else {
     h += '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Items</th><th>Synced</th></tr></thead><tbody>';
     if (!camps.length) {
       h += '<tr><td colspan="6" style="color:var(--text-2);font-weight:700">No campaigns synced yet for this filter.</td></tr>';
     }
     camps.forEach(function (c) {
       h += '<tr><td>' + esc(cwStr(c.account)) + '</td>' +
-        '<td style="font-weight:700">' + esc(cwStr(c.name) || cwStr(c.campaign_id)) + '</td>' +
+        '<td style="font-weight:700">' + adtCampaignLink(c.campaign_id, cwStr(c.name)) + '</td>' +
         '<td>' + cwPill(c.status) + '</td>' +
         '<td class="cw-num">' + (Number(c.budget) ? '£' + Number(c.budget).toFixed(2) : '—') + '</td>' +
         '<td class="cw-num">' + (Number(c.items) || 0) + '</td>' +
         '<td class="cw-when">' + esc(cwPKT(c.synced_at)) + '</td></tr>';
     });
     h += '</tbody></table></div>';
+    }
 
     var cpq = (d.cpq || []).filter(function (r) { return !acc || r.account === acc; });
     if (cpq.length) {
@@ -6960,7 +7601,7 @@ VIEW_CSS.push(
     var payload = { range: TR.range };
     if (TR.account) { payload.account = TR.account; }
     if (TR.mode === 'today') { payload.from = trShift(ukToday(), -6); payload.to = ukToday(); }
-    else if (TR.mode === 'custom' && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
+    else if ((TR.mode === 'custom' || TR.mode === 'd3') && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
     api('trafficBoard', payload).then(function (d) {
       d = d || {};
       // fold per-account day rows into one series when "all accounts"
@@ -6976,7 +7617,7 @@ VIEW_CSS.push(
       var today = String(d.today || ukToday());
       var win;
       if (TR.mode === 'today') { win = series.filter(function (r) { return r.date === today; }); }
-      else if (TR.mode === 'custom') { win = series; }
+      else if (TR.mode === 'custom' || TR.mode === 'd3') { win = series; }
       else { win = series.slice(-TR.range); }
 
       /* eBay finishes a day overnight, so only TODAY is ever unfinished. */
@@ -6988,6 +7629,7 @@ VIEW_CSS.push(
       // the tiles describe finished days; today gets its own line so it cannot drag them down
       var showing = (TR.mode === 'today') ? (partial ? [partial] : []) : settled;
       var winLbl = TR.mode === 'today' ? 'so far today'
+        : TR.mode === 'd3' ? 'last 3 days'
         : TR.mode === 'custom' ? (TR.from + ' \u2192 ' + TR.to)
         : (settled.length ? settled.length + ' full day' + (settled.length === 1 ? '' : 's') + ' to ' + settled[settled.length - 1].date.slice(5) : TR.range + 'd');
       var tot = { impressions: 0, views: 0, transactions: 0 };
@@ -7072,7 +7714,11 @@ VIEW_CSS.push(
       }
       var rows = d.listings || [];
       if (rows.length) {
-        h += '<div class="scroll" style="margin-top:14px"><table class="tr-tbl"><thead><tr>' +
+        h += '<div class="hu-hint" style="margin-top:14px">Per listing, over ' + (d.range || 7) + ' days.' +
+          ((TR.mode === 'd3' || TR.mode === 'today' || TR.mode === 'custom')
+            ? ' eBay only publishes a 7 or 30 day figure per listing, so this table keeps its own window while the figures above follow the one you picked.'
+            : '') + '</div>';
+        h += '<div class="scroll"><table class="tr-tbl"><thead><tr>' +
           '<th>Listing</th><th>Impressions</th><th>Views</th><th>Sold</th><th>CTR</th><th>Conversion</th></tr></thead><tbody>';
         rows.forEach(function (r) {
           var lctr = r.impressions ? (r.views / r.impressions * 100).toFixed(2) : '0.00';
@@ -7104,6 +7750,7 @@ VIEW_CSS.push(
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
             '<button class="minibtn' + (TR.mode === 'today' ? ' on' : '') + '" id="trToday">Today</button>' +
+            '<button class="minibtn' + (TR.mode === 'd3' ? ' on' : '') + '" id="tr3d">3 days</button>' +
             '<button class="minibtn' + (TR.range === 7 && !TR.mode ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
             '<button class="minibtn' + (TR.range === 30 && !TR.mode ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
             '<input type="date" id="trFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="trTo" class="minibtn" style="padding:5px 6px">' +
@@ -7115,8 +7762,21 @@ VIEW_CSS.push(
     },
     init: function () {
       function trChips(el) {
-        document.querySelectorAll('[data-tr-r], #trToday').forEach(function (x) { x.classList.remove('on'); });
+        document.querySelectorAll('[data-tr-r], #trToday, #tr3d').forEach(function (x) { x.classList.remove('on'); });
         if (el) { el.classList.add('on'); }
+      }
+      /* owner, 18 Oct: 3 days everywhere. eBay publishes traffic per DAY, so the account figures
+         and the day chart can honestly cover 3 days. It does NOT publish a 3-day per-listing
+         figure, only 7 and 30 day buckets, so the per-listing table below stays on 7 days and
+         says so rather than relabelling 7 days as 3. */
+      var tr3 = document.getElementById('tr3d');
+      if (tr3) {
+        tr3.onclick = function () {
+          trChips(this); this.classList.add('on');
+          TR.mode = 'd3'; TR.range = 7;
+          TR.from = trShift(ukToday(), -2); TR.to = ukToday();
+          trLoad();
+        };
       }
       document.querySelectorAll('[data-tr-r]').forEach(function (b) {
         b.onclick = function () {
@@ -7510,7 +8170,7 @@ VIEW_CSS.push(
       return '<div class="hgroup enter d1"><h1>Advertising <span class="goldtext">money</span></h1>' +
         '<span class="sub">what the ads cost against what they brought back — per day, per account, against the 5× target</span>' +
         '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
-        [7, 14, 30, 60].map(function (n) {
+        [3, 7, 14, 30, 60].map(function (n) {
           return '<button class="minibtn' + (AM.days === n && !AM.from ? ' on' : '') + '" data-am-d="' + n + '">' + n + 'd</button>';
         }).join('') +
         '<select id="amAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
@@ -9249,7 +9909,7 @@ function enterApp(user){
        actions — not copies. Their labels are left exactly as the owner knows them; where an
        advertising-tool page carried a near-identical name the TOOL page is renamed, because two
        "command centres" in one sidebar is the duplication the owner asked us to remove. */
-    var ADS_MERGED = { tasksAds: 1, adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
+    var ADS_MERGED = { adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
       traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
@@ -9270,11 +9930,11 @@ function enterApp(user){
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
        tool page covering its subject, so the two are read together instead of being hunted for. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['tasksAds', 'adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
+      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
       { name: 'Products',      keys: ['adtoolCpc', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },
-      { name: 'Campaigns',     keys: ['campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
+      { name: 'Campaigns',     keys: ['adtoolCampaignBoard', 'adtoolItemCampaigns', 'campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
       { name: 'Traffic and keywords', keys: ['traffic', 'potentialCpc', 'keywordApprovals'] },
       { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
       { name: 'Data health',   keys: ['adtoolHealth'] }
@@ -9463,6 +10123,29 @@ function fmtPkt(iso, withDate){
   return d.toLocaleString('en-GB',opts);
 }
 function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
+/* Campaign link (adtCampaignLink) — owner, 18 Oct: "add campaign link in the background of the
+   campaign name". The same idea as a listing title linking to the item: the name you already read
+   becomes the way into eBay's own campaign screen.
+
+   The URL was established by probing, not guessed, because a link that 404s is worse than no link.
+   /sh/ads/campaign/<id> answers with eBay's sign-in challenge and its `ru` parameter points back at
+   that exact campaign, while a made-up path under /sh/ads/ answers with /n/error instead. Verified
+   for both funding models. Do not "tidy" this to /sh/mkt/campaign/<id>: that one is an error page.
+
+   No id means no link: the name renders as plain text rather than as something that goes nowhere. */
+function adtCampaignUrl(campaignId){
+  var id = String(campaignId == null ? '' : campaignId).trim();
+  return /^[0-9]+$/.test(id) ? 'https://www.ebay.co.uk/sh/ads/campaign/' + id : '';
+}
+function adtCampaignLink(campaignId, name, opts){
+  opts = opts || {};
+  var label = String(name == null || name === '' ? (campaignId == null ? '' : campaignId) : name);
+  var url = adtCampaignUrl(campaignId);
+  if (!url) { return esc(label); }
+  var tip = 'Open this campaign on eBay' + (name ? ' \u00b7 ' + String(campaignId) : '');
+  return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" title="' + esc(tip) + '"' +
+    ' class="adt-camplink"' + (opts.style ? ' style="' + esc(opts.style) + '"' : '') + '>' + esc(label) + '</a>';
+}
 /* Advertising product cell (owner, 27 Sep: "wherever products appear: image, name, item ID, account,
    item link"). r = {item_id, account, title, image}; opts: {open:false} drops the Product-history
    hand-off (the title is then plain text), {compact:true} narrows it. The image is lazy and falls
@@ -9552,7 +10235,9 @@ function adtLeverLine(lever, who){
    last_month · custom), the same custom-range cap. The page sends {period, from, to} and prints
    the engine's echo (`period` in every response) — the bar never computes a window of its own
    beyond refusing a custom range the engine would refuse. Last choice remembered per page. */
-var ADT_PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['d7', '7 d'], ['d14', '14 d'], ['d30', '30 d'], ['d90', '90 d'],
+/* owner, 18 Oct: "i need last 3 days data everywhere in portal". adtPeriod already accepts any
+   d<N>, so one entry here puts a 3-day chip on every advertising page that uses this bar. */
+var ADT_PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['d3', '3 d'], ['d7', '7 d'], ['d14', '14 d'], ['d30', '30 d'], ['d90', '90 d'],
   ['this_week', 'This week'], ['last_week', 'Last week'], ['this_month', 'This month'], ['last_month', 'Last month']];
 var ADT_PERIOD_MAX_DAYS = 120;
 function adtUkDay(){ try { return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); } catch (e) { return new Date().toISOString().slice(0, 10); } }

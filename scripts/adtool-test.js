@@ -23,13 +23,14 @@ function run(argv) {
   const i11 = src.indexOf('/* ADTOOL-P11-PURE-BEGIN */'); const j11 = src.indexOf('/* ADTOOL-P11-PURE-END */');
   const i12 = src.indexOf('/* ADTOOL-P12-PURE-BEGIN */'); const j12 = src.indexOf('/* ADTOOL-P12-PURE-END */');
   const i13 = src.indexOf('/* ADTOOL-P13-PURE-BEGIN */'); const j13 = src.indexOf('/* ADTOOL-P13-PURE-END */');
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '');   /* pure helpers of every phase */
+  const i14 = src.indexOf('/* ADTOOL-P14-PURE-BEGIN */'); const j14 = src.indexOf('/* ADTOOL-P14-PURE-END */');
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '');   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -913,7 +914,7 @@ function run(argv) {
      house style, so the next entry anybody adds has to meet it too. `source_tables` is deliberately
      NOT judged: that column IS the technical provenance list, which is what it is for.
      --------------------------------------------------------------------------------------------- */
-  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13'];
+  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13', 'ADTOOL_REGISTER_P14'];
   const rgAll = []; let rgParseFail = null;
   for (const nm of rgNames) {
     const i = src.indexOf('const ' + nm + ' = [');
@@ -923,7 +924,7 @@ function run(argv) {
       for (const row of new Function('return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))()) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
     } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
   }
-  t('register: all eleven arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
+  t('register: all twelve arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
 
   /* the words the audit found live in production copy, and what to say instead. Judged on the four
      prose fields only. */
@@ -963,6 +964,146 @@ function run(argv) {
   const rgDept = rgAll.filter(r => r.id === 'DEPARTMENTS')[0];
   t('register: the departments page has an entry naming its rule, its sources, when it recomputes and how it is rechecked', !!rgDept && /lands in one of five places/.test(rgDept.formula) && /items_api/.test(rgDept.sources) && /Once a day/.test(rgDept.recompute) && /Unit tests/.test(rgDept.recheck), rgDept && rgDept.name);
   t('register: and it names no threshold it reads from config, because those are printed on the page instead', !!rgDept && !/\b(14|20|30|£3|£10)\b/.test(rgDept.formula.replace(/last 30 days|30 days before/g, '')), rgDept && rgDept.formula.slice(0, 80));
+
+
+  /* ---------------------------------------------------------------------------------------------
+     17. Campaigns, and where each listing advertises (owner's batch, 18 Oct 2026).
+
+     THE HONESTY PROBLEM THESE TESTS EXIST FOR. eBay's daily ad report is downloaded per listing, so
+     per-campaign money has to be added up from the listings inside each campaign until the
+     per-campaign rows cover the window. Listings are live in two campaigns at once, so that sum
+     counts those listings twice. Every rule for handling that is pure, and every one of them is
+     here: the attribution, the excess a reader has to subtract, the per-campaign share count, the
+     empty campaign, the zero denominators, and the campaign budget that is SHARED by its listings
+     rather than owned by each of them.
+     --------------------------------------------------------------------------------------------- */
+  const cbRules = { day_cap: 3 };
+  const cbCamp = (id, st, bud) => ({ account: 'A', campaign_id: id, name: 'Campaign ' + id, status: st, budget: bud, funding_model: 'COST_PER_CLICK', bid_pct: '2.5', start_date: '', end_date: '' });
+  const cbMem = (id, item, acct) => ({ account: acct || 'A', campaign_id: id, item_id: item });
+  const cbMny = (sp, cl, un, rv) => ({ spend: sp, clicks: cl, units: un, revenue: rv });
+  const cbRoll = (o) => F.adtCampaignRollup(Object.assign({ campaigns: [], members: [], live: [], money: {}, real: [], rules: cbRules, status: '' }, o));
+  const cbOf = (r, id) => r.campaigns.filter(x => x.campaign_id === id)[0];
+
+  /* (a) one listing, one campaign: the whole of its spend belongs to that campaign */
+  const cbR1 = cbRoll({ campaigns: [cbCamp('c1', 'RUNNING', '50')], members: [cbMem('c1', 'i1')], live: [cbMem('c1', 'i1')], money: { i1: cbMny(12, 40, 2, 48) } });
+  t('campaign board: a listing in one campaign gives that campaign its whole spend, clicks, units and sales', cbR1.campaigns[0].spend === 12 && cbR1.campaigns[0].clicks === 40 && cbR1.campaigns[0].sales_units === 2 && cbR1.campaigns[0].sales_money === 48 && cbR1.totals.spend === 12, cbR1.campaigns[0]);
+  t('campaign board: a figure added up from the listings says so and is never dressed up as eBay\'s own report', cbR1.money_source === 'added up from the listings in each campaign' && cbR1.campaigns[0].money_from === 'listings', cbR1.money_source);
+  t('campaign board: one listing in one campaign is nothing counted twice', cbR1.overlap.listings_in_two_or_more === 0 && cbR1.overlap.of_live_advertised === 1 && cbR1.overlap.spend_counted_twice === 0, cbR1.overlap);
+  t('campaign board: return on ad spend and cost per click come out of the campaign\'s own sums', cbR1.campaigns[0].roas === 4 && cbR1.campaigns[0].cpc === 0.3, [cbR1.campaigns[0].roas, cbR1.campaigns[0].cpc]);
+
+  /* (b) THE DOUBLE COUNT. i1 is live in both campaigns; i2 is only in the first. */
+  const cbR2 = cbRoll({ campaigns: [cbCamp('c1', 'RUNNING', '50'), cbCamp('c2', 'RUNNING', '20')], members: [cbMem('c1', 'i1'), cbMem('c2', 'i1'), cbMem('c1', 'i2')], live: [cbMem('c1', 'i1'), cbMem('c2', 'i1'), cbMem('c1', 'i2')], money: { i1: cbMny(10, 20, 1, 30), i2: cbMny(4, 8, 0, 0) } });
+  t('campaign board: a listing live in two campaigns is counted in BOTH of them', cbOf(cbR2, 'c1').spend === 14 && cbOf(cbR2, 'c2').spend === 10, [cbOf(cbR2, 'c1').spend, cbOf(cbR2, 'c2').spend]);
+  t('campaign board: spend_counted_twice is that listing\'s spend ONCE, not twice, so subtracting it from the campaign column leaves what was really spent', cbR2.overlap.spend_counted_twice === 10 && (cbOf(cbR2, 'c1').spend + cbOf(cbR2, 'c2').spend) - cbR2.overlap.spend_counted_twice === cbR2.totals.spend && cbR2.totals.spend === 14, [cbR2.overlap.spend_counted_twice, cbR2.totals.spend]);
+  t('campaign board: the overlap is stated as listings out of the listings being advertised', cbR2.overlap.listings_in_two_or_more === 1 && cbR2.overlap.of_live_advertised === 2 && cbR2.overlap.share_pct === 50 && cbR2.overlap.applies_to_money === true, cbR2.overlap);
+  t('campaign board: account and company totals count a shared listing ONCE, however the campaign column reads', cbR2.accounts[0].spend === 14 && cbR2.accounts[0].listings === 2 && cbR2.totals.listings === 2 && cbR2.totals.spend === 14, cbR2.accounts[0]);
+  t('campaign board: both campaigns are marked as sharing a listing, and each marks one listing', cbOf(cbR2, 'c1').shares_listings === 1 && cbOf(cbR2, 'c2').shares_listings === 1, [cbOf(cbR2, 'c1').shares_listings, cbOf(cbR2, 'c2').shares_listings]);
+
+  /* (c) shares_listings counts LISTINGS, not campaigns: i1 is in three campaigns, i2 in two */
+  const cbR3 = cbRoll({ campaigns: [cbCamp('c1', 'RUNNING', '9'), cbCamp('c2', 'RUNNING', '9'), cbCamp('c3', 'RUNNING', '9')], members: [cbMem('c1', 'i1'), cbMem('c2', 'i1'), cbMem('c3', 'i1'), cbMem('c1', 'i2'), cbMem('c2', 'i2')], live: [cbMem('c1', 'i1'), cbMem('c2', 'i1'), cbMem('c3', 'i1'), cbMem('c1', 'i2'), cbMem('c2', 'i2')], money: { i1: cbMny(6, 0, 0, 0), i2: cbMny(5, 0, 0, 0) } });
+  t('campaign board: shares_listings counts LISTINGS, not campaigns — a listing sitting in two other campaigns still adds one', cbOf(cbR3, 'c1').shares_listings === 2 && cbOf(cbR3, 'c1').listings === 2 && cbOf(cbR3, 'c3').shares_listings === 1 && cbOf(cbR3, 'c3').listings === 1, [cbOf(cbR3, 'c1').shares_listings, cbOf(cbR3, 'c3').shares_listings]);
+  t('campaign board: a listing in three campaigns has its spend repeated twice over, so the excess is twice its spend', cbR3.overlap.spend_counted_twice === 17 && cbR3.overlap.listings_in_two_or_more === 2 && cbR3.totals.spend === 11, cbR3.overlap);
+
+  /* (d) a campaign with nothing in it */
+  const cbR4 = cbRoll({ campaigns: [cbCamp('c9', 'RUNNING', '50')] });
+  const cbE = cbR4.campaigns[0];
+  t('campaign board: a campaign with no listings in it returns zero money, never null and never NaN', cbE.spend === 0 && cbE.clicks === 0 && cbE.sales_units === 0 && cbE.sales_money === 0 && cbE.listings === 0 && isFinite(cbE.spend) && isFinite(cbE.sales_money), cbE);
+  t('campaign board: return on ad spend and cost per click are NULL when the denominator is zero, not zero and not infinity', cbE.roas === null && cbE.cpc === null && F.adtRateRoas(10, 0) === null && F.adtRateCpc(10, 0) === null && F.adtRateRoas(0, 0) === null && F.adtRateCpc(0, 0) === null, [cbE.roas, cbE.cpc]);
+  t('campaign board: and an empty campaign cannot put an item over the daily figure, because no item is sharing its budget', cbE.budget_per_listing_day === null && cbE.over_day_cap === false && cbE.over_day_cap_per_listing === false && cbE.budget_day === 50, cbE);
+
+  /* (e) THE SHARED DAILY BUDGET. A campaign budget belongs to the campaign, not to each listing. */
+  const cb40 = F.adtCampaignBudgetShare('50', 40, cbRules), cb4 = F.adtCampaignBudgetShare('50', 4, cbRules);
+  t('campaign budget: fifty shared by forty listings is a pound and a quarter each, which is NOT past a cap of three', cb40.budget_per_listing_day === 1.25 && cb40.over_day_cap_per_listing === false && cb40.over_day_cap === false && cb40.listings_sharing_budget === 40, cb40);
+  t('campaign budget: the same fifty shared by four listings is twelve fifty each, which IS past it', cb4.budget_per_listing_day === 12.5 && cb4.over_day_cap_per_listing === true && cb4.over_day_cap === true, cb4);
+  t('campaign budget: the budget column arrives as TEXT and still compares numerically', cb4.budget_day === 50 && F.adtCampaignBudgetShare(' 50.00 ', 4, cbRules).budget_per_listing_day === 12.5 && F.adtCampaignBudgetShare('£50', 4, cbRules).budget_day === 50 && F.adtMoneyNum('50') === 50 && F.adtMoneyNum('abc') === null, [cb4.budget_day, F.adtMoneyNum('50')]);
+  t('campaign budget: the cap is the one handed in, so changing the owner\'s figure changes the answer', F.adtCampaignBudgetShare('50', 40, { day_cap: 1 }).over_day_cap === true && F.adtCampaignBudgetShare('50', 4, { day_cap: 20 }).over_day_cap === false && cb40.day_cap === 3 && F.adtCampaignBudgetShare('50', 40, { day_cap: 1 }).day_cap === 1, null);
+  t('campaign budget: with no figure handed in the default is the owner\'s own, which lives in exactly one place and is read from config', F.adtCampaignBudgetShare('50', 10, null).day_cap === F.ADTOOL_DEPT_DEFAULTS.day_cap && F.ADTOOL_DEPT_CONFIG_KEYS.day_cap === 'adtool_dept_day_cap' && F.adtDeptRules({ adtool_dept_day_cap: '5' }).day_cap === 5 && F.adtCampaignBudgetShare('50', 10, { day_cap: '' }).day_cap === F.ADTOOL_DEPT_DEFAULTS.day_cap, null);
+  t('campaign budget: a blank budget is not a budget of zero, and neither of them is a breach', F.adtCampaignBudgetShare('', 4, cbRules).budget_day === null && F.adtCampaignBudgetShare('', 4, cbRules).over_day_cap === false && F.adtCampaignBudgetShare('0', 4, cbRules).budget_day === 0 && F.adtCampaignBudgetShare('0', 4, cbRules).over_day_cap === false, null);
+  t('campaign budget: the per-listing share is what is compared, and it is on the row under its own name beside the cap it was compared with', typeof cb4.budget_per_listing_day === 'number' && typeof cb4.day_cap === 'number' && cbOf(cbR2, 'c1').budget_per_listing_day === 25 && cbOf(cbR2, 'c1').day_cap === 3, cbOf(cbR2, 'c1'));
+
+  /* (f) the status filter the owner asked for: active, paused, ended */
+  const cbSts = [cbCamp('c1', 'RUNNING', '5'), cbCamp('c2', 'PAUSED', '5'), cbCamp('c3', 'ENDED', '5'), cbCamp('c4', 'ENDING_SOON', '5')];
+  const cbAll = cbRoll({ campaigns: cbSts }), cbAct = cbRoll({ campaigns: cbSts, status: 'active' }), cbEnd = cbRoll({ campaigns: cbSts, status: 'ended' }), cbPau = cbRoll({ campaigns: cbSts, status: 'paused' });
+  t('campaign board: a campaign whose status is ENDED is OUT of the active filter and IN the ended one', cbAct.campaigns.every(r => r.campaign_id !== 'c3') && cbAct.campaigns.length === 2 && cbEnd.campaigns.length === 1 && cbEnd.campaigns[0].campaign_id === 'c3' && cbPau.campaigns.length === 1, [cbAct.campaigns.map(r => r.campaign_id), cbEnd.campaigns.map(r => r.campaign_id)]);
+  t('campaign board: running, paused and ended are each counted, and ENDING_SOON counts as running because it is still spending', cbAll.totals.running === 2 && cbAll.totals.paused === 1 && cbAll.totals.ended === 1 && cbAll.totals.campaigns === 4, cbAll.totals);
+  t('campaign status: blank means all of them, and a status we do not recognise matches none of the three', F.adtCampStatusKey('ENDING_SOON') === 'active' && F.adtCampStatusKey('ENDED') === 'ended' && F.adtCampStatusKey('PAUSED') === 'paused' && F.adtCampStatusMatch('ENDED', '') === true && F.adtCampStatusMatch('ENDED', 'active') === false && F.adtCampStatusKey('SOMETHING ELSE') === 'other' && F.adtCampStatusMatch('SOMETHING ELSE', 'active') === false, null);
+  t('campaign board: only the budgets of campaigns that are actually running add up on the account line', cbAll.accounts[0].budget_day === 10 && cbAct.accounts[0].budget_day === 10 && cbEnd.accounts[0].budget_day === null, [cbAll.accounts[0].budget_day, cbEnd.accounts[0].budget_day]);
+
+  /* (g) once eBay's own per-campaign rows are in, they are preferred and nothing is counted twice */
+  const cbReal = cbRoll({ campaigns: [cbCamp('c1', 'RUNNING', '50'), cbCamp('c2', 'RUNNING', '20')], members: [cbMem('c1', 'i1'), cbMem('c2', 'i1')], live: [cbMem('c1', 'i1'), cbMem('c2', 'i1')], money: { i1: cbMny(10, 20, 1, 30) }, real: [{ account: 'A', campaign_id: 'c1', spend: 7, clicks: 14, units: 1, revenue: 30, listings: 1 }, { account: 'A', campaign_id: 'c2', spend: 3, clicks: 6, units: 0, revenue: 0, listings: 1 }] });
+  t('campaign board: eBay\'s own per-campaign report is preferred over adding the listings up, and the payload says which it used', cbReal.money_source === 'eBay campaign report' && cbOf(cbReal, 'c1').spend === 7 && cbOf(cbReal, 'c2').spend === 3 && cbOf(cbReal, 'c1').money_from === 'report', cbReal.money_source);
+  t('campaign board: with the real report in, nothing is counted twice, so the excess is nil while the listing counts stay true', cbReal.overlap.spend_counted_twice === 0 && cbReal.overlap.listings_in_two_or_more === 1 && cbReal.overlap.of_live_advertised === 1 && cbReal.overlap.applies_to_money === false && cbReal.totals.spend === 10, cbReal.overlap);
+
+  /* (h) a listing held by a paused campaign still shows what it spent, but it is not live there */
+  const cbPz = cbRoll({ campaigns: [cbCamp('c1', 'PAUSED', '5'), cbCamp('c2', 'RUNNING', '5')], members: [cbMem('c1', 'i1'), cbMem('c2', 'i1')], live: [cbMem('c2', 'i1')], money: { i1: cbMny(8, 10, 0, 0) } });
+  t('campaign board: a paused campaign still shows what its listings spent, with none of them live in it', cbOf(cbPz, 'c1').spend === 8 && cbOf(cbPz, 'c1').listings === 1 && cbOf(cbPz, 'c1').listings_advertised === 0 && cbOf(cbPz, 'c1').shares_listings === 1, cbOf(cbPz, 'c1'));
+  t('campaign board: a listing live in only one campaign is no overlap, whatever other campaigns hold a stopped ad for it', cbPz.overlap.listings_in_two_or_more === 0 && cbPz.overlap.of_live_advertised === 1 && cbPz.overlap.spend_counted_twice === 0, cbPz.overlap);
+
+  /* (h2) THE RECONCILIATION A READER ACTUALLY DOES, and the case that proves it cannot be the live
+     overlap. cbPz above has one listing held by a PAUSED campaign and live in a RUNNING one. Its £8
+     lands on BOTH campaign rows, so the column reads £16 against a company total of £8 — while the
+     live overlap is rightly nil, because only one of those ads is live. Subtracting the live figure
+     from the column would land a reader on £16 and tell them that was the truth. So the figure to
+     subtract is measured off the printed rows, and the identity is exact in every one of these. */
+  const cbCol = r => r.campaigns.reduce((s, x) => s + x.spend, 0);
+  const cbIdent = r => Math.abs(cbCol(r) - r.column.spend_counted_twice - r.totals.spend) < 0.005;
+  t('campaign column: the campaign rows minus what is counted twice equals the company total, in the paused case the live overlap calls nil', cbPz.column.spend === 16 && cbPz.column.spend_counted_twice === 8 && cbPz.totals.spend === 8 && cbIdent(cbPz) && cbPz.column.listings_counted_more_than_once === 1, cbPz.column);
+  t('campaign column: the same identity holds for a listing live in two, a listing in three, one campaign on its own, and an empty campaign', cbIdent(cbR1) && cbIdent(cbR2) && cbIdent(cbR3) && cbIdent(cbR4) && cbR2.column.spend_counted_twice === 10 && cbR3.column.spend_counted_twice === 17 && cbR1.column.spend_counted_twice === 0 && cbR4.column.spend_counted_twice === 0, [cbR2.column, cbR3.column]);
+  t('campaign column: it reconciles to the very figure the totals row prints, and says so', cbR2.column.reconciles_to === cbR2.totals.spend && cbR3.column.reconciles_to === cbR3.totals.spend && cbPz.column.reconciles_to === cbPz.totals.spend, null);
+  t('campaign column: the identity survives the status filter, because the column it measures is the column being shown', cbIdent(cbRoll({ campaigns: cbSts, status: 'active' })) && cbIdent(cbRoll({ campaigns: cbSts, status: 'ended' })), null);
+  t('campaign column: clicks, units and sales from ads are added down the column too, so every money column can be reconciled and not just spend', cbR2.column.clicks === 48 && cbR2.column.sales_units === 2 && cbR2.column.sales_money === 60, cbR2.column);
+
+  /* (g2) once eBay's own rows are in they are the WHOLE answer, a silence included: a campaign the
+     report does not mention spent nothing. Falling back to the listing sum on just that row mixed
+     two sources down one column and left it reconciling to nothing a reader could reach. */
+  const cbHalf = cbRoll({ campaigns: [cbCamp('c1', 'RUNNING', '50'), cbCamp('c2', 'RUNNING', '20')], members: [cbMem('c1', 'i1'), cbMem('c2', 'i2')], live: [cbMem('c1', 'i1'), cbMem('c2', 'i2')], money: { i1: cbMny(10, 20, 1, 30), i2: cbMny(7, 5, 0, 0) }, real: [{ account: 'A', campaign_id: 'c1', spend: 9, clicks: 18, units: 1, revenue: 30, listings: 1 }] });
+  t('campaign board: with eBay\'s report in, a campaign it does not mention reads as nil rather than quietly falling back to the listing sum', cbOf(cbHalf, 'c2').spend === 0 && cbOf(cbHalf, 'c2').money_from === 'report' && cbOf(cbHalf, 'c1').spend === 9, [cbOf(cbHalf, 'c2').spend, cbOf(cbHalf, 'c2').money_from]);
+  t('campaign board: so one source stands behind every row of the column, and the column still reconciles to the total', cbHalf.campaigns.every(r => r.money_from === 'report') && cbIdent(cbHalf) && cbHalf.column.spend_counted_twice === 0 && cbHalf.totals.spend === 9, cbHalf.column);
+  const cbP14 = src.slice(src.indexOf('/* ADTOOL-P14-BEGIN'), src.indexOf('/* ADTOOL-P14-END'));
+  t('campaign board: and the report is only taken for a window it covers on EVERY account, which the caller decides before the rows are handed in', /accounts_short/.test(cbP14) && /short\.length === 0/.test(cbP14) && /GROUP BY d\.account/.test(cbP14), null);
+  t('campaign board: the window object itself is echoed, not just its name, because that is what the shared period bar reads', /period: w, period_key: w\.key/.test(cbP14) && (cbP14.match(/period: w, period_key/g) || []).length === 2, null);
+
+  /* (i) the overlap rule on its own, including the rubbish a sync can hand it */
+  t('campaign overlap: no rows at all is zero out of zero, with no share to report', JSON.stringify(F.adtCampaignOverlap([], {})) === JSON.stringify({ listings_in_two_or_more: 0, of_live_advertised: 0, spend_counted_twice: 0, share_pct: null }), F.adtCampaignOverlap([], {}));
+  t('campaign overlap: a listing we hold no money for is still an overlap, it just adds nothing to the excess', F.adtCampaignOverlap([cbMem('c1', 'i1'), cbMem('c2', 'i1')], {}).listings_in_two_or_more === 1 && F.adtCampaignOverlap([cbMem('c1', 'i1'), cbMem('c2', 'i1')], {}).spend_counted_twice === 0, null);
+  t('campaign overlap: the same campaign listed twice for one listing is one campaign, not two', F.adtCampaignOverlap([cbMem('c1', 'i1'), cbMem('c1', 'i1')], { i1: cbMny(5, 0, 0, 0) }).listings_in_two_or_more === 0, null);
+  t('campaign overlap: the account is part of what makes a campaign, so the same listing id under two accounts is two campaigns', F.adtCampaignOverlap([cbMem('c1', 'i1', 'A'), cbMem('c1', 'i1', 'B')], { i1: cbMny(5, 0, 0, 0) }).spend_counted_twice === 5, null);
+  t('campaign overlap: a row with no listing id is dropped rather than counted as a listing called nothing', F.adtCampaignOverlap([{ account: 'A', campaign_id: 'c1', item_id: '' }, cbMem('c1', 'i1')], { i1: cbMny(5, 0, 0, 0) }).of_live_advertised === 1, null);
+
+  /* (j) the cached answer and the key it is held under */
+  t('kv key: Campaigns at its own default window hashes to the empty payload, and another window does not', kk('adtoolCampaignBoard', { period: 'd7' }) === kk('adtoolCampaignBoard', {}) && kk('adtoolCampaignBoard', { period: 'd3' }) !== kk('adtoolCampaignBoard', {}) && F.ADTOOL_KV_DEFAULT_PERIOD.adtoolCampaignBoard === 'd7' && F.ADTOOL_KV_DEFAULT_PERIOD.adtoolCampaignListings === 'd7', null);
+  t('kv key: one campaign\'s listings are held per campaign, and the profit class stays in the key as it does everywhere else', kk('adtoolCampaignListings', { account: 'A', campaign_id: 'c1' }) !== kk('adtoolCampaignListings', { account: 'A', campaign_id: 'c2' }) && kk('adtoolItemCampaigns', {}) !== F.adtKvKey('adtoolItemCampaigns', 'np', {}), null);
+
+  /* (k) THE ORDERING THAT HAS SHIPPED WRONG BEFORE: the role gate must run before the cache is read.
+     Judged on the source of the three actions, because a cache hit that skipped the gate is not a
+     thing a pure function can be asked about. */
+  const cbSrc = src.slice(src.indexOf('/* ADTOOL-P14-BEGIN'), src.indexOf('/* ADTOOL-P14-END'));
+  for (const cbAct2 of ['adtoolCampaignBoard', 'adtoolCampaignListings', 'adtoolItemCampaigns']) {
+    const cbBlk = cbSrc.slice(cbSrc.indexOf('  ' + cbAct2 + ': {'));
+    const cbBody = cbBlk.slice(0, cbBlk.indexOf('\n  },'));
+    t('campaign actions: ' + cbAct2 + ' refuses the wrong role BEFORE it ever looks in the cache', cbBody.indexOf('adtGate') >= 0 && cbBody.indexOf('adtKvMemo') > cbBody.indexOf('adtGate') && /adtGate\(ctx, null\)/.test(cbBody) && /adtGate\(ctx, 'adtool_page_[a-z_]+'\)/.test(cbBody), [cbBody.indexOf('adtGate'), cbBody.indexOf('adtKvMemo')]);
+  }
+  t('campaign actions: all three are held in the page cache, keyed by the caller\'s profit class', (cbSrc.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length === 3 && (cbSrc.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 3, (cbSrc.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length);
+  t('campaign actions: each of the three names its own time to live, and none of them outlives the ceiling the gate states', /adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000, adtoolItemCampaigns: 120000/.test(src) && (cbSrc.match(/ADTOOL_KV_TTL_MS\.adtool(CampaignBoard|CampaignListings|ItemCampaigns)/g) || []).length === 3, null);
+
+  /* (l) the flag, and the promise that turning it on costs nothing */
+  t('campaign truth: the flag is SET on, not merely defaulted, so a row already holding off does not survive', /'adtool_campaign_truth', 'on'[\s\S]{0,160}DO UPDATE SET value = 'on'/.test(cbSrc) && !/adtool_campaign_truth[\s\S]{0,120}DO NOTHING/.test(cbSrc), null);
+  t('campaign truth: the reason it costs no eBay traffic is written down beside it, so nobody turns it back off to save a report', /ALREADY downloaded/.test(cbSrc) && /adds NO eBay traffic/.test(cbSrc), null);
+  t('campaign pages: the two page switches are born on and left alone if somebody has set them', /'adtool_page_campaign_board', 'adtool_page_item_campaigns'/.test(cbSrc) && /VALUES \(\?1, 'on', datetime\('now'\)\) ON CONFLICT\(key\) DO NOTHING/.test(cbSrc), null);
+
+  /* (m) read-only, one membership rule, and the columns not to touch */
+  t('campaign pages: nothing is ever sent to eBay, and the only writes at all are the documentation and the flags', !/fetch\(/.test(cbSrc) && (cbSrc.match(/INSERT INTO/g) || []).length === (cbSrc.match(/INSERT INTO (adtool_number_register|portal_config)/g) || []).length && !/UPDATE campaigns|DELETE FROM/.test(cbSrc), (cbSrc.match(/INSERT INTO/g) || []).length);
+  t('campaign pages: the one membership rule the tool shares is reused, never written a second time', (cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length >= 2 && /adtCampaignStmt\(/.test(cbSrc) && !/c\.status LIKE/.test(cbSrc), (cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length);
+  t('campaign pages: no query asks for the impressions column that is declared and never written', !/impressions/.test(cbSrc), null);
+  t('campaign pages: nothing adds the click fee on top of a day total that already carries it', !/cpc_spend/.test(cbSrc), null);
+  t('campaign pages: every window comes from the shared period helper, and the day source is asked for rather than named', (cbSrc.match(/adtPeriodOr\(/g) || []).length === 2 && /adtDaySrc\(/.test(cbSrc) && /adtPeriod\(\{ period: 'd3' \}/.test(cbSrc), null);
+  t('campaign pages: every read is bounded, by a limit or by the window, and nothing asks for every column of anything', (cbSrc.match(/LIMIT \d+/g) || []).length >= 7 && !/SELECT \* FROM/.test(cbSrc) && /d\.day >= \?1 AND d\.day <= \?2/.test(cbSrc), (cbSrc.match(/LIMIT \d+/g) || []).length);
+
+  /* (n) the register entries for the two new pages */
+  const cbRgB = rgAll.filter(r => r.id === 'CAMPAIGN_BOARD')[0], cbRgO = rgAll.filter(r => r.id === 'CAMPAIGN_OVERLAP')[0], cbRgI = rgAll.filter(r => r.id === 'ITEM_CAMPAIGNS')[0], cbRgS = rgAll.filter(r => r.id === 'CAMPAIGN_BUDGET_SHARE')[0];
+  t('register: the two new pages, the overlap and the shared budget each have an entry naming the rule, the sources, when it recomputes and how it is rechecked', !!cbRgB && !!cbRgO && !!cbRgI && !!cbRgS && [cbRgB, cbRgO, cbRgI, cbRgS].every(r => r.name && r.formula && r.sources && r.recompute && r.recheck), [!!cbRgB, !!cbRgO, !!cbRgI, !!cbRgS]);
+  t('register: the campaign entry says plainly that a derived figure is derived', !!cbRgB && /added up from the listings inside it/.test(cbRgB.formula), cbRgB && cbRgB.formula.slice(0, 70));
+  t('register: the shared budget entry prints no cap figure at all, because the page prints the live one', !!cbRgS && !/\d/.test(cbRgS.formula), cbRgS && cbRgS.formula);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

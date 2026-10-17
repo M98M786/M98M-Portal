@@ -4921,7 +4921,7 @@ function adtProfitClass(user) { const u = user || {}; return (PROFIT_ROLES.index
    that names exactly this window means the same request as an empty payload, so the two must hash alike — the
    hourly warm writes {} and the period bar always sends {period:'d30'}. Only actions listed here drop their default;
    an action absent from the list keeps `period` in the key (adtoolListing answers a period differently from none). */
-const ADTOOL_KV_DEFAULT_PERIOD = { adtoolAccounts: 'd30', adtoolCategories: 'd30', adtoolCases: 'd30', adtoolSlots: 'd28', adtoolPlan: 'd30', adtoolCpcListings: 'd30', adtoolOverview: 'd30' };
+const ADTOOL_KV_DEFAULT_PERIOD = { adtoolAccounts: 'd30', adtoolCategories: 'd30', adtoolCases: 'd30', adtoolSlots: 'd28', adtoolPlan: 'd30', adtoolCpcListings: 'd30', adtoolOverview: 'd30', adtoolCampaignBoard: 'd7', adtoolCampaignListings: 'd7' };
 function adtKvCanon(action, payload) {
   /* the canonical form of a cache payload: keys whose value is undefined / null / '' dropped (account:'' is "all
      accounts"), the action's default period dropped, adtoolCpcListings' default mode 'active' dropped, keys sorted.
@@ -4999,7 +4999,11 @@ async function adtoolTodayPrewarm(env, rebuild) {
    windows behind it end yesterday, so nothing in its answer can move between two rollups. Half an
    hour is therefore generous without ever being a day stale, and it is short enough that an owner
    who edits one of the eight numbers sees the page follow within the half hour. */
-const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000, adtoolDepts: 1800000 };
+const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000, adtoolDepts: 1800000,
+  /* the campaign pages read the campaign map, which the sync refreshes every few minutes, and the finished
+     day figures behind it, which move once an hour. Two minutes keeps a page flag switched off honoured
+     inside the ceiling the gate above states, and still spares the owner the whole compute on every click. */
+  adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000, adtoolItemCampaigns: 120000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -9442,6 +9446,518 @@ async function adtoolDeptsCompute(env, p) {
 }
 /* ADTOOL-P13-END ================================================================================== */
 
+/* ADTOOL-P14-BEGIN ================================================================================
+   Campaigns, and where each listing advertises (owner's batch, 18 Oct 2026). Three read actions, no
+   write path of any kind: nothing in this section is ever sent to eBay.
+
+   WHY A CAMPAIGN'S MONEY IS ADDED UP FROM ITS LISTINGS.
+   eBay's daily ad report is downloaded per listing and summed, so the portal's own day table knows
+   what a listing spent but not which campaign it spent through. adtool_ads_daily is the per-campaign
+   table, and it fills from THE SAME REPORT THE ENGINE ALREADY DOWNLOADS, read per campaign instead of
+   summed per listing. Its writer sits behind portal_config.adtool_campaign_truth, which this section
+   turns ON. Turning it on adds NO eBay traffic and sends nothing: the report is already in hand, and
+   the only cost is the rows it stores. Please do not switch it off believing it buys another report
+   from eBay, because it does not; switch the page off instead if a page has to go.
+   Until those rows cover the window being asked for, a campaign's money is added up from the listings
+   inside it. Every payload says which of the two it used, and the overlap block says how many listings
+   are live in two campaigns at once and how much of the campaign column is therefore the same spend
+   counted twice. A derived figure is never presented as one eBay reported. */
+/* ADTOOL-P14-PURE-BEGIN */
+function adtMoneyNum(v) {
+  /* campaigns.budget arrives as TEXT in D1, and has been seen with a currency mark on it. Returns a
+     number or null, never NaN, so a blank budget can be told apart from a budget of zero. */
+  if (v === null || v === undefined) return null;
+  const s = String(v).replace(/[^0-9.\-]/g, '');
+  if (s === '' || s === '-' || s === '.') return null;
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}
+function adtCampStatusKey(status) {
+  /* the three words the owner asked for, off eBay's own status. RUNNING and ENDING_SOON are both a
+     campaign that is spending today, which is the same reading the shared membership rule takes. */
+  const s = String(status == null ? '' : status).toUpperCase();
+  if (s.indexOf('RUNNING') >= 0 || s === 'ENDING_SOON') return 'active';
+  if (s.indexOf('PAUSED') >= 0) return 'paused';
+  if (s.indexOf('ENDED') >= 0) return 'ended';
+  return 'other';
+}
+function adtCampStatusMatch(status, want) {
+  const w = String(want == null ? '' : want);
+  if (w === '') return true;
+  return adtCampStatusKey(status) === w;
+}
+function adtRateRoas(revenue, spend) {
+  /* no spend means no return to report. Null, so the page prints nothing rather than a false zero or
+     an infinity. */
+  const s = Number(spend) || 0;
+  return s > 0 ? round2((Number(revenue) || 0) / s) : null;
+}
+function adtRateCpc(spend, clicks) {
+  const c = Number(clicks) || 0;
+  return c > 0 ? round2((Number(spend) || 0) / c) : null;
+}
+function adtCampaignBudgetShare(budget, listings, rules) {
+  /* A DAILY BUDGET BELONGS TO THE CAMPAIGN, NOT TO A LISTING. Setting a campaign budget straight
+     against the owner's per-item daily figure called dozens of ordinary campaigns a breach once
+     already, and it was wrong: a budget of fifty over forty listings is a pound and a quarter each.
+     So the budget is divided by the listings sharing it before it is compared, the figure compared is
+     named for what it is, and the cap comes from the rules handed in (the owner's own number, read
+     from config) rather than from anything written here. Pure. */
+  const R = rules || ADTOOL_DEPT_DEFAULTS;
+  /* an absent, blank or nonsense cap keeps the owner's default rather than reading as a cap of zero,
+     which would call every campaign on the fleet a breach */
+  const capRaw = (R.day_cap === null || R.day_cap === undefined || String(R.day_cap).trim() === '') ? NaN : Number(R.day_cap);
+  const cap = (isFinite(capRaw) && capRaw >= 0) ? capRaw : ADTOOL_DEPT_DEFAULTS.day_cap;
+  const b = adtMoneyNum(budget);
+  const n = Math.max(0, Math.round(Number(listings) || 0));
+  /* a campaign with no listings in it cannot put a single item over anything */
+  const per = (b === null || n <= 0) ? null : round2(b / n);
+  return {
+    budget_day: b === null ? null : round2(b),
+    listings_sharing_budget: n,
+    budget_per_listing_day: per,
+    day_cap: round2(cap),
+    over_day_cap_per_listing: per !== null && per > cap,
+    /* the same answer under the shorter name the page asks for; there is one comparison behind both */
+    over_day_cap: per !== null && per > cap,
+  };
+}
+function adtCampaignOverlap(live, money) {
+  /* live: one row per LIVE (campaign, listing) membership. A listing live in two campaigns at once is
+     counted in both campaigns' money, so the campaign column adds up to more than the fleet really
+     spent. This states by how much: spend_counted_twice is the EXCESS, which is a listing's spend once
+     for a listing in two campaigns and twice for one in three, so a reader can subtract it from the
+     column and arrive at the truth. Pure: no database, no clock. */
+  const seen = {};
+  for (const r of (live || [])) {
+    const id = String((r && r.item_id) || '');
+    if (!id) continue;
+    const ck = String((r && r.account) || '') + '|' + String((r && r.campaign_id) || '');
+    (seen[id] = seen[id] || {})[ck] = 1;
+  }
+  const M = money || {};
+  let inTwo = 0, excess = 0, total = 0;
+  for (const id of Object.keys(seen)) {
+    const n = Object.keys(seen[id]).length;
+    total++;
+    if (n < 2) continue;
+    inTwo++;
+    excess += (Number((M[id] || {}).spend) || 0) * (n - 1);
+  }
+  return {
+    listings_in_two_or_more: inTwo,
+    of_live_advertised: total,
+    spend_counted_twice: round2(excess),
+    share_pct: total > 0 ? round2(100 * inTwo / total) : null,
+  };
+}
+function adtCampaignRollup(input) {
+  /* THE WHOLE BOARD, with no database and no clock in it, so every rule below is unit tested from
+     worked examples.
+       campaigns: [{account, campaign_id, name, status, budget, funding_model, bid_pct, start_date, end_date}]
+       members:   [{account, campaign_id, item_id}]  every ad still in the campaign
+       live:      [{account, campaign_id, item_id}]  the shared "being advertised right now" rows
+       money:     { item_id: {spend, clicks, units, revenue} }  the window, per listing
+       real:      [{account, campaign_id, spend, clicks, units, revenue, listings}] or empty
+       rules:     { day_cap }        status: '' | 'active' | 'paused' | 'ended'
+     A campaign's money is eBay's own per-campaign rows when they are handed in, and otherwise the sum
+     of the listings inside it. Account and fleet money is always counted over DISTINCT listings, so a
+     listing in two campaigns is counted once there however the campaign column reads. */
+  const I = input || {};
+  const rules = I.rules || ADTOOL_DEPT_DEFAULTS;
+  const money = I.money || {};
+  const want = String(I.status || '');
+  const ck = r => String((r && r.account) || '') + '|' + String((r && r.campaign_id) || '');
+  const zero = () => ({ spend: 0, clicks: 0, units: 0, revenue: 0 });
+  const addM = (t, s) => { if (s) { t.spend += Number(s.spend) || 0; t.clicks += Number(s.clicks) || 0; t.units += Number(s.units) || 0; t.revenue += Number(s.revenue) || 0; } return t; };
+  const say = m => ({
+    spend: round2(m.spend), clicks: Math.round(m.clicks || 0), sales_units: Math.round(m.units || 0), sales_money: round2(m.revenue),
+    roas: adtRateRoas(m.revenue, m.spend), cpc: adtRateCpc(m.spend, m.clicks),
+  });
+  /* which campaigns each listing is LIVE in */
+  const liveIn = {};
+  for (const r of (I.live || [])) { const id = String((r && r.item_id) || ''); if (id) (liveIn[id] = liveIn[id] || {})[ck(r)] = 1; }
+  /* every ad still in each campaign */
+  const mem = {};
+  for (const r of (I.members || [])) { const id = String((r && r.item_id) || ''); if (id) (mem[ck(r)] = mem[ck(r)] || {})[id] = 1; }
+  const real = {}; let realRows = 0;
+  for (const r of (I.real || [])) { real[ck(r)] = r; realRows++; }
+  const useReal = realRows > 0;
+  const rows = [], accs = {}, seenItem = {}, colTimes = {};
+  let running = 0, paused = 0, ended = 0;
+  for (const c of (I.campaigns || [])) {
+    if (!adtCampStatusMatch(c.status, want)) continue;
+    const k = ck(c), sKey = adtCampStatusKey(c.status);
+    const items = Object.keys(mem[k] || {});
+    const liveItems = items.filter(id => liveIn[id] && liveIn[id][k]);
+    /* shares_listings counts LISTINGS, not campaigns: how many of this campaign's listings are also
+       live in some OTHER campaign. A listing in three campaigns adds one to this, not two. */
+    const shares = items.filter(id => {
+      const L = liveIn[id]; if (!L) return false;
+      for (const other of Object.keys(L)) if (other !== k) return true;
+      return false;
+    }).length;
+    /* WHEN EBAY'S OWN ROWS ARE IN, THEY ARE THE WHOLE ANSWER, INCLUDING A SILENCE.
+       A campaign the report does not mention is a campaign the report says had no clicks and no
+       spend, so it reads as nil rather than falling back to the listing sum. Mixing the two sources
+       down one column is what stops a reader reconciling it: the campaign column would then add up
+       to something the account and company rows cannot reach. The window is only taken from the
+       report at all when it covers every day of it on every account (see the caller), so a silence
+       here is a real silence, not a table that has not finished filling. */
+    const m = useReal ? addM(zero(), real[k] || zero()) : items.reduce((t, id) => addM(t, money[id]), zero());
+    /* how many times each listing is counted down the campaign column actually shown */
+    for (const id of items) colTimes[id] = (colTimes[id] || 0) + 1;
+    const bud = adtCampaignBudgetShare(c.budget, liveItems.length || items.length, rules);
+    const acct = String(c.account || '');
+    const a = accs[acct] = accs[acct] || { account: acct, campaigns: 0, running: 0, paused: 0, ended: 0, items: {}, budget: 0, budget_known: 0, money: zero(), real: zero() };
+    a.campaigns++;
+    if (sKey === 'active') { a.running++; running++; } else if (sKey === 'paused') { a.paused++; paused++; } else if (sKey === 'ended') { a.ended++; ended++; }
+    if (sKey === 'active' && bud.budget_day !== null) { a.budget += bud.budget_day; a.budget_known++; }
+    for (const id of items) { a.items[id] = 1; seenItem[id] = 1; }
+    addM(a.real, real[k] || zero());
+    rows.push(Object.assign({
+      account: acct, campaign_id: String(c.campaign_id || ''), name: String(c.name || ''), status: String(c.status || ''), status_key: sKey,
+      funding_model: String(c.funding_model || ''), bid_pct: c.bid_pct === null || c.bid_pct === undefined || c.bid_pct === '' ? null : round2(Number(c.bid_pct)),
+      start_date: String(c.start_date || ''), end_date: String(c.end_date || ''),
+      listings: items.length, listings_advertised: liveItems.length,
+      shares_listings: shares,
+    }, say(m), {
+      budget_day: bud.budget_day, budget_per_listing_day: bud.budget_per_listing_day, day_cap: bud.day_cap,
+      over_day_cap_per_listing: bud.over_day_cap_per_listing, over_day_cap: bud.over_day_cap,
+      money_from: useReal ? 'report' : 'listings',
+    }));
+  }
+  /* account and fleet money over DISTINCT listings, so no listing is counted twice above campaign level */
+  const accounts = Object.keys(accs).sort().map(k => {
+    const a = accs[k], ids = Object.keys(a.items);
+    const m = useReal ? a.real : ids.reduce((t, id) => addM(t, money[id]), zero());
+    return Object.assign({
+      account: a.account, campaigns: a.campaigns, running: a.running, paused: a.paused, ended: a.ended,
+      listings: ids.length, budget_day: a.budget_known ? round2(a.budget) : null,
+    }, say(m));
+  });
+  const allIds = Object.keys(seenItem);
+  const fleet = useReal ? accounts.reduce((t, a) => addM(t, { spend: a.spend, clicks: a.clicks, units: a.sales_units, revenue: a.sales_money }), zero())
+    : allIds.reduce((t, id) => addM(t, money[id]), zero());
+  const ov = adtCampaignOverlap(I.live || [], money);
+  const totals = Object.assign({ campaigns: rows.length, running: running, paused: paused, ended: ended, listings: allIds.length }, say(fleet));
+  /* THE RECONCILIATION, AND IT IS EXACT BY CONSTRUCTION.
+     A reader looking at the campaign column has to be able to get from it to the company total, and
+     the only figure that lets them do that is the difference between the two as they are PRINTED.
+     So it is measured, not reasoned about: add up the campaign rows exactly as they are rounded on
+     screen, take the company total exactly as it is rounded on screen, and the gap between them is
+     what the column repeats. Counting live memberships instead got this wrong, because a listing
+     with a stopped ad in a paused campaign is still counted down the column by that campaign while
+     it is not an overlap of live ads at all. */
+  const col = rows.reduce((t, r) => { t.spend += Number(r.spend) || 0; t.clicks += Number(r.clicks) || 0; t.units += Number(r.sales_units) || 0; t.revenue += Number(r.sales_money) || 0; return t; }, zero());
+  const colSpend = round2(col.spend);
+  const twice = Object.keys(colTimes).filter(id => colTimes[id] > 1);
+  const column = {
+    spend: colSpend, clicks: Math.round(col.clicks), sales_units: Math.round(col.units), sales_money: round2(col.revenue),
+    spend_counted_twice: round2(colSpend - totals.spend),
+    listings_counted_more_than_once: twice.length,
+    reconciles_to: totals.spend,
+  };
+  return {
+    money_source: useReal ? 'eBay campaign report' : 'added up from the listings in each campaign',
+    /* the two listing counts are a membership fact rather than a money one, so they stay true either
+       way; the excess a reader subtracts is the measured one above, which is nil once eBay's own
+       per-campaign rows are in because then no listing's money lands on two rows */
+    overlap: {
+      listings_in_two_or_more: ov.listings_in_two_or_more, of_live_advertised: ov.of_live_advertised,
+      spend_counted_twice: useReal ? 0 : ov.spend_counted_twice, share_pct: ov.share_pct,
+      applies_to_money: !useReal,
+    },
+    column: column,
+    accounts: accounts,
+    campaigns: rows,
+    totals: totals,
+  };
+}
+/* ADTOOL-P14-PURE-END */
+
+const ADTOOL_REGISTER_P14 = [
+  ['CAMPAIGN_BOARD', 'Campaign and account totals for a period', 'Spend, clicks, units from ads and sales from ads for every campaign and every account over the period you pick. Where eBay\'s daily report is held per campaign it is used as it stands. Where it is not, a campaign\'s money is added up from the listings inside it and the page says so. Account and company totals always count a listing once.', 'campaigns, campaign_ads, adtool_ads_daily, adtool_listing_day, adtool_listing_today, items_api, portal_config', 'Worked out when you open the page, and held for a couple of minutes', 'Unit tests on worked examples: one listing in one campaign, one listing in two, a campaign with nothing in it, and a daily budget shared across its listings'],
+  ['CAMPAIGN_OVERLAP', 'Listings advertised in two campaigns at once', 'How many listings are being advertised in more than one campaign right now, out of all the listings being advertised, and how much spend the campaign column therefore repeats. The repeat is measured off the campaign rows exactly as they are printed, less the company total exactly as it is printed, so subtracting it from the column always lands on the total. A listing held by a stopped campaign is counted down the column by it even though its ad there is not live, which is why the repeat is not the count of live ads.', 'campaign_ads, campaigns, items_api, adtool_listing_day', 'Worked out with the campaign totals', 'Unit tests: the repeat equals a listing\'s spend once where it sits in two campaigns and twice where it sits in three, and the column less the repeat equals the total in every worked example, the stopped campaign included'],
+  ['CAMPAIGN_LISTINGS', 'The listings inside one campaign', 'Every listing in the campaign with its own spend, clicks, units from ads, sales from ads, return on ad spend and cost per click over the period, whether its ad is running or stopped, the ad rate on it, and whether the same listing is also running in another campaign.', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today', 'Worked out when you open a campaign', 'The listings add back up to the campaign total above them'],
+  ['ITEM_CAMPAIGNS', 'Which campaign each listing is in', 'Every active listing with the campaign or campaigns advertising it right now, and the listings in none. Being advertised means a running campaign, an active listing, and an ad that is neither stopped nor put away, which is the same test every other advertising page uses.', 'campaign_ads, campaigns, items_api, adtool_listing_day', 'Worked out when you open the page, and held for a couple of minutes', 'The three groups add up to the active listing count, counted again straight from the item list'],
+  ['CAMPAIGN_BUDGET_SHARE', 'A campaign\'s daily budget per listing', 'A daily budget belongs to the campaign and is shared by every listing inside it, so it is divided by the listings sharing it before it is set against the figure allowed for one item a day. A budget shared by forty listings leaves each one a fraction of it; the same budget shared by four does not.', 'campaigns, campaign_ads, portal_config', 'Worked out with the campaign totals', 'Unit tests on both of those worked examples, on a budget stored as text, and on the allowed figure being changed'],
+];
+let ADTOOL_P14_REG_OK = false;
+async function ensureAdtoolPhaseCampaignBoardRegister(env) {
+  if (ADTOOL_P14_REG_OK) return;
+  await ensureAdtoolPhase2Schema(env);
+  const stmts = ADTOOL_REGISTER_P14.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 14, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 14").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* both pages are born ON and only read; a manager can switch either off in Flags */
+  for (const key of ['adtool_page_campaign_board', 'adtool_page_item_campaigns']) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
+  }
+  /* THE ONE FLAG THAT IS FORCED ON RATHER THAN DEFAULTED.
+     adtool_campaign_truth gates the writer that fills adtool_ads_daily from the ad report the engine
+     has ALREADY downloaded. It has never been on, so there is a real chance the row exists holding
+     'off' from the day it was added, and INSERT OR IGNORE would leave that 'off' standing for ever.
+     This SETS it. That is safe because the flag buys nothing from eBay and sends nothing to eBay: it
+     only decides whether a report in hand is stored per campaign as well as summed per listing. The
+     page switches above are the ones to use if a page has to go away. */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_campaign_truth', 'on', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = 'on', updated_at = datetime('now')"));
+  try { await adtBatch(env, stmts); } catch (e) { /* documentation and two defaults; never let it stop a page */ }
+  ADTOOL_P14_REG_OK = true;
+}
+async function adtoolCampaignMoneyRows(env, w, acct, accounts) {
+  /* eBay's own per-campaign rows for the window, used only when they cover ALL of it ON EVERY
+     ACCOUNT ASKED ABOUT. A window half covered would read as a collapse in spend rather than as a
+     table that has only just started filling, and so would a report that has landed for one account
+     and not another, so it is all or nothing and a short report falls back to adding the listings
+     up. The caller hands in the accounts the campaigns on screen belong to. */
+  const cov = await env.DB.prepare('SELECT d.account AS account, COUNT(*) AS n, MIN(d.day) AS mn, MAX(d.day) AS mx FROM adtool_ads_daily d WHERE d.day >= ?1 AND d.day <= ?2' + (acct ? ' AND d.account = ?3' : '') + ' GROUP BY d.account')
+    .bind(...[w.from, w.to].concat(acct ? [acct] : [])).all().catch(() => null);
+  const per = {};
+  let have = 0, mn = '', mx = '';
+  for (const r of ((cov && cov.results) || [])) {
+    const a = String(r.account || ''), n = Number(r.n) || 0;
+    per[a] = { n, mn: String(r.mn || ''), mx: String(r.mx || '') };
+    have += n;
+    if (!mn || per[a].mn < mn) mn = per[a].mn;
+    if (!mx || per[a].mx > mx) mx = per[a].mx;
+  }
+  const want = (acct ? [acct] : (accounts || [])).map(a => String(a || '')).filter(Boolean);
+  const short = want.filter(a => !(per[a] && per[a].mn <= w.from && per[a].mx >= w.to));
+  const covers = have > 0 && want.length > 0 && short.length === 0;
+  const rows = covers
+    ? ((await env.DB.prepare('SELECT d.account, d.campaign_id, ROUND(SUM(d.spend), 2) AS spend, SUM(d.clicks) AS clicks, SUM(d.units) AS units, ROUND(SUM(d.revenue), 2) AS revenue, COUNT(DISTINCT d.item_id) AS listings FROM adtool_ads_daily d WHERE d.day >= ?1 AND d.day <= ?2' + (acct ? ' AND d.account = ?3' : '') + ' GROUP BY d.account, d.campaign_id')
+      .bind(...[w.from, w.to].concat(acct ? [acct] : [])).all()).results || [])
+    : [];
+  return { rows, held: { rows_in_window: have, from: mn, to: mx, covers_window: covers, accounts_asked: want.length, accounts_short: short.length } };
+}
+async function adtoolCampaignBoardCompute(env, p) {
+  await ensureAdtoolPhaseCampaignBoardRegister(env);
+  const today = ukDate(''), todayUtc = utcDate();
+  /* every period the bar offers, the owner's 3 days and a custom range included, for free */
+  const w = adtPeriodOr(p || {}, today, 'd7');
+  const src = adtDaySrc(w, today, todayUtc);
+  const acct = String((p && p.account) || '').trim();
+  const want = String((p && p.status) || '').trim();
+  if (want && ['active', 'paused', 'ended'].indexOf(want) < 0) throw new Error('SAY: status is active, paused, ended, or left blank for all of them');
+  const rules = adtDeptRules(await adtoolDeptConfig(env));
+  const B = await env.DB.batch([
+    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date FROM campaigns c' + (acct ? ' WHERE c.account = ?1' : '') + ' ORDER BY c.account, c.name LIMIT 2000').bind(...(acct ? [acct] : [])),
+    /* every ad still in a campaign. An ad put away by eBay is no longer inside it, so it is not
+       counted as one of its listings and its money is not added to it. */
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id FROM campaign_ads ca WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
+    /* being advertised right now: the one membership rule the whole tool shares */
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    /* the window, per listing. `spend` in the day table already carries the cost-per-click leg, so
+       nothing is added on top of it here. */
+    env.DB.prepare('SELECT d.item_id, ROUND(SUM(d.spend), 2) AS spend, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS units, ROUND(SUM(d.attr_revenue), 2) AS revenue FROM ' + src + ' d WHERE d.day >= ?1 AND d.day <= ?2' + (acct ? ' AND d.account = ?3' : '') + ' GROUP BY d.item_id').bind(...[w.from, w.to].concat(acct ? [acct] : [])),
+    env.DB.prepare("SELECT DISTINCT account FROM campaigns WHERE account <> '' ORDER BY account LIMIT 100"),
+  ]);
+  const money = {};
+  for (const r of (B[3].results || [])) money[String(r.item_id)] = { spend: Number(r.spend) || 0, clicks: Number(r.clicks) || 0, units: Number(r.units) || 0, revenue: Number(r.revenue) || 0 };
+  const camps = B[0].results || [];
+  const real = await adtoolCampaignMoneyRows(env, w, acct, Array.from(new Set(camps.map(c => String(c.account || '')).filter(Boolean))));
+  const roll = adtCampaignRollup({ campaigns: camps, members: B[1].results || [], live: B[2].results || [], money, real: real.rows, rules, status: want });
+  const shown = roll.campaigns.slice().sort((a, b) => (b.spend - a.spend) || (b.listings - a.listings) || String(a.account + a.name).localeCompare(String(b.account + b.name)));
+  return Object.assign({
+    /* `period` is the whole window object, because that is what every other advertising action
+       echoes and what the shared period bar reads: hand it the key alone and the bar prints no
+       dates at all. period_label and window stay beside it for anything reading those names. */
+    period: w, period_key: w.key, period_label: w.label, window: { from: w.from, to: w.to, days: w.days, includes_today: w.includes_today },
+    account: acct || 'all', accounts_list: (B[4].results || []).map(r => String(r.account)), status: want || 'all',
+    computed_at: new Date().toISOString(), fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'),
+  }, roll, {
+    campaigns: shown.slice(0, 500), campaigns_total: shown.length, campaigns_held_back: Math.max(0, shown.length - 500),
+    campaign_report_rows: real.held,
+    rules: {
+      day_cap: rules.day_cap,
+      budget: 'A campaign budget is shared by every listing inside it, so the budget is divided by those listings before it is set against the figure allowed for one item a day.',
+      money: roll.money_source === 'eBay campaign report'
+        ? 'Each campaign\'s money is eBay\'s own report for that campaign.'
+        : 'Each campaign\'s money is added up from the listings inside it, because eBay\'s report is held per listing, not per campaign. A listing in two campaigns is counted in both.',
+      totals: 'Account and company totals count each listing once, however many campaigns it is in.',
+    },
+    source: 'campaigns, campaign_ads, ' + (roll.money_source === 'eBay campaign report' ? 'adtool_ads_daily' : 'adtool_listing_day' + (w.includes_today ? ' + adtool_listing_today' : '')) + ', items_api',
+  });
+}
+async function adtoolCampaignListingsCompute(env, p) {
+  await ensureAdtoolPhaseCampaignBoardRegister(env);
+  const today = ukDate(''), todayUtc = utcDate();
+  const w = adtPeriodOr(p || {}, today, 'd7');
+  const src = adtDaySrc(w, today, todayUtc);
+  const acct = String((p && p.account) || '').trim();
+  const cid = String((p && p.campaign_id) || '').trim();
+  if (!acct || !cid) throw new Error('SAY: give the account and the campaign');
+  const rules = adtDeptRules(await adtoolDeptConfig(env));
+  const B = await env.DB.batch([
+    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date FROM campaigns c WHERE c.account = ?1 AND c.campaign_id = ?2').bind(acct, cid),
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_group FROM campaign_ads ca WHERE ca.account = ?1 AND ca.campaign_id = ?2 AND COALESCE(ca.ad_status, '') <> 'ARCHIVED' LIMIT 5000").bind(acct, cid),
+  ]);
+  const camp = (B[0].results || [])[0];
+  if (!camp) throw new Error('SAY: that campaign is not in the portal campaign list');
+  const ads = B[1].results || [];
+  const ids = Array.from(new Set(ads.map(r => String(r.item_id)).filter(Boolean)));
+  const stmts = [], kinds = [];
+  for (const ch of adtChunks(ids)) {
+    stmts.push(env.DB.prepare('SELECT d.item_id, ROUND(SUM(d.spend), 2) AS spend, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS units, ROUND(SUM(d.attr_revenue), 2) AS revenue FROM ' + src + ' d WHERE d.day >= ?1 AND d.day <= ?2 AND d.item_id IN ' + adtInList(ch, 2) + ' GROUP BY d.item_id').bind(w.from, w.to, ...ch)); kinds.push('money');
+    stmts.push(env.DB.prepare("SELECT i.item_id, i.account, i.title, i.image, i.price, i.status FROM items_api i WHERE i.item_id IN " + adtInList(ch)).bind(...ch)); kinds.push('meta');
+    /* the shared membership rule, asked only about these listings, so this page and the board agree */
+    stmts.push(adtCampaignStmt(env, ch, '')); kinds.push('live');
+  }
+  const money = {}, meta = {}, liveIn = {};
+  (await adtBatchRead(env, stmts)).forEach((rows, i) => {
+    for (const r of rows) {
+      const id = String(r.item_id);
+      if (kinds[i] === 'money') money[id] = { spend: Number(r.spend) || 0, clicks: Number(r.clicks) || 0, units: Number(r.units) || 0, revenue: Number(r.revenue) || 0 };
+      else if (kinds[i] === 'meta') meta[id] = r;
+      else (liveIn[id] = liveIn[id] || {})[String(r.account || '') + '|' + String(r.campaign_id || '')] = 1;
+    }
+  });
+  const mine = acct + '|' + cid;
+  const listings = ids.map(id => {
+    const m = money[id] || { spend: 0, clicks: 0, units: 0, revenue: 0 }, it = meta[id] || {}, ad = ads.filter(a => String(a.item_id) === id)[0] || {};
+    const L = liveIn[id] || {};
+    const others = Object.keys(L).filter(k => k !== mine);
+    const st = adtAdState(camp.funding_model, ad.ad_status);
+    const rate = ad.ad_bid !== null && ad.ad_bid !== undefined && ad.ad_bid !== '' ? ad.ad_bid : camp.bid_pct;
+    return {
+      item_id: id, account: String(it.account || acct), title: String(it.title || ''), image: it.image ? String(it.image) : null,
+      price: it.price === null || it.price === undefined ? null : round2(it.price), listing_status: String(it.status || ''),
+      ad_status: st.state, live: !!L[mine], ad_rate: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
+      ad_group: String(ad.ad_group || ''),
+      spend: round2(m.spend), clicks: Math.round(m.clicks), sales_units: Math.round(m.units), sales_money: round2(m.revenue),
+      roas: adtRateRoas(m.revenue, m.spend), cpc: adtRateCpc(m.spend, m.clicks),
+      shared_with_another_campaign: others.length > 0, other_campaigns: others.length,
+    };
+  }).sort((a, b) => (b.spend - a.spend) || String(a.title).localeCompare(String(b.title)));
+  const sum = listings.reduce((t, r) => { t.spend += r.spend; t.clicks += r.clicks; t.units += r.sales_units; t.revenue += r.sales_money; return t; }, { spend: 0, clicks: 0, units: 0, revenue: 0 });
+  const liveCount = listings.filter(r => r.live).length;
+  const bud = adtCampaignBudgetShare(camp.budget, liveCount || listings.length, rules);
+  return {
+    period: w, period_key: w.key, period_label: w.label, window: { from: w.from, to: w.to, days: w.days, includes_today: w.includes_today },
+    account: acct,
+    campaign: Object.assign({
+      account: acct, campaign_id: cid, name: String(camp.name || ''), status: String(camp.status || ''), status_key: adtCampStatusKey(camp.status),
+      funding_model: String(camp.funding_model || ''), bid_pct: adtMoneyNum(camp.bid_pct) === null ? null : round2(adtMoneyNum(camp.bid_pct)),
+      start_date: String(camp.start_date || ''), end_date: String(camp.end_date || ''),
+      listings: listings.length, listings_advertised: liveCount,
+    }, bud),
+    listings: listings.slice(0, 1000), listings_total: listings.length, listings_held_back: Math.max(0, listings.length - 1000),
+    totals: {
+      listings: listings.length, spend: round2(sum.spend), clicks: Math.round(sum.clicks), sales_units: Math.round(sum.units),
+      sales_money: round2(sum.revenue), roas: adtRateRoas(sum.revenue, sum.spend), cpc: adtRateCpc(sum.spend, sum.clicks),
+      shared_with_another_campaign: listings.filter(r => r.shared_with_another_campaign).length,
+    },
+    rules: { money: 'Each listing\'s money is its own, from eBay\'s daily report. A listing shared with another campaign carries the same money there as well.', day_cap: rules.day_cap },
+    computed_at: new Date().toISOString(),
+    source: 'campaign_ads, campaigns, items_api, adtool_listing_day' + (w.includes_today ? ' + adtool_listing_today' : ''),
+  };
+}
+async function adtoolItemCampaignsCompute(env, p) {
+  await ensureAdtoolPhaseCampaignBoardRegister(env);
+  const today = ukDate(''), yday = adtAddDays(today, -1);
+  const d7 = adtPeriod({ period: 'd7' }, today), d3 = adtPeriod({ period: 'd3' }, today);
+  const acct = String((p && p.account) || '').trim();
+  const q = String((p && p.q) || '').trim().slice(0, 60);
+  const state = String((p && p.state) || '').trim();
+  if (state && ['in', 'none', 'multi'].indexOf(state) < 0) throw new Error('SAY: the filter is in a campaign, in none, in more than one, or left blank');
+  const like = '%' + q.replace(/[%_]/g, ' ') + '%';
+  const B = await env.DB.batch([
+    env.DB.prepare("SELECT i.item_id, i.account, i.title, i.image, i.price FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + (q ? ' AND (i.title LIKE ?' + (acct ? 2 : 1) + ' OR i.item_id LIKE ?' + (acct ? 2 : 1) + ')' : '') + ' ORDER BY i.account, i.title LIMIT 3000').bind(...(acct ? [acct] : []).concat(q ? [like] : [])),
+    /* every ad still in a campaign on an active listing, with the campaign it belongs to */
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, c.name, c.status, c.funding_model, c.budget, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    /* the two windows the owner asked to see everywhere, and units from our own records over 30 days */
+    env.DB.prepare('SELECT d.item_id, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.spend ELSE 0 END), 2) AS spend_7d, ROUND(SUM(CASE WHEN d.day >= ?2 THEN d.spend ELSE 0 END), 2) AS spend_3d, SUM(d.units) AS units_30d FROM adtool_listing_day d WHERE d.day >= ?3 AND d.day <= ?4 GROUP BY d.item_id').bind(d7.from, d3.from, adtAddDays(today, -30), yday),
+    env.DB.prepare("SELECT DISTINCT account FROM items_api WHERE status = 'ACTIVE' AND account <> '' ORDER BY account LIMIT 100"),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])),
+  ]);
+  const items = B[0].results || [];
+  const live = {};
+  for (const r of (B[2].results || [])) (live[String(r.item_id)] = live[String(r.item_id)] || {})[String(r.account || '') + '|' + String(r.campaign_id || '')] = 1;
+  const camps = {};
+  for (const r of (B[1].results || [])) {
+    const id = String(r.item_id), key = String(r.account || '') + '|' + String(r.campaign_id || '');
+    const st = adtAdState(r.funding_model, r.ad_status);
+    const rate = r.ad_bid !== null && r.ad_bid !== undefined && r.ad_bid !== '' ? r.ad_bid : r.c_bid;
+    const b = adtMoneyNum(r.budget);
+    (camps[id] = camps[id] || []).push({
+      campaign_id: String(r.campaign_id || ''), name: String(r.name || ''), status: String(r.status || ''), status_key: adtCampStatusKey(r.status),
+      funding_model: String(r.funding_model || ''), budget_day: b === null ? null : round2(b),
+      bid_pct: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
+      ad_status: st.state, live: !!(live[id] && live[id][key]),
+    });
+  }
+  const day = {};
+  for (const r of (B[3].results || [])) day[String(r.item_id)] = r;
+  const rows = items.map(it => {
+    const id = String(it.item_id), cs = (camps[id] || []).slice().sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+    const d = day[id] || {};
+    return {
+      item_id: id, account: String(it.account || ''), title: String(it.title || ''), image: it.image ? String(it.image) : null,
+      price: it.price === null || it.price === undefined ? null : round2(it.price),
+      sold_30d: Number(d.units_30d) || 0,
+      campaigns: cs, live_count: cs.filter(c => c.live).length, campaign_count: cs.length,
+      spend_7d: round2(d.spend_7d), spend_3d: round2(d.spend_3d),
+    };
+  });
+  const counts = { active: rows.length, in_one: rows.filter(r => r.live_count === 1).length, in_many: rows.filter(r => r.live_count > 1).length, in_none: rows.filter(r => r.live_count === 0).length };
+  const keep = rows.filter(r => state === '' || (state === 'in' ? r.live_count > 0 : state === 'none' ? r.live_count === 0 : r.live_count > 1))
+    .sort((a, b) => (b.live_count - a.live_count) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
+  return {
+    computed_at: new Date().toISOString(),
+    /* the page carries a freshness tag like every other advertising page, and the grain is the
+       finished-day one because both spend windows here end yesterday */
+    fresh: await adtFresh(env, 'day'),
+    accounts: (B[4].results || []).map(r => String(r.account)), account: acct || 'all', q, state: state || 'all',
+    counts, active_counted: Number((((B[5] || {}).results || [])[0] || {}).n) || null,
+    windows: { spend_7d: { from: d7.from, to: d7.to }, spend_3d: { from: d3.from, to: d3.to }, sold_30d: { from: adtAddDays(today, -30), to: yday } },
+    items: keep.slice(0, 600), items_total: keep.length, items_held_back: Math.max(0, keep.length - 600),
+    rules: { live: 'Being advertised means a running campaign, an active listing, and an ad that is neither stopped nor put away. It is the same test every other advertising page uses.' },
+    source: 'campaign_ads, campaigns, items_api, adtool_listing_day',
+  };
+}
+const ADTOOL_ACTIONS_P14 = {
+  adtoolCampaignBoard: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* THE GATE RUNS BEFORE THE CACHE, AND MUST STAY THAT WAY. A cache hit that skipped the role
+         check has shipped in this codebase before: the cache key carries the caller's profit class,
+         not the caller's role, so a stored answer can never be the thing that decides who may read
+         the page. Refuse first, then look for a cached answer. The role half runs before the seed as
+         well, so a caller who may not be here writes nothing at all; the seed has to come before the
+         page-flag half, because the seed is what puts the flag there. */
+      await adtGate(ctx, null);
+      await ensureAdtoolPhaseCampaignBoardRegister(ctx.env);
+      await adtGate(ctx, 'adtool_page_campaign_board');
+      const pay = { period: String((p && p.period) || ''), from: String((p && p.from) || ''), to: String((p && p.to) || ''), account: String((p && p.account) || '').trim(), status: String((p && p.status) || '').trim() };
+      return adtKvMemo(ctx.env, 'adtoolCampaignBoard', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolCampaignBoard,
+        () => adtoolCampaignBoardCompute(ctx.env, pay),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+  adtoolCampaignListings: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null);                                   // role first, before anything is written or read
+      await ensureAdtoolPhaseCampaignBoardRegister(ctx.env);
+      await adtGate(ctx, 'adtool_page_campaign_board');            // then the page flag, which the seed above put there
+      const pay = { period: String((p && p.period) || ''), from: String((p && p.from) || ''), to: String((p && p.to) || ''), account: String((p && p.account) || '').trim(), campaign_id: String((p && p.campaign_id) || '').trim() };
+      return adtKvMemo(ctx.env, 'adtoolCampaignListings', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolCampaignListings,
+        () => adtoolCampaignListingsCompute(ctx.env, pay),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+  adtoolItemCampaigns: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null);                                   // role first: the gate never sits behind the cache
+      await ensureAdtoolPhaseCampaignBoardRegister(ctx.env);
+      await adtGate(ctx, 'adtool_page_item_campaigns');
+      const pay = { account: String((p && p.account) || '').trim(), q: String((p && p.q) || '').trim(), state: String((p && p.state) || '').trim() };
+      return adtKvMemo(ctx.env, 'adtoolItemCampaigns', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolItemCampaigns,
+        () => adtoolItemCampaignsCompute(ctx.env, pay),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+};
+/* ADTOOL-P14-END ================================================================================== */
+
 
 
 /* ---------------- ADTOOL Phase 1.1 — append-only intraday ad history (spec §2.1) ----------------
@@ -12132,7 +12648,9 @@ const ROUTES = {
       /* Night review 2: "advertising requires all previous numbers the way i told you" — the
          board takes a window (7/14/30/60 days) and also returns the per-day series, so the
          command centre carries the history, not just today. */
-      const histDays = Math.min(60, Math.max(7, Number(p.days) || 14));
+      /* 18 Oct: the floor was 7, so asking for 3 days silently returned 7 days of numbers under a
+         3-day heading. The owner asked for 3 days everywhere, so the floor is now 3. */
+      const histDays = Math.min(60, Math.max(3, Number(p.days) || 14));
       /* Review 3: the centre takes a CUSTOM window and an account filter — from/to override the
          day-count chips, and every series row carries eBay-attributed revenue for ROAS. */
       const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
@@ -18378,6 +18896,7 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P8); /* ADTOOL Phase 8: live apply (off unt
 Object.assign(ROUTES, ADTOOL_ACTIONS_P9); /* ADTOOL war room: what to do today, with the arithmetic behind it */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P10); /* ADTOOL sale events: who qualifies, and the rotation that keeps one running */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P11); /* ADTOOL big update phase 3: CPC Active / Post listings, Advertising Overview */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P14); /* ADTOOL owner batch 18 Oct: Campaigns, the listings inside one, and where each listing advertises */
 /* Phase 1A (27 Sep 2026): no collective profit leaves the engine for the ads portal. Every adtool action's answer
    passes through adtStripCollectiveProfit on the way out — profit keys survive only inside item-keyed rows, and the
    old est. ad profit never survives. The actions themselves no longer compute account or fleet profit; this is the

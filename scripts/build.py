@@ -156,7 +156,9 @@ def build_frontend():
 # holds Live listings and Wrong advertising, view-cpc.js holds Keyword approvals, and
 # view-deptTasks.js registers Advertising tasks inside a per-department loop.
 ADS_MERGED_FILES = [
-    'view-deptTasks.js',        # Advertising tasks
+    # view-deptTasks.js was spliced here for Advertising tasks until 18 Oct, when the owner said
+    # that page is not needed in this portal. Dropping the file also takes the Listing, Hunting,
+    # Orders and CS boards back out, which only ever arrived as passengers.
     'view-signals.js',          # Advertising signals
     'view-adsCentre.js',        # Ads command centre
     'view-marketing.js',        # Marketing
@@ -168,7 +170,7 @@ ADS_MERGED_FILES = [
     'view-cpc.js',              # Keyword approvals (and the hidden CPC research page)
 ]
 # The eleven pages the owner named, which the shell's ADS_MERGED allowlist must also carry.
-ADS_MERGED_KEYS = ['tasksAds', 'adSignals', 'adsCentre', 'marketing', 'campaignWatch',
+ADS_MERGED_KEYS = ['adSignals', 'adsCentre', 'marketing', 'campaignWatch',
                    'traffic', 'liveSplit', 'wrongAds', 'advertising', 'potentialCpc',
                    'keywordApprovals']
 
@@ -238,9 +240,7 @@ def build_ads():
                  % (len(missing), ', '.join(missing)))
     # The same tripwire for the merged pages. `tasksAds` is registered as VIEWS[D.key] inside a
     # loop, so the regex above cannot see it; it is asserted by the loop's own marker instead.
-    gone = [k for k in ADS_MERGED_KEYS if k != 'tasksAds' and ('VIEWS.%s =' % k) not in page]
-    if "key: 'tasksAds'" not in page:
-        gone.append('tasksAds')
+    gone = [k for k in ADS_MERGED_KEYS if ('VIEWS.%s =' % k) not in page]
     if gone:
         sys.exit('ERROR: the ads build is missing %d merged advertising page(s): %s'
                  % (len(gone), ', '.join(sorted(gone))))

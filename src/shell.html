@@ -95,6 +95,9 @@ a.adt-pc-t:hover{color:var(--gold-a)}
 .adt-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--gold-b)}
 .adt-fresh.stale{color:#ffb3a6;border-color:rgba(224,86,63,.5)}.adt-fresh.stale::before{background:#e0563f}
 .adt-fresh .p{color:var(--text-3);font-weight:600}
+/* Campaign name as a link into eBay (adtCampaignLink) */
+.adt-camplink{color:inherit;text-decoration:none;border-bottom:1px dotted var(--gold-line-hi)}
+.adt-camplink:hover{color:var(--gold-a);border-bottom-color:var(--gold-a)}
 
 /* ── Shared across departments (14 Oct) ──────────────────────────────────────────────────────
    These five class families were each declared inside ONE view file and then used from three or
@@ -718,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -1592,7 +1595,7 @@ function enterApp(user){
        actions — not copies. Their labels are left exactly as the owner knows them; where an
        advertising-tool page carried a near-identical name the TOOL page is renamed, because two
        "command centres" in one sidebar is the duplication the owner asked us to remove. */
-    var ADS_MERGED = { tasksAds: 1, adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
+    var ADS_MERGED = { adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
       traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
@@ -1613,11 +1616,11 @@ function enterApp(user){
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
        tool page covering its subject, so the two are read together instead of being hunted for. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['tasksAds', 'adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
+      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
       { name: 'Products',      keys: ['adtoolCpc', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },
-      { name: 'Campaigns',     keys: ['campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
+      { name: 'Campaigns',     keys: ['adtoolCampaignBoard', 'adtoolItemCampaigns', 'campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
       { name: 'Traffic and keywords', keys: ['traffic', 'potentialCpc', 'keywordApprovals'] },
       { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
       { name: 'Data health',   keys: ['adtoolHealth'] }
@@ -1806,6 +1809,29 @@ function fmtPkt(iso, withDate){
   return d.toLocaleString('en-GB',opts);
 }
 function safeUrl(u){ u=String(u||'').trim(); if(!/^https?:\/\//i.test(u)) return ''; if(/["'<>\\\s\u0000-\u001f]/.test(u)) return ''; try{ var p=new URL(u); return (p.protocol==='http:'||p.protocol==='https:')?u:''; }catch(e){ return ''; } }
+/* Campaign link (adtCampaignLink) — owner, 18 Oct: "add campaign link in the background of the
+   campaign name". The same idea as a listing title linking to the item: the name you already read
+   becomes the way into eBay's own campaign screen.
+
+   The URL was established by probing, not guessed, because a link that 404s is worse than no link.
+   /sh/ads/campaign/<id> answers with eBay's sign-in challenge and its `ru` parameter points back at
+   that exact campaign, while a made-up path under /sh/ads/ answers with /n/error instead. Verified
+   for both funding models. Do not "tidy" this to /sh/mkt/campaign/<id>: that one is an error page.
+
+   No id means no link: the name renders as plain text rather than as something that goes nowhere. */
+function adtCampaignUrl(campaignId){
+  var id = String(campaignId == null ? '' : campaignId).trim();
+  return /^[0-9]+$/.test(id) ? 'https://www.ebay.co.uk/sh/ads/campaign/' + id : '';
+}
+function adtCampaignLink(campaignId, name, opts){
+  opts = opts || {};
+  var label = String(name == null || name === '' ? (campaignId == null ? '' : campaignId) : name);
+  var url = adtCampaignUrl(campaignId);
+  if (!url) { return esc(label); }
+  var tip = 'Open this campaign on eBay' + (name ? ' \u00b7 ' + String(campaignId) : '');
+  return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" title="' + esc(tip) + '"' +
+    ' class="adt-camplink"' + (opts.style ? ' style="' + esc(opts.style) + '"' : '') + '>' + esc(label) + '</a>';
+}
 /* Advertising product cell (owner, 27 Sep: "wherever products appear: image, name, item ID, account,
    item link"). r = {item_id, account, title, image}; opts: {open:false} drops the Product-history
    hand-off (the title is then plain text), {compact:true} narrows it. The image is lazy and falls
@@ -1895,7 +1921,9 @@ function adtLeverLine(lever, who){
    last_month · custom), the same custom-range cap. The page sends {period, from, to} and prints
    the engine's echo (`period` in every response) — the bar never computes a window of its own
    beyond refusing a custom range the engine would refuse. Last choice remembered per page. */
-var ADT_PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['d7', '7 d'], ['d14', '14 d'], ['d30', '30 d'], ['d90', '90 d'],
+/* owner, 18 Oct: "i need last 3 days data everywhere in portal". adtPeriod already accepts any
+   d<N>, so one entry here puts a 3-day chip on every advertising page that uses this bar. */
+var ADT_PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['d3', '3 d'], ['d7', '7 d'], ['d14', '14 d'], ['d30', '30 d'], ['d90', '90 d'],
   ['this_week', 'This week'], ['last_week', 'Last week'], ['this_month', 'This month'], ['last_month', 'Last month']];
 var ADT_PERIOD_MAX_DAYS = 120;
 function adtUkDay(){ try { return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); } catch (e) { return new Date().toISOString().slice(0, 10); } }

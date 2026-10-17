@@ -168,6 +168,7 @@ VIEW_CSS.push(
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
           '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day — combined, per account, per item</span>' +
           '<span style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn" data-ac-d="3">3d</button>' +
             '<button class="minibtn" data-ac-d="7">7d</button>' +
             '<button class="minibtn on" data-ac-d="14">14d</button>' +
             '<button class="minibtn" data-ac-d="30">30d</button>' +

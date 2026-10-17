@@ -48,7 +48,7 @@
     var payload = { range: TR.range };
     if (TR.account) { payload.account = TR.account; }
     if (TR.mode === 'today') { payload.from = trShift(ukToday(), -6); payload.to = ukToday(); }
-    else if (TR.mode === 'custom' && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
+    else if ((TR.mode === 'custom' || TR.mode === 'd3') && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
     api('trafficBoard', payload).then(function (d) {
       d = d || {};
       // fold per-account day rows into one series when "all accounts"
@@ -64,7 +64,7 @@
       var today = String(d.today || ukToday());
       var win;
       if (TR.mode === 'today') { win = series.filter(function (r) { return r.date === today; }); }
-      else if (TR.mode === 'custom') { win = series; }
+      else if (TR.mode === 'custom' || TR.mode === 'd3') { win = series; }
       else { win = series.slice(-TR.range); }
 
       /* eBay finishes a day overnight, so only TODAY is ever unfinished. */
@@ -76,6 +76,7 @@
       // the tiles describe finished days; today gets its own line so it cannot drag them down
       var showing = (TR.mode === 'today') ? (partial ? [partial] : []) : settled;
       var winLbl = TR.mode === 'today' ? 'so far today'
+        : TR.mode === 'd3' ? 'last 3 days'
         : TR.mode === 'custom' ? (TR.from + ' \u2192 ' + TR.to)
         : (settled.length ? settled.length + ' full day' + (settled.length === 1 ? '' : 's') + ' to ' + settled[settled.length - 1].date.slice(5) : TR.range + 'd');
       var tot = { impressions: 0, views: 0, transactions: 0 };
@@ -160,7 +161,11 @@
       }
       var rows = d.listings || [];
       if (rows.length) {
-        h += '<div class="scroll" style="margin-top:14px"><table class="tr-tbl"><thead><tr>' +
+        h += '<div class="hu-hint" style="margin-top:14px">Per listing, over ' + (d.range || 7) + ' days.' +
+          ((TR.mode === 'd3' || TR.mode === 'today' || TR.mode === 'custom')
+            ? ' eBay only publishes a 7 or 30 day figure per listing, so this table keeps its own window while the figures above follow the one you picked.'
+            : '') + '</div>';
+        h += '<div class="scroll"><table class="tr-tbl"><thead><tr>' +
           '<th>Listing</th><th>Impressions</th><th>Views</th><th>Sold</th><th>CTR</th><th>Conversion</th></tr></thead><tbody>';
         rows.forEach(function (r) {
           var lctr = r.impressions ? (r.views / r.impressions * 100).toFixed(2) : '0.00';
@@ -192,6 +197,7 @@
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
             '<button class="minibtn' + (TR.mode === 'today' ? ' on' : '') + '" id="trToday">Today</button>' +
+            '<button class="minibtn' + (TR.mode === 'd3' ? ' on' : '') + '" id="tr3d">3 days</button>' +
             '<button class="minibtn' + (TR.range === 7 && !TR.mode ? ' on' : '') + '" data-tr-r="7">7 days</button>' +
             '<button class="minibtn' + (TR.range === 30 && !TR.mode ? ' on' : '') + '" data-tr-r="30">30 days</button>' +
             '<input type="date" id="trFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="trTo" class="minibtn" style="padding:5px 6px">' +
@@ -203,8 +209,21 @@
     },
     init: function () {
       function trChips(el) {
-        document.querySelectorAll('[data-tr-r], #trToday').forEach(function (x) { x.classList.remove('on'); });
+        document.querySelectorAll('[data-tr-r], #trToday, #tr3d').forEach(function (x) { x.classList.remove('on'); });
         if (el) { el.classList.add('on'); }
+      }
+      /* owner, 18 Oct: 3 days everywhere. eBay publishes traffic per DAY, so the account figures
+         and the day chart can honestly cover 3 days. It does NOT publish a 3-day per-listing
+         figure, only 7 and 30 day buckets, so the per-listing table below stays on 7 days and
+         says so rather than relabelling 7 days as 3. */
+      var tr3 = document.getElementById('tr3d');
+      if (tr3) {
+        tr3.onclick = function () {
+          trChips(this); this.classList.add('on');
+          TR.mode = 'd3'; TR.range = 7;
+          TR.from = trShift(ukToday(), -2); TR.to = ukToday();
+          trLoad();
+        };
       }
       document.querySelectorAll('[data-tr-r]').forEach(function (b) {
         b.onclick = function () {

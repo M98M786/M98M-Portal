@@ -125,7 +125,7 @@
             : paused ? 'background:rgba(120,132,152,.12);border:1px solid rgba(120,132,152,.35);color:var(--text-3)'
             : 'background:rgba(120,132,152,.08);border:1px solid rgba(120,132,152,.25);color:var(--text-3);opacity:.7';
           return '<span class="cw-pill" style="margin:2px 6px 2px 0;display:inline-block;' + tone + '">' +
-            esc(cwStr(r.name) || cwStr(r.campaign_id)) +
+            adtCampaignLink(r.campaign_id, cwStr(r.name)) +
             ' <b style="font-size:9px;letter-spacing:.05em">' + esc(chip) + '</b>' +
             (live ? ' <a href="#" data-cw-rm="1" data-acc="' + cwAttr(r.account) + '" data-cid="' + cwAttr(r.campaign_id) + '" data-lid="' + cwAttr(r.listing_id) + '" data-nm="' + cwAttr(r.name) + '" style="color:var(--bad);font-weight:900;text-decoration:none">✕</a>' : '') +
             '</span>';
@@ -140,9 +140,23 @@
       h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ No item sits in more than one running campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
     }
 
-    /* Hasib item 9, the other half: ACTIVE listings sitting in NO campaign at all. */
+    /* Hasib item 9, the other half: ACTIVE listings sitting in NO campaign at all.
+       Owner, 18 Oct, "one home per number": in the ADVERTISING portal this list now lives on
+       "Where each listing advertises", which holds every active listing, the campaigns each one is
+       in, and the in-no-campaign group as a chip with the same count from the same membership rule.
+       So that portal keeps the COUNT and points at the page for the rows, and this page stays whole
+       on the company portal, where those pages do not exist and the rows have nowhere else to go. */
     var unc = (d.uncampaigned || []).filter(function (r) { return !acc || r.account === acc; });
-    if (unc.length) {
+    if (window.M98M_ADS_ONLY) {
+      h += '<div class="cw-dupbox"' + (unc.length ? ' style="border-color:var(--warn)"' : ' style="border-color:var(--ok);background:var(--ok-soft)"') + '>' +
+        '<h3' + (unc.length ? ' style="color:var(--warn)"' : ' style="color:var(--ok)"') + '>' +
+        (unc.length ? '🟡 ' + unc.length + ' active listing(s) in NO campaign' + (acc ? ' on ' + esc(acc) : '')
+                    : '✓ Every active listing sits in at least one campaign' + (acc ? ' on ' + esc(acc) : '')) + '</h3>' +
+        '<p style="margin:4px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">' +
+        (unc.length ? 'The listings themselves, with their price, what they have sold and the campaigns every other listing is in, are on the <a href="#adtoolItemCampaigns" style="color:var(--gold-a);font-weight:800">Where each listing advertises</a> page under its <b>In no campaign</b> chip. The Advertising Manager gets one digest bell a day while that list is not empty.'
+                    : 'Where each listing advertises carries the same check listing by listing.') +
+        '</p></div>';
+    } else if (unc.length) {
       h += '<div class="cw-dupbox" style="border-color:var(--warn)"><h3 style="color:var(--warn)">🟡 ' + unc.length + ' active listing(s) in NO campaign — unadvertised reach</h3>' +
         '<div class="scroll" style="max-height:280px"><table class="cw-tbl"><thead><tr><th>Account</th><th>Item</th><th>Price</th><th>Sold 30d</th></tr></thead><tbody>';
       unc.forEach(function (r) {
@@ -158,19 +172,29 @@
       h += '<div class="cw-dupbox" style="border-color:var(--ok);background:var(--ok-soft)"><h3 style="color:var(--ok)">✓ Every active listing sits in at least one campaign' + (acc ? ' on ' + esc(acc) : '') + '</h3></div>';
     }
 
+    /* Owner, 18 Oct, "one home per number": in the ADVERTISING portal the campaign LIST is the
+       Campaigns page, which carries these same rows with real spend, clicks, sales and return over
+       any period, the listings inside each campaign, and an account-to-account roll-up. This page is
+       the campaign FAULTS, so it keeps the count and points at the list. The company portal has no
+       such page, so there it keeps the table. */
+    if (window.M98M_ADS_ONLY) {
+      h += '<div class="cw-dupbox"><h3>' + camps.length + ' campaign(s)' + (acc ? ' on ' + esc(acc) : ' across the fleet') + '</h3>' +
+        '<p style="margin:4px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">Every campaign with its status, daily budget, listings, spend, clicks, sales from ads and return on ad spend over any period, and account by account, is on the <a href="#adtoolCampaignBoard" style="color:var(--gold-a);font-weight:800">Campaigns</a> page.</p></div>';
+    } else {
     h += '<div class="scroll"><table class="cw-tbl"><thead><tr><th>Account</th><th>Campaign</th><th>Status</th><th>Budget/day</th><th>Items</th><th>Synced</th></tr></thead><tbody>';
     if (!camps.length) {
       h += '<tr><td colspan="6" style="color:var(--text-2);font-weight:700">No campaigns synced yet for this filter.</td></tr>';
     }
     camps.forEach(function (c) {
       h += '<tr><td>' + esc(cwStr(c.account)) + '</td>' +
-        '<td style="font-weight:700">' + esc(cwStr(c.name) || cwStr(c.campaign_id)) + '</td>' +
+        '<td style="font-weight:700">' + adtCampaignLink(c.campaign_id, cwStr(c.name)) + '</td>' +
         '<td>' + cwPill(c.status) + '</td>' +
         '<td class="cw-num">' + (Number(c.budget) ? '£' + Number(c.budget).toFixed(2) : '—') + '</td>' +
         '<td class="cw-num">' + (Number(c.items) || 0) + '</td>' +
         '<td class="cw-when">' + esc(cwPKT(c.synced_at)) + '</td></tr>';
     });
     h += '</tbody></table></div>';
+    }
 
     var cpq = (d.cpq || []).filter(function (r) { return !acc || r.account === acc; });
     if (cpq.length) {
