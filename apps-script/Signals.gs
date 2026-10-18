@@ -1624,6 +1624,19 @@ function runLossEscalationSweep() {
     try { huntBackupDailyCopy_(); }
     catch (e) { logActivity_('trigger', 'ERROR:huntBackupCopy', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   }
+  /* 18 Oct one-shot, flag-guarded exactly like the night-watch bootstrap above: the owner's
+     staff change ("hamza hassan is the free email now — shift all tasks to m98meleven") runs
+     once on this 5-minute clock, so it lands whether or not anyone can reach the editor's Run
+     button tonight. The flag is set BEFORE the call — a crash cannot make it loop — and the
+     one-shot itself is idempotent. Delete this block at the next tidy-up; it costs one property
+     read per sweep until then. */
+  try {
+    const props18 = PropertiesService.getScriptProperties();
+    if (props18.getProperty('FREE_HAMZA_18OCT') !== 'done' && typeof freeHamzaEmailToM98meleven === 'function') {
+      props18.setProperty('FREE_HAMZA_18OCT', 'done');
+      logActivity_('system', 'FREE_HAMZA_18OCT', 'm98mone@gmail.com', '', 'run from the 5-minute sweep', freeHamzaEmailToM98meleven());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:freeHamza18Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
