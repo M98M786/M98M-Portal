@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261017-2339';
+var BUILD = '20261018-0218';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9895,7 +9895,7 @@ function createMeeting() {
     badge: function () { return (STATE.counts && STATE.counts.cpc) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>CPC research</h1>' +
-          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to Zain</span>' +
+          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to the Advertising Manager</span>' +
           '<button class="minibtn" id="cpRefresh" style="margin-left:auto">Refresh</button>' +
         '</div>' +
         '<div class="card enter d1"><div class="hd">CPC research tasks ' +
@@ -9980,7 +9980,7 @@ function createMeeting() {
       cpCount('cpc', open);
       if (!rows.length) {
         box.innerHTML = '<div class="cp-empty">No CPC research on you right now.' +
-          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of Zain’s Potential-CPC nominations.</span></div>';
+          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of the Advertising Manager’s Potential-CPC nominations.</span></div>';
         return;
       }
       box.innerHTML = '<div class="scroll"><table class="cp-tbl cp-list">' +
@@ -10511,7 +10511,7 @@ function createMeeting() {
         (cpStr(f.duplicate_title) ? '<div class="tl-row"><span class="k">Duplicate title</span><span>' + esc(cpStr(f.duplicate_title)) + '</span></div>' : '') +
       '</div>' +
       '<div class="cp-box cp-det"><div class="k">Links</div>' +
-        '<div class="tl-row"><span class="k">Keywords (Zain)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
+        '<div class="tl-row"><span class="k">Keywords (Advertising)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
         '<div class="tl-row"><span class="k">Main image</span>' + cpLink(f.main_image_link, 'Main Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Duplicate image</span>' + cpLink(f.duplicate_image_link, 'Duplicate Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Description page</span>' + cpLink(f.final_description_page_link, 'Final description page') + '</div>' +
@@ -18042,7 +18042,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
       lsStepCard('Step 2 · +7 days', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
-      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
+      lsStepCard('Step 3 · same day', 'Campaign testing — Advertising', camp, 'The Advertising Manager\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
   function lsStepCard(step, head, win, note, gold) {
@@ -18311,7 +18311,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var carried = lsStr(j.item_id);
     if (status === LS_SUBMITTED) {
       return '<div class="ls-id"><h3>Item ID ' + esc(carried) + ' is in</h3>' +
-        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
+        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. The Advertising Manager\'s campaign task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
         '<div class="ls-btns"><span class="pill ls-p-awaiting">' + esc(LS_SUBMITTED) + '</span>' +
         '<span class="ls-sub2">Submitted ' + esc(lsWhen(j.submitted_at) || '—') + '</span></div></div>';
     }
@@ -18433,7 +18433,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     }
     return '<div class="ls-steps"><div class="k">When you confirm, four things happen at once</div>' +
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">2</span><span><b>The Advertising Manager gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
 
       '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
@@ -18729,7 +18729,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (lsStr(camp.uk)) {
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));
     }
-    rows += lsMadeRow('Zain · campaign_set', made.campaign_set);
+    rows += lsMadeRow('Advertising · campaign_set', made.campaign_set);
 
     rows += lsMadeRow('You · ' + LS_KIND_72H, made.revision);
     rows += lsReceiptRow('Central sheet', mirror && mirror.ok
@@ -24304,7 +24304,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<ol class="pc-steps">' +
           '<li>A <b>cpc_research</b> task (§8.3) is created for the Item Lister you name, with the deadline you set.</li>' +
           '<li>The lister works it and submits — §8.0b: nothing is Completed until the keywords and working are approved.</li>' +
-          '<li>Only then does <b>Zain switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
+          '<li>Only then does <b>the Advertising Manager switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
           '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook — you will be told which columns that tab does not carry.</li>' +
         '</ol>' +
         (win ? '<div class="pc-sub2" style="margin-top:8px">Campaign testing window (§8.0): 5:00–10:00 PM UK = ' + esc(win) + ' today.</div>' : '') +
@@ -24318,7 +24318,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<input class="pc-in" type="text" autocomplete="off" data-priority="' + pcAttr(id) + '"></div>' +
       '</div>' +
       '<div class="field" style="margin-top:12px"><label>Comment (required to reject)</label>' +
-        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="Zain gets this comment with the decision"></textarea></div>' +
+        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="The Advertising Manager gets this comment with the decision"></textarea></div>' +
       '<div class="pc-btns">' +
         '<button class="btn-gold" data-q="approve" data-id="' + pcAttr(id) + '">Approve</button>' +
         '<button class="minibtn" data-q="reject" data-id="' + pcAttr(id) + '">Reject</button>' +
@@ -24359,7 +24359,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
     btn.disabled = true;
     api('decidePotentialCpc', payload).then(function (res) {
-      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — Zain has your comment.');
+      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — the Advertising Manager has your comment.');
       pcShowResult(box, id, act === 'approve' ? pcApproveResult(res) : pcRejectResult(res));
       if (STATE.counts && STATE.counts.potentialCpc) { pcCount(Math.max(0, STATE.counts.potentialCpc - 1)); }
     }).catch(function (e) { btn.disabled = false; toast('Not decided: ' + e.message); });
@@ -24382,7 +24382,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   function pcRejectResult(res) {
     return '<div class="pc-box pc-bad"><div class="pc-k">Rejected</div>' +
-      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. Zain has been notified with your comment' +
+      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. The Advertising Manager has been notified with your comment' +
       (pcStr(res && res.decided_at) ? ' at ' + esc(fmtPkt(res.decided_at, true)) : '') + '.</div></div>';
   }
 
@@ -24396,7 +24396,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       out += '<li><b>' + esc(pcStr(res && res.task_error) || 'the cpc_research task was not created') +
         '</b> — Management has been notified; create it by hand from My tasks.</li>';
     }
-    out += '<li>Zain is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
+    out += '<li>The Advertising Manager is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
       '</ol></div>' + pcMirrorNote(res && res.mirror);
     return out;
   }
@@ -34782,7 +34782,7 @@ function saveSchedule() {
       if (revReq) {
         return '<div class="kw-row" style="border-color:rgba(255,159,67,.5)">' + head +
           '<div class="kw-form"><button class="minibtn" data-kw-rev="' + r.id + '" data-kw-link="' + esc(kwS(r.doc_link)) + '">Revision done — archive</button>' +
-          '<span style="font-size:11px;color:var(--text-3);font-weight:600">requested by ' + esc(kwS(r.decided_by) || 'Zain') + '</span></div></div>';
+          '<span style="font-size:11px;color:var(--text-3);font-weight:600">requested by ' + esc(kwS(r.decided_by) || 'the Advertising Manager') + '</span></div></div>';
       }
       return '<div class="kw-row">' + head +
         '<div class="kw-form">' +

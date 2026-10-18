@@ -1639,11 +1639,20 @@ function runLossEscalationSweep() {
 
   /* Owner (11 Sept: "loss items to Zain, NOT Husnain"): the ADVERTISING MANAGER by ROLE owns
      the loss desk — a module grant (read access) must never steal the tasking. Module holders
-     remain only the fallback if no role-holder exists. */
+     remain only the fallback if no role-holder exists.
+     18 Oct (owner): two Advertising Managers now — "loss items task to m98mfour" (Tahir Amin;
+     Zain has left). The loss desk is CONFIG adv_loss_email, resolved by listingAdvertisingFor_
+     ('loss_review'); the first role-holder is only the fallback when that address is not an
+     approved Advertising Manager. The sweep used to take whoever came first in USERS. */
   const roleAdv = [];
   readTab_('USERS').forEach(function (u) {
     if (String(u.role) === 'Advertising Manager' && String(u.status) === 'approved') roleAdv.push(String(u.email));
   });
+  const lossDesk = (typeof listingAdvertisingFor_ === 'function') ? listingAdvertisingFor_('loss_review') : '';
+  if (lossDesk) {
+    const i = roleAdv.map(normalizeEmail).indexOf(lossDesk);
+    if (i > 0) roleAdv.unshift(roleAdv.splice(i, 1)[0]);   // the loss desk goes first; advHolders[0] below is that person
+  }
   const advHolders = roleAdv.length ? roleAdv : usersWithModule_('advertising', ['Advertising Manager']);
   const tlHolders = usersWithModule_('team-lead', ['Team Lead']);
   if (!advHolders.length) {

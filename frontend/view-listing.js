@@ -353,7 +353,7 @@
     return '<div class="ls-tl">' +
       lsStepCard('Step 1 · day 0', 'Dummy listing goes live', go, 'You list from Hamza\'s keywords, then enter the eBay Item ID below — that Item ID is the confirmation.', true) +
       lsStepCard('Step 2 · +7 days', 'CPC Main Potential Revision', rev, 'The dummy becomes the real competitor-based listing — final title, keywords, description. Auto-scheduled the moment the Item ID lands.', false) +
-      lsStepCard('Step 3 · same day', 'Campaign testing — Zain', camp, 'Zain\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
+      lsStepCard('Step 3 · same day', 'Campaign testing — Advertising', camp, 'The Advertising Manager\'s campaign_set task opens as soon as the CPC Main Potential Revision is approved.', false) +
     '</div>';
   }
   function lsStepCard(step, head, win, note, gold) {
@@ -622,7 +622,7 @@
     var carried = lsStr(j.item_id);
     if (status === LS_SUBMITTED) {
       return '<div class="ls-id"><h3>Item ID ' + esc(carried) + ' is in</h3>' +
-        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. Zain\'s campaign task, the supplier task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
+        '<div class="ls-sub">This listing is with <b>' + esc(lsApprover(j)) + '</b> for approval. The Advertising Manager\'s campaign task and your CPC Main Potential Revision were created the moment you confirmed.</div>' +
         '<div class="ls-btns"><span class="pill ls-p-awaiting">' + esc(LS_SUBMITTED) + '</span>' +
         '<span class="ls-sub2">Submitted ' + esc(lsWhen(j.submitted_at) || '—') + '</span></div></div>';
     }
@@ -744,7 +744,7 @@
     }
     return '<div class="ls-steps"><div class="k">When you confirm, four things happen at once</div>' +
       '<div class="ls-what"><span class="ls-no">1</span><span><b>This listing goes for approval.</b> The job moves to “' + esc(LS_SUBMITTED) + '” — no task completes itself, your approver decides.</span></div>' +
-      '<div class="ls-what"><span class="ls-no">2</span><span><b>Zain gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
+      '<div class="ls-what"><span class="ls-no">2</span><span><b>The Advertising Manager gets the campaign task.</b> campaign_set for this Item ID, worked in the testing window <b class="num">' + esc(camp.uk) + '</b> (' + esc(camp.pkt) + ') once the CPC Main Potential Revision is approved.</span></div>' +
       // 'Ali Express Link 1' and 'Suuplier 2' are the live Central Main Sheet headers, typo included.
 
       '<div class="ls-what"><span class="ls-no">4</span><span><b>Your CPC Main Potential Revision is scheduled.</b> ' + esc(LS_KIND_72H) + ' comes back to you for the window <b class="num">' + esc(rev.uk) + '</b> (' + esc(rev.pkt) + ') on day 3.</span></div>' +
@@ -1040,7 +1040,7 @@
     if (lsStr(camp.uk)) {
       rows += lsReceiptRow('Campaign testing', '<span class="num">' + esc(lsStr(camp.uk)) + '</span> (' + esc(lsStr(camp.pkt)) + ') on ' + esc(lsStr(camp.uk_date)));
     }
-    rows += lsMadeRow('Zain · campaign_set', made.campaign_set);
+    rows += lsMadeRow('Advertising · campaign_set', made.campaign_set);
 
     rows += lsMadeRow('You · ' + LS_KIND_72H, made.revision);
     rows += lsReceiptRow('Central sheet', mirror && mirror.ok

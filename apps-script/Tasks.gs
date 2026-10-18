@@ -247,6 +247,12 @@ function taskChainNext_(rec, ctx) {
     const ovr = (typeof listingRevisionOverride_ === 'function') ? listingRevisionOverride_() : '';
     if (ovr) chainTo = ovr;
   }
+  /* 18 Oct (owner): the chain's final campaign_set step goes to the campaign desk (CONFIG
+     adv_campaign_email → Malik), not to whichever advertising holder comes first in USERS. */
+  if (String(step.type || '') === 'campaign_set' && typeof listingAdvertisingFor_ === 'function') {
+    const desk = listingAdvertisingFor_('campaign_set');
+    if (desk && holders.indexOf(desk) >= 0) chainTo = desk;
+  }
   const stamp = now_();
   const nextId = 'T' + Utilities.getUuid().slice(0, 8);
   const hours = Number(step.deadline_hours) || 24;

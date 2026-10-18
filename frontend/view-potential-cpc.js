@@ -600,7 +600,7 @@
         '<ol class="pc-steps">' +
           '<li>A <b>cpc_research</b> task (§8.3) is created for the Item Lister you name, with the deadline you set.</li>' +
           '<li>The lister works it and submits — §8.0b: nothing is Completed until the keywords and working are approved.</li>' +
-          '<li>Only then does <b>Zain switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
+          '<li>Only then does <b>the Advertising Manager switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
           '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook — you will be told which columns that tab does not carry.</li>' +
         '</ol>' +
         (win ? '<div class="pc-sub2" style="margin-top:8px">Campaign testing window (§8.0): 5:00–10:00 PM UK = ' + esc(win) + ' today.</div>' : '') +
@@ -614,7 +614,7 @@
           '<input class="pc-in" type="text" autocomplete="off" data-priority="' + pcAttr(id) + '"></div>' +
       '</div>' +
       '<div class="field" style="margin-top:12px"><label>Comment (required to reject)</label>' +
-        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="Zain gets this comment with the decision"></textarea></div>' +
+        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="The Advertising Manager gets this comment with the decision"></textarea></div>' +
       '<div class="pc-btns">' +
         '<button class="btn-gold" data-q="approve" data-id="' + pcAttr(id) + '">Approve</button>' +
         '<button class="minibtn" data-q="reject" data-id="' + pcAttr(id) + '">Reject</button>' +
@@ -655,7 +655,7 @@
 
     btn.disabled = true;
     api('decidePotentialCpc', payload).then(function (res) {
-      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — Zain has your comment.');
+      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — the Advertising Manager has your comment.');
       pcShowResult(box, id, act === 'approve' ? pcApproveResult(res) : pcRejectResult(res));
       if (STATE.counts && STATE.counts.potentialCpc) { pcCount(Math.max(0, STATE.counts.potentialCpc - 1)); }
     }).catch(function (e) { btn.disabled = false; toast('Not decided: ' + e.message); });
@@ -678,7 +678,7 @@
 
   function pcRejectResult(res) {
     return '<div class="pc-box pc-bad"><div class="pc-k">Rejected</div>' +
-      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. Zain has been notified with your comment' +
+      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. The Advertising Manager has been notified with your comment' +
       (pcStr(res && res.decided_at) ? ' at ' + esc(fmtPkt(res.decided_at, true)) : '') + '.</div></div>';
   }
 
@@ -692,7 +692,7 @@
       out += '<li><b>' + esc(pcStr(res && res.task_error) || 'the cpc_research task was not created') +
         '</b> — Management has been notified; create it by hand from My tasks.</li>';
     }
-    out += '<li>Zain is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
+    out += '<li>The Advertising Manager is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
       '</ol></div>' + pcMirrorNote(res && res.mirror);
     return out;
   }

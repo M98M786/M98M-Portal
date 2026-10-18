@@ -51,7 +51,7 @@
       if (revReq) {
         return '<div class="kw-row" style="border-color:rgba(255,159,67,.5)">' + head +
           '<div class="kw-form"><button class="minibtn" data-kw-rev="' + r.id + '" data-kw-link="' + esc(kwS(r.doc_link)) + '">Revision done — archive</button>' +
-          '<span style="font-size:11px;color:var(--text-3);font-weight:600">requested by ' + esc(kwS(r.decided_by) || 'Zain') + '</span></div></div>';
+          '<span style="font-size:11px;color:var(--text-3);font-weight:600">requested by ' + esc(kwS(r.decided_by) || 'the Advertising Manager') + '</span></div></div>';
       }
       return '<div class="kw-row">' + head +
         '<div class="kw-form">' +

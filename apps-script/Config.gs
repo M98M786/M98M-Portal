@@ -113,6 +113,13 @@ const CONFIG_DEFAULTS = {
   adv_primary_email: 'm98msixteen@gmail.com',   // 6 Oct (owner): Malik moved off m98mtweleve
   adv_primary_from: '2026-10-16',
   adv_interim_email: 'm98mfour@gmail.com',
+  /* 18 Oct (owner): "from now on portal will send campaign set task to m98msixteen and loss items
+     task to m98mfour — now we have advertising two persons." Zain has left; m98mfour is Tahir Amin.
+     Two desks by DUTY: campaign_set → Malik, loss_review → Tahir; anything else an Advertising
+     Manager is handed (cpc_keywords, the Potential-CPC chain's final step) follows the primary
+     above. Change a name here or in CONFIG, no code. */
+  adv_campaign_email: 'm98msixteen@gmail.com',
+  adv_loss_email: 'm98mfour@gmail.com',
   /* 1 Oct (owner): approved refunds and replacements become tasks for Wahab. */
   refund_handler_email: 'm98meight@gmail.com',
   replacement_handler_email: 'm98meight@gmail.com',

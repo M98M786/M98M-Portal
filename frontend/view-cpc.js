@@ -199,7 +199,7 @@
     badge: function () { return (STATE.counts && STATE.counts.cpc) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>CPC research</h1>' +
-          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to Zain</span>' +
+          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to the Advertising Manager</span>' +
           '<button class="minibtn" id="cpRefresh" style="margin-left:auto">Refresh</button>' +
         '</div>' +
         '<div class="card enter d1"><div class="hd">CPC research tasks ' +
@@ -284,7 +284,7 @@
       cpCount('cpc', open);
       if (!rows.length) {
         box.innerHTML = '<div class="cp-empty">No CPC research on you right now.' +
-          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of Zain’s Potential-CPC nominations.</span></div>';
+          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of the Advertising Manager’s Potential-CPC nominations.</span></div>';
         return;
       }
       box.innerHTML = '<div class="scroll"><table class="cp-tbl cp-list">' +
@@ -815,7 +815,7 @@
         (cpStr(f.duplicate_title) ? '<div class="tl-row"><span class="k">Duplicate title</span><span>' + esc(cpStr(f.duplicate_title)) + '</span></div>' : '') +
       '</div>' +
       '<div class="cp-box cp-det"><div class="k">Links</div>' +
-        '<div class="tl-row"><span class="k">Keywords (Zain)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
+        '<div class="tl-row"><span class="k">Keywords (Advertising)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
         '<div class="tl-row"><span class="k">Main image</span>' + cpLink(f.main_image_link, 'Main Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Duplicate image</span>' + cpLink(f.duplicate_image_link, 'Duplicate Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Description page</span>' + cpLink(f.final_description_page_link, 'Final description page') + '</div>' +

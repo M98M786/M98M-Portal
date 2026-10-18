@@ -473,6 +473,16 @@ function staffRename(args) {
   return 'renamed ' + target + ': "' + before + '" → "' + name + '" · ' + mirror;
 }
 
+/* 18 Oct (owner): "update name of m98mfour@gmail.com to Tahir Amin — and Zain is not our
+   employee anymore." The mailbox stays in service under its new holder: same email, same role,
+   same tasks and history; only the name changes, through staffRename (which also re-pushes the
+   engine users mirror). Run once from the editor; a second run is a no-op. */
+function renameM98mfourToTahirAmin() {
+  const r = staffRename({ email: 'm98mfour@gmail.com', name: 'Tahir Amin' });
+  Logger.log(r);
+  return r;
+}
+
 // ---------- §4.1b REMOVE (= deactivate) ----------
 /** The button says Remove; nothing is deleted (§16.2). Sign-in is blocked from the next request
  * (RL-5, enforced by the router's fresh USERS read — see the file header). */

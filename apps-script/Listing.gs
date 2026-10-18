@@ -841,9 +841,71 @@ function listingQueueListingDone_(account, title, actor) {
   return { ok: true, queued: true };
 }
 
+/* 18 Oct (owner): two Advertising Managers, split by DUTY — "campaign set task to m98msixteen,
+   loss items task to m98mfour". The desk for a task TYPE: campaign_set → adv_campaign_email,
+   loss_review → adv_loss_email, everything else → the dated primary above. Returns the email only
+   when that person is an approved Advertising Manager right now; '' lets the picker load-balance,
+   so a leaver or a typo in CONFIG never strands a task. */
+function listingAdvertisingFor_(type) {
+  const t = String(type || '');
+  const key = t === 'campaign_set' ? 'adv_campaign_email' : (t === 'loss_review' ? 'adv_loss_email' : '');
+  if (!key) return listingAdvertisingPrimary_();
+  try {
+    const email = normalizeEmail(getConfig(key) || CONFIG_DEFAULTS[key] || '');
+    if (!email) return listingAdvertisingPrimary_();
+    let ok = false;
+    readTab_('USERS').forEach(function (u) {
+      if (normalizeEmail(u.email) === email && String(u.status || '') === 'approved' && String(u.role || '') === 'Advertising Manager') ok = true;
+    });
+    return ok ? email : listingAdvertisingPrimary_();
+  } catch (e) { return listingAdvertisingPrimary_(); }
+}
+
+/* Editor one-shots for the 18 Oct split. STATUS is read-only: the desk each task type resolves
+   to, the raw CONFIG rows behind it, and every approved Advertising Manager. APPLY writes the two
+   duty rows into CONFIG as the owner said them, and repairs adv_primary_email if the sheet still
+   names an address that is no longer an approved Advertising Manager (the 6 Oct rename left a
+   dead m98mtweleve in some copies) — then forgets the config cache so the change is live now. */
+function advRoutingStatus() {
+  const keys = ['adv_campaign_email', 'adv_loss_email', 'adv_primary_email', 'adv_primary_from', 'adv_interim_email'];
+  const cfgRows = {};
+  readTab_('CONFIG').forEach(function (r) { if (keys.indexOf(String(r.key)) >= 0) cfgRows[String(r.key)] = String(r.value); });
+  const advs = [];
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.role || '') === 'Advertising Manager') advs.push(String(u.email) + ' = ' + String(u.name || '') + ' [' + String(u.status || '') + ']');
+  });
+  const out = {
+    campaign_set: listingAdvertisingFor_('campaign_set'),
+    loss_review: listingAdvertisingFor_('loss_review'),
+    other_adv_tasks: listingAdvertisingFor_('cpc_keywords'),
+    config_sheet_rows: cfgRows,
+    code_defaults: { adv_campaign_email: CONFIG_DEFAULTS.adv_campaign_email, adv_loss_email: CONFIG_DEFAULTS.adv_loss_email, adv_primary_email: CONFIG_DEFAULTS.adv_primary_email, adv_primary_from: CONFIG_DEFAULTS.adv_primary_from },
+    advertising_managers: advs,
+  };
+  Logger.log(JSON.stringify(out));
+  return JSON.stringify(out);
+}
+function advRoutingApply() {
+  const cache = CacheService.getScriptCache();
+  const put = function (k, v) { r8SetConfig_(k, v); try { cache.remove('cfg_' + k); } catch (e) {} delete EXEC_CFG[k]; };
+  put('adv_campaign_email', 'm98msixteen@gmail.com');
+  put('adv_loss_email', 'm98mfour@gmail.com');
+  const approved = {};
+  readTab_('USERS').forEach(function (u) {
+    if (String(u.role || '') === 'Advertising Manager' && String(u.status || '') === 'approved') approved[normalizeEmail(u.email)] = 1;
+  });
+  const prim = normalizeEmail(getConfig('adv_primary_email') || '');
+  let note = 'adv_primary_email kept (' + (prim || 'blank → code default') + ')';
+  if (prim && !approved[prim]) { put('adv_primary_email', 'm98msixteen@gmail.com'); note = 'adv_primary_email repaired: ' + prim + ' → m98msixteen@gmail.com'; }
+  try { logActivity_('system', 'ADV_ROUTING_APPLY', '', '', 'campaign→m98msixteen · loss→m98mfour', note); } catch (e) {}
+  const r = 'applied · ' + note + ' · now: ' + advRoutingStatus();
+  Logger.log(r);
+  return r;
+}
+
 function listingPickForRole_(role, preferredEmail, tasks, type) {
   let wanted = normalizeEmail(preferredEmail || '');
-  if (role === 'Advertising Manager' && !wanted) wanted = listingAdvertisingPrimary_();
+  if (role === 'Advertising Manager' && !wanted) wanted = listingAdvertisingFor_(type);
   const users = [];
   readTab_('USERS').forEach(function (u) {
     if (String(u.role || '') !== role || String(u.status || '') !== 'approved') return;

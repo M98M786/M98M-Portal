@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261017-2339';
+var BUILD = '20261018-0218';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -8807,7 +8807,7 @@ VIEW_CSS.push(
         '<ol class="pc-steps">' +
           '<li>A <b>cpc_research</b> task (§8.3) is created for the Item Lister you name, with the deadline you set.</li>' +
           '<li>The lister works it and submits — §8.0b: nothing is Completed until the keywords and working are approved.</li>' +
-          '<li>Only then does <b>Zain switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
+          '<li>Only then does <b>the Advertising Manager switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
           '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook — you will be told which columns that tab does not carry.</li>' +
         '</ol>' +
         (win ? '<div class="pc-sub2" style="margin-top:8px">Campaign testing window (§8.0): 5:00–10:00 PM UK = ' + esc(win) + ' today.</div>' : '') +
@@ -8821,7 +8821,7 @@ VIEW_CSS.push(
           '<input class="pc-in" type="text" autocomplete="off" data-priority="' + pcAttr(id) + '"></div>' +
       '</div>' +
       '<div class="field" style="margin-top:12px"><label>Comment (required to reject)</label>' +
-        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="Zain gets this comment with the decision"></textarea></div>' +
+        '<textarea class="pc-ta" data-cmt="' + pcAttr(id) + '" placeholder="The Advertising Manager gets this comment with the decision"></textarea></div>' +
       '<div class="pc-btns">' +
         '<button class="btn-gold" data-q="approve" data-id="' + pcAttr(id) + '">Approve</button>' +
         '<button class="minibtn" data-q="reject" data-id="' + pcAttr(id) + '">Reject</button>' +
@@ -8862,7 +8862,7 @@ VIEW_CSS.push(
 
     btn.disabled = true;
     api('decidePotentialCpc', payload).then(function (res) {
-      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — Zain has your comment.');
+      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — the Advertising Manager has your comment.');
       pcShowResult(box, id, act === 'approve' ? pcApproveResult(res) : pcRejectResult(res));
       if (STATE.counts && STATE.counts.potentialCpc) { pcCount(Math.max(0, STATE.counts.potentialCpc - 1)); }
     }).catch(function (e) { btn.disabled = false; toast('Not decided: ' + e.message); });
@@ -8885,7 +8885,7 @@ VIEW_CSS.push(
 
   function pcRejectResult(res) {
     return '<div class="pc-box pc-bad"><div class="pc-k">Rejected</div>' +
-      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. Zain has been notified with your comment' +
+      '<div class="pc-txt">Nothing was written to the Potential CPC workbook. The Advertising Manager has been notified with your comment' +
       (pcStr(res && res.decided_at) ? ' at ' + esc(fmtPkt(res.decided_at, true)) : '') + '.</div></div>';
   }
 
@@ -8899,7 +8899,7 @@ VIEW_CSS.push(
       out += '<li><b>' + esc(pcStr(res && res.task_error) || 'the cpc_research task was not created') +
         '</b> — Management has been notified; create it by hand from My tasks.</li>';
     }
-    out += '<li>Zain is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
+    out += '<li>The Advertising Manager is notified, and switches the campaign to ' + esc(PC_CAMPAIGN_CPC) + ' once that research is approved.</li>' +
       '</ol></div>' + pcMirrorNote(res && res.mirror);
     return out;
   }
@@ -9160,7 +9160,7 @@ VIEW_CSS.push(
     badge: function () { return (STATE.counts && STATE.counts.cpc) || 0; },
     render: function () {
       return '<div class="hgroup enter d1"><h1>CPC research</h1>' +
-          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to Zain</span>' +
+          '<span class="sub">Hamza’s research columns · nothing completes itself — the keywords go to the Advertising Manager</span>' +
           '<button class="minibtn" id="cpRefresh" style="margin-left:auto">Refresh</button>' +
         '</div>' +
         '<div class="card enter d1"><div class="hd">CPC research tasks ' +
@@ -9245,7 +9245,7 @@ VIEW_CSS.push(
       cpCount('cpc', open);
       if (!rows.length) {
         box.innerHTML = '<div class="cp-empty">No CPC research on you right now.' +
-          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of Zain’s Potential-CPC nominations.</span></div>';
+          '<span>A cpc_research task lands here when a hunt is routed to CPC, or when Management approves one of the Advertising Manager’s Potential-CPC nominations.</span></div>';
         return;
       }
       box.innerHTML = '<div class="scroll"><table class="cp-tbl cp-list">' +
@@ -9776,7 +9776,7 @@ VIEW_CSS.push(
         (cpStr(f.duplicate_title) ? '<div class="tl-row"><span class="k">Duplicate title</span><span>' + esc(cpStr(f.duplicate_title)) + '</span></div>' : '') +
       '</div>' +
       '<div class="cp-box cp-det"><div class="k">Links</div>' +
-        '<div class="tl-row"><span class="k">Keywords (Zain)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
+        '<div class="tl-row"><span class="k">Keywords (Advertising)</span>' + cpLink(f.keywords_link_by_zain, 'Keywords document') + '</div>' +
         '<div class="tl-row"><span class="k">Main image</span>' + cpLink(f.main_image_link, 'Main Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Duplicate image</span>' + cpLink(f.duplicate_image_link, 'Duplicate Image Link') + '</div>' +
         '<div class="tl-row"><span class="k">Description page</span>' + cpLink(f.final_description_page_link, 'Final description page') + '</div>' +
