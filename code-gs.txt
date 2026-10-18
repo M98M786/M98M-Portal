@@ -22082,6 +22082,52 @@ function renameM98mfourToTahirAmin() {
   return r;
 }
 
+/* 18 Oct (owner): "hamza hassan is the free email now — m98mone@gmail.com — shift all tasks to
+   m98meleven@gmail.com." Two steps, same code the Staff desk runs: every open task moves to
+   m98meleven through actionReassignTasks_ (one write, one handover bell), then the mailbox is
+   freed the way m98mseven was — disabled, no role, named as spare — so it can be handed to the
+   next hire. The actor is a system identity with the Management role: no one is impersonated in
+   the audit log. Both mirrors are re-pushed so the boards agree at once. Idempotent. */
+function freeHamzaEmailToM98meleven() {
+  const FROM = 'm98mone@gmail.com', TO = 'm98meleven@gmail.com';
+  const ctx = { ident: { email: 'system:owner-18oct', name: 'owner instruction, 18 Oct (editor one-shot)' },
+    user: { role: 'Management', status: SADM_STATUS_APPROVED, email: 'system:owner-18oct' } };
+  const out = [];
+  try {
+    const r = actionReassignTasks_({ from_email: FROM, to_email: TO }, ctx);
+    out.push('moved ' + r.count + ' open task(s) to ' + TO + ': ' + r.moved.map(function (m) { return m.task_id + ' (' + m.status + ')'; }).join(', '));
+  } catch (e) { out.push('reassign: ' + String((e && e.message) || e)); }   // "no open tasks to move" is a legitimate answer
+
+  const sh = sadmUsersSheet_();
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(function (h) { return String(h); });
+  const c = {};
+  ['email', 'name', 'role', 'status', 'deactivated_at', 'notes'].forEach(function (k) { c[k] = head.indexOf(k); });
+  let freed = 'ABORT: ' + FROM + ' not found in USERS';
+  for (let i = 1; i < vals.length; i++) {
+    if (normalizeEmail(vals[i][c.email]) !== normalizeEmail(FROM)) continue;
+    if (isSuperAdmin(vals[i][c.email])) { freed = 'REFUSED: target is a super admin'; break; }
+    const beforeRole = String(vals[i][c.role] || ''), beforeStatus = String(vals[i][c.status] || ''), beforeName = String(vals[i][c.name] || '');
+    if (beforeStatus === SADM_STATUS_DISABLED && beforeName.indexOf('Free Email') >= 0) { freed = 'already freed'; break; }
+    const row = i + 1;
+    sh.getRange(row, c.status + 1).setValue(SADM_STATUS_DISABLED);
+    if (c.deactivated_at >= 0) sh.getRange(row, c.deactivated_at + 1).setValue(now_());
+    if (c.name >= 0) sh.getRange(row, c.name + 1).setValue('Hamza Hassan Free Email');
+    if (c.role >= 0) sh.getRange(row, c.role + 1).setValue('');
+    if (c.notes >= 0) sh.getRange(row, c.notes + 1).setValue('Freed 18 Oct by owner request (was ' + beforeName + ', ' + beforeRole + '); open tasks moved to ' + TO + '.');
+    logActivity_('system', 'STAFF_FREED', FROM, beforeRole + '|' + beforeStatus, 'disabled|free email', 'owner request 18 Oct · tasks → ' + TO);
+    freed = 'freed ' + FROM + ' (was ' + beforeName + ', ' + beforeRole + '/' + beforeStatus + ')';
+    break;
+  }
+  out.push(freed);
+  sadmForgetUsers_();
+  try { out.push('tasks mirror: ' + String(pushEngineTasks())); } catch (e) { out.push('tasks mirror failed: ' + String((e && e.message) || e)); }
+  try { out.push('users mirror: ' + String(pushEngineSync())); } catch (e) { out.push('users mirror failed: ' + String((e && e.message) || e)); }
+  const r = out.join(' · ');
+  Logger.log(r);
+  return r;
+}
+
 // ---------- §4.1b REMOVE (= deactivate) ----------
 /** The button says Remove; nothing is deleted (§16.2). Sign-in is blocked from the next request
  * (RL-5, enforced by the router's fresh USERS read — see the file header). */
