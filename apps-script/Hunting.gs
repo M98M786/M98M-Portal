@@ -1318,3 +1318,57 @@ function huntsClearFalseRevised() {
   logActivity_('system', 'HUNT_FALSE_REVISED_CLEARED', String(fixed.length), '', '', fixed.join(',').slice(0, 250));
   return 'cleared ' + fixed.length + ' false-revised marker(s): ' + fixed.join(', ').slice(0, 250);
 }
+
+
+/* 20 Oct (owner: "jahanzaib doesn't have option for product revision"). Read-only audit of one
+   hunter's revision road, run from the editor when nobody can sign in as that person: the USERS
+   row (role, status, modules — a '-huntRevisions' there hides the page), every USERS row whose
+   NAME matches (the person may be on another mailbox by now), every hunt of theirs by status with
+   the pending and sent-back ones listed, every open task on their desk with the hunt reference it
+   carries, and their last notifications. Logger only; writes nothing. */
+function hunterRevisionAudit(args) {
+  const email = normalizeEmail((args && args.email) || 'm98mseven@gmail.com');
+  const nameRe = new RegExp(String((args && args.name) || 'jahanzaib'), 'i');
+  const out = { email: email, user: null, name_matches: [], hunts: { total: 0, pending: [], revision: [], approved: 0, not_approved: 0, other: [] }, open_tasks: [], notifications: [] };
+  readTab_('USERS').forEach(function (u) {
+    const row = { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''), status: String(u.status || ''),
+      shift: String(u.shift || ''), modules: String(u.modules || ''), tools: String(u.tools || ''), accounts: String(u.accounts_access || '') };
+    if (normalizeEmail(u.email) === email) out.user = row;
+    if (nameRe.test(row.name)) out.name_matches.push(row);
+  });
+  readTab_('HUNTING_DB').forEach(function (h) {
+    if (normalizeEmail(h.hunter_email) !== email) return;
+    out.hunts.total++;
+    const st = String(h['Approval Status'] || '').trim();
+    const rec = { hunt_id: String(h.hunt_id || ''), ts: String(h.ts || ''), title: String(h['Title'] || '').slice(0, 50),
+      listing: String(h['Listing Status'] || ''), account: String(h['Account Selected'] || ''), comments: String(h['Comments'] || '').slice(0, 140) };
+    if (st === '') out.hunts.pending.push(rec);
+    else if (st === 'REVISION REQUIRED') out.hunts.revision.push(rec);
+    else if (st === 'APPROVED') out.hunts.approved++;
+    else if (st === 'NOT APPROVED') out.hunts.not_approved++;
+    else { rec.status = st; out.hunts.other.push(rec); }
+  });
+  readTab_('TASKS').forEach(function (t) {
+    if (normalizeEmail(t.assigned_to) !== email) return;
+    if (String(t.status || '') === TASK_STATUS_COMPLETED) return;
+    const det = String(t.details || '');
+    out.open_tasks.push({ task_id: String(t.task_id || ''), type: String(t.type || ''), status: String(t.status || ''),
+      title: String(t.title || '').slice(0, 70), created_at: String(t.created_at || ''), by: String(t.assigned_by || ''),
+      ref: (det.match(/hunt:[A-Za-z0-9_-]+|item:\d+/) || [''])[0], details_head: det.slice(0, 160) });
+  });
+  try {
+    const mine = [];
+    readTab_('NOTIFICATIONS').forEach(function (n) {
+      if (normalizeEmail(n.to) !== email) return;
+      mine.push({ at: String(n.created_at || ''), type: String(n.type || ''), msg: String(n.message || '').slice(0, 110), read: String(n.read_at || '') ? 'read' : 'UNREAD' });
+    });
+    mine.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+    out.notifications = mine.slice(0, 6);
+    out.notifications_total = mine.length;
+  } catch (e) { out.notifications = ['failed: ' + String((e && e.message) || e)]; }
+  out.hunts.pending = out.hunts.pending.slice(-8);
+  out.hunts.revision = out.hunts.revision.slice(-12);
+  const s = JSON.stringify(out);
+  Logger.log(s);
+  return s;
+}
