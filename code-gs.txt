@@ -7541,7 +7541,53 @@ function actionReviseHunt_(payload, ctx) {
   Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
   rec.approval_status = HUNT_PENDING;   // canonical key the mirror binds — derived at read, so the merge above does not refresh it
   huntMirrorPush_(rec);
+  /* 20 Oct (owner: "jahanzaib doesn't have option for product revision"). The revise flipped the
+     hunt REVISION REQUIRED → pending, but the hunt_revision TASK that asked for the fix was never
+     closed — so a hunter who had revised still carried an open "please revise" task, and once his
+     hunt went back to pending (or on to approved) the Revisions page showed that card with no
+     button. Twelve such zombies had piled up on one hunter. Close them now, by the same hunt
+     reference both revision roads stamp. Outside the hunt lock, best-effort — a revise must never
+     fail because the task close hiccuped. */
+  try { huntCloseRevisionTasks_(rec.hunt_id, String(rec.item_id || ''), rec.hunter_email, 'revised by ' + ctx.ident.email); } catch (e) {}
   return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
+}
+
+/* Complete every OPEN hunt_revision task that asked for a fix to this hunt — matched on the
+   `hunt:<id>` reference both roads stamp into details (item:<id> as the fallback for a task raised
+   before the hunt had an id). Its own short lock, run AFTER the hunt lock releases; re-pushes the
+   task mirror only when something changed. Shared by actionReviseHunt_ and the cleanup one-shot. */
+function huntCloseRevisionTasks_(huntId, itemId, hunterEmail, byLabel) {
+  const refs = [];
+  if (huntId) refs.push('hunt:' + String(huntId));
+  if (itemId) refs.push('item:' + String(itemId));
+  if (!refs.length) return 0;
+  const sh = tasksSheet_();
+  const he = normalizeEmail(hunterEmail || '');
+  let closed = 0;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const vals = sh.getDataRange().getValues();
+    const head = vals[0].map(String);
+    const cType = head.indexOf('type'), cTo = head.indexOf('assigned_to'), cStatus = head.indexOf('status'),
+      cDetails = head.indexOf('details'), cDecided = head.indexOf('decided_at'), cUpdated = head.indexOf('updated_at'), cId = head.indexOf('task_id');
+    if (cType < 0 || cStatus < 0 || cDetails < 0) return 0;
+    const stamp = now_();
+    for (let i = 1; i < vals.length; i++) {
+      if (String(vals[i][cType]) !== 'hunt_revision') continue;
+      if (String(vals[i][cStatus]) === TASK_STATUS_COMPLETED) continue;
+      if (he && cTo >= 0 && normalizeEmail(vals[i][cTo]) !== he) continue;
+      const det = String(vals[i][cDetails] || '');
+      if (!refs.some(function (r) { return det.indexOf(r) >= 0; })) continue;
+      sh.getRange(i + 1, cStatus + 1).setValue(TASK_STATUS_COMPLETED);
+      if (cDecided >= 0) sh.getRange(i + 1, cDecided + 1).setValue(stamp);
+      if (cUpdated >= 0) sh.getRange(i + 1, cUpdated + 1).setValue(stamp);
+      closed++;
+      try { logActivity_('system', 'HUNT_REVISION_TASK_CLOSED', String(vals[i][cId] || ''), 'open', 'completed', String(byLabel || 'revised') + ' · ' + refs[0]); } catch (e) {}
+    }
+  } finally { lock.releaseLock(); }
+  if (closed) { try { if (typeof pushEngineTasks === 'function') pushEngineTasks(); } catch (e) {} }
+  return closed;
 }
 
 /* ---------- the records archive (26 Aug, owner) ----------
@@ -7636,57 +7682,132 @@ function huntsClearFalseRevised() {
 }
 
 
-/* 20 Oct (owner: "jahanzaib doesn't have option for product revision"). Read-only audit of one
-   hunter's revision road, run from the editor when nobody can sign in as that person: the USERS
-   row (role, status, modules — a '-huntRevisions' there hides the page), every USERS row whose
-   NAME matches (the person may be on another mailbox by now), every hunt of theirs by status with
-   the pending and sent-back ones listed, every open task on their desk with the hunt reference it
-   carries, and their last notifications. Logger only; writes nothing. */
-function hunterRevisionAudit(args) {
-  const email = normalizeEmail((args && args.email) || 'm98mseven@gmail.com');
-  const nameRe = new RegExp(String((args && args.name) || 'jahanzaib'), 'i');
-  const out = { email: email, user: null, name_matches: [], hunts: { total: 0, pending: [], revision: [], approved: 0, not_approved: 0, other: [] }, open_tasks: [], notifications: [] };
-  readTab_('USERS').forEach(function (u) {
-    const row = { email: String(u.email || ''), name: String(u.name || ''), role: String(u.role || ''), status: String(u.status || ''),
-      shift: String(u.shift || ''), modules: String(u.modules || ''), tools: String(u.tools || ''), accounts: String(u.accounts_access || '') };
-    if (normalizeEmail(u.email) === email) out.user = row;
-    if (nameRe.test(row.name)) out.name_matches.push(row);
-  });
+/* 20 Oct (owner: "jahanzaib doesn't have option for product revision"). Read-only audit of the
+   revision road for the named hunters, run from the editor when nobody can sign in as them. For
+   each: the USERS row (role/status/modules — a '-huntRevisions' there would hide the page, though
+   the Product Hunter role grants it anyway), whether the role sees the Revisions page, hunt counts
+   by status, and — the point — for every OPEN hunt_revision task, the CURRENT status of the hunt it
+   references and whether that hunt is still revisable (so a card without a button is visible here).
+   Logger only; writes nothing. */
+var HRA_ROLES_SEE_REVISIONS = ['Product Hunter', 'Management', 'Ops Head', 'Team Lead'];
+function hunterRevisionAudit() {
+  const who = [
+    { email: 'm98mseven@gmail.com', label: 'Jahanzaib' },
+    { email: 'm98mfive@gmail.com', label: 'Irfan (reference)' },
+  ];
+  const huntStatus = {}, huntRevised = {};
   readTab_('HUNTING_DB').forEach(function (h) {
-    if (normalizeEmail(h.hunter_email) !== email) return;
-    out.hunts.total++;
-    const st = String(h['Approval Status'] || '').trim();
-    const rec = { hunt_id: String(h.hunt_id || ''), ts: String(h.ts || ''), title: String(h['Title'] || '').slice(0, 50),
-      listing: String(h['Listing Status'] || ''), account: String(h['Account Selected'] || ''), comments: String(h['Comments'] || '').slice(0, 140) };
-    if (st === '') out.hunts.pending.push(rec);
-    else if (st === 'REVISION REQUIRED') out.hunts.revision.push(rec);
-    else if (st === 'APPROVED') out.hunts.approved++;
-    else if (st === 'NOT APPROVED') out.hunts.not_approved++;
-    else { rec.status = st; out.hunts.other.push(rec); }
+    const id = String(h.hunt_id || '');
+    if (!id) return;
+    huntStatus[id] = String(h['Approval Status'] || '').trim();
+    huntRevised[id] = String(h['Comments'] || '').indexOf('(revised') >= 0;
   });
-  readTab_('TASKS').forEach(function (t) {
-    if (normalizeEmail(t.assigned_to) !== email) return;
-    if (String(t.status || '') === TASK_STATUS_COMPLETED) return;
-    const det = String(t.details || '');
-    out.open_tasks.push({ task_id: String(t.task_id || ''), type: String(t.type || ''), status: String(t.status || ''),
-      title: String(t.title || '').slice(0, 70), created_at: String(t.created_at || ''), by: String(t.assigned_by || ''),
-      ref: (det.match(/hunt:[A-Za-z0-9_-]+|item:\d+/) || [''])[0], details_head: det.slice(0, 160) });
-  });
-  try {
-    const mine = [];
-    readTab_('NOTIFICATIONS').forEach(function (n) {
-      if (normalizeEmail(n.to) !== email) return;
-      mine.push({ at: String(n.created_at || ''), type: String(n.type || ''), msg: String(n.message || '').slice(0, 110), read: String(n.read_at || '') ? 'read' : 'UNREAD' });
+  const usersByEmail = {};
+  readTab_('USERS').forEach(function (u) { usersByEmail[normalizeEmail(u.email)] = u; });
+  const out = [];
+  who.forEach(function (w) {
+    const email = normalizeEmail(w.email);
+    const u = usersByEmail[email] || {};
+    const mods = String(u.modules || '');
+    const role = String(u.role || '');
+    const rec = { who: w.label, email: email, role: role, status: String(u.status || ''), modules: mods,
+      role_sees_revisions_page: HRA_ROLES_SEE_REVISIONS.indexOf(role) >= 0 && mods.indexOf('-huntRevisions') < 0,
+      hunts: { total: 0, pending: 0, revision: 0, approved: 0, not_approved: 0 }, open_revision_tasks: [] };
+    readTab_('HUNTING_DB').forEach(function (h) {
+      if (normalizeEmail(h.hunter_email) !== email) return;
+      rec.hunts.total++;
+      const st = String(h['Approval Status'] || '').trim();
+      if (st === '') rec.hunts.pending++;
+      else if (st === 'REVISION REQUIRED') rec.hunts.revision++;
+      else if (st === 'APPROVED') rec.hunts.approved++;
+      else if (st === 'NOT APPROVED') rec.hunts.not_approved++;
     });
-    mine.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
-    out.notifications = mine.slice(0, 6);
-    out.notifications_total = mine.length;
-  } catch (e) { out.notifications = ['failed: ' + String((e && e.message) || e)]; }
-  out.hunts.pending = out.hunts.pending.slice(-8);
-  out.hunts.revision = out.hunts.revision.slice(-12);
+    readTab_('TASKS').forEach(function (t) {
+      if (normalizeEmail(t.assigned_to) !== email) return;
+      if (String(t.type || '') !== 'hunt_revision') return;
+      if (String(t.status || '') === TASK_STATUS_COMPLETED) return;
+      const det = String(t.details || '');
+      const ref = (det.match(/hunt:[A-Za-z0-9_-]+/) || [''])[0];
+      const hid = ref ? ref.slice(5) : '';
+      const hs = hid ? (huntStatus[hid] === undefined ? '(hunt not found)' : (huntStatus[hid] === '' ? 'pending' : huntStatus[hid])) : '(no hunt ref)';
+      const revisable = hid ? (huntStatus[hid] === '' || huntStatus[hid] === 'REVISION REQUIRED') : false;
+      rec.open_revision_tasks.push({ task_id: String(t.task_id || ''), status: String(t.status || ''), by: String(t.assigned_by || ''),
+        created: String(t.created_at || '').slice(0, 10), ref: ref || '(none)', hunt_status: hs,
+        hunt_already_revised: hid ? !!huntRevised[hid] : false,
+        revise_button_shows: revisable, verdict: (!hid ? 'NO REF — pre-5-Oct zombie' : (revisable ? 'actionable' : 'ZOMBIE — hunt already ' + hs + ', no revise button')) });
+    });
+    rec.open_revision_tasks_total = rec.open_revision_tasks.length;
+    rec.zombies = rec.open_revision_tasks.filter(function (x) { return /ZOMBIE|NO REF/.test(x.verdict); }).length;
+    out.push(rec);
+  });
   const s = JSON.stringify(out);
   Logger.log(s);
   return s;
+}
+
+/* Clean up the zombies the no-close bug left behind: for each hunter, complete every OPEN
+   hunt_revision task whose referenced hunt is DECIDED (approved / not approved) or already
+   revised-and-back-in-queue — the fix is moot and the card only confuses. A task whose hunt is
+   genuinely REVISION REQUIRED, or pending-and-not-yet-revised, is LEFT ALONE (it is real work,
+   actionable on the Revisions page / My hunts). A ref-less pre-fix task older than `stale_days`
+   (default 10) is closed too — it can never be tied to a hunt and has been dead for weeks. Dry
+   run first. */
+function cleanupHuntRevisionZombiesDryRun() { return cleanupHuntRevisionZombies_(true); }
+function cleanupHuntRevisionZombies() { return cleanupHuntRevisionZombies_(false); }
+function cleanupHuntRevisionZombies_(dryRun) {
+  const STALE_DAYS = 10;
+  const huntStatus = {}, huntRevised = {};
+  readTab_('HUNTING_DB').forEach(function (h) {
+    const id = String(h.hunt_id || ''); if (!id) return;
+    huntStatus[id] = String(h['Approval Status'] || '').trim();
+    huntRevised[id] = String(h['Comments'] || '').indexOf('(revised') >= 0;
+  });
+  const sh = tasksSheet_();
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(String);
+  const cType = head.indexOf('type'), cTo = head.indexOf('assigned_to'), cStatus = head.indexOf('status'),
+    cDetails = head.indexOf('details'), cCreated = head.indexOf('created_at'), cDecided = head.indexOf('decided_at'),
+    cUpdated = head.indexOf('updated_at'), cId = head.indexOf('task_id');
+  if (cType < 0 || cStatus < 0 || cDetails < 0) return 'ABORT: TASKS headers not as expected';
+  const nowMs = Date.now();
+  const hits = [], keep = [];
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][cType]) !== 'hunt_revision') continue;
+    if (String(vals[i][cStatus]) === TASK_STATUS_COMPLETED) continue;
+    const det = String(vals[i][cDetails] || '');
+    const ref = (det.match(/hunt:[A-Za-z0-9_-]+/) || [''])[0];
+    const hid = ref ? ref.slice(5) : '';
+    const to = String(vals[i][cTo] || '').split('@')[0];
+    const created = cCreated >= 0 ? String(vals[i][cCreated] || '') : '';
+    const ageDays = created ? Math.round((nowMs - (Date.parse(created) || nowMs)) / 86400000) : 0;
+    let close = false, why = '';
+    if (!hid) { if (ageDays >= STALE_DAYS) { close = true; why = 'no ref, ' + ageDays + 'd old'; } }
+    else if (huntStatus[hid] === undefined) { close = true; why = 'hunt deleted'; }
+    else if (huntStatus[hid] === 'APPROVED' || huntStatus[hid] === 'NOT APPROVED') { close = true; why = 'hunt ' + huntStatus[hid].toLowerCase(); }
+    else if (huntStatus[hid] === '' && huntRevised[hid]) { close = true; why = 'already revised, back in queue'; }
+    const row = { row: i + 1, task_id: String(vals[i][cId] || ''), to: to, ref: ref || '(none)',
+      hunt_status: hid ? (huntStatus[hid] === undefined ? 'gone' : (huntStatus[hid] === '' ? 'pending' : huntStatus[hid])) : '-', age_days: ageDays, why: why };
+    if (close) hits.push(row); else keep.push(row);
+  }
+  const byWho = {};
+  hits.forEach(function (h) { byWho[h.to] = (byWho[h.to] || 0) + 1; });
+  const summary = hits.length + ' zombie task(s) to close [' +
+    Object.keys(byWho).map(function (k) { return k + ' ' + byWho[k]; }).join(', ') + '] · ' +
+    keep.length + ' left as genuine';
+  if (dryRun) return 'DRY RUN · ' + summary + ' · close: ' + JSON.stringify(hits.slice(0, 40)) + ' · keep: ' + JSON.stringify(keep.slice(0, 20));
+  const stamp = now_();
+  hits.forEach(function (h) {
+    sh.getRange(h.row, cStatus + 1).setValue(TASK_STATUS_COMPLETED);
+    if (cDecided >= 0) sh.getRange(h.row, cDecided + 1).setValue(stamp);
+    if (cUpdated >= 0) sh.getRange(h.row, cUpdated + 1).setValue(stamp);
+    try { logActivity_('system', 'HUNT_REVISION_ZOMBIE_CLOSED', h.task_id, 'open', 'completed', h.to + ' · ' + h.ref + ' · ' + h.why); } catch (e) {}
+  });
+  SpreadsheetApp.flush();
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  const r = 'closed ' + summary + ' · ' + mirror;
+  Logger.log(r);
+  return r;
 }
 
 
