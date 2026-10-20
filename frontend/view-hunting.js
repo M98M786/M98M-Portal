@@ -867,7 +867,9 @@
     toast(revId ? 'Revision sent — saving…' : 'Hunt submitted — saving…');
     api(revId ? 'reviseHunt' : 'submitHunt', payload).then(function (res) {
       if (typeof draftClear === 'function') { draftClear('hunting'); }
-      toast(revId ? 'Revised · ' + huStr(res.hunt_id) + ' is back in the review queue'
+      toast(revId ? (res && res.in_place
+          ? 'Updated · ' + huStr(res.hunt_id) + ' — sent to the listing desk (stays approved)'
+          : 'Revised · ' + huStr(res.hunt_id) + ' is back in the review queue')
         : 'Hunt saved · ' + huStr(res.hunt_id) +
           ((res.criteria_flags && res.criteria_flags.length) ? ' · ' + res.criteria_flags.length + ' criteria flag(s)' : ''));
       huLoadMine();
@@ -944,11 +946,16 @@
     if (band) {
       band.className = HU_REVISING ? 'hu-revband' : '';
       band.style.display = HU_REVISING ? '' : 'none';
+      var revRec = HU_REVISING ? HU_MINE[HU_REVISING] : null;
+      var revInPlace = !!revRec && huStr(revRec.approval_status) === HU_APPROVED;
       band.innerHTML = HU_REVISING
-        ? '<span>Revising <b class="mono">' + esc(HU_REVISING) + '</b>' +
+        ? '<span>' + (revInPlace ? 'Answering the listing desk on ' : 'Revising ') + '<b class="mono">' + esc(HU_REVISING) + '</b>' +
             (HU_REV_TITLE ? ' — ' + esc(HU_REV_TITLE.slice(0, 60)) : '') + '</span>' +
-          '<span style="font-weight:500;color:var(--text-2)">Fix what was asked, then press Save revision — it goes straight back into the review queue.</span>' +
-          '<button class="minibtn" id="huRevCancel" style="margin-left:auto">Cancel revision</button>'
+          '<span style="font-weight:500;color:var(--text-2)">' +
+            (revInPlace
+              ? 'Fix what the lister asked, then press Save update — it updates this approved hunt in place and tells the lister. It does not go back for approval.'
+              : 'Fix what was asked, then press Save revision — it goes straight back into the review queue.') + '</span>' +
+          '<button class="minibtn" id="huRevCancel" style="margin-left:auto">Cancel</button>'
         : '';
       var c = huEl('huRevCancel');
       if (c) {
@@ -958,7 +965,7 @@
         };
       }
     }
-    if (send) { send.textContent = HU_REVISING ? 'Save revision' : 'Submit hunt'; }
+    if (send) { send.textContent = HU_REVISING ? ((HU_MINE[HU_REVISING] && huStr(HU_MINE[HU_REVISING].approval_status) === HU_APPROVED) ? 'Save update' : 'Save revision') : 'Submit hunt'; }
   }
 
   function huFillFromRec(rec, onlyEmpty) {

@@ -121,11 +121,13 @@
         '<span>Status <b>' + esc(hrvStr(t.status)) + '</b></span>' +
       '</div>' +
       '<div class="hrv-foot">' +
-        (revisable ? '<button class="btn-gold hrv-revbtn" data-hrvid="' + hrvAttr(huntId) + '">Revise this hunt</button>' : '') +
+        (rec ? '<button class="btn-gold hrv-revbtn" data-hrvid="' + hrvAttr(huntId) + '">' +
+          (revisable ? 'Revise this hunt' : 'Revise &amp; answer') + '</button>' : '') +
         '<button class="minibtn" data-hrvtask="' + hrvAttr(hrvStr(t.task_id)) + '">Answer it on My tasks</button>' +
         '<span class="hu-hint" style="margin:0">' +
           (revisable ? 'The hunt is still open — fixing it there answers this too.'
-            : 'This hunt is already approved and being listed, so add what is missing and submit the task.') +
+            : (rec ? 'This hunt is approved and being listed — your edit updates it in place and tells the lister; it does not go back for approval.'
+                   : 'This hunt is already approved and being listed, so add what is missing and submit the task.')) +
         '</span>' +
       '</div>' +
     '</div>';

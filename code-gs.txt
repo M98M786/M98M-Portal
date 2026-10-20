@@ -7496,6 +7496,23 @@ function actionReviseHunt_(payload, ctx) {
 
   let rec = null;
   const pre = huntFind_(huntSheet_(), payload.hunt_id);      // heavy read outside the lock
+  /* 20 Oct (owner: "give the lister path a button too"). A revision asked by the LISTING DESK sits
+     on an hunt that MANAGEMENT already approved and is being listed — sending it back through
+     approval would be wrong. So an approved hunt may be revised IN PLACE, but only when an open
+     hunt_revision task for it sits on this hunter's own desk (the lister's request). Read those
+     here, outside the lock; the mode is decided inside. */
+  let inPlaceOut = false;
+  const openRevTasks = [];
+  try {
+    const meRev = normalizeEmail(ctx.ident.email);
+    readTab_('TASKS').forEach(function (t) {
+      if (String(t.type || '') !== 'hunt_revision') return;
+      if (String(t.status || '') === TASK_STATUS_COMPLETED) return;
+      if (normalizeEmail(t.assigned_to) !== meRev) return;
+      if (String(t.details || '').indexOf('hunt:' + String(payload.hunt_id)) < 0) return;
+      openRevTasks.push({ task_id: String(t.task_id || ''), by: String(t.assigned_by || '') });
+    });
+  } catch (e) {}
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
@@ -7505,7 +7522,9 @@ function actionReviseHunt_(payload, ctx) {
     if (normalizeEmail(rec.hunter_email) !== normalizeEmail(ctx.ident.email) && !isMgmt_(ctx.user.role, ctx.ident.email)) {
       throw new Error('only the hunter who submitted it may revise it');
     }
-    if (rec.approval_status !== HUNT_PENDING && rec.approval_status !== HUNT_REVISION) {
+    const inPlace = rec.approval_status === HUNT_APPROVED && openRevTasks.length > 0;
+    inPlaceOut = inPlace;
+    if (rec.approval_status !== HUNT_PENDING && rec.approval_status !== HUNT_REVISION && !inPlace) {
       throw new Error('this hunt is already decided — submit a new one instead');
     }
     const merged = {};
@@ -7516,9 +7535,15 @@ function actionReviseHunt_(payload, ctx) {
       sent[HC_PROFIT] = calc.profit === null ? '' : calc.profit;
       sent[HC_ROI] = calc.roi === null ? '' : calc.roi;
     }
-    sent[HC_APPROVAL] = HUNT_PENDING;                  // back into the queue
-    sent[HC_COMMENTS] = String(rec[HC_COMMENTS] || '').slice(0, 1500) +
-      (rec[HC_COMMENTS] ? ' · ' : '') + '(revised ' + huntPktDate_() + ')';
+    if (inPlace) {
+      // the lister asked for a fix on an approved, being-listed hunt — update it, do NOT re-queue
+      sent[HC_COMMENTS] = String(rec[HC_COMMENTS] || '').slice(0, 1500) +
+        (rec[HC_COMMENTS] ? ' · ' : '') + '(updated for the listing desk ' + huntPktDate_() + ')';
+    } else {
+      sent[HC_APPROVAL] = HUNT_PENDING;                  // back into the queue
+      sent[HC_COMMENTS] = String(rec[HC_COMMENTS] || '').slice(0, 1500) +
+        (rec[HC_COMMENTS] ? ' · ' : '') + '(revised ' + huntPktDate_() + ')';
+    }
     /* The hunter-editable whitelist: every hunting column EXCEPT the ones that are not theirs to
        touch — who selected it, when it arrived, the =IMAGE cell, and the two management-only
        routing columns (already deleted from `sent` above; forbidden here too, belt and braces). */
@@ -7539,17 +7564,33 @@ function actionReviseHunt_(payload, ctx) {
      op the 3 Sept submit hotfix removed) and huntBackupSync, the 5-minute reconciler, rebuilds
      every tray from HUNTING_DB anyway. */
   Object.keys(sent).forEach(function (k) { rec[k] = sent[k]; });
-  rec.approval_status = HUNT_PENDING;   // canonical key the mirror binds — derived at read, so the merge above does not refresh it
+  /* canonical key the mirror binds — derived at read, so the merge above does not refresh it. An
+     in-place fix for the listing desk STAYS approved; a normal revise goes back to pending. */
+  rec.approval_status = inPlaceOut ? HUNT_APPROVED : HUNT_PENDING;
   huntMirrorPush_(rec);
-  /* 20 Oct (owner: "jahanzaib doesn't have option for product revision"). The revise flipped the
-     hunt REVISION REQUIRED → pending, but the hunt_revision TASK that asked for the fix was never
-     closed — so a hunter who had revised still carried an open "please revise" task, and once his
-     hunt went back to pending (or on to approved) the Revisions page showed that card with no
-     button. Twelve such zombies had piled up on one hunter. Close them now, by the same hunt
-     reference both revision roads stamp. Outside the hunt lock, best-effort — a revise must never
-     fail because the task close hiccuped. */
-  try { huntCloseRevisionTasks_(rec.hunt_id, String(rec.item_id || ''), rec.hunter_email, 'revised by ' + ctx.ident.email); } catch (e) {}
-  return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length };
+  /* 20 Oct: close the hunt_revision task(s) that asked for this — the no-close bug (see
+     huntCloseRevisionTasks_) left a wall of dead "please revise" cards on the hunter. Both roads
+     stamp the same hunt:<id> ref. Outside the hunt lock, best-effort — a revise must never fail
+     because the task close hiccuped. */
+  try { huntCloseRevisionTasks_(rec.hunt_id, String(rec.item_id || ''), rec.hunter_email, (inPlaceOut ? 'answered' : 'revised') + ' by ' + ctx.ident.email); } catch (e) {}
+  /* On an in-place fix, tell the lister(s) who asked — the hunt stays approved, so nothing else
+     signals them that their request was answered. */
+  if (inPlaceOut) {
+    const told = {};
+    const changed = Object.keys(sent).filter(function (k) { return k !== HC_COMMENTS; }).join(', ').slice(0, 160);
+    openRevTasks.forEach(function (tk) {
+      const who = normalizeEmail(tk.by);
+      if (!who || who.indexOf('system:') === 0 || told[who]) return;
+      told[who] = 1;
+      try {
+        notify_(tk.by, 'Revision answered',
+          '🟢 ' + (ctx.user.name || ctx.ident.email) + ' updated "' + String(rec[HC_TITLE] || rec.hunt_id).slice(0, 50) +
+          '" for your listing — ' + (changed || 'details refreshed') + '. The hunt stays approved; the fresh details are on it now.',
+          'huntrev:' + rec.hunt_id);
+      } catch (e) {}
+    });
+  }
+  return { revised: true, hunt_id: rec.hunt_id, fields: Object.keys(sent).length, in_place: !!inPlaceOut };
 }
 
 /* Complete every OPEN hunt_revision task that asked for a fix to this hunt — matched on the
