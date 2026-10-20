@@ -1478,7 +1478,7 @@ function cleanupHuntRevisionZombies_(dryRun) {
   const summary = hits.length + ' zombie task(s) to close [' +
     Object.keys(byWho).map(function (k) { return k + ' ' + byWho[k]; }).join(', ') + '] · ' +
     keep.length + ' left as genuine';
-  if (dryRun) return 'DRY RUN · ' + summary + ' · close: ' + JSON.stringify(hits.slice(0, 40)) + ' · keep: ' + JSON.stringify(keep.slice(0, 20));
+  if (dryRun) { const dr = 'DRY RUN · ' + summary + ' · close: ' + JSON.stringify(hits.slice(0, 50)) + ' · keep: ' + JSON.stringify(keep.slice(0, 30)); Logger.log(dr); return dr; }
   const stamp = now_();
   hits.forEach(function (h) {
     sh.getRange(h.row, cStatus + 1).setValue(TASK_STATUS_COMPLETED);
