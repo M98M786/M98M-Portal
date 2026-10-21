@@ -469,6 +469,67 @@ function actionGoLiveReturn_(payload, ctx) {
   return { task_id: String(rec.task_id), assigned_to: back };
 }
 
+/* 22 Oct (owner): "in go-live desk add option for deleting the draft — in some cases an item can
+   receive VeRO, I delete the draft so it will not get live." A publisher kills a draft before it
+   is published: the listing_new task row is removed, so the item never gets an Item ID and never
+   goes live; the lister is told; the hunt it came from is stamped so it is not re-sent; and the
+   engine task mirror is reconciled so the draft leaves the desk at once. Gated to go-live
+   publishers (the shared desk) and management. A reason is optional but recorded. */
+function actionGoLiveDelete_(payload, ctx) {
+  const publisher = (typeof listingIsGoLivePublisher_ === 'function') && listingIsGoLivePublisher_(ctx.ident.email);
+  if (!publisher && !isMgmt_(ctx.user.role, ctx.ident.email)) throw new Error(SAFE_ERROR_PREFIX + 'only the go-live desk may delete a draft');
+  const reason = String(payload.note || payload.reason || '').trim().slice(0, 500);
+  const sh = tasksSheet_();
+  let rec = null, huntId = '', lister = '';
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = taskVerify_(sh, pre, payload.task_id);
+    rec = found.rec;
+    if (String(rec.type) !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'that is not a listing draft any more — press Refresh');
+    if (String(rec.item_id || '').trim()) throw new Error(SAFE_ERROR_PREFIX + 'this listing already carries an Item ID — it is live on eBay, so it cannot be deleted here');
+    lister = normalizeEmail(rec.assigned_to || '');
+    try { huntId = String((JSON.parse(String(rec.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    sh.deleteRow(found.row);
+  } finally { lock.releaseLock(); }
+  logActivity_(ctx.ident.email, 'GO_LIVE_DELETE', String(rec.task_id), String(rec.status || ''), 'deleted',
+    (String(rec.account || '')) + ' · ' + String(rec.title || '').slice(0, 60) + (huntId ? ' · hunt ' + huntId : '') + (reason ? ' · ' + reason : ''));
+  /* Stamp the source hunt so the Approved archive never re-sends a product that was pulled for
+     VeRO — the comment carries the mark; the hunt stays APPROVED but is flagged deleted. */
+  if (huntId) {
+    try {
+      const hsh = huntSheet_();
+      const hpre = huntFind_(hsh, huntId);
+      const hlock = LockService.getScriptLock();
+      try {
+        hlock.waitLock(8000);
+        const hfound = huntVerify_(hsh, hpre, huntId);
+        const hrec = huntRecord_(hfound.rec);
+        const mark = String(hrec[HC_COMMENTS] || '').slice(0, 1400) + (hrec[HC_COMMENTS] ? ' · ' : '') +
+          '(listing DELETED at go-live ' + huntPktDate_() + (reason ? ' — ' + reason.slice(0, 80) : '') + ')';
+        const hpatch = {}; hpatch[HC_COMMENTS] = mark;
+        huntWrite_(hsh, hfound, hpatch);
+        hrec[HC_COMMENTS] = mark;
+        huntMirrorPush_(hrec);
+      } finally { hlock.releaseLock(); }
+    } catch (e) { logActivity_('system', 'GO_LIVE_DELETE_HUNTSTAMP_FAIL', huntId, '', '', String(e && e.message || e).slice(0, 120)); }
+  }
+  if (lister && lister.indexOf('system:') !== 0) {
+    try {
+      notify_(lister, 'Draft deleted',
+        '🔴 "' + String(rec.title || '').slice(0, 60) + '" · ' + String(rec.account || '') +
+        ' — ' + (ctx.user.name || 'the go-live desk') + ' deleted this draft; it will NOT go live' +
+        (reason ? '. Reason: ' + reason.slice(0, 300) : '.') + ' Nothing more to do on it.', 'task:' + String(rec.task_id));
+    } catch (e) {}
+  }
+  /* Reconcile the engine task mirror so the draft leaves the go-live desk at once (the row is gone
+     from the sheet; a full push prunes it from D1). Best-effort — it also self-heals on the sync. */
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  return { ok: true, task_id: String(rec.task_id), deleted: true, hunt_id: huntId, mirror: mirror };
+}
+
 /* ---------- staff reviews (R8-5) ---------- */
 const R8_REVIEW_HEADERS = ['review_id', 'email', 'week', 'rated_by', 'behavior', 'working', 'notes', 'created_at'];
 
@@ -935,6 +996,7 @@ const ACTIONS_R8 = {
   mgmtRejectDecide:   [actionMgmtRejectDecide_, 'any'],  // mgmt gated inside
   decisionAct:        [actionDecisionAct_, 'any'],       // mgmt gated inside
   goLiveReturn:       [actionGoLiveReturn_, 'any'],      // TL/mgmt gated inside
+  goLiveDelete:       [actionGoLiveDelete_, 'any'],      // go-live publishers / mgmt — kill a draft before it goes live (owner, 22 Oct)
   staffReviewsPending: [actionStaffReviewsPending_, 'any'],
   staffReviewSave:    [actionStaffReviewSave_, 'any'],
   staffReviewHistory: [actionStaffReviewHistory_, 'any'],

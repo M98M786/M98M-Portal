@@ -243,6 +243,8 @@
       '<div class="hu-btns" style="margin-top:10px">' +
         '<button class="btn-gold" data-gl-live="' + esc(id) + '">Make live — enter Item ID</button>' +
         '<button class="minibtn" data-gl-back="' + esc(id) + '">Send back to the lister</button>' +
+        /* 22 Oct (owner): delete a draft that must not go live (e.g. VeRO risk). */
+        '<button class="minibtn gl-del" data-gl-del="' + esc(id) + '" style="margin-left:auto;color:var(--bad);border-color:var(--bad)">Delete draft</button>' +
       '</div></div>';
   }
 
@@ -329,6 +331,32 @@
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
           glLoad(true);
         }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
+    /* 22 Oct (owner): delete a draft so it never goes live — for a VeRO/IP risk spotted at go-live.
+       Destructive, so it confirms first; the note box (if filled) rides along as the reason. */
+    box.querySelectorAll('[data-gl-del]').forEach(function (b) {
+      b.onclick = function () {
+        var id = this.getAttribute('data-gl-del');
+        var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
+        var reason = note ? glS(note.value) : '';
+        var card = box.querySelector('[data-gl-card="' + id.replace(/"/g, '') + '"]');
+        var ttl = card ? (card.querySelector('[data-gl-title]') || {}).value : '';
+        if (!window.confirm('Delete this draft? It will be removed from the go-live desk and will NOT go live on eBay. This cannot be undone.' + (reason ? '\n\nReason: ' + reason : '\n\n(Tip: type a reason in the note box first — the lister is told.)'))) { return; }
+        var btn = this; btn.disabled = true; btn.textContent = 'Deleting…';
+        api('goLiveDelete', { task_id: id, note: reason }).then(function () {
+          GL_DONE[id] = true;   // keep it off the desk even while the mirror lags
+          delete GL_DRAFT[id];
+          toast('Draft deleted — it will not go live.');
+          glLoad(true);
+        }).catch(function (e) {
+          var msg = String((e && e.message) || '');
+          if (/overloaded|timeout|did not answer|taking long|aborted/i.test(msg)) {
+            btn.textContent = 'Finishing on the server…';
+            toast('Google is slow right now — the delete is finishing on the server. Refreshing to confirm…');
+            setTimeout(function () { glLoad(true); }, 7000);
+          } else { btn.disabled = false; btn.textContent = 'Delete draft'; toast('NOT deleted — ' + msg); }
+        });
       };
     });
   }

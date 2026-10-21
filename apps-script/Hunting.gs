@@ -1534,3 +1534,70 @@ function cleanupHuntRevisionZombies_(dryRun) {
   Logger.log(r);
   return r;
 }
+
+/* 22 Oct (owner): read-only pipeline audit to ground the "pending tasks are wrong" complaints and
+   size the approve→archive→assign restructure. Reports hunt counts by status; of APPROVED hunts,
+   how many have no listing task (the "approved, pending send to lister" pool), an open one, only a
+   completed one, or were deleted at go-live; and the listing_new / listing_revision task counts by
+   status and lister, plus the go-live draft backlog. Logger only; writes nothing. */
+function huntListingPipelineAudit() {
+  const out = { hunts: { total: 0, pending: 0, revision: 0, approved: 0, not_approved: 0 },
+    approved_pool: { no_task: 0, open_task: 0, completed_task: 0, deleted_at_golive: 0 },
+    listing_new: { pending: 0, working: 0, updated: 0, submitted: 0, completed: 0, drafts_waiting: 0, by_lister_open: {} },
+    listing_revision: { open: 0, completed: 0 },
+    hunt_revision_open: 0, sample_pending_send: [] };
+  // hunt_id -> {status, approved, deleted, title, hunter}
+  const hunts = {};
+  readTab_('HUNTING_DB').forEach(function (h) {
+    const id = String(h.hunt_id || ''); if (!id) return;
+    out.hunts.total++;
+    const st = String(h['Approval Status'] || '').trim();
+    if (st === '') out.hunts.pending++;
+    else if (st === 'REVISION REQUIRED') out.hunts.revision++;
+    else if (st === 'APPROVED') out.hunts.approved++;
+    else if (st === 'NOT APPROVED') out.hunts.not_approved++;
+    hunts[id] = { status: st, title: String(h['Title'] || '').slice(0, 44),
+      deleted: String(h['Comments'] || '').indexOf('listing DELETED at go-live') >= 0,
+      account: String(h['Account Selected'] || '') };
+  });
+  // listing_new tasks per hunt
+  const tasksByHunt = {};
+  readTab_('TASKS').forEach(function (t) {
+    const type = String(t.type || ''), status = String(t.status || '');
+    const open = status !== TASK_STATUS_COMPLETED;
+    if (type === 'hunt_revision' && open) out.hunt_revision_open++;
+    if (type === 'listing_revision') { if (open) out.listing_revision.open++; else out.listing_revision.completed++; }
+    if (type !== 'listing_new') return;
+    if (status === TASK_STATUS_PENDING) out.listing_new.pending++;
+    else if (status === TASK_STATUS_WORKING) out.listing_new.working++;
+    else if (status === TASK_STATUS_UPDATED) out.listing_new.updated++;
+    else if (status === TASK_STATUS_SUBMITTED) out.listing_new.submitted++;
+    else if (status === TASK_STATUS_COMPLETED) out.listing_new.completed++;
+    if (open) {
+      const to = String(t.assigned_to || '').split('@')[0] || '(none)';
+      out.listing_new.by_lister_open[to] = (out.listing_new.by_lister_open[to] || 0) + 1;
+      if (String(t.comments || '').indexOf('@LFLAG@') >= 0 && String(t.comments || '').indexOf('"flag":"draft"') >= 0) out.listing_new.drafts_waiting++;
+    }
+    let hid = '';
+    try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (hid) { (tasksByHunt[hid] = tasksByHunt[hid] || []).push(status); }
+  });
+  // classify approved hunts
+  Object.keys(hunts).forEach(function (id) {
+    const h = hunts[id];
+    if (h.status !== 'APPROVED') return;
+    if (h.deleted) { out.approved_pool.deleted_at_golive++; return; }
+    const ts = tasksByHunt[id] || [];
+    const hasOpen = ts.some(function (x) { return x !== TASK_STATUS_COMPLETED; });
+    const hasAny = ts.length > 0;
+    if (hasOpen) out.approved_pool.open_task++;
+    else if (hasAny) out.approved_pool.completed_task++;
+    else {
+      out.approved_pool.no_task++;
+      if (out.sample_pending_send.length < 12) out.sample_pending_send.push({ hunt: id, title: h.title, account: h.account });
+    }
+  });
+  const s = JSON.stringify(out);
+  Logger.log(s);
+  return s;
+}
