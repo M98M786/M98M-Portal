@@ -1637,6 +1637,16 @@ function runLossEscalationSweep() {
       logActivity_('system', 'FREE_HAMZA_18OCT', 'm98mone@gmail.com', '', 'run from the 5-minute sweep', freeHamzaEmailToM98meleven());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:freeHamza18Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 22 Oct: seed the "pending send" set from the activity log once, flag-guarded on this 5-minute
+     clock so it lands without the editor Run button (the Approved archive needs it to show genuine
+     new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */
+  try {
+    const p22 = PropertiesService.getScriptProperties();
+    if (p22.getProperty('BACKFILL_PENDING_SEND_22OCT') !== 'done' && typeof backfillPendingSendFromLog === 'function') {
+      p22.setProperty('BACKFILL_PENDING_SEND_22OCT', 'done');
+      logActivity_('system', 'BACKFILL_PENDING_SEND_22OCT', '', '', 'run from the 5-minute sweep', backfillPendingSendFromLog());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:backfillPendingSend22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 

@@ -39,7 +39,22 @@
     '.aa-empty{color:var(--text-2);font-weight:700;padding:16px 0}.aa-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}'
   );
 
-  var AA = { data: null, tab: 'pending', accounts: [], listers: [], seq: 0 };
+  var AA = { data: null, tab: 'pending', accounts: [], listers: [], autoListers: [], seq: 0 };
+
+  /* 22 Oct (owner): auto-select the deadline — today 11:59 PM Pakistan time — as a datetime-local
+     value, so the owner never types it. PKT is UTC+5; a datetime-local wants local wall time. */
+  function aaTodayEndPkt() {
+    var pk = new Date(Date.now() + 5 * 3600000);   // now in PKT
+    var y = pk.getUTCFullYear(), m = ('0' + (pk.getUTCMonth() + 1)).slice(-2), d = ('0' + pk.getUTCDate()).slice(-2);
+    return y + '-' + m + '-' + d + 'T23:59';
+  }
+  /* "from now on auto-select one to Umar and one to Sajawal" — find both listers in the staff list
+     (by name) so the send form alternates between them per card. Falls back gracefully. */
+  function aaComputeAutoListers() {
+    var find = function (re) { for (var i = 0; i < AA.listers.length; i++) { if (re.test(AA.listers[i].name)) { return AA.listers[i].email; } } return ''; };
+    var umar = find(/umar|umer/i), saj = find(/saj[ao]?wal|sajjawal/i);
+    AA.autoListers = [umar, saj].filter(Boolean);
+  }
 
   function aaStr(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
   function aaAttr(v) { return esc(aaStr(v)).replace(/"/g, '&quot;'); }
@@ -58,8 +73,9 @@
     return '<span class="pill hu-wait">Not started</span>';
   }
 
-  function aaCard(h, canSend) {
+  function aaCard(h, canSend, idx) {
     var id = aaStr(h.hunt_id);
+    var autoL = AA.autoListers.length ? AA.autoListers[(idx || 0) % AA.autoListers.length] : '';
     var img = aaStr(h['Image Link']);
     var nums = '';
     function num(label, v, money) { var val = money ? aaMoney(v) : aaStr(v); if (!val || val === '0') { return; } nums += '<span class="aa-num">' + esc(label) + ' <b>' + esc(val) + '</b></span>'; }
@@ -81,8 +97,8 @@
           '<div><label>Campaign type</label><select class="aa-in" data-aa-camp="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaCampOpts(h['CPC Selling Chance']) + '</select></div>' +
         '</div>' +
         '<div class="aa-row">' +
-          '<div><label>Lister</label><select class="aa-in" data-aa-lister="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaListerOpts() + '</select></div>' +
-          '<div><label>Deadline (PKT) · optional</label><input class="aa-in" type="datetime-local" data-aa-due="' + aaAttr(id) + '"></div>' +
+          '<div><label>Lister' + (autoL ? ' <span style="color:var(--text-3);font-weight:600;text-transform:none;letter-spacing:0">· auto</span>' : '') + '</label><select class="aa-in" data-aa-lister="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaListerOpts(autoL) + '</select></div>' +
+          '<div><label>Deadline (PKT)</label><input class="aa-in" type="datetime-local" data-aa-due="' + aaAttr(id) + '" value="' + aaTodayEndPkt() + '"></div>' +
         '</div>' +
         '<button class="btn-gold" data-aa-send="' + aaAttr(id) + '" style="width:100%">Send to lister</button>' +
       '</div>';
@@ -112,8 +128,8 @@
     var types = (AA.data && AA.data.advertising_types) || [];
     return types.map(function (t) { return '<option value="' + aaAttr(t) + '"' + (aaStr(cur) === aaStr(t) ? ' selected' : '') + '>' + esc(t) + (aaStr(cur) === aaStr(t) ? ' — hunt pick' : '') + '</option>'; }).join('');
   }
-  function aaListerOpts() {
-    return AA.listers.map(function (l) { return '<option value="' + aaAttr(l.email) + '">' + esc(l.name) + '</option>'; }).join('');
+  function aaListerOpts(sel) {
+    return AA.listers.map(function (l) { return '<option value="' + aaAttr(l.email) + '"' + (aaStr(sel) && aaStr(sel) === aaStr(l.email) ? ' selected' : '') + '>' + esc(l.name) + '</option>'; }).join('');
   }
 
   function aaPaint() {
@@ -138,7 +154,7 @@
     if (AA.tab === 'pending') {
       var items = d.pending_send || [];
       if (!items.length) { body.innerHTML = '<div class="aa-empty">Nothing waiting to be sent.<span>Approved items land here; choose a lister and send each one.</span></div>'; return; }
-      body.innerHTML = '<div class="aa-grid">' + items.map(function (h) { return aaCard(h, !!d.can_send); }).join('') + '</div>';
+      body.innerHTML = '<div class="aa-grid">' + items.map(function (h, i) { return aaCard(h, !!d.can_send, i); }).join('') + '</div>';
       aaWireSend(body);
     } else {
       var sent = d.sent || [];
@@ -196,6 +212,7 @@
       AA.data = res[0] || {};
       AA.accounts = ((res[1] && res[1].accounts) || []).map(function (a) { return aaStr(a.account); }).filter(Boolean);
       AA.listers = ((res[2] && res[2].staff) || []).map(function (s) { return { email: aaStr(s.email), name: aaStr(s.name) + ' — ' + aaStr(s.role) }; });
+      aaComputeAutoListers();
       if (STATE.counts) { STATE.counts.approvedArchive = (AA.data.counts && AA.data.counts.pending_send) || 0; }
       if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
       aaPaint();

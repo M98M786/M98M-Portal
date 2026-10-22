@@ -6858,6 +6858,9 @@ function actionDecideHunt_(payload, ctx) {
     return { hunt_id: rec.hunt_id, approval_status: decision, idempotent: true,
       note: 'Already ' + String(decision).toLowerCase() + ' — no duplicate was created.' };
   }
+  /* 22 Oct: a new-flow approval (approve-only — no lister assigned) enters the "pending send" set,
+     which is what the Approved archive shows. Old-flow approvals (assignNow) never do. */
+  if (approving && !assignNow) { try { pendingSendAdd_(rec.hunt_id); } catch (e) {} }
 
   logActivity_(ctx.ident.email, 'DECIDE_HUNT', rec.hunt_id, HUNT_PENDING, decision,
     assignNow ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId
@@ -7979,6 +7982,11 @@ function actionApprovedArchive_(payload, ctx) {
         created_at: String(t.created_at || ''), deadline_pkt: String(t.deadline_pkt || '') };
     }
   });
+  /* Only hunts in the pending-send set are genuinely awaiting a lister (new-flow approvals not yet
+     sent). An approved hunt with no task that is NOT in the set is a historical one (listed long
+     ago, task purged) — it must not reappear in the queue. */
+  const pendSet = {};
+  try { pendingSendGet_().forEach(function (h) { pendSet[h] = 1; }); } catch (e) {}
   const pending = [], sent = [];
   readTab_('HUNTING_DB').forEach(function (h) {
     if (String(h['Approval Status'] || '').trim() !== 'APPROVED') return;
@@ -7990,7 +7998,7 @@ function actionApprovedArchive_(payload, ctx) {
       sent.push({ hunt_id: hid, title: card['Title'], account: task.account, lister: task.lister,
         status: task.status, task_id: task.task_id, created_at: task.created_at, ts: card.ts,
         hunter_name: card.hunter_name });
-    } else {
+    } else if (pendSet[hid]) {
       pending.push(card);
     }
   });
@@ -8049,6 +8057,7 @@ function actionHuntSendToLister_(payload, ctx) {
 
   rec.approval_status = HUNT_APPROVED;
   try { huntMirrorPush_(rec); } catch (e) {}
+  try { pendingSendRemove_(rec.hunt_id); } catch (e) {}   // it is with a lister now — out of the send queue
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
   logActivity_(ctx.ident.email, 'HUNT_SEND_TO_LISTER', rec.hunt_id, 'approved', lister.email,
     account + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId);
@@ -8063,6 +8072,62 @@ function actionHuntSendToLister_(payload, ctx) {
       '🔵 "' + title + '" · ' + account + ' — ' + lister.name + ' lists it next.', 'hunt:' + rec.hunt_id);
   } catch (e) {}
   return { ok: true, hunt_id: rec.hunt_id, task_id: taskId, assigned_to: lister.email, account: account, advertising_type: advertising, deadline_pkt: deadline };
+}
+
+
+/* ===================== 22 Oct — the "pending send" set ========================================
+   The Approved archive must show only items that are GENUINELY waiting for a lister — NOT every
+   approved hunt that happens to have no listing task. Old approved hunts were listed long ago and
+   their completed tasks were later purged, so "approved + no task" wrongly swept them into the
+   send queue (owner, 22 Oct: "why is it showing previous old items"). The truth of "approved under
+   the new two-step flow and not yet sent" is kept in a Script Property set: the new-flow approval
+   adds the hunt_id, huntSendToLister removes it. Old-flow approvals are never in it. ============ */
+function pendingSendGet_() {
+  try { var raw = PropertiesService.getScriptProperties().getProperty('PENDING_SEND_HUNTS'); var a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function pendingSendWrite_(arr) {
+  try { PropertiesService.getScriptProperties().setProperty('PENDING_SEND_HUNTS', JSON.stringify(arr.slice(-1500))); } catch (e) {}
+}
+function pendingSendAdd_(huntId) {
+  if (!huntId) return;
+  var lk = LockService.getScriptLock();
+  try { lk.waitLock(5000); var a = pendingSendGet_(); if (a.indexOf(huntId) < 0) { a.push(huntId); pendingSendWrite_(a); } } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
+}
+function pendingSendRemove_(huntId) {
+  if (!huntId) return;
+  var lk = LockService.getScriptLock();
+  try { lk.waitLock(5000); var a = pendingSendGet_(); var i = a.indexOf(huntId); if (i >= 0) { a.splice(i, 1); pendingSendWrite_(a); } } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
+}
+
+/* One-shot backfill for the transition: every new-flow approval logged DECIDE_HUNT with
+   'pending send' in its new_value (old-flow logged account/lister/task instead). Collect those
+   hunt_ids from ACTIVITY_LOG, drop any that already have a listing task (already sent) or are no
+   longer approved, and seed the set. Run once after the fix ships. */
+function backfillPendingSendFromLog() {
+  var newFlow = {};
+  readTab_('ACTIVITY_LOG').forEach(function (r) {
+    if (String(r.action || '') !== 'DECIDE_HUNT') return;
+    if (String(r.new_value || '').indexOf('pending send') < 0) return;
+    var hid = String(r.target || '').trim();
+    if (hid) newFlow[hid] = 1;
+  });
+  // approved set
+  var approved = {};
+  readTab_('HUNTING_DB').forEach(function (h) { if (String(h['Approval Status'] || '').trim() === 'APPROVED') approved[String(h.hunt_id || '')] = 1; });
+  // hunts that already have a listing task
+  var hasTask = {};
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type || '') !== 'listing_new') return;
+    var hid = ''; try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (!hid) { var m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) hid = m[0]; }
+    if (hid) hasTask[hid] = 1;
+  });
+  var set = [];
+  Object.keys(newFlow).forEach(function (hid) { if (approved[hid] && !hasTask[hid]) set.push(hid); });
+  pendingSendWrite_(set);
+  var r = 'pending-send set backfilled: ' + set.length + ' hunt(s) awaiting a lister (from ' + Object.keys(newFlow).length + ' new-flow approvals in the log)';
+  Logger.log(r);
+  return r;
 }
 
 
@@ -21959,6 +22024,16 @@ function runLossEscalationSweep() {
       logActivity_('system', 'FREE_HAMZA_18OCT', 'm98mone@gmail.com', '', 'run from the 5-minute sweep', freeHamzaEmailToM98meleven());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:freeHamza18Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 22 Oct: seed the "pending send" set from the activity log once, flag-guarded on this 5-minute
+     clock so it lands without the editor Run button (the Approved archive needs it to show genuine
+     new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */
+  try {
+    const p22 = PropertiesService.getScriptProperties();
+    if (p22.getProperty('BACKFILL_PENDING_SEND_22OCT') !== 'done' && typeof backfillPendingSendFromLog === 'function') {
+      p22.setProperty('BACKFILL_PENDING_SEND_22OCT', 'done');
+      logActivity_('system', 'BACKFILL_PENDING_SEND_22OCT', '', '', 'run from the 5-minute sweep', backfillPendingSendFromLog());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:backfillPendingSend22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
