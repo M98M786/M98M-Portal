@@ -121,7 +121,11 @@
   }
 
   VIEWS.adtoolPeak = {
-    label: 'Peak times only', hidden: true, order: 93, roles: ROLES,
+    label: 'Peak times only', /* 22 Oct: NOT hidden. Every other advertising-tool page is hidden here and lives only in
+       the /ads/ portal, but the owner asked for these three "on portal" alongside a sort on
+       the Ads command centre, which is a company-portal page. They are carried by both
+       builds, so they appear in both sidebars. */
+    hidden: false, order: 93, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M4 4l2 2M20 4l-2 2"/>',
     render: function () {
       return '<div class="pkt-wrap">' +

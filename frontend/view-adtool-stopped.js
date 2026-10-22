@@ -651,7 +651,11 @@
   });
 
   VIEWS.adtoolStopped = {
-    label: 'Stopped yesterday', hidden: true, order: 94, roles: ROLES,
+    label: 'Stopped yesterday', /* 22 Oct: NOT hidden. Every other advertising-tool page is hidden here and lives only in
+       the /ads/ portal, but the owner asked for these three "on portal" alongside a sort on
+       the Ads command centre, which is a company-portal page. They are carried by both
+       builds, so they appear in both sidebars. */
+    hidden: false, order: 94, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
     render: STOPPED.render,
     init: STOPPED.init

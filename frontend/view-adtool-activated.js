@@ -35,7 +35,11 @@
   }
 
   VIEWS.adtoolActivated = {
-    label: 'Activated today', hidden: true, order: 94, roles: ROLES,
+    label: 'Activated today', /* 22 Oct: NOT hidden. Every other advertising-tool page is hidden here and lives only in
+       the /ads/ portal, but the owner asked for these three "on portal" alongside a sort on
+       the Ads command centre, which is a company-portal page. They are carried by both
+       builds, so they appear in both sidebars. */
+    hidden: false, order: 94, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
     render: function () {
       var p = page();
