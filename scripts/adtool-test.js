@@ -24,13 +24,14 @@ function run(argv) {
   const i12 = src.indexOf('/* ADTOOL-P12-PURE-BEGIN */'); const j12 = src.indexOf('/* ADTOOL-P12-PURE-END */');
   const i13 = src.indexOf('/* ADTOOL-P13-PURE-BEGIN */'); const j13 = src.indexOf('/* ADTOOL-P13-PURE-END */');
   const i14 = src.indexOf('/* ADTOOL-P14-PURE-BEGIN */'); const j14 = src.indexOf('/* ADTOOL-P14-PURE-END */');
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '');   /* pure helpers of every phase */
+  const i15 = src.indexOf('/* ADTOOL-P15-PURE-BEGIN */'); const j15 = src.indexOf('/* ADTOOL-P15-PURE-END */');
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '');   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -914,7 +915,7 @@ function run(argv) {
      house style, so the next entry anybody adds has to meet it too. `source_tables` is deliberately
      NOT judged: that column IS the technical provenance list, which is what it is for.
      --------------------------------------------------------------------------------------------- */
-  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13', 'ADTOOL_REGISTER_P14'];
+  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13', 'ADTOOL_REGISTER_P14', 'ADTOOL_REGISTER_P15'];
   const rgAll = []; let rgParseFail = null;
   for (const nm of rgNames) {
     const i = src.indexOf('const ' + nm + ' = [');
@@ -924,7 +925,7 @@ function run(argv) {
       for (const row of new Function('return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))()) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
     } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
   }
-  t('register: all twelve arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
+  t('register: all thirteen arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
 
   /* the words the audit found live in production copy, and what to say instead. Judged on the four
      prose fields only. */
@@ -1104,6 +1105,261 @@ function run(argv) {
   t('register: the two new pages, the overlap and the shared budget each have an entry naming the rule, the sources, when it recomputes and how it is rechecked', !!cbRgB && !!cbRgO && !!cbRgI && !!cbRgS && [cbRgB, cbRgO, cbRgI, cbRgS].every(r => r.name && r.formula && r.sources && r.recompute && r.recheck), [!!cbRgB, !!cbRgO, !!cbRgI, !!cbRgS]);
   t('register: the campaign entry says plainly that a derived figure is derived', !!cbRgB && /added up from the listings inside it/.test(cbRgB.formula), cbRgB && cbRgB.formula.slice(0, 70));
   t('register: the shared budget entry prints no cap figure at all, because the page prints the live one', !!cbRgS && !/\d/.test(cbRgS.formula), cbRgS && cbRgS.formula);
+
+
+  /* ---------------------------------------------------------------------------------------------
+     20. OWNER BATCH 22 OCT 2026 — Stopped yesterday, Activated today, Peak times only.
+
+     Three things in here had never been tested because they had never existed: a UK day converted
+     to the UTC instants it actually sits between, the reading that says which of the two change
+     pages a recorded change belongs on, and the rule that says a listing sells in one part of the
+     day. The first is the one that was silently WRONG before: the report cut a UTC day out of UTC
+     stamps and called it yesterday, which through BST moves the last hour of every UK evening into
+     the next day's count.
+     --------------------------------------------------------------------------------------------- */
+  const p15Src = src.slice(src.indexOf('/* ADTOOL-P15-BEGIN'), src.indexOf('/* ADTOOL-P15-END'));
+  const p15Code = p15Src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');   /* the code, with the prose taken out: a comment that QUOTES the old wrong cut is not the old wrong cut */
+  const hoursBetween = (a, b) => (Date.parse(b.replace(' ', 'T') + 'Z') - Date.parse(a.replace(' ', 'T') + 'Z')) / 3600000;
+
+  /* (a) a UK day, and the two UTC instants it sits between */
+  let ub = F.adtUkDayUtcBounds('2026-10-16');
+  t('UK day: a summer day runs 23:00 to 23:00, because London is an hour ahead of the stamps', ub[0] === '2026-10-15 23:00:00' && ub[1] === '2026-10-16 23:00:00' && hoursBetween(ub[0], ub[1]) === 24, ub);
+  ub = F.adtUkDayUtcBounds('2026-11-01');
+  t('UK day: a winter day runs midnight to midnight', ub[0] === '2026-11-01 00:00:00' && ub[1] === '2026-11-02 00:00:00' && hoursBetween(ub[0], ub[1]) === 24, ub);
+  ub = F.adtUkDayUtcBounds('2026-10-25');
+  t('UK day: the day the clocks go back is twenty five hours long and all of them are read', ub[0] === '2026-10-24 23:00:00' && ub[1] === '2026-10-26 00:00:00' && hoursBetween(ub[0], ub[1]) === 25, ub);
+  ub = F.adtUkDayUtcBounds('2026-03-29');
+  t('UK day: the day the clocks go forward is twenty three hours long', ub[0] === '2026-03-29 00:00:00' && ub[1] === '2026-03-29 23:00:00' && hoursBetween(ub[0], ub[1]) === 23, ub);
+  t('UK day: the stamps come back in the same shape the database stores a time in', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(F.adtUkDayUtcBounds('2026-08-01')[0]), F.adtUkDayUtcBounds('2026-08-01'));
+  t('UK day: rubbish in gives nothing back rather than a wrong day', F.adtUkDayUtcBounds('') === null && F.adtUkDayUtcBounds('not a day') === null && F.adtUkDayUtcBounds(null) === null, null);
+  let ukGap = null, ukLen = {};
+  for (let i = 0; i < 400; i++) {
+    const d = F.adtAddDays('2026-01-01', i), nx = F.adtAddDays(d, 1);
+    const a = F.adtUkDayUtcBounds(d), b2 = F.adtUkDayUtcBounds(nx);
+    if (a[1] !== b2[0]) { ukGap = [d, a[1], b2[0]]; break; }
+    ukLen[hoursBetween(a[0], a[1])] = (ukLen[hoursBetween(a[0], a[1])] || 0) + 1;
+  }
+  t('UK day: four hundred days running join end to end with no gap and no overlap', ukGap === null, ukGap);
+  t('UK day: and every one of them is twenty three, twenty four or twenty five hours long, one of each odd one', !ukGap && ukLen[24] >= 396 && ukLen[23] === 1 && ukLen[25] === 1, ukLen);
+  t('UK clock: a stamp from the last hour of a summer evening prints as the next day in London', F.adtUkClockOf('2026-10-15 23:30:00') === '2026-10-16 00:30' && F.adtUkClockOf('2026-11-01 09:05:00') === '2026-11-01 09:05', [F.adtUkClockOf('2026-10-15 23:30:00'), F.adtUkClockOf('2026-11-01 09:05:00')]);
+  t('UK clock: nothing in gives an empty string, never a made up time', F.adtUkClockOf('') === '' && F.adtUkClockOf('rubbish') === '', null);
+  const w14 = F.adtUkDayWindows('2026-10-26', 14);
+  t('fourteen days: newest first, each joined to the next, across the night the clocks went back', w14.length === 14 && w14[0].day === '2026-10-26' && w14[13].day === '2026-10-13' && w14.every((w, i) => i === 0 || w.to_utc === w14[i - 1].from_utc), w14.map(w => w.day).slice(0, 3));
+
+  /* (b) one ad event: what happened, and which page it belongs on */
+  const adK = (f, to) => F.adtAdChangeKind(f, to);
+  let adOnce = [], adKinds = {};
+  for (const f of F.ADTOOL_AD_STATES) for (const to of F.ADTOOL_AD_STATES) {
+    const k = adK(f, to);
+    adKinds[k.kind] = 1;
+    const n = ['stopped', 'activated', 'neither'].filter(d => k.direction === d).length;
+    if (n !== 1) adOnce.push([f, to, k.direction]);
+  }
+  t('ad changes: all thirty six pairs of before and after land on exactly one of stopped, activated or neither', adOnce.length === 0, adOnce.slice(0, 4));
+  t('ad changes: a pause, a put away and a leaving are the stopped page', adK('ACTIVE', 'PAUSED').kind === 'ad_paused' && adK('ACTIVE', 'PAUSED').direction === 'stopped' && adK('ACTIVE', 'ARCHIVED').kind === 'ad_archived' && adK('ACTIVE', 'ARCHIVED').direction === 'stopped' && adK('ACTIVE', 'REMOVED').kind === 'ad_removed' && adK('ACTIVE', 'REMOVED').direction === 'stopped', null);
+  t('ad changes: a resume and a brand new ad are the activated page', adK('PAUSED', 'ACTIVE').kind === 'ad_resumed' && adK('PAUSED', 'ACTIVE').direction === 'activated' && adK('', 'ACTIVE').kind === 'ad_added' && adK('', 'ACTIVE').direction === 'activated', null);
+  t('ad changes: a pay-on-sale ad joining or leaving is neither on its state and still lands on a page through its membership', adK('', 'EXISTS').kind === 'ad_added' && adK('', 'EXISTS').basis === 'membership' && adK('', 'EXISTS').direction === 'activated' && adK('', 'EXISTS').status_direction === 'neither' && adK('EXISTS', 'REMOVED').kind === 'ad_removed' && adK('EXISTS', 'REMOVED').basis === 'membership' && adK('EXISTS', 'REMOVED').direction === 'stopped' && adK('EXISTS', 'REMOVED').status_direction === 'neither', [adK('', 'EXISTS'), adK('EXISTS', 'REMOVED')]);
+  t('ad changes: a state that merely stops being reported is nobody stopping and nobody starting', adK('ACTIVE', 'EXISTS').direction === 'neither' && adK('PAUSED', 'EXISTS').direction === 'neither' && adK('ARCHIVED', 'EXISTS').direction === 'neither', [adK('ACTIVE', 'EXISTS').direction, adK('PAUSED', 'EXISTS').direction]);
+  t('ad changes: an ad that appears already paused or already put away is an addition that is not running', adK('', 'PAUSED').kind === 'ad_added' && adK('', 'PAUSED').direction === 'neither' && adK('', 'ARCHIVED').direction === 'neither', [adK('', 'PAUSED'), adK('', 'ARCHIVED')]);
+  t('ad changes: the same state twice is not a change', F.ADTOOL_AD_STATES.every(x => adK(x, x).direction === 'neither' && adK(x, x).kind === 'ad_unchanged'), null);
+  t('ad changes: it is safe on nothing at all and on lower case, because the table holds what eBay sent', adK('active', 'paused').kind === 'ad_paused' && adK(undefined, undefined).direction === 'neither' && adK('active', 'removed').kind === 'ad_removed' && adK(null, 'active').kind === 'ad_added', null);
+
+  /* (c) one campaign event */
+  const cK = (ct, o, n) => F.adtCampaignChangeKind(ct, o, n);
+  t('campaign changes: paused and ended are the stopped page, started is the activated page', cK('status', 'RUNNING', 'PAUSED').kind === 'campaign_paused' && cK('status', 'RUNNING', 'PAUSED').direction === 'stopped' && cK('status', 'RUNNING', 'ENDED').kind === 'campaign_ended' && cK('status', 'RUNNING', 'ENDED').direction === 'stopped' && cK('status', 'PAUSED', 'RUNNING').kind === 'campaign_started' && cK('status', 'PAUSED', 'RUNNING').direction === 'activated' && cK('status', 'ENDED', 'RUNNING').direction === 'activated', null);
+  t('campaign changes: ending soon is a campaign that is still running, so moving in or out of it is neither', cK('status', 'RUNNING', 'ENDING_SOON').direction === 'neither' && cK('status', 'ENDING_SOON', 'RUNNING').direction === 'neither' && cK('status', 'ENDING_SOON', 'PAUSED').direction === 'stopped' && cK('status', 'PAUSED', 'ENDING_SOON').direction === 'activated', [cK('status', 'RUNNING', 'ENDING_SOON').direction, cK('status', 'ENDING_SOON', 'PAUSED').direction]);
+  t('campaign changes: a move between two stopped states changes nothing about whether the ads run', cK('status', 'PAUSED', 'ENDED').direction === 'neither' && cK('status', 'ENDED', 'PAUSED').direction === 'neither', null);
+  t('campaign changes: a new campaign is activated and a campaign gone from eBay is stopped', cK('created', '', 'RUNNING').kind === 'campaign_created' && cK('created', '', 'RUNNING').direction === 'activated' && cK('removed', 'RUNNING', '').kind === 'campaign_removed' && cK('removed', 'RUNNING', '').direction === 'stopped' && cK('removed', 'PAUSED', '').direction === 'stopped', null);
+  t('campaign changes: a budget, a rename, an item list and the portal\'s own per-item rows are on neither page, so nothing is counted twice', cK('budget', '5', '8').direction === 'neither' && cK('budget', '5', '8').kind === 'campaign_budget' && cK('renamed', 'a', 'b').direction === 'neither' && cK('items', '3', '4').direction === 'neither' && cK('cpc_rule', '', 'x').direction === 'neither' && cK('ad-paused', 'ACTIVE', 'PAUSED').direction === 'neither' && cK('remove_item', '', 'removed').direction === 'neither', null);
+  t('changes: every kind either page shows is named in the two lists, and no kind is on both', F.ADTOOL_CHANGE_STOPPED_KINDS.concat(F.ADTOOL_CHANGE_ACTIVATED_KINDS).every(k => Object.keys(adKinds).concat(['campaign_paused', 'campaign_ended', 'campaign_removed', 'campaign_started', 'campaign_created']).indexOf(k) >= 0) && F.ADTOOL_CHANGE_STOPPED_KINDS.filter(k => F.ADTOOL_CHANGE_ACTIVATED_KINDS.indexOf(k) >= 0).length === 0, null);
+
+  /* (d) who changed it */
+  const apRow = (o) => Object.assign({ day: '2026-10-16', account: 'A', item_id: '111', campaign_id: 'c1', decision_id: 'd1', op: 'status', mode: 'live', payload_json: JSON.stringify({ op: 'status', to: 'PAUSED' }) }, o || {});
+  const evStop = { account: 'A', item_id: '111', campaign_id: 'c1', day: '2026-10-16', direction: 'stopped' };
+  let at1 = F.adtChangeAttribution(evStop, [apRow()]);
+  t('who: a change the portal\'s own record matches is the portal\'s, with the instruction beside it', at1.who === 'tool' && at1.tool.op === 'status' && at1.tool.mode === 'live' && at1.tool.decision_id === 'd1', at1);
+  t('who: a record for a DIFFERENT listing on the same day is refused', F.adtChangeAttribution(evStop, [apRow({ item_id: '222' })]).who === 'ebay', null);
+  t('who: a record pointing the OTHER way is refused', F.adtChangeAttribution(evStop, [apRow({ payload_json: JSON.stringify({ to: 'ACTIVE' }) })]).who === 'ebay' && F.adtChangeAttribution(Object.assign({}, evStop, { direction: 'activated' }), [apRow()]).who === 'ebay', null);
+  t('who: a record from another day, another account, another campaign or another operation is refused', F.adtChangeAttribution(evStop, [apRow({ day: '2026-10-15' })]).who === 'ebay' && F.adtChangeAttribution(evStop, [apRow({ account: 'B' })]).who === 'ebay' && F.adtChangeAttribution(evStop, [apRow({ campaign_id: 'c9' })]).who === 'ebay' && F.adtChangeAttribution(evStop, [apRow({ op: 'budget' })]).who === 'ebay', null);
+  /* the apply log's three modes are 'live' (it reached eBay), 'would-send' (the account's live switch
+     is off, so nothing left the portal) and 'blocked' (a daily limit held it). Only the first can be
+     why eBay's answer changed, and live apply is on for ONE account, so crediting a would-send row
+     would have put most of the fleet's by-hand pauses down to the tool every single day. */
+  t('who: only a record the portal actually SENT counts, so a would-send and a blocked one are both refused', F.adtChangeAttribution(evStop, [apRow({ mode: 'live' })]).who === 'tool' && F.adtChangeAttribution(evStop, [apRow({ mode: 'would-send' })]).who === 'ebay' && F.adtChangeAttribution(evStop, [apRow({ mode: 'blocked' })]).who === 'ebay' && F.adtChangeAttribution(evStop, [apRow({ mode: '' })]).who === 'ebay', [F.adtChangeAttribution(evStop, [apRow({ mode: 'would-send' })]).who, F.adtChangeAttribution(evStop, [apRow({ mode: 'blocked' })]).who]);
+  t('who: a sent record is still found when the ones that were never sent are sitting in front of it', F.adtChangeAttribution(evStop, [apRow({ mode: 'would-send' }), apRow({ mode: 'blocked' }), apRow({ mode: 'live' })]).who === 'tool' && F.adtChangeAttribution(evStop, [apRow({ mode: 'would-send' }), apRow({ mode: 'blocked' }), apRow({ mode: 'live' })]).tool.mode === 'live', null);
+  t('who: the page only ever asks the log for what was sent, so the cap is not eaten by rows that were not', /FROM adtool_apply_log WHERE day = \?1 AND mode = 'live'/.test(p15Src) && /String\(r\.mode \|\| ''\) !== 'live'/.test(p15Src), null);
+  t('who: with nothing to match against, and on a change that is neither, nobody is ever named', F.adtChangeAttribution(evStop, []).who === 'ebay' && F.adtChangeAttribution(evStop, []).tool === null && F.adtChangeAttribution(evStop, null).who === 'ebay' && F.adtChangeAttribution(Object.assign({}, evStop, { direction: 'neither' }), [apRow()]).who === 'ebay', null);
+  t('who: a campaign change matches on the campaign, because it has no listing of its own', F.adtChangeAttribution({ account: 'A', item_id: '', campaign_id: 'c1', day: '2026-10-16', direction: 'stopped' }, [apRow({ item_id: '' })]).who === 'tool' && F.adtChangeAttribution({ account: 'A', item_id: '', campaign_id: 'c2', day: '2026-10-16', direction: 'stopped' }, [apRow({ item_id: '' })]).who === 'ebay', null);
+  t('who: the state the portal was aiming at is read out of what it sent, however it is carried', F.adtApplyTargetState({ to: 'paused' }) === 'PAUSED' && F.adtApplyTargetState({ payload_json: '{"to":"ACTIVE"}' }) === 'ACTIVE' && F.adtApplyTargetState({ payload_json: 'not json' }) === '' && F.adtApplyTargetState(null) === '', null);
+
+  /* (e) the fourteen day archive */
+  const arcW = F.adtUkDayWindows('2026-10-16', 14);
+  const arc = F.adtChangeArchive(arcW, [
+    { at: '2026-10-15 23:30:00', direction: 'stopped', n: 2 },     // 00:30 UK on the 16th
+    { at: '2026-10-16 09:00:00', direction: 'activated', n: 5 },
+    { at: '2026-10-15 09:00:00', direction: 'stopped', n: 1 },
+    { at: '2026-10-16 23:30:00', direction: 'stopped', n: 9 },     // 00:30 UK on the 17th: outside the window
+    { at: '2026-10-14 12:00:00', direction: 'neither', n: 7 },
+  ]);
+  t('archive: fourteen entries, newest first, with a zero on a day nothing happened', arc.length === 14 && arc[0].day === '2026-10-16' && arc[13].day === '2026-10-03' && arc[2].stopped === 0 && arc[2].activated === 0, arc.slice(0, 3));
+  t('archive: a change from the last hour of a summer evening is counted on the UK day it happened', arc[0].stopped === 2 && arc[0].activated === 5 && arc[1].stopped === 1, [arc[0], arc[1]]);
+  t('archive: a change after the window, and a change that is neither, are not counted at all', arc.reduce((s, r) => s + r.stopped + r.activated, 0) === 8, arc.reduce((s, r) => s + r.stopped + r.activated, 0));
+  t('archive: it carries only the day and the two counts, and is safe on nothing at all', Object.keys(arc[0]).sort().join(',') === 'activated,day,stopped' && F.adtChangeArchive(null, null).length === 0 && F.adtChangeArchive(arcW, null)[0].stopped === 0, Object.keys(arc[0]).sort());
+
+  /* (f) peak times only: does this listing sell in one part of the day */
+  const pk = (u, off, rl) => F.adtPeakRule({ slot_units: u, spend_off_peak_7d: off }, rl || F.adtPeakRules({}));
+  let pv = pk([2, 2, 2, 14], 12.4);                                 // 20 units, 70 % in the evening
+  t('peak: twenty units with seventy per cent in one stretch is suggested', pv.suggested === true && pv.peak_slot === 3 && pv.peak_slot_name === 'evening' && pv.units_28d === 20 && pv.units_in_peak === 14, pv);
+  pv = pk([2, 2, 1, 15], 12.4);                                     // 20 units, 75 %
+  t('peak: and the sentence names the stretch, the clock hours and the money it spent outside them', /evening/.test(pv.why) && /17:00 and midnight/.test(pv.why) && /£12\.40/.test(pv.why) && /75%/.test(pv.why), pv.why);
+  t('peak: forty nine per cent in its best stretch is not suggested', pk([49, 30, 21, 0], 5).suggested === false && pk([49, 30, 21, 0], 5).peak_share === 0.49 && pk([50, 30, 20, 0], 5).suggested === true, pk([49, 30, 21, 0], 5));
+  t('peak: nine units is not suggested however concentrated they are', pk([0, 0, 0, 9], 5).suggested === false && pk([0, 0, 0, 9], 5).peak_share === 1, pk([0, 0, 0, 9], 5));
+  t('peak: ten units at exactly half is suggested, because both figures are read as at least', pk([5, 0, 0, 5], 1).suggested === true && pk([4, 0, 0, 5], 1).suggested === false, [pk([5, 0, 0, 5], 1).suggested, pk([4, 0, 0, 5], 1).suggested]);
+  t('peak: the figures handed in are honoured, so a manager who lowers either one changes who is listed', pk([49, 30, 21, 0], 5, { share: 0.4, min_units: 10, window_days: 28 }).suggested === true && pk([49, 30, 21, 0], 5, { share: 0.6, min_units: 10, window_days: 28 }).suggested === false && pk([0, 0, 0, 9], 5, { share: 0.5, min_units: 5, window_days: 28 }).suggested === true && pk([2, 2, 2, 14], 5, { share: 0.9, min_units: 10, window_days: 28 }).suggested === false, null);
+  t('peak: a listing with no units at all is not suggested and says there is nothing to read', pk([0, 0, 0, 0], 0).suggested === false && pk([0, 0, 0, 0], 0).units_28d === 0 && /nothing to read/.test(pk([0, 0, 0, 0], 0).why), pk([0, 0, 0, 0], 0).why);
+  t('peak: the sentence for one that just misses prints the figures in force, not fixed ones', /fewer than the 5 /.test(pk([0, 0, 0, 4], 1, { share: 0.5, min_units: 5, window_days: 28 }).why) && /under the 70%/.test(pk([10, 10, 10, 19], 1, { share: 0.7, min_units: 10, window_days: 28 }).why), [pk([0, 0, 0, 4], 1, { share: 0.5, min_units: 5, window_days: 28 }).why, pk([10, 10, 10, 19], 1, { share: 0.7, min_units: 10, window_days: 28 }).why]);
+  t('peak: the morning, afternoon and night stretches name their own clock hours', /06:00 and noon/.test(pk([0, 20, 0, 0], 1).why) && /noon and 17:00/.test(pk([0, 0, 20, 0], 1).why) && /midnight and 06:00/.test(pk([20, 0, 0, 0], 1).why) && /at night/.test(pk([20, 0, 0, 0], 1).why), null);
+  /* nought sampled hours is NOT nought pounds. A listing nobody has a reading for spent an unknown
+     amount outside its hours, and a page that prints £0.00 there is read as "it wastes nothing". */
+  const pkBlind = F.adtPeakRule({ slot_units: [2, 2, 2, 14], spend_off_peak_7d: 0, hours_sampled: 0 }, F.adtPeakRules({}));
+  t('peak: with no hour of the week sampled, the money outside the peak is nothing-known, never nought pounds', pkBlind.suggested === true && pkBlind.spend_off_peak_7d === null && pkBlind.hours_sampled_7d === 0 && /cannot be seen yet/.test(pkBlind.why) && !/£/.test(pkBlind.why), pkBlind);
+  const pkSeen = F.adtPeakRule({ slot_units: [2, 2, 2, 14], spend_off_peak_7d: 0, hours_sampled: 9 }, F.adtPeakRules({}));
+  t('peak: with hours sampled and nothing spent outside the peak, nought pounds is the honest answer and is printed', pkSeen.spend_off_peak_7d === 0 && pkSeen.hours_sampled_7d === 9 && /£0\.00 outside that/.test(pkSeen.why), pkSeen.why);
+  t('peak: asked without an hour count at all, it says the money exactly as it always did', pk([2, 2, 2, 14], 12.4).spend_off_peak_7d === 12.4 && pk([2, 2, 2, 14], 12.4).hours_sampled_7d === null && /£12\.40/.test(pk([2, 2, 2, 14], 12.4).why), pk([2, 2, 2, 14], 12.4).hours_sampled_7d);
+  t('peak page: the three spend figures are kept apart on the row, and the two sampled ones are nothing-known where nobody looked', /spend_off_peak_7d: v\.spend_off_peak_7d/.test(p15Src) && /hours_sampled_7d: hrs\.length/.test(p15Src) && /spend_sampled_7d: hrs\.length \? \(sampled7\[id\] === undefined \? 0 : sampled7\[id\]\) : null/.test(p15Src) && /hours_sampled: hrs\.length/.test(p15Src), null);
+  t('peak page: the money outside the hours is read over the SAME hours the stretches were judged on, excluded the same way', /NOT \(h\.day < \?3 AND h\.hour = 8\)/.test(p15Src) && /ADTOOL_CARRY_FIX_DAY/.test(p15Src), null);
+  t('peak page: every suggested listing is asked for its name and picture, the ones already on the by-hand list too', /const titleIds = bandIds;/.test(p15Src) && !/bandIds\.filter\(id => !manualSet\[id\]\)/.test(p15Src), null);
+  let pr = F.adtPeakRules({});
+  t('peak figures: the defaults stand where nothing is set', pr.share === 0.5 && pr.min_units === 10 && pr.window_days === 28 && F.ADTOOL_PEAK_DEFAULTS.share === 0.5 && F.ADTOOL_PEAK_DEFAULTS.min_units === 10, pr);
+  pr = F.adtPeakRules({ adtool_peak_share: '0.65', adtool_peak_min_units: '25' });
+  t('peak figures: what the owner has set is used, text and all', pr.share === 0.65 && pr.min_units === 25, pr);
+  t('peak figures: rubbish, nothing and a share over one all fall back or are held at one', F.adtPeakRules({ adtool_peak_share: 'x', adtool_peak_min_units: '' }).share === 0.5 && F.adtPeakRules({ adtool_peak_min_units: 'x' }).min_units === 10 && F.adtPeakRules({ adtool_peak_share: '4' }).share === 1 && F.adtPeakRules({ adtool_peak_share: '0' }).share === 0.5, null);
+  t('peak figures: the two keys the owner sets them under are named in one place', F.ADTOOL_PEAK_CONFIG_KEYS.share === 'adtool_peak_share' && F.ADTOOL_PEAK_CONFIG_KEYS.min_units === 'adtool_peak_min_units' && F.ADTOOL_SLOT_NAMES.join(',') === 'night,morning,afternoon,evening', null);
+
+  /* (g) what it spent outside the hours it sells in */
+  const offHours = [{ hour: 7, spend: 1.5 }, { hour: 18, spend: 4 }, { hour: 19, spend: 3 }, { hour: 20, spend: 2 }, { hour: 2, spend: 0.75 }];
+  t('outside its hours: every hour inside a selling stretch is left out', F.adtOffPeakSpend(offHours, [[18, 20]]) === 2.25 && F.adtOffPeakSpend(offHours, [[18, 20], [7, 7]]) === 0.75, [F.adtOffPeakSpend(offHours, [[18, 20]]), F.adtOffPeakSpend(offHours, [[18, 20], [7, 7]])]);
+  t('outside its hours: with no selling stretch at all, every hour is outside', F.adtOffPeakSpend(offHours, []) === 11.25 && F.adtOffPeakSpend(offHours, null) === 11.25, F.adtOffPeakSpend(offHours, []));
+  t('outside its hours: the first reading of a day belongs to no hour of trading and is never counted', F.adtOffPeakSpend([{ hour: 8, spend: 1, carry_spend: 99 }, { hour: 9, spend: 2, carry_spend: 40 }], []) === 3 && !/carry_spend/.test(String(F.adtOffPeakSpend)), F.adtOffPeakSpend([{ hour: 8, spend: 1, carry_spend: 99 }], []));
+  t('outside its hours: an hour outside the clock, and nothing at all, add nothing', F.adtOffPeakSpend([{ hour: 24, spend: 5 }, { hour: -1, spend: 5 }, { hour: 3, spend: 1 }], []) === 1 && F.adtOffPeakSpend(null, []) === 0 && F.adtOffPeakSpend([null], []) === 0, null);
+  t('outside its hours: a stretch is read inclusive at both ends, the way the running page prints it', F.adtInHourBands(18, [[18, 20]]) === true && F.adtInHourBands(20, [[18, 20]]) === true && F.adtInHourBands(17, [[18, 20]]) === false && F.adtInHourBands(21, [[18, 20]]) === false && F.adtInHourBands(5, null) === false, null);
+
+  /* (h) the actions, the writes and the promises, judged on the source */
+  for (const p15Act of ['adtoolChangeDay', 'adtoolPeak', 'adtoolPeakAdd', 'adtoolPeakRemove']) {
+    const blk = p15Src.slice(p15Src.indexOf('  ' + p15Act + ': {'));
+    const body = blk.slice(0, blk.indexOf('\n  },'));
+    const cached = p15Act === 'adtoolChangeDay' || p15Act === 'adtoolPeak';
+    t('change and peak pages: ' + p15Act + ' refuses the wrong role BEFORE it ever looks in the cache', body.indexOf('adtGate') >= 0 && /adtGate\(ctx, null\)/.test(body) && /adtGate\(ctx, 'adtool_page_(changes|peak)'\)/.test(body) && (!cached || body.indexOf('adtKvMemo') > body.indexOf('adtGate')), [p15Act, body.indexOf('adtGate'), body.indexOf('adtKvMemo')]);
+    t('change and peak pages: ' + p15Act + ' seeds its own documentation and switch before the switch is read', body.indexOf('ensureAdtoolPhase15Register') > body.indexOf('adtGate(ctx, null)') && body.indexOf('ensureAdtoolPhase15Register') < body.indexOf("adtGate(ctx, 'adtool_page"), p15Act);
+    t('change and peak pages: ' + p15Act + (cached ? ' is held in the page cache, keyed by the caller\'s profit class' : ' is a write and is NEVER cached'), cached ? (/adtKvMemo\(ctx\.env, 'adtool/.test(body) && /adtProfitClass\(ctx\.user\)/.test(body)) : (body.indexOf('adtKvMemo') < 0 && /ctx\.user \|\| \{\}/.test(body) && /adtPeakCacheClear\(/.test(body)), p15Act);
+  }
+  t('change and peak pages: both actions name their own time to live, and neither outlives the ceiling the gate states', /adtoolChangeDay: 60000, adtoolPeak: 120000/.test(src) && /ADTOOL_KV_TTL_MS\.adtoolChangeDay/.test(p15Src) && /ADTOOL_KV_TTL_MS\.adtoolPeak/.test(p15Src), null);
+  t('peak list: a write drops the cached page for BOTH profit classes, for all accounts and for the listing\'s own', (p15Src.match(/adtKvKey\('adtoolPeak', cls/g) || []).length === 2 && /for \(const cls of \['p', 'np'\]\)/.test(p15Src) && /HOT\.delete/.test(p15Src), (p15Src.match(/adtKvKey\('adtoolPeak', cls/g) || []).length);
+  t('peak list: taking a listing off KEEPS its row with who took it off and when, and deletes nothing', /UPDATE adtool_peak_items SET removed_by = \?2, removed_at = datetime\('now'\)/.test(p15Src) && !/DELETE FROM/.test(p15Src) && /WHERE p\.removed_at = ''/.test(p15Src), null);
+  t('peak list: every write stamps the person who made it', (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length === 2, (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length);
+  t('change and peak pages: nothing is ever sent to eBay, and the only writes at all are the documentation, the switches and the by-hand list', !/fetch\(/.test(p15Src) && !/api\.ebay\.com/.test(p15Src) && !/ebayAccessToken/.test(p15Src) && (p15Src.match(/INSERT INTO/g) || []).length === (p15Src.match(/INSERT INTO (adtool_peak_items|adtool_number_register|portal_config)/g) || []).length && p15Src.replace(/DO UPDATE SET/g, '').match(/UPDATE\s+([A-Za-z_]+)/g).join(',') === 'UPDATE adtool_peak_items', (p15Src.match(/INSERT INTO/g) || []).length);
+  t('change and peak pages: exactly one column is added, nullable, guarded, and the campaign change carries the id from then on', (p15Src.match(/ALTER TABLE/g) || []).length === 1 && /ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''/.test(p15Src) && /INSERT INTO campaign_events \(account, campaign, campaign_id, item_id, change_type, old, new, actor, at\)/.test(src) && /ensureCampaignEventsCampaignId\(env\)/.test(src), null);
+  t('change pages: an older campaign change with no id resolves its name and SAYS the link is a name match', /campaign_id_source/.test(p15Src) && /'matched by name'/.test(p15Src) && /'recorded'/.test(p15Src) && /'unknown'/.test(p15Src), null);
+  t('peak page: the one membership rule the tool shares is reused, never written a second time', /ADTOOL_LIVE_AD_SQL/.test(p15Src) && /adtCampaignStmt\(/.test(p15Src) && !/c\.status LIKE/.test(p15Src), null);
+  t('peak page: the hours it sells in come from the same function the running page uses', /adtBandsAndLevers\(/.test(p15Src) && !/function adtHourBands/.test(p15Src), null);
+  t('change and peak pages: no query asks for the impressions column that is declared and never written', !/impressions/.test(p15Src), null);
+  t('change and peak pages: nothing adds the click fee on top of a day total that already carries it', !/cpc_spend/.test(p15Src), null);
+  t('change and peak pages: every read is bounded, by a day window, a limit or the listings being advertised', (p15Src.match(/LIMIT \d+/g) || []).length >= 6 && !/SELECT \* FROM/.test(p15Src) && /seen_at >= \?1 AND seen_at < \?2/.test(p15Src) && /at >= \?1 AND at < \?2/.test(p15Src) && /day >= \?1 AND day <= \?2/.test(p15Src), (p15Src.match(/LIMIT \d+/g) || []).length);
+  t('change pages: both event tables are cut with the UK day\'s own bounds, never with a slice of the stamp', /adtUkDayUtcBounds\(/.test(p15Src) && !/substr\(seen_at, 1, 10\)/.test(p15Code) && !/substr\(at, 1, 10\)/.test(p15Code) && (p15Src.match(/adtUkDayUtcBounds\(/g) || []).length >= 3, null);
+  t('change pages: the rows are capped and what is held back is reported, and the archive is fourteen days', /ADTOOL_CHANGE_ROW_CAP = 400/.test(p15Src) && /ADTOOL_CHANGE_ARCHIVE_DAYS = 14/.test(p15Src) && /rows_held_back/.test(p15Src), null);
+  /* a day can have ninety ads paused inside six campaigns and not one campaign-level change of its
+     own. One number cannot answer both questions, and a page saying "across 0 campaigns" under
+     ninety paused ads reads as broken, so both are counted and the page names each. */
+  t('change pages: how many changes were at campaign level and how many campaigns were touched are counted apart', /campaigns: campN, campaigns_touched: Object\.keys\(campSeen\)\.length/.test(p15Src) && /campaigns_touched: Object\.keys\(accs\[k\]\.camps\)\.length/.test(p15Src) && /if \(ck\) campSeen\[r\.account \+ '\|' \+ ck\] = 1/.test(p15Src), null);
+  t('change and peak pages: both carry a freshness tag, and the change pages name the slower of the two syncs behind them', /fresh: await adtChangeFresh\(env\)/.test(p15Src) && /fresh: await adtFresh\(env, 'day'\)/.test(p15Src) && /cadence: 'every 15 min'/.test(p15Src) && /job IN \('adsItems', 'adsSync'\)/.test(p15Src), null);
+  t('change pages: the suggested list says what it held back, so two hundred is never read as all of them', /suggested_held_back: Math\.max\(0, first\.length - suggested\.length\)/.test(p15Src) && /ADTOOL_PEAK_SUGGEST_CAP = 200/.test(p15Src), null);
+  t('both page switches are born on and left alone if somebody has already set them', /'adtool_page_changes', 'adtool_page_peak'/.test(p15Src) && /VALUES \(\?1, 'on', datetime\('now'\)\) ON CONFLICT\(key\) DO NOTHING/.test(p15Src), null);
+  t('the two new actions are wired into the router beside the others', /Object\.assign\(ROUTES, ADTOOL_ACTIONS_P15\)/.test(src) && /adtoolChangeDay: \{/.test(p15Src) && /adtoolPeak: \{/.test(p15Src) && /adtoolPeakAdd: \{/.test(p15Src) && /adtoolPeakRemove: \{/.test(p15Src), null);
+
+  /* (i) the report's own line now counts the same way, and points at the page */
+  const rpSrc = src.slice(src.indexOf('async function adtoolReport('), src.indexOf('/* ---- ROAS target (morning chain) ---- */'));
+  t('yesterday\'s report: its ad changes line counts a UK day, where it used to cut a day out of the stamps', /adtUkDayUtcBounds\(day\)/.test(rpSrc) && /seen_at >= \?1 AND seen_at < \?2/.test(rpSrc) && !/substr\(seen_at, 1, 10\) = \?1/.test(rpSrc), null);
+  t('yesterday\'s report: the line is still there, and now says which page it lives on', /ad status changes seen on eBay/.test(rpSrc) && /changes_page: 'adtoolStopped'/.test(rpSrc) && /ad_status_changes:/.test(rpSrc), null);
+
+  /* (j) the register entries for the new numbers */
+  const p15Reg = ['CHANGE_DAY', 'CHANGES_STOPPED', 'CHANGES_ACTIVATED', 'CHANGE_WHO', 'CHANGE_BEFORE', 'CHANGE_ARCHIVE', 'PEAK_SUGGESTED', 'PEAK_OFF_PEAK_SPEND', 'PEAK_MANUAL'].map(id => rgAll.filter(r => r.id === id)[0]);
+  t('register: every new number has an entry naming the rule, the sources, when it recomputes and how it is rechecked', p15Reg.every(r => r && r.name && r.formula && r.sources && r.recompute && r.recheck), p15Reg.map((r, i) => r ? r.id : i));
+  t('register: the entry for a day says plainly that a day is a UK day and that the clocks move', /UK days/.test(p15Reg[0].formula) && /clocks go back/.test(p15Reg[0].formula), p15Reg[0].formula.slice(0, 60));
+  t('register: the entry for who changed something promises nobody is guessed', /Nobody is ever guessed/.test(p15Reg[3].formula), p15Reg[3].formula.slice(-40));
+  t('register: the by-hand list entry says in words that nothing on it reaches eBay', /not a timer/.test(p15Reg[8].formula) && /ever sent to eBay/.test(p15Reg[8].formula) && /read back/.test(p15Reg[8].formula), p15Reg[8].formula.slice(0, 60));
+  t('register: the suggested list entry prints no figure of its own, because the page prints the ones in force', !/\d/.test(p15Reg[6].formula), p15Reg[6].formula);
+
+  /* (k) THE EXPLAINER HOOKS, end to end. A tag on a page carries a label; the shell matches that
+     label against ADT_REG_MAP and shows the register rows the matched keys name. A label with no
+     pattern of its own falls through to the whole register, which is noise where a reader asked one
+     question — so every tag the three new pages carry is resolved here, through the real map, right
+     down to a real row. This is the only test in the file that reads the frontend, and it reads it
+     because the two halves can only be wrong about each other. */
+  const readFile = (rel) => { const n = $.NSString.stringWithContentsOfFileEncodingError(root + '/' + rel, $.NSUTF8StringEncoding, null); return n && n.js ? n.js : ''; };
+  const shellSrc = readFile('src/shell.html');
+  const viewSrc = ['frontend/view-adtool-stopped.js', 'frontend/view-adtool-activated.js', 'frontend/view-adtool-peak.js'].map(readFile).join('\n');
+  let regMap = null, regMapFail = null;
+  try {
+    const mi = shellSrc.indexOf('var ADT_REG_MAP = ['), mj = shellSrc.indexOf('\n];', mi);
+    regMap = new Function('return ' + shellSrc.slice(mi + 'var ADT_REG_MAP = '.length, mj + 3))();
+  } catch (e) { regMapFail = e.message; }
+  t('explainers: the shell\'s map of tag to note parses, and the three new pages were read', !regMapFail && regMap && regMap.length > 20 && viewSrc.length > 10000 && shellSrc.length > 10000, regMapFail || [regMap && regMap.length, viewSrc.length]);
+  /* the labels as they are written at the call sites. Each page has ONE place that builds the tag, so
+     scanning for the tag itself would only find the template; the labels handed to it are what count,
+     and they are literals on purpose so that this test can read them. */
+  const hookLabels = [];
+  (viewSrc.match(/\breg\('[^']+'/g) || []).forEach(m => { const v = m.slice(5, -1); if (hookLabels.indexOf(v) < 0) hookLabels.push(v); });
+  (viewSrc.match(/data-adtreg="[a-z0-9 ]+"/g) || []).forEach(m => { const v = m.slice(14, -1); if (hookLabels.indexOf(v) < 0) hookLabels.push(v); });
+  const hookDead = [], hookWhole = [];
+  for (const lab of hookLabels) {
+    let keys = null;
+    for (const row of (regMap || [])) { if (row[0].test(lab)) { keys = row[1]; break; } }
+    if (!keys) { hookWhole.push(lab); continue; }
+    const hit = rgAll.filter(r => keys.some(k => String(r.sources).indexOf(k) >= 0 || r.id === k));
+    if (!hit.length) hookDead.push(lab);
+  }
+  t('explainers: the new pages carry hooks at all, on the day figures, on who changed something and on the peak money', hookLabels.length >= 6 && hookLabels.indexOf('changes on this day') >= 0 && hookLabels.indexOf('who changed it') >= 0 && hookLabels.indexOf('the 7 days before') >= 0 && hookLabels.indexOf('spend outside the peak') >= 0 && hookLabels.indexOf('one part of the day') >= 0, hookLabels);
+  t('explainers: EVERY hook has a pattern of its own, so none of them opens the whole register instead of an answer', hookWhole.length === 0, hookWhole);
+  t('explainers: and every pattern they match names at least one register entry that really exists', hookDead.length === 0, hookDead);
+  t('explainers: the day figures open the day notes, who changed something opens its own, and the peak money opens the peak note', (() => {
+    const resolve = (lab) => { for (const row of (regMap || [])) { if (row[0].test(lab)) { return rgAll.filter(r => row[1].some(k => String(r.sources).indexOf(k) >= 0 || r.id === k)).map(r => r.id); } } return []; };
+    const a1 = resolve('changes on this day'), a2 = resolve('who changed it'), a3 = resolve('spend outside the peak'), a4 = resolve('one part of the day'), a5 = resolve('the 7 days before'), a6 = resolve('the change archive'), a7 = resolve('the peak hours work list');
+    return a1.indexOf('CHANGES_STOPPED') >= 0 && a1.indexOf('CHANGES_ACTIVATED') >= 0 && a2.join(',') === 'CHANGE_WHO' && a3.join(',') === 'PEAK_OFF_PEAK_SPEND' && a4.join(',') === 'PEAK_SUGGESTED' && a5.join(',') === 'CHANGE_BEFORE' && a6.indexOf('CHANGE_ARCHIVE') >= 0 && a7.join(',') === 'PEAK_MANUAL';
+  })(), null);
+
+  /* (l) the fields the three pages read, against the ones the engine actually sends. A field the page
+     reads and the engine never sends is an EMPTY CELL, and an empty cell where a number belongs is
+     read as a nought. These are the ones a reader would act on. */
+  const sends = (f) => new RegExp('\\b' + f + '\\b').test(p15Src);
+  const reads = (f) => new RegExp('\\.' + f + '\\b').test(viewSrc);
+  const bothWays = ['campaigns_touched', 'all_accounts', 'suggested_held_back', 'suggested_total', 'spend_sampled_7d', 'hours_sampled_7d', 'peak_share_pct', 'hour_basis', 'campaign_id_source', 'rows_held_back', 'rows_total', 'uk_bounds', 'units_day_before', 'spend_day_before', 'removed_or_added', 'already_manual', 'live_now', 'hours_judged'];
+  t('fields: every figure the three pages read is one the engine really sends, so no cell is empty where a number belongs', bothWays.every(f => sends(f) && reads(f)), bothWays.filter(f => !(sends(f) && reads(f))).map(f => [f, sends(f), reads(f)]));
+  t('fields: and the numbers the engine went to the trouble of sending are used rather than left on the floor', ['spend_sampled_7d', 'suggested_held_back', 'all_accounts', 'campaigns_touched', 'peak_share_pct', 'hour_basis'].every(f => reads(f)), ['spend_sampled_7d', 'suggested_held_back', 'all_accounts', 'campaigns_touched', 'peak_share_pct', 'hour_basis'].filter(f => !reads(f)));
+  t('fields: a share is read as the fraction it is, and the page never divides one twice or prints a fraction as a percentage', /Math\.round\(v \* 100\) \+ '%'/.test(viewSrc) && !/if \(v > 1\) return Math\.round\(v\)/.test(viewSrc), null);
+  t('fields: units a day keeps a decimal under ten, because an average a day is routinely under one', /function unitsNum/.test(viewSrc) && /v\.toFixed\(1\)/.test(viewSrc) && /unitsNum\(T\.units_day_before\)/.test(viewSrc), null);
+  t('fields: choosing an account asks the engine again rather than filtering the fleet\'s rows under the fleet\'s totals', /S\.account = this\.getAttribute\('data-cdya'\) \|\| '';[\s\S]{0,900}load\(false\)/.test(viewSrc) && /all_accounts/.test(viewSrc), null);
+  t('fields: the money outside the peak is shown against the sampled hours it belongs inside, never against the whole week', /we can see/.test(viewSrc) && /gbp\(samp\)/.test(viewSrc) && /all hours/.test(viewSrc) && !/in all, 7 days/.test(viewSrc), null);
+  /* (m) what else this batch touched. The sort on the command centre, the one page spliced into BOTH
+     portals; the factory the two change pages share; and the one added column in the five-minute
+     campaign sync, which is how the portal sees eBay at all. */
+  const acSrc = readFile('frontend/view-adsCentre.js');
+  t('command centre: with no sort chosen the board keeps its own order, key for key, as the engine sent it', /items\.sort\(\(a, b\) => \(b\.waste - a\.waste\) \|\| \(b\.spend_today - a\.spend_today\) \|\| \(b\.spend_14d - a\.spend_14d\)\)/.test(src) && /if \(wa !== wb\) \{ return wb - wa; \}/.test(acSrc) && /if \(sa !== sb\) \{ return sb - sa; \}/.test(acSrc) && /acNum\(b\.spend_14d\) \|\| 0\) - \(acNum\(a\.spend_14d\) \|\| 0\)/.test(acSrc), null);
+  t('command centre: a sort never asks the engine again, every heading says what it sorts by, and the choice is remembered', /acSortRows\(rows\)/.test(acSrc) && /AC\.items = \(d\.items \|\| \[\]\)/.test(acSrc) && (acSrc.match(/sorts: '/g) || []).length === 8 && /localStorage\.setItem\(AC_SORT_KEY/.test(acSrc) && /title="' \+ esc\('Sort by ' \+ c\.sorts\)/.test(acSrc), (acSrc.match(/sorts: '/g) || []).length);
+  t('command centre: an empty cell sinks to the bottom whichever way a column is pointed, so a gap never reads as the smallest number', /if \(va == null\) \{ return 1; \}/.test(acSrc) && /if \(vb == null\) \{ return -1; \}/.test(acSrc) && /if \(!va && vb\) \{ return 1; \}/.test(acSrc), null);
+  const actSrc = readFile('frontend/view-adtool-activated.js');
+  t('the two change pages: the shared page is asked for at RENDER time, never while the file is loading, because the files splice in name order', /typeof window\.adtChangeDayPage === 'function'/.test(actSrc) && !/^\s*(var|let|const)\s+PAGE\s*=\s*window\.adtChangeDayPage/m.test(actSrc) && /render: function \(\) \{[\s\S]{0,80}var p = page\(\);/.test(actSrc) && /Not available/.test(actSrc), null);
+  const viewCode = viewSrc.replace(/\/\*[\s\S]*?\*\//g, '');   /* the prose names the shared page too; this is about the code */
+  t('the two change pages: only one file hands the shared page over, and only the other one asks for it', (viewCode.match(/window\.adtChangeDayPage = /g) || []).length === 1 && (viewCode.match(/window\.adtChangeDayPage/g) || []).length === 3, (viewCode.match(/window\.adtChangeDayPage/g) || []).length);
+  /* THE MOST DANGEROUS LINE IN THE BATCH. The campaign sync runs every five minutes and is the only
+     way the portal sees eBay's campaigns at all. The added column is written where it is there, and a
+     database the ALTER has not reached must still record the change on the old column list. */
+  const evIns = src.slice(src.indexOf('INSERT INTO campaign_events (account, campaign, campaign_id'), src.indexOf('if (evN <= 4)'));
+  t('campaign sync: the change is written with the id, and a database without the column still records it on the old columns', /INSERT INTO campaign_events \(account, campaign, campaign_id, item_id, change_type, old, new, actor, at\) VALUES \(\?1, \?2, \?3, '', \?4, \?5, \?6, '', datetime\('now'\)\)/.test(evIns) && /INSERT INTO campaign_events \(account, campaign, item_id, change_type, old, new, actor, at\) VALUES \(\?1, \?2, '', \?3, \?4, \?5, '', datetime\('now'\)\)/.test(evIns) && /\} catch \(e\) \{/.test(evIns), null);
+  t('campaign sync: the fallback binds one value fewer, in the order its own columns ask for them', /\.bind\(acct, nm, String\(ev\.id \|\| ''\), ev\.type, String\(ev\.old\), String\(ev\.nw\)\)/.test(evIns) && /\.bind\(acct, nm, ev\.type, String\(ev\.old\), String\(ev\.nw\)\)/.test(evIns), null);
+  t('campaign sync: the column is added once, guarded, and a failure to add it never stops a change being recorded', /try \{ await ensureCampaignEventsCampaignId\(env\); \} catch \(e\)/.test(src) && /try \{ await env\.DB\.prepare\("ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''"\)\.run\(\); \} catch \(e\)/.test(src), null);
+  t('campaign sync: every other writer of a campaign change names its columns and leaves the new one to its default', (src.match(/INSERT INTO campaign_events \(/g) || []).length === 8 && (src.match(/INSERT INTO campaign_events \(account, campaign, item_id,/g) || []).length === 7 && !/INSERT INTO campaign_events VALUES/.test(src), (src.match(/INSERT INTO campaign_events \(/g) || []).length);
+
+  t('fields: nothing on the three pages is ever sent to eBay, and no collective profit figure is printed anywhere on them', !/ebay\.com\/sh\/ads\/dashboard\/campaign\/[^']*'\s*\+/.test(viewSrc) && !/adtProfitCell/.test(viewSrc) && (viewSrc.match(/api\('[A-Za-z]+'/g) || []).every(c => /adtoolChangeDay|adtoolPeak/.test(c)), (viewSrc.match(/api\('[A-Za-z]+'/g) || []));
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

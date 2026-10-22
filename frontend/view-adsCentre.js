@@ -4,7 +4,10 @@
 (function () {
 
   var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
-  var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
+  /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
+     first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
+  var AC = { timer: null, days: 14, acct: '', from: '', to: '', items: [], lastDays: 14, sort: { key: '', dir: -1 } };
+  var AC_SORT_KEY = 'm98m:adsCentre:sort';
 
   /* `acc-tbl`, not `ac-tbl`: view-adtool-campaigns.js declares its OWN `.ac-tbl` with a different
    body. VIEW_CSS is one array joined in splice order, and the two portals splice these files in a
@@ -23,6 +26,10 @@ VIEW_CSS.push(
     '.acc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}' +
     '.acc-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.acc-tbl th:first-child{text-align:left}' +
+    /* every heading of the per-item board sorts it (owner, 22 Oct) */
+    '.acc-tbl th.acc-s{cursor:pointer;user-select:none}' +
+    '.acc-tbl th.acc-s:hover{color:var(--gold-a)}' +
+    '.acc-tbl th .acc-ar{color:var(--gold-a);margin-left:3px}' +
     '.acc-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.acc-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
@@ -41,6 +48,111 @@ VIEW_CSS.push(
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
   function acROAS(rev, sp) { return Number(sp) > 0.005 ? (Number(rev) / Number(sp)).toFixed(1) + '\u00d7' : '\u2014'; }
+  function acNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+
+  /* \u2500\u2500 the per-item board, sortable on every column (owner, 22 Oct: "add sort option on data in ad
+     commands center"). The rows are already in hand, so a sort never asks the engine again. Each
+     column heading says what it sorts by; numbers sort numerically, text alphabetically, and an
+     empty cell sinks to the bottom whichever way the column is pointed. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+  var AC_COLS = [
+    { key: 'title', label: 'Item', text: true, sorts: 'the listing title, A to Z',
+      val: function (r) { return String(r.title || r.item_id || ''); },
+      cell: function (r) {
+        return '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+          esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
+          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) +
+          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>';
+      } },
+    { key: 'spend_today', label: 'Spend today', sorts: 'what the listing has spent on ads today',
+      val: function (r) { return acNum(r.spend_today); }, cell: function (r) { return acGBP(r.spend_today); } },
+    { key: 'clicks_today', label: 'Clicks', sorts: 'clicks on the ad today',
+      val: function (r) { return acNum(r.clicks_today); }, cell: function (r) { return r.clicks_today || 0; } },
+    { key: 'cpc_today', label: 'Avg CPC', sorts: 'the average cost of a click today',
+      val: function (r) { return acNum(r.cpc_today); }, cell: function (r) { return r.cpc_today ? acGBP(r.cpc_today) : '\u2014'; } },
+    { key: 'sold_today', label: 'Sold via ads', sorts: 'units eBay credits to the ad today',
+      val: function (r) { return acNum(r.sold_today); }, cell: function (r) { return r.sold_today || 0; } },
+    { key: 'spend_14d', label: function () { return 'Spend ' + AC.lastDays + 'd'; }, sorts: 'ad spend over the window',
+      val: function (r) { return acNum(r.spend_14d); }, cell: function (r) { return acGBP(r.spend_14d); } },
+    { key: 'clicks_14d', label: function () { return 'Clicks ' + AC.lastDays + 'd'; }, sorts: 'clicks over the window',
+      val: function (r) { return acNum(r.clicks_14d); }, cell: function (r) { return r.clicks_14d || 0; } },
+    { key: 'sold_14d', label: function () { return 'Sold ' + AC.lastDays + 'd'; }, sorts: 'units from ads over the window',
+      val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } }
+  ];
+
+  function acCol(key) {
+    for (var i = 0; i < AC_COLS.length; i++) { if (AC_COLS[i].key === key) { return AC_COLS[i]; } }
+    return null;
+  }
+  function acLabel(c) { return typeof c.label === 'function' ? c.label() : c.label; }
+  function acSortRestore() {
+    try {
+      var raw = localStorage.getItem(AC_SORT_KEY);
+      if (!raw) { return; }
+      var s = JSON.parse(raw);
+      if (s && acCol(s.key)) { AC.sort = { key: s.key, dir: Number(s.dir) < 0 ? -1 : 1 }; }
+    } catch (e) {}
+  }
+  function acSortSave() { try { localStorage.setItem(AC_SORT_KEY, JSON.stringify(AC.sort)); } catch (e) {} }
+  function acSortRows(rows) {
+    var out = rows.slice();
+    var col = AC.sort.key ? acCol(AC.sort.key) : null;
+    if (!col) {
+      /* Nothing chosen: the board's own order, reproduced key for key — waste rows first, then the
+         biggest spend today, then the biggest spend over the window. That third key is not decoration:
+         every listing on the board for its window spend alone has nought spend today, so without it a
+         long tail of rows ties and their order depends on the sort being a stable one. */
+      return out.sort(function (a, b) {
+        var wa = a.waste ? 1 : 0, wb = b.waste ? 1 : 0;
+        if (wa !== wb) { return wb - wa; }
+        var sa = acNum(a.spend_today) || 0, sb = acNum(b.spend_today) || 0;
+        if (sa !== sb) { return sb - sa; }
+        return (acNum(b.spend_14d) || 0) - (acNum(a.spend_14d) || 0);
+      });
+    }
+    var dir = AC.sort.dir;
+    return out.sort(function (a, b) {
+      var va = col.val(a), vb = col.val(b);
+      if (col.text) {
+        va = String(va == null ? '' : va).toLowerCase(); vb = String(vb == null ? '' : vb).toLowerCase();
+        if (!va && vb) { return 1; }
+        if (va && !vb) { return -1; }                          /* an empty name sinks either way */
+        return va < vb ? -dir : (va > vb ? dir : 0);
+      }
+      if (va == null && vb == null) { return 0; }
+      if (va == null) { return 1; }
+      if (vb == null) { return -1; }                           /* nulls sink whichever way we sort */
+      return (va - vb) * dir;
+    });
+  }
+  function acPaintItems() {
+    var box = $('acItems');
+    if (!box) { return; }
+    var rows = AC.items || [];
+    if (!rows.length) {
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today \u2014 the first intraday report lands within ~10 minutes of the day starting.</div>';
+      return;
+    }
+    var h = '<div class="scroll"><table class="acc-tbl"><thead><tr>' + AC_COLS.map(function (c) {
+      var on = AC.sort.key === c.key;
+      return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
+        esc(acLabel(c)) + (on ? '<span class="acc-ar">' + (AC.sort.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '') + '</th>';
+    }).join('') + '</tr></thead><tbody>';
+    acSortRows(rows).forEach(function (r) {
+      h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
+        AC_COLS.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+    });
+    h += '</tbody></table></div>';
+    box.innerHTML = h;
+    var ths = box.querySelectorAll('th[data-ac-k]');
+    for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
+      var k = this.getAttribute('data-ac-k'), col = acCol(k);
+      if (!col) { return; }
+      if (AC.sort.key === k) { AC.sort.dir = -AC.sort.dir; }
+      else { AC.sort = { key: k, dir: col.text ? 1 : -1 }; }
+      acSortSave();
+      acPaintItems();
+    };
+  }
 
   function acLoad() {
     var box = $('acBody');
@@ -131,28 +243,14 @@ VIEW_CSS.push(
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
           a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
       }).join('') + '</div>';
-      var rows = d.items || [];
-      if (!rows.length) {
-        h += '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today — the first intraday report lands within ~10 minutes of the day starting.</div>';
-      } else {
-        h += '<div class="scroll"><table class="acc-tbl"><thead><tr>' +
-          '<th>Item</th><th>Spend today</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th>' +
-          '<th>Spend ' + (d.days || 14) + 'd</th><th>Clicks ' + (d.days || 14) + 'd</th><th>Sold ' + (d.days || 14) + 'd</th></tr></thead><tbody>';
-        rows.forEach(function (r) {
-          h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '><td>' +
-            '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
-            esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
-            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' · ' + esc(String(r.account)) +
-            (r.waste ? ' · <b style="color:var(--bad)">£3+ TODAY, NO ORDER — PAUSE OR FIX</b>' : '') + '</div></td>' +
-            '<td>' + acGBP(r.spend_today) + '</td><td>' + (r.clicks_today || 0) + '</td>' +
-            '<td>' + (r.cpc_today ? acGBP(r.cpc_today) : '—') + '</td><td>' + (r.sold_today || 0) + '</td>' +
-            '<td>' + acGBP(r.spend_14d) + '</td><td>' + (r.clicks_14d || 0) + '</td><td>' + (r.sold_14d || 0) + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-      }
+      /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
+      AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
+      AC.lastDays = Number(d.days) || 14;
+      h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
+      acPaintItems();
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
     });
@@ -180,6 +278,7 @@ VIEW_CSS.push(
         '<div class="card enter d2"><div class="bd" id="acBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
+      acSortRestore();
       var rf = $('acRefresh');
       if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
       var sel = $('acAcct');

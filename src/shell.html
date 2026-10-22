@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -1330,7 +1330,18 @@ var ADT_REG_MAP = [
   [/^checks?$/i, ['PROFIT_SHEET_LAW', 'ACTUAL_PROFIT_LISTING_DAY']],
   [/written from the numbers|model, validated|narrative/i, ['NARRATIVE']],
   [/weekly spend and return|review window/i, ['ROAS_LADDER']],
-  [/^generated /i, ['REPORT_YESTERDAY']]
+  [/^generated /i, ['REPORT_YESTERDAY']],
+  /* Owner batch 22 Oct: Stopped yesterday, Activated today, Peak times only. A tag whose label has no
+     pattern here opens the WHOLE register, so every label the three pages use is named, and nothing
+     else: each of these phrases appears on no other page. Last in the list on purpose: none of the
+     patterns above matches them, and nothing below can then be shadowed by these. */
+  [/changes on this day/i, ['CHANGE_DAY', 'CHANGES_STOPPED', 'CHANGES_ACTIVATED']],
+  [/who changed it/i, ['CHANGE_WHO']],
+  [/the 7 days before/i, ['CHANGE_BEFORE']],
+  [/the change archive/i, ['CHANGE_ARCHIVE', 'CHANGE_DAY']],
+  [/one part of the day/i, ['PEAK_SUGGESTED']],
+  [/spend outside the peak/i, ['PEAK_OFF_PEAK_SPEND']],
+  [/the peak hours work list/i, ['PEAK_MANUAL']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -1616,9 +1627,9 @@ function enterApp(user){
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
        tool page covering its subject, so the two are read together instead of being hunted for. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
+      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport', 'adtoolActivated', 'adtoolStopped'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
-      { name: 'Products',      keys: ['adtoolCpc', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
+      { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },
       { name: 'Campaigns',     keys: ['adtoolCampaignBoard', 'adtoolItemCampaigns', 'campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
       { name: 'Traffic and keywords', keys: ['traffic', 'potentialCpc', 'keywordApprovals'] },

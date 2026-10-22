@@ -223,7 +223,9 @@
         : esc(cwStr(e.campaign)) + ' — ' + esc(what) + (cwStr(e.old) || cwStr(e.new) ? ': ' + esc(cwStr(e.old)) + ' → ' + esc(cwStr(e.new)) : '');
       h += '<li><span class="cw-when">' + esc(cwPKT(e.at)) + '</span>' + esc(cwStr(e.account)) + ' · ' + line + (cwStr(e.actor) ? ' · by ' + esc(cwStr(e.actor)) : '') + '</li>';
     });
-    h += '</ul>';
+    /* this feed is the LAST THIRTY changes of every kind, live. Whole days of them, read as stops and
+       starts with the listing behind each one, are on the two change pages, which keep a fortnight. */
+    h += '</ul><p style="margin:6px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">One whole day at a time, with the listings behind each change and a fortnight of archive, is on <a href="#adtoolStopped" style="color:var(--gold-a);font-weight:800">Stopped yesterday</a> and <a href="#adtoolActivated" style="color:var(--gold-a);font-weight:800">Activated today</a>.</p>';
     box.innerHTML = h;
   }
 

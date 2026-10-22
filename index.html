@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261022-0004';
+var BUILD = '20261022-0021';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1330,7 +1330,18 @@ var ADT_REG_MAP = [
   [/^checks?$/i, ['PROFIT_SHEET_LAW', 'ACTUAL_PROFIT_LISTING_DAY']],
   [/written from the numbers|model, validated|narrative/i, ['NARRATIVE']],
   [/weekly spend and return|review window/i, ['ROAS_LADDER']],
-  [/^generated /i, ['REPORT_YESTERDAY']]
+  [/^generated /i, ['REPORT_YESTERDAY']],
+  /* Owner batch 22 Oct: Stopped yesterday, Activated today, Peak times only. A tag whose label has no
+     pattern here opens the WHOLE register, so every label the three pages use is named, and nothing
+     else: each of these phrases appears on no other page. Last in the list on purpose: none of the
+     patterns above matches them, and nothing below can then be shadowed by these. */
+  [/changes on this day/i, ['CHANGE_DAY', 'CHANGES_STOPPED', 'CHANGES_ACTIVATED']],
+  [/who changed it/i, ['CHANGE_WHO']],
+  [/the 7 days before/i, ['CHANGE_BEFORE']],
+  [/the change archive/i, ['CHANGE_ARCHIVE', 'CHANGE_DAY']],
+  [/one part of the day/i, ['PEAK_SUGGESTED']],
+  [/spend outside the peak/i, ['PEAK_OFF_PEAK_SPEND']],
+  [/the peak hours work list/i, ['PEAK_MANUAL']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -2452,7 +2463,10 @@ VIEWS.home = {
 (function () {
 
   var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
-  var AC = { timer: null, days: 14, acct: '', from: '', to: '' };
+  /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
+     first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
+  var AC = { timer: null, days: 14, acct: '', from: '', to: '', items: [], lastDays: 14, sort: { key: '', dir: -1 } };
+  var AC_SORT_KEY = 'm98m:adsCentre:sort';
 
   /* `acc-tbl`, not `ac-tbl`: view-adtool-campaigns.js declares its OWN `.ac-tbl` with a different
    body. VIEW_CSS is one array joined in splice order, and the two portals splice these files in a
@@ -2471,6 +2485,10 @@ VIEW_CSS.push(
     '.acc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}' +
     '.acc-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.acc-tbl th:first-child{text-align:left}' +
+    /* every heading of the per-item board sorts it (owner, 22 Oct) */
+    '.acc-tbl th.acc-s{cursor:pointer;user-select:none}' +
+    '.acc-tbl th.acc-s:hover{color:var(--gold-a)}' +
+    '.acc-tbl th .acc-ar{color:var(--gold-a);margin-left:3px}' +
     '.acc-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.acc-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
@@ -2489,6 +2507,111 @@ VIEW_CSS.push(
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
   function acROAS(rev, sp) { return Number(sp) > 0.005 ? (Number(rev) / Number(sp)).toFixed(1) + '\u00d7' : '\u2014'; }
+  function acNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+
+  /* \u2500\u2500 the per-item board, sortable on every column (owner, 22 Oct: "add sort option on data in ad
+     commands center"). The rows are already in hand, so a sort never asks the engine again. Each
+     column heading says what it sorts by; numbers sort numerically, text alphabetically, and an
+     empty cell sinks to the bottom whichever way the column is pointed. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+  var AC_COLS = [
+    { key: 'title', label: 'Item', text: true, sorts: 'the listing title, A to Z',
+      val: function (r) { return String(r.title || r.item_id || ''); },
+      cell: function (r) {
+        return '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
+          esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
+          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) +
+          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>';
+      } },
+    { key: 'spend_today', label: 'Spend today', sorts: 'what the listing has spent on ads today',
+      val: function (r) { return acNum(r.spend_today); }, cell: function (r) { return acGBP(r.spend_today); } },
+    { key: 'clicks_today', label: 'Clicks', sorts: 'clicks on the ad today',
+      val: function (r) { return acNum(r.clicks_today); }, cell: function (r) { return r.clicks_today || 0; } },
+    { key: 'cpc_today', label: 'Avg CPC', sorts: 'the average cost of a click today',
+      val: function (r) { return acNum(r.cpc_today); }, cell: function (r) { return r.cpc_today ? acGBP(r.cpc_today) : '\u2014'; } },
+    { key: 'sold_today', label: 'Sold via ads', sorts: 'units eBay credits to the ad today',
+      val: function (r) { return acNum(r.sold_today); }, cell: function (r) { return r.sold_today || 0; } },
+    { key: 'spend_14d', label: function () { return 'Spend ' + AC.lastDays + 'd'; }, sorts: 'ad spend over the window',
+      val: function (r) { return acNum(r.spend_14d); }, cell: function (r) { return acGBP(r.spend_14d); } },
+    { key: 'clicks_14d', label: function () { return 'Clicks ' + AC.lastDays + 'd'; }, sorts: 'clicks over the window',
+      val: function (r) { return acNum(r.clicks_14d); }, cell: function (r) { return r.clicks_14d || 0; } },
+    { key: 'sold_14d', label: function () { return 'Sold ' + AC.lastDays + 'd'; }, sorts: 'units from ads over the window',
+      val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } }
+  ];
+
+  function acCol(key) {
+    for (var i = 0; i < AC_COLS.length; i++) { if (AC_COLS[i].key === key) { return AC_COLS[i]; } }
+    return null;
+  }
+  function acLabel(c) { return typeof c.label === 'function' ? c.label() : c.label; }
+  function acSortRestore() {
+    try {
+      var raw = localStorage.getItem(AC_SORT_KEY);
+      if (!raw) { return; }
+      var s = JSON.parse(raw);
+      if (s && acCol(s.key)) { AC.sort = { key: s.key, dir: Number(s.dir) < 0 ? -1 : 1 }; }
+    } catch (e) {}
+  }
+  function acSortSave() { try { localStorage.setItem(AC_SORT_KEY, JSON.stringify(AC.sort)); } catch (e) {} }
+  function acSortRows(rows) {
+    var out = rows.slice();
+    var col = AC.sort.key ? acCol(AC.sort.key) : null;
+    if (!col) {
+      /* Nothing chosen: the board's own order, reproduced key for key — waste rows first, then the
+         biggest spend today, then the biggest spend over the window. That third key is not decoration:
+         every listing on the board for its window spend alone has nought spend today, so without it a
+         long tail of rows ties and their order depends on the sort being a stable one. */
+      return out.sort(function (a, b) {
+        var wa = a.waste ? 1 : 0, wb = b.waste ? 1 : 0;
+        if (wa !== wb) { return wb - wa; }
+        var sa = acNum(a.spend_today) || 0, sb = acNum(b.spend_today) || 0;
+        if (sa !== sb) { return sb - sa; }
+        return (acNum(b.spend_14d) || 0) - (acNum(a.spend_14d) || 0);
+      });
+    }
+    var dir = AC.sort.dir;
+    return out.sort(function (a, b) {
+      var va = col.val(a), vb = col.val(b);
+      if (col.text) {
+        va = String(va == null ? '' : va).toLowerCase(); vb = String(vb == null ? '' : vb).toLowerCase();
+        if (!va && vb) { return 1; }
+        if (va && !vb) { return -1; }                          /* an empty name sinks either way */
+        return va < vb ? -dir : (va > vb ? dir : 0);
+      }
+      if (va == null && vb == null) { return 0; }
+      if (va == null) { return 1; }
+      if (vb == null) { return -1; }                           /* nulls sink whichever way we sort */
+      return (va - vb) * dir;
+    });
+  }
+  function acPaintItems() {
+    var box = $('acItems');
+    if (!box) { return; }
+    var rows = AC.items || [];
+    if (!rows.length) {
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today \u2014 the first intraday report lands within ~10 minutes of the day starting.</div>';
+      return;
+    }
+    var h = '<div class="scroll"><table class="acc-tbl"><thead><tr>' + AC_COLS.map(function (c) {
+      var on = AC.sort.key === c.key;
+      return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
+        esc(acLabel(c)) + (on ? '<span class="acc-ar">' + (AC.sort.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '') + '</th>';
+    }).join('') + '</tr></thead><tbody>';
+    acSortRows(rows).forEach(function (r) {
+      h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
+        AC_COLS.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+    });
+    h += '</tbody></table></div>';
+    box.innerHTML = h;
+    var ths = box.querySelectorAll('th[data-ac-k]');
+    for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
+      var k = this.getAttribute('data-ac-k'), col = acCol(k);
+      if (!col) { return; }
+      if (AC.sort.key === k) { AC.sort.dir = -AC.sort.dir; }
+      else { AC.sort = { key: k, dir: col.text ? 1 : -1 }; }
+      acSortSave();
+      acPaintItems();
+    };
+  }
 
   function acLoad() {
     var box = $('acBody');
@@ -2579,28 +2702,14 @@ VIEW_CSS.push(
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
           a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
       }).join('') + '</div>';
-      var rows = d.items || [];
-      if (!rows.length) {
-        h += '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today — the first intraday report lands within ~10 minutes of the day starting.</div>';
-      } else {
-        h += '<div class="scroll"><table class="acc-tbl"><thead><tr>' +
-          '<th>Item</th><th>Spend today</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th>' +
-          '<th>Spend ' + (d.days || 14) + 'd</th><th>Clicks ' + (d.days || 14) + 'd</th><th>Sold ' + (d.days || 14) + 'd</th></tr></thead><tbody>';
-        rows.forEach(function (r) {
-          h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '><td>' +
-            '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
-            esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
-            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' · ' + esc(String(r.account)) +
-            (r.waste ? ' · <b style="color:var(--bad)">£3+ TODAY, NO ORDER — PAUSE OR FIX</b>' : '') + '</div></td>' +
-            '<td>' + acGBP(r.spend_today) + '</td><td>' + (r.clicks_today || 0) + '</td>' +
-            '<td>' + (r.cpc_today ? acGBP(r.cpc_today) : '—') + '</td><td>' + (r.sold_today || 0) + '</td>' +
-            '<td>' + acGBP(r.spend_14d) + '</td><td>' + (r.clicks_14d || 0) + '</td><td>' + (r.sold_14d || 0) + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-      }
+      /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
+      AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
+      AC.lastDays = Number(d.days) || 14;
+      h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
+      acPaintItems();
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
     });
@@ -2628,6 +2737,7 @@ VIEW_CSS.push(
         '<div class="card enter d2"><div class="bd" id="acBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
+      acSortRestore();
       var rf = $('acRefresh');
       if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
       var sel = $('acAcct');
@@ -2654,6 +2764,58 @@ VIEW_CSS.push(
       if (AC.timer) { clearInterval(AC.timer); }
       AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
     }
+  };
+})();
+
+/* ---------- view-adtool-activated.js ---------- */
+/* view-adtool-activated.js — Advertising · Activated today (owner's batch, 22 Oct 2026: "make a page
+ * on portal that tells you which items you made active today ... keep the archive so that we can see
+ * working archive").
+ *
+ * The same page as Stopped yesterday, read the other way round, so it is the SAME implementation: the
+ * factory lives in view-adtool-stopped.js and is handed over on `window.adtChangeDayPage`. Only the
+ * direction, the default day (today in UK time) and the words differ. Two screens that share one set
+ * of sums can never come to disagree about a day.
+ *
+ * The factory is asked for at render time, never while this file is loading: the files are spliced in
+ * name order, so this one runs first and the factory does not exist yet. If the other file were ever
+ * missing from a build, the page says so plainly instead of throwing.
+ *
+ * Read-only: nothing on this page is ever sent to eBay. Engine action: adtoolChangeDay.
+ * Own class prefix: .acd-
+ */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+
+  VIEW_CSS.push([
+    '.acd-miss{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;max-width:720px}',
+    '.acd-miss h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.acd-miss p{margin:0;font-size:12px;color:var(--text-2);line-height:1.55}'
+  ].join(''));
+
+  var PAGE = null;
+  function page() {
+    if (!PAGE && typeof window.adtChangeDayPage === 'function') {
+      PAGE = window.adtChangeDayPage({
+        id: 'cdyA', direction: 'activated', title: 'Activated today',
+        sub: 'Every ad and campaign started on a chosen UK day'
+      });
+    }
+    return PAGE;
+  }
+
+  VIEWS.adtoolActivated = {
+    label: 'Activated today', hidden: true, order: 94, roles: ROLES,
+    icon: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
+    render: function () {
+      var p = page();
+      if (p) return p.render();
+      return '<div class="hgroup enter d1"><h1>Activated today</h1>' +
+        '<span class="sub">Every ad and campaign started on a chosen UK day</span></div>' +
+        '<div class="acd-miss"><h3>Not available</h3><p>This page shares its workings with Stopped yesterday, ' +
+        'and that page is not in this build. Both pages come back together.</p></div>';
+    },
+    init: function () { var p = page(); if (p) p.init(); }
   };
 })();
 
@@ -5102,7 +5264,12 @@ VIEW_CSS.push(
       h += '<div class="an-panel"><h3>' + esc(R.day) + ' · ' + esc(R.weekday) + src('generated ' + String(R.generated_at).slice(11, 16) + ' UTC') + '</h3><div class="an-sub">' + esc((R.sources || []).join(' · ')) + '</div><div class="an-kpis">' + kpi('Spend', gbp(y.spend, 0), (y.attr_units || 0) + ' units from ads') + kpi('ROAS', roas(y.roas), gbp(y.attr_revenue, 0) + ' sales from ads') + kpi('CPC', y.clicks > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') + kpi('Conversion rate', y.clicks > 0 && y.attr_units != null ? (Math.round(Number(y.attr_units) / Number(y.clicks) * 1000) / 10) + '%' : '—', 'units from ads ÷ clicks') + kpi('Orders', String(y.orders || 0), (y.units || 0) + ' units · ' + gbp(y.revenue, 0)) + '</div>' +
         '<div class="an-sub">Against the 7-day average per day: spend ' + (R.vs_7day ? gbp(R.vs_7day.spend) : '—') + ' · ROAS ' + (R.vs_7day ? roas(R.vs_7day.roas) : '—') + '. Same weekday last week: spend ' + (R.vs_same_weekday_last_week ? gbp(R.vs_same_weekday_last_week.spend) : '—') + ' · ROAS ' + (R.vs_same_weekday_last_week ? roas(R.vs_same_weekday_last_week.roas) : '—') + '.' + (R.decisions && R.decisions.note ? ' ' + esc(R.decisions.note) + '.' : '') + '</div>' +
         '<button class="an-btn" id="moPdf">Download PDF</button> <button class="an-btn" id="moSend" style="background:transparent;border:1px solid var(--gold-line);color:var(--text-2)">Send to inbox</button></div>';
-      h += '<div class="an-panel"><h3>What changed</h3><ul class="at-list">' + R.what_changed.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>';
+      /* the ad status changes line KEEPS its number here, because this is the morning read and the
+         number belongs in it. Everything behind it — which ad, which campaign, what time, and which
+         of them the tool itself sent — lives on one page now, so the bullet points there instead of
+         the count being written out a second time further down this same screen. */
+      h += '<div class="an-panel"><h3>What changed</h3><ul class="at-list">' + R.what_changed.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') +
+        '</ul><div class="an-note" style="margin-top:6px">Every ad and campaign stopped or started on this day, with the time and who sent it, is on <a href="#' + esc(String((R.ad_status_changes && R.ad_status_changes.changes_page) || 'adtoolStopped')) + '" style="color:var(--gold-a);font-weight:800">Stopped yesterday</a> and <a href="#adtoolActivated" style="color:var(--gold-a);font-weight:800">Activated today</a>.</div></div>';
       /* account rows carry spend / units from ads / sales from ads / ROAS only, never a collective profit figure */
       var ba = R.by_account || [];
       h += '<div class="an-panel"><h3>By account</h3><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Units from ads</th><th class="r">Sales from ads</th><th class="r">ROAS</th></tr></thead><tbody>' + ba.map(function (a) { return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(a.spend, 0) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + gbp(a.attr_revenue, 0) + '</td><td class="r">' + (a.spend > 0 ? roas(a.attr_revenue / a.spend) : (a.roas != null ? roas(a.roas) : '—')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
@@ -5128,7 +5295,9 @@ VIEW_CSS.push(
       }
       var tbl = function (rows, title) { return '<div class="an-panel"><h3>' + esc(title) + (RP.account ? ' · ' + esc(RP.account) : '') + '</h3><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend</th><th class="r">Units from ads</th><th class="r">ROAS</th><th class="r">Profit</th><th>Why</th></tr></thead><tbody>' + (rows.length ? rows.map(function (r) { return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.spend) + '</td><td class="r">' + (r.attr_units || 0) + '</td><td class="r">' + (r.spend > 0 && r.attr_revenue != null ? roas(r.attr_revenue / r.spend) : (r.roas != null ? roas(r.roas) : '—')) + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td><td>' + esc(r.why || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="an-empty">none</td></tr>') + '</tbody></table></div></div>'; };
       h += '<div class="an-grid2">' + tbl(winners, 'Winners') + tbl(losers, 'Losers') + '</div>';
-      h += '<div class="an-note">Open alerts ' + ((R.open_alerts && R.open_alerts.n) || 0) + ' (' + ((R.open_alerts && R.open_alerts.high) || 0) + ' high) · ' + (R.capped_listings || 0) + ' listings ran out of budget · ' + ((R.ad_status_changes && R.ad_status_changes.n) || 0) + ' ads switched on or off</div>';
+      /* the ads-switched-on-or-off count used to be restated here as well as in the bullets above.
+         One home per number: the bullet keeps it and points at the page that owns the detail. */
+      h += '<div class="an-note">Open alerts ' + ((R.open_alerts && R.open_alerts.n) || 0) + ' (' + ((R.open_alerts && R.open_alerts.high) || 0) + ' high) · ' + (R.capped_listings || 0) + ' listings ran out of budget</div>';
       $('moRp').innerHTML = h;
       var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { if (this.hasAttribute('data-d')) { RP.day = this.getAttribute('data-d'); } else if (this.hasAttribute('data-acc')) { RP.account = this.getAttribute('data-acc'); } loadReport(); };
       $('moPdf').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, pdf: 1 }).then(function (r) { var bin = atob(r.pdf_base64); var arr = new Uint8Array(bin.length); for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k); var blob = new Blob([arr], { type: 'application/pdf' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 2000); b.disabled = false; }).catch(function (e) { toast(e.message || 'failed'); b.disabled = false; }); };
@@ -5551,6 +5720,413 @@ VIEW_CSS.push(
       '<div class="note">The listings whose own profit moved most against the period before. Profit is per listing, never added up.</div>' +
       '<div class="ov-grid2"><div class="ov-mcard"><h4>Top risers</h4>' + tbl(risers, true) + '</div>' +
       '<div class="ov-mcard"><h4>Top decliners</h4>' + tbl(decliners, false) + '</div></div></div>';
+  }
+})();
+
+/* ---------- view-adtool-peak.js ---------- */
+/* view-adtool-peak.js — Advertising · Peak times only (owner's batch, 22 Oct 2026: "make a page on
+ * portal for selecting items that should be running in peak times only; there will be two pages:
+ * system suggested, manually added").
+ *
+ * One page, two tabs. "System suggested" is every advertised listing whose units land mostly in one
+ * part of the day, with the money it spends outside that part. "Manually added" is the list the team
+ * keeps by hand, with who added each row and when, and a removal keeps the row as a record.
+ *
+ * eBay cannot schedule an ad by the hour, so this page is a work list for pausing and resuming by
+ * hand, and a record of what the team decided. Nothing on it is ever sent to eBay. The hours come
+ * from the same function Running today uses, never a second rule, and the thresholds are printed
+ * from the live config rather than typed in here.
+ *
+ * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove. Own class prefix: .pkt-
+ */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+  var PK = { tab: 'suggested', account: '', data: null, busy: false };
+
+  VIEW_CSS.push([
+    '.pkt-wrap{max-width:1420px}',
+    '.pkt-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--text-2);font-weight:600}',
+    '.pkt-banner{border:1px solid var(--gold-b);border-radius:14px;padding:13px 16px;margin-bottom:12px;background:rgba(242,176,53,.08);color:var(--text);font-size:12.5px;line-height:1.6}',
+    '.pkt-banner b{color:var(--text)}',
+    '.pkt-rules{background:var(--panel-2);border:1px dashed var(--gold-line);border-radius:12px;padding:11px 14px;margin-bottom:12px;color:var(--text-2);font-size:12px;line-height:1.6}',
+    '.pkt-rules b{color:var(--text)}',
+    '.pkt-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}',
+    '.pkt-tab{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:6px 16px;font:inherit;font-size:12.5px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}',
+    '.pkt-tab.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.pkt-tab .n{opacity:.75;margin-left:7px;font-variant-numeric:tabular-nums}',
+    '.pkt-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.pkt-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:4px 12px;font:inherit;font-size:11.5px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}',
+    '.pkt-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.pkt-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
+    '.pkt-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.pkt-sub{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}',
+    '.pkt-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.pkt-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.pkt-tbl th.r{text-align:right}',
+    '.pkt-tbl td{padding:9px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.pkt-tbl td.r{text-align:right;white-space:nowrap}',
+    '.pkt-scroll{overflow-x:auto}',
+    '.pkt-why{max-width:360px;min-width:220px;font-size:11.5px;color:var(--text-2);line-height:1.55}',
+    '.pkt-slot{font-weight:800;color:var(--text)}',
+    '.pkt-sm{font-size:11px;color:var(--text-2);line-height:1.5}.pkt-sm b{color:var(--text)}',
+    '.pkt-sm2{font-size:10.5px;color:var(--text-3);line-height:1.45}',
+    '.pkt-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
+    '.pkt-tag.live{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
+    '.pkt-tag.off{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
+    '.pkt-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;border:1px solid var(--gold-line-hi);color:var(--gold-a);white-space:nowrap}',
+    '.pkt-neg{color:' + LOSS + ';font-weight:800}.pkt-pos{color:var(--gold-a);font-weight:700}',
+    '.pkt-btn{background:var(--gold-b);color:var(--gold-ink);border:0;border-radius:8px;padding:6px 13px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}',
+    '.pkt-btn.ghost{background:transparent;color:var(--text-2);border:1px solid var(--gold-line)}',
+    '.pkt-btn[disabled]{opacity:.5;cursor:default}',
+    '.pkt-add{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}',
+    '.pkt-add label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
+    '.pkt-add input{background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:6px 9px;min-width:150px}',
+    '.pkt-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
+    '.pkt-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}'
+  ].join(''));
+
+  /* adtSlot in the engine: 0 night 00-06, 1 morning 06-12, 2 afternoon 12-17, 3 evening 17-24, UK hours */
+  var SLOT_NAMES = ['night', 'morning', 'afternoon', 'evening'];
+  var SLOT_HOURS = ['00:00 to 06:00', '06:00 to 12:00', '12:00 to 17:00', '17:00 to midnight'];
+
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function cnt(n) { var v = num(n); return v == null ? '—' : Math.round(v).toLocaleString('en-GB'); }
+  function n0(n) { var v = num(n); return v == null ? 0 : v; }
+  function plural(n, one, many) { return Math.round(n0(n)) === 1 ? one : many; }
+  /* A SHARE IS A FRACTION on every field that carries one: rules.share is 0.5 and peak_share is 0.71.
+     The engine also sends the whole number beside the row's own share, as peak_share_pct, and that is
+     the one to print where it is there, so the percentage on the page and the percentage inside the
+     sentence beside it can never be worked out two different ways and disagree. */
+  function shareTxt(n) {
+    var v = num(n); if (v == null) return '—';
+    return Math.round(v * 100) + '%';
+  }
+  function shareOf(r) {
+    var pct = num(r && r.peak_share_pct);
+    return pct == null ? shareTxt(r && r.peak_share) : Math.round(pct) + '%';
+  }
+  /* the explainer hook. Only these three labels have a pattern of their own in the register map. */
+  function reg(label, shown) {
+    return '<span class="pkt-reg" data-adtreg="' + esc(label) + '" title="how is this worked out">' + esc(shown || label) + '</span>';
+  }
+  function slotName(r) {
+    var n = String((r && r.peak_slot_name) || '').trim();
+    if (n) return n;
+    var s = num(r && r.peak_slot);
+    return s != null && SLOT_NAMES[s] ? SLOT_NAMES[s] : 'one part of the day';
+  }
+  function slotHours(r) {
+    var bands = (r && r.run) || [];
+    if (bands.length) {
+      var t = adtHourBandText({ run: bands, avoid: (r && r.avoid) || [] });
+      if (t && t.run) return t.run;
+    }
+    var s = num(r && r.peak_slot);
+    return s != null && SLOT_HOURS[s] ? SLOT_HOURS[s] : '';
+  }
+  function liveTag(v) {
+    if (v == null) return '<span class="pkt-sm2">not known</span>';
+    return '<span class="pkt-tag ' + (v ? 'live' : 'off') + '">' + (v ? 'live now' : 'not live') + '</span>';
+  }
+  function campCell(r) {
+    var name = String((r && (r.campaign_name || r.campaign_id)) || '');
+    if (!name) return '<span class="pkt-sm2">no campaign recorded</span>';
+    return adtCampaignLink(r.campaign_id, name);
+  }
+  function whenTxt(at) {
+    var s = String(at == null ? '' : at);
+    if (!s) return '';
+    var d = new Date(s.replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
+    if (isNaN(d.getTime())) return s.slice(0, 16);
+    try {
+      return d.toLocaleDateString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short' }) + ' ' +
+        d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return s.slice(0, 16); }
+  }
+
+  VIEWS.adtoolPeak = {
+    label: 'Peak times only', hidden: true, order: 93, roles: ROLES,
+    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M4 4l2 2M20 4l-2 2"/>',
+    render: function () {
+      return '<div class="pkt-wrap">' +
+        adtHgroup('Peak times only', 'Listings that sell in one part of the day, and the hand-kept list', 'pktFresh') +
+        '<div id="pktAcct" class="pkt-chips"></div>' +
+        '<div id="pktBody"><div class="pkt-empty">Loading…</div></div></div>';
+    },
+    init: function () { acctChips(); load(false).catch(function () {}); }
+  };
+
+  function load(quiet) {
+    return api('adtoolPeak', PK.account ? { account: PK.account } : {}).then(function (D) {
+      PK.data = D || {};
+      if (!$('pktBody')) return;
+      acctChips();
+      draw();
+      adtFreshShow('pktFresh', PK.data.fresh);
+    }).catch(function (e) {
+      if (!quiet && $('pktBody')) {
+        $('pktBody').innerHTML = '<div class="pkt-panel"><h3>Not available</h3><div class="pkt-sub">' +
+          esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      }
+      throw e;
+    });
+  }
+
+  function suggested() { return ((PK.data && PK.data.suggested) || []).filter(function (r) { return r && typeof r === 'object'; }); }
+  function manual() { return ((PK.data && PK.data.manual) || []).filter(function (r) { return r && typeof r === 'object'; }); }
+
+  function accountNames() {
+    var A = ((PK.data && PK.data.accounts) || []).map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
+    if (!A.length) {
+      var seen = {};
+      suggested().concat(manual()).forEach(function (r) { if (r.account && !seen[r.account]) { seen[r.account] = 1; A.push(r.account); } });
+      A.sort();
+    }
+    return A;
+  }
+  function acctChips() {
+    var el = $('pktAcct'); if (!el) return;
+    el.innerHTML = '<button class="pkt-chip' + (PK.account ? '' : ' on') + '" data-pka="">All accounts</button>' +
+      accountNames().map(function (a) {
+        return '<button class="pkt-chip' + (PK.account === a ? ' on' : '') + '" data-pka="' + esc(a) + '">' + esc(a) + '</button>';
+      }).join('');
+    var bs = el.querySelectorAll('[data-pka]');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+      PK.account = this.getAttribute('data-pka') || '';
+      acctChips();
+      load(false).catch(function () {});
+    };
+  }
+
+  /* ── the banner and the live thresholds ──────────────────────────────────────────────────────── */
+  function banner() {
+    return '<div class="pkt-banner"><b>eBay cannot schedule an ad by the hour.</b> This list is for pausing and ' +
+      'resuming by hand, and for the tool on the accounts where live apply is switched on. ' +
+      '<b>Nothing on this page is sent to eBay.</b></div>';
+  }
+  function rulesLine() {
+    var R = (PK.data && PK.data.rules) || {};
+    var share = num(R.share), minU = num(R.min_units), win = num(R.window_days);
+    if (share == null && minU == null && win == null) {
+      return '<div class="pkt-rules">The thresholds behind the suggestions are not in this answer, so none is shown here.</div>';
+    }
+    return '<div class="pkt-rules"><b>What the system suggests.</b> A listing is suggested when it is advertised now, ' +
+      'has sold at least <b>' + cnt(minU) + ' ' + plural(minU, 'unit', 'units') + '</b> over the last <b>' + cnt(win) + ' ' +
+      plural(win, 'day', 'days') + '</b>, and at least <b>' + shareTxt(share) + '</b> of those units land in one part of the day.</div>';
+  }
+
+  /* ── tabs ────────────────────────────────────────────────────────────────────────────────────── */
+  function counts() {
+    var C = (PK.data && PK.data.counts) || {};
+    var s = suggested(), m = manual();
+    var both = num(C.both);
+    if (both == null) {
+      var ids = {}; m.forEach(function (r) { if (r.item_id) ids[String(r.item_id)] = 1; });
+      both = s.filter(function (r) { return r.already_manual || ids[String(r.item_id)]; }).length;
+    }
+    return {
+      suggested: num(C.suggested) == null ? s.length : num(C.suggested),
+      manual: num(C.manual) == null ? m.length : num(C.manual),
+      both: both
+    };
+  }
+  function tabs(C) {
+    return '<div class="pkt-tabs">' +
+      '<button class="pkt-tab' + (PK.tab === 'suggested' ? ' on' : '') + '" data-pkt="suggested">System suggested<span class="n">' +
+      cnt(C.suggested) + '</span></button>' +
+      '<button class="pkt-tab' + (PK.tab === 'manual' ? ' on' : '') + '" data-pkt="manual">Manually added<span class="n">' +
+      cnt(C.manual) + '</span></button>' +
+      (n0(C.both) > 0 ? '<span class="pkt-sm" style="align-self:center">' + cnt(C.both) + ' ' +
+        plural(C.both, 'listing is', 'listings are') + ' on both lists</span>' : '') + '</div>';
+  }
+
+  /* ── tab 1 · system suggested, the biggest spend outside the peak first ──────────────────────── */
+  function suggestedRows() {
+    var ids = {};
+    manual().forEach(function (r) { if (r.item_id) ids[String(r.item_id)] = 1; });
+    return suggested().slice().map(function (r) {
+      if (r.already_manual == null && ids[String(r.item_id)]) { r.already_manual = true; }
+      return r;
+    }).sort(function (a, b) { return n0(b.spend_off_peak_7d) - n0(a.spend_off_peak_7d); });
+  }
+  function suggestedPanel() {
+    var rows = suggestedRows();
+    var D = PK.data || {};
+    var held = num(D.suggested_held_back), tot = num(D.suggested_total);
+    var h = '<div class="pkt-panel"><h3>System suggested</h3>' +
+      '<div class="pkt-sub">Listings whose units land mostly in one part of the day, with the money they spend ' +
+      'outside it over the last 7 days. The biggest spend outside the peak comes first.' +
+      /* the engine caps this list. Two hundred rows with nothing said about it reads as all of them. */
+      (held != null && held > 0
+        ? ' <b>' + cnt(tot) + ' ' + plural(tot, 'listing is', 'listings are') + ' suggested in all and the ' +
+          cnt(rows.length) + ' with the most units in their peak are shown; choose one account to see more of them.</b>'
+        : '') + '</div>';
+    if (!rows.length) {
+      return h + '<div class="pkt-empty">No listing meets the thresholds above' +
+        (PK.account ? ' on ' + esc(PK.account) : '') + ' yet.</div></div>';
+    }
+    var R = (PK.data && PK.data.rules) || {}, win = num(R.window_days);
+    h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr>' +
+      '<th>Listing</th><th>Live now</th><th>Campaign</th><th>Peak hours</th>' +
+      '<th class="r">Share in the peak' + reg('one part of the day', 'how') + '</th>' +
+      '<th class="r">Units' + (win == null ? '' : ' in ' + cnt(win) + ' days') + '</th>' +
+      '<th class="r" title="of the sampled hours of the last 7 days, the money that fell outside the hours it sells in">Spend outside the peak' + reg('spend outside the peak', 'how') + '</th>' +
+      '<th class="r" title="ad spend over the last 7 finished days, all hours, from the day figures">Spend, 7 days</th>' +
+      '<th>Why</th><th></th>' +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        var off = num(r.spend_off_peak_7d), hoursTxt = slotHours(r), judged = num(r.hours_judged);
+        /* THREE DIFFERENT BASES, and the page must not read one as a share of another. The money
+           outside the peak sits inside the SAMPLED hours of the last 7 days; the day figure is the
+           whole of those days and is always the larger, so it gets its own column rather than being
+           printed under the first where it reads as its denominator. Where no hour was sampled at
+           all, both of the first two are nothing-known, and saying so beats printing £0.00. */
+        var samp = num(r.spend_sampled_7d), seen = num(r.hours_sampled_7d);
+        return '<tr><td>' + adtProductCell(r) +
+          (r.already_manual ? '<div style="margin-top:4px"><span class="pkt-mark" title="this listing is on the hand-kept list as well">on my list</span></div>' : '') + '</td>' +
+          '<td>' + liveTag(r.live_now) + '</td>' +
+          '<td>' + campCell(r) + '</td>' +
+          '<td><div class="pkt-slot">' + esc(slotName(r)) + '</div>' +
+          (hoursTxt ? '<div class="pkt-sm">' + esc(hoursTxt) + '</div>' : '') +
+          (judged == null ? '' : '<div class="pkt-sm2">' + cnt(judged) + ' ' + plural(judged, 'hour', 'hours') + ' judged</div>') +
+          '<div style="margin-top:4px">' + adtHourStrip({ run: r.run || [], avoid: r.avoid || [], basis: String(r.hour_basis || '') }, { text: false }) + '</div></td>' +
+          '<td class="r"><b>' + shareOf(r) + '</b><div class="pkt-sm2">' + cnt(r.units_in_peak) + ' ' +
+          plural(r.units_in_peak, 'unit', 'units') + '</div></td>' +
+          '<td class="r">' + cnt(r.units_28d) + '</td>' +
+          '<td class="r">' + (off == null
+            ? '<span class="pkt-sm2">no hours sampled</span>'
+            : '<span class="' + (off > 0 ? 'pkt-neg' : '') + '">' + gbp(off) + '</span>' +
+              '<div class="pkt-sm2">of ' + gbp(samp) + ' in the ' + (seen == null ? 'hours' : cnt(seen) + ' ' + plural(seen, 'hour', 'hours')) + ' we can see</div>') + '</td>' +
+          '<td class="r">' + gbp(r.spend_7d) + '<div class="pkt-sm2">all hours</div></td>' +
+          '<td class="pkt-why">' + esc(String(r.why || '')) + '</td>' +
+          '<td><button class="pkt-btn" data-pkadd="' + esc(String(r.item_id || '')) + '"' +
+          (r.already_manual ? ' disabled title="already on the hand-kept list"' : '') + '>' +
+          (r.already_manual ? 'On my list' : 'Add to my list') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    /* the same figure as the Spend outside the peak column, drawn so the worst rows read at a glance */
+    var bars = rows.filter(function (r) { return n0(r.spend_off_peak_7d) > 0; }).slice(0, 12).map(function (r) {
+      return {
+        label: String(r.item_id || '').slice(-4), value: n0(r.spend_off_peak_7d),
+        title: String(r.title || r.item_id || '') + ': ' + gbp(r.spend_off_peak_7d) + ' outside the ' + slotName(r) + ' over 7 days'
+      };
+    });
+    if (bars.length > 1) {
+      h += '<div class="pkt-sub" style="margin:12px 0 4px">Spend outside the peak, last 7 days, worst ' + bars.length + '</div>' +
+        chartBars(bars, { height: 150, everyNth: 1 });
+    }
+    return h + '</div>';
+  }
+
+  /* ── tab 2 · manually added ──────────────────────────────────────────────────────────────────── */
+  function manualPanel() {
+    var rows = manual(), sugg = {};
+    suggested().forEach(function (r) { if (r.item_id) sugg[String(r.item_id)] = r; });
+    var h = '<div class="pkt-panel"><h3>Manually added' + reg('the peak hours work list', 'how') + '</h3>' +
+      '<div class="pkt-sub">The list the team keeps by hand. A removal keeps the row as a record, so the list ' +
+      'stays a history of what was decided.</div>';
+    h += '<div class="pkt-add" style="margin-bottom:12px">' +
+      '<label>Item number<input type="text" id="pktItem" inputmode="numeric" placeholder="item number"></label>' +
+      '<label>Hours, optional<input type="text" id="pktHours" placeholder="17-23"></label>' +
+      '<label>Note, optional<input type="text" id="pktNote" placeholder="why it belongs on the list"></label>' +
+      '<button class="pkt-btn" id="pktAddBtn">Add by item number</button></div>';
+    if (!rows.length) {
+      return h + '<div class="pkt-empty">Nothing on the hand-kept list' + (PK.account ? ' for ' + esc(PK.account) : '') +
+        ' yet. Add an item above, or add one from the suggested tab.</div></div>';
+    }
+    h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr>' +
+      '<th>Listing</th><th>Hours</th><th>Note</th><th>Added by</th><th>Live now</th>' +
+      '<th>Campaign</th><th class="r">Spend, 7 days</th><th class="r">Units</th><th></th>' +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        var s = sugg[String(r.item_id)];
+        return '<tr><td>' + adtProductCell(r) +
+          (s ? '<div style="margin-top:4px"><span class="pkt-mark" title="the system suggests this one too">system suggested</span></div>' : '') + '</td>' +
+          '<td>' + (r.hours ? '<b>' + esc(String(r.hours)) + '</b>' : '<span class="pkt-sm2">no hours set</span>') + '</td>' +
+          '<td class="pkt-why">' + (r.note ? esc(String(r.note)) : '<span class="pkt-sm2">no note</span>') + '</td>' +
+          '<td><div class="pkt-sm">' + esc(String(r.added_by || 'not recorded')) + '</div>' +
+          '<div class="pkt-sm2">' + esc(whenTxt(r.added_at)) + '</div></td>' +
+          '<td>' + liveTag(r.live_now) + '</td>' +
+          '<td>' + campCell(r) + '</td>' +
+          '<td class="r">' + gbp(r.spend_7d) + '</td>' +
+          '<td class="r">' + cnt(r.units_28d) + '</td>' +
+          '<td><button class="pkt-btn ghost" data-pkrm="' + esc(String(r.item_id || '')) + '">Remove</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return h + '</div>';
+  }
+
+  /* ── draw and wire ───────────────────────────────────────────────────────────────────────────── */
+  function draw() {
+    var box = $('pktBody'); if (!box) return;
+    var D = PK.data || {}, C = counts();
+    var h = '<div class="pkt-top"><span><b>Peak times only</b></span><span>·</span>' +
+      '<span>' + esc(PK.account || 'all accounts') + '</span><span>·</span>' +
+      '<span>' + cnt(C.suggested) + ' suggested · ' + cnt(C.manual) + ' added by hand</span>' +
+      (D.computed_at ? '<span>·</span><span>worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC</span>' : '') + '</div>';
+    h += banner();
+    h += rulesLine();
+    h += tabs(C);
+    h += PK.tab === 'manual' ? manualPanel() : suggestedPanel();
+    box.innerHTML = h;
+    wire();
+  }
+
+  function wire() {
+    var box = $('pktBody'); if (!box) return;
+    var ts = box.querySelectorAll('[data-pkt]');
+    for (var i = 0; i < ts.length; i++) ts[i].onclick = function () { PK.tab = this.getAttribute('data-pkt'); draw(); };
+
+    var as = box.querySelectorAll('[data-pkadd]');
+    for (var a = 0; a < as.length; a++) as[a].onclick = function () {
+      var id = this.getAttribute('data-pkadd');
+      if (!id) { toast('This row has no item number.'); return; }
+      add({ item_id: id }, this);
+    };
+
+    var btn = $('pktAddBtn');
+    if (btn) btn.onclick = function () {
+      var it = $('pktItem'), hr = $('pktHours'), nt = $('pktNote');
+      var id = it ? String(it.value || '').replace(/\s+/g, '') : '';
+      if (!/^\d{9,13}$/.test(id)) { toast('Type the item number first.'); return; }
+      add({ item_id: id, hours: hr ? String(hr.value || '').trim() : '', note: nt ? String(nt.value || '').trim() : '' }, this);
+    };
+
+    var rs = box.querySelectorAll('[data-pkrm]');
+    for (var r = 0; r < rs.length; r++) rs[r].onclick = function () {
+      var id = this.getAttribute('data-pkrm');
+      if (!id) { toast('This row has no item number.'); return; }
+      if (!confirm('Take ' + id + ' off the peak times list?\n\nThe row is kept as a record of what was decided. Nothing is sent to eBay.')) return;
+      remove(id, this);
+    };
+  }
+
+  function add(payload, el) {
+    if (PK.busy) return;
+    PK.busy = true;
+    if (el) el.disabled = true;
+    api('adtoolPeakAdd', payload).then(function () {
+      toast('Added to the peak times list');
+      PK.tab = 'manual';
+      PK.busy = false;
+      return load(false);
+    }).catch(function (e) {
+      PK.busy = false;
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That could not be added.');
+    });
+  }
+  function remove(id, el) {
+    if (PK.busy) return;
+    PK.busy = true;
+    if (el) el.disabled = true;
+    api('adtoolPeakRemove', { item_id: id }).then(function () {
+      toast('Taken off the list');
+      PK.busy = false;
+      return load(false);
+    }).catch(function (e) {
+      PK.busy = false;
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That could not be removed.');
+    });
   }
 })();
 
@@ -6947,6 +7523,667 @@ VIEW_CSS.push(
       var un = document.querySelectorAll('[data-undo]'); for (var j = 0; j < un.length; j++) un[j].onclick = function () { var id = this.getAttribute('data-undo'); if (!confirm('Undo this action on eBay?')) return; api('adtoolApplyPage', { op: 'undo', id: Number(id) }).then(function () { toast('Undone'); loadLive(); }).catch(function (e) { toast(e.message); }); };
     }).catch(function (e) { $('stLive').innerHTML = '<div class="an-note">This panel could not load: ' + esc(e.message || '') + '</div>'; });
   }
+})();
+
+/* ---------- view-adtool-stopped.js ---------- */
+/* view-adtool-stopped.js — Advertising · Stopped yesterday (owner's batch, 22 Oct 2026: "make a page
+ * on portal that tells you the items you stopped yesterday ... keep the archive so that we can see
+ * working archive ... add details that can give clear presentation about yesterday").
+ *
+ * This file carries BOTH day pages. The owner asked for two screens that differ only in the direction
+ * they look at, so there is one implementation here and the other registration lives in
+ * view-adtool-activated.js, which calls the factory this file hands it on `window.adtChangeDayPage`.
+ * One page, one set of words, one set of sums: the two screens can never come to disagree.
+ *
+ * The day is a UK day, midnight to midnight, and any past day can be opened from the date box, the
+ * previous and next buttons, or the 14-day strip, which is the working archive the owner asked for.
+ * The reader is told, on the page and not in a footnote, which changes the tool itself made and which
+ * were seen on eBay, because the sync cannot see who changed something on eBay and must never guess.
+ *
+ * Read-only: nothing on this page is ever sent to eBay. No profit above item level, by the Sales
+ * Analysis law; these pages deal in stops, starts, spend, units and hours. Galaxy tokens only, gold
+ * the accent, #e0563f the loss colour. Engine action: adtoolChangeDay. Own class prefix: .cdy-
+ */
+(function () {
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  var LOSS = '#e0563f';
+
+  VIEW_CSS.push([
+    '.cdy-wrap{max-width:1420px}',
+    '.cdy-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--text-2);font-weight:600}',
+    '.cdy-day{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}',
+    '.cdy-day input[type=date]{background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:5px 8px}',
+    '.cdy-btn{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 11px;font:inherit;font-size:12px;cursor:pointer}',
+    '.cdy-btn:hover{color:var(--gold-a)}',
+    '.cdy-btn[disabled]{opacity:.45;cursor:default}',
+    '.cdy-btn.go{background:var(--gold-b);border-color:var(--gold-b);color:var(--gold-ink);font-weight:800}',
+    '.cdy-daytxt{font-size:12px;color:var(--text-2);font-weight:700}',
+    '.cdy-strip{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.cdy-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:4px 12px;font:inherit;font-size:11.5px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}',
+    '.cdy-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.cdy-chip .n{opacity:.75;margin-left:6px;font-variant-numeric:tabular-nums}',
+    '.cdy-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.cdy-line{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:var(--text);line-height:1.6}',
+    '.cdy-line b{color:var(--text)}',
+    '.cdy-tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
+    '.cdy-tile{flex:1 1 140px;border:1px solid var(--gold-line);border-radius:12px;padding:9px 13px;background:var(--panel-2)}',
+    '.cdy-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.cdy-tile .v{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.cdy-tile.gold .v{color:var(--gold-a)}.cdy-tile.loss .v{color:' + LOSS + '}',
+    '.cdy-tile .d{font-size:11px;color:var(--text-2);margin-top:2px;line-height:1.45}',
+    '.cdy-who{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}',
+    '.cdy-whoc{flex:1 1 240px;border:1px solid var(--gold-line);border-radius:14px;padding:12px 15px;background:var(--panel)}',
+    '.cdy-whoc.tool{border-color:var(--gold-b);background:rgba(242,176,53,.08)}',
+    '.cdy-whoc .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
+    '.cdy-whoc .v{font-size:28px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:3px}',
+    '.cdy-whoc.tool .v{color:var(--gold-a)}',
+    '.cdy-whoc .d{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
+    '.cdy-split{height:14px;border-radius:7px;overflow:hidden;background:rgba(255,255,255,.07);display:flex;margin:0 0 6px}',
+    '.cdy-split span{display:block;height:100%}',
+    '.cdy-split .t{background:var(--gold-b)}.cdy-split .e{background:rgba(255,255,255,.22)}',
+    '.cdy-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
+    '.cdy-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.cdy-sub{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}',
+    '.cdy-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
+    '.cdy-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.cdy-tbl th.r{text-align:right}',
+    '.cdy-tbl td{padding:8px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
+    '.cdy-tbl td.r{text-align:right;white-space:nowrap}',
+    '.cdy-tbl tr.cdy-tot td{border-top:1px solid var(--gold-line);border-bottom:0;font-weight:800;background:rgba(242,176,53,.06)}',
+    '.cdy-tbl tr.cdy-grp td{background:rgba(255,255,255,.04);font-weight:800;font-size:11.5px;letter-spacing:.04em;color:var(--text)}',
+    '.cdy-tbl tr.sold td:first-child{box-shadow:inset 3px 0 0 ' + LOSS + '}',
+    '.cdy-tbl tr.start td:first-child{box-shadow:inset 3px 0 0 var(--gold-b)}',
+    '.cdy-scroll{overflow-x:auto}',
+    '.cdy-when{white-space:nowrap;font-weight:700}',
+    '.cdy-kind{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:800;white-space:nowrap;border:1px solid var(--gold-line);color:var(--text-2)}',
+    '.cdy-kind.off{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
+    '.cdy-kind.on{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
+    '.cdy-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
+    '.cdy-tag.live{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
+    '.cdy-tag.gone{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
+    '.cdy-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;border:1px solid var(--gold-line);color:var(--text-3);white-space:nowrap}',
+    '.cdy-sm{font-size:11px;color:var(--text-2);line-height:1.5}.cdy-sm b{color:var(--text)}',
+    '.cdy-sm2{font-size:10.5px;color:var(--text-3);line-height:1.45}',
+    '.cdy-camp{font-weight:700}',
+    '.cdy-neg{color:' + LOSS + ';font-weight:700}.cdy-pos{color:var(--gold-a);font-weight:700}',
+    '.cdy-honest{border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px;background:var(--panel-2);color:var(--text-2);font-size:12.5px;line-height:1.6}',
+    '.cdy-honest h3{margin:0 0 8px;font-size:14px;font-weight:800;color:var(--text)}',
+    '.cdy-honest p{margin:0 0 8px}.cdy-honest p:last-child{margin-bottom:0}',
+    '.cdy-honest b{color:var(--text)}',
+    '.cdy-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
+    '.cdy-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}'
+  ].join(''));
+
+  /* ── the two directions, in the owner's words ─────────────────────────────────────────────────── */
+  var KINDS = {
+    stopped: [
+      ['ad_paused', 'ad paused'],
+      ['ad_archived', 'ad archived'],
+      ['ad_removed', 'taken out of campaign'],
+      ['campaign_paused', 'campaign paused'],
+      ['campaign_ended', 'campaign ended'],
+      ['campaign_removed', 'campaign gone']
+    ],
+    activated: [
+      ['ad_resumed', 'ad resumed'],
+      ['ad_added', 'added to campaign'],
+      ['campaign_started', 'campaign started'],
+      ['campaign_created', 'new campaign']
+    ]
+  };
+  function kindWord(direction, k) {
+    var list = KINDS[direction] || [], i;
+    for (i = 0; i < list.length; i++) { if (list[i][0] === k) return list[i][1]; }
+    list = (KINDS.stopped).concat(KINDS.activated);
+    for (i = 0; i < list.length; i++) { if (list[i][0] === k) return list[i][1]; }
+    return String(k || '').replace(/_/g, ' ') || 'change';
+  }
+
+  /* ── formatters. a figure with nothing behind it prints the empty marker, never a zero ────────── */
+  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
+  function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
+  function cnt(n) { var v = num(n); return v == null ? '—' : Math.round(v).toLocaleString('en-GB'); }
+  function n0(n) { var v = num(n); return v == null ? 0 : Math.round(v); }
+  function roasTxt(n) { var v = num(n); return v == null ? '—' : v.toFixed(2) + '×'; }
+  /* units A DAY is an average and is routinely under one. Rounded to a whole number, 0.6 units a day
+     prints as "0", and a reader takes that for a listing that was selling nothing — on the one page
+     whose job is to say what a listing was doing before somebody stopped it. One decimal under ten. */
+  function unitsNum(n) {
+    var v = num(n); if (v == null) return '—';
+    return (Math.abs(v) < 10 && v !== Math.round(v)) ? v.toFixed(1) : Math.round(v).toLocaleString('en-GB');
+  }
+  function unitsWord(n) { var v = num(n); return unitsNum(n) + ' unit' + (v === 1 ? '' : 's'); }
+  /* the explainer hook. Only these four labels have a pattern of their own in the register map, so
+     only these four are ever used: an unknown label opens the whole register, which is noise. */
+  function reg(label, shown) {
+    return '<span class="cdy-reg" data-adtreg="' + esc(label) + '" title="how is this worked out">' + esc(shown || label) + '</span>';
+  }
+  function plural(n, one, many) { return n0(n) === 1 ? one : many; }
+  function dayOk(d) { d = String(d == null ? '' : d).slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(d) ? d : ''; }
+  function dayShift(d, by) {
+    d = dayOk(d); if (!d) return '';
+    var t = new Date(d + 'T12:00:00Z'); if (isNaN(t.getTime())) return '';
+    t.setUTCDate(t.getUTCDate() + by);
+    return t.toISOString().slice(0, 10);
+  }
+  function dayLong(d) {
+    d = dayOk(d); if (!d) return '';
+    var t = new Date(d + 'T12:00:00Z'); if (isNaN(t.getTime())) return d;
+    try { return t.toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+    catch (e) { return d; }
+  }
+  function dayShort(d) {
+    d = dayOk(d); if (!d) return '—';
+    var t = new Date(d + 'T12:00:00Z'); if (isNaN(t.getTime())) return d;
+    try { return t.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }); } catch (e) { return d.slice(5); }
+  }
+  /* the engine sends the UK clock time on at_uk; at_utc is the fallback and is converted here */
+  function ukClock(r) {
+    var a = String((r && r.at_uk) || '');
+    var m = a.match(/(\d\d):(\d\d)/);
+    if (m) return m[1] + ':' + m[2];
+    var u = String((r && r.at_utc) || '');
+    if (!u) return '—';
+    var d = new Date(u.replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(u) ? '' : 'Z'));
+    if (isNaN(d.getTime())) return u.slice(11, 16) || '—';
+    try { return d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return d.toISOString().slice(11, 16); }
+  }
+  function utcClock(s) {
+    s = String(s == null ? '' : s);
+    var m = s.match(/(\d{4}-\d\d-\d\d)[T ](\d\d):(\d\d)/);
+    return m ? m[1] + ' ' + m[2] + ':' + m[3] : (s || '');
+  }
+  function isCampaignRow(r) { return !String((r && r.item_id) || '').trim(); }
+
+  /* ── one page, built for a direction ─────────────────────────────────────────────────────────── */
+  function makePage(cfg) {
+    cfg = cfg || {};
+    var DIR = cfg.direction === 'activated' ? 'activated' : 'stopped';
+    var ID = String(cfg.id || ('cdy' + DIR));
+    var BODY = ID + 'Body', ACCT = ID + 'Acct', FRESH = ID + 'Fresh', DATE = ID + 'Date';
+    var WORD = DIR === 'activated' ? 'started' : 'stopped';
+    var S = { day: '', account: '', kind: '', data: null };
+
+    function title() { return cfg.title || (DIR === 'activated' ? 'Activated today' : 'Stopped yesterday'); }
+    function sub() {
+      return cfg.sub || (DIR === 'activated'
+        ? 'Every ad and campaign started on a chosen UK day'
+        : 'Every ad and campaign stopped on a chosen UK day');
+    }
+
+    function render() {
+      return '<div class="cdy-wrap">' + adtHgroup(title(), sub(), FRESH) +
+        '<div id="' + ID + 'Day" class="cdy-day"></div>' +
+        '<div id="' + ID + 'Strip" class="cdy-strip"></div>' +
+        '<div id="' + ACCT + '" class="cdy-filters"></div>' +
+        '<div id="' + BODY + '"><div class="cdy-empty">Loading…</div></div></div>';
+    }
+
+    function init() {
+      dayBar();
+      load(false).catch(function () {});
+      /* today moves while the page is open; adtPoll skips hidden tabs and stops on an 'auth' refusal */
+      adtPoll(BODY, 120000, function () { return shownDay() === adtUkDay() ? load(true) : Promise.resolve(); });
+    }
+
+    function shownDay() { return dayOk(S.day) || dayOk(S.data && S.data.day); }
+
+    function load(quiet) {
+      var p = {};
+      if (dayOk(S.day)) p.day = dayOk(S.day);
+      if (S.account) p.account = S.account;
+      p.direction = DIR;
+      return api('adtoolChangeDay', p).then(function (D) {
+        S.data = D || {};
+        if (dayOk(S.data.day)) S.day = dayOk(S.data.day);
+        if (!$(BODY)) return;
+        dayBar();
+        acctChips();
+        draw();
+        adtFreshShow(FRESH, S.data.fresh);
+      }).catch(function (e) {
+        if (!quiet && $(BODY)) {
+          $(BODY).innerHTML = '<div class="cdy-panel"><h3>Not available</h3><div class="cdy-sub">' +
+            esc((e && e.message) || 'This page could not load.') + '</div></div>';
+        }
+        throw e;
+      });
+    }
+
+    /* ── the day picker and the 14-day working archive ─────────────────────────────────────────── */
+    function archive() {
+      var A = (S.data && S.data.archive) || [];
+      return A.filter(function (a) { return a && dayOk(a.day); });
+    }
+    function archiveCount(a) { return DIR === 'activated' ? num(a.activated) : num(a.stopped); }
+    function dayBar() {
+      var el = $(ID + 'Day');
+      if (el) {
+        var d = shownDay(), today = adtUkDay(), atEnd = !d || d >= today;
+        el.innerHTML = '<button class="cdy-btn" data-cdystep="-1"' + (d ? '' : ' disabled') + '>Previous day</button>' +
+          '<input type="date" id="' + DATE + '" value="' + esc(d) + '" max="' + esc(today) + '">' +
+          '<button class="cdy-btn" data-cdystep="1"' + (atEnd ? ' disabled' : '') + '>Next day</button>' +
+          (d === today ? '' : '<button class="cdy-btn go" data-cdyday="' + esc(DIR === 'activated' ? today : dayShift(today, -1)) + '">' +
+            (DIR === 'activated' ? 'Today' : 'Yesterday') + '</button>') +
+          '<span class="cdy-daytxt">' + esc(d ? dayLong(d) + (d === today ? ' (today)' : '') : 'no day chosen yet') + '</span>';
+        var inp = $(DATE);
+        if (inp) inp.onchange = function () { var v = dayOk(this.value); if (v) go(v); };
+        var bs = el.querySelectorAll('[data-cdystep]');
+        for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+          var step = Number(this.getAttribute('data-cdystep')) || 0, base = shownDay() || adtUkDay();
+          var next = dayShift(base, step);
+          if (next && next <= adtUkDay()) go(next);
+        };
+        var gs = el.querySelectorAll('[data-cdyday]');
+        for (var g = 0; g < gs.length; g++) gs[g].onclick = function () { go(this.getAttribute('data-cdyday')); };
+      }
+      var strip = $(ID + 'Strip');
+      if (!strip) return;
+      var A = archive();
+      if (!A.length) { strip.innerHTML = ''; return; }
+      var cur = shownDay();
+      strip.innerHTML = '<span class="cdy-daytxt" style="align-self:center;margin-right:4px">Last ' + A.length + ' days</span>' +
+        A.map(function (a) {
+          var n = archiveCount(a);
+          return '<button class="cdy-chip' + (a.day === cur ? ' on' : '') + '" data-cdyday="' + esc(a.day) + '" title="' +
+            esc(dayLong(a.day) + ': ' + cnt(n) + ' ' + WORD) + '">' + esc(dayShort(a.day)) +
+            '<span class="n">' + cnt(n) + '</span></button>';
+        }).join('');
+      var cs = strip.querySelectorAll('[data-cdyday]');
+      for (var c = 0; c < cs.length; c++) cs[c].onclick = function () { go(this.getAttribute('data-cdyday')); };
+    }
+    function go(day) {
+      day = dayOk(day); if (!day) return;
+      S.day = day; S.kind = '';
+      dayBar();
+      load(false).catch(function () {});
+    }
+
+    /* ── account chips ─────────────────────────────────────────────────────────────────────────── */
+    function accountRows() {
+      var A = (S.data && S.data.accounts) || [];
+      return A.filter(function (a) { return a && typeof a === 'object' && a.account; });
+    }
+    /* EVERY account, not only the ones with a change on this day. The engine sends the whole list on
+       all_accounts for exactly this reason: a chip reloads the page for one account, and the answer it
+       sends back then names only that account, so a list built from the answer would strand the reader
+       on whichever account they picked first. */
+    function accountNames() {
+      var all = (((S.data && S.data.all_accounts) || [])
+        .map(function (a) { return typeof a === 'string' ? a : (a && a.account); })
+        .filter(Boolean));
+      if (all.length) return all;
+      var names = accountRows().map(function (a) { return a.account; });
+      if (!names.length) {
+        var seen = {};
+        rows().forEach(function (r) { if (r.account && !seen[r.account]) { seen[r.account] = 1; names.push(r.account); } });
+        names.sort();
+      }
+      return names;
+    }
+    function acctChips() {
+      var el = $(ACCT); if (!el) return;
+      var by = {};
+      accountRows().forEach(function (a) { by[a.account] = num(a.ads); });
+      el.innerHTML = '<button class="cdy-chip' + (S.account ? '' : ' on') + '" data-cdya="">All accounts</button>' +
+        accountNames().map(function (a) {
+          return '<button class="cdy-chip' + (S.account === a ? ' on' : '') + '" data-cdya="' + esc(a) + '">' + esc(a) +
+            (by[a] == null ? '' : '<span class="n">' + cnt(by[a]) + '</span>') + '</button>';
+        }).join('');
+      var bs = el.querySelectorAll('[data-cdya]');
+      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+        S.account = this.getAttribute('data-cdya') || '';
+        S.kind = '';
+        acctChips();
+        /* ASK AGAIN rather than filter what is in hand. The counts above come from the engine and
+           cover every change on the day, so filtering here would leave one account's rows sitting
+           under the whole fleet's totals; and the engine caps its rows, so asking for one account
+           is also the only way to see more of them. */
+        load(false).catch(function () {});
+      };
+    }
+
+    function rows() {
+      return ((S.data && S.data.rows) || []).filter(function (r) { return r && typeof r === 'object'; });
+    }
+    function shownRows() {
+      return rows().filter(function (r) {
+        if (S.account && String(r.account || '') !== S.account) return false;
+        if (S.kind && String(r.kind || '') !== S.kind) return false;
+        return true;
+      });
+    }
+
+    /* ── 1 · the day in one line ───────────────────────────────────────────────────────────────── */
+    /* the engine sends the summary; when a field is missing the page counts the same thing from the
+       rows it has, so a thin answer still reads as a day rather than as a row of dashes */
+    function summary() {
+      var raw = (S.data && S.data.summary) || {};
+      var R = rows(), ads = 0, items = {}, camps = {}, campLvl = 0, tool = 0, ebay = 0, moved = 0;
+      R.forEach(function (r) {
+        var id = String(r.item_id || '').trim();
+        if (id) { ads++; items[id] = 1; } else { campLvl++; }
+        var ck = String(r.campaign_id || r.campaign_name || '');
+        if (ck) camps[r.account + '|' + ck] = 1;
+        if (String(r.who || '') === 'tool') tool++; else ebay++;
+        if (/_(removed|added)$/.test(String(r.kind || '')) && id) moved++;
+      });
+      var pick = function (k, fallback) { var v = num(raw[k]); return v == null ? fallback : v; };
+      /* `campaigns` is how many of the changes were AT campaign level; `campaigns_touched` is how many
+         campaigns the day's changes landed in at all. A day of ninety paused ads inside six campaigns
+         that were never themselves touched has none of the first and six of the second, so one number
+         cannot stand for both and the page names each where it prints it. */
+      return {
+        ads: pick('ads', ads),
+        listings: pick('listings', Object.keys(items).length),
+        campaigns: pick('campaigns', campLvl),
+        campaigns_touched: pick('campaigns_touched', Object.keys(camps).length),
+        removed_or_added: pick('removed_or_added', moved),
+        spend_day_before: num(raw.spend_day_before),
+        units_day_before: num(raw.units_day_before),
+        by_tool: pick('by_tool', tool),
+        by_ebay: pick('by_ebay', ebay)
+      };
+    }
+    /* `hook` is the explainer tag ALREADY BUILT by the caller, so the label it carries is a literal
+       at the call site where a reader of this file can see which note that tile opens. */
+    function tile(k, v, d, cls, hook) {
+      return '<div class="cdy-tile ' + (cls || '') + '"><div class="k">' + esc(k) + (hook || '') +
+        '</div><div class="v">' + v + '</div><div class="d">' + esc(d) + '</div></div>';
+    }
+    function oneLine(T) {
+      var d = shownDay(), today = adtUkDay();
+      var when = d ? dayLong(d) + (d === today ? ' (today)' : (d === dayShift(today, -1) ? ' (yesterday)' : '')) : 'this day';
+      var h = '<div class="cdy-line"><b>' + esc(when) + '.</b> ' +
+        (n0(T.ads) || n0(T.campaigns)
+          ? cnt(T.ads) + ' ' + plural(T.ads, 'ad was ', 'ads were ') + WORD + ' on ' + cnt(T.listings) + ' ' +
+            plural(T.listings, 'listing', 'listings') + ' across ' + cnt(T.campaigns_touched) + ' ' +
+            plural(T.campaigns_touched, 'campaign', 'campaigns') +
+            (n0(T.campaigns) ? ', and ' + cnt(T.campaigns) + ' ' + plural(T.campaigns, 'campaign was', 'campaigns were') + ' ' + WORD + ' outright' : '') +
+            esc(S.account ? ', on ' + S.account : '') + '. '
+          : 'Nothing was ' + WORD + ' on this day' + esc(S.account ? ' on ' + S.account : '') + '. ');
+      if (T.spend_day_before != null || T.units_day_before != null) {
+        h += 'Over the 7 days before, those listings were spending <b>' + gbp(T.spend_day_before) + ' a day</b> and selling <b>' +
+          unitsWord(T.units_day_before) + ' a day</b>. ';
+      }
+      h += 'The tool made <b>' + cnt(T.by_tool) + '</b> of the changes and <b>' + cnt(T.by_ebay) +
+        '</b> ' + plural(T.by_ebay, 'was', 'were') + ' seen on eBay.</div>';
+      return h;
+    }
+    /* the hook label is a LITERAL at every call site: the explainer resolves it through the shell's
+       map of label to note, and a label that is assembled somewhere else cannot be checked. */
+    function tiles(T) {
+      return '<div class="cdy-tiles">' +
+        tile(DIR === 'activated' ? 'Ads started' : 'Ads stopped', cnt(T.ads), 'changes at ad level', DIR === 'activated' ? 'gold' : 'loss', reg('changes on this day', 'how')) +
+        tile('Listings', cnt(T.listings), 'listings behind those ads', '', reg('changes on this day', 'how')) +
+        tile('Campaigns', cnt(T.campaigns_touched),
+          'campaigns the changes landed in' + (n0(T.campaigns) ? ', ' + cnt(T.campaigns) + ' ' + plural(T.campaigns, 'change was', 'changes were') + ' to a campaign itself' : ''), '', reg('changes on this day', 'how')) +
+        tile(DIR === 'activated' ? 'Added to campaigns' : 'Taken out of campaigns', cnt(T.removed_or_added),
+          DIR === 'activated' ? 'ads that joined a campaign' : 'ads that left a campaign', '', reg('changes on this day', 'how')) +
+        tile('Was spending a day', gbp(T.spend_day_before), 'those listings, over the 7 days before', 'gold', reg('the 7 days before', 'how')) +
+        tile('Was selling a day', unitsNum(T.units_day_before), 'units a day, over the 7 days before', '', reg('the 7 days before', 'how')) +
+        '</div>';
+    }
+    /* the split a manager asks for first, so it is a panel of its own and not a line in a table */
+    function whoBlock(T) {
+      var t = n0(T.by_tool), e = n0(T.by_ebay), tot = t + e;
+      var pct = tot > 0 ? Math.round(t / tot * 100) : 0;
+      return '<div class="cdy-panel"><h3>Who made these changes' + reg('who changed it', 'how') + '</h3>' +
+        '<div class="cdy-sub">Our own tool against everything else. The portal cannot see who made a change on eBay, so those are never put to a name.</div>' +
+        (tot > 0 ? '<div class="cdy-split"><span class="t" style="width:' + pct + '%"></span><span class="e" style="width:' + (100 - pct) + '%"></span></div>' : '') +
+        '<div class="cdy-who">' +
+        '<div class="cdy-whoc tool"><div class="k">The tool made</div><div class="v">' + cnt(t) + '</div>' +
+        '<div class="d">' + (tot > 0 ? pct + '% of the day' : 'nothing yet') + ', written in its own log with the operation and whether it was sent</div></div>' +
+        '<div class="cdy-whoc"><div class="k">Seen on eBay</div><div class="v">' + cnt(e) + '</div>' +
+        '<div class="d">' + (tot > 0 ? (100 - pct) + '% of the day' : 'nothing yet') + ', found by the sync comparing eBay against the last read, so the portal cannot see who</div></div>' +
+        '</div></div>';
+    }
+
+    /* ── 2 · by account ────────────────────────────────────────────────────────────────────────── */
+    function accountPanel(T) {
+      var A = accountRows();
+      if (!A.length) return '';
+      var sums = { ads: 0, campaigns: 0, touched: 0, listings: 0, spend: 0, haveSpend: false };
+      A.forEach(function (a) {
+        sums.ads += n0(a.ads); sums.campaigns += n0(a.campaigns); sums.touched += n0(a.campaigns_touched); sums.listings += n0(a.listings);
+        var v = num(a.spend_day_before); if (v != null) { sums.spend += v; sums.haveSpend = true; }
+      });
+      return '<div class="cdy-panel"><h3>By account</h3>' +
+        '<div class="cdy-sub">The same day, account by account.</div>' +
+        '<div class="cdy-scroll"><table class="cdy-tbl"><thead><tr><th>Account</th>' +
+        '<th class="r">' + (DIR === 'activated' ? 'Ads started' : 'Ads stopped') + '</th>' +
+        '<th class="r" title="campaigns the day\'s changes landed in, counted once each">Campaigns touched</th>' +
+        '<th class="r" title="changes to a campaign itself rather than to one of its ads">Campaign changes</th>' +
+        '<th class="r">Listings</th><th class="r">Was spending a day</th></tr></thead><tbody>' +
+        A.slice().sort(function (x, y) { return n0(y.ads) - n0(x.ads); }).map(function (a) {
+          return '<tr><td><b>' + esc(a.account) + '</b></td><td class="r">' + cnt(a.ads) + '</td>' +
+            '<td class="r">' + cnt(a.campaigns_touched) + '</td><td class="r">' + cnt(a.campaigns) + '</td>' +
+            '<td class="r">' + cnt(a.listings) + '</td>' +
+            '<td class="r">' + gbp(a.spend_day_before) + '</td></tr>';
+        }).join('') +
+        '<tr class="cdy-tot"><td>All accounts</td><td class="r">' + cnt(num(T.ads) != null ? T.ads : sums.ads) + '</td>' +
+        '<td class="r">' + cnt(num(T.campaigns_touched) != null ? T.campaigns_touched : sums.touched) + '</td>' +
+        '<td class="r">' + cnt(num(T.campaigns) != null ? T.campaigns : sums.campaigns) + '</td>' +
+        '<td class="r">' + cnt(num(T.listings) != null ? T.listings : sums.listings) + '</td>' +
+        '<td class="r">' + (num(T.spend_day_before) != null ? gbp(T.spend_day_before) : (sums.haveSpend ? gbp(sums.spend) : '—')) + '</td></tr>' +
+        '</tbody></table></div></div>';
+    }
+
+    /* ── 3 · the 14 days, the same counts as the strip above ───────────────────────────────────── */
+    function archivePanel() {
+      var A = archive();
+      if (A.length < 2) return '';
+      var pts = A.slice().reverse().map(function (a) {
+        var n = archiveCount(a);
+        return {
+          label: dayShort(a.day), value: n0(n), strong: a.day === shownDay(),
+          title: dayLong(a.day) + ': ' + cnt(num(a.stopped)) + ' stopped, ' + cnt(num(a.activated)) + ' started'
+        };
+      });
+      return '<div class="cdy-panel"><h3>The last ' + A.length + ' days' + reg('the change archive', 'how') + '</h3>' +
+        '<div class="cdy-sub">How many ads and campaigns were ' + WORD + ' each day. Click a day above to open it.</div>' +
+        chartBars(pts, { height: 150, fmt: chartNum, everyNth: 1 }) + '</div>';
+    }
+
+    /* ── 4 · the list ──────────────────────────────────────────────────────────────────────────── */
+    function kindChips() {
+      var R = rows().filter(function (r) { return !S.account || String(r.account || '') === S.account; });
+      var counts = {}, order = [];
+      R.forEach(function (r) {
+        var k = String(r.kind || '');
+        if (counts[k] == null) { counts[k] = 0; order.push(k); }
+        counts[k]++;
+      });
+      var known = (KINDS[DIR] || []).map(function (x) { return x[0]; });
+      var list = known.filter(function (k) { return counts[k]; }).concat(order.filter(function (k) { return known.indexOf(k) < 0; }));
+      if (!list.length) return '';
+      return '<div class="cdy-filters"><button class="cdy-chip' + (S.kind ? '' : ' on') + '" data-cdyk="">Everything<span class="n">' +
+        cnt(R.length) + '</span></button>' + list.map(function (k) {
+          return '<button class="cdy-chip' + (S.kind === k ? ' on' : '') + '" data-cdyk="' + esc(k) + '">' +
+            esc(kindWord(DIR, k)) + '<span class="n">' + cnt(counts[k]) + '</span></button>';
+        }).join('') + '</div>';
+    }
+
+    function whoCell(r) {
+      if (String(r.who || '') === 'tool') {
+        var t = r.tool || {};
+        /* the log's own mode words are not reader words: only 'live' means it reached eBay, and
+           everything else was written and held back, however the log spells it */
+        var mode = String(t.mode || '');
+        return '<div class="cdy-sm"><b>The tool</b>' + (t.op ? ' · ' + esc(String(t.op)) : '') + '</div>' +
+          '<div class="cdy-sm2">' + esc(mode === 'live' ? 'sent to eBay' : (mode ? 'written, not sent to eBay' : 'from the log of its own actions')) +
+          (t.decision_id ? ' · ' + esc(String(t.decision_id)) : '') + '</div>';
+      }
+      return '<div class="cdy-sm">Changed on eBay</div><div class="cdy-sm2">the portal cannot see who</div>';
+    }
+    function decisionCell(r) {
+      var d = r.decision;
+      if (!d || typeof d !== 'object' || !(d.decision || d.why)) return '<div class="cdy-sm2">no morning decision</div>';
+      var label = String(d.decision || '').toUpperCase();
+      return '<div class="cdy-sm"><b>' + esc(label || 'decision') + '</b>' +
+        (d.batch ? ' <span class="cdy-sm2">· ' + esc(String(d.batch) === 'boundary' ? 'evening run' : String(d.batch) + ' run') + '</span>' : '') + '</div>' +
+        (d.why ? '<div class="cdy-sm2">' + esc(String(d.why)) + '</div>' : '');
+    }
+    function beforeCell(r) {
+      var b = r.before;
+      if (!b || typeof b !== 'object') return '<div class="cdy-sm2">no figures for the 7 days before</div>';
+      var sp = num(b.spend_day), un = num(b.units_day), ro = num(b.roas), dys = num(b.days);
+      if (sp == null && un == null && ro == null) return '<div class="cdy-sm2">no figures for the 7 days before</div>';
+      return '<div class="cdy-sm"><b>' + gbp(sp) + '</b> a day · ' + unitsWord(un) + ' a day</div>' +
+        '<div class="cdy-sm2">ROAS <span class="' + (ro == null ? '' : (ro < 1 ? 'cdy-neg' : 'cdy-pos')) + '">' + roasTxt(ro) + '</span>' +
+        (dys == null ? '' : ' · over ' + cnt(dys) + ' ' + plural(dys, 'day', 'days')) + '</div>';
+    }
+    function campaignCell(r) {
+      var name = String(r.campaign_name || r.campaign_id || '');
+      if (!name) return '<span class="cdy-sm2">no campaign on this change</span>';
+      var h = '<span class="cdy-camp">' + adtCampaignLink(r.campaign_id, name) + '</span>';
+      if (String(r.campaign_id_source || '') === 'matched by name') {
+        h += '<span class="cdy-mark" title="this row was recorded before the campaign id was kept, so the link is matched by the campaign name within the account">matched by name</span>';
+      } else if (String(r.campaign_id_source || '') === 'unknown') {
+        h += '<span class="cdy-mark" title="no campaign id was recorded and the name does not match a campaign on this account, so there is no link">no link</span>';
+      }
+      if (r.campaign_status_now) h += '<div class="cdy-sm2">now ' + esc(String(r.campaign_status_now)) + '</div>';
+      return h;
+    }
+    function whatCell(r) {
+      var k = String(r.kind || '');
+      var cls = DIR === 'activated' ? 'on' : 'off';
+      var h = '<span class="cdy-kind ' + cls + '">' + esc(kindWord(DIR, k)) + '</span>';
+      if (r.from || r.to) {
+        h += '<div class="cdy-sm2">' + esc(String(r.from || 'not in a campaign')) + ' → ' + esc(String(r.to || 'gone')) + '</div>';
+      }
+      return h;
+    }
+    function subjectCell(r) {
+      if (!isCampaignRow(r)) return adtProductCell(r);
+      var held = num(r.listings);
+      return '<div class="cdy-sm"><b>' + esc(String(r.campaign_name || r.campaign_id || 'a campaign')) + '</b></div>' +
+        '<div class="cdy-sm2">' + (held == null ? 'a whole campaign, no listing count recorded' : 'a whole campaign, holding ' + cnt(held) + ' ' + plural(held, 'ad', 'ads')) +
+        (r.account ? ' · ' + esc(String(r.account)) : '') + '</div>';
+    }
+    function rowHtml(r) {
+      var wasSelling = n0(r.before && r.before.units_day) > 0;
+      var cls = DIR === 'activated' ? 'start' : (wasSelling ? 'sold' : '');
+      var live = r.live_now;
+      return '<tr class="' + cls + '"><td class="cdy-when">' + esc(ukClock(r)) + '</td>' +
+        '<td>' + whatCell(r) + '</td>' +
+        '<td>' + subjectCell(r) + '</td>' +
+        '<td>' + campaignCell(r) + '</td>' +
+        '<td>' + whoCell(r) + '</td>' +
+        '<td>' + decisionCell(r) + '</td>' +
+        '<td>' + beforeCell(r) + '</td>' +
+        '<td>' + (live == null ? '<span class="cdy-sm2">not known</span>'
+          : '<span class="cdy-tag ' + (live ? 'live' : 'gone') + '">' + (live ? 'live now' : 'not live') + '</span>') + '</td></tr>';
+    }
+    function listPanel() {
+      var R = shownRows();
+      var head = '<thead><tr><th>UK time</th><th>What happened</th><th>Listing or campaign</th>' +
+        '<th>Campaign</th><th>Who or what</th><th>That morning</th><th>The 7 days before</th>' +
+        '<th>Live now</th></tr></thead>';
+      var h = '<div class="cdy-panel"><h3>' + (DIR === 'activated' ? 'Everything started' : 'Everything stopped') + '</h3>' +
+        '<div class="cdy-sub">Newest first' + (S.account ? ', on ' + esc(S.account) : ', grouped by account') + '. ' +
+        (DIR === 'activated'
+          ? 'A gold edge marks a start, so a listing that was losing money and is now running again stands out.'
+          : 'A red edge marks a listing that was selling before it was stopped.') + '</div>';
+      if (!R.length) {
+        return h + '<div class="cdy-empty">' + (rows().length
+          ? 'Nothing in this filter on this day.'
+          : 'Nothing was ' + WORD + ' on this day.') + '</div></div>';
+      }
+      var body = '';
+      if (!S.account) {
+        var order = [], byAcct = {};
+        R.forEach(function (r) {
+          var a = String(r.account || 'no account');
+          if (!byAcct[a]) { byAcct[a] = []; order.push(a); }
+          byAcct[a].push(r);
+        });
+        body = order.map(function (a) {
+          return '<tr class="cdy-grp"><td colspan="8">' + esc(a) + ' · ' + cnt(byAcct[a].length) + ' ' +
+            plural(byAcct[a].length, 'change', 'changes') + '</td></tr>' + byAcct[a].map(rowHtml).join('');
+        }).join('');
+      } else {
+        body = R.map(rowHtml).join('');
+      }
+      return h + '<div class="cdy-scroll"><table class="cdy-tbl">' + head + '<tbody>' + body + '</tbody></table></div></div>';
+    }
+
+    /* ── 5 · honesty ───────────────────────────────────────────────────────────────────────────── */
+    function honesty() {
+      var D = S.data || {}, h = '<div class="cdy-honest"><h3>How to read this day</h3>';
+      var held = num(D.rows_held_back), total = num(D.rows_total);
+      h += '<p><b>The day.</b> This page covers a UK day, midnight to midnight' +
+        (shownDay() ? ' on ' + esc(dayLong(shownDay())) : '') + '.' +
+        (D.uk_bounds && (D.uk_bounds.from_utc || D.uk_bounds.to_utc)
+          ? ' The changes are the ones recorded from ' + esc(utcClock(D.uk_bounds.from_utc)) + ' to ' +
+            esc(utcClock(D.uk_bounds.to_utc)) + ' UTC, which is that UK day.'
+          : '') + '</p>';
+      if (held != null && held > 0) {
+        h += '<p><b>' + cnt(held) + ' ' + plural(held, 'change is', 'changes are') + ' not on the page.</b> ' +
+          'The newest ' + cnt(total != null ? Math.max(0, total - held) : rows().length) + ' are shown. ' +
+          'The counts above cover every change on the day, shown or not. Choose one account to see more of them.</p>';
+      }
+      h += '<p><b>Who changed something.</b> A change is put to the tool only when the log the tool keeps of its ' +
+        'own actions holds it for the same listing or campaign on the same UK day. Everything else was found by comparing eBay against ' +
+        'the last read, and the portal cannot see who made it, so no name is ever guessed.</p>';
+      var matched = rows().filter(function (r) { return String(r.campaign_id_source || '') === 'matched by name'; }).length;
+      if (matched > 0) {
+        h += '<p><b>' + cnt(matched) + ' campaign ' + plural(matched, 'link is', 'links are') + ' matched by name.</b> ' +
+          'Older campaign changes were recorded with the campaign name and no id, so the link is found by matching ' +
+          'that name within the account. Each one is marked on its row.</p>';
+      }
+      h += '<p>Nothing on this page is ever sent to eBay.' +
+        (D.computed_at ? ' Worked out at ' + esc(utcClock(D.computed_at)) + ' UTC.' : '') + '</p>';
+      return h + '</div>';
+    }
+
+    /* ── draw and wire ─────────────────────────────────────────────────────────────────────────── */
+    function draw() {
+      var box = $(BODY); if (!box) return;
+      var D = S.data || {}, T = summary();
+      var h = '<div class="cdy-top"><span><b>' + esc(title()) + '</b></span><span>·</span>' +
+        '<span>' + esc(shownDay() ? dayLong(shownDay()) : 'no day chosen yet') + '</span><span>·</span>' +
+        '<span>' + esc(S.account || 'all accounts') + '</span><span>·</span>' +
+        '<span>' + cnt(num(D.rows_total) != null ? D.rows_total : rows().length) + ' ' +
+        plural(num(D.rows_total) != null ? D.rows_total : rows().length, 'change', 'changes') + '</span></div>';
+      h += oneLine(T);
+      h += tiles(T);
+      h += whoBlock(T);
+      h += accountPanel(T);
+      h += archivePanel();
+      h += kindChips();
+      h += listPanel();
+      h += honesty();
+      box.innerHTML = h;
+      var ks = box.querySelectorAll('[data-cdyk]');
+      for (var i = 0; i < ks.length; i++) ks[i].onclick = function () {
+        var k = this.getAttribute('data-cdyk') || '';
+        S.kind = S.kind === k ? '' : k;
+        draw();
+      };
+      var ds = box.querySelectorAll('[data-cdyday]');
+      for (var j = 0; j < ds.length; j++) ds[j].onclick = function () { go(this.getAttribute('data-cdyday')); };
+    }
+
+    return { render: render, init: init, direction: DIR };
+  }
+
+  /* view-adtool-activated.js registers the other direction off this factory. Both files are spliced
+     into both portals, so the classes above are always present wherever the factory is used. */
+  window.adtChangeDayPage = makePage;
+
+  var STOPPED = makePage({
+    id: 'cdyS', direction: 'stopped', title: 'Stopped yesterday',
+    sub: 'Every ad and campaign stopped on a chosen UK day'
+  });
+
+  VIEWS.adtoolStopped = {
+    label: 'Stopped yesterday', hidden: true, order: 94, roles: ROLES,
+    icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
+    render: STOPPED.render,
+    init: STOPPED.init
+  };
 })();
 
 /* ---------- view-advertisingMoney.js ---------- */
@@ -9839,7 +11076,9 @@ function createMeeting() {
         : esc(cwStr(e.campaign)) + ' — ' + esc(what) + (cwStr(e.old) || cwStr(e.new) ? ': ' + esc(cwStr(e.old)) + ' → ' + esc(cwStr(e.new)) : '');
       h += '<li><span class="cw-when">' + esc(cwPKT(e.at)) + '</span>' + esc(cwStr(e.account)) + ' · ' + line + (cwStr(e.actor) ? ' · by ' + esc(cwStr(e.actor)) : '') + '</li>';
     });
-    h += '</ul>';
+    /* this feed is the LAST THIRTY changes of every kind, live. Whole days of them, read as stops and
+       starts with the listing behind each one, are on the two change pages, which keep a fortnight. */
+    h += '</ul><p style="margin:6px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">One whole day at a time, with the listings behind each change and a fortnight of archive, is on <a href="#adtoolStopped" style="color:var(--gold-a);font-weight:800">Stopped yesterday</a> and <a href="#adtoolActivated" style="color:var(--gold-a);font-weight:800">Activated today</a>.</p>';
     box.innerHTML = h;
   }
 
@@ -36597,9 +37836,9 @@ function enterApp(user){
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
        tool page covering its subject, so the two are read together instead of being hunted for. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport'] },
+      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport', 'adtoolActivated', 'adtoolStopped'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
-      { name: 'Products',      keys: ['adtoolCpc', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
+      { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },
       { name: 'Campaigns',     keys: ['adtoolCampaignBoard', 'adtoolItemCampaigns', 'campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
       { name: 'Traffic and keywords', keys: ['traffic', 'potentialCpc', 'keywordApprovals'] },
