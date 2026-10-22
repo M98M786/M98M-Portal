@@ -39,7 +39,7 @@
     '.aa-empty{color:var(--text-2);font-weight:700;padding:16px 0}.aa-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}'
   );
 
-  var AA = { data: null, tab: 'pending', accounts: [], listers: [], autoListers: [], seq: 0 };
+  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], seq: 0, sentSeq: 0 };
 
   /* 22 Oct (owner): auto-select the deadline — today 11:59 PM Pakistan time — as a datetime-local
      value, so the owner never types it. PKT is UTC+5; a datetime-local wants local wall time. */
@@ -135,19 +135,19 @@
   function aaPaint() {
     var d = AA.data;
     var tiles = $('aaTiles'); if (tiles && d) {
-      var openSent = (d.sent || []).filter(function (x) { return aaStr(x.status) !== 'Completed'; }).length;
-      var listed = (d.sent || []).filter(function (x) { return aaStr(x.status) === 'Completed'; }).length;
+      var sc = AA.sentData && AA.sentData.counts;
+      var withL = sc ? sc.with_listers : null, listed = sc ? sc.listed : null;
       tiles.innerHTML =
         '<div class="aa-tile"><span class="k">Approved · pending send</span><b class="goldtext">' + (d.counts ? d.counts.pending_send : 0) + '</b></div>' +
-        '<div class="aa-tile"><span class="k">With listers · in progress</span><b style="color:var(--warn)">' + openSent + '</b></div>' +
-        '<div class="aa-tile"><span class="k">Listed</span><b style="color:var(--ok)">' + listed + '</b></div>';
+        '<div class="aa-tile"><span class="k">With listers · in progress</span><b style="color:var(--warn)">' + (withL == null ? '…' : withL) + '</b></div>' +
+        '<div class="aa-tile"><span class="k">Listed</span><b style="color:var(--ok)">' + (listed == null ? '…' : listed) + '</b></div>';
     }
     var tabs = $('aaTabs'); if (tabs && d) {
       tabs.innerHTML =
         '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + (d.counts ? d.counts.pending_send : 0) + '</span></button>' +
-        '<button class="aa-tab' + (AA.tab === 'sent' ? ' on' : '') + '" data-aa-tab="sent">Sent to listers <span style="opacity:.7">' + (d.counts ? d.counts.sent : 0) + '</span></button>';
+        '<button class="aa-tab' + (AA.tab === 'sent' ? ' on' : '') + '" data-aa-tab="sent">Sent to listers <span style="opacity:.7">' + ((AA.sentData && AA.sentData.counts) ? AA.sentData.counts.sent : '…') + '</span></button>';
       Array.prototype.forEach.call(tabs.querySelectorAll('[data-aa-tab]'), function (b) {
-        b.onclick = function () { AA.tab = this.getAttribute('data-aa-tab'); aaPaint(); };
+        b.onclick = function () { AA.tab = this.getAttribute('data-aa-tab'); if (AA.tab === 'sent' && !AA.sentData) { aaLoadSent(); } aaPaint(); };
       });
     }
     var body = $('aaBody'); if (!body || !d) { return; }
@@ -157,7 +157,8 @@
       body.innerHTML = '<div class="aa-grid">' + items.map(function (h, i) { return aaCard(h, !!d.can_send, i); }).join('') + '</div>';
       aaWireSend(body);
     } else {
-      var sent = d.sent || [];
+      if (!AA.sentData) { body.innerHTML = '<div class="spinner"></div>'; aaLoadSent(); return; }
+      var sent = AA.sentData.sent || [];
       if (!sent.length) { body.innerHTML = '<div class="aa-empty">Nothing sent yet.</div>'; return; }
       body.innerHTML = '<div class="scroll"><table class="aa-tbl"><thead><tr>' +
         '<th>Product</th><th>Account</th><th>Lister</th><th>Status</th><th>Sent</th></tr></thead><tbody>' +
@@ -200,7 +201,17 @@
     });
   }
 
+  function aaLoadSent() {
+    var seq = ++AA.sentSeq;
+    api('approvedArchive', { view: 'sent' }).then(function (d) {
+      if (seq !== AA.sentSeq) { return; }
+      AA.sentData = d || { sent: [], counts: {} };
+      aaPaint();
+    }).catch(function () { /* leave the tiles at … ; the pending workflow is unaffected */ });
+  }
+
   function aaLoad() {
+    AA.sentData = null;
     var seq = ++AA.seq;
     var body = $('aaBody'); if (body && !AA.data) { body.innerHTML = '<div class="spinner"></div>'; }
     Promise.all([
@@ -216,6 +227,7 @@
       if (STATE.counts) { STATE.counts.approvedArchive = (AA.data.counts && AA.data.counts.pending_send) || 0; }
       if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
       aaPaint();
+      aaLoadSent();   // the heavy list, in the background, so the tiles fill and the Sent tab is ready
     }).catch(function (e) {
       if (seq !== AA.seq) { return; }
       var b = $('aaBody'); if (b) { b.innerHTML = '<div class="aa-empty">Could not load the archive.<span>' + esc((e && e.message) || 'no answer') + '</span></div>'; }

@@ -543,7 +543,7 @@ function actionDecideHunt_(payload, ctx) {
   }
   /* 22 Oct: a new-flow approval (approve-only — no lister assigned) enters the "pending send" set,
      which is what the Approved archive shows. Old-flow approvals (assignNow) never do. */
-  if (approving && !assignNow) { try { pendingSendAdd_(rec.hunt_id); } catch (e) {} }
+  if (approving && !assignNow) { try { pendingSendAdd_(rec); } catch (e) {} }
 
   logActivity_(ctx.ident.email, 'DECIDE_HUNT', rec.hunt_id, HUNT_PENDING, decision,
     assignNow ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId
@@ -1649,49 +1649,55 @@ function actionApprovedArchive_(payload, ctx) {
   }
   const canProfit = canSeeProfit_(ctx.user.role) || isMgmt_(ctx.user.role, ctx.ident.email);
   const canSend = isMgmt_(ctx.user.role, ctx.ident.email);
-  // listing_new tasks per hunt → who holds it and at what status
+  const ADV = ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
+    '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'];
+
+  /* PENDING is read from its own tiny tab — milliseconds, no HUNTING_DB/TASKS scan. */
+  const pending = pendingSendCards_().map(function (r) {
+    const card = r.card || {};
+    if (!canProfit) { delete card['Our Profit']; delete card['ROI']; }
+    return card;
+  });
+  pending.reverse();   // newest approval first (appended in order)
+
+  /* SENT is the heavy one (every approved hunt joined to its listing task) — computed only when
+     asked for (view:'sent'), so opening the page never pays for it. */
+  if (String(payload && payload.view || '') !== 'sent') {
+    return { pending_send: pending, counts: { pending_send: pending.length },
+      can_send: canSend, advertising_types: ADV, sent_deferred: true };
+  }
+
   const byHunt = {};
   readTab_('TASKS').forEach(function (t) {
     if (String(t.type || '') !== 'listing_new') return;
     let hid = '';
     try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (!hid) { const m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) hid = m[0]; }
     if (!hid) return;
-    const cur = byHunt[hid];
     const rank = { 'Pending': 1, 'Working': 2, 'Updated': 2, 'Submitted — awaiting approval': 3, 'Completed': 4 };
-    // keep the most-advanced task for the hunt (a resend would be prevented anyway)
+    const cur = byHunt[hid];
     if (!cur || (rank[String(t.status || '')] || 0) >= (rank[cur.status] || 0)) {
       byHunt[hid] = { task_id: String(t.task_id || ''), status: String(t.status || ''),
         lister: String(t.assigned_to || ''), account: String(t.account || ''),
-        created_at: String(t.created_at || ''), deadline_pkt: String(t.deadline_pkt || '') };
+        created_at: String(t.created_at || '') };
     }
   });
-  /* Only hunts in the pending-send set are genuinely awaiting a lister (new-flow approvals not yet
-     sent). An approved hunt with no task that is NOT in the set is a historical one (listed long
-     ago, task purged) — it must not reappear in the queue. */
-  const pendSet = {};
-  try { pendingSendGet_().forEach(function (h) { pendSet[h] = 1; }); } catch (e) {}
-  const pending = [], sent = [];
+  const sent = [];
   readTab_('HUNTING_DB').forEach(function (h) {
     if (String(h['Approval Status'] || '').trim() !== 'APPROVED') return;
-    if (String(h['Comments'] || '').indexOf('listing DELETED at go-live') >= 0) return;   // VeRO-killed — never re-send
     const hid = String(h.hunt_id || '');
-    const card = huntArchiveCard_(h, canProfit);
     const task = byHunt[hid];
-    if (task) {
-      sent.push({ hunt_id: hid, title: card['Title'], account: task.account, lister: task.lister,
-        status: task.status, task_id: task.task_id, created_at: task.created_at, ts: card.ts,
-        hunter_name: card.hunter_name });
-    } else if (pendSet[hid]) {
-      pending.push(card);
-    }
+    if (!task) return;
+    sent.push({ hunt_id: hid, title: String(h['Title'] || ''), account: task.account, lister: task.lister,
+      status: task.status, task_id: task.task_id, created_at: task.created_at, ts: String(h.ts || ''),
+      hunter_name: String(h.hunter_name || h.hunter_email || '') });
   });
-  pending.sort(function (a, b) { return String(a.ts).localeCompare(String(b.ts)); });   // oldest approval first
   sent.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  const withListers = sent.filter(function (x) { return x.status !== 'Completed'; }).length;
+  const listed = sent.filter(function (x) { return x.status === 'Completed'; }).length;
   return { pending_send: pending, sent: sent.slice(0, 300),
-    counts: { pending_send: pending.length, sent: sent.length },
-    can_send: canSend,
-    advertising_types: ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
-      '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'] };
+    counts: { pending_send: pending.length, sent: sent.length, with_listers: withListers, listed: listed },
+    can_send: canSend, advertising_types: ADV };
 }
 
 function actionHuntSendToLister_(payload, ctx) {
@@ -1758,57 +1764,103 @@ function actionHuntSendToLister_(payload, ctx) {
 }
 
 
-/* ===================== 22 Oct — the "pending send" set ========================================
-   The Approved archive must show only items that are GENUINELY waiting for a lister — NOT every
-   approved hunt that happens to have no listing task. Old approved hunts were listed long ago and
-   their completed tasks were later purged, so "approved + no task" wrongly swept them into the
-   send queue (owner, 22 Oct: "why is it showing previous old items"). The truth of "approved under
-   the new two-step flow and not yet sent" is kept in a Script Property set: the new-flow approval
-   adds the hunt_id, huntSendToLister removes it. Old-flow approvals are never in it. ============ */
-function pendingSendGet_() {
-  try { var raw = PropertiesService.getScriptProperties().getProperty('PENDING_SEND_HUNTS'); var a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; } catch (e) { return []; }
+/* ===================== 22 Oct — the "pending send" STORE (its own tiny tab) ====================
+   The Approved archive must show only items GENUINELY waiting for a lister — not every approved
+   hunt with no task (old ones were listed long ago, their tasks purged). And it must open FAST:
+   scanning all of HUNTING_DB + TASKS on every open made the page crawl (owner, 22 Oct). So the
+   pending-send items live in their OWN small tab, PENDING_SEND — one row per waiting item, the
+   card stored as JSON. New-flow approval appends a row (with the product card ready to render);
+   huntSendToLister deletes it. The archive reads ONLY this tab for the pending list — a handful
+   of rows, milliseconds. The big "Sent" list is computed lazily, on demand. =================== */
+const PENDING_SEND_TAB = 'PENDING_SEND';
+const PENDING_SEND_HEADER = ['hunt_id', 'added_at', 'card_json'];
+function pendingSendTab_() {
+  const db = getPortalDb_(false);
+  let sh = db.getSheetByName(PENDING_SEND_TAB);
+  if (!sh) { sh = db.insertSheet(PENDING_SEND_TAB); sh.appendRow(PENDING_SEND_HEADER); }
+  else if (sh.getLastRow() < 1) { sh.appendRow(PENDING_SEND_HEADER); }
+  return sh;
 }
-function pendingSendWrite_(arr) {
-  try { PropertiesService.getScriptProperties().setProperty('PENDING_SEND_HUNTS', JSON.stringify(arr.slice(-1500))); } catch (e) {}
+/* read: [{hunt_id, card}] — the cards ready to render, newest approval first */
+function pendingSendCards_() {
+  try {
+    const sh = pendingSendTab_();
+    const lr = sh.getLastRow();
+    if (lr < 2) return [];
+    const vals = sh.getRange(2, 1, lr - 1, 3).getValues();
+    const out = [];
+    for (let i = 0; i < vals.length; i++) {
+      const id = String(vals[i][0] || ''); if (!id) continue;
+      let card = null; try { card = JSON.parse(String(vals[i][2] || '')); } catch (e) {}
+      if (card) out.push({ hunt_id: id, added_at: String(vals[i][1] || ''), card: card });
+    }
+    return out;
+  } catch (e) { return []; }
 }
-function pendingSendAdd_(huntId) {
+function pendingSendHas_(huntId) {
+  const sh = pendingSendTab_();
+  const lr = sh.getLastRow();
+  if (lr < 2) return 0;
+  const col = sh.getRange(2, 1, lr - 1, 1).getValues();
+  for (let i = 0; i < col.length; i++) { if (String(col[i][0] || '') === huntId) return i + 2; }   // row number, or 0
+  return 0;
+}
+/* add: rec is the full hunt record (huntRecord_); the card is built and stored so the archive
+   never has to open HUNTING_DB for it. */
+function pendingSendAdd_(rec) {
+  const huntId = String((rec && rec.hunt_id) || '');
   if (!huntId) return;
-  var lk = LockService.getScriptLock();
-  try { lk.waitLock(5000); var a = pendingSendGet_(); if (a.indexOf(huntId) < 0) { a.push(huntId); pendingSendWrite_(a); } } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
+  const lk = LockService.getScriptLock();
+  try {
+    lk.waitLock(8000);
+    if (pendingSendHas_(huntId)) return;
+    let card = {}; try { card = huntArchiveCard_(rec, true); } catch (e) { card = { hunt_id: huntId, Title: String((rec && rec[HC_TITLE]) || huntId) }; }
+    pendingSendTab_().appendRow([huntId, now_(), JSON.stringify(card)]);
+  } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
 }
 function pendingSendRemove_(huntId) {
+  huntId = String(huntId || '');
   if (!huntId) return;
-  var lk = LockService.getScriptLock();
-  try { lk.waitLock(5000); var a = pendingSendGet_(); var i = a.indexOf(huntId); if (i >= 0) { a.splice(i, 1); pendingSendWrite_(a); } } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
+  const lk = LockService.getScriptLock();
+  try {
+    lk.waitLock(8000);
+    const row = pendingSendHas_(huntId);
+    if (row) pendingSendTab_().deleteRow(row);
+  } catch (e) {} finally { try { lk.releaseLock(); } catch (e) {} }
 }
 
-/* One-shot backfill for the transition: every new-flow approval logged DECIDE_HUNT with
-   'pending send' in its new_value (old-flow logged account/lister/task instead). Collect those
-   hunt_ids from ACTIVITY_LOG, drop any that already have a listing task (already sent) or are no
-   longer approved, and seed the set. Run once after the fix ships. */
-function backfillPendingSendFromLog() {
-  var newFlow = {};
+/* One-shot: rebuild the PENDING_SEND tab from scratch — the new-flow approvals (DECIDE_HUNT log
+   rows whose new_value says 'pending send') that are still approved and have no listing task. One
+   HUNTING_DB + TASKS scan, offline. Run once after the tab ships (replaces the earlier Script
+   Property backfill). Idempotent. */
+function rebuildPendingSendTab() {
+  const newFlow = {};
   readTab_('ACTIVITY_LOG').forEach(function (r) {
     if (String(r.action || '') !== 'DECIDE_HUNT') return;
     if (String(r.new_value || '').indexOf('pending send') < 0) return;
-    var hid = String(r.target || '').trim();
-    if (hid) newFlow[hid] = 1;
+    const hid = String(r.target || '').trim(); if (hid) newFlow[hid] = 1;
   });
-  // approved set
-  var approved = {};
-  readTab_('HUNTING_DB').forEach(function (h) { if (String(h['Approval Status'] || '').trim() === 'APPROVED') approved[String(h.hunt_id || '')] = 1; });
-  // hunts that already have a listing task
-  var hasTask = {};
+  const hasTask = {};
   readTab_('TASKS').forEach(function (t) {
     if (String(t.type || '') !== 'listing_new') return;
-    var hid = ''; try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
-    if (!hid) { var m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) hid = m[0]; }
+    let hid = ''; try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (!hid) { const m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) hid = m[0]; }
     if (hid) hasTask[hid] = 1;
   });
-  var set = [];
-  Object.keys(newFlow).forEach(function (hid) { if (approved[hid] && !hasTask[hid]) set.push(hid); });
-  pendingSendWrite_(set);
-  var r = 'pending-send set backfilled: ' + set.length + ' hunt(s) awaiting a lister (from ' + Object.keys(newFlow).length + ' new-flow approvals in the log)';
+  const rows = [];
+  readTab_('HUNTING_DB').forEach(function (h) {
+    const hid = String(h.hunt_id || '');
+    if (!newFlow[hid]) return;
+    if (String(h['Approval Status'] || '').trim() !== 'APPROVED') return;
+    if (hasTask[hid]) return;
+    if (String(h['Comments'] || '').indexOf('listing DELETED at go-live') >= 0) return;
+    let card = {}; try { card = huntArchiveCard_(h, true); } catch (e) {}
+    rows.push([hid, now_(), JSON.stringify(card)]);
+  });
+  const sh = pendingSendTab_();
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+  if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
+  const r = 'PENDING_SEND tab rebuilt: ' + rows.length + ' item(s) awaiting a lister';
   Logger.log(r);
   return r;
 }

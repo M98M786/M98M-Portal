@@ -1642,11 +1642,11 @@ function runLossEscalationSweep() {
      new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */
   try {
     const p22 = PropertiesService.getScriptProperties();
-    if (p22.getProperty('BACKFILL_PENDING_SEND_22OCT') !== 'done' && typeof backfillPendingSendFromLog === 'function') {
-      p22.setProperty('BACKFILL_PENDING_SEND_22OCT', 'done');
-      logActivity_('system', 'BACKFILL_PENDING_SEND_22OCT', '', '', 'run from the 5-minute sweep', backfillPendingSendFromLog());
+    if (p22.getProperty('REBUILD_PENDING_SEND_TAB_22OCT') !== 'done' && typeof rebuildPendingSendTab === 'function') {
+      p22.setProperty('REBUILD_PENDING_SEND_TAB_22OCT', 'done');
+      logActivity_('system', 'REBUILD_PENDING_SEND_TAB_22OCT', '', '', 'run from the 5-minute sweep', rebuildPendingSendTab());
     }
-  } catch (e) { logActivity_('trigger', 'ERROR:backfillPendingSend22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  } catch (e) { logActivity_('trigger', 'ERROR:rebuildPendingSendTab22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* 22 Oct (owner): add Sir Hasib's third management email — runs once on this 5-minute clock so it
      lands without the editor Run button. Idempotent; delete at the next tidy-up. */
   try {
