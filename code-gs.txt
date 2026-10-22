@@ -22034,6 +22034,15 @@ function runLossEscalationSweep() {
       logActivity_('system', 'BACKFILL_PENDING_SEND_22OCT', '', '', 'run from the 5-minute sweep', backfillPendingSendFromLog());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:backfillPendingSend22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 22 Oct (owner): add Sir Hasib's third management email — runs once on this 5-minute clock so it
+     lands without the editor Run button. Idempotent; delete at the next tidy-up. */
+  try {
+    const p22b = PropertiesService.getScriptProperties();
+    if (p22b.getProperty('ADD_MGMT_EMAIL_22OCT') !== 'done' && typeof addHasibThirdManagementEmail === 'function') {
+      p22b.setProperty('ADD_MGMT_EMAIL_22OCT', 'done');
+      logActivity_('system', 'ADD_MGMT_EMAIL_22OCT', 'mrhasibullah@googlemail.com', '', 'run from the 5-minute sweep', addHasibThirdManagementEmail());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:addMgmtEmail22Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   const hour = Number(Utilities.formatDate(new Date(), 'Asia/Karachi', 'H'));
   if (hour < LOSS_PING_START || hour >= LOSS_PING_END) return 'outside ping hours';
 
