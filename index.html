@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261022-0021';
+var BUILD = '20261022-1406';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14950,7 +14950,7 @@ VIEWS.dashboard = {
      the desk is SHARED between the publishers — each sees every waiting draft and may make it live.
      The server (CONFIG go_live_publishers) decides who may publish; this list only shows the desk.
      Google signs the same person in as either @googlemail.com or @gmail.com, so both are listed. */
-  var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+  var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];   // 22 Oct: Sir Hasib's third management email
   /* Item IDs published from THIS desk in this session. The desk reads myListingWork, which is
      engine-served (D1 tasks mirror) and lags the sheet write enterItemId just made — so without
      this the draft the publisher just made live comes straight back on the next refresh until the

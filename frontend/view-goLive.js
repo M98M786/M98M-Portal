@@ -11,7 +11,7 @@
      the desk is SHARED between the publishers — each sees every waiting draft and may make it live.
      The server (CONFIG go_live_publishers) decides who may publish; this list only shows the desk.
      Google signs the same person in as either @googlemail.com or @gmail.com, so both are listed. */
-  var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+  var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];   // 22 Oct: Sir Hasib's third management email
   /* Item IDs published from THIS desk in this session. The desk reads myListingWork, which is
      engine-served (D1 tasks mirror) and lags the sheet write enterItemId just made — so without
      this the draft the publisher just made live comes straight back on the next refresh until the

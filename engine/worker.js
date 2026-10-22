@@ -41,14 +41,14 @@ const LISTING_LOAD_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Listing Mana
 const REVISION_STATUSES = ['Started', 'Title & keywords rewritten', 'Photos updated', 'Description & specifics updated', 'Price checked', 'Blocked — need help'];
 /* 4 Oct (owner): the go-live desk is shared between these people (portal_config go_live_publishers
    overrides; this is the fallback) — each sees every waiting listing draft and may make it live. */
-const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];
 /* 7 Oct (owner): "no one other than Zaid, Hasib and me can sign in from anywhere other than the
    office's IP address — advertising too." Every signed-in call (the portal AND the advertising
    portal ride this same engine) must arrive from OFFICE_IP unless the email is on this list.
    OFFICE_IP = dashboard plain var, comma list of exact IPs; an entry ending in '.' or ':' is a
    prefix (an IPv6 /64, a small range). Left UNSET the gate stays open, so a deploy can never
    lock the office itself out before the address is typed in. */
-const IP_FREE_EMAILS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com'];
+const IP_FREE_EMAILS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];   // 22 Oct: Sir Hasib's third management email signs in from anywhere too
 class LocationError extends Error {}
 function officeGate(env, req, email) {
   const allow = String(env.OFFICE_IP || '').split(',').map((s) => s.trim()).filter(Boolean);

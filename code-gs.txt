@@ -105,7 +105,8 @@ const CONFIG_DEFAULTS = {
   /* 4 Oct (owner: "update Sir Hasib's portal with the go-live desk … same as Zaid's"): the go-live desk is
      SHARED by these people — each sees every waiting draft and may publish it. Comma list; the approver
      above (who the drafts are assigned to) is always included. Google may sign Hasib in as either domain. */
-  go_live_publishers: 'zaidkaleem987@gmail.com,mrhasibullah91@googlemail.com,mrhasibullah91@gmail.com,m98m786@gmail.com',
+  /* 22 Oct (owner): a third Sir Hasib management email joins the shared desk (both domain spellings). */
+  go_live_publishers: 'zaidkaleem987@gmail.com,mrhasibullah91@googlemail.com,mrhasibullah91@gmail.com,m98m786@gmail.com,mrhasibullah@googlemail.com,mrhasibullah@gmail.com',
   paused_accounts: '',                                    // owner pause: accounts that generate NO automated tasks (comma-separated)
   // §16.10 pilot gate: while this is anything but 'true', the pipeline never writes to a live
   // business sheet — intended writes are logged as SHADOW_WRITE so they can be inspected first.
@@ -22518,6 +22519,57 @@ function staffRename(args) {
    employee anymore." The mailbox stays in service under its new holder: same email, same role,
    same tasks and history; only the name changes, through staffRename (which also re-pushes the
    engine users mirror). Run once from the editor; a second run is a no-op. */
+/* 22 Oct (owner): "add mrhasibullah@googlemail.com as third management email." Idempotent one-shot:
+   ensure the USERS row (role Management, approved), and add it (both domain spellings) to the live
+   go_live_publishers config so the shared go-live desk opens for it. Management role passes isMgmt_
+   and gets every management screen by role. NOT a super admin (kept to mrhasibullah91 / Zaid) and —
+   because IP_FREE_EMAILS is an engine constant and the live engine is mid-change — the "sign in from
+   anywhere" exemption is committed in engine/worker.js and activates on the next engine deploy; until
+   then this email works from the office. pushEngineSync mirrors the row + config to D1. */
+function addHasibThirdManagementEmail() {
+  var TARGET = 'mrhasibullah@googlemail.com';
+  var out = [];
+  var sh = sadmUsersSheet_();
+  var cols = DB_TABS.USERS;
+  var vals = sh.getDataRange().getValues();
+  var n = normalizeEmail(TARGET);
+  var found = -1;
+  for (var i = 1; i < vals.length; i++) { if (normalizeEmail(vals[i][0]) === n) { found = i; break; } }
+  if (found >= 0) {
+    var r = found + 1;
+    sh.getRange(r, cols.indexOf('role') + 1).setValue('Management');
+    sh.getRange(r, cols.indexOf('status') + 1).setValue(SADM_STATUS_APPROVED);
+    if (!String(vals[found][cols.indexOf('name')] || '').trim()) { sh.getRange(r, cols.indexOf('name') + 1).setNumberFormat('@'); sh.getRange(r, cols.indexOf('name') + 1).setValue('Sir Hasib'); }
+    out.push('USERS row existed → ensured Management/approved');
+  } else {
+    var row = [TARGET, 'Sir Hasib', 'Management', '', 'ALL', SADM_STATUS_APPROVED, now_(), 'system:owner-22oct', '',
+      'Sir Hasib — third management email (owner, 22 Oct)', '', ''];
+    var rr = sh.getLastRow() + 1;
+    sh.getRange(rr, cols.indexOf('name') + 1).setNumberFormat('@');
+    sh.getRange(rr, cols.indexOf('notes') + 1).setNumberFormat('@');
+    sh.getRange(rr, 1, 1, cols.length).setValues([row.slice(0, cols.length)]);
+    out.push('USERS row ADDED: ' + TARGET + ' = Management/approved');
+  }
+  sadmForgetUsers_();
+  // add both domain spellings to the live go_live_publishers config (engine reads this from D1)
+  try {
+    var cur = String(getConfig('go_live_publishers') || CONFIG_DEFAULTS.go_live_publishers || '');
+    var list = cur.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    ['mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'].forEach(function (e) { if (list.indexOf(e) < 0) list.push(e); });
+    r8SetConfig_('go_live_publishers', list.join(','));
+    try { CacheService.getScriptCache().remove('cfg_go_live_publishers'); } catch (e) {}
+    try { delete EXEC_CFG['go_live_publishers']; } catch (e) {}
+    out.push('go_live_publishers → ' + list.join(','));
+  } catch (e) { out.push('go_live_publishers update FAILED: ' + (e && e.message || e)); }
+  try { logActivity_('system', 'ADD_MGMT_EMAIL', TARGET, '', 'Management/approved + go-live publisher', 'owner 22 Oct'); } catch (e) {}
+  var mirror = 'mirror not pushed';
+  try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  out.push('mirror: ' + mirror);
+  var res = out.join(' · ');
+  Logger.log(res);
+  return res;
+}
+
 function renameM98mfourToTahirAmin() {
   const r = staffRename({ email: 'm98mfour@gmail.com', name: 'Tahir Amin' });
   Logger.log(r);
