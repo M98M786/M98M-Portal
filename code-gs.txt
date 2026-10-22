@@ -6777,8 +6777,13 @@ function actionDecideHunt_(payload, ctx) {
   const approving = decision === HUNT_APPROVED;
   if (!approving && !comment) throw new Error('a comment is mandatory when a hunt is not approved');
 
+  /* 22 Oct (owner): approval and lister-assignment are now TWO steps. Approve just approves — the
+     account, campaign type, lister and the send itself happen later on the Approved archive
+     (huntSendToLister). Backward-compatible: if a caller still passes lister_email (an old frontend
+     tab), the listing task is created here exactly as before, so nothing strands mid-transition. */
+  const assignNow = approving && String(payload.lister_email || '').trim() !== '';
   let account = '', advertising = '', deadline = '', lister = null, taskId = '';
-  if (approving) {
+  if (assignNow) {
     account = huntAccount_(payload.account);
     advertising = huntAdvertisingType_(payload.advertising_type, true);
     deadline = taskPktIso_(payload.deadline_pkt);
@@ -6815,13 +6820,12 @@ function actionDecideHunt_(payload, ctx) {
       patch[HC_APPROVAL] = decision;
       if (comment) patch[HC_COMMENTS] = comment;
       if (approving) {
-        patch[HC_ACCOUNT] = account;
-        patch[HC_CPC] = advertising;
         patch[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
+        if (assignNow) { patch[HC_ACCOUNT] = account; patch[HC_CPC] = advertising; }
       }
       huntWrite_(sh, found, patch);
 
-      if (approving) {
+      if (assignNow) {
         rec[HC_ACCOUNT] = account;
         rec[HC_CPC] = advertising;
         limited = huntLimitedPayload_(rec);
@@ -6855,8 +6859,8 @@ function actionDecideHunt_(payload, ctx) {
   }
 
   logActivity_(ctx.ident.email, 'DECIDE_HUNT', rec.hunt_id, HUNT_PENDING, decision,
-    approving ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId
-      : comment.slice(0, 200));
+    assignNow ? account + ' · ' + lister.email + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId
+      : (approving ? 'approved — pending send to a lister' : comment.slice(0, 200)));
 
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
   /* 29 Aug (owner: "products are not getting approved timely"): the three live-workbook mirrors
@@ -6864,18 +6868,22 @@ function actionDecideHunt_(payload, ctx) {
    * approval once writes went live. They now queue; flushMirrorQueue lands them within the hour
    * from HUNTING_DB's fresh truth. The decision itself is already safe in the portal DB. */
   mirrorEnqueue_('hunt_decision', { hunt_id: rec.hunt_id, approving: approving,
-    limited: approving ? limited : null, actor: ctx.ident.email });
+    limited: assignNow ? limited : null, actor: ctx.ident.email });
   const mirror = { ok: true, queued: true };
   let central = { ok: true, queued: approving };
   if (taskId) engineTaskPush_(taskId, (typeof taskRowOut !== 'undefined' && taskRowOut) ? taskRowOut : null);   // the lister's new task on the boards in seconds — no re-read of TASKS
 
-  if (approving) {
+  if (assignNow) {
     notify_(rec.hunter_email, 'Hunt approved',
       '🔵 Your hunt "' + title + '" · ' + account + ' — approved as ' + advertising + '. ' + lister.name +
       ' lists it next; you will see it move through the pipeline.', 'hunt:' + rec.hunt_id);
     notify_(lister.email, 'Task assigned',
       '🔵 New listing task · ' + account + ' — "' + title + '" (' + advertising + '), due ' + deadline +
       ' (Pakistan time). The full product pack is inside the task → open My tasks.', 'task:' + taskId);
+  } else if (approving) {
+    notify_(rec.hunter_email, 'Hunt approved',
+      '🔵 Your hunt "' + title + '" — approved. It is in the Approved archive; management will send it to a lister shortly.',
+      'hunt:' + rec.hunt_id);
   } else {
     notify_(rec.hunter_email, 'Hunt not approved',
       '🟠 Your hunt "' + title + '" — not approved. Reason: ' + comment +
@@ -6884,8 +6892,8 @@ function actionDecideHunt_(payload, ctx) {
 
   return {
     hunt_id: rec.hunt_id, approval_status: decision, decided_at: stamp,
-    task_id: taskId, assigned_to: approving ? lister.email : '', account: account,
-    advertising_type: advertising, deadline_pkt: deadline,
+    task_id: taskId, assigned_to: assignNow ? lister.email : '', account: account,
+    advertising_type: advertising, deadline_pkt: deadline, pending_send: approving && !assignNow,
     mirror: mirror, central_copy: central,
   };
 }
@@ -7691,6 +7699,8 @@ const ACTIONS_HUNTING = {
   huntRecords:[actionHuntRecords_, 'any'], // read-only archive, hunt roles gated inside
   decideHunt: [actionDecideHunt_, 'any'],  // Management / Ops Head gated inside
   reviseHunt: [actionReviseHunt_, 'any'],  // hunter-own or management, gated inside
+  approvedArchive: [actionApprovedArchive_, 'any'],   // 22 Oct — the send-to-lister archive (read; hunt roles gated inside)
+  huntSendToLister: [actionHuntSendToLister_, 'any'], // 22 Oct — create the listing task from the archive (mgmt gated inside)
 };
 
 
@@ -7916,6 +7926,142 @@ function huntListingPipelineAudit() {
   const s = JSON.stringify(out);
   Logger.log(s);
   return s;
+}
+
+
+/* ===================== 22 Oct — approve → archive → send to lister ===========================
+   The owner split approval from assignment. actionDecideHunt_ now only approves; THIS pair is the
+   second step. actionApprovedArchive_ feeds the presentational archive (approved items, split into
+   "pending send to a lister" and "already sent"); actionHuntSendToLister_ is the send itself — it
+   creates the listing_new task, exactly what approval used to do inline. No scheduling (owner:
+   "leave it") — the send is immediate. ========================================================= */
+
+const HUNT_ARCHIVE_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Listing Manager'];
+
+/* Columns the archive card shows for a product. Links + evidence render as links; numbers as text.
+   Profit / ROI ride only for roles allowed to see earnings (canSeeProfit_). */
+const HUNT_ARCHIVE_FIELDS = ['Title', 'Image Link', 'DESCRIPTION', 'Category', 'Seasonal',
+  'Product Link 1 Main supplier', 'Product Link 2', 'Product Link 3', 'Ebay Link',
+  'Main Keyword Terapeak link', 'Image Link of avg sold price', 'Temu Link',
+  'Source Price', 'E-Bey Caluclator + £4', 'TOP THREE SALES', 'Sell Through',
+  'CPC Selling Chance', 'Comment'];
+const HUNT_ARCHIVE_PROFIT_FIELDS = ['Our Profit', 'ROI'];
+
+function huntArchiveCard_(h, canProfit) {
+  const out = { hunt_id: String(h.hunt_id || ''), ts: String(h.ts || ''),
+    hunter_email: String(h.hunter_email || ''), hunter_name: String(h.hunter_name || ''),
+    account_hint: String(h['Account Selected'] || '') };
+  HUNT_ARCHIVE_FIELDS.forEach(function (c) { out[c] = String(h[c] == null ? '' : h[c]); });
+  if (canProfit) HUNT_ARCHIVE_PROFIT_FIELDS.forEach(function (c) { out[c] = String(h[c] == null ? '' : h[c]); });
+  return out;
+}
+
+function actionApprovedArchive_(payload, ctx) {
+  if (HUNT_ARCHIVE_ROLES.indexOf(ctx.user.role) < 0 && !isMgmt_(ctx.user.role, ctx.ident.email)) {
+    throw new Error(SAFE_ERROR_PREFIX + 'this archive is for management and the listing desk');
+  }
+  const canProfit = canSeeProfit_(ctx.user.role) || isMgmt_(ctx.user.role, ctx.ident.email);
+  const canSend = isMgmt_(ctx.user.role, ctx.ident.email);
+  // listing_new tasks per hunt → who holds it and at what status
+  const byHunt = {};
+  readTab_('TASKS').forEach(function (t) {
+    if (String(t.type || '') !== 'listing_new') return;
+    let hid = '';
+    try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (!hid) return;
+    const cur = byHunt[hid];
+    const rank = { 'Pending': 1, 'Working': 2, 'Updated': 2, 'Submitted — awaiting approval': 3, 'Completed': 4 };
+    // keep the most-advanced task for the hunt (a resend would be prevented anyway)
+    if (!cur || (rank[String(t.status || '')] || 0) >= (rank[cur.status] || 0)) {
+      byHunt[hid] = { task_id: String(t.task_id || ''), status: String(t.status || ''),
+        lister: String(t.assigned_to || ''), account: String(t.account || ''),
+        created_at: String(t.created_at || ''), deadline_pkt: String(t.deadline_pkt || '') };
+    }
+  });
+  const pending = [], sent = [];
+  readTab_('HUNTING_DB').forEach(function (h) {
+    if (String(h['Approval Status'] || '').trim() !== 'APPROVED') return;
+    if (String(h['Comments'] || '').indexOf('listing DELETED at go-live') >= 0) return;   // VeRO-killed — never re-send
+    const hid = String(h.hunt_id || '');
+    const card = huntArchiveCard_(h, canProfit);
+    const task = byHunt[hid];
+    if (task) {
+      sent.push({ hunt_id: hid, title: card['Title'], account: task.account, lister: task.lister,
+        status: task.status, task_id: task.task_id, created_at: task.created_at, ts: card.ts,
+        hunter_name: card.hunter_name });
+    } else {
+      pending.push(card);
+    }
+  });
+  pending.sort(function (a, b) { return String(a.ts).localeCompare(String(b.ts)); });   // oldest approval first
+  sent.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  return { pending_send: pending, sent: sent.slice(0, 300),
+    counts: { pending_send: pending.length, sent: sent.length },
+    can_send: canSend,
+    advertising_types: ['General Dynamic', '75% Low DYN', '80% Medium DYN', '85% Medium DYN',
+      '90% High CPC LOW', '95% High  CPC PRO', '100 % Strong ', 'General 10%', 'General 5%'] };
+}
+
+function actionHuntSendToLister_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not a hunt approver', ctx.ident.email);
+  const account = huntAccount_(payload.account);
+  const advertising = huntAdvertisingType_(payload.advertising_type, true);
+  const lister = huntResolveLister_(payload.lister_email);
+  let deadline = taskPktIso_(payload.deadline_pkt);
+  if (!deadline) deadline = taskPktIso_(new Date(Date.now() + 24 * 3600000));   // default: 24h, PKT
+
+  // guard against a double-send: any listing_new task already referencing this hunt
+  let existing = null;
+  readTab_('TASKS').forEach(function (t) {
+    if (existing) return;
+    if (String(t.type || '') !== 'listing_new') return;
+    let hid = '';
+    try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (hid === String(payload.hunt_id)) existing = { task_id: String(t.task_id || ''), status: String(t.status || ''), to: String(t.assigned_to || '') };
+  });
+  if (existing) throw new Error(SAFE_ERROR_PREFIX + 'this item is already with ' + (existing.to.split('@')[0] || 'a lister') + ' (' + existing.status + ') — refresh the archive');
+
+  const stamp = now_();
+  let rec = null, taskId = 'T' + Utilities.getUuid().slice(0, 8), limited = null;
+  const pre = huntFind_(huntSheet_(), payload.hunt_id);      // heavy read outside the lock
+  const lock = LockService.getScriptLock();
+  try {
+    try { lock.waitLock(15000); }
+    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy — press Send again in a moment'); }
+    const sh = huntSheet_();
+    const found = huntVerify_(sh, pre, payload.hunt_id);
+    rec = huntRecord_(found.rec);
+    if (rec.approval_status !== HUNT_APPROVED) throw new Error(SAFE_ERROR_PREFIX + 'only an approved item can be sent to a lister');
+    if (String(rec[HC_COMMENTS] || '').indexOf('listing DELETED at go-live') >= 0) throw new Error(SAFE_ERROR_PREFIX + 'this item was deleted at go-live — it will not be listed');
+    const patch = {}; patch[HC_ACCOUNT] = account; patch[HC_CPC] = advertising; patch[HC_LISTING_STATUS] = HUNT_LISTING_PENDING;
+    huntWrite_(sh, found, patch);
+    rec[HC_ACCOUNT] = account; rec[HC_CPC] = advertising;
+    limited = huntLimitedPayload_(rec);
+    huntAppendTask_({
+      task_id: taskId, type: 'listing_new', account: account, item_id: '',
+      title: String(rec[HC_TITLE] || '').slice(0, 400),
+      details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
+      assigned_by: ctx.ident.email, assigned_to: lister.email,
+      deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
+    });
+  } finally { lock.releaseLock(); }
+
+  rec.approval_status = HUNT_APPROVED;
+  try { huntMirrorPush_(rec); } catch (e) {}
+  const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
+  logActivity_(ctx.ident.email, 'HUNT_SEND_TO_LISTER', rec.hunt_id, 'approved', lister.email,
+    account + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId);
+  try { engineTaskPush_(taskId, null); } catch (e) {}
+  try {
+    notify_(lister.email, 'Task assigned',
+      '🔵 New listing task · ' + account + ' — "' + title + '" (' + advertising + '), due ' + deadline +
+      ' (Pakistan time). The full product pack is inside the task → open My tasks.', 'task:' + taskId);
+  } catch (e) {}
+  try {
+    notify_(String(rec.hunter_email || ''), 'Your hunt is being listed',
+      '🔵 "' + title + '" · ' + account + ' — ' + lister.name + ' lists it next.', 'hunt:' + rec.hunt_id);
+  } catch (e) {}
+  return { ok: true, hunt_id: rec.hunt_id, task_id: taskId, assigned_to: lister.email, account: account, advertising_type: advertising, deadline_pkt: deadline };
 }
 
 

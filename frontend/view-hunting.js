@@ -1143,9 +1143,16 @@
             'style="margin-left:auto">Backup sheet</a>' +
           '<button class="minibtn" id="huQRefresh" style="margin-left:8px">Refresh</button>' +
         '</div>' +
+        /* Owner (22 Oct): "pending tasks in hunt approvals ... I just need to know about the
+           assigned new listings data, 3 to 4 main blocks." The new-listing pipeline at a glance:
+           waiting to approve · approved and waiting to be sent · with listers · listed. */
+        '<div class="card enter d1"><div class="hd">New-listing pipeline' +
+          '<span class="hint">from approval to listed · the whole flow in four numbers</span>' +
+          '<a class="minibtn" href="#approvedArchive" style="margin-left:auto">Send to listers →</a></div>' +
+          '<div class="bd"><div class="hu-tiles" id="huPipe"><div class="spinner"></div></div></div></div>' +
         /* R6 (Hasib): "dashboard that shows number of products pending for approval, how many got
            rejected in past 7 days, from every individual, and how much are still pending" */
-        '<div class="card enter d2"><div class="hd">Hunting pulse — per hunter' +
+        '<div class="card enter d2" style="margin-top:14px"><div class="hd">Hunting pulse — per hunter' +
           '<span class="hint">pending now · decided in the last 7 days</span></div>' +
           '<div class="bd" id="huQStats"><div class="spinner"></div></div></div>' +
         /* Owner (18 Oct): "how many new listings are currently assigned to someone, how many for
@@ -1155,7 +1162,7 @@
           '<span class="hint">open new-listing tasks \u00b7 who holds them \u00b7 which account \u00b7 assigned on \u2192 due</span></div>' +
           '<div class="bd" id="huQLoad"><div class="spinner"></div></div></div>' +
         '<div class="card enter d2" style="margin-top:14px"><div class="hd">Waiting for a decision ' +
-          '<span class="hint">Approve needs an account, a lister, an advertising type and a deadline</span></div>' +
+          '<span class="hint">Approve · Send back for revision · Not approved — assigning a lister happens in the Approved archive</span></div>' +
           '<div class="bd" id="huQBody"><div class="spinner"></div></div>' +
         '</div>' +
         /* R7-5 (Hasib): "make the proper approval records" — every decided hunt, its decision,
@@ -1170,12 +1177,13 @@
         '<datalist id="huListerList"></datalist>';
     },
     init: function () {
-      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); huLoadListingLoad(); };
+      huEl('huQRefresh').onclick = function () { huLoadQueue(); huLoadQueueStats(); huLoadListingLoad(); huLoadPipeline(); };
       huEl('huQRecFind').oninput = function () { huPaintRecords(this.value); };
       huLoadPickers();
       huLoadQueue();
       huLoadQueueStats();
       huLoadListingLoad();
+      huLoadPipeline();
       huPvArchLoad();
     }
   };
@@ -1427,6 +1435,27 @@
     if (!box) { return; }
     var ins = box.querySelectorAll('input[data-lister]'), i;
     for (i = 0; i < ins.length; i++) { huListerHint(box, ins[i]); }
+  }
+
+  /* Owner (22 Oct): the four-number new-listing pipeline. Pending approval comes from the hunt
+     queue; the rest from the Approved archive (approved-pending-send, with-listers, listed). */
+  function huLoadPipeline() {
+    var box = huEl('huPipe'); if (!box) { return; }
+    var pendApproval = (STATE.counts && STATE.counts.huntQueue) || 0;
+    api('approvedArchive', {}).then(function (d) {
+      var sent = (d && d.sent) || [];
+      var withListers = sent.filter(function (x) { return huStr(x.status) !== 'Completed'; }).length;
+      var listed = sent.filter(function (x) { return huStr(x.status) === 'Completed'; }).length;
+      var pendSend = (d && d.counts && d.counts.pending_send) || 0;
+      box.innerHTML =
+        '<div class="hu-tile big"><span class="k">Pending approval</span><b class="num goldtext">' + pendApproval + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Approved · to send</span><b class="num" style="color:var(--warn)">' + pendSend + '</b></div>' +
+        '<div class="hu-tile"><span class="k">With listers</span><b class="num" style="color:var(--blue-2)">' + withListers + '</b></div>' +
+        '<div class="hu-tile"><span class="k">Listed</span><b class="num" style="color:var(--ok)">' + listed + '</b></div>';
+    }).catch(function () {
+      box.innerHTML = '<div class="hu-tile big"><span class="k">Pending approval</span><b class="num goldtext">' + pendApproval + '</b></div>' +
+        '<div class="hu-hint" style="align-self:center">The rest of the pipeline could not be read just now.</div>';
+    });
   }
 
   function huLoadQueueStats() {
@@ -1708,25 +1737,13 @@
     '</div>';
   }
 
+  /* 22 Oct (owner): approval and assignment are two steps. Approve is now a single button — the
+     account, campaign type and lister are chosen later on the Approved archive (Send to listers).
+     The comment box stays: it is required to reject or send back. */
   function huDecisionPanel(id, types, adv) {
     return '<div class="hu-dec">' +
       '<div class="hu-grid">' +
-        '<div class="field"><label>Account Selected</label>' +
-          '<input class="hu-in" list="huAccList" autocomplete="off" data-acc="' + huAttr(id) + '">' +
-          '<div class="hu-hint">The account this item is listed on.</div></div>' +
-        '<div class="field"><label>Lister</label>' +
-          '<input class="hu-in" type="email" list="huListerList" autocomplete="off" data-lister="' + huAttr(id) + '">' +
-          '<div class="hu-hint" data-ldhint="' + huAttr(id) + '">The listing_new task goes to this person.</div></div>' +
-        '<div class="field"><label>CPC Selling Chance</label>' +
-          '<select class="hu-sel" data-adv="' + huAttr(id) + '"><option value=""></option>' +
-            types.map(function (t) {
-              return '<option value="' + huAttr(t) + '"' + (t === adv ? ' selected' : '') + '>' + esc(t) + '</option>';
-            }).join('') + '</select>' +
-          '<div class="hu-hint">The advertising type this item runs on.</div></div>' +
-        '<div class="field"><label>Deadline (PKT)</label>' +
-          /* R6 (Hasib): "auto selected date … current day 11:59pm deadline" — prefilled, still editable */
-          '<input class="hu-in" type="datetime-local" data-due="' + huAttr(id) + '" value="' + huTodayEndPkt() + '">' +
-          '<div class="hu-hint">' + huClockLine() + ' · prefilled: today 11:59 PM</div></div>' +
+        '<div class="field hu-wide"><div class="hu-hint" style="margin-bottom:6px">Approving does not assign a lister — it moves the item to the <b>Approved archive</b>, where you pick the account, campaign type and lister and send it.</div></div>' +
         '<div class="field hu-wide"><label>Comment <span class="hu-req">required to reject or send back</span></label>' +
           /* R7-5: the chips below write straight into this box — tap to add, tap again to remove;
              anything typed by hand stays untouched. */
@@ -1814,28 +1831,14 @@
     }
 
     payload.decision = HU_APPROVED;
-    el = huPick(box, 'data-acc', id);
-    payload.account = el ? huStr(el.value) : '';
-    if (!payload.account) { toast('Choose the account this item is listed on.'); if (el) { el.focus(); } return; }
-    el = huPick(box, 'data-lister', id);
-    payload.lister_email = el ? huStr(el.value) : '';
-    if (!payload.lister_email) { toast('Choose the lister who will list it.'); if (el) { el.focus(); } return; }
-    el = huPick(box, 'data-adv', id);
-    payload.advertising_type = el ? huStr(el.value) : '';
-    if (!payload.advertising_type) { toast('Choose the advertising type.'); if (el) { el.focus(); } return; }
-    el = huPick(box, 'data-due', id);
-    payload.deadline_pkt = el ? huStr(el.value) : '';
-    if (!payload.deadline_pkt) { toast('Set the listing deadline (Pakistan time).'); if (el) { el.focus(); } return; }
-
-    /* R7-1: optimistic approve — instant. The card collapses NOW; the task creation and sheet
-       copy happen behind it, and the toast upgrades itself when the server answers. */
-    huCardGone(box, id, 'Approved ✓ — assigning…');
-    api('decideHunt', payload).then(function (res) {
-      toast('Approved · task ' + huStr(res.task_id) + ' for ' + huStr(res.assigned_to) +
-        ((res.central_copy && res.central_copy.ok === false) ? ' · the sheet copy is still pending' : ''));
+    /* 22 Oct: approve only — no account/lister/campaign here. The item moves to the Approved
+       archive; it is sent to a lister from there. Optimistic: the card collapses now. */
+    huCardGone(box, id, 'Approved ✓ — in the archive');
+    api('decideHunt', payload).then(function () {
+      toast('Approved ✓ — open “Send to listers” to choose a lister and send it.');
       huCount('huntQueue', Math.max(0, ((STATE.counts && STATE.counts.huntQueue) || 1) - 1));
       huLoadQueueStats();
-      setTimeout(huLoadListingLoad, 4000);   // the new task reaches the mirror a few seconds after the sheet
+      huLoadPipeline();
     }).catch(function (e) { huDecideCatch(box, id, e, 'the approval'); });
   }
 
