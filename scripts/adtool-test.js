@@ -1526,11 +1526,11 @@ function run(argv) {
   t('engine: the repair pass is bounded — a capped row read, a capped campaign count per tick and the same tick budget', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return /LIMIT 4000/.test(rp) && /ADS_REPAIR_CAMPAIGNS_PER_TICK\)/.test(rp) && /adsBudgetSpent\(budget\)/.test(rp) && /LIMIT 20000/.test(rp); })(), null);
   t('engine: the repair pass writes down what it corrected, what eBay still calls archived, and what has no ad at all', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return /adsItemsRepair/.test(rp) && /corrected/.test(rp) && /still says archived/.test(rp) && /no ad record at all/.test(rp); })(), null);
   t('engine: the repair pass never deletes a membership, it only updates the row it re-read', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return !/DELETE/.test(rp) && /UPDATE campaign_ads SET ad_status/.test(rp); })(), null);
-  t('engine: the pause action reads its answer back through the merge too, so an old archived twin cannot undo it', (() => { const pl = src.slice(src.indexOf('  adsPauseListing: {'), src.indexOf('  adtoolAdProbe: {')); return /adPickLiveAd\(adGroupAdsByListing\(got\.ads\)\[lid\]\)/.test(pl) && /ad_records = \?6/.test(pl) && !/if \(String\(ad\.listingId\) === lid\)/.test(src); })(), null);
+  t('engine: the pause action reads its answer back through the merge too, so an old archived twin cannot undo it', (() => { const pl = src.slice(src.indexOf('  adsPauseListing: {'), src.indexOf('  adsAdProbe: {')); return /adPickLiveAd\(adGroupAdsByListing\(got\.ads\)\[lid\]\)/.test(pl) && /ad_records = \?6/.test(pl) && !/if \(String\(ad\.listingId\) === lid\)/.test(src); })(), null);
 
   /* (k) the probe (fix 2). It exists, it is sync-key only, and it writes NOTHING. */
-  const probe = src.slice(src.indexOf('  adtoolAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
-  t('probe: the route exists, takes an account, a campaign and an optional listing, and is sync-key only', /adtoolAdProbe: \{\n\s*auth: 'sync', fn:/.test(src) && /p && p\.account/.test(probe) && /p && p\.campaign_id/.test(probe) && /p && p\.listing_id/.test(probe), null);
+  const probe = src.slice(src.indexOf('  adsAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
+  t('probe: the route exists, takes an account, a campaign and an optional listing, and is sync-key only', /adsAdProbe: \{\n\s*auth: 'sync', fn:/.test(src) && /p && p\.account/.test(probe) && /p && p\.campaign_id/.test(probe) && /p && p\.listing_id/.test(probe), null);
   t('probe: it hands back every RAW record, grouped by listing, with the duplicate count and the record that governs', /adGroupAdsByListing\(got\.ads\)/.test(probe) && /governs: adPickLiveAd\(by\[lid\]\)/.test(probe) && /ad_status: String\(ad\.adStatus \|\| ''\)/.test(probe) && /bid_percentage/.test(probe) && /ad_group_id/.test(probe) && /duplicate_listings/.test(probe) && /records: by\[lid\]\.length/.test(probe), null);
   t('probe: it says whether the answer was whole, so a truncated read can never be mistaken for the truth', /answer_complete: !got\.truncated/.test(probe) && /total_reported: got\.total/.test(probe), null);
   t('probe: READ ONLY — not one write of any kind, no schema guard, no note, and nothing but a GET to eBay', !/INSERT|UPDATE |DELETE |ALTER |ctx_setSync|ensureTruthSchema|ensureAdtoolPhase/.test(probe) && !/method: 'POST'|method: 'PUT'|method: 'DELETE'/.test(probe) && (probe.match(/adsFetchAdList/g) || []).length === 1 && !/fetch\(/.test(probe), null);
@@ -1548,7 +1548,7 @@ function run(argv) {
      a person reads seconds after asking for it, not a page. */
   t('honesty: no PAGE payload pre-words an age any more, so the pages are the only owner of that sentence', (() => {
     const calls = (src.match(/adsAgeWords\(/g) || []).length;          // one definition + one caller
-    const probe = src.slice(src.indexOf('  adtoolAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
+    const probe = src.slice(src.indexOf('  adsAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
     /* the cadence sentence is gone as a FIELD; the comment that records why it went still names it */
     return calls === 2 && (probe.match(/adsAgeWords\(/g) || []).length === 1 && !/ad_status_cadence:/.test(src);
   })(), [(src.match(/adsAgeWords\(/g) || []).length]);

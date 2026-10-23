@@ -5762,7 +5762,7 @@ async function adtWhereRows(env, iid) {
       campaign_running: resolved && (/RUNNING/.test(String(r.c_status || '')) || String(r.c_status || '') === 'ENDING_SOON'),
       /* the OLDER of "eBay was last asked about this campaign's ads" and "this ad was last seen in
          an answer". Only a stamp is sent, never words: the page owns the wording so that an open
-         page keeps counting (see adsOldestStamp and the note above adtoolAdProbe). */
+         page keeps counting (see adsOldestStamp and the note above adsAdProbe). */
       ads_synced_at: adsOldestStamp(r.ads_synced_at, r.synced_at),
       /* the proof the owner can see: more than one ad record for this listing in this campaign is
          exactly the duplicate that made a serving ad read ARCHIVED */
@@ -18575,7 +18575,13 @@ const ROUTES = {
      READ ONLY and sync-key only: one GET to eBay’s ad list and nothing else. It writes NOTHING, not
      even a schema guard or a sync_state note, and it is deliberately absent from every portal page
      and every nav list. */
-  adtoolAdProbe: {
+  /* NOT named adtool*: the router role-gates every action whose name starts with adtool
+     (`if (action.indexOf('adtool') === 0 && !adtRoleAllowed(ctx2.user))`), because the advertising
+     KV cache is keyed by profit class rather than by role. A sync-key call carries no user, so an
+     adtool-named route is unreachable with the key however its own `auth` reads. This one answered
+     'auth' to a valid key until it was renamed. It returns no profit figure, so it does not want
+     the adtool auto-strip either. */
+  adsAdProbe: {
     auth: 'sync', fn: async (p, ctx) => {
       const acct = String((p && p.account) || '').slice(0, 40);
       const cid = String((p && p.campaign_id) || '').slice(0, 40);
