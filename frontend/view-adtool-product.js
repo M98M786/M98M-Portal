@@ -23,6 +23,12 @@
     '.at-panel .at-sub{font-size:12px;color:var(--text-2);margin:0 0 10px}' +
     '.at-src{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:8px;vertical-align:middle;font-weight:800}' +
     '.at-src.s{color:var(--gold-a);border-color:rgba(242,176,53,.4)}' +
+    /* an ad status is a READING: its date rides under it, and a reading a day or more old is
+       written brighter so it cannot be skimmed as a present-tense fact */
+    '.at-age{display:block;font-size:10px;color:var(--text-3);font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}' +
+    '.at-age.old{color:var(--text-2)}' +
+    '.at-clash{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(224,86,63,.55);color:' + LOSS + ';white-space:nowrap}' +
+    '.at-clash-why{display:block;font-size:10px;color:' + LOSS + ';font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}' +
     '.at-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}' +
     '.at-kpi{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px}' +
     '.at-kpi .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
@@ -68,6 +74,117 @@
   /* `t` is the LOOKUP key the register box matches on and must stay stable when the wording changes;
      `shown` is what the reader sees. Rewording arg 1 silently empties the box, so reword arg 2. */
   function src(t, shown, sampled) { return '<span class="at-src' + (sampled ? ' s' : '') + '" data-adtreg="' + esc(t) + '" title="how is this worked out">' + esc(shown || t) + '</span>'; }
+
+  /* ── AN AD STATUS IS A READING, NOT A LIVE FACT ───────────────────────────────────────────────
+     The portal re-reads a campaign's ads on a rotation, a couple of campaigns per account per tick,
+     and a campaign that is not running is not re-read at all. So an ad status on this page can be
+     hours or weeks old. It used to be printed as current, under a tag claiming every 15 minutes.
+     Every status now carries the date of the reading behind it, and a reading a day or more old is
+     written in the past tense. None of this changes what a status IS.
+     The engine sends ads_synced_at, when that campaign's ads were last read, and ad_records, how
+     many ad records eBay returned for that listing in that campaign. Both are read defensively,
+     falling back to the per-ad synced_at the payload already carries, so the page is honest whether
+     or not the engine half has landed. This block is deliberately the same in the five advertising
+     views that show an ad status: change one and change all five. */
+  var AD_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function adReadAt(o) {
+    if (!o || typeof o !== 'object') return '';
+    var v = o.ads_synced_at != null && o.ads_synced_at !== '' ? o.ads_synced_at
+      : (o.ad_synced_at != null && o.ad_synced_at !== '' ? o.ad_synced_at : o.synced_at);
+    return v == null ? '' : String(v).trim();
+  }
+  function adReadMs(at) {
+    if (!at) return null;
+    var s = String(at).trim().replace(' ', 'T');
+    if (!/(?:Z|[+-]\d\d:?\d\d)$/.test(s)) s += 'Z';
+    var t = new Date(s).getTime();
+    return isNaN(t) ? null : t;
+  }
+  function adReadDay(ms) {
+    var d = new Date(ms);
+    return d.getUTCDate() + ' ' + AD_MONTHS[d.getUTCMonth()] +
+      (d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : ' ' + d.getUTCFullYear());
+  }
+  /* band: 'now' under an hour, with nothing to say · 'hours' · 'days' · 'unknown' no usable date */
+  function adFresh(o) {
+    var at = adReadAt(o), ms = adReadMs(at);
+    if (ms == null) return { band: 'unknown', at: '', mins: null, words: 'we do not hold when this was read' };
+    var mins = (Date.now() - ms) / 60000;
+    if (mins < 0) mins = 0;
+    if (mins < 60) return { band: 'now', at: at, mins: mins, words: '' };
+    if (mins < 1440) {
+      var hrs = Math.max(1, Math.round(mins / 60));
+      return { band: 'hours', at: at, mins: mins, words: 'read ' + hrs + ' hour' + (hrs === 1 ? '' : 's') + ' ago' };
+    }
+    var dys = Math.max(1, Math.floor(mins / 1440));
+    return { band: 'days', at: at, mins: mins, words: 'last read on ' + adReadDay(ms) + ', ' + dys + ' day' + (dys === 1 ? '' : 's') + ' ago' };
+  }
+  function adArchived(s) { return /archiv/i.test(String(s == null ? '' : s)); }
+  /* A CAMPAIGN row's own synced_at is when the CAMPAIGN was read, which is a far faster job than
+     reading all of its ads, so it must never stand in for an ad reading. Ask a campaign object
+     for ads_synced_at and nothing else. An ad row's own synced_at IS when that ad was read, so
+     adFresh keeps it as the fallback there. */
+  function adFreshCamp(o) {
+    return adFresh({ ads_synced_at: o && (o.ads_synced_at != null && o.ads_synced_at !== '' ? o.ads_synced_at : o.ad_synced_at) });
+  }
+  function adRecords(o) {
+    if (!o || typeof o !== 'object') return null;
+    var n = Number(o.ad_records != null ? o.ad_records : o.ad_record_count);
+    return isNaN(n) || n < 1 ? null : Math.round(n);
+  }
+  /* the oldest reading in a set of rows, so a panel can say how old its worst status is instead of
+     claiming one cadence for all of them. An entry that is already an adFresh() answer is taken as
+     it stands, which is how a caller passes readings it has already worked out per row. */
+  function adOldest(rows) {
+    var worst = null, unknown = 0;
+    (rows || []).forEach(function (r) {
+      var f = (r && typeof r.band === 'string') ? r : adFresh(r);
+      if (f.band === 'unknown') { unknown++; return; }
+      if (!worst || f.mins > worst.mins) worst = f;
+    });
+    return { worst: worst, unknown: unknown };
+  }
+  function adPanelNote(rows) {
+    var o = adOldest(rows), bits = [];
+    if (o.worst && o.worst.band !== 'now') bits.push('The oldest reading here was taken ' + (o.worst.band === 'days' ? 'on ' + adReadDay(adReadMs(o.worst.at)) : Math.max(1, Math.round(o.worst.mins / 60)) + ' hours ago') + '.');
+    else if (o.worst) bits.push('Every reading here was taken within the last hour.');
+    if (o.unknown) bits.push(o.unknown + (o.unknown === 1 ? ' reading does' : ' readings do') + ' not carry a date, so ' + (o.unknown === 1 ? 'it' : 'they') + ' could be hours or weeks old.');
+    return bits.join(' ');
+  }
+  /* `quietUnknown` is for dense tables that say once, at panel level, that they do not hold
+     the read times, rather than repeating it on every row. `prefix` names what was read
+     when the line sits beside a different date, as in "its ads read 4 hours ago". */
+  function adAgeLine(f, quietUnknown, prefix) {
+    if (!f.words || (quietUnknown && f.band === 'unknown')) return '';
+    return '<span class="at-age' + (f.band === 'days' ? ' old' : '') + '">' +
+      (prefix ? esc(prefix) + ' ' : '') + esc(f.words) + '</span>';
+  }
+  function adDupLine(o) {
+    var n = adRecords(o);
+    if (n == null || n < 2) return '';
+    return '<span class="at-age old">eBay returned ' + n + ' ad records for this listing in this campaign.</span>';
+  }
+  /* THE CONTRADICTION, said plainly. An archived ad cannot be charged, so a row reading ARCHIVED on
+     a listing the same campaign billed has one of the two wrong, and the money is the half to
+     believe. `money` is a figure already in this payload, never a fresh request. */
+  function adClash(status, money, when) {
+    var v = Number(money);
+    if (!adArchived(status) || money == null || money === '' || isNaN(v) || v <= 0) return '';
+    return '<span class="at-clash" title="an archived ad cannot be charged, so one of the two is wrong">archived but spending</span>' +
+      '<span class="at-clash-why">Charged ' + gbp(v) + ' in this campaign ' + esc(String(when || '')) + '. An archived ad cannot spend, so believe the money, not this status.</span>';
+  }
+  /* this page's status cell: the reading, the date it was taken, how many ad records eBay returned
+     for it, and the contradiction when an archived ad was charged in the same campaign. `live` is
+     left null on the snapshot table, which carries no live flag, so no row is coloured on a guess. */
+  function adStateCell(c, state, live) {
+    var f = adFresh(c), txt = String(state == null || state === '' ? 'unknown' : state);
+    var money = null, when = '';
+    if (Number(c.spend_yesterday) > 0) { money = c.spend_yesterday; when = 'yesterday'; }
+    else if (Number(c.spend_7d) > 0) { money = c.spend_7d; when = 'over the last 7 days'; }
+    return '<span class="at-tag ' + (live === true ? 'gold' : live === false ? 'loss' : '') + '">' + esc(txt) + (live === true ? ' · live' : '') + '</span>' +
+      adAgeLine(f) + adDupLine(c) + adClash(txt, money, when);
+  }
+
   /* Phase 4: week-to-week behaviour. The engine sends weeks_behaviour[] = {iso_week, label,
      descriptors, changed:[{descriptor, from, to, direction}], sentence}; the descriptor names are the
      ones from adtool_descriptors. A plain-English label per descriptor and a value formatter so the
@@ -229,12 +346,21 @@
       }).join('') + '</tbody></table></div></div>';
     /* where its ads sit — live rows when the campaign-truth phase has them, the refresh's snapshot otherwise */
     var Wr = D.where && D.where.rows ? D.where.rows : null; var C = D.campaigns || [];
-    h += '<div class="at-panel"><h3>Where its ads sit right now' + src('campaigns · every 15 min') + '</h3><div class="at-sub">Which campaigns this listing is in, and whether its own ad is running. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
-      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
-        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td><span class="at-tag ' + (c.live ? 'gold' : 'loss') + '">' + esc(c.ad_state) + (c.live ? ' · live' : '') + '</span></td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+    /* THE PANEL THAT STARTED ALL THIS. It was headed "right now" and tagged every 15 min while a
+       status in it could be weeks old, so a listing read as ARCHIVED in three running campaigns
+       while eBay was billing it. The title no longer says now, the tag no longer claims a cadence,
+       and every row carries the date of its own reading. */
+    var readNote = adPanelNote(Wr || C);
+    h += '<div class="at-panel"><h3>Where its ads sit' + src('campaign map', 'ad status, read per campaign') + '</h3><div class="at-sub">Which campaigns this listing is in, and what its own ad said when that campaign\'s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + (readNote ? ' ' + esc(readNote) : '') + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
+      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">7-day spend</th><th class="r">7-day ROAS</th><th>Last change</th></tr></thead><tbody>' +
+        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + adStateCell(c, c.ad_state, c.live) + '</td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
         (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign we know about.</div>') :
-      (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
-        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign we know about.</div>')) + '</div>';
+      (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
+        /* the snapshot rows come out of adtool_listings.campaigns_json, where the campaign id is
+           stored as `id`. Reading campaign_id here handed adtCampaignLink undefined and every
+           campaign name on this fallback table was an unclickable blank. It is only reached when
+           the live read above fails, which is exactly when a reader most needs the names. */
+        C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + adtCampaignLink(c.campaign_id || c.id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.status || '?') + '</td><td>' + adStateCell(c, st, null) + '</td><td class="r">' + esc(c.bid ? c.bid + '%' : '—') + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="at-empty">Not in any campaign we know about.</div>')) + '</div>';
     /* yesterday hour by hour + all-time daily */
     h += '<div class="at-grid2">' +
       '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday usually does by that hour.</div><div id="atHour" class="at-chart"></div></div>' +

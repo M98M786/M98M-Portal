@@ -201,10 +201,11 @@ export default {
   },
 
   /* Cron fan-out — each schedule set in the dashboard calls this with its own cron string.
-     adsItems rides the 15-minute slot (with the light listingSync), NOT the 5-minute one:
-     orderSync + adsSync + item fetches + notifications in one invocation can cross the
-     50-subrequest cap, and a burst then kills whichever account happens to run last. The queue
-     flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8 fetches). */
+     adsItems rode the 15-minute slot until 24 Oct and now has its own quarter-hour slot at :08,
+     NOT the 5-minute one: orderSync + adsSync + item fetches + notifications in one invocation can
+     cross the 50-subrequest cap, and a burst then kills whichever account happens to run last. The
+     queue flush runs AFTER the jobs so this invocation's alerts go out in it (bounded at 8
+     fetches). */
   async scheduled(event, env, ctx) {
     /* Slot budgeting (20 Aug, after the cap deaths): every job in a slot shares ONE invocation's
        subrequest budget, so the heavy movers are spread out — listingSync dropped to hourly on
@@ -215,7 +216,15 @@ export default {
       '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
       /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
          carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      '*/15 * * * *': [reportsRelayToSheet, adsItems, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
+      /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
+         left a RUNNING campaign unread for 2.6 to 7 hours and an ad status wrong for most of a day.
+         At 14 a tick it costs roughly 84 ad-list GETs fleet-wide, and this slot already runs twelve
+         jobs on ONE invocation’s subrequest budget, so it was given the quarter-hour slot of its own
+         at :08 below. What stays here is only the safety net: a cron string has to be registered on
+         the Cloudflare side as well as written here, and a slot nobody registered never fires.
+         adsItemsNet is one D1 read on a normal tick and runs the job only if no account has had a
+         tick for 40 minutes. */
+      '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
       '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
          orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
@@ -260,6 +269,13 @@ export default {
          skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
          quarter-hour and reacts within 15 minutes when staff edit a day tab. */
       '5-59/15 * * * *': [signalsPull],
+      /* Item-level ad membership and the money-beats-status repair, on an invocation of their own
+         (:08, :23, :38, :53) so their fetches can never eat another slot’s subrequest budget, and
+         the other way about. The minute is three past the 5-minute campaign sync, so the campaign
+         list this job rotates through is at most 3 minutes old, and it is clear of every other
+         entry in this map: the five-minute slots occupy minutes ending 0 or 5 and 2 or 7, the hourly jobs
+         sit at :20 :25 :30 :40 :50, and 5-59/15 sits at :05 :20 :35 :50. */
+      '8-59/15 * * * *': [adsItems],
       /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
          Aug; registration present, tick never delivered, all other slots fine). Moved to a
          fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
@@ -2229,58 +2245,324 @@ async function adsSync(env) {
    lives in dup_state (D1), never KV: per-item KV markers would blow the 1k-writes/day KV cap.
    Bells are one summary per account per UK day, not one per item — the full list lives on the
    Campaign watch screen, which is the action link. */
-const ADS_ITEM_CAMPAIGNS_PER_TICK = 2;
+/* ADSTATUS-PURE-BEGIN */
+/* "product is live on ebay but portal is showing archived" (owner, 24 Oct). ONE listing can hold
+   MORE THAN ONE ad record in the SAME campaign: take an ad out and put it back and eBay keeps the
+   old record beside the new one, archived. The membership loop below used to keep whichever record
+   eBay happened to return LAST, so a dead record could overwrite the serving one and the portal
+   then called a billed, serving ad ARCHIVED. Every measured fact fitted that: the reads were fresh,
+   they said ARCHIVED, and eBay was billing the ad.
+   These are the whole of the cure and they are pure, so the tests hold them to it without a
+   database, a token or a fetch. */
+function adStatusRank(st) {
+  const s = String(st == null ? '' : st).trim().toUpperCase();
+  if (s === 'ACTIVE') return 4;
+  if (s === 'PAUSED') return 3;
+  if (s === 'ARCHIVED') return 1;
+  /* '' is a cost-per-sale ad: existence IS its status, so it outranks ARCHIVED. Any word eBay
+     invents later lands here too, which is the right default: only ARCHIVED is ever allowed to
+     lose, because only ARCHIVED is the claim that contradicts the money. */
+  return 2;
+}
+/* adIds are decimal strings well past the largest integer JavaScript can hold exactly, so they are
+   compared as DIGITS and never parsed: more digits is newer, same length compares character by
+   character. A string-safe numeric compare, as the fix asks for. */
+function adIdNewer(a, b) {
+  const clean = v => String(v == null ? '' : v).replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  const x = clean(a), y = clean(b);
+  if (x.length !== y.length) return x.length > y.length;
+  return x > y;
+}
+/* The records eBay returned for ONE listing in ONE campaign; the one that governs comes back, with
+   how many records were seen. ACTIVE beats PAUSED beats ''/EXISTS beats ARCHIVED, whatever order
+   they arrived in; a tie goes to the newest adId. An empty list is null, never a guess. */
+function adPickLiveAd(records) {
+  const list = Array.isArray(records) ? records : [];
+  let best = null, n = 0;
+  for (const ad of list) {
+    if (!ad) continue;
+    n++;
+    if (!best) { best = ad; continue; }
+    const rb = adStatusRank(best.adStatus), rn = adStatusRank(ad.adStatus);
+    if (rn > rb || (rn === rb && adIdNewer(ad.adId, best.adId))) best = ad;
+  }
+  if (!best) return null;
+  return { ad_id: String(best.adId || ''), bid: String(best.bidPercentage || ''),
+    st: String(best.adStatus || ''), grp: String(best.adGroupId || ''), records: n };
+}
+/* listingId -> the records eBay returned for it in this campaign */
+function adGroupAdsByListing(ads) {
+  const by = {};
+  for (const ad of (ads || [])) {
+    if (!ad) continue;
+    const lid = String(ad.listingId || '');
+    if (!lid) continue;
+    (by[lid] = by[lid] || []).push(ad);
+  }
+  return by;
+}
+/* the whole campaign in one go: listingId -> the governing record, plus how much duplication was
+   there to find. The count is per listing, never per campaign. */
+function adMergeAds(ads) {
+  const by = adGroupAdsByListing(ads);
+  const now = {};
+  let dupListings = 0, extra = 0;
+  for (const lid of Object.keys(by)) {
+    const pick = adPickLiveAd(by[lid]);
+    if (!pick) continue;
+    now[lid] = pick;
+    if (pick.records > 1) { dupListings++; extra += pick.records - 1; }
+  }
+  return { now, duplicate_listings: dupListings, extra_records: extra };
+}
+/* Fix 5: the ad fetch pages twice at 500, so a campaign past 1,000 ads answers SHORT. A short
+   answer makes every unseen listing look removed, and the membership writer DELETEs those rows.
+   eBay’s own `total` is the only thing that can tell the two apart. No total, or a total of none,
+   is not evidence of truncation. */
+function adsFetchTruncated(fetched, total) {
+  const t = Number(total);
+  if (!isFinite(t) || t <= 0) return false;
+  return (Number(fetched) || 0) < t;
+}
+/* Fix 3, money beats status: a listing eBay BILLED inside a campaign cannot be archived in that
+   campaign, so that row is re-read from eBay at once and corrected from the live answer.
+   rows        the campaign_ads rows under suspicion, {account, campaign_id, listing_id, ad_status}
+   byCampaign  'account|campaign_id|listing_id' -> money billed in the window, from the campaign-level
+               report rows, which know which campaign spent it
+   byListing   'account|listing_id' -> the same money from the per-listing report, which does NOT know
+               the campaign and is only the fallback
+   A listing the campaign-level source has anything to say about is judged by that source ALONE:
+   money in one campaign is never evidence about another campaign. */
+function adRepairTargets(rows, byCampaign, byListing) {
+  const bc = byCampaign || {}, bl = byListing || {};
+  const spoken = {};
+  for (const k of Object.keys(bc)) {
+    if (!(Number(bc[k]) > 0)) continue;
+    const p = String(k).split('|');
+    if (p.length >= 3) spoken[p[0] + '|' + p[2]] = true;
+  }
+  const out = [];
+  for (const r of (rows || [])) {
+    if (String((r && r.ad_status) || '').trim().toUpperCase() !== 'ARCHIVED') continue;
+    const acct = String(r.account || ''), cid = String(r.campaign_id || ''), lid = String(r.listing_id || '');
+    if (!acct || !cid || !lid) continue;
+    const perCamp = Number(bc[acct + '|' + cid + '|' + lid] || 0);
+    if (perCamp > 0) { out.push({ account: acct, campaign_id: cid, listing_id: lid, evidence: 'campaign', spend: perCamp }); continue; }
+    if (spoken[acct + '|' + lid]) continue;          // the campaign-level source has spoken: not this campaign
+    const perList = Number(bl[acct + '|' + lid] || 0);
+    if (perList > 0) out.push({ account: acct, campaign_id: cid, listing_id: lid, evidence: 'listing', spend: perList });
+  }
+  return out;
+}
+/* Fix 4, money first: the campaigns that SPENT in the last two finished days are re-read before the
+   idle ones, and inside each group the one read longest ago goes first. A campaign never read at all
+   has no stamp, which sorts first of all. The campaign id breaks the last tie so the order is total
+   and a tick never shuffles two campaigns at random. */
+function adsRotationOrder(camps, spendByCampaign) {
+  const sp = spendByCampaign || {};
+  const money = c => (Number(sp[String(c && c.campaign_id)] || 0) > 0 ? 1 : 0);
+  return (camps || []).slice().sort((a, b) => {
+    const ma = money(a), mb = money(b);
+    if (ma !== mb) return mb - ma;
+    const aa = String((a && a.ads_synced_at) || ''), ab = String((b && b.ads_synced_at) || '');
+    if (aa !== ab) return aa < ab ? -1 : 1;
+    return String((a && a.campaign_id) || '') < String((b && b.campaign_id) || '') ? -1 : 1;
+  });
+}
+/* Money first is right, and on its own it STARVES. An account where more campaigns spent than a
+   tick can read would re-read the spenders for ever and never come back to the quiet ones, which is
+   the same disease in a new place. So a tick is split: most of it goes to the money order above, and
+   a reserved share goes to the oldest-read campaigns that did NOT spend. Anything left over is
+   filled from the money order again, so a tick is never short when one of the two lists runs dry.
+   The guarantee is arithmetic: with 14 a tick, 10 money slots and 4 reserved, an account of 56
+   running campaigns clears both groups inside the hour whichever way they are split. */
+function adsRotationPick(camps, spendByCampaign, perTick, moneySlots) {
+  const sp = spendByCampaign || {};
+  const spent = c => Number(sp[String((c && c.campaign_id) || '')] || 0) > 0;
+  const n = Math.max(0, Number(perTick) || 0);
+  const reserve = (moneySlots == null) ? n : Math.max(0, Math.min(n, Number(moneySlots) || 0));
+  const money = adsRotationOrder(camps, sp);
+  const idle = adsRotationOrder((camps || []).filter(c => !spent(c)), {});
+  const out = [], seen = {};
+  const take = (list, cap) => {
+    for (const c of (list || [])) {
+      if (out.length >= cap) return;
+      const k = String((c && c.campaign_id) || '');
+      if (seen[k]) continue;
+      seen[k] = 1; out.push(c);
+    }
+  };
+  take(money, reserve);     // the money order, up to its share
+  take(idle, n);            // then the reserved share, to the quiet campaigns read longest ago
+  take(money, n);           // and fill any slot the two left empty rather than waste it
+  return out;
+}
+/* THE HONEST AGE OF A READING, when more than one stamp could stand for it.
+   Two stamps describe one ad: campaigns.ads_synced_at, when eBay was last ASKED about that
+   campaign's ad list, and campaign_ads.synced_at, when THIS ad was last SEEN in an answer. They
+   come apart the moment an answer is short (fix 5 writes what it saw and removes nothing), or when
+   a repair re-read touches a few listings in a campaign and not the rest. Whenever the two
+   disagree, the OLDER one is the one a reader is owed: it is the last moment eBay actually
+   confirmed the thing on screen. Same rule for a row that stands for many ads, such as a campaign
+   row on the Campaigns board: the oldest reading underneath it is that row's honest age, because the
+   row is only as current as its stalest part.
+   Stamps are 'YYYY-MM-DD HH:MM:SS' or ISO, so they sort as strings once the space is a T. An empty
+   stamp is NOT treated as infinitely old: it carries no information at all, and dropping a page to
+   "we do not hold when this was read" because one row of forty never got stamped would hide the
+   thirty-nine dates we do hold. Nothing at all gives '', which the pages read as unknown. */
+function adsOldestStamp() {
+  let best = '', bestKey = '';
+  for (let i = 0; i < arguments.length; i++) {
+    const s = String(arguments[i] == null ? '' : arguments[i]).trim();
+    if (!s) continue;
+    const key = s.replace(' ', 'T');
+    if (!best || key < bestKey) { best = s; bestKey = key; }
+  }
+  return best;
+}
+/* plain words for how long ago an ad list was read, so a page never has to invent them */
+function adsAgeWords(stamp, nowMs) {
+  const s = String(stamp || '').trim();
+  if (!s) return 'never read';
+  const t = Date.parse(s.indexOf('T') >= 0 ? s : s.replace(' ', 'T') + 'Z');
+  if (!isFinite(t)) return 'never read';
+  const mins = Math.floor(((Number(nowMs) || Date.now()) - t) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return mins + ' minutes ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs === 1 ? 'an hour ago' : hrs + ' hours ago';
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? 'yesterday' : days + ' days ago';
+}
+/* ADSTATUS-PURE-END */
+
+/* THE TWO COLUMNS THIS FIX LEANS ON, MADE SURE OF CHEAPLY.
+   campaign_ads.ad_records is new on 24 Oct and campaigns.ads_synced_at has been written for far
+   longer, and both are named in ensureTruthSchema's list so a fresh database gets them and the
+   column checker can see them. But ensureTruthSchema is a hundred statements and most of the paths
+   that need these two columns are page reads, which must not pay for that. Worse, between the
+   moment this code lands and the first run of ensureTruthSchema, a query naming ad_records would
+   throw: adtWhereRows is wrapped in a try/catch by its caller, so the Product page would have
+   silently fallen back to its snapshot table instead of saying anything was wrong. So the two
+   ALTERs also get their own tiny guarded pass with its own flag, one call per isolate, run by every
+   path that names either column before it names it. The probe is the one exception and writes
+   nothing at all, which is safe because it reads only ads_synced_at. */
+let ADS_READING_COLS_OK = false;
+async function ensureAdsReadingColumns(env) {
+  if (ADS_READING_COLS_OK) return;
+  for (const s of ['ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1',
+    'ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT']) {
+    try { await env.DB.prepare(s).run(); } catch (e) { /* already there, which is the usual case */ }
+  }
+  ADS_READING_COLS_OK = true;
+}
+
+/* The rotation rate (fix 4). Two campaigns a tick meant a RUNNING campaign came round only every
+   2.6 to 7 hours, so a wrong ad status could stand for most of a day. Fourteen a tick clears the
+   largest account's running campaigns inside the hour at four ticks an hour, and every account's
+   inside the hour with room to spare. The cost is ONE ad-list GET per campaign (the largest
+   campaign on the fleet holds far fewer ads than the 500 one page carries), so a full tick is
+   roughly 84 GETs fleet-wide plus the repair tail. That is why adsItems moved to a cron slot of its
+   own rather than sharing the 15-minute slot with eleven other jobs: perAccount’s own comment
+   records that overrunning the subrequest cap once killed one account’s syncs for 29 hours. */
+const ADS_ITEM_CAMPAIGNS_PER_TICK = 14;
+/* of those 14, how many go to the money order; the remaining 4 are reserved for the campaigns that
+   did NOT spend and were read longest ago, so money first can never starve the quiet ones */
+const ADS_ITEM_MONEY_SLOTS = 10;
+/* Hard ceilings for ONE tick, shared by the whole fleet, so a slow account can never starve the
+   ones after it: perAccount runs the accounts one after another and rotates which goes first each
+   hour, so the account that loses out is never the same one twice running. */
+const ADS_ITEM_TICK_MS = 150000;             // 2.5 minutes of wall clock for the whole fleet
+const ADS_ITEM_FETCH_CAP = 240;             // ad-list GETs in one tick, repair re-reads included
+const ADS_REPAIR_CAMPAIGNS_PER_TICK = 4;    // per account, on the tail of the rotation
+const ADS_REPAIR_DAYS = 2;                  // the last 2 finished days of money
+/* the read-only probe’s own bounds, so one campaign can never answer with an unbounded payload */
+const ADS_PROBE_LISTING_CAP = 300;
+const ADS_PROBE_RECORD_CAP = 20;
 const DUP_CONFIRM_MS = 90 * 60000;
 
+function adsBudgetSpent(b) { return !b || b.fetches >= ADS_ITEM_FETCH_CAP || Date.now() >= b.until; }
+/* the ad report’s own day keys are UTC days (the report is asked for from 00:00Z to 23:59Z), so the
+   money window is counted the same way and never in Pakistan time */
+function adsDayBack(n) { return new Date(Date.now() - (Number(n) || 0) * 86400000).toISOString().slice(0, 10); }
+
+/* READ ONLY: one campaign’s ad list, two pages of 500. `total` is carried back because it is the
+   only thing that can tell "this listing left the campaign" from "we did not see it" (fix 5). */
+async function adsFetchAdList(tok, acct, cid, budget) {
+  let ads = [], total = null;
+  for (let page = 0; page < 2; page++) {
+    if (budget) budget.fetches++;
+    const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
+      '/ad?limit=500&offset=' + (page * 500), { headers: { authorization: 'Bearer ' + tok } });
+    if (!r.ok) {
+      if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
+      return { ads, ok: false, total, truncated: false };   // 4xx: rule-based campaign, no ad list
+    }
+    const pj = await r.json();
+    if (pj && pj.total != null) total = Number(pj.total);
+    ads = ads.concat(pj.ads || []);
+    if (!(pj.ads || []).length) break;
+    if (total != null && ads.length >= total) break;
+  }
+  return { ads, ok: true, total, truncated: adsFetchTruncated(ads.length, total) };
+}
+
 async function adsItems(env) {
+  /* one budget for the whole tick, closed over by every account below */
+  const budget = { fetches: 0, until: Date.now() + ADS_ITEM_TICK_MS, campaigns: 0, repaired: 0,
+    unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, starved: [] };
+  /* before the FIRST query, because the very first one names ads_synced_at. perAccount catches per
+     account, so a missing column here would have failed every account in turn and never reached the
+     ensureTruthSchema call further down, which is the one that would have fixed it. */
+  await ensureAdsReadingColumns(env);
   await perAccount(env, 'adsItems', async (acct) => {
+    if (adsBudgetSpent(budget)) { budget.starved.push(acct); return; }
     const camps = await env.DB.prepare(
-      "SELECT campaign_id, name, funding_model FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id"
+      "SELECT campaign_id, name, funding_model, ads_synced_at FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id LIMIT 600"
     ).bind(acct).all();
     const running = (camps.results || []);
     if (!running.length) return;
+    /* money first: what each of this account’s campaigns spent over the last 2 finished days, from
+       the campaign-level report rows. One bounded read per account per tick. */
+    const spend = {};
+    for (const r of ((await env.DB.prepare(
+      'SELECT campaign_id, SUM(spend) AS sp FROM adtool_ads_daily WHERE account = ?1 AND day >= ?2 AND day <= ?3 GROUP BY campaign_id LIMIT 600'
+    ).bind(acct, adsDayBack(ADS_REPAIR_DAYS), adsDayBack(1)).all().catch(() => ({ results: [] }))).results || [])) spend[String(r.campaign_id)] = Number(r.sp) || 0;
+    const order = adsRotationPick(running, spend, ADS_ITEM_CAMPAIGNS_PER_TICK, ADS_ITEM_MONEY_SLOTS);
     const tok = await ebayAccessToken(env, acct);
+    await ensureTruthSchema(env);
+    /* read once per account, not once per campaign: at 14 campaigns a tick that was 7 times the
+       D1 reads for an answer that cannot change inside one tick */
+    const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
 
-    const st = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'adsItems' AND account = ?1").bind(acct).first();
-    let idx = (Math.max(0, Number(st && st.cursor) || 0)) % running.length;
+    let done = 0;
+    for (const camp of order) {
+      if (done >= ADS_ITEM_CAMPAIGNS_PER_TICK) break;
+      if (adsBudgetSpent(budget)) { budget.starved.push(acct + ' (part way)'); break; }
+      const cid = camp.campaign_id;
+      const nm = camp.name || cid;
+      const funding = String(camp.funding_model || '');
+      done++;
 
-    for (let k = 0; k < Math.min(ADS_ITEM_CAMPAIGNS_PER_TICK, running.length); k++) {
-      const cid = running[idx].campaign_id;
-      const nm = running[idx].name || cid;
-      const funding = String(running[idx].funding_model || '');
-      idx = (idx + 1) % running.length;
+      const got = await adsFetchAdList(tok, acct, cid, budget);
+      if (!got.ok) continue;
+      budget.campaigns++;
+      if (got.truncated) budget.truncated++;
 
-      let ads = [];
-      let ok = true;
-      for (let page = 0; page < 2; page++) {          // 1000 ads covers any campaign here; capped, not silent
-        const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
-          '/ad?limit=500&offset=' + (page * 500), { headers: { authorization: 'Bearer ' + tok } });
-        if (!r.ok) {
-          if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
-          ok = false; break;                           // 4xx: rule-based campaign, no ad list — skip
-        }
-        const pj = await r.json();
-        ads = ads.concat(pj.ads || []);
-        if (ads.length >= Number(pj.total || 0) || !(pj.ads || []).length) break;
-      }
-      if (!ok) continue;
+      /* THE CORE FIX: one governing record per listing, chosen by precedence and never by arrival
+         order, so an ARCHIVED record can no longer overwrite a live one. */
+      const merged = adMergeAds(got.ads);
+      const now = merged.now;
+      budget.dup_listings += merged.duplicate_listings;
 
-      await ensureTruthSchema(env);
-      const now = {};
-      for (const ad of ads) {
-        const lid = String(ad.listingId || '');
-        /* WO-08: adStatus exists on COST_PER_CLICK ads (ACTIVE/PAUSED/ARCHIVED); COST_PER_SALE
-           ads carry none — existence is their status. Capture it verbatim. */
-        if (lid) now[lid] = { ad_id: String(ad.adId || ''), bid: String(ad.bidPercentage || ''),
-          st: String(ad.adStatus || ''), grp: String(ad.adGroupId || '') };
-      }
       const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
       const prev = {}, prevSt = {};
       for (const row of (prevRs.results || [])) { prev[row.listing_id] = String(row.bid_pct || ''); prevSt[row.listing_id] = row.ad_status == null ? '' : String(row.ad_status); }
       const first = Object.keys(prev).length === 0;
 
       const added = Object.keys(now).filter(l => !(l in prev));
-      const removed = Object.keys(prev).filter(l => !(l in now));
+      /* fix 5: a short answer cannot say what left. Nothing is removed from a truncated answer. */
+      const removed = got.truncated ? [] : Object.keys(prev).filter(l => !(l in now));
       const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
 
       if (!first && (added.length || removed.length || bidMoved.length)) {
@@ -2320,38 +2602,135 @@ async function adsItems(env) {
 
       /* ADTOOL P2: every change of an ad's state inside this campaign becomes an event (flag-gated; a
          campaign's first-ever sync is a baseline, not a flood of 'added' events) */
-      if (!first && (await adtFlag(env, 'adtool_campaign_truth')) === 'on') {
+      if (!first && truthOn) {
         try { await adtoolAdEventsWrite(env, acct, cid, prevSt, now); } catch (e) { await ctx_setSync(env, 'adtoolAdEvents', acct, String(e && e.message || e).slice(0, 200)); }
       }
       const stmts = [];
       for (const lid of added) {
         stmts.push(env.DB.prepare(
-          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) " +
-          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, ad_status = ?6, ad_group = ?7, synced_at = datetime('now')"
-        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid, now[lid].st, now[lid].grp));
+          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
+          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now')"
+        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid, now[lid].st, now[lid].grp, now[lid].records));
       }
       /* status/bid updates for every row still present — a CPC pause must land even when the
          membership itself did not change */
       for (const lid of Object.keys(now)) {
         if (added.indexOf(lid) >= 0) continue;
         stmts.push(env.DB.prepare(
-          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, ad_status = ?6, ad_group = ?7, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
-        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id, now[lid].st, now[lid].grp));
+          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
+        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id, now[lid].st, now[lid].grp, now[lid].records));
       }
       for (const lid of removed) {
         stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
       }
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
       await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
+      if (got.truncated) {
+        await ctx_setSync(env, 'adsItemsTruncated', acct, 'campaign ' + cid + ': eBay reported ' + String(got.total) +
+          ' ads and the two pages carried ' + got.ads.length + ', so what was seen was written and nothing was removed. ' +
+          'Raise the page count before this campaign can be trusted to say what left it.');
+      }
     }
+
+    const fixed = await adsRepairPass(env, acct, tok, budget, truthOn);
+    budget.repaired += fixed.corrected;
+    budget.unchanged += fixed.unchanged;
+    budget.missing += fixed.missing;
 
     await env.DB.prepare(
       "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItems', ?1, ?2, datetime('now'), '') " +
       "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
-    ).bind(acct, String(idx)).run();
+    ).bind(acct, 'read ' + done + ' of ' + running.length + ' running campaigns · money first').run();
 
     await dupSweep(env, acct);
   });
+  await ctx_setSync(env, 'adsItemsTick', '', 'campaigns read ' + budget.campaigns + ' · ad-list reads ' + budget.fetches +
+    ' of ' + ADS_ITEM_FETCH_CAP + ' · listings with more than one ad record ' + budget.dup_listings +
+    ' · truncated answers ' + budget.truncated + ' · money-first repairs: corrected ' + budget.repaired +
+    ', already right ' + budget.unchanged + ', no ad on eBay ' + budget.missing +
+    (budget.starved.length ? ' · out of budget before: ' + budget.starved.join(', ') : ' · every account inside budget'));
+}
+
+/* Fix 3, money beats status. A listing eBay BILLED inside a campaign cannot be archived in that
+   campaign, so for the last ADS_REPAIR_DAYS finished days every campaign_ads row that reads
+   ARCHIVED against money is re-read from eBay AT ONCE and taken from the live answer through
+   adPickLiveAd. Nothing is ever rewritten to a guess: if eBay still says ARCHIVED, ARCHIVED stands
+   and the disagreement is written down instead, which is what settles whether the duplicate records
+   were the cause or eBay really does bill an archived ad. READ ONLY against eBay. */
+async function adsRepairPass(env, acct, tok, budget, truthOn) {
+  const out = { targets: 0, campaigns: 0, corrected: 0, unchanged: 0, missing: 0 };
+  if (adsBudgetSpent(budget)) return out;
+  const from = adsDayBack(ADS_REPAIR_DAYS), to = adsDayBack(1);
+  const rows = (await env.DB.prepare(
+    "SELECT ca.account, ca.campaign_id, ca.listing_id, ca.ad_status FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id " +
+    "WHERE ca.account = ?1 AND ca.ad_status = 'ARCHIVED' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') LIMIT 4000"
+  ).bind(acct).all().catch(() => ({ results: [] }))).results || [];
+  if (!rows.length) return out;
+  const byCampaign = {}, byListing = {};
+  for (const r of ((await env.DB.prepare(
+    'SELECT campaign_id, item_id, SUM(spend) AS sp FROM adtool_ads_daily WHERE account = ?1 AND day >= ?2 AND day <= ?3 GROUP BY campaign_id, item_id LIMIT 20000'
+  ).bind(acct, from, to).all().catch(() => ({ results: [] }))).results || [])) byCampaign[acct + '|' + String(r.campaign_id) + '|' + String(r.item_id)] = Number(r.sp) || 0;
+  for (const r of ((await env.DB.prepare(
+    'SELECT item_id, SUM(spend) AS sp FROM ads_daily WHERE account = ?1 AND date >= ?2 AND date <= ?3 GROUP BY item_id LIMIT 20000'
+  ).bind(acct, from, to).all().catch(() => ({ results: [] }))).results || [])) byListing[acct + '|' + String(r.item_id)] = Number(r.sp) || 0;
+
+  const targets = adRepairTargets(rows, byCampaign, byListing);
+  out.targets = targets.length;
+  if (!targets.length) return out;
+  /* group by campaign: one ad-list read answers for every suspect listing inside it */
+  const perCamp = {};
+  for (const t of targets) (perCamp[t.campaign_id] = perCamp[t.campaign_id] || []).push(t);
+  const cids = Object.keys(perCamp).sort().slice(0, ADS_REPAIR_CAMPAIGNS_PER_TICK);
+  const notes = [];
+  for (const cid of cids) {
+    if (adsBudgetSpent(budget)) break;
+    let got = null;
+    try { got = await adsFetchAdList(tok, acct, cid, budget); } catch (e) { notes.push('campaign ' + cid + ': eBay refused the read (' + String(e && e.message || e).slice(0, 80) + ')'); continue; }
+    if (!got || !got.ok) continue;
+    out.campaigns++;
+    const merged = adMergeAds(got.ads);
+    const stmts = [];
+    /* only the suspect listings go into the event write: the answer carries the whole campaign, and
+       handing all of it over would read as every other ad being added today */
+    const prevSt = {}, nowSub = {};
+    for (const t of perCamp[cid]) {
+      const pick = merged.now[t.listing_id];
+      if (!pick) { out.missing++; continue; }
+      prevSt[t.listing_id] = 'ARCHIVED';
+      nowSub[t.listing_id] = pick;
+      if (String(pick.st || '').trim().toUpperCase() === 'ARCHIVED') { out.unchanged++; }
+      else { out.corrected++; }
+      stmts.push(env.DB.prepare(
+        "UPDATE campaign_ads SET ad_status = ?4, ad_id = ?5, bid_pct = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
+      ).bind(acct, cid, t.listing_id, pick.st, pick.ad_id, pick.bid, pick.grp, pick.records));
+    }
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
+    if (Object.keys(nowSub).length && truthOn) {
+      try { await adtoolAdEventsWrite(env, acct, cid, prevSt, nowSub, 'repair'); } catch (e) {}
+    }
+  }
+  await ctx_setSync(env, 'adsItemsRepair', acct, 'billed but reading archived: ' + out.targets + ' row(s) in ' +
+    Object.keys(perCamp).length + ' campaign(s); re-read ' + out.campaigns + ' this tick; corrected ' + out.corrected +
+    ', eBay still says archived ' + out.unchanged + ', no ad record at all ' + out.missing +
+    ' · money read from the ' + ADS_REPAIR_DAYS + ' finished days to ' + to + (notes.length ? ' · ' + notes.join(' | ') : ''));
+  return out;
+}
+
+/* The safety net for the dedicated cron slot below. A new cron string has to be registered on the
+   Cloudflare side as well as listed here, and a slot that was never registered simply never fires:
+   adsItems would then stop dead and nothing would say so. So the 15-minute slot still carries this
+   one line, and it runs the job itself ONLY if no account has had a successful tick for 40 minutes,
+   which can only happen if the dedicated trigger is missing or broken. One D1 read on a normal
+   tick, and no second run. */
+const ADS_ITEM_NET_MINUTES = 40;
+async function adsItemsNet(env) {
+  const r = await env.DB.prepare("SELECT MAX(last_ok) AS at FROM sync_state WHERE job = 'adsItems' AND account NOT IN ('@lock', '')").first().catch(() => null);
+  const at = r && r.at ? Date.parse(String(r.at).replace(' ', 'T') + 'Z') : NaN;
+  if (isFinite(at) && Date.now() - at < ADS_ITEM_NET_MINUTES * 60000) return;
+  await ctx_setSync(env, 'adsItemsNet', '', 'the dedicated ad-membership slot has not landed for ' + ADS_ITEM_NET_MINUTES +
+    ' minutes, so the 15-minute slot ran it instead. Check that the cron trigger is registered.');
+  await adsItems(env);
 }
 
 /* dup_state carries each currently-duplicated item: first_seen for the 90-minute confirmation,
@@ -5245,6 +5624,9 @@ async function ensureAdtoolPhase2Schema(env) {
   await ensureAdtoolPhase1Schema(env);
   /* nullable columns at the existing grain (owner's rule): what eBay returns for a campaign and the portal never stored */
   for (const c of ['bid_pct TEXT', 'start_date TEXT', 'end_date TEXT']) { try { await env.DB.prepare('ALTER TABLE campaigns ADD COLUMN ' + c).run(); } catch (e) { /* already there */ } }
+  /* every advertising read path comes through here, and most of them now name ad_records and
+     ads_synced_at, so the two columns are made sure of before any of those queries runs */
+  await ensureAdsReadingColumns(env);
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_campaign_ad_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, campaign_id TEXT, item_id TEXT, from_status TEXT DEFAULT '', to_status TEXT DEFAULT '', seen_at TEXT, source TEXT DEFAULT 'sync')",
     'CREATE INDEX IF NOT EXISTS idx_adtcae_item ON adtool_campaign_ad_events(item_id, seen_at)',
@@ -5297,12 +5679,15 @@ async function adtoolCampaignArchiveWrite(env, acct, id, prev) {
   await env.DB.prepare("INSERT INTO adtool_campaign_archive (account, campaign_id, name, status_last, funding, budget, gone_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) ON CONFLICT(account, campaign_id) DO UPDATE SET name = ?3, status_last = ?4, funding = ?5, budget = ?6, gone_at = datetime('now')")
     .bind(acct, id, String(r.name || ''), String(r.status || ''), String(r.funding_model || ''), String(r.budget || '')).run();
 }
-async function adtoolAdEventsWrite(env, acct, cid, prevSt, now) {
+async function adtoolAdEventsWrite(env, acct, cid, prevSt, now, source) {
   await ensureAdtoolPhase2Schema(env);
   const nowSt = {}; for (const lid of Object.keys(now)) nowSt[lid] = now[lid].st || '';
   const ev = adtAdEvents(prevSt, nowSt);
   if (!ev.length) return 0;
-  await adtBatch(env, ev.map(e => env.DB.prepare("INSERT INTO adtool_campaign_ad_events (account, campaign_id, item_id, from_status, to_status, seen_at, source) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), 'sync')").bind(acct, cid, e.item_id, e.from, e.to)));
+  /* 'sync' is the rolling membership read; 'repair' is the money-beats-status re-read, which is
+     worth telling apart on the history because it is the one that CORRECTS a wrong answer. */
+  const src = String(source || 'sync').slice(0, 12);
+  await adtBatch(env, ev.map(e => env.DB.prepare("INSERT INTO adtool_campaign_ad_events (account, campaign_id, item_id, from_status, to_status, seen_at, source) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), ?6)").bind(acct, cid, e.item_id, e.from, e.to, src)));
   return ev.length;
 }
 async function adtoolCampaignRowsWrite(env, acct, day, family, text) {
@@ -5358,7 +5743,7 @@ async function adtWhereRows(env, iid) {
   await ensureAdtoolPhase2Schema(env);
   const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   const d7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  const rows = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid).all()).results || [];
+  const rows = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, ca.ad_records, c.ads_synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid).all()).results || [];
   const spend = {};
   for (const r of ((await env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7).all()).results || [])) spend[r.campaign_id] = r;
   const lastEv = {};
@@ -5370,9 +5755,26 @@ async function adtWhereRows(env, iid) {
     const st = adtAdState(funding, r.ad_status);
     const live = resolved ? liveMembershipRow({ c_status: r.c_status, l_status: r.l_status, funding_model: r.funding_model, ad_status: r.ad_status }) : false;
     const s = spend[r.campaign_id] || {};
-    return { campaign_id: r.campaign_id, name: resolved ? r.name : (archived ? r.a_name + ' (gone from eBay ' + String(r.gone_at || '').slice(0, 10) + ')' : 'unresolved id ' + r.campaign_id), resolved, archived, funding, campaign_status: resolved ? r.c_status : (archived ? r.a_status + ' (archived)' : 'unknown'), ad_state: st.state, live, ad_bid: r.ad_bid || '', campaign_bid: r.c_bid || '', budget: r.budget == null ? null : Number(r.budget), start_date: r.start_date || '', end_date: r.end_date || '', spend_yesterday: s.sp_y == null ? null : round2(s.sp_y), units_yesterday: s.un_y == null ? null : Number(s.un_y), revenue_yesterday: s.rv_y == null ? null : round2(s.rv_y), spend_7d: s.sp_7 == null ? null : round2(s.sp_7), roas_7d: (s.sp_7 > 0) ? round2(s.rv_7 / s.sp_7) : null, units_7d: s.un_7 == null ? null : Number(s.un_7), campaign_rows_to: s.last_day || '', last_change: lastEv[r.campaign_id] || '', synced_at: r.synced_at };
+    return { campaign_id: r.campaign_id, name: resolved ? r.name : (archived ? r.a_name + ' (gone from eBay ' + String(r.gone_at || '').slice(0, 10) + ')' : 'unresolved id ' + r.campaign_id), resolved, archived, funding, campaign_status: resolved ? r.c_status : (archived ? r.a_status + ' (archived)' : 'unknown'), ad_state: st.state, live, ad_bid: r.ad_bid || '', campaign_bid: r.c_bid || '', budget: r.budget == null ? null : Number(r.budget), start_date: r.start_date || '', end_date: r.end_date || '', spend_yesterday: s.sp_y == null ? null : round2(s.sp_y), units_yesterday: s.un_y == null ? null : Number(s.un_y), revenue_yesterday: s.rv_y == null ? null : round2(s.rv_y), spend_7d: s.sp_7 == null ? null : round2(s.sp_7), roas_7d: (s.sp_7 > 0) ? round2(s.rv_7 / s.sp_7) : null, units_7d: s.un_7 == null ? null : Number(s.un_7), campaign_rows_to: s.last_day || '', last_change: lastEv[r.campaign_id] || '', synced_at: r.synced_at,
+      /* 24 Oct, fix 6: ad status is NOT "every 15 minutes" for every row. Only a RUNNING or
+         ENDING_SOON campaign is ever re-read, so for anything else this is the last time eBay was
+         asked and the page must say "last seen" rather than present it as current. */
+      campaign_running: resolved && (/RUNNING/.test(String(r.c_status || '')) || String(r.c_status || '') === 'ENDING_SOON'),
+      /* the OLDER of "eBay was last asked about this campaign's ads" and "this ad was last seen in
+         an answer". Only a stamp is sent, never words: the page owns the wording so that an open
+         page keeps counting (see adsOldestStamp and the note above adtoolAdProbe). */
+      ads_synced_at: adsOldestStamp(r.ads_synced_at, r.synced_at),
+      /* the proof the owner can see: more than one ad record for this listing in this campaign is
+         exactly the duplicate that made a serving ad read ARCHIVED */
+      ad_records: r.ad_records == null ? 1 : Number(r.ad_records) };
   });
-  return { rows: out, history, yesterday: yday, note: Object.keys(spend).length ? 'spend per campaign from the tool\'s campaign-level report rows' : 'per-campaign spend arrives with the next daily report ingest (campaign-level rows are new); family totals are on the P&L table' };
+  /* There is no ad_status_cadence sentence here any more. It said "every 15 minutes (:08 :23 :38
+     :53)", which is a cron string written out in prose: it would go on claiming that after the cron
+     changed, which is the whole fault this batch was raised to fix, only one layer further back. No
+     page read it. Every row carries its own stamp and the page says how old that is. */
+  return { rows: out, history, yesterday: yday,
+    duplicate_rows: out.filter(r => Number(r.ad_records) > 1).length,
+    note: Object.keys(spend).length ? 'spend per campaign from the tool\'s campaign-level report rows' : 'per-campaign spend arrives with the next daily report ingest (campaign-level rows are new); family totals are on the P&L table' };
 }
 
 /* ---- actions ---- */
@@ -5406,10 +5808,20 @@ const ADTOOL_ACTIONS_P2 = {
       const off = (await env.DB.prepare("SELECT c.account, c.campaign_id, c.name, c.status, ROUND(SUM(d.spend), 2) AS spend_2d, MAX(d.day) AS last_day FROM adtool_ads_daily d JOIN campaigns c ON c.account = d.account AND c.campaign_id = d.campaign_id WHERE d.day >= ?1 AND NOT (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') GROUP BY c.account, c.campaign_id HAVING SUM(d.spend) > 0 ORDER BY spend_2d DESC").bind(d2).all()).results || [];
       const campRows = await env.DB.prepare('SELECT COUNT(*) AS n, MIN(day) AS mn, MAX(day) AS mx FROM adtool_ads_daily').first();
       issues.campaign_off_still_spending = { count: off.length, sample: off.slice(0, 20), campaign_rows: campRows };
-      const pausedLong = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, c.name, COALESCE((SELECT MAX(seen_at) FROM adtool_campaign_ad_events e WHERE e.account = ca.account AND e.campaign_id = ca.campaign_id AND e.item_id = ca.listing_id AND e.to_status = 'PAUSED'), ca.synced_at) AS paused_since FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.ad_status = 'PAUSED' AND c.funding_model = 'COST_PER_CLICK' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON')").all()).results || [];
+      const pausedLong = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_records, ca.synced_at AS ad_synced_at, c.name, c.ads_synced_at, COALESCE((SELECT MAX(seen_at) FROM adtool_campaign_ad_events e WHERE e.account = ca.account AND e.campaign_id = ca.campaign_id AND e.item_id = ca.listing_id AND e.to_status = 'PAUSED'), ca.synced_at) AS paused_since FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.ad_status = 'PAUSED' AND c.funding_model = 'COST_PER_CLICK' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON')").all()).results || [];
       const old = pausedLong.filter(x => x.paused_since && (Date.now() - new Date(String(x.paused_since).replace(' ', 'T') + (String(x.paused_since).endsWith('Z') ? '' : 'Z')).getTime()) > 7 * 86400000);
+      /* fix 6: a status is only as current as the last time eBay was asked, so each row carries the
+         stamp. The stamp only: the page turns it into words, so a page left open keeps counting. */
+      old.forEach((x) => { x.ad_records = x.ad_records == null ? 1 : Number(x.ad_records); x.ads_synced_at = adsOldestStamp(x.ads_synced_at, x.ad_synced_at); });
       issues.paused_long = { count: old.length, paused_total: pausedLong.length, sample: old.slice(0, 20), note: 'since the last PAUSED event, or the stamp time where no event exists yet (events start with this phase)' };
-      const campaigns = (await env.DB.prepare("SELECT c.account, c.campaign_id, c.name, c.status, c.funding_model, c.budget, c.bid_pct, c.start_date, c.end_date, c.synced_at, c.ads_synced_at, SUM(CASE WHEN ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads, SUM(CASE WHEN ca.ad_status = 'ACTIVE' OR (c.funding_model = 'COST_PER_SALE' AND ca.listing_id IS NOT NULL AND COALESCE(ca.ad_status, '') <> 'ARCHIVED') THEN 1 ELSE 0 END) AS ads_active, SUM(CASE WHEN ca.ad_status = 'PAUSED' THEN 1 ELSE 0 END) AS ads_paused, SUM(CASE WHEN ca.ad_status = 'ARCHIVED' THEN 1 ELSE 0 END) AS ads_archived, SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status IS NULL OR ca.ad_status = '') AND ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads_unstamped FROM campaigns c LEFT JOIN campaign_ads ca ON ca.account = c.account AND ca.campaign_id = c.campaign_id GROUP BY c.account, c.campaign_id ORDER BY c.account, c.status, c.name").all()).results || [];
+      const campaigns = (await env.DB.prepare("SELECT c.account, c.campaign_id, c.name, c.status, c.funding_model, c.budget, c.bid_pct, c.start_date, c.end_date, c.synced_at, c.ads_synced_at, SUM(CASE WHEN ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads, SUM(CASE WHEN ca.ad_status = 'ACTIVE' OR (c.funding_model = 'COST_PER_SALE' AND ca.listing_id IS NOT NULL AND COALESCE(ca.ad_status, '') <> 'ARCHIVED') THEN 1 ELSE 0 END) AS ads_active, SUM(CASE WHEN ca.ad_status = 'PAUSED' THEN 1 ELSE 0 END) AS ads_paused, SUM(CASE WHEN ca.ad_status = 'ARCHIVED' THEN 1 ELSE 0 END) AS ads_archived, SUM(CASE WHEN c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status IS NULL OR ca.ad_status = '') AND ca.listing_id IS NOT NULL THEN 1 ELSE 0 END) AS ads_unstamped, SUM(CASE WHEN COALESCE(ca.ad_records, 1) > 1 THEN 1 ELSE 0 END) AS ads_duplicated FROM campaigns c LEFT JOIN campaign_ads ca ON ca.account = c.account AND ca.campaign_id = c.campaign_id GROUP BY c.account, c.campaign_id ORDER BY c.account, c.status, c.name").all()).results || [];
+      /* fix 6: every campaign carries the stamp of when its ad list was last read, and whether it is
+         re-read at all. Only a running campaign is in the rotation; anything else is last seen. The
+         words are the reader's side, never a frozen sentence from here. */
+      campaigns.forEach((c) => {
+        c.ads_rotating = /RUNNING/.test(String(c.status || '')) || String(c.status || '') === 'ENDING_SOON';
+        c.ads_duplicated = Number(c.ads_duplicated) || 0;
+      });
       const sp7 = {};
       for (const r of ((await env.DB.prepare('SELECT account, campaign_id, ROUND(SUM(spend), 2) AS sp, ROUND(SUM(revenue), 2) AS rv, SUM(units) AS un FROM adtool_ads_daily WHERE day >= ?1 GROUP BY account, campaign_id').bind(d7).all()).results || [])) sp7[r.account + '|' + r.campaign_id] = r;
       const lastChange = {};
@@ -6956,7 +7368,7 @@ const ADTOOL_ACTIONS_P5 = {
     auth: 'any', fn: async (p, ctx) => {
       await adtGate(ctx, 'adtool_page_health'); const env = ctx.env; await ensureAdtoolPhase5Schema(env);
       const jobs = (await env.DB.prepare("SELECT job, MAX(started_at) AS last_start, MAX(finished_at) AS last_end, SUM(CASE WHEN status IN ('error', 'FAIL') THEN 1 ELSE 0 END) AS bad, COUNT(*) AS runs, (SELECT status FROM adtool_jobs j2 WHERE j2.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_status, (SELECT note FROM adtool_jobs j3 WHERE j3.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_note, (SELECT rows_written FROM adtool_jobs j4 WHERE j4.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_rows FROM adtool_jobs j GROUP BY job ORDER BY job").all()).results || [];
-      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: 'every 5 min (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min', listingSync: 'hourly :40 (category fill)' };
+      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: 'every 5 min (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min (:08 :23 :38 :53, its own slot)', listingSync: 'hourly :40 (category fill)' };
       const gaps = {
         missing_report_days: (await env.DB.prepare("SELECT c.account, COUNT(*) AS days FROM (SELECT DISTINCT account FROM campaigns) c JOIN (SELECT DISTINCT date FROM ads_daily WHERE date >= '2026-08-13') d LEFT JOIN ad_report_tasks t ON t.account = c.account AND t.report_date = d.date AND t.status = 'INGESTED' WHERE t.task_id IS NULL GROUP BY c.account").all()).results || [],
         unresolved_campaign_ids: await env.DB.prepare('SELECT COUNT(DISTINCT ca.campaign_id) AS n FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id WHERE c.campaign_id IS NULL AND a.campaign_id IS NULL').first(),
@@ -6987,7 +7399,7 @@ const ADTOOL_ACTIONS_P5 = {
         { family: 'eBay fees', cadence: 'hourly :00 (financeSync)', last_at: await lastOk('financeSync') },
         { family: 'Ali cost', cadence: 'when a day tab is posted (Apps Script → syncCosts)', last_at: await lastOk('costSync') },
         { family: 'listing_day rollup', cadence: 'hourly :20 (today-2..today) + nightly 10-day re-roll after 03:00 UTC', last_at: await maxOf("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND status = 'ok'") },
-        { family: 'campaign membership', cadence: 'every 15 min (adsItems)', last_at: await lastOk('adsItems') },
+        { family: 'campaign membership', cadence: 'every 15 min (adsItems, :08 past the quarter)', last_at: await lastOk('adsItems') },
         { family: 'sale membership', cadence: 'hourly :50 (marketingSync; list-based detail ≤ ~20 h)', last_at: await lastOk('marketingSync') },
         { family: 'profiles / stages', cadence: 'daily 05:20 UTC chain (+ hourly catch-up)', last_at: profilesCur.split('|')[0] || null, cursor: profilesCur },
         { family: 'forecast', cadence: 'daily 05:20 UTC chain', last_at: forecastCur.split('|')[0] || null, cursor: forecastCur },
@@ -8043,8 +8455,12 @@ async function ensureAdtoolPhase9Register(env) {
 /* ---- batched reads shared by the war room, Running today and Stop today (IN chunks ≤ 90, one round trip per 50) ---- */
 /* the SQL twin of liveMembershipRow (WO-08): a RUNNING / ENDING_SOON campaign, an ACTIVE listing, and for cost-per-click
    an ad whose status is ACTIVE or not yet stamped (NULL / '' — rows not re-synced since the ad_status column landed keep
-   their pre-WO-08 meaning until adsItems stamps them), for cost-per-sale any ad not ARCHIVED */
-const ADTOOL_LIVE_AD_SQL = "SELECT ca.listing_id AS item_id, ca.campaign_id, c.account, c.name, c.funding_model, c.budget, ca.ad_status, ca.bid_pct, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ia.status = 'ACTIVE' AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))";
+   their pre-WO-08 meaning until adsItems stamps them), for cost-per-sale any ad not ARCHIVED.
+   It carries BOTH read stamps, because a page that shows an ad status owes the reader the older of
+   them: c.ads_synced_at is when eBay was last asked about this campaign's ad list, ad_synced_at is
+   when THIS ad was last seen in an answer, and a short answer or a repair re-read pulls the two
+   apart. adsOldestStamp is what reconciles them. */
+const ADTOOL_LIVE_AD_SQL = "SELECT ca.listing_id AS item_id, ca.campaign_id, c.account, c.name, c.funding_model, c.budget, ca.ad_status, ca.bid_pct, c.bid_pct AS c_bid, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ia.status = 'ACTIVE' AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'))";
 function adtChunks(ids, n) { const size = n || 90; const list = Array.from(new Set((ids || []).map(x => String(x)).filter(Boolean))); const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out; }
 function adtInList(ch, offset) { return '(' + ch.map((_, i) => '?' + (i + 1 + (offset || 0))).join(',') + ')'; }
 async function adtBatchRead(env, stmts) {
@@ -8940,7 +9356,7 @@ async function adtoolCpcCompute(env, p) {
     ids = Object.keys(liveCamp); camp = liveCamp;
   } else {
     const cand = (await env.DB.prepare(
-      "SELECT ca.listing_id AS item_id, ca.campaign_id, ca.ad_status, COALESCE(c.funding_model, a.funding) AS funding_model, COALESCE(c.name, a.name) AS name, COALESCE(c.budget, a.budget) AS budget, c.bid_pct AS c_bid, ca.bid_pct AS bid_pct, c.status AS c_status, a.gone_at AS gone_at " +
+      "SELECT ca.listing_id AS item_id, ca.campaign_id, ca.ad_status, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at, COALESCE(c.funding_model, a.funding) AS funding_model, COALESCE(c.name, a.name) AS name, COALESCE(c.budget, a.budget) AS budget, c.bid_pct AS c_bid, ca.bid_pct AS bid_pct, c.status AS c_status, a.gone_at AS gone_at " +
       'FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id ' +
       "WHERE COALESCE(c.funding_model, a.funding) = 'COST_PER_CLICK' AND (a.campaign_id IS NOT NULL OR ca.ad_status IN ('PAUSED', 'ARCHIVED') OR (c.status IS NOT NULL AND c.status NOT LIKE '%RUNNING%'))" + (acct ? ' AND ca.account = ?1' : '')
     ).bind(...(acct ? [acct] : [])).all()).results || [];
@@ -8979,6 +9395,14 @@ async function adtoolCpcCompute(env, p) {
       actual_profit: a.actual_profit == null ? null : round2(a.actual_profit), pending_cost_orders: Number(a.pending_cost_orders) || 0, pending_fee_orders: Number(a.pending_fee_orders) || 0,
       impressions: imp.available && imp.map[id] != null ? imp.map[id] : null,
       lever: adtLever(cps), who: adtWho(String(m.account || (cps[0] && cps[0].account) || '')), in_cpc: mode === 'active',
+      /* fix 6 (24 Oct): an ad status is only as true as the last time eBay was asked, and the post
+         page is made of campaigns that are NOT running, which the rotation never re-reads at all.
+         The oldest read among this listing’s campaigns is the one a reader waits for, so that is
+         the one printed. ad_records above 1 is eBay holding more than one record for the listing in
+         one campaign, which is what made a serving ad read ARCHIVED. */
+      ad_records: cps.reduce((mx, c) => Math.max(mx, Number(c.ad_records) || 1), 1),
+      ads_synced_at: adsOldestStamp.apply(null, cps.map(c => c.ads_synced_at).concat(cps.map(c => c.ad_synced_at))),
+      ads_rotating: mode === 'active',
     };
     if (postCtx && postCtx[id]) { row.last_active_day = postCtx[id].last_active_day; row.last_active_source = postCtx[id].last_active_source; row.before = postCtx[id].before; row.after = postCtx[id].after; row.held = postCtx[id].held || null; row.held_rule = postCtx[id].held_rule || null; }
     return row;
@@ -9578,8 +10002,8 @@ function adtCampaignOverlap(live, money) {
 function adtCampaignRollup(input) {
   /* THE WHOLE BOARD, with no database and no clock in it, so every rule below is unit tested from
      worked examples.
-       campaigns: [{account, campaign_id, name, status, budget, funding_model, bid_pct, start_date, end_date}]
-       members:   [{account, campaign_id, item_id}]  every ad still in the campaign
+       campaigns: [{account, campaign_id, name, status, budget, funding_model, bid_pct, start_date, end_date, ads_synced_at}]
+       members:   [{account, campaign_id, item_id, ad_synced_at}]  every ad still in the campaign
        live:      [{account, campaign_id, item_id}]  the shared "being advertised right now" rows
        money:     { item_id: {spend, clicks, units, revenue} }  the window, per listing
        real:      [{account, campaign_id, spend, clicks, units, revenue, listings}] or empty
@@ -9601,9 +10025,19 @@ function adtCampaignRollup(input) {
   /* which campaigns each listing is LIVE in */
   const liveIn = {};
   for (const r of (I.live || [])) { const id = String((r && r.item_id) || ''); if (id) (liveIn[id] = liveIn[id] || {})[ck(r)] = 1; }
-  /* every ad still in each campaign */
-  const mem = {};
-  for (const r of (I.members || [])) { const id = String((r && r.item_id) || ''); if (id) (mem[ck(r)] = mem[ck(r)] || {})[id] = 1; }
+  /* every ad still in each campaign, and the OLDEST moment any of them was last seen in an eBay
+     answer. A campaign row stands for all of its ads, so that is the honest age for the row: the
+     Advertised count on it is worked out from ad statuses and is only as current as the stalest one.
+     The campaign's own ask-time joins the same comparison below, so a campaign with no ads left, or
+     a database where the per-ad stamps are missing, still answers with something true. */
+  const mem = {}, memAge = {};
+  for (const r of (I.members || [])) {
+    const id = String((r && r.item_id) || '');
+    if (!id) continue;
+    const k = ck(r);
+    (mem[k] = mem[k] || {})[id] = 1;
+    memAge[k] = adsOldestStamp(memAge[k], r && r.ad_synced_at);
+  }
   const real = {}; let realRows = 0;
   for (const r of (I.real || [])) { real[ck(r)] = r; realRows++; }
   const useReal = realRows > 0;
@@ -9645,6 +10079,9 @@ function adtCampaignRollup(input) {
       start_date: String(c.start_date || ''), end_date: String(c.end_date || ''),
       listings: items.length, listings_advertised: liveItems.length,
       shares_listings: shares,
+      /* the oldest reading under this row, which is what the page prints beneath the Advertised
+         count so the number is never read as a live check */
+      ads_synced_at: adsOldestStamp(c.ads_synced_at, memAge[k]),
     }, say(m), {
       budget_day: bud.budget_day, budget_per_listing_day: bud.budget_per_listing_day, day_cap: bud.day_cap,
       over_day_cap_per_listing: bud.over_day_cap_per_listing, over_day_cap: bud.over_day_cap,
@@ -9764,10 +10201,12 @@ async function adtoolCampaignBoardCompute(env, p) {
   if (want && ['active', 'paused', 'ended'].indexOf(want) < 0) throw new Error('SAY: status is active, paused, ended, or left blank for all of them');
   const rules = adtDeptRules(await adtoolDeptConfig(env));
   const B = await env.DB.batch([
-    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date FROM campaigns c' + (acct ? ' WHERE c.account = ?1' : '') + ' ORDER BY c.account, c.name LIMIT 2000').bind(...(acct ? [acct] : [])),
+    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date, c.ads_synced_at FROM campaigns c' + (acct ? ' WHERE c.account = ?1' : '') + ' ORDER BY c.account, c.name LIMIT 2000').bind(...(acct ? [acct] : [])),
     /* every ad still in a campaign. An ad put away by eBay is no longer inside it, so it is not
-       counted as one of its listings and its money is not added to it. */
-    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id FROM campaign_ads ca WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
+       counted as one of its listings and its money is not added to it. Each one carries when it was
+       last SEEN in an eBay answer, because the Advertised count on a campaign row is worked out from
+       these statuses and is therefore only as current as the oldest of them (fix 6). */
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.synced_at AS ad_synced_at FROM campaign_ads ca WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
     /* being advertised right now: the one membership rule the whole tool shares */
     env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
     /* the window, per listing. `spend` in the day table already carries the cost-per-click leg, so
@@ -9812,8 +10251,8 @@ async function adtoolCampaignListingsCompute(env, p) {
   if (!acct || !cid) throw new Error('SAY: give the account and the campaign');
   const rules = adtDeptRules(await adtoolDeptConfig(env));
   const B = await env.DB.batch([
-    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date FROM campaigns c WHERE c.account = ?1 AND c.campaign_id = ?2').bind(acct, cid),
-    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_group FROM campaign_ads ca WHERE ca.account = ?1 AND ca.campaign_id = ?2 AND COALESCE(ca.ad_status, '') <> 'ARCHIVED' LIMIT 5000").bind(acct, cid),
+    env.DB.prepare('SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.funding_model, c.bid_pct, c.start_date, c.end_date, c.ads_synced_at FROM campaigns c WHERE c.account = ?1 AND c.campaign_id = ?2').bind(acct, cid),
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_group, ca.ad_records, ca.synced_at AS ad_synced_at FROM campaign_ads ca WHERE ca.account = ?1 AND ca.campaign_id = ?2 AND COALESCE(ca.ad_status, '') <> 'ARCHIVED' LIMIT 5000").bind(acct, cid),
   ]);
   const camp = (B[0].results || [])[0];
   if (!camp) throw new Error('SAY: that campaign is not in the portal campaign list');
@@ -9847,6 +10286,12 @@ async function adtoolCampaignListingsCompute(env, p) {
       price: it.price === null || it.price === undefined ? null : round2(it.price), listing_status: String(it.status || ''),
       ad_status: st.state, live: !!L[mine], ad_rate: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
       ad_group: String(ad.ad_group || ''),
+      /* fix 6: one row is ONE ad in ONE campaign, so its honest reading is the older of the two
+         stamps and there is nothing to aggregate. The row carries it rather than leaning on the
+         campaign header above, because a short answer or a repair re-read leaves some ads in a
+         campaign confirmed longer ago than the campaign itself was asked about. */
+      ads_synced_at: adsOldestStamp(camp.ads_synced_at, ad.ad_synced_at),
+      ad_records: ad.ad_records == null ? 1 : Number(ad.ad_records),
       spend: round2(m.spend), clicks: Math.round(m.clicks), sales_units: Math.round(m.units), sales_money: round2(m.revenue),
       roas: adtRateRoas(m.revenue, m.spend), cpc: adtRateCpc(m.spend, m.clicks),
       shared_with_another_campaign: others.length > 0, other_campaigns: others.length,
@@ -9863,6 +10308,12 @@ async function adtoolCampaignListingsCompute(env, p) {
       funding_model: String(camp.funding_model || ''), bid_pct: adtMoneyNum(camp.bid_pct) === null ? null : round2(adtMoneyNum(camp.bid_pct)),
       start_date: String(camp.start_date || ''), end_date: String(camp.end_date || ''),
       listings: listings.length, listings_advertised: liveCount,
+      /* THE CAMPAIGN HEADER AGGREGATES EVERY AD UNDER IT, so it carries the OLDEST reading of the
+         lot. That is the honest age for a row that stands for many: the header is only as current
+         as its stalest ad, and printing the campaign's own ask-time here would quietly flatter the
+         rows that have not been confirmed since. The page falls back to this header for any row
+         that somehow carries no stamp of its own. */
+      ads_synced_at: listings.reduce((old, r) => adsOldestStamp(old, r.ads_synced_at), String(camp.ads_synced_at || '')),
     }, bud),
     listings: listings.slice(0, 1000), listings_total: listings.length, listings_held_back: Math.max(0, listings.length - 1000),
     totals: {
@@ -9886,8 +10337,9 @@ async function adtoolItemCampaignsCompute(env, p) {
   const like = '%' + q.replace(/[%_]/g, ' ') + '%';
   const B = await env.DB.batch([
     env.DB.prepare("SELECT i.item_id, i.account, i.title, i.image, i.price FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + (q ? ' AND (i.title LIKE ?' + (acct ? 2 : 1) + ' OR i.item_id LIKE ?' + (acct ? 2 : 1) + ')' : '') + ' ORDER BY i.account, i.title LIMIT 3000').bind(...(acct ? [acct] : []).concat(q ? [like] : [])),
-    /* every ad still in a campaign on an active listing, with the campaign it belongs to */
-    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, c.name, c.status, c.funding_model, c.budget, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
+    /* every ad still in a campaign on an active listing, with the campaign it belongs to, and the
+       two read stamps so each card can say when its status was taken (fix 6) */
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at, c.name, c.status, c.funding_model, c.budget, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
     env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])),
     /* the two windows the owner asked to see everywhere, and units from our own records over 30 days */
     env.DB.prepare('SELECT d.item_id, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.spend ELSE 0 END), 2) AS spend_7d, ROUND(SUM(CASE WHEN d.day >= ?2 THEN d.spend ELSE 0 END), 2) AS spend_3d, SUM(d.units) AS units_30d FROM adtool_listing_day d WHERE d.day >= ?3 AND d.day <= ?4 GROUP BY d.item_id').bind(d7.from, d3.from, adtAddDays(today, -30), yday),
@@ -9908,6 +10360,13 @@ async function adtoolItemCampaignsCompute(env, p) {
       funding_model: String(r.funding_model || ''), budget_day: b === null ? null : round2(b),
       bid_pct: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
       ad_status: st.state, live: !!(live[id] && live[id][key]),
+      /* fix 6: a card prints its ad status mid-sentence, so the date of the reading joins that same
+         sentence. One card is ONE ad in ONE campaign, so there is nothing to aggregate here: the
+         honest reading is simply the older of the two stamps. ad_records above 1 is eBay holding
+         more than one ad record for this listing in this campaign, which is the duplicate that made
+         a serving ad read ARCHIVED, and the card says so underneath. */
+      ads_synced_at: adsOldestStamp(r.ads_synced_at, r.ad_synced_at),
+      ad_records: r.ad_records == null ? 1 : Number(r.ad_records),
     });
   }
   const day = {};
@@ -12074,6 +12533,17 @@ async function ensureTruthSchema(env) {
     "CREATE TABLE IF NOT EXISTS item_links (item_id TEXT PRIMARY KEY, ali_link TEXT DEFAULT '', last_ali_order TEXT DEFAULT '', updated_at TEXT)",
     "ALTER TABLE campaign_ads ADD COLUMN ad_status TEXT",
     "ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT",
+    /* how many ad records eBay returned for this listing in this campaign (24 Oct). One is the
+       ordinary case and the default, so every row written before the column landed reads true. More
+       than one is the duplicate that made a serving ad read ARCHIVED, and it is the proof a page can
+       show: "eBay returned N ad records for this listing in this campaign". */
+    "ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1",
+    /* when this campaign’s AD LIST was last read, as opposed to campaigns.synced_at, which is when
+       the campaign ROW was last read. The two are five minutes and several hours apart, and every
+       page that shows an ad status needs the second one to be honest about it. The column has been
+       written since the membership job was built; it is named here as well so a fresh database has
+       it and so the column checker can see it exists. */
+    "ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT",
     "ALTER TABLE alert_log ADD COLUMN resolved_by TEXT",
     "CREATE TABLE IF NOT EXISTS cpc_live_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, listing_id TEXT, campaign_id TEXT, live_at TEXT, task_id INTEGER)",
     "CREATE INDEX IF NOT EXISTS idx_cle_listing ON cpc_live_events(listing_id, live_at)",
@@ -12685,7 +13155,7 @@ async function metricAds(env, account) {
      (pages, verifier, per-account filters) reads this single result. */
   const all = await memo('metricAds:v2', 30000, async () => {
     const rs = await env.DB.prepare(
-      'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.bid_pct, c.name AS c_name, ' +
+      'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.bid_pct, ca.ad_records, ca.synced_at, c.ads_synced_at, c.name AS c_name, ' +
       'c.status AS c_status, c.funding_model, ia.status AS l_status, ia.title, ia.price ' +
       'FROM campaign_ads ca ' +
       'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
@@ -12696,7 +13166,14 @@ async function metricAds(env, account) {
       const b = (byListing[r.account + '|' + r.listing_id] = byListing[r.account + '|' + r.listing_id] || { account: r.account, listing_id: r.listing_id, title: r.title, memberships: [], liveCpc: 0, liveGen: 0 });
       const live = liveMembershipRow(r);
       b.memberships.push({ campaign_id: r.campaign_id, name: r.c_name, c_status: r.c_status,
-        funding: r.funding_model, ad_status: r.ad_status || '', bid: r.bid_pct, live: live, chip: memberChipStatus(r) });
+        funding: r.funding_model, ad_status: r.ad_status || '', bid: r.bid_pct, live: live, chip: memberChipStatus(r),
+        /* fix 6 (24 Oct): only a running campaign’s ads are ever re-read, so every membership says
+           when eBay was last asked and whether it is still being asked. ad_records above 1 is eBay
+           holding more than one ad record for this listing in this campaign. A stamp, never a
+           sentence: the page owns the wording so an open page cannot show a frozen age. */
+        ad_records: r.ad_records == null ? 1 : Number(r.ad_records),
+        ads_synced_at: adsOldestStamp(r.ads_synced_at, r.synced_at),
+        ads_rotating: /RUNNING/.test(String(r.c_status || '')) || String(r.c_status || '') === 'ENDING_SOON' });
       if (live) { if (String(r.funding_model) === 'COST_PER_CLICK') b.liveCpc++; else b.liveGen++; }
     }
     const act = await env.DB.prepare("SELECT account, item_id, title FROM items_api WHERE status = 'ACTIVE'").all();
@@ -14523,8 +15000,16 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'Advertising Manager'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       return memo('campaignWatch', 60000, async () => {
+      /* this page is spliced into BOTH portals and names ad_records below, so it makes sure of the
+         column itself rather than relying on another path having run first */
+      await ensureAdsReadingColumns(ctx.env);
+      /* fix 6 (24 Oct): the campaign row is re-read every 5 minutes, its ADS are not, so the row
+         carries both stamps and the page prints them as two different things. There is deliberately
+         no second count of duplicated listings here: it would be a second correlated subquery on an
+         unbounded query that both portals load, and the duplicate proof the owner asked for is per
+         listing, on the chips below. */
       const camps = await ctx.env.DB.prepare(
-        'SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.synced_at, ' +
+        'SELECT c.account, c.campaign_id, c.name, c.status, c.budget, c.synced_at, c.ads_synced_at, ' +
         '(SELECT COUNT(*) FROM campaign_ads ca WHERE ca.account = c.account AND ca.campaign_id = c.campaign_id) AS items ' +
         'FROM campaigns c ORDER BY c.account, c.status, c.name'
       ).all();
@@ -14540,7 +15025,7 @@ const ROUTES = {
          status so the row shows its TRUE state (LIVE / AD PAUSED / CAMPAIGN PAUSED / LISTING ENDED),
          computed by the same liveMembershipRow/memberChipStatus the dup-sweep and ads split use. */
       const dupsRaw = await ctx.env.DB.prepare(
-        'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, c.name, c.status AS c_status, c.funding_model, ia.title, ia.status AS l_status ' +
+        'SELECT ca.account, ca.listing_id, ca.campaign_id, ca.ad_status, ca.ad_records, ca.synced_at, c.ads_synced_at, c.name, c.status AS c_status, c.funding_model, ia.title, ia.status AS l_status ' +
         'FROM campaign_ads ca ' +
         'JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
         'LEFT JOIN items_api ia ON ia.item_id = ca.listing_id ' +
@@ -14557,6 +15042,10 @@ const ROUTES = {
         status: r.c_status,
         live: liveMembershipRow(r),                 // true = actually being charged (campaign running + ad live + listing active)
         chip: memberChipStatus(r),                  // LIVE · AD PAUSED · CAMPAIGN PAUSED · LISTING ENDED · ARCHIVED
+        ad_records: r.ad_records == null ? 1 : Number(r.ad_records),   // above 1 = eBay holds more than one record here
+        /* the stamp, and only the stamp: the words are the page's job, so an open page can never
+           show an age that stopped counting when the payload was built */
+        ads_synced_at: adsOldestStamp(r.ads_synced_at, r.synced_at),
       })) };
       const events = await ctx.env.DB.prepare(
         'SELECT account, campaign, item_id, change_type, old, new, actor, at FROM campaign_events ORDER BY id DESC LIMIT 60'
@@ -18037,6 +18526,10 @@ const ROUTES = {
       if (CAMPAIGN_ROLES.indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const acct = String(p.account || ''), cid = String(p.campaign_id || ''), lid = String(p.listing_id || '');
       if (!acct || !cid || !lid) throw new Error('account, campaign_id and listing_id are required');
+      /* before the eBay call, never after it: the read-back writes ad_records, and if that column
+         were missing the write would be swallowed by the catch below while the pause itself had
+         already landed on eBay. Nothing is sent to eBay until this has passed. */
+      await ensureAdsReadingColumns(ctx.env);
       const c = await ctx.env.DB.prepare('SELECT funding_model, name FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).first();
       if (!c) throw new Error('unknown campaign');
       if (String(c.funding_model) !== 'COST_PER_CLICK') throw new Error('only Promoted Listings Advanced (CPC) ads can be paused per-listing; General ads must be removed from the campaign on eBay');
@@ -18048,23 +18541,77 @@ const ROUTES = {
       });
       const jt = await r.text();
       if (!r.ok) throw new Error('eBay refused the pause (' + r.status + '): ' + jt.slice(0, 200));
-      /* targeted re-sync: read this campaign's ads back so the pages show eBay's own state */
+      /* targeted re-sync: read this campaign's ads back so the pages show eBay's own state.
+         DUPLICATE-SAFE since 24 Oct: this loop used to take whichever record eBay returned LAST for
+         the listing, so an old archived record left behind by an earlier remove-and-re-add could
+         overwrite the live one and the pause looked like an archive. Every record for the listing
+         now goes through adPickLiveAd and the one that governs is what lands. */
       let confirmed = '';
-      const ar = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) + '/ad?limit=500', { headers: { authorization: 'Bearer ' + tok } });
-      if (ar.ok) {
-        const aj = await ar.json();
-        for (const ad of (aj.ads || [])) {
-          if (String(ad.listingId) === lid) {
-            confirmed = String(ad.adStatus || '');
-            await ctx.env.DB.prepare('UPDATE campaign_ads SET ad_status = ?4, synced_at = datetime(\'now\') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3')
-              .bind(acct, cid, lid, confirmed).run();
+      let records = 1;
+      try {
+        const got = await adsFetchAdList(tok, acct, cid, null);
+        if (got.ok) {
+          const pick = adPickLiveAd(adGroupAdsByListing(got.ads)[lid]);
+          if (pick) {
+            confirmed = pick.st;
+            records = pick.records;
+            await ctx.env.DB.prepare("UPDATE campaign_ads SET ad_status = ?4, ad_id = ?5, ad_records = ?6, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3")
+              .bind(acct, cid, lid, confirmed, pick.ad_id, pick.records).run();
           }
         }
-      }
+      } catch (e) { /* the pause itself already landed on eBay: a failed read-back must never undo it */ }
       await ctx.env.DB.prepare(
         "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'ad-paused', 'ACTIVE', ?4, ?5, datetime('now'))"
       ).bind(acct, String(c.name || cid), lid, confirmed || 'PAUSED', ctx.user.name || ctx.user.email).run().catch(() => {});
-      return { ok: true, ad_status: confirmed || 'PAUSED', confirmed_from_ebay: !!confirmed };
+      return { ok: true, ad_status: confirmed || 'PAUSED', confirmed_from_ebay: !!confirmed, ad_records: records };
+    },
+  },
+
+  /* THE PROBE (owner batch 24 Oct, fix 2). "product is live on ebay but portal is showing
+     archived" cost a day of guesswork because nobody could see what eBay’s ad list actually
+     returned. This hands back every RAW record eBay gives for a campaign, grouped by listing, with
+     the duplicate count and the record adPickLiveAd would choose. It is the audit tool that settles
+     the question for good, and it stays.
+     READ ONLY and sync-key only: one GET to eBay’s ad list and nothing else. It writes NOTHING, not
+     even a schema guard or a sync_state note, and it is deliberately absent from every portal page
+     and every nav list. */
+  adtoolAdProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const acct = String((p && p.account) || '').slice(0, 40);
+      const cid = String((p && p.campaign_id) || '').slice(0, 40);
+      const want = String((p && p.listing_id) || '').replace(/\D/g, '');
+      if (!acct || !cid) throw new Error('SAY: account and campaign_id are required');
+      const c = await ctx.env.DB.prepare('SELECT name, status, funding_model, ads_synced_at FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).first();
+      const tok = await ebayAccessToken(ctx.env, acct);
+      const got = await adsFetchAdList(tok, acct, cid, null);
+      if (!got.ok) return { ok: true, account: acct, campaign_id: cid, read_only: true, ebay_gave_no_ad_list: true,
+        note: 'eBay answered 4xx for the ad list of this campaign, which is what a rule-based (dynamic) campaign does. There is nothing to read.' };
+      const by = adGroupAdsByListing(got.ads);
+      const ids = Object.keys(by).filter(l => !want || l === want).sort();
+      const listings = ids.slice(0, ADS_PROBE_LISTING_CAP).map((lid) => ({
+        listing_id: lid,
+        records: by[lid].length,
+        duplicate: by[lid].length > 1,
+        governs: adPickLiveAd(by[lid]),
+        raw: by[lid].slice(0, ADS_PROBE_RECORD_CAP).map(ad => ({ ad_id: String(ad.adId || ''), listing_id: String(ad.listingId || ''),
+          ad_status: String(ad.adStatus || ''), bid_percentage: String(ad.bidPercentage || ''), ad_group_id: String(ad.adGroupId || '') })),
+      }));
+      return {
+        ok: true, read_only: true, account: acct, campaign_id: cid,
+        campaign_name: (c && c.name) || '', campaign_status: (c && c.status) || '', funding_model: (c && c.funding_model) || '',
+        /* THE ONE PLACE A PRE-WORDED AGE IS STILL SENT, and the reason it is the only one. Every
+           PAGE gets the stamp alone and does the wording itself, because a page sits open and a
+           sentence built when the payload was made stops counting. This is not a page: it is a
+           sync-key JSON answer read once by a person at the moment they ask, so the words are read
+           within seconds of being written and save them doing the arithmetic. */
+        ads_synced_at: (c && c.ads_synced_at) || '', ads_last_read: adsAgeWords((c && c.ads_synced_at) || '', Date.now()),
+        listing_id: want || null,
+        records_fetched: got.ads.length, total_reported: got.total, answer_complete: !got.truncated,
+        listings_in_answer: ids.length, listings_listed: listings.length,
+        duplicate_listings: Object.keys(by).filter(l => by[l].length > 1).length,
+        listings, as_of: new Date().toISOString(),
+        source: 'eBay sell/marketing ad_campaign/{id}/ad, read live. Nothing was written and nothing was sent to eBay.',
+      };
     },
   },
 

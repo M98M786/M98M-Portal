@@ -71,7 +71,13 @@
     '.cbd-honest b{color:var(--text)}.cbd-honest .big{color:' + LOSS + ';font-weight:800}',
     '.cbd-note{font-size:12px;color:var(--text-2);background:var(--panel-2);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5}',
     '.cbd-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
-    '.cbd-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:help}'
+    '.cbd-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:help}',
+    /* an ad status is a READING: its date rides under it, and a reading a day or more old is
+       written brighter so it cannot be skimmed as a present-tense fact */
+    '.cbd-age{display:block;font-size:10px;color:var(--text-3);font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}',
+    '.cbd-age.old{color:var(--text-2)}',
+    '.cbd-clash{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(224,86,63,.55);color:' + LOSS + ';white-space:nowrap}',
+    '.cbd-clash-why{display:block;font-size:10px;color:' + LOSS + ';font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}'
   ].join(''));
 
   /* ── small formatters. a figure with nothing to divide by prints the empty marker, never a zero ── */
@@ -96,6 +102,105 @@
   /* the engine sends roas and cpc; the safe ratio is the fallback so a row never prints a stale blank */
   function roasOf(r) { var v = num(r.roas); return v == null ? ratio(r.sales_money, r.spend) : v; }
   function cpcOf(r) { var v = num(r.cpc); return v == null ? ratio(r.spend, r.clicks) : v; }
+
+  /* ── AN AD STATUS IS A READING, NOT A LIVE FACT ───────────────────────────────────────────────
+     The portal re-reads a campaign's ads on a rotation, a couple of campaigns per account per tick,
+     and a campaign that is not running is not re-read at all. So an ad status on this page can be
+     hours or weeks old. It used to be printed as current, under a tag claiming every 15 minutes.
+     Every status now carries the date of the reading behind it, and a reading a day or more old is
+     written in the past tense. None of this changes what a status IS.
+     The engine sends ads_synced_at, when that campaign's ads were last read, and ad_records, how
+     many ad records eBay returned for that listing in that campaign. Both are read defensively,
+     falling back to the per-ad synced_at the payload already carries, so the page is honest whether
+     or not the engine half has landed. This block is deliberately the same in the five advertising
+     views that show an ad status: change one and change all five. */
+  var AD_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function adReadAt(o) {
+    if (!o || typeof o !== 'object') return '';
+    var v = o.ads_synced_at != null && o.ads_synced_at !== '' ? o.ads_synced_at
+      : (o.ad_synced_at != null && o.ad_synced_at !== '' ? o.ad_synced_at : o.synced_at);
+    return v == null ? '' : String(v).trim();
+  }
+  function adReadMs(at) {
+    if (!at) return null;
+    var s = String(at).trim().replace(' ', 'T');
+    if (!/(?:Z|[+-]\d\d:?\d\d)$/.test(s)) s += 'Z';
+    var t = new Date(s).getTime();
+    return isNaN(t) ? null : t;
+  }
+  function adReadDay(ms) {
+    var d = new Date(ms);
+    return d.getUTCDate() + ' ' + AD_MONTHS[d.getUTCMonth()] +
+      (d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : ' ' + d.getUTCFullYear());
+  }
+  /* band: 'now' under an hour, with nothing to say · 'hours' · 'days' · 'unknown' no usable date */
+  function adFresh(o) {
+    var at = adReadAt(o), ms = adReadMs(at);
+    if (ms == null) return { band: 'unknown', at: '', mins: null, words: 'we do not hold when this was read' };
+    var mins = (Date.now() - ms) / 60000;
+    if (mins < 0) mins = 0;
+    if (mins < 60) return { band: 'now', at: at, mins: mins, words: '' };
+    if (mins < 1440) {
+      var hrs = Math.max(1, Math.round(mins / 60));
+      return { band: 'hours', at: at, mins: mins, words: 'read ' + hrs + ' hour' + (hrs === 1 ? '' : 's') + ' ago' };
+    }
+    var dys = Math.max(1, Math.floor(mins / 1440));
+    return { band: 'days', at: at, mins: mins, words: 'last read on ' + adReadDay(ms) + ', ' + dys + ' day' + (dys === 1 ? '' : 's') + ' ago' };
+  }
+  function adArchived(s) { return /archiv/i.test(String(s == null ? '' : s)); }
+  /* A CAMPAIGN row's own synced_at is when the CAMPAIGN was read, which is a far faster job than
+     reading all of its ads, so it must never stand in for an ad reading. Ask a campaign object
+     for ads_synced_at and nothing else. An ad row's own synced_at IS when that ad was read, so
+     adFresh keeps it as the fallback there. */
+  function adFreshCamp(o) {
+    return adFresh({ ads_synced_at: o && (o.ads_synced_at != null && o.ads_synced_at !== '' ? o.ads_synced_at : o.ad_synced_at) });
+  }
+  function adRecords(o) {
+    if (!o || typeof o !== 'object') return null;
+    var n = Number(o.ad_records != null ? o.ad_records : o.ad_record_count);
+    return isNaN(n) || n < 1 ? null : Math.round(n);
+  }
+  /* the oldest reading in a set of rows, so a panel can say how old its worst status is instead of
+     claiming one cadence for all of them. An entry that is already an adFresh() answer is taken as
+     it stands, which is how a caller passes readings it has already worked out per row. */
+  function adOldest(rows) {
+    var worst = null, unknown = 0;
+    (rows || []).forEach(function (r) {
+      var f = (r && typeof r.band === 'string') ? r : adFresh(r);
+      if (f.band === 'unknown') { unknown++; return; }
+      if (!worst || f.mins > worst.mins) worst = f;
+    });
+    return { worst: worst, unknown: unknown };
+  }
+  function adPanelNote(rows) {
+    var o = adOldest(rows), bits = [];
+    if (o.worst && o.worst.band !== 'now') bits.push('The oldest reading here was taken ' + (o.worst.band === 'days' ? 'on ' + adReadDay(adReadMs(o.worst.at)) : Math.max(1, Math.round(o.worst.mins / 60)) + ' hours ago') + '.');
+    else if (o.worst) bits.push('Every reading here was taken within the last hour.');
+    if (o.unknown) bits.push(o.unknown + (o.unknown === 1 ? ' reading does' : ' readings do') + ' not carry a date, so ' + (o.unknown === 1 ? 'it' : 'they') + ' could be hours or weeks old.');
+    return bits.join(' ');
+  }
+  /* `quietUnknown` is for dense tables that say once, at panel level, that they do not hold
+     the read times, rather than repeating it on every row. `prefix` names what was read
+     when the line sits beside a different date, as in "its ads read 4 hours ago". */
+  function adAgeLine(f, quietUnknown, prefix) {
+    if (!f.words || (quietUnknown && f.band === 'unknown')) return '';
+    return '<span class="cbd-age' + (f.band === 'days' ? ' old' : '') + '">' +
+      (prefix ? esc(prefix) + ' ' : '') + esc(f.words) + '</span>';
+  }
+  function adDupLine(o) {
+    var n = adRecords(o);
+    if (n == null || n < 2) return '';
+    return '<span class="cbd-age old">eBay returned ' + n + ' ad records for this listing in this campaign.</span>';
+  }
+  /* THE CONTRADICTION, said plainly. An archived ad cannot be charged, so a row reading ARCHIVED on
+     a listing the same campaign billed has one of the two wrong, and the money is the half to
+     believe. `money` is a figure already in this payload, never a fresh request. */
+  function adClash(status, money, when) {
+    var v = Number(money);
+    if (!adArchived(status) || money == null || money === '' || isNaN(v) || v <= 0) return '';
+    return '<span class="cbd-clash" title="an archived ad cannot be charged, so one of the two is wrong">archived but spending</span>' +
+      '<span class="cbd-clash-why">Charged ' + gbp(v) + ' in this campaign ' + esc(String(when || '')) + '. An archived ad cannot spend, so believe the money, not this status.</span>';
+  }
 
   VIEWS.adtoolCampaignBoard = {
     label: 'Campaigns', hidden: true, order: 96, roles: ROLES,
@@ -293,7 +398,9 @@
       }, sortVal: function (c) { return num(c.budget_day); } },
     { key: 'bid_pct', label: 'Ad rate', cls: 'r', cell: function (c) { return rateTxt(c.bid_pct); }, sortVal: function (c) { return num(c.bid_pct); } },
     { key: 'listings', label: 'Listings', cls: 'r', cell: function (c) { return cnt(c.listings); }, sortVal: function (c) { return num(c.listings); } },
-    { key: 'listings_advertised', label: 'Advertised', cls: 'r', cell: function (c) { return cnt(c.listings_advertised); }, sortVal: function (c) { return num(c.listings_advertised); } },
+    /* the advertised count is worked out from ad statuses, so it is only as current as the reading
+       that produced them: the date of that reading belongs under the number */
+    { key: 'listings_advertised', label: 'Advertised', cls: 'r', cell: function (c) { return cnt(c.listings_advertised) + adAgeLine(adFreshCamp(c), true); }, sortVal: function (c) { return num(c.listings_advertised); } },
     { key: 'spend', label: 'Spend', cls: 'r', cell: function (c) { return gbp(c.spend); }, sortVal: function (c) { return num(c.spend); } },
     { key: 'clicks', label: 'Clicks', cls: 'r', cell: function (c) { return cnt(c.clicks); }, sortVal: function (c) { return num(c.clicks); } },
     { key: 'sales_money', label: 'Sales from ads', cls: 'r', cell: function (c) {
@@ -358,10 +465,12 @@
     var held = num(got.held_back);
     /* the listings add back up to the campaign row above them, and this line is where a reader can
        see that they do rather than take it on trust */
-    return '<div class="cbd-scroll"><table class="cbd-tbl"><thead><tr>' +
-      '<th>Listing</th><th>This ad</th><th class="r">Ad rate</th><th class="r">Spend</th><th class="r">Clicks</th>' +
+    var note = adPanelNote(rows.map(function (r) { return adFreshSrc(r, got.campaign); }));
+    return (note ? '<div class="cbd-sub2" style="margin-bottom:6px">Each ad status below is a reading taken when this campaign\'s ads were last read, not a live check. ' + esc(note) + '</div>' : '') +
+      '<div class="cbd-scroll"><table class="cbd-tbl"><thead><tr>' +
+      '<th>Listing</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Spend</th><th class="r">Clicks</th>' +
       '<th class="r">Sales from ads</th><th class="r">ROAS</th><th class="r">Cost per click</th><th>Also in</th>' +
-      '</tr></thead><tbody>' + rows.map(insideRow).join('') +
+      '</tr></thead><tbody>' + rows.map(function (r) { return insideRow(r, got.campaign); }).join('') +
       '<tr class="cbd-tot"><td>' + cnt(T.listings != null ? T.listings : rows.length) + ' listings in this campaign</td><td></td><td></td>' +
       '<td class="r">' + gbp(T.spend) + '</td><td class="r">' + cnt(T.clicks) + '</td>' +
       '<td class="r">' + gbp(T.sales_money) + '</td><td class="r">' + roasTxt(roasOf(T)) + '</td>' +
@@ -370,7 +479,13 @@
       '</tbody></table></div>' +
       (held != null && held > 0 ? '<div class="cbd-sub2" style="margin-top:6px">' + cnt(held) + ' more listing' + (held === 1 ? '' : 's') + ' in this campaign are not shown, though the row above counts them all.</div>' : '');
   }
-  function insideRow(r) {
+  /* a listing row carries its own read time once the engine sends one; until then the campaign's
+     own ads_synced_at is the date behind every ad status in this campaign */
+  function adFreshSrc(r, camp) {
+    var f = adFresh(r);
+    return f.band === 'unknown' && camp ? adFreshCamp(camp) : f;
+  }
+  function insideRow(r, camp) {
     var live = r.live != null ? !!r.live : /ACTIVE|ELIGIBLE/i.test(String(r.ad_status || ''));
     /* the engine names these other_campaigns and ad_rate. Reading shared_with and bid_pct printed an
        empty cell in both columns, which a reader takes for "none" and "no ad rate". */
@@ -378,7 +493,14 @@
     if (shared == null) shared = r.shared_with_another_campaign ? 1 : 0;
     var roas = roasOf(r), cpc = cpcOf(r);
     return '<tr><td>' + adtProductCell(r) + '</td>' +
-      '<td><span class="cbd-tag ' + (live ? 'live' : 'off') + '">' + esc(r.ad_status || '—') + (live ? ' · live' : '') + '</span></td>' +
+      '<td><span class="cbd-tag ' + (live ? 'live' : 'off') + '">' + esc(r.ad_status || '—') + (live ? ' · live' : '') + '</span>' +
+        /* NO archived-but-spending flag on this table, and that is deliberate rather than an
+           oversight: the engine leaves ARCHIVED ads out of a campaign's listings altogether, so
+           their money is not added to the campaign either, and a row reading archived can never
+           reach this table for the flag to fire on. Calling the check here would have looked like
+           cover it does not give. The contradiction is caught where an archived row IS shown: the
+           per-listing map on Product history and the Campaigns-live lookup. */
+        adAgeLine(adFreshSrc(r, camp), true) + adDupLine(r) + '</td>' +
       '<td class="r">' + rateTxt(r.ad_rate != null ? r.ad_rate : r.bid_pct) + '</td>' +
       '<td class="r">' + gbp(r.spend) + '</td>' +
       '<td class="r">' + cnt(r.clicks) + '</td>' +
@@ -411,7 +533,10 @@
       CB.inside[k] = {
         rows: ((d && (d.listings || d.rows)) || []),
         totals: (d && d.totals) || null,
-        held_back: d ? d.listings_held_back : null
+        held_back: d ? d.listings_held_back : null,
+        /* the campaign carries when its ads were last read, which is the date behind every ad
+           status in the table below it */
+        campaign: (d && d.campaign) || null
       };
       paint(k);
     }).catch(function (e) {
@@ -485,6 +610,18 @@
         ? 'A listing is allowed ' + gbp(cap) + ' a day, so a row is marked <span class="cbd-mark cap">over the cap</span> when that per-listing share is above it.'
         : 'A row is marked <span class="cbd-mark cap">over the cap</span> when that per-listing share is above the daily cap a listing is allowed.') +
       ' The whole budget is never judged against a per-listing cap.</p>';
+
+    /* fix 6: the page used to print ad statuses, and the advertised count worked out from them, as
+       the state of things now. They are readings on a rotation, and a campaign that is not running
+       may not have been read for weeks. */
+    var readNote = adPanelNote((D.campaigns || []).map(function (c) { return adFreshCamp(c); }));
+    h += '<p><b>An ad status is a reading.</b> The advertised count, and every ad status inside an' +
+      ' opened campaign, is what eBay said when that campaign\'s ads were last read. It is not a live' +
+      ' check, and a campaign that is not running may not have been read for a long time. Each one' +
+      ' carries the date of its own reading.' + (readNote ? ' ' + esc(readNote) : '') +
+      ' A listing marked <span class="cbd-clash">archived but spending</span> was charged inside a' +
+      ' campaign whose ad for it reads archived: an archived ad cannot spend, so the money is the half' +
+      ' to believe and the status is the one to re-read.</p>';
 
     h += '<p>Nothing on this page is ever sent to eBay.' +
       (D.computed_at ? ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.' : '') + '</p>';

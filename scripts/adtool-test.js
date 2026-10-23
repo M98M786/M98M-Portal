@@ -25,13 +25,18 @@ function run(argv) {
   const i13 = src.indexOf('/* ADTOOL-P13-PURE-BEGIN */'); const j13 = src.indexOf('/* ADTOOL-P13-PURE-END */');
   const i14 = src.indexOf('/* ADTOOL-P14-PURE-BEGIN */'); const j14 = src.indexOf('/* ADTOOL-P14-PURE-END */');
   const i15 = src.indexOf('/* ADTOOL-P15-PURE-BEGIN */'); const j15 = src.indexOf('/* ADTOOL-P15-PURE-END */');
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '');   /* pure helpers of every phase */
+  /* 24 Oct: the duplicate-safe ad merge, the truncation guard, the money-beats-status repair and the
+     money-first rotation. Pure on purpose, so "an archived record must never win" is a test and not
+     a hope. */
+  const iAS = src.indexOf('/* ADSTATUS-PURE-BEGIN */'); const jAS = src.indexOf('/* ADSTATUS-PURE-END */');
+  if (iAS < 0 || jAS < 0) return 'FAIL: ad-status block markers not found';
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1360,6 +1365,251 @@ function run(argv) {
   t('campaign sync: every other writer of a campaign change names its columns and leaves the new one to its default', (src.match(/INSERT INTO campaign_events \(/g) || []).length === 8 && (src.match(/INSERT INTO campaign_events \(account, campaign, item_id,/g) || []).length === 7 && !/INSERT INTO campaign_events VALUES/.test(src), (src.match(/INSERT INTO campaign_events \(/g) || []).length);
 
   t('fields: nothing on the three pages is ever sent to eBay, and no collective profit figure is printed anywhere on them', !/ebay\.com\/sh\/ads\/dashboard\/campaign\/[^']*'\s*\+/.test(viewSrc) && !/adtProfitCell/.test(viewSrc) && (viewSrc.match(/api\('[A-Za-z]+'/g) || []).every(c => /adtoolChangeDay|adtoolPeak/.test(c)), (viewSrc.match(/api\('[A-Za-z]+'/g) || []));
+
+  /* ================= "live on eBay, ARCHIVED in the portal" (owner, 24 Oct) =================
+     One listing can hold more than one ad record in the SAME campaign, and the membership loop used
+     to keep whichever record eBay returned LAST, so a dead ARCHIVED record could overwrite the
+     serving one. Every rule of the cure is held here. */
+  const AD = (adId, adStatus, bidPercentage, listingId, adGroupId) => ({ adId: adId, adStatus: adStatus, bidPercentage: bidPercentage || '', listingId: listingId || 'L1', adGroupId: adGroupId || '' });
+
+  /* (a) one record of each status returns itself */
+  t('ad merge: a single ACTIVE record returns itself', (() => { const r = F.adPickLiveAd([AD('100', 'ACTIVE', '7.5')]); return r && r.ad_id === '100' && r.st === 'ACTIVE' && r.bid === '7.5' && r.records === 1; })(), F.adPickLiveAd([AD('100', 'ACTIVE', '7.5')]));
+  t('ad merge: a single PAUSED record returns itself', (() => { const r = F.adPickLiveAd([AD('101', 'PAUSED')]); return r && r.ad_id === '101' && r.st === 'PAUSED' && r.records === 1; })(), F.adPickLiveAd([AD('101', 'PAUSED')]));
+  t('ad merge: a single ARCHIVED record returns itself, because that is all eBay gave', (() => { const r = F.adPickLiveAd([AD('102', 'ARCHIVED')]); return r && r.ad_id === '102' && r.st === 'ARCHIVED' && r.records === 1; })(), F.adPickLiveAd([AD('102', 'ARCHIVED')]));
+  t('ad merge: a cost-per-sale record carries no status and still returns itself', (() => { const r = F.adPickLiveAd([AD('103', '')]); return r && r.ad_id === '103' && r.st === '' && r.records === 1; })(), F.adPickLiveAd([AD('103', '')]));
+
+  /* (b) THE BUG. ACTIVE must beat ARCHIVED whichever order eBay returns them in. */
+  t('ad merge: ACTIVE beats ARCHIVED when the archived record arrives LAST (the exact bug)', (() => { const r = F.adPickLiveAd([AD('500', 'ACTIVE'), AD('100', 'ARCHIVED')]); return r && r.st === 'ACTIVE' && r.ad_id === '500' && r.records === 2; })(), F.adPickLiveAd([AD('500', 'ACTIVE'), AD('100', 'ARCHIVED')]));
+  t('ad merge: ACTIVE beats ARCHIVED when the archived record arrives FIRST', (() => { const r = F.adPickLiveAd([AD('100', 'ARCHIVED'), AD('500', 'ACTIVE')]); return r && r.st === 'ACTIVE' && r.ad_id === '500' && r.records === 2; })(), F.adPickLiveAd([AD('100', 'ARCHIVED'), AD('500', 'ACTIVE')]));
+  t('ad merge: ACTIVE still beats ARCHIVED when the archived record has the HIGHER adId', F.adPickLiveAd([AD('900', 'ARCHIVED'), AD('100', 'ACTIVE')]).st === 'ACTIVE', F.adPickLiveAd([AD('900', 'ARCHIVED'), AD('100', 'ACTIVE')]));
+  t('ad merge: PAUSED beats ARCHIVED either way round', F.adPickLiveAd([AD('1', 'PAUSED'), AD('2', 'ARCHIVED')]).st === 'PAUSED' && F.adPickLiveAd([AD('2', 'ARCHIVED'), AD('1', 'PAUSED')]).st === 'PAUSED', null);
+  t('ad merge: a blank status (cost-per-sale, where existing IS the status) beats ARCHIVED either way round', F.adPickLiveAd([AD('1', ''), AD('2', 'ARCHIVED')]).st === '' && F.adPickLiveAd([AD('2', 'ARCHIVED'), AD('1', '')]).st === '', null);
+  t('ad merge: ACTIVE beats PAUSED, and PAUSED beats blank, so the whole order is ACTIVE > PAUSED > blank > ARCHIVED', F.adPickLiveAd([AD('1', 'PAUSED'), AD('2', 'ACTIVE')]).st === 'ACTIVE' && F.adPickLiveAd([AD('1', ''), AD('2', 'PAUSED')]).st === 'PAUSED' && F.adStatusRank('ACTIVE') > F.adStatusRank('PAUSED') && F.adStatusRank('PAUSED') > F.adStatusRank('') && F.adStatusRank('') > F.adStatusRank('ARCHIVED'), [F.adStatusRank('ACTIVE'), F.adStatusRank('PAUSED'), F.adStatusRank(''), F.adStatusRank('ARCHIVED')]);
+  t('ad merge: the status is read whatever case or padding eBay sends it in', F.adStatusRank(' active ') === F.adStatusRank('ACTIVE') && F.adStatusRank('Archived') === F.adStatusRank('ARCHIVED'), null);
+  t('ad merge: a word eBay has not used before outranks ARCHIVED, because only ARCHIVED contradicts the money', F.adStatusRank('SOMETHING_NEW') > F.adStatusRank('ARCHIVED') && F.adPickLiveAd([AD('1', 'ARCHIVED'), AD('2', 'SOMETHING_NEW')]).st === 'SOMETHING_NEW', null);
+
+  /* (c) ties go to the newest adId, compared as digits and never as a number */
+  t('ad merge: two ACTIVE records take the newer adId, whichever order they arrive in', F.adPickLiveAd([AD('100', 'ACTIVE'), AD('900', 'ACTIVE')]).ad_id === '900' && F.adPickLiveAd([AD('900', 'ACTIVE'), AD('100', 'ACTIVE')]).ad_id === '900', null);
+  t('ad merge: the newer adId is decided by digits, so a longer id wins and 1000 beats 999', F.adIdNewer('1000', '999') && !F.adIdNewer('999', '1000') && F.adPickLiveAd([AD('999', 'ACTIVE'), AD('1000', 'ACTIVE')]).ad_id === '1000', null);
+  t('ad merge: an adId far past the largest exact integer is still compared correctly', F.adIdNewer('9007199254740993', '9007199254740992') && !F.adIdNewer('9007199254740992', '9007199254740993'), null);
+  t('ad merge: leading zeroes do not make an id look longer, and equal ids are not newer than each other', F.adIdNewer('0100', '99') && !F.adIdNewer('100', '100') && !F.adIdNewer('100', '0100'), null);
+  t('ad merge: two ARCHIVED records still answer, with the newer id, rather than refusing', F.adPickLiveAd([AD('1', 'ARCHIVED'), AD('2', 'ARCHIVED')]).ad_id === '2' && F.adPickLiveAd([AD('1', 'ARCHIVED'), AD('2', 'ARCHIVED')]).records === 2, null);
+
+  /* (d) nothing in, nothing out */
+  t('ad merge: an empty list is null, never a guessed status', F.adPickLiveAd([]) === null && F.adPickLiveAd(null) === null && F.adPickLiveAd(undefined) === null, null);
+  t('ad merge: a list of nothing but holes is null too, and holes are not counted as records', F.adPickLiveAd([null, undefined]) === null, null);
+
+  /* (e) the count is PER LISTING, which is the proof the owner can see */
+  t('ad merge: the duplicate count is the records for THAT listing, not the campaign', (() => {
+    const m = F.adMergeAds([AD('1', 'ARCHIVED', '', 'L1'), AD('2', 'ACTIVE', '', 'L1'), AD('3', 'ACTIVE', '', 'L2'), AD('4', 'ACTIVE', '', 'L3'), AD('5', 'PAUSED', '', 'L3'), AD('6', 'ARCHIVED', '', 'L3')]);
+    return m.now.L1.records === 2 && m.now.L2.records === 1 && m.now.L3.records === 3 && m.duplicate_listings === 2 && m.extra_records === 3;
+  })(), F.adMergeAds([AD('1', 'ARCHIVED', '', 'L1'), AD('2', 'ACTIVE', '', 'L1'), AD('3', 'ACTIVE', '', 'L2'), AD('4', 'ACTIVE', '', 'L3'), AD('5', 'PAUSED', '', 'L3'), AD('6', 'ARCHIVED', '', 'L3')]));
+  t('ad merge: a whole campaign resolves one governing record per listing and the archived twin never wins', (() => {
+    const m = F.adMergeAds([AD('1', 'ARCHIVED', '', 'L1'), AD('2', 'ACTIVE', '5.0', 'L1'), AD('3', 'ARCHIVED', '', 'L2')]);
+    return m.now.L1.st === 'ACTIVE' && m.now.L1.bid === '5.0' && m.now.L2.st === 'ARCHIVED' && Object.keys(m.now).length === 2;
+  })(), null);
+  const AD_NOLID = [{ adId: '1', adStatus: 'ACTIVE', bidPercentage: '', adGroupId: '' }];
+  t('ad merge: a record with no listing id is dropped rather than filed under an empty key', Object.keys(F.adGroupAdsByListing(AD_NOLID)).length === 0 && Object.keys(F.adMergeAds(AD_NOLID).now).length === 0, Object.keys(F.adGroupAdsByListing(AD_NOLID)));
+  t('ad merge: the governing record carries its ad group and bid through, not just its status', (() => { const r = F.adPickLiveAd([AD('1', 'ARCHIVED', '1.0', 'L1', 'gOld'), AD('2', 'ACTIVE', '9.5', 'L1', 'gNew')]); return r.grp === 'gNew' && r.bid === '9.5'; })(), null);
+
+  /* (f) fix 5: a short answer must never delete a membership */
+  t('truncation: an answer short of the total eBay reports is truncated', F.adsFetchTruncated(500, 1200) === true && F.adsFetchTruncated(1000, 1200) === true, null);
+  t('truncation: a whole answer is not truncated, and more than the total is not either', F.adsFetchTruncated(119, 119) === false && F.adsFetchTruncated(1000, 999) === false, null);
+  t('truncation: no total, a total of none, or nonsense is not evidence of truncation', F.adsFetchTruncated(0, null) === false && F.adsFetchTruncated(5, 0) === false && F.adsFetchTruncated(5, undefined) === false && F.adsFetchTruncated(5, 'x') === false, null);
+  t('truncation: a response short of the total produces NO deletions (the membership writer skips them)', (() => {
+    const prev = { L1: '', L2: '', L3: '' };
+    const now = { L1: {}, L2: {} };                                    // L3 simply was not on the page we got
+    const truncated = F.adsFetchTruncated(500, 1200);
+    const removed = truncated ? [] : Object.keys(prev).filter(l => !(l in now));
+    const whole = F.adsFetchTruncated(3, 3) ? [] : Object.keys(prev).filter(l => !(l in now));
+    return truncated && removed.length === 0 && whole.length === 1 && whole[0] === 'L3';
+  })(), null);
+
+  /* (g) fix 3: money beats status */
+  const RQ = (acct, cid, lid, st) => ({ account: acct, campaign_id: cid, listing_id: lid, ad_status: st });
+  t('repair: a billed listing reading ARCHIVED is queued for a re-read', (() => {
+    const q = F.adRepairTargets([RQ('A', 'C1', 'L1', 'ARCHIVED')], { 'A|C1|L1': 12.34 }, {});
+    return q.length === 1 && q[0].campaign_id === 'C1' && q[0].listing_id === 'L1' && q[0].evidence === 'campaign';
+  })(), F.adRepairTargets([RQ('A', 'C1', 'L1', 'ARCHIVED')], { 'A|C1|L1': 12.34 }, {}));
+  t('repair: a billed listing reading ACTIVE is not queued, because nothing about it disagrees', F.adRepairTargets([RQ('A', 'C1', 'L1', 'ACTIVE'), RQ('A', 'C1', 'L2', 'PAUSED'), RQ('A', 'C1', 'L3', '')], { 'A|C1|L1': 9, 'A|C1|L2': 9, 'A|C1|L3': 9 }, {}).length === 0, null);
+  t('repair: an ARCHIVED row with no money against it is not queued', F.adRepairTargets([RQ('A', 'C1', 'L1', 'ARCHIVED')], {}, {}).length === 0 && F.adRepairTargets([RQ('A', 'C1', 'L1', 'ARCHIVED')], { 'A|C1|L1': 0 }, {}).length === 0, null);
+  t('repair: money in a DIFFERENT campaign does not queue this campaign, and does not clear the one it was billed in', (() => {
+    const rows = [RQ('A', 'C1', 'L1', 'ARCHIVED'), RQ('A', 'C2', 'L1', 'ARCHIVED')];
+    const q = F.adRepairTargets(rows, { 'A|C1|L1': 7 }, { 'A|L1': 7 });
+    return q.length === 1 && q[0].campaign_id === 'C1';
+  })(), F.adRepairTargets([RQ('A', 'C1', 'L1', 'ARCHIVED'), RQ('A', 'C2', 'L1', 'ARCHIVED')], { 'A|C1|L1': 7 }, { 'A|L1': 7 }));
+  t('repair: the per-listing figures are a FALLBACK, used only where the campaign-level rows say nothing at all about that listing', (() => {
+    const only = F.adRepairTargets([RQ('A', 'C9', 'L9', 'ARCHIVED')], {}, { 'A|L9': 3 });
+    const beaten = F.adRepairTargets([RQ('A', 'C9', 'L9', 'ARCHIVED')], { 'A|C8|L9': 3 }, { 'A|L9': 3 });
+    return only.length === 1 && only[0].evidence === 'listing' && beaten.length === 0;
+  })(), null);
+  t('repair: another account is never swept in on the same campaign or listing id', F.adRepairTargets([RQ('B', 'C1', 'L1', 'ARCHIVED')], { 'A|C1|L1': 20 }, { 'A|L1': 20 }).length === 0, null);
+  t('repair: a row missing its account, campaign or listing is skipped rather than queued half-built', F.adRepairTargets([RQ('', 'C1', 'L1', 'ARCHIVED'), RQ('A', '', 'L1', 'ARCHIVED'), RQ('A', 'C1', '', 'ARCHIVED')], { '|C1|L1': 5, 'A||L1': 5, 'A|C1|': 5 }, {}).length === 0, null);
+
+  /* (h) fix 4: money first, then the oldest read */
+  t('rotation: a campaign that spent comes before an idle one', (() => {
+    const o = F.adsRotationOrder([{ campaign_id: 'idle', ads_synced_at: '2026-10-20 01:00:00' }, { campaign_id: 'spent', ads_synced_at: '2026-10-24 09:00:00' }], { spent: 4.2 });
+    return o[0].campaign_id === 'spent' && o[1].campaign_id === 'idle';
+  })(), F.adsRotationOrder([{ campaign_id: 'idle', ads_synced_at: '2026-10-20 01:00:00' }, { campaign_id: 'spent', ads_synced_at: '2026-10-24 09:00:00' }], { spent: 4.2 }).map(c => c.campaign_id));
+  t('rotation: inside the same group an older read comes before a newer one', (() => {
+    const o = F.adsRotationOrder([{ campaign_id: 'new', ads_synced_at: '2026-10-24 09:00:00' }, { campaign_id: 'old', ads_synced_at: '2026-10-24 02:00:00' }], {});
+    return o[0].campaign_id === 'old';
+  })(), null);
+  t('rotation: a campaign never read at all has no stamp and goes first of all', F.adsRotationOrder([{ campaign_id: 'read', ads_synced_at: '2026-10-24 02:00:00' }, { campaign_id: 'never', ads_synced_at: null }], {})[0].campaign_id === 'never', null);
+  t('rotation: a spending campaign read five minutes ago still outranks an idle one never read', F.adsRotationOrder([{ campaign_id: 'never', ads_synced_at: '' }, { campaign_id: 'spent', ads_synced_at: '2026-10-24 09:55:00' }], { spent: 0.01 })[0].campaign_id === 'spent', null);
+  t('rotation: the order is total, so two campaigns with the same money and the same stamp never shuffle', (() => {
+    const camps = [{ campaign_id: 'b', ads_synced_at: 'x' }, { campaign_id: 'a', ads_synced_at: 'x' }];
+    const o1 = F.adsRotationOrder(camps, {}).map(c => c.campaign_id).join(',');
+    const o2 = F.adsRotationOrder(camps.slice().reverse(), {}).map(c => c.campaign_id).join(',');
+    return o1 === 'a,b' && o2 === 'a,b';
+  })(), null);
+  /* money first on its own would starve the quiet campaigns, which is the same disease in a new
+     place, so a share of every tick is reserved for them */
+  const CAMPS = (n, spentN, stampFrom) => { const a = []; for (let i = 0; i < n; i++) a.push({ campaign_id: 'c' + (i < 10 ? '0' : '') + i, ads_synced_at: '2026-10-24 0' + (i % 10) + ':00:00', spent: i < spentN }); return a; };
+  const SPEND = cs => { const o = {}; cs.forEach(c => { if (c.spent) o[c.campaign_id] = 1; }); return o; };
+  t('rotation: a tick reserves slots for the campaigns that did NOT spend, so money first cannot starve them', (() => {
+    const cs = CAMPS(56, 40);                       // far more spenders than one tick can read
+    const pick = F.adsRotationPick(cs, SPEND(cs), 14, 10);
+    const quiet = pick.filter(c => !c.spent).length;
+    return pick.length === 14 && quiet === 4 && pick.filter(c => c.spent).length === 10;
+  })(), F.adsRotationPick(CAMPS(56, 40), SPEND(CAMPS(56, 40)), 14, 10).length);
+  t('rotation: with nothing spending at all the whole tick goes to the oldest reads', (() => {
+    const cs = CAMPS(20, 0);
+    const pick = F.adsRotationPick(cs, {}, 14, 10);
+    return pick.length === 14 && pick.filter(c => c.spent).length === 0;
+  })(), null);
+  t('rotation: with everything spending the reserved slots are filled from the money order rather than wasted', (() => {
+    const cs = CAMPS(30, 30);
+    const pick = F.adsRotationPick(cs, SPEND(cs), 14, 10);
+    return pick.length === 14;
+  })(), F.adsRotationPick(CAMPS(30, 30), SPEND(CAMPS(30, 30)), 14, 10).length);
+  t('rotation: a tick never returns the same campaign twice, and never more than it was asked for', (() => {
+    const cs = CAMPS(8, 3);
+    const pick = F.adsRotationPick(cs, SPEND(cs), 14, 10);
+    const ids = pick.map(c => c.campaign_id);
+    return pick.length === 8 && new Set(ids).size === 8;
+  })(), null);
+  t('rotation: asked for none it reads none, and the money share is never larger than the tick', F.adsRotationPick(CAMPS(5, 2), {}, 0, 10).length === 0 && F.adsRotationPick(CAMPS(5, 5), SPEND(CAMPS(5, 5)), 3, 99).length === 3, null);
+  t('rotation: the spending campaigns a tick does take are the ones read longest ago', (() => {
+    const cs = [{ campaign_id: 'newSpend', ads_synced_at: '2026-10-24 09:00:00' }, { campaign_id: 'oldSpend', ads_synced_at: '2026-10-24 01:00:00' }, { campaign_id: 'idle', ads_synced_at: '2026-10-24 00:00:00' }];
+    const pick = F.adsRotationPick(cs, { newSpend: 1, oldSpend: 1 }, 2, 1);
+    return pick[0].campaign_id === 'oldSpend' && pick[1].campaign_id === 'idle';
+  })(), F.adsRotationPick([{ campaign_id: 'newSpend', ads_synced_at: '2026-10-24 09:00:00' }, { campaign_id: 'oldSpend', ads_synced_at: '2026-10-24 01:00:00' }, { campaign_id: 'idle', ads_synced_at: '2026-10-24 00:00:00' }], { newSpend: 1, oldSpend: 1 }, 2, 1).map(c => c.campaign_id));
+  t('rotation: the list handed in is not reordered underneath the caller', (() => { const camps = [{ campaign_id: 'z', ads_synced_at: 'b' }, { campaign_id: 'a', ads_synced_at: 'a' }]; F.adsRotationOrder(camps, {}); return camps[0].campaign_id === 'z'; })(), null);
+
+  /* (i) plain words for how stale a status is (fix 6) */
+  t('last read: plain words, and never read when there is no stamp', (() => {
+    const now = Date.parse('2026-10-24T12:00:00Z');
+    return F.adsAgeWords('', now) === 'never read' && F.adsAgeWords(null, now) === 'never read' &&
+      F.adsAgeWords('2026-10-24 11:59:30', now) === 'just now' &&
+      F.adsAgeWords('2026-10-24 11:30:00', now) === '30 minutes ago' &&
+      F.adsAgeWords('2026-10-24 11:00:00', now) === 'an hour ago' &&
+      F.adsAgeWords('2026-10-24 06:00:00', now) === '6 hours ago' &&
+      F.adsAgeWords('2026-10-23 06:00:00', now) === 'yesterday' &&
+      F.adsAgeWords('2026-09-18 06:00:00', now) === '36 days ago';
+  })(), [F.adsAgeWords('2026-10-24 11:00:00', Date.parse('2026-10-24T12:00:00Z')), F.adsAgeWords('2026-09-18 06:00:00', Date.parse('2026-10-24T12:00:00Z'))]);
+  t('last read: an unreadable stamp says never read rather than inventing an age', F.adsAgeWords('not a date', Date.parse('2026-10-24T12:00:00Z')) === 'never read', null);
+
+  /* (j) and the engine really uses all of it — the rules above are worth nothing if the job still
+     keeps whichever record arrived last. These read the source. */
+  const asBlk = src.slice(src.indexOf('async function adsItems(env) {'), src.indexOf('/* The safety net for the dedicated cron slot'));
+  t('engine: the membership job merges by precedence and no longer keeps whichever record arrived last', /const merged = adMergeAds\(got\.ads\);/.test(asBlk) && !/if \(lid\) now\[lid\] = \{ ad_id:/.test(src), null);
+  t('engine: the removed list is EMPTY when the answer was truncated, so no membership is deleted from a short answer', /const removed = got\.truncated \? \[\] : Object\.keys\(prev\)\.filter/.test(asBlk) && /if \(got\.truncated\) budget\.truncated\+\+;/.test(asBlk), null);
+  t('engine: a truncated campaign is written down where a person can read it, naming what eBay said', /adsItemsTruncated/.test(asBlk) && /eBay reported/.test(asBlk), null);
+  t('engine: the duplicate count is stored on both the insert and the update, so an existing row gains it too', /INSERT INTO campaign_ads \(account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at\)/.test(asBlk) && /UPDATE campaign_ads SET bid_pct = \?4, ad_id = \?5, ad_status = \?6, ad_group = \?7, ad_records = \?8/.test(asBlk), null);
+  t('engine: the column is added once, guarded, in the same list as the two that are already there', /"ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1"/.test(src) && /"ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT"/.test(src), null);
+  t('engine: the rotation is money first and the rate is high enough to come round inside the hour', /const order = adsRotationPick\(running, spend, ADS_ITEM_CAMPAIGNS_PER_TICK, ADS_ITEM_MONEY_SLOTS\);/.test(asBlk) && /const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/.test(src) && Number((src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]) >= 14, (src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]);
+  t('engine: a slow account cannot starve the ones after it — the tick carries a clock and a fetch ceiling, checked before every campaign', /function adsBudgetSpent\(b\) \{ return !b \|\| b\.fetches >= ADS_ITEM_FETCH_CAP \|\| Date\.now\(\) >= b\.until; \}/.test(src) && (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length >= 2 && /starved/.test(asBlk), (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length);
+  t('engine: the heavy rotation got a cron slot of its own, and the 15-minute slot keeps only a safety net', /'8-59\/15 \* \* \* \*': \[adsItems\],/.test(src) && /adsItemsNet, adsReportPoll/.test(src) && !/\[reportsRelayToSheet, adsItems,/.test(src), null);
+  t('engine: the safety net runs the job only when the dedicated slot has not landed, so nothing runs twice', /async function adsItemsNet\(env\) \{/.test(src) && /ADS_ITEM_NET_MINUTES \* 60000\) return;/.test(src), null);
+  t('engine: the repair pass re-reads from eBay and takes eBay’s own answer through the merge, never a guess', /async function adsRepairPass\(env, acct, tok, budget, truthOn\)/.test(src) && /const targets = adRepairTargets\(rows, byCampaign, byListing\);/.test(src) && /const merged = adMergeAds\(got\.ads\);/.test(src.slice(src.indexOf('async function adsRepairPass'))), null);
+  t('engine: the repair pass is bounded — a capped row read, a capped campaign count per tick and the same tick budget', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return /LIMIT 4000/.test(rp) && /ADS_REPAIR_CAMPAIGNS_PER_TICK\)/.test(rp) && /adsBudgetSpent\(budget\)/.test(rp) && /LIMIT 20000/.test(rp); })(), null);
+  t('engine: the repair pass writes down what it corrected, what eBay still calls archived, and what has no ad at all', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return /adsItemsRepair/.test(rp) && /corrected/.test(rp) && /still says archived/.test(rp) && /no ad record at all/.test(rp); })(), null);
+  t('engine: the repair pass never deletes a membership, it only updates the row it re-read', (() => { const rp = src.slice(src.indexOf('async function adsRepairPass'), src.indexOf('/* The safety net for the dedicated cron slot')); return !/DELETE/.test(rp) && /UPDATE campaign_ads SET ad_status/.test(rp); })(), null);
+  t('engine: the pause action reads its answer back through the merge too, so an old archived twin cannot undo it', (() => { const pl = src.slice(src.indexOf('  adsPauseListing: {'), src.indexOf('  adtoolAdProbe: {')); return /adPickLiveAd\(adGroupAdsByListing\(got\.ads\)\[lid\]\)/.test(pl) && /ad_records = \?6/.test(pl) && !/if \(String\(ad\.listingId\) === lid\)/.test(src); })(), null);
+
+  /* (k) the probe (fix 2). It exists, it is sync-key only, and it writes NOTHING. */
+  const probe = src.slice(src.indexOf('  adtoolAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
+  t('probe: the route exists, takes an account, a campaign and an optional listing, and is sync-key only', /adtoolAdProbe: \{\n\s*auth: 'sync', fn:/.test(src) && /p && p\.account/.test(probe) && /p && p\.campaign_id/.test(probe) && /p && p\.listing_id/.test(probe), null);
+  t('probe: it hands back every RAW record, grouped by listing, with the duplicate count and the record that governs', /adGroupAdsByListing\(got\.ads\)/.test(probe) && /governs: adPickLiveAd\(by\[lid\]\)/.test(probe) && /ad_status: String\(ad\.adStatus \|\| ''\)/.test(probe) && /bid_percentage/.test(probe) && /ad_group_id/.test(probe) && /duplicate_listings/.test(probe) && /records: by\[lid\]\.length/.test(probe), null);
+  t('probe: it says whether the answer was whole, so a truncated read can never be mistaken for the truth', /answer_complete: !got\.truncated/.test(probe) && /total_reported: got\.total/.test(probe), null);
+  t('probe: READ ONLY — not one write of any kind, no schema guard, no note, and nothing but a GET to eBay', !/INSERT|UPDATE |DELETE |ALTER |ctx_setSync|ensureTruthSchema|ensureAdtoolPhase/.test(probe) && !/method: 'POST'|method: 'PUT'|method: 'DELETE'/.test(probe) && (probe.match(/adsFetchAdList/g) || []).length === 1 && !/fetch\(/.test(probe), null);
+  t('probe: its answer is bounded, so one campaign can never return an unbounded payload', /ADS_PROBE_LISTING_CAP/.test(probe) && /ADS_PROBE_RECORD_CAP/.test(probe) && /const ADS_PROBE_LISTING_CAP = \d+;/.test(src), null);
+  t('probe: the ad list is read with a GET and nothing else, and the one fetch in the engine’s ad reader sends no body', (() => { const fa = src.slice(src.indexOf('async function adsFetchAdList'), src.indexOf('async function adsItems(env) {')); return /headers: \{ authorization: 'Bearer ' \+ tok \} \}\);/.test(fa) && !/method:/.test(fa) && !/body:/.test(fa); })(), null);
+
+  /* (l) fix 6: an ad status is only as true as the last time eBay was asked, and only RUNNING
+     campaigns are ever asked again. Every page that shows one is handed the stamp and the words. */
+  t('honesty: the shared per-listing read sends the stamp of its own reading, whether it is still being re-read, and how many ad records eBay held', (() => { const w = src.slice(src.indexOf('async function adtWhereRows'), src.indexOf('/* ---- actions ---- */')); return /ca\.synced_at, ca\.ad_records, c\.ads_synced_at/.test(w) && /ads_synced_at: adsOldestStamp\(r\.ads_synced_at, r\.synced_at\)/.test(w) && /campaign_running:/.test(w) && /ad_records: r\.ad_records == null \? 1 : Number\(r\.ad_records\)/.test(w); })(), null);
+  /* ONE OWNER FOR THE WORDING (settled 24 Oct). The engine used to send a pre-worded age AND the
+     pages derived their own from the stamp. Two sources for one sentence drift, and the engine's is
+     the one that goes wrong: it is built when the payload is built, so a page left open on a desk
+     keeps showing the age it had when it loaded. The pages own the words; the engine sends stamps.
+     The probe is the single exception and says why in its own comment: it is a sync-key JSON answer
+     a person reads seconds after asking for it, not a page. */
+  t('honesty: no PAGE payload pre-words an age any more, so the pages are the only owner of that sentence', (() => {
+    const calls = (src.match(/adsAgeWords\(/g) || []).length;          // one definition + one caller
+    const probe = src.slice(src.indexOf('  adtoolAdProbe: {'), src.indexOf('  /* WO-08: the advertising truth for the three pages'));
+    /* the cadence sentence is gone as a FIELD; the comment that records why it went still names it */
+    return calls === 2 && (probe.match(/adsAgeWords\(/g) || []).length === 1 && !/ad_status_cadence:/.test(src);
+  })(), [(src.match(/adsAgeWords\(/g) || []).length]);
+  t('honesty: every payload that shows an ad status carries the stamp and the duplicate count, and the cadence sentence is gone', (() => {
+    const F2 = (name, end) => src.slice(src.indexOf(name), src.indexOf(end));
+    const item = F2('async function adtoolItemCampaignsCompute', 'const ADTOOL_ACTIONS_P14');
+    const inside = F2('async function adtoolCampaignListingsCompute', 'async function adtoolItemCampaignsCompute');
+    const board = F2('async function adtoolCampaignBoardCompute', 'async function adtoolCampaignListingsCompute');
+    const watch = F2('  campaignWatch: {', '  /* CPQ, last 14 days per item');
+    /* the three payloads the pages were waiting on, each forwarding both fields */
+    const forwards = [item, inside].every(s => /ads_synced_at: adsOldestStamp\(/.test(s) && /ad_records:/.test(s));
+    return forwards && /ads_synced_at: adsOldestStamp\(c\.ads_synced_at, memAge\[k\]\)/.test(src) &&
+      /c\.ads_synced_at FROM campaigns c/.test(board) && /ca\.synced_at AS ad_synced_at/.test(board) &&
+      /ads_synced_at: adsOldestStamp\(r\.ads_synced_at, r\.synced_at\)/.test(watch) && /ca\.ad_records, ca\.synced_at/.test(watch) &&
+      /ads_rotating/.test(src) && /ads_duplicated/.test(src) && !/ads_last_read/.test(item + inside + board + watch);
+  })(), null);
+  /* the honest age when two stamps describe one thing, and when one row stands for many */
+  t('oldest stamp: the older of two readings wins, whichever order they are given', F.adsOldestStamp('2026-10-24 09:00:00', '2026-10-20 01:00:00') === '2026-10-20 01:00:00' && F.adsOldestStamp('2026-10-20 01:00:00', '2026-10-24 09:00:00') === '2026-10-20 01:00:00', null);
+  t('oldest stamp: a space and a T in the middle are the same stamp, so the two formats compare', F.adsOldestStamp('2026-10-24T09:00:00', '2026-10-24 08:00:00') === '2026-10-24 08:00:00', null);
+  t('oldest stamp: a missing stamp carries no information and never wins, because one unstamped row must not blank out the dates we do hold', F.adsOldestStamp('', '2026-10-24 09:00:00') === '2026-10-24 09:00:00' && F.adsOldestStamp(null, '2026-10-24 09:00:00') === '2026-10-24 09:00:00' && F.adsOldestStamp(undefined, '2026-10-24 09:00:00') === '2026-10-24 09:00:00', null);
+  t('oldest stamp: nothing at all answers with the empty string, which the pages read as unknown rather than as old', F.adsOldestStamp() === '' && F.adsOldestStamp('', null) === '', null);
+  t('oldest stamp: it takes any number of stamps, which is how a campaign row answers for all of its ads', F.adsOldestStamp('2026-10-24 09:00:00', '2026-10-22 09:00:00', '2026-10-23 09:00:00', '') === '2026-10-22 09:00:00', null);
+  t('campaign board: a campaign row carries the OLDEST reading under it, not the campaign\'s own ask-time, because the row is only as current as its stalest ad', (() => {
+    const r = F.adtCampaignRollup({
+      campaigns: [{ account: 'A', campaign_id: 'C1', name: 'one', status: 'RUNNING', budget: '10', funding_model: 'COST_PER_CLICK', ads_synced_at: '2026-10-24 09:00:00' }],
+      members: [{ account: 'A', campaign_id: 'C1', item_id: 'L1', ad_synced_at: '2026-10-24 09:00:00' },
+        { account: 'A', campaign_id: 'C1', item_id: 'L2', ad_synced_at: '2026-10-19 03:00:00' }],
+      live: [{ account: 'A', campaign_id: 'C1', item_id: 'L1' }], money: {}, real: [], rules: { day_cap: 2 },
+    });
+    return r.campaigns[0].ads_synced_at === '2026-10-19 03:00:00';
+  })(), F.adtCampaignRollup({ campaigns: [{ account: 'A', campaign_id: 'C1', status: 'RUNNING', ads_synced_at: '2026-10-24 09:00:00' }], members: [{ account: 'A', campaign_id: 'C1', item_id: 'L2', ad_synced_at: '2026-10-19 03:00:00' }], live: [], money: {}, real: [], rules: { day_cap: 2 } }).campaigns[0]);
+  t('campaign board: a campaign with no ads left still answers with its own ask-time rather than nothing', (() => {
+    const r = F.adtCampaignRollup({ campaigns: [{ account: 'A', campaign_id: 'C9', status: 'PAUSED', ads_synced_at: '2026-10-21 07:00:00' }], members: [], live: [], money: {}, real: [], rules: { day_cap: 2 } });
+    return r.campaigns[0].ads_synced_at === '2026-10-21 07:00:00';
+  })(), null);
+  /* the two columns this fix leans on, made sure of before anything names them */
+  t('columns: the ad_records and ads_synced_at ALTERs have their own tiny guarded pass, run before the first query that names either', (() => {
+    const g = src.slice(src.indexOf('async function ensureAdsReadingColumns'), src.indexOf('/* The rotation rate (fix 4)'));
+    const items = src.slice(src.indexOf('async function adsItems(env) {'), src.indexOf('/* Fix 3, money beats status.'));
+    return /ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1/.test(g) && /ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT/.test(g) &&
+      /ADS_READING_COLS_OK/.test(g) && items.indexOf('ensureAdsReadingColumns(env)') < items.indexOf('FROM campaigns WHERE account = ?1') &&
+      (src.match(/ensureAdsReadingColumns\(/g) || []).length >= 5;
+  })(), [(src.match(/ensureAdsReadingColumns\(/g) || []).length]);
+  t('columns: the pause path makes sure of the column BEFORE it calls eBay, so a missing column can never swallow the read-back of a pause that already landed', (() => {
+    const pause = src.slice(src.indexOf('  adsPauseListing: {'), src.indexOf('  /* THE PROBE (owner batch 24 Oct, fix 2)'));
+    return pause.indexOf('ensureAdsReadingColumns(ctx.env)') > 0 && pause.indexOf('ensureAdsReadingColumns(ctx.env)') < pause.indexOf('bulk_update_ads_status_by_listing_id');
+  })(), null);
+  t('columns: pre-existing rows read truthfully as one ad record, which is what the default says and what every reader falls back to', /ad_records INTEGER DEFAULT 1/.test(src) && /COALESCE\(ca\.ad_records, 1\)/.test(src) && /ad_records == null \? 1 :/.test(src), null);
+  t('honesty: when the ad list was last read is a real column the engine can name, so a fresh database has it too', /"ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT"/.test(src), null);
+  t('honesty: the ad-state event rows say whether a change came from the rolling read or from the money-beats-status repair', /adtoolAdEventsWrite\(env, acct, cid, prevSt, now, source\)|async function adtoolAdEventsWrite\(env, acct, cid, prevSt, now, source\)/.test(src) && /String\(source \|\| 'sync'\)\.slice\(0, 12\)/.test(src) && /nowSub, 'repair'\)/.test(src), null);
+
+  /* (m) the hard rule: nothing new is ever sent to eBay. The two new readers GET and nothing else. */
+  t('hard rule: the only eBay write in the whole advertising path is still the one the pause action always had', (() => {
+    const posts = (src.match(/method: 'POST'[\s\S]{0,400}?api\.ebay\.com\/sell\/marketing[^']*/g) || []);
+    /* two mentions and only two: the endpoint table that names it, and the pause action that calls
+       it. Nothing added on 24 Oct sends anything to eBay. */
+    const bulk = (src.match(/bulk_update_ads_status_by_listing_id/g) || []);
+    return bulk.length === 2 && !/ad_campaign\/' \+ encodeURIComponent\(cid\) \+ '\/ad'[\s\S]{0,120}method/.test(src) && posts.length <= 2;
+  })(), [(src.match(/bulk_update_ads_status_by_listing_id/g) || []).length]);
+  t('hard rule: the repair pass and the probe both go through the one read-only ad reader', (() => { const uses = (src.match(/adsFetchAdList\(/g) || []).length; return uses === 5 && /async function adsFetchAdList\(tok, acct, cid, budget\)/.test(src); })(), (src.match(/adsFetchAdList\(/g) || []).length);
+  t('hard rule: the money read uses the spend already held per day and never adds a click fee on top of it, and never reads impressions', (() => { const rp = src.slice(src.indexOf('async function adsItems(env) {'), src.indexOf('/* The safety net for the dedicated cron slot')); return /SUM\(spend\) AS sp/.test(rp) && !/impressions/.test(rp) && !/cpc_spend/.test(rp); })(), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
