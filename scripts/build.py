@@ -159,7 +159,7 @@ ADS_MERGED_FILES = [
     # view-deptTasks.js was spliced here for Advertising tasks until 18 Oct, when the owner said
     # that page is not needed in this portal. Dropping the file also takes the Listing, Hunting,
     # Orders and CS boards back out, which only ever arrived as passengers.
-    'view-signals.js',          # Advertising signals
+    'view-signals.js',          # Advertising signals: folded into Past Situation on 27 Oct, which draws its cards
     'view-adsCentre.js',        # Ads command centre
     'view-marketing.js',        # Marketing
     'view-campaignWatch.js',    # Campaign watch
@@ -169,7 +169,9 @@ ADS_MERGED_FILES = [
     'view-potential-cpc.js',    # Potential CPC
     'view-cpc.js',              # Keyword approvals (and the hidden CPC research page)
 ]
-# The eleven pages the owner named, which the shell's ADS_MERGED allowlist must also carry.
+# The pages the owner named, which the shell's ADS_MERGED allowlist must also carry. adSignals is the one
+# exception since 27 Oct: it left the sidebar for Past Situation, but its file must still be spliced, because
+# Past Situation draws the advertising signals with it, so the tripwire keeps asserting it is here.
 ADS_MERGED_KEYS = ['adSignals', 'adsCentre', 'marketing', 'campaignWatch',
                    'traffic', 'liveSplit', 'wrongAds', 'advertising', 'potentialCpc',
                    'keywordApprovals']

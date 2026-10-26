@@ -590,18 +590,23 @@
     if (!el || el === this) { return; }
     act = el.getAttribute('data-sig-do');
     idx = Number(el.getAttribute('data-sig-i'));
+    /* A department page (and the advertising portal's Past Situation) paints its OWN list, and a card's
+       index belongs to the list of the box it sits in. Deciding by "whichever list was painted last" sent
+       the one-tap buttons on a department page to the main feed's record at that index, and could do the
+       same to an acknowledgement on Home for five minutes after a department page was left (27 Oct). */
+    var own = (this && this.id && SG_DEPT_BOX[this.id]) ? SG_PAGE_LIST : null;
     if (act === 'ackopen') { sgAckOpen(idx, el, true); return; }
     if (act === 'ackcancel') { sgAckOpen(idx, el, false); return; }
-    if (act === 'ack') { sgAck(idx, el); return; }
-    if (act === 'go') { sgGo(idx, el.getAttribute('data-sig-act')); return; }
+    if (act === 'ack') { sgAck(idx, el, own); return; }
+    if (act === 'go') { sgGo(idx, el.getAttribute('data-sig-act'), own); return; }
     if (act === 'all') { sgOpen('signals'); return; }
     if (act === 'recompute') { sgRefresh(el); return; }
   }
 
   /** §27's one-tap actions: open the screen that owns the job. The card stays pinned either way —
       leaving the signal is not the same as answering it. */
-  function sgGo(i, label) {
-    var rec = sgList()[i], keys = SG_ACTION_VIEWS[label] || [], j, v;
+  function sgGo(i, label, own) {
+    var rec = (own || sgList())[i], keys = SG_ACTION_VIEWS[label] || [], j, v;
     if (!rec) { return; }
     for (j = 0; j < keys.length; j++) {
       v = VIEWS[keys[j]];
@@ -623,8 +628,8 @@
     form.className = 'sig-ackform' + (open ? '' : ' hidden');
     if (open) { var ta = form.querySelector('textarea'); if (ta) { ta.focus(); } }
   }
-  function sgAck(i, btn) {
-    var rec = (SG_PAGE_LIST || sgList())[i], key, host, ta, note;
+  function sgAck(i, btn, own) {
+    var rec = (own || sgList())[i], key, host, ta, note;
     if (!rec) { return; }
     host = btn && btn.closest ? btn.closest('.sig') : null;
     ta = host ? host.querySelector('[data-sig-note="' + i + '"]') : null;
@@ -639,7 +644,7 @@
       account: rec.account, type: rec.type, date: rec.date, item_id: rec.item_id, note: note
     }).then(function (res) {
       delete SG.busy[key];
-      if (SG_PAGE_LIST) {
+      if (own) {
         rec.acked_by_me = true; rec.pinned = false;
         (rec.ack_history = rec.ack_history || []).push({ who: (STATE.user && STATE.user.email) || 'you', at: (res && res.acknowledged_at) || '', note: note });
         var pg = document.getElementById('sigCsAll') ? ['sigCsAll', 'sigCsSum', 'CS', 'customer service'] : ['sigAdAll', 'sigAdSum', 'Advertising Manager', 'advertising'];
@@ -843,7 +848,10 @@
      the department token in targeted_roles, and re-fetches itself every 5 minutes while open.
      Signal DETECTION itself is the hourly engine run (heavy workbook scans) + the Refresh button;
      this timer keeps the page current with every acknowledgement and every new card within 5 min. */
-  var SG_DEPT = { data: null, at: 0, timer: null, key: '' };
+  /* `day` narrows a department list to the signals about one day (Past Situation, owner 27 Oct); '' = the
+     whole window, which is what the department pages themselves always show */
+  var SG_DEPT = { data: null, at: 0, timer: null, key: '', day: '' };
+  var SG_DEPT_BOX = { sigAdAll: 1, sigCsAll: 1 };
   var SG_DEPT_MS = 5 * 60 * 1000;
   /* 18 Sept (owner: "advertising, customer service and signals — all signal pages should have
      different signals; you are showing the same to everyone; they should receive signals related
@@ -860,29 +868,68 @@
     for (k in SG_DEPT_TYPES) { if (SG_DEPT_TYPES.hasOwnProperty(k) && SG_DEPT_TYPES[k].indexOf(type) >= 0) { return k; } }
     return '';
   }
+  /* With a day set (Past Situation) the engine is asked for that day alone, so the feed's 60-card cut cannot
+     drop part of it; an engine or sheet backend that does not know the filter answers the whole window, and
+     the day is then picked out here as before (sgDeptFilter), with sgDeptPaint saying when that may be short. */
   function sgDeptLoad(fresh) {
-    if (!fresh && SG_DEPT.data && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
-    return api('mySignals', { include_acked: true }).then(function (d) { SG_DEPT.data = d || {}; SG_DEPT.at = Date.now(); return SG_DEPT.data; });
+    var day = SG_DEPT.day || '';
+    if (!fresh && SG_DEPT.data && SG_DEPT.dataDay === day && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
+    var payload = { include_acked: true }; if (day) { payload.day = day; }
+    return api('mySignals', payload).then(function (d) {
+      /* a day picked since this request went out wins: keep the older answer out of the cache it would mislabel */
+      if ((SG_DEPT.day || '') !== day) { return SG_DEPT.data || {}; }
+      SG_DEPT.data = d || {}; SG_DEPT.dataDay = day; SG_DEPT.at = Date.now(); return SG_DEPT.data;
+    });
   }
   function sgDeptFilter(token) {
     var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], out = [], i;
     for (i = 0; i < all.length; i++) {
-      if (types.indexOf(sgStr(all[i].type)) >= 0) { out.push(all[i]); }
+      if (types.indexOf(sgStr(all[i].type)) >= 0 && (!SG_DEPT.day || sgStr(all[i].date) === SG_DEPT.day)) { out.push(all[i]); }
     }
     return out;
+  }
+  /* the oldest day the feed still holds any signal of this department for: a day before it is not a quiet
+     day, it is a day the portal no longer keeps signals for (they leave the feed after a few days) */
+  function sgDeptOldest() {
+    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], lo = '', i, d;
+    for (i = 0; i < all.length; i++) { d = sgStr(all[i].date); if (d && (!lo || d < lo)) { lo = d; } }
+    return lo;
+  }
+  /* What a day's list can honestly claim (review, 27 Oct). The feed carries at most 60 cards across every desk,
+     newest day first, and only the last few days. Returns {kind, oldest}: 'kept' — the day is older than the
+     feed keeps; 'cut' — the 60-card cut stops before or inside this day, so its list may be short; '' — the
+     list is the whole day. An engine that narrowed the answer to the day itself is only ever 'kept' or ''. */
+  function sgDeptDayScope() {
+    var D = SG_DEPT.data || {}, day = SG_DEPT.day, oldest = sgDeptOldest(), keptFrom = sgStr(D.kept_from);
+    if (!day) { return { kind: '', oldest: oldest }; }
+    if (keptFrom && day < keptFrom) { return { kind: 'kept', oldest: keptFrom }; }
+    if (sgStr(D.day_filter) === day) { return { kind: D.truncated ? 'cut' : '', oldest: oldest }; }
+    if (D.truncated && (!oldest || day <= oldest)) { return { kind: 'cut', oldest: oldest }; }
+    if (!keptFrom && oldest && day < oldest) { return { kind: 'kept', oldest: oldest }; }
+    return { kind: '', oldest: oldest };
   }
   function sgDeptPaint(boxId, sumId, token, label) {
     var box = document.getElementById(boxId), sum = document.getElementById(sumId), list, out = '', i, pending = 0, acked = 0;
     if (!box) { return; }
     list = sgDeptFilter(token);
     for (i = 0; i < list.length; i++) { if (list[i].acked_by_me) { acked++; } else { pending++; } }
+    var scope = sgDeptDayScope();
     if (sum) {
       sum.innerHTML = '<b class="num">' + pending + '</b> waiting on you · <b class="num">' + acked + '</b> acknowledged by you · ' +
-        '<span>' + list.length + ' ' + esc(label) + ' signal' + (list.length === 1 ? '' : 's') + ' in the window</span>' +
+        '<span>' + list.length + ' ' + esc(label) + ' signal' + (list.length === 1 ? '' : 's') + (SG_DEPT.day ? ' about ' + esc(sgDay(SG_DEPT.day)) : ' in the window') + '</span>' +
+        (scope.kind === 'cut' && list.length ? '<span class="sig-warnline" style="padding:3px 9px">the feed holds the newest 60 signals across every desk, so this day may be missing some</span>' : '') +
         '<span class="sig-when num" style="margin-left:auto">updated ' + esc(new Date().toTimeString().slice(0, 5)) + ' · refreshes every 5 min</span>';
     }
     if (!list.length) {
-      box.innerHTML = '<div class="card enter d1"><div class="hd">Nothing for ' + esc(label) + '</div><div class="bd"><div class="sig-empty"><b>No ' + esc(label) + ' signal in the current window.</b> New ones appear here within 5 minutes of the engine finding them.</div></div></div>';
+      box.innerHTML = '<div class="card enter d1"><div class="hd">Nothing for ' + esc(label) + '</div><div class="bd"><div class="sig-empty">' +
+        (SG_DEPT.day
+          ? (scope.kind === 'kept'
+            ? '<b>Signals are only kept for the last few days.</b> The feed now starts at ' + esc(sgDay(scope.oldest)) + ', so there is nothing to show for ' + esc(sgDay(SG_DEPT.day)) + ', even if there were signals that day.'
+            : scope.kind === 'cut'
+              ? '<b>Not in the feed.</b> It holds the newest 60 signals across every desk and stops before ' + esc(sgDay(SG_DEPT.day)) + ', so this day\'s signals, if there were any, are not here.'
+              : '<b>No ' + esc(label) + ' signal about ' + esc(sgDay(SG_DEPT.day)) + '.</b> New ones appear here within 5 minutes of the engine finding them.')
+          : '<b>No ' + esc(label) + ' signal in the current window.</b> New ones appear here within 5 minutes of the engine finding them.') +
+        '</div></div></div>';
       return;
     }
     // pending first, then acknowledged (history still shown on those)
@@ -903,7 +950,8 @@
       });
     };
     if (btn) { btn.onclick = function () { btn.disabled = true; btn.textContent = 'Refreshing…'; load(true).then(function () { btn.disabled = false; btn.textContent = 'Refresh'; }); }; }
-    if (SG_DEPT.data) { paint(); }
+    /* paint the cached answer at once only if it was asked for the same day (or the same whole window) */
+    if (SG_DEPT.data && (SG_DEPT.dataDay || '') === (SG_DEPT.day || '')) { paint(); }
     load(true);
     SG_DEPT.timer = setInterval(function () {
       if (!document.body.contains(box)) { clearInterval(SG_DEPT.timer); SG_DEPT.timer = null; SG_PAGE_LIST = null; return; }
@@ -923,7 +971,7 @@
     roles: ['CS', 'Management', 'Ops Head', 'Team Lead'],
     order: 0.3,
     render: function () { return sgDeptRender('Customer service <span class="goldtext">signals</span>', 'returns above usual, negative feedback and new cases for the CS desk · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigCsAll', 'sigCsSum', 'sigCsRefresh'); },
-    init: function () { sgDeptInit('sigCsAll', 'sigCsSum', 'sigCsRefresh', 'CS', 'customer service'); }
+    init: function () { SG_DEPT.day = ''; sgDeptInit('sigCsAll', 'sigCsSum', 'sigCsRefresh', 'CS', 'customer service'); }
   };
   VIEWS.adSignals = {
     label: 'Advertising signals',
@@ -931,7 +979,16 @@
     roles: ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'],
     order: 0.3,
     render: function () { return sgDeptRender('Advertising <span class="goldtext">signals</span>', 'worst CPC performers, negative days and Wrong Advertising alarms · acknowledge with a comment · full history of who said what · refreshes every 5 minutes', 'sigAdAll', 'sigAdSum', 'sigAdRefresh'); },
-    init: function () { sgDeptInit('sigAdAll', 'sigAdSum', 'sigAdRefresh', 'Advertising Manager', 'advertising'); }
+    init: function () { SG_DEPT.day = ''; sgDeptInit('sigAdAll', 'sigAdSum', 'sigAdRefresh', 'Advertising Manager', 'advertising'); }
+  };
+  /* Past Situation (advertising portal, owner 27 Oct: "Advertising signals & Yesterday report to be merged
+     under one title page, Past Situation ... all information should be reflective of dates clicks"). The
+     same cards, the same acknowledge-with-a-comment and the same 5-minute refresh as Advertising signals,
+     narrowed to the signals about the day picked. The page must use the ids sigAdAll / sigAdSum: an
+     acknowledgement repaints the advertising list by those ids. */
+  window.sgAdSignalsForDay = function (boxId, sumId, day) {
+    SG_DEPT.day = sgStr(day);
+    sgDeptInit(boxId, sumId, null, 'Advertising Manager', 'advertising');
   };
 
   // ============================== §28.1 clock in / clock out ==============================

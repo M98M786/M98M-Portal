@@ -550,6 +550,51 @@ function chartBars(pts, opt){
   out += chartValueDots(dots, { color: opt.pillColor || 'var(--gold-a)', ink: '#1c1200', fontSize: 9.5, minGap: opt.minGap != null ? opt.minGap : 44 });
   return out + '</svg>';
 }
+/* Two measures side by side in every category, with the same number pills (owner, 27 Oct: "two bars,
+   red money spent and green orders received, next to each other" in each hour). The two are different
+   units, so there is no shared y-axis to read off: each series is drawn against its OWN largest value
+   and every bar carries its real figure, which is what makes the pair honest to read together.
+   pts = [{label, a, b, titleA?, titleB?}] — a / b null means nothing to draw there (an hour still to
+   come); 0 draws a hairline and a 0. opt: {colorA, colorB, inkA, inkB, fmtA, fmtB, height, aria}.
+   Bar A is always the LEFT one of the pair, so position carries identity as well as colour. When the
+   two pills of one pair would sit on top of each other, the higher one steps up a pill's height. */
+function chartPairBars(pts, opt){
+  opt = opt || {}; if (!pts || !pts.length) { return ''; }
+  var W = 1200, H = opt.height || 240, L = 8, R = 8, T = 40, B = 24;
+  var ca = opt.colorA || '#bd3d2d', cb = opt.colorB || '#26ae6c';
+  var inkA = opt.inkA || '#fff', inkB = opt.inkB || '#04140b';
+  var fa = opt.fmtA || chartMoney, fb = opt.fmtB || chartNum;
+  var mxA = 0, mxB = 0, i;
+  for (i = 0; i < pts.length; i++) {
+    if (pts[i] && pts[i].a != null) { mxA = Math.max(mxA, Math.abs(Number(pts[i].a)) || 0); }
+    if (pts[i] && pts[i].b != null) { mxB = Math.max(mxB, Math.abs(Number(pts[i].b)) || 0); }
+  }
+  var base = H - B, span = base - T, slot = (W - L - R) / pts.length, gap = 2;
+  var bw = Math.max(3, Math.min(20, (slot - 12 - gap) / 2)), fs = 9.5, ph = fs + 6;
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img"' +
+    (opt.aria ? ' aria-label="' + esc(opt.aria) + '"' : '') + '>';
+  out += '<line x1="' + L + '" y1="' + base + '" x2="' + (W - R) + '" y2="' + base + '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
+  var pills = '';
+  var bar = function (x, v, mx, color, title) {
+    var hgt = Math.max(1.5, mx > 0 ? Math.abs(Number(v) || 0) / mx * span : 0);
+    return { y: base - hgt, svg: '<rect x="' + x.toFixed(1) + '" y="' + (base - hgt).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hgt.toFixed(1) +
+      '" rx="2.5" fill="' + color + '">' + (title ? '<title>' + esc(title) + '</title>' : '') + '</rect>' };
+  };
+  for (i = 0; i < pts.length; i++) {
+    var p = pts[i] || {}, cx = L + slot * i + slot / 2, xa = cx - gap / 2 - bw, xb = cx + gap / 2;
+    var A = p.a != null ? bar(xa, p.a, mxA, ca, p.titleA) : null, Bv = p.b != null ? bar(xb, p.b, mxB, cb, p.titleB) : null;
+    if (A) { out += A.svg; }
+    if (Bv) { out += Bv.svg; }
+    if (p.label != null && p.label !== '') {
+      out += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' + esc(String(p.label)) + '</text>';
+    }
+    var ya = A ? A.y - ph / 2 - 3 : null, yb = Bv ? Bv.y - ph / 2 - 3 : null;
+    if (A && Bv && Math.abs(ya - yb) < ph + 1) { if (ya <= yb) { ya = yb - ph - 2; } else { yb = ya - ph - 2; } }
+    if (A) { pills += chartValueDots([{ x: xa + bw / 2, y: Math.max(ph / 2 + 1, ya), label: fa(Number(p.a) || 0), title: p.titleA || '' }], { color: ca, ink: inkA, fontSize: fs, minGap: 0 }); }
+    if (Bv) { pills += chartValueDots([{ x: xb + bw / 2, y: Math.max(ph / 2 + 1, yb), label: fb(Number(p.b) || 0), title: p.titleB || '' }], { color: cb, ink: inkB, fontSize: fs, minGap: 0 }); }
+  }
+  return out + pills + '</svg>';
+}
 function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
@@ -1341,7 +1386,10 @@ var ADT_REG_MAP = [
   [/the change archive/i, ['CHANGE_ARCHIVE', 'CHANGE_DAY']],
   [/one part of the day/i, ['PEAK_SUGGESTED']],
   [/spend outside the peak/i, ['PEAK_OFF_PEAK_SPEND']],
-  [/the peak hours work list/i, ['PEAK_MANUAL']]
+  [/the peak hours work list/i, ['PEAK_MANUAL']],
+  /* owner, 27 Oct: the two listing sets and the Overview's hourly chart, each tag a phrase no other page uses */
+  [/listing set/i, ['LISTSET_DYNAMIC', 'LISTSET_NOCPC']],
+  [/hourly spends/i, ['HOURLY_SPEND_ORDERS']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -1606,8 +1654,23 @@ function enterApp(user){
        actions — not copies. Their labels are left exactly as the owner knows them; where an
        advertising-tool page carried a near-identical name the TOOL page is renamed, because two
        "command centres" in one sidebar is the duplication the owner asked us to remove. */
-    var ADS_MERGED = { adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
+    /* Owner, 27 Oct: Advertising signals is folded into Past Situation (the advertising signals about the
+       day picked there), so it leaves this portal's sidebar; its file stays spliced, because Past Situation
+       draws the cards with it, and an old #adSignals link lands on Past Situation (ADS_MOVED below). */
+    var ADS_MERGED = { adsCentre: 1, marketing: 1, campaignWatch: 1,
       traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
+    /* Only for those who can open Past Situation. A Team Lead may read Advertising signals but not the
+       advertising-tool pages, so for that role the page stays exactly where it was (review, 27 Oct): moving
+       it would have left them on a forwarding notice they are not allowed past. */
+    var adsPastOk = !!(VIEWS.adtoolReport && canSee(VIEWS.adtoolReport));
+    if (!adsPastOk) { ADS_MERGED.adSignals = 1; }
+    /* Owner, 27 Oct: What to do today and Today at a glance became Overview (adtoolCommand), Running today and
+       Stop today became Decision (adtoolRunToday), Yesterday's report and Advertising signals became Past
+       Situation (adtoolReport). What was left of the two pages folded in stays reachable, one link away from
+       Decision and out of the sidebar: Switch off and push (adtoolPlan, the period lists) and Decision engine
+       (adtoolStop: rule scores, past days, the action log and the eBay live switches). */
+    var ADS_HIDDEN = { adtoolPlan: 1, adtoolStop: 1 };
+    var ADS_MOVED = adsPastOk ? { adSignals: 'adtoolReport' } : {};
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
        and the like and collided with the eleven above; the copy pass has since retitled the pages
@@ -1618,16 +1681,27 @@ function enterApp(user){
     var ADS_RENAME = {};
     Object.keys(VIEWS).forEach(function (k) {
       var own = k.indexOf('adtool') === 0;
-      VIEWS[k].hidden = !(own || ADS_MERGED[k]);
+      VIEWS[k].hidden = !(own || ADS_MERGED[k]) || !!ADS_HIDDEN[k];
       /* "(ads)" existed to tell these apart from the company portal's own advertising screens.
          In a portal that is nothing but advertising it is noise on every line of the sidebar. */
       if (own && VIEWS[k].label) { VIEWS[k].label = VIEWS[k].label.replace(/\s*\(ads\)\s*$/, ''); }
       if (ADS_RENAME[k]) { VIEWS[k].label = ADS_RENAME[k]; }
     });
+    /* a page that moved: its old link renders the page it moved into, so a bookmark still lands somewhere true */
+    Object.keys(ADS_MOVED).forEach(function (k) {
+      if (!VIEWS[k]) { return; }
+      var to = ADS_MOVED[k];
+      VIEWS[k].render = function () { setTimeout(function () { if (location.hash !== '#' + to) { location.hash = to; } }, 0); return '<div class="an-empty">This page is now part of Past Situation…</div>'; };
+      VIEWS[k].init = null;
+    });
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
-       tool page covering its subject, so the two are read together instead of being hunted for. */
+       tool page covering its subject, so the two are read together instead of being hunted for.
+       Owner, 27 Oct: the first group in the order of his sheet — Overview, Decision, Past Situation,
+       Dynamic listings, Listings without CPC — then Alerts (kept while the owner decides whether the pages
+       above already cover it), then the two change archives. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport', 'adtoolActivated', 'adtoolStopped'] },
+      /* adSignals is listed for the roles above that keep it; everyone else has it hidden, so it never shows */
+      { name: 'Every morning', keys: ['adtoolCommand', 'adtoolRunToday', 'adtoolReport', 'adSignals', 'adtoolDynamic', 'adtoolNoCpc', 'adtoolAlerts', 'adtoolActivated', 'adtoolStopped'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
       { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },

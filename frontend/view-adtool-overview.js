@@ -184,7 +184,7 @@
     /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
     var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
     return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Today at a glance</b> or <b>What to do today</b>.</div>' +
+      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Overview</b>.</div>' +
       '<div class="ov-metrics">' + cards + '</div></div>';
   }
   function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
