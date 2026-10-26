@@ -91,6 +91,9 @@
   function cmRoas(w) { if (!w) return null; if (w.roas != null) return num(w.roas); var s = num(w.spend), r = num(w.attr_revenue); return s > 0 && r != null ? r / s : null; }
   function cmSum(rows, k) { return rows.reduce(function (t, r) { return t + (num(r[k]) || 0); }, 0); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  /* the hourly pills: pence under £10, so one account's quiet hour reads £0.42 rather than a "£0" sitting on a bar
+     that is visibly not zero; whole pounds above, where pence would only crowd the pill */
+  function ovMoney(v) { var n = Number(v) || 0, a = Math.abs(n); return a > 0 && a < 10 ? (n < 0 ? '−£' : '£') + a.toFixed(2) : chartMoney(n); }
   function ukHourNow() { try { return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).format(new Date())) % 24; } catch (e) { return new Date().getUTCHours(); } }
   VIEWS.adtoolCommand = {
     label: 'Overview (ads)', hidden: true, order: 94, roles: ROLES, icon: '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>',
@@ -227,6 +230,11 @@
     (oh || []).forEach(function (x) { var hh = num(x.hour); if (hh == null) return; orders[hh] = (orders[hh] || 0) + (num(x.orders) || 0); units[hh] = (units[hh] || 0) + (num(x.units) || 0); });
     var from = carryHour != null ? carryHour : firstSpendHour;
     var nowH = ukHourNow(), pts = [], sumSpend = 0, sumOrders = 0, sumUnits = 0;
+    /* eBay's ad day is the UTC day. In British Summer Time the first UK hour (00:00 to 01:00) still belongs to
+       eBay's previous day, so for that one hour nothing read so far is today's spend: draw orders only, and do
+       not call the previous day's "before the first reading" figure today's (review, 27 Oct) */
+    var ebayDayPending = nowH === 0 && new Date().getUTCHours() === 23;
+    if (ebayDayPending) { sampled = false; carry = null; }
     for (i = 0; i < 24; i++) {
       var past = i <= nowH;
       var a = sampled && past && from != null && i >= from ? Math.round((spend[i] || 0) * 100) / 100 : null;
@@ -241,13 +249,13 @@
     var title = CM.account ? 'Hourly spends · ' + CM.account : 'All account hourly spends';
     var sub = 'Money spent on ads in red and orders received in green, in each UK hour of today.';
     if (carry != null && carry > 0) sub += ' <b>' + gbp(carry) + ' had already been spent before the first reading today</b> and is not on the chart.';
-    if (!sampled) sub += ' No ad figures from eBay yet today. They start arriving around 08:00 UK.';
+    if (!sampled) sub += ebayDayPending ? ' eBay\'s ad day starts at 01:00 UK in summer, so there is no spend for today yet.' : ' No ad figures from eBay yet today. They start arriving around 08:00 UK.';
     if (!oh) sub += ' Orders by the hour appear once the engine update of 27 Oct is live.';
     var any = pts.some(function (p) { return p.a != null || p.b != null; });
     return '<div class="an-panel"><h3>' + esc(title) + src('hourly spends', 'today so far · every 5 min') + '</h3><div class="an-sub">' + sub + '</div>' +
       '<div class="wr-legend"><span><i style="background:' + OV_SPEND + '"></i>money spent</span><span><i style="background:' + OV_ORDERS + '"></i>orders received</span></div>' +
       /* 48 bars do not shrink to a phone and stay readable: below ~860 px the chart keeps its size and scrolls sideways */
-      (any ? '<div class="an-scroll"><div style="min-width:860px">' + chartPairBars(pts, { colorA: OV_SPEND, colorB: OV_ORDERS, fmtA: chartMoney, fmtB: chartNum, aria: title + ': money spent and orders received in each UK hour of today' }) + '</div></div>' : '<div class="an-empty">Nothing to draw yet today.</div>') +
+      (any ? '<div class="an-scroll"><div style="min-width:860px">' + chartPairBars(pts, { colorA: OV_SPEND, colorB: OV_ORDERS, fmtA: ovMoney, fmtB: chartNum, aria: title + ': money spent and orders received in each UK hour of today' }) + '</div></div>' : '<div class="an-empty">Nothing to draw yet today.</div>') +
       '<div class="an-sub" style="margin:8px 0 0">Each colour is drawn against its own busiest hour, so the two shapes line up; read the figure on each bar. So far today: <b>' + gbp(sumSpend) + '</b> spent in the hours shown' + (carry != null && carry > 0 ? ' plus <b>' + gbp(carry) + '</b> before the first reading' : '') + (oh ? ' · <b>' + sumOrders + '</b> order' + (sumOrders === 1 ? '' : 's') + ' (' + sumUnits + ' unit' + (sumUnits === 1 ? '' : 's') + ')' : '') + '.</div></div>';
   }
 

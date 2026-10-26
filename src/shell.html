@@ -1659,13 +1659,18 @@ function enterApp(user){
        draws the cards with it, and an old #adSignals link lands on Past Situation (ADS_MOVED below). */
     var ADS_MERGED = { adsCentre: 1, marketing: 1, campaignWatch: 1,
       traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
+    /* Only for those who can open Past Situation. A Team Lead may read Advertising signals but not the
+       advertising-tool pages, so for that role the page stays exactly where it was (review, 27 Oct): moving
+       it would have left them on a forwarding notice they are not allowed past. */
+    var adsPastOk = !!(VIEWS.adtoolReport && canSee(VIEWS.adtoolReport));
+    if (!adsPastOk) { ADS_MERGED.adSignals = 1; }
     /* Owner, 27 Oct: What to do today and Today at a glance became Overview (adtoolCommand), Running today and
        Stop today became Decision (adtoolRunToday), Yesterday's report and Advertising signals became Past
        Situation (adtoolReport). What was left of the two pages folded in stays reachable, one link away from
        Decision and out of the sidebar: Switch off and push (adtoolPlan, the period lists) and Decision engine
        (adtoolStop: rule scores, past days, the action log and the eBay live switches). */
     var ADS_HIDDEN = { adtoolPlan: 1, adtoolStop: 1 };
-    var ADS_MOVED = { adSignals: 'adtoolReport' };
+    var ADS_MOVED = adsPastOk ? { adSignals: 'adtoolReport' } : {};
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
        and the like and collided with the eleven above; the copy pass has since retitled the pages
@@ -1695,7 +1700,8 @@ function enterApp(user){
        Dynamic listings, Listings without CPC — then Alerts (kept while the owner decides whether the pages
        above already cover it), then the two change archives. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolCommand', 'adtoolRunToday', 'adtoolReport', 'adtoolDynamic', 'adtoolNoCpc', 'adtoolAlerts', 'adtoolActivated', 'adtoolStopped'] },
+      /* adSignals is listed for the roles above that keep it; everyone else has it hidden, so it never shows */
+      { name: 'Every morning', keys: ['adtoolCommand', 'adtoolRunToday', 'adtoolReport', 'adSignals', 'adtoolDynamic', 'adtoolNoCpc', 'adtoolAlerts', 'adtoolActivated', 'adtoolStopped'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
       { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },

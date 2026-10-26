@@ -17,7 +17,9 @@
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var RT = { account: '', filter: '', data: null, stop: null, stopAt: 0, stopErr: null, seq: 0 };
+  /* `dataAccount` is the account RT.data was asked for. The page labels and filters by IT, never by the chip
+     just clicked, so between a click and its answer the page keeps showing one account consistently */
+  var RT = { account: '', filter: '', data: null, dataAccount: '', stop: null, stopAt: 0, stopErr: null, seq: 0 };
   /* the filters that list the morning decisions (Stop today's cards) instead of the verdict rows */
   var DEC = { DSTOP: 'STOP', REDUCE: 'REDUCE', PUSH: 'PUSH' };
   var DOWL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -98,11 +100,15 @@
       .catch(function (e) { RT.stopErr = (e && e.message) || 'it could not load'; if (!RT.stop) throw e; return RT.stop; });
   }
   function load(quiet) {
-    var my = ++RT.seq;
-    loadStop(false).then(function () { if ($('rtBody') && RT.data && my === RT.seq) draw(); }, function () { if ($('rtBody') && RT.data && my === RT.seq) draw(); });
-    return api('adtoolRunToday', RT.account ? { account: RT.account } : {}).then(function (D) {
+    var my = ++RT.seq, acct = RT.account;
+    /* the morning decisions usually come back first (they are kept 15 minutes): draw them in only when the
+       verdict rows on screen are already this request's, or a chip click would label the previous account's
+       rows with the new account's name until its own answer landed (review, 27 Oct) */
+    var redraw = function () { if ($('rtBody') && RT.data && my === RT.seq && RT.dataAccount === acct) draw(); };
+    loadStop(false).then(redraw, redraw);
+    return api('adtoolRunToday', acct ? { account: acct } : {}).then(function (D) {
       if (my !== RT.seq) return;
-      RT.data = D || {};
+      RT.data = D || {}; RT.dataAccount = acct;
       if (!$('rtBody')) return;
       acctChips();
       draw();
@@ -119,7 +125,7 @@
     if (counts.run == null && counts.stop == null && counts.watch == null) { counts = { run: 0, stop: 0, watch: 0 }; rows.forEach(function (r) { var v = String(r.verdict || 'watch').toLowerCase(); counts[v] = (counts[v] || 0) + 1; }); }
     var h = '';
     var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'today';
-    h += '<div class="rt-top"><span>' + esc(when) + '</span><span>·</span><span>' + esc(RT.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' advertised listing' + (rows.length === 1 ? '' : 's') + '</span>' +
+    h += '<div class="rt-top"><span>' + esc(when) + '</span><span>·</span><span>' + esc(RT.dataAccount || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' advertised listing' + (rows.length === 1 ? '' : 's') + '</span>' +
       (D.computed_at ? '<span>·</span><span>updated ' + esc(hhmm(D.computed_at)) + '</span>' : '') + src('run today verdict') + '</div>';
     h += '<div class="rt-counts">' + [['stop', 'Stop today', 'lost on 3 of the last 4 same weekdays and over the last 7 days'], ['run', 'Run today', 'earned on the last same weekdays, or earning over 7 days above break-even'], ['watch', 'Watch', 'some orders are not costed yet, so we cannot say']].map(function (x) {
       return '<div class="rt-c ' + x[0] + (RT.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '"><div class="k">' + esc(x[1]) + '</div><div class="v">' + cnt(counts[x[0]]) + '</div><div class="d">' + esc(x[2]) + '</div></div>';
@@ -153,8 +159,9 @@
     var S = RT.stop;
     var head = '<div class="rt-dhead"><b>Morning decisions</b> · written before the day starts and scored the next morning against the profit the listing actually made · nothing here is sent to eBay' + src('scored daily') + '</div>';
     if (!S || typeof window.adtDecisionCounts !== 'function') return head + '<div class="rt-sm" style="margin:-2px 0 12px">' + (RT.stopErr ? 'The morning decisions did not load: ' + esc(RT.stopErr) : 'Loading the morning decisions…') + '</div>';
-    var c = window.adtDecisionCounts(S, RT.account);
-    var all = RT.account ? '<div class="rt-sm" style="margin-top:2px">all accounts</div>' : '';
+    var A = RT.dataAccount || '';
+    var c = window.adtDecisionCounts(S, A);
+    var all = A ? '<div class="rt-sm" style="margin-top:2px">all accounts</div>' : '';
     var t = function (key, cls, label, v, d) {
       return '<div class="rt-c ' + cls + (key ? (RT.filter === key ? ' on' : '') : ' static') + '"' + (key ? ' data-f="' + key + '"' : '') + '><div class="k">' + esc(label) + '</div><div class="v">' + v + '</div><div class="d">' + d + '</div></div>';
     };
@@ -169,9 +176,10 @@
   function decisionList() {
     var S = RT.stop, want = DEC[RT.filter], label = { STOP: 'Stop', REDUCE: 'Reduce', PUSH: 'Push' }[want] || want;
     if (!S || typeof window.adtDecisionCard !== 'function') return '<div class="rt-empty">' + (RT.stopErr ? 'The morning decisions did not load: ' + esc(RT.stopErr) : 'Loading the morning decisions…') + '</div>';
-    var rows = (S.decisions || []).filter(function (d) { return d.decision === want && (!RT.account || d.account === RT.account); });
-    var h = '<div class="rt-top"><span><b>' + esc(label) + '</b> · the morning decisions for ' + esc(S.day || 'today') + '</span><span>·</span><span>' + esc(RT.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span></div>';
-    return h + (rows.length ? rows.map(window.adtDecisionCard).join('') : '<div class="rt-empty">No ' + esc(label.toLowerCase()) + ' decision ' + (RT.account ? 'for ' + esc(RT.account) + ' ' : '') + 'today.</div>');
+    var A = RT.dataAccount || '';
+    var rows = (S.decisions || []).filter(function (d) { return d.decision === want && (!A || d.account === A); });
+    var h = '<div class="rt-top"><span><b>' + esc(label) + '</b> · the morning decisions for ' + esc(S.day || 'today') + '</span><span>·</span><span>' + esc(A || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span></div>';
+    return h + (rows.length ? rows.map(window.adtDecisionCard).join('') : '<div class="rt-empty">No ' + esc(label.toLowerCase()) + ' decision ' + (A ? 'for ' + esc(A) + ' ' : '') + 'today.</div>');
   }
 
   function rowHtml(r) {

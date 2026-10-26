@@ -911,7 +911,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261026-2155';
+var BUILD = '20261026-2223';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -4512,6 +4512,9 @@ window.M98M_ADS_ONLY = true;
   function cmRoas(w) { if (!w) return null; if (w.roas != null) return num(w.roas); var s = num(w.spend), r = num(w.attr_revenue); return s > 0 && r != null ? r / s : null; }
   function cmSum(rows, k) { return rows.reduce(function (t, r) { return t + (num(r[k]) || 0); }, 0); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  /* the hourly pills: pence under £10, so one account's quiet hour reads £0.42 rather than a "£0" sitting on a bar
+     that is visibly not zero; whole pounds above, where pence would only crowd the pill */
+  function ovMoney(v) { var n = Number(v) || 0, a = Math.abs(n); return a > 0 && a < 10 ? (n < 0 ? '−£' : '£') + a.toFixed(2) : chartMoney(n); }
   function ukHourNow() { try { return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).format(new Date())) % 24; } catch (e) { return new Date().getUTCHours(); } }
   VIEWS.adtoolCommand = {
     label: 'Overview (ads)', hidden: true, order: 94, roles: ROLES, icon: '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>',
@@ -4648,6 +4651,11 @@ window.M98M_ADS_ONLY = true;
     (oh || []).forEach(function (x) { var hh = num(x.hour); if (hh == null) return; orders[hh] = (orders[hh] || 0) + (num(x.orders) || 0); units[hh] = (units[hh] || 0) + (num(x.units) || 0); });
     var from = carryHour != null ? carryHour : firstSpendHour;
     var nowH = ukHourNow(), pts = [], sumSpend = 0, sumOrders = 0, sumUnits = 0;
+    /* eBay's ad day is the UTC day. In British Summer Time the first UK hour (00:00 to 01:00) still belongs to
+       eBay's previous day, so for that one hour nothing read so far is today's spend: draw orders only, and do
+       not call the previous day's "before the first reading" figure today's (review, 27 Oct) */
+    var ebayDayPending = nowH === 0 && new Date().getUTCHours() === 23;
+    if (ebayDayPending) { sampled = false; carry = null; }
     for (i = 0; i < 24; i++) {
       var past = i <= nowH;
       var a = sampled && past && from != null && i >= from ? Math.round((spend[i] || 0) * 100) / 100 : null;
@@ -4662,13 +4670,13 @@ window.M98M_ADS_ONLY = true;
     var title = CM.account ? 'Hourly spends · ' + CM.account : 'All account hourly spends';
     var sub = 'Money spent on ads in red and orders received in green, in each UK hour of today.';
     if (carry != null && carry > 0) sub += ' <b>' + gbp(carry) + ' had already been spent before the first reading today</b> and is not on the chart.';
-    if (!sampled) sub += ' No ad figures from eBay yet today. They start arriving around 08:00 UK.';
+    if (!sampled) sub += ebayDayPending ? ' eBay\'s ad day starts at 01:00 UK in summer, so there is no spend for today yet.' : ' No ad figures from eBay yet today. They start arriving around 08:00 UK.';
     if (!oh) sub += ' Orders by the hour appear once the engine update of 27 Oct is live.';
     var any = pts.some(function (p) { return p.a != null || p.b != null; });
     return '<div class="an-panel"><h3>' + esc(title) + src('hourly spends', 'today so far · every 5 min') + '</h3><div class="an-sub">' + sub + '</div>' +
       '<div class="wr-legend"><span><i style="background:' + OV_SPEND + '"></i>money spent</span><span><i style="background:' + OV_ORDERS + '"></i>orders received</span></div>' +
       /* 48 bars do not shrink to a phone and stay readable: below ~860 px the chart keeps its size and scrolls sideways */
-      (any ? '<div class="an-scroll"><div style="min-width:860px">' + chartPairBars(pts, { colorA: OV_SPEND, colorB: OV_ORDERS, fmtA: chartMoney, fmtB: chartNum, aria: title + ': money spent and orders received in each UK hour of today' }) + '</div></div>' : '<div class="an-empty">Nothing to draw yet today.</div>') +
+      (any ? '<div class="an-scroll"><div style="min-width:860px">' + chartPairBars(pts, { colorA: OV_SPEND, colorB: OV_ORDERS, fmtA: ovMoney, fmtB: chartNum, aria: title + ': money spent and orders received in each UK hour of today' }) + '</div></div>' : '<div class="an-empty">Nothing to draw yet today.</div>') +
       '<div class="an-sub" style="margin:8px 0 0">Each colour is drawn against its own busiest hour, so the two shapes line up; read the figure on each bar. So far today: <b>' + gbp(sumSpend) + '</b> spent in the hours shown' + (carry != null && carry > 0 ? ' plus <b>' + gbp(carry) + '</b> before the first reading' : '') + (oh ? ' · <b>' + sumOrders + '</b> order' + (sumOrders === 1 ? '' : 's') + ' (' + sumUnits + ' unit' + (sumUnits === 1 ? '' : 's') + ')' : '') + '.</div></div>';
   }
 
@@ -5103,7 +5111,7 @@ window.M98M_ADS_ONLY = true;
     /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
     var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
     return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Today at a glance</b> or <b>What to do today</b>.</div>' +
+      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Overview</b>.</div>' +
       '<div class="ov-metrics">' + cards + '</div></div>';
   }
   function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
@@ -5956,7 +5964,7 @@ window.M98M_ADS_ONLY = true;
   }
   function todayPanels(D) {
     var run = D.run_today_top || [], stop = D.stop_today_top || [];
-    var more = '<a class="wr-more" href="#adtoolRunToday">All of today\'s verdicts on Running today →</a>';
+    var more = '<a class="wr-more" href="#adtoolRunToday">All of today\'s verdicts on Decision →</a>';
     /* an off flag returns empty lists with run_today.enabled = false — that is "not computed", never "nothing to do" */
     var off = !!(D.run_today && D.run_today.enabled === false);
     var missing = off ? '<div class="wr-empty">Running today is switched off, so nothing was judged.</div>' : (!D.run_today_top && !D.stop_today_top ? '<div class="wr-empty">No verdicts in this data.</div>' : '');
@@ -6072,7 +6080,7 @@ window.M98M_ADS_ONLY = true;
       return { label: wdName(r.weekday), value: ro || 0, title: wdName(r.weekday) + ' · ROAS ' + roasTxt(ro) + ' · spend ' + gbp(num(r.spend) / d) + ' a day over ' + d + ' day' + (d === 1 ? '' : 's') + ' · sales from ads ' + gbp(revOf(r)) + ' · ' + cnt(r.orders) + ' orders' };
     });
     return '<div class="wr-panel"><h3>Weekdays in this period' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">ROAS per weekday for ' + esc(D.account && D.account !== 'all' ? D.account : 'all accounts') + ' over ' + esc(windowText(D)) + '; hover for spend a day and orders. Which listing should run on which day is decided per listing on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Running today</a>, not from this fleet average.</div>' +
+      '<div class="wr-note">ROAS per weekday for ' + esc(D.account && D.account !== 'all' ? D.account : 'all accounts') + ' over ' + esc(windowText(D)) + '; hover for spend a day and orders. Which listing should run on which day is decided per listing on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Decision</a>, not from this fleet average.</div>' +
       chartBars(pts, { height: 150, fmt: function (v) { return (Math.round(v * 10) / 10) + '×'; } }) + '</div>';
   }
 })();
@@ -6587,7 +6595,9 @@ window.M98M_ADS_ONLY = true;
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var RT = { account: '', filter: '', data: null, stop: null, stopAt: 0, stopErr: null, seq: 0 };
+  /* `dataAccount` is the account RT.data was asked for. The page labels and filters by IT, never by the chip
+     just clicked, so between a click and its answer the page keeps showing one account consistently */
+  var RT = { account: '', filter: '', data: null, dataAccount: '', stop: null, stopAt: 0, stopErr: null, seq: 0 };
   /* the filters that list the morning decisions (Stop today's cards) instead of the verdict rows */
   var DEC = { DSTOP: 'STOP', REDUCE: 'REDUCE', PUSH: 'PUSH' };
   var DOWL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -6668,11 +6678,15 @@ window.M98M_ADS_ONLY = true;
       .catch(function (e) { RT.stopErr = (e && e.message) || 'it could not load'; if (!RT.stop) throw e; return RT.stop; });
   }
   function load(quiet) {
-    var my = ++RT.seq;
-    loadStop(false).then(function () { if ($('rtBody') && RT.data && my === RT.seq) draw(); }, function () { if ($('rtBody') && RT.data && my === RT.seq) draw(); });
-    return api('adtoolRunToday', RT.account ? { account: RT.account } : {}).then(function (D) {
+    var my = ++RT.seq, acct = RT.account;
+    /* the morning decisions usually come back first (they are kept 15 minutes): draw them in only when the
+       verdict rows on screen are already this request's, or a chip click would label the previous account's
+       rows with the new account's name until its own answer landed (review, 27 Oct) */
+    var redraw = function () { if ($('rtBody') && RT.data && my === RT.seq && RT.dataAccount === acct) draw(); };
+    loadStop(false).then(redraw, redraw);
+    return api('adtoolRunToday', acct ? { account: acct } : {}).then(function (D) {
       if (my !== RT.seq) return;
-      RT.data = D || {};
+      RT.data = D || {}; RT.dataAccount = acct;
       if (!$('rtBody')) return;
       acctChips();
       draw();
@@ -6689,7 +6703,7 @@ window.M98M_ADS_ONLY = true;
     if (counts.run == null && counts.stop == null && counts.watch == null) { counts = { run: 0, stop: 0, watch: 0 }; rows.forEach(function (r) { var v = String(r.verdict || 'watch').toLowerCase(); counts[v] = (counts[v] || 0) + 1; }); }
     var h = '';
     var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'today';
-    h += '<div class="rt-top"><span>' + esc(when) + '</span><span>·</span><span>' + esc(RT.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' advertised listing' + (rows.length === 1 ? '' : 's') + '</span>' +
+    h += '<div class="rt-top"><span>' + esc(when) + '</span><span>·</span><span>' + esc(RT.dataAccount || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' advertised listing' + (rows.length === 1 ? '' : 's') + '</span>' +
       (D.computed_at ? '<span>·</span><span>updated ' + esc(hhmm(D.computed_at)) + '</span>' : '') + src('run today verdict') + '</div>';
     h += '<div class="rt-counts">' + [['stop', 'Stop today', 'lost on 3 of the last 4 same weekdays and over the last 7 days'], ['run', 'Run today', 'earned on the last same weekdays, or earning over 7 days above break-even'], ['watch', 'Watch', 'some orders are not costed yet, so we cannot say']].map(function (x) {
       return '<div class="rt-c ' + x[0] + (RT.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '"><div class="k">' + esc(x[1]) + '</div><div class="v">' + cnt(counts[x[0]]) + '</div><div class="d">' + esc(x[2]) + '</div></div>';
@@ -6723,8 +6737,9 @@ window.M98M_ADS_ONLY = true;
     var S = RT.stop;
     var head = '<div class="rt-dhead"><b>Morning decisions</b> · written before the day starts and scored the next morning against the profit the listing actually made · nothing here is sent to eBay' + src('scored daily') + '</div>';
     if (!S || typeof window.adtDecisionCounts !== 'function') return head + '<div class="rt-sm" style="margin:-2px 0 12px">' + (RT.stopErr ? 'The morning decisions did not load: ' + esc(RT.stopErr) : 'Loading the morning decisions…') + '</div>';
-    var c = window.adtDecisionCounts(S, RT.account);
-    var all = RT.account ? '<div class="rt-sm" style="margin-top:2px">all accounts</div>' : '';
+    var A = RT.dataAccount || '';
+    var c = window.adtDecisionCounts(S, A);
+    var all = A ? '<div class="rt-sm" style="margin-top:2px">all accounts</div>' : '';
     var t = function (key, cls, label, v, d) {
       return '<div class="rt-c ' + cls + (key ? (RT.filter === key ? ' on' : '') : ' static') + '"' + (key ? ' data-f="' + key + '"' : '') + '><div class="k">' + esc(label) + '</div><div class="v">' + v + '</div><div class="d">' + d + '</div></div>';
     };
@@ -6739,9 +6754,10 @@ window.M98M_ADS_ONLY = true;
   function decisionList() {
     var S = RT.stop, want = DEC[RT.filter], label = { STOP: 'Stop', REDUCE: 'Reduce', PUSH: 'Push' }[want] || want;
     if (!S || typeof window.adtDecisionCard !== 'function') return '<div class="rt-empty">' + (RT.stopErr ? 'The morning decisions did not load: ' + esc(RT.stopErr) : 'Loading the morning decisions…') + '</div>';
-    var rows = (S.decisions || []).filter(function (d) { return d.decision === want && (!RT.account || d.account === RT.account); });
-    var h = '<div class="rt-top"><span><b>' + esc(label) + '</b> · the morning decisions for ' + esc(S.day || 'today') + '</span><span>·</span><span>' + esc(RT.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span></div>';
-    return h + (rows.length ? rows.map(window.adtDecisionCard).join('') : '<div class="rt-empty">No ' + esc(label.toLowerCase()) + ' decision ' + (RT.account ? 'for ' + esc(RT.account) + ' ' : '') + 'today.</div>');
+    var A = RT.dataAccount || '';
+    var rows = (S.decisions || []).filter(function (d) { return d.decision === want && (!A || d.account === A); });
+    var h = '<div class="rt-top"><span><b>' + esc(label) + '</b> · the morning decisions for ' + esc(S.day || 'today') + '</span><span>·</span><span>' + esc(A || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' listing' + (rows.length === 1 ? '' : 's') + '</span></div>';
+    return h + (rows.length ? rows.map(window.adtDecisionCard).join('') : '<div class="rt-empty">No ' + esc(label.toLowerCase()) + ' decision ' + (A ? 'for ' + esc(A) + ' ' : '') + 'today.</div>');
   }
 
   function rowHtml(r) {
@@ -8823,9 +8839,18 @@ window.M98M_ADS_ONLY = true;
     for (k in SG_DEPT_TYPES) { if (SG_DEPT_TYPES.hasOwnProperty(k) && SG_DEPT_TYPES[k].indexOf(type) >= 0) { return k; } }
     return '';
   }
+  /* With a day set (Past Situation) the engine is asked for that day alone, so the feed's 60-card cut cannot
+     drop part of it; an engine or sheet backend that does not know the filter answers the whole window, and
+     the day is then picked out here as before (sgDeptFilter), with sgDeptPaint saying when that may be short. */
   function sgDeptLoad(fresh) {
-    if (!fresh && SG_DEPT.data && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
-    return api('mySignals', { include_acked: true }).then(function (d) { SG_DEPT.data = d || {}; SG_DEPT.at = Date.now(); return SG_DEPT.data; });
+    var day = SG_DEPT.day || '';
+    if (!fresh && SG_DEPT.data && SG_DEPT.dataDay === day && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
+    var payload = { include_acked: true }; if (day) { payload.day = day; }
+    return api('mySignals', payload).then(function (d) {
+      /* a day picked since this request went out wins: keep the older answer out of the cache it would mislabel */
+      if ((SG_DEPT.day || '') !== day) { return SG_DEPT.data || {}; }
+      SG_DEPT.data = d || {}; SG_DEPT.dataDay = day; SG_DEPT.at = Date.now(); return SG_DEPT.data;
+    });
   }
   function sgDeptFilter(token) {
     var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], out = [], i;
@@ -8836,28 +8861,44 @@ window.M98M_ADS_ONLY = true;
   }
   /* the oldest day the feed still holds any signal of this department for: a day before it is not a quiet
      day, it is a day the portal no longer keeps signals for (they leave the feed after a few days) */
-  function sgDeptOldest(token) {
-    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], lo = '', i, d;
-    for (i = 0; i < all.length; i++) { if (types.indexOf(sgStr(all[i].type)) < 0) { continue; } d = sgStr(all[i].date); if (d && (!lo || d < lo)) { lo = d; } }
+  function sgDeptOldest() {
+    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], lo = '', i, d;
+    for (i = 0; i < all.length; i++) { d = sgStr(all[i].date); if (d && (!lo || d < lo)) { lo = d; } }
     return lo;
+  }
+  /* What a day's list can honestly claim (review, 27 Oct). The feed carries at most 60 cards across every desk,
+     newest day first, and only the last few days. Returns {kind, oldest}: 'kept' — the day is older than the
+     feed keeps; 'cut' — the 60-card cut stops before or inside this day, so its list may be short; '' — the
+     list is the whole day. An engine that narrowed the answer to the day itself is only ever 'kept' or ''. */
+  function sgDeptDayScope() {
+    var D = SG_DEPT.data || {}, day = SG_DEPT.day, oldest = sgDeptOldest(), keptFrom = sgStr(D.kept_from);
+    if (!day) { return { kind: '', oldest: oldest }; }
+    if (keptFrom && day < keptFrom) { return { kind: 'kept', oldest: keptFrom }; }
+    if (sgStr(D.day_filter) === day) { return { kind: D.truncated ? 'cut' : '', oldest: oldest }; }
+    if (D.truncated && (!oldest || day <= oldest)) { return { kind: 'cut', oldest: oldest }; }
+    if (!keptFrom && oldest && day < oldest) { return { kind: 'kept', oldest: oldest }; }
+    return { kind: '', oldest: oldest };
   }
   function sgDeptPaint(boxId, sumId, token, label) {
     var box = document.getElementById(boxId), sum = document.getElementById(sumId), list, out = '', i, pending = 0, acked = 0;
     if (!box) { return; }
     list = sgDeptFilter(token);
     for (i = 0; i < list.length; i++) { if (list[i].acked_by_me) { acked++; } else { pending++; } }
+    var scope = sgDeptDayScope();
     if (sum) {
       sum.innerHTML = '<b class="num">' + pending + '</b> waiting on you · <b class="num">' + acked + '</b> acknowledged by you · ' +
         '<span>' + list.length + ' ' + esc(label) + ' signal' + (list.length === 1 ? '' : 's') + (SG_DEPT.day ? ' about ' + esc(sgDay(SG_DEPT.day)) : ' in the window') + '</span>' +
+        (scope.kind === 'cut' && list.length ? '<span class="sig-warnline" style="padding:3px 9px">the feed holds the newest 60 signals across every desk, so this day may be missing some</span>' : '') +
         '<span class="sig-when num" style="margin-left:auto">updated ' + esc(new Date().toTimeString().slice(0, 5)) + ' · refreshes every 5 min</span>';
     }
     if (!list.length) {
-      var oldest = SG_DEPT.day ? sgDeptOldest(token) : '';
       box.innerHTML = '<div class="card enter d1"><div class="hd">Nothing for ' + esc(label) + '</div><div class="bd"><div class="sig-empty">' +
         (SG_DEPT.day
-          ? (oldest && SG_DEPT.day < oldest
-            ? '<b>Signals are only kept for the last few days.</b> The oldest one held is about ' + esc(sgDay(oldest)) + ', so there is nothing to show for ' + esc(sgDay(SG_DEPT.day)) + ', even if there were signals that day.'
-            : '<b>No ' + esc(label) + ' signal about ' + esc(sgDay(SG_DEPT.day)) + '.</b> New ones appear here within 5 minutes of the engine finding them.')
+          ? (scope.kind === 'kept'
+            ? '<b>Signals are only kept for the last few days.</b> The feed now starts at ' + esc(sgDay(scope.oldest)) + ', so there is nothing to show for ' + esc(sgDay(SG_DEPT.day)) + ', even if there were signals that day.'
+            : scope.kind === 'cut'
+              ? '<b>Not in the feed.</b> It holds the newest 60 signals across every desk and stops before ' + esc(sgDay(SG_DEPT.day)) + ', so this day\'s signals, if there were any, are not here.'
+              : '<b>No ' + esc(label) + ' signal about ' + esc(sgDay(SG_DEPT.day)) + '.</b> New ones appear here within 5 minutes of the engine finding them.')
           : '<b>No ' + esc(label) + ' signal in the current window.</b> New ones appear here within 5 minutes of the engine finding them.') +
         '</div></div></div>';
       return;
@@ -8880,7 +8921,8 @@ window.M98M_ADS_ONLY = true;
       });
     };
     if (btn) { btn.onclick = function () { btn.disabled = true; btn.textContent = 'Refreshing…'; load(true).then(function () { btn.disabled = false; btn.textContent = 'Refresh'; }); }; }
-    if (SG_DEPT.data) { paint(); }
+    /* paint the cached answer at once only if it was asked for the same day (or the same whole window) */
+    if (SG_DEPT.data && (SG_DEPT.dataDay || '') === (SG_DEPT.day || '')) { paint(); }
     load(true);
     SG_DEPT.timer = setInterval(function () {
       if (!document.body.contains(box)) { clearInterval(SG_DEPT.timer); SG_DEPT.timer = null; SG_PAGE_LIST = null; return; }
@@ -12316,13 +12358,18 @@ function enterApp(user){
        draws the cards with it, and an old #adSignals link lands on Past Situation (ADS_MOVED below). */
     var ADS_MERGED = { adsCentre: 1, marketing: 1, campaignWatch: 1,
       traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
+    /* Only for those who can open Past Situation. A Team Lead may read Advertising signals but not the
+       advertising-tool pages, so for that role the page stays exactly where it was (review, 27 Oct): moving
+       it would have left them on a forwarding notice they are not allowed past. */
+    var adsPastOk = !!(VIEWS.adtoolReport && canSee(VIEWS.adtoolReport));
+    if (!adsPastOk) { ADS_MERGED.adSignals = 1; }
     /* Owner, 27 Oct: What to do today and Today at a glance became Overview (adtoolCommand), Running today and
        Stop today became Decision (adtoolRunToday), Yesterday's report and Advertising signals became Past
        Situation (adtoolReport). What was left of the two pages folded in stays reachable, one link away from
        Decision and out of the sidebar: Switch off and push (adtoolPlan, the period lists) and Decision engine
        (adtoolStop: rule scores, past days, the action log and the eBay live switches). */
     var ADS_HIDDEN = { adtoolPlan: 1, adtoolStop: 1 };
-    var ADS_MOVED = { adSignals: 'adtoolReport' };
+    var ADS_MOVED = adsPastOk ? { adSignals: 'adtoolReport' } : {};
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
        and the like and collided with the eleven above; the copy pass has since retitled the pages
@@ -12352,7 +12399,8 @@ function enterApp(user){
        Dynamic listings, Listings without CPC — then Alerts (kept while the owner decides whether the pages
        above already cover it), then the two change archives. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolCommand', 'adtoolRunToday', 'adtoolReport', 'adtoolDynamic', 'adtoolNoCpc', 'adtoolAlerts', 'adtoolActivated', 'adtoolStopped'] },
+      /* adSignals is listed for the roles above that keep it; everyone else has it hidden, so it never shows */
+      { name: 'Every morning', keys: ['adtoolCommand', 'adtoolRunToday', 'adtoolReport', 'adSignals', 'adtoolDynamic', 'adtoolNoCpc', 'adtoolAlerts', 'adtoolActivated', 'adtoolStopped'] },
       { name: 'Listing departments', keys: ['adtoolDepts'] },
       { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
       { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },

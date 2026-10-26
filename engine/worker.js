@@ -19291,6 +19291,9 @@ const ROUTES = {
         refreshStarted = true;
       }
       const includeAcked = !!(p && p.include_acked);
+      /* Past Situation (owner, 27 Oct) asks for ONE day's signals. Filtering here, before the 60-card cut below,
+         means a busy week can no longer push part of that day off the end of the list. */
+      const onlyDay = /^\d{4}-\d{2}-\d{2}$/.test(String((p && p.day) || '')) ? String(p.day) : '';
       const pinDaysRow = await ctx.env.DB.prepare("SELECT value FROM portal_config WHERE key = 'signals_pin_days'").first().catch(() => null);
       const pinDays = Math.max(1, Number(pinDaysRow && pinDaysRow.value) || 4);   // Apps Script's SIGNALS_CONFIG_DEFAULTS.signals_pin_days = 4; the sync mirrors any override
       const pkt = new Date(Date.now() + 5 * 3600000);
@@ -19302,6 +19305,7 @@ const ROUTES = {
       for (const r of (rs.results || [])) {
         const type = String(r.type || ''), account = String(r.account || '');
         if (String(r.date || '') && String(r.date) < cutoff) { expired++; continue; }
+        if (onlyDay && String(r.date || '') !== onlyDay) continue;
         if (!accountsAllow(account)) continue;
         if (!Number(r.count_only) && !profit) continue;
         let card = null; try { card = r.card_json ? JSON.parse(r.card_json) : null; } catch (e) { card = null; }
@@ -19361,7 +19365,9 @@ const ROUTES = {
       const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
       out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0); });
       const MAX = 60;
-      return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, expired, types: order,
+      /* kept_from: the oldest day the feed still holds (the pin window), so a page can tell a day the portal no
+         longer keeps from a quiet one; day_filter: the day this answer was narrowed to, '' when it was not */
+      return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, expired, types: order, kept_from: cutoff, day_filter: onlyDay,
         date: new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10), engine: true, refresh_started: refreshStarted };
     },
   },

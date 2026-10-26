@@ -868,9 +868,18 @@
     for (k in SG_DEPT_TYPES) { if (SG_DEPT_TYPES.hasOwnProperty(k) && SG_DEPT_TYPES[k].indexOf(type) >= 0) { return k; } }
     return '';
   }
+  /* With a day set (Past Situation) the engine is asked for that day alone, so the feed's 60-card cut cannot
+     drop part of it; an engine or sheet backend that does not know the filter answers the whole window, and
+     the day is then picked out here as before (sgDeptFilter), with sgDeptPaint saying when that may be short. */
   function sgDeptLoad(fresh) {
-    if (!fresh && SG_DEPT.data && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
-    return api('mySignals', { include_acked: true }).then(function (d) { SG_DEPT.data = d || {}; SG_DEPT.at = Date.now(); return SG_DEPT.data; });
+    var day = SG_DEPT.day || '';
+    if (!fresh && SG_DEPT.data && SG_DEPT.dataDay === day && Date.now() - SG_DEPT.at < 20000) { return Promise.resolve(SG_DEPT.data); }
+    var payload = { include_acked: true }; if (day) { payload.day = day; }
+    return api('mySignals', payload).then(function (d) {
+      /* a day picked since this request went out wins: keep the older answer out of the cache it would mislabel */
+      if ((SG_DEPT.day || '') !== day) { return SG_DEPT.data || {}; }
+      SG_DEPT.data = d || {}; SG_DEPT.dataDay = day; SG_DEPT.at = Date.now(); return SG_DEPT.data;
+    });
   }
   function sgDeptFilter(token) {
     var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], out = [], i;
@@ -881,28 +890,44 @@
   }
   /* the oldest day the feed still holds any signal of this department for: a day before it is not a quiet
      day, it is a day the portal no longer keeps signals for (they leave the feed after a few days) */
-  function sgDeptOldest(token) {
-    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], types = SG_DEPT_TYPES[token] || [], lo = '', i, d;
-    for (i = 0; i < all.length; i++) { if (types.indexOf(sgStr(all[i].type)) < 0) { continue; } d = sgStr(all[i].date); if (d && (!lo || d < lo)) { lo = d; } }
+  function sgDeptOldest() {
+    var all = (SG_DEPT.data && SG_DEPT.data.signals) || [], lo = '', i, d;
+    for (i = 0; i < all.length; i++) { d = sgStr(all[i].date); if (d && (!lo || d < lo)) { lo = d; } }
     return lo;
+  }
+  /* What a day's list can honestly claim (review, 27 Oct). The feed carries at most 60 cards across every desk,
+     newest day first, and only the last few days. Returns {kind, oldest}: 'kept' — the day is older than the
+     feed keeps; 'cut' — the 60-card cut stops before or inside this day, so its list may be short; '' — the
+     list is the whole day. An engine that narrowed the answer to the day itself is only ever 'kept' or ''. */
+  function sgDeptDayScope() {
+    var D = SG_DEPT.data || {}, day = SG_DEPT.day, oldest = sgDeptOldest(), keptFrom = sgStr(D.kept_from);
+    if (!day) { return { kind: '', oldest: oldest }; }
+    if (keptFrom && day < keptFrom) { return { kind: 'kept', oldest: keptFrom }; }
+    if (sgStr(D.day_filter) === day) { return { kind: D.truncated ? 'cut' : '', oldest: oldest }; }
+    if (D.truncated && (!oldest || day <= oldest)) { return { kind: 'cut', oldest: oldest }; }
+    if (!keptFrom && oldest && day < oldest) { return { kind: 'kept', oldest: oldest }; }
+    return { kind: '', oldest: oldest };
   }
   function sgDeptPaint(boxId, sumId, token, label) {
     var box = document.getElementById(boxId), sum = document.getElementById(sumId), list, out = '', i, pending = 0, acked = 0;
     if (!box) { return; }
     list = sgDeptFilter(token);
     for (i = 0; i < list.length; i++) { if (list[i].acked_by_me) { acked++; } else { pending++; } }
+    var scope = sgDeptDayScope();
     if (sum) {
       sum.innerHTML = '<b class="num">' + pending + '</b> waiting on you · <b class="num">' + acked + '</b> acknowledged by you · ' +
         '<span>' + list.length + ' ' + esc(label) + ' signal' + (list.length === 1 ? '' : 's') + (SG_DEPT.day ? ' about ' + esc(sgDay(SG_DEPT.day)) : ' in the window') + '</span>' +
+        (scope.kind === 'cut' && list.length ? '<span class="sig-warnline" style="padding:3px 9px">the feed holds the newest 60 signals across every desk, so this day may be missing some</span>' : '') +
         '<span class="sig-when num" style="margin-left:auto">updated ' + esc(new Date().toTimeString().slice(0, 5)) + ' · refreshes every 5 min</span>';
     }
     if (!list.length) {
-      var oldest = SG_DEPT.day ? sgDeptOldest(token) : '';
       box.innerHTML = '<div class="card enter d1"><div class="hd">Nothing for ' + esc(label) + '</div><div class="bd"><div class="sig-empty">' +
         (SG_DEPT.day
-          ? (oldest && SG_DEPT.day < oldest
-            ? '<b>Signals are only kept for the last few days.</b> The oldest one held is about ' + esc(sgDay(oldest)) + ', so there is nothing to show for ' + esc(sgDay(SG_DEPT.day)) + ', even if there were signals that day.'
-            : '<b>No ' + esc(label) + ' signal about ' + esc(sgDay(SG_DEPT.day)) + '.</b> New ones appear here within 5 minutes of the engine finding them.')
+          ? (scope.kind === 'kept'
+            ? '<b>Signals are only kept for the last few days.</b> The feed now starts at ' + esc(sgDay(scope.oldest)) + ', so there is nothing to show for ' + esc(sgDay(SG_DEPT.day)) + ', even if there were signals that day.'
+            : scope.kind === 'cut'
+              ? '<b>Not in the feed.</b> It holds the newest 60 signals across every desk and stops before ' + esc(sgDay(SG_DEPT.day)) + ', so this day\'s signals, if there were any, are not here.'
+              : '<b>No ' + esc(label) + ' signal about ' + esc(sgDay(SG_DEPT.day)) + '.</b> New ones appear here within 5 minutes of the engine finding them.')
           : '<b>No ' + esc(label) + ' signal in the current window.</b> New ones appear here within 5 minutes of the engine finding them.') +
         '</div></div></div>';
       return;
@@ -925,7 +950,8 @@
       });
     };
     if (btn) { btn.onclick = function () { btn.disabled = true; btn.textContent = 'Refreshing…'; load(true).then(function () { btn.disabled = false; btn.textContent = 'Refresh'; }); }; }
-    if (SG_DEPT.data) { paint(); }
+    /* paint the cached answer at once only if it was asked for the same day (or the same whole window) */
+    if (SG_DEPT.data && (SG_DEPT.dataDay || '') === (SG_DEPT.day || '')) { paint(); }
     load(true);
     SG_DEPT.timer = setInterval(function () {
       if (!document.body.contains(box)) { clearInterval(SG_DEPT.timer); SG_DEPT.timer = null; SG_PAGE_LIST = null; return; }

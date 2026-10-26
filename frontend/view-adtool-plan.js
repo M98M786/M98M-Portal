@@ -324,7 +324,7 @@
   }
   function todayPanels(D) {
     var run = D.run_today_top || [], stop = D.stop_today_top || [];
-    var more = '<a class="wr-more" href="#adtoolRunToday">All of today\'s verdicts on Running today →</a>';
+    var more = '<a class="wr-more" href="#adtoolRunToday">All of today\'s verdicts on Decision →</a>';
     /* an off flag returns empty lists with run_today.enabled = false — that is "not computed", never "nothing to do" */
     var off = !!(D.run_today && D.run_today.enabled === false);
     var missing = off ? '<div class="wr-empty">Running today is switched off, so nothing was judged.</div>' : (!D.run_today_top && !D.stop_today_top ? '<div class="wr-empty">No verdicts in this data.</div>' : '');
@@ -440,7 +440,7 @@
       return { label: wdName(r.weekday), value: ro || 0, title: wdName(r.weekday) + ' · ROAS ' + roasTxt(ro) + ' · spend ' + gbp(num(r.spend) / d) + ' a day over ' + d + ' day' + (d === 1 ? '' : 's') + ' · sales from ads ' + gbp(revOf(r)) + ' · ' + cnt(r.orders) + ' orders' };
     });
     return '<div class="wr-panel"><h3>Weekdays in this period' + src('eBay ads report') + '</h3>' +
-      '<div class="wr-note">ROAS per weekday for ' + esc(D.account && D.account !== 'all' ? D.account : 'all accounts') + ' over ' + esc(windowText(D)) + '; hover for spend a day and orders. Which listing should run on which day is decided per listing on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Running today</a>, not from this fleet average.</div>' +
+      '<div class="wr-note">ROAS per weekday for ' + esc(D.account && D.account !== 'all' ? D.account : 'all accounts') + ' over ' + esc(windowText(D)) + '; hover for spend a day and orders. Which listing should run on which day is decided per listing on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Decision</a>, not from this fleet average.</div>' +
       chartBars(pts, { height: 150, fmt: function (v) { return (Math.round(v * 10) / 10) + '×'; } }) + '</div>';
   }
 })();
