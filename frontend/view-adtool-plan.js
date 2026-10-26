@@ -1,4 +1,12 @@
-/* War room — what is happening, why, which account, which listing, and what to do today.
+/* Switch off and push (was "What to do today", the war room). Owner, 27 Oct: its six period figures moved to the
+ * top of the new Overview page and its account-to-account, day-by-day and how-far-it-is-worth-spending panels were
+ * taken off; what to run and stop TODAY lives on the Decision page. What is left here are the lists over the period
+ * you pick that no other page carries: what is losing enough to switch off, what lost but is on the mend, what
+ * deserves more money, who ran out of budget, and the weekdays. It is no longer in the advertising sidebar; the
+ * Decision page links to it. The hero is still drawn by THIS file (heroTiles, exported below as adtPlanHeroHtml)
+ * so the Overview's six figures are one implementation, not a copy.
+ *
+ * War room — what is happening, why, which account, which listing, and what to do today.
  * Phase 2 of the 27 Sep brief. The look is the Operating System's advertising page (tiles, bars,
  * value pills); the numbers are the engine's adtoolPlan answer for the window and account the reader
  * picks. Profit appears per listing only, under the Sales Analysis law; account, fleet, day and
@@ -69,10 +77,11 @@
   function hhmm(at) { if (!at) return ''; var d = new Date(String(at).replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(String(at)) ? '' : 'Z')); if (isNaN(d.getTime())) return String(at).slice(11, 16); try { return d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }) + ' UK'; } catch (e) { return d.toISOString().slice(11, 16) + ' UTC'; } }
 
   VIEWS.adtoolPlan = {
-    label: 'What to do today (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
+    label: 'Switch off and push (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
     icon: '<path d="M3 3v18h18"/><path d="m7 14 4-5 4 3 5-8"/><circle cx="11" cy="9" r="1.6"/>',
     render: function () {
-      return '<div class="wr-wrap">' + adtHgroup('What to do today', 'Where the ad money went, and which listings to change', 'wrFresh') +
+      return '<div class="wr-wrap">' + adtHgroup('Switch off and push', 'Over the period you pick: what to switch off, what is on the mend, what deserves more money, and who ran out of budget', 'wrFresh') +
+        '<div class="wr-note" style="margin:-4px 0 12px">The period\'s spend and sales are at the top of <a class="wr-more" href="#adtoolCommand" style="margin:0">Overview</a>, and what to run or stop today is on <a class="wr-more" href="#adtoolRunToday" style="margin:0">Decision</a>.</div>' +
         '<div id="wrBar"></div><div id="wrAcct" class="wr-acct"></div>' +
         '<div id="wrBody"><div class="wr-empty">Loading…</div></div></div>';
     },
@@ -138,12 +147,10 @@
   function draw() {
     var D = WR.data, h = '';
     if (!D || typeof D !== 'object') { $('wrBody').innerHTML = '<div class="wr-empty">No data for this period.</div>'; return; }
-    h += heroTiles(D);
-    h += accountPanel(D);
-    h += byDayPanel(D);
-    h += frontierPanel(D);
+    /* owner, 27 Oct: the hero now opens the Overview, and the account-to-account, day-by-day and
+       how-far-it-is-worth-spending panels were taken off. What to run and stop today is the Decision page's.
+       The panel functions stay below unused rather than deleted, so this page can be put back as it was. */
     h += verdictPanel(D);
-    h += todayPanels(D);
     h += cutPanel(D);
     h += improvingPanel(D);
     h += pushPanel(D);
@@ -158,6 +165,9 @@
     for (var i = 0; i < rs.length; i++) rs[i].onclick = function () { var a = this.getAttribute('data-a'); WR.account = WR.account === a ? '' : a; acctChips(); load(false); };
   }
 
+  /* the Overview draws these six figures from this one function (owner, 27 Oct), so they cannot drift
+     between two copies; it hands in the adtoolPlan answer it asked for itself */
+  window.adtPlanHeroHtml = function (D) { return heroTiles(D || {}); };
   /* ── hero: the six figures the owner asked for, per-day figures under each, the window named once ── */
   function tile(k, v, d, cls) { return '<div class="wr-tile ' + (cls || '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + d + '</div></div>'; }
   function heroTiles(D) {

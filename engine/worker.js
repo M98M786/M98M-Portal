@@ -7214,10 +7214,13 @@ const ADTOOL_ACTIONS_P5 = {
         .sort((a, b) => (Number(b.spend) || 0) - (Number(a.spend) || 0) || (Number(b.orders) || 0) - (Number(a.orders) || 0));
       const alerts = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high FROM adtool_alerts WHERE cleared_at = '' AND (snoozed_until = '' OR snoozed_until < ?1)").bind(new Date().toISOString()).first();
       const rep = await env.DB.prepare('SELECT json FROM adtool_reports WHERE day = ?1').bind(yday).first(); const report = rep ? JSON.parse(rep.json) : null;
-      /* today's orders by slot from `orders` (5-minute sync), not the hourly adtool_orders mirror */
-      const todayOrders = []; const slotAgg = {};
-      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const sl = adtUkParts(ms).slot; const s = (slotAgg[sl] = slotAgg[sl] || { slot: sl, units: 0, orders: 0 }); s.orders++; s.units += Math.max(1, Number(o.qty) || 1); }
+      /* today's orders by slot from `orders` (5-minute sync), not the hourly adtool_orders mirror.
+         The same read buckets them by UK hour too (owner, 27 Oct: the Overview's hourly chart puts the
+         orders received in each hour beside the money spent in it) — one pass, no second query. */
+      const todayOrders = []; const slotAgg = {}; const hourAgg = {};
+      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const uk = adtUkParts(ms), sl = uk.slot, q = Math.max(1, Number(o.qty) || 1); const s = (slotAgg[sl] = slotAgg[sl] || { slot: sl, units: 0, orders: 0 }); s.orders++; s.units += q; const hh = (hourAgg[uk.hour] = hourAgg[uk.hour] || { hour: uk.hour, orders: 0, units: 0 }); hh.orders++; hh.units += q; }
       for (const k of Object.keys(slotAgg).sort()) todayOrders.push(slotAgg[k]);
+      const todayHours = Object.values(hourAgg).sort((a, b) => a.hour - b.hour);
       const slotProf = await adtLatestProfiles(env, 'fleet', 'slot');
       const accounts = [];
       const byDate = (await env.DB.prepare('SELECT day, weekday, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '') + ' GROUP BY day ORDER BY day').bind(...(acct ? [adtAddDays(yday, -29), yday, acct] : [adtAddDays(yday, -29), yday])).all()).results || [];
@@ -7239,7 +7242,7 @@ const ADTOOL_ACTIONS_P5 = {
         totals_by_account: todayPay.totals_by_account,
         profit_label: 'Profit (Sales Analysis law)',
         yesterday: Object.assign({ day: yday, roas: y && y.spend > 0 ? round2(y.attr_revenue / y.spend) : null, cpc: y && y.clicks > 0 ? round2(y.spend / y.clicks) : null, cvr: y && y.clicks > 0 ? round2(y.attr_units / y.clicks) : null, report_status: reportStatus }, y),
-        alerts, decisions_waiting: 0, report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
+        alerts, decisions_waiting: 0, report_hours: report ? report.hours : null, today_slots: todayOrders, today_hours: todayHours, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
         source: 'adtool_listing_today (sampled, provisional) + adtool_listing_day, orders, adtool_ads_intraday (hour curve), adtool_reports, adtool_alerts, sync_state',
       };
     },
@@ -9183,6 +9186,31 @@ function adtCpcHeld(before, after) {
   if (after) after.days = ad; if (after) after.units_per_day = ar;
   return { held, held_rule: 'held when all-channel units per day since the stop ≥ 60 % of the 30 days before it; too early under 7 days after' };
 }
+/* Dynamic listings (owner, 27 Oct). A dynamic campaign is one whose own NAME says so — his naming convention, as
+   in "General Dynamic" and "75% Low DYN" / "80% Medium DYN" / "85% Medium DYN" — the same convention the
+   dynamic-campaign price rules read (lower(name) LIKE '%dynamic%'). eBay's own ad-rate strategy is not synced,
+   so the name is the only signal there is. "dyn" counts only as a whole word, so a name that merely contains the
+   letters ("Dynamo cases") is not dynamic. */
+function adtIsDynamicCampaign(name) { return /\bdyn(?:amic)?\b/i.test(String(name == null ? '' : name)); }
+/* The by-account summary of a listing set (Dynamic listings, Listings without CPC): how many listings, how many
+   sold in the window, and the spend / sales / orders / units they add up to. No profit key: profit leaves the
+   engine per item only. Every account named in `accounts` gets a row, so an account with none reads 0, not absent. */
+function adtListSetByAccount(rows, accounts) {
+  const by = {};
+  const blank = a => ({ account: a, listings: 0, with_sales: 0, spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0, revenue: 0 });
+  for (const a of (accounts || [])) by[String(a)] = blank(String(a));
+  for (const r of (rows || [])) {
+    const k = String((r && r.account) || '');
+    const a = (by[k] = by[k] || blank(k));
+    a.listings++; if ((Number(r.units) || 0) > 0) a.with_sales++;
+    a.spend += Number(r.spend) || 0; a.attr_revenue += Number(r.attr_revenue) || 0; a.clicks += Number(r.clicks) || 0; a.attr_units += Number(r.attr_units) || 0;
+    a.orders += Number(r.orders) || 0; a.units += Number(r.units) || 0; a.revenue += Number(r.revenue) || 0;
+  }
+  return Object.values(by).filter(a => a.account !== '' || a.listings > 0).map(a => Object.assign(a, {
+    spend: round2(a.spend), attr_revenue: round2(a.attr_revenue), revenue: round2(a.revenue), roas: a.spend > 0 ? round2(a.attr_revenue / a.spend) : null,
+  })).sort((x, y) => (x.account < y.account ? -1 : x.account > y.account ? 1 : 0));
+}
+const ADTOOL_LISTSET_ROW_CAP = 600;
 function adtCpcTotals(rows) {
   /* the collective totals a CPC page shows — spend, attributed sales, ROAS, clicks, avg CPC, CVR, ad units,
      all-channel orders and units. NO profit key: profit leaves the engine per item only (adtStripCollectiveProfit
@@ -9207,6 +9235,10 @@ const ADTOOL_REGISTER_P11 = [
   ['CPC_POST', 'Ads stopped', 'Listings whose pay-per-click ad is paused, archived or gone, and how they sold afterwards. The thirty days before the ad stopped are shown against the days since, so you can see whether the sales held. Where we cannot tell when the ad stopped, the page says so rather than guessing.', 'campaign_ads, campaigns, adtool_campaign_archive, adtool_campaign_ad_events, items_api, adtool_listing_day, adtool_ads_daily, items_facts, adtool_orders', 'Worked out when you open the page', 'Shares the tests for Ads running, and the exclusion of listings whose ads are still live is checked'],
   ['ADV_OVERVIEW', 'Advertising overview', 'Day by day for the company or one account: spend, sales from ads, ROAS, the cost of a click, how many clicks turn into a sale, ad units, orders and units. Then the last week against the week before and the last ten days against the ten before, each with the change and which way it went. Profit appears only as counts of listings making and losing money, never as a company total.', 'adtool_scope_day, adtool_listing_week, items_api', 'Worked out when you open the page', 'The comparisons and their zero cases are covered by tests, and the counts are checked for carrying no company profit figure'],
   ['WARM_HOURLY', 'Preparing the slow pages in advance', 'Once the hourly figures are in, the pages that take longest to build are worked out ahead of time and kept, so the first person to open one gets it straight away instead of waiting. Anything that would take too long is skipped and counted.', 'ROUTES (the pages above), env.HOT (KV)', 'Every hour, after the figures land', 'A note records which pages were prepared and which were skipped for time'],
+  /* owner, 27 Oct: the advertising portal's two listing sets and the Overview's hourly chart */
+  ['LISTSET_DYNAMIC', 'Dynamic listings', 'Every listing live in a running campaign whose name says Dynamic or DYN, the way campaigns are named here. For the period you pick: what its ads cost, the sales eBay credits to the ads, its orders, units and sales on every channel, and its own profit, worked out the same way the Sales Analysis sheet works it out. The account table adds up everything except profit, which is only ever shown per listing.', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today, items_facts, adtool_orders', 'Worked out when you open the page', 'The naming test and the account table are covered by tests, and the account table is checked for carrying no profit figure'],
+  ['LISTSET_NOCPC', 'Listings without CPC', 'Every active listing with no live pay-per-click ad: listings only in general campaigns, and listings in no campaign at all. The same figures as Dynamic listings, sorted by units sold so the ones selling without pay-per-click come first. A page shows the first 600; the tiles and the account table count every one.', 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_listing_today, items_facts, adtool_orders', 'Worked out when you open the page', 'A test checks that no listing with a live pay-per-click ad can appear here'],
+  ['HOURLY_SPEND_ORDERS', 'All account hourly spends', 'Today hour by hour: the money spent on ads in each UK hour beside the orders received in it. Spend is the difference between the five-minute readings of the running totals eBay reports; what was spent before the first reading of the day cannot be placed in an hour, so it is shown as one figure under the chart. Orders are counted in the UK hour they were placed, on every channel.', 'adtool_ads_intraday, orders', 'Every 5 minutes while the page is open', 'The hour buckets come from the same read as the slot table, which a test checks'],
 ];
 let ADTOOL_BU3_REG_OK = false;
 async function ensureAdtoolPhaseBu3Register(env) {
@@ -9345,7 +9377,11 @@ async function adtoolCpcCompute(env, p) {
   const today = ukDate(''), todayUtc = utcDate(), yday = adtAddDays(today, -1);
   const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
   const acct = String((p && p.account) || '').trim();
-  const mode = String((p && p.mode) || 'active') === 'post' ? 'post' : 'active';
+  /* 'dynamic' and 'nocpc' (owner, 27 Oct) are the two listing sets beside the CPC pages. An unknown mode is
+     still 'active', and every answer names the mode it computed, so a page can tell an older engine apart. */
+  const modeIn = String((p && p.mode) || 'active');
+  const mode = modeIn === 'post' ? 'post' : (modeIn === 'dynamic' || modeIn === 'nocpc' ? modeIn : 'active');
+  const listSet = mode === 'dynamic' || mode === 'nocpc';
   const accounts = ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account));
   /* the currently CPC-live set (the SQL twin of liveMembershipRow): the active page IS this set, the post page
      EXCLUDES it */
@@ -9354,6 +9390,20 @@ async function adtoolCpcCompute(env, p) {
   let ids, camp = {}, postCtx = null;
   if (mode === 'active') {
     ids = Object.keys(liveCamp); camp = liveCamp;
+  } else if (listSet) {
+    /* both sets stand on the SQL twin of liveMembershipRow, so "live" means here what it means everywhere.
+       Dynamic: every listing live in a running campaign whose name says dynamic, with those campaigns as its
+       memberships. Without CPC: every ACTIVE listing with no live cost-per-click ad, general-only and
+       unadvertised alike, with its live general memberships (if any) as its campaigns. */
+    const allLive = (await env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])).all()).results || [];
+    if (mode === 'dynamic') {
+      for (const r of allLive) if (adtIsDynamicCampaign(r.name)) (camp[String(r.item_id)] = camp[String(r.item_id)] || []).push(r);
+      ids = Object.keys(camp);
+    } else {
+      for (const r of allLive) { const id = String(r.item_id); if (!liveCamp[id]) (camp[id] = camp[id] || []).push(r); }
+      const act = (await env.DB.prepare("SELECT item_id FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])).all()).results || [];
+      ids = Array.from(new Set(act.map(r => String(r.item_id)))).filter(id => id && !liveCamp[id]);
+    }
   } else {
     const cand = (await env.DB.prepare(
       "SELECT ca.listing_id AS item_id, ca.campaign_id, ca.ad_status, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at, COALESCE(c.funding_model, a.funding) AS funding_model, COALESCE(c.name, a.name) AS name, COALESCE(c.budget, a.budget) AS budget, c.bid_pct AS c_bid, ca.bid_pct AS bid_pct, c.status AS c_status, a.gone_at AS gone_at " +
@@ -9367,11 +9417,12 @@ async function adtoolCpcCompute(env, p) {
   if (!ids.length) {
     return {
       period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
-      rows: [], totals: adtCpcTotals([]), prev: await adtCpcPrevTotals(env, [], w.prev_from, w.prev_to),
+      rows: [], rows_total: 0, by_account: listSet ? adtListSetByAccount([], acct ? [acct] : accounts) : undefined,
+      totals: adtCpcTotals([]), prev: await adtCpcPrevTotals(env, [], w.prev_from, w.prev_to),
       impressions_from: mode === 'active' || from <= to ? (from > ADTOOL_IMPRESSIONS_FROM ? from : ADTOOL_IMPRESSIONS_FROM) : null,
       events_from: await adtCpcEventsFrom(env, mode),
       profit_label: 'Profit (Sales Analysis law) — item level only', computed_at: new Date().toISOString(),
-      source: 'no ' + (mode === 'active' ? 'live cost-per-click' : 'paused / archived cost-per-click') + ' listing' + (acct ? ' on ' + acct : ''),
+      source: 'no ' + (mode === 'active' ? 'live cost-per-click' : mode === 'dynamic' ? 'listing live in a dynamic campaign' : mode === 'nocpc' ? 'ACTIVE listing without a live cost-per-click ad' : 'paused / archived cost-per-click') + (mode === 'dynamic' || mode === 'nocpc' ? '' : ' listing') + (acct ? ' on ' + acct : ''),
     };
   }
   const [agg, imp, cost, meta] = await Promise.all([
@@ -9406,7 +9457,16 @@ async function adtoolCpcCompute(env, p) {
     };
     if (postCtx && postCtx[id]) { row.last_active_day = postCtx[id].last_active_day; row.last_active_source = postCtx[id].last_active_source; row.before = postCtx[id].before; row.after = postCtx[id].after; row.held = postCtx[id].held || null; row.held_rule = postCtx[id].held_rule || null; }
     return row;
-  }).sort((x, y) => (Number(y.spend) || 0) - (Number(x.spend) || 0) || (Number(y.attr_revenue) || 0) - (Number(x.attr_revenue) || 0));
+  }).sort(mode === 'nocpc'
+    /* without CPC the ad figures are mostly zero: what a listing sells is what tells them apart */
+    ? (x, y) => (Number(y.units) || 0) - (Number(x.units) || 0) || (Number(y.revenue) || 0) - (Number(x.revenue) || 0) || (Number(y.spend) || 0) - (Number(x.spend) || 0)
+    : (x, y) => (Number(y.spend) || 0) - (Number(x.spend) || 0) || (Number(y.attr_revenue) || 0) - (Number(x.attr_revenue) || 0));
+  /* a listing set can run to every active listing on six accounts: the by-account summary and the totals are over
+     ALL of them, the rows sent are the first ROW_CAP in the order above, and the answer says how many there are */
+  const rowsTotal = rows.length;
+  const byAccount = listSet ? adtListSetByAccount(rows, acct ? [acct] : accounts) : undefined;
+  const totalsAll = adtCpcTotals(rows);
+  if (listSet && rows.length > ADTOOL_LISTSET_ROW_CAP) rows.length = ADTOOL_LISTSET_ROW_CAP;
   /* Phase 5 (big update): the Active-listings fields on every CPC row — Currently in Sale Event (today's membership,
      → 'YES'/'NO' in the view) and Eligible for Sale Event On (the observed timeline). Two batched reads, guarded so a
      database without the sale grains (before marketingSync runs) simply leaves them false / null. */
@@ -9420,11 +9480,11 @@ async function adtoolCpcCompute(env, p) {
   } catch (e) { for (const row of rows) { if (row.in_sale === undefined) row.in_sale = false; if (row.eligible_on === undefined) row.eligible_on = null; } }
   return {
     period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), accounts, account: acct || 'all', mode,
-    rows, totals: adtCpcTotals(rows), prev: await adtCpcPrevTotals(env, ids, w.prev_from, w.prev_to),
+    rows, rows_total: rowsTotal, by_account: byAccount, totals: totalsAll, prev: await adtCpcPrevTotals(env, ids, w.prev_from, w.prev_to),
     impressions_from: imp.available ? imp.from : null,
     events_from: await adtCpcEventsFrom(env, mode),
     profit_label: 'Profit (Sales Analysis law) — item level only',
-    note: (mode === 'active' ? 'live cost-per-click listings (ACTIVE ad in a RUNNING campaign on an ACTIVE listing)' : 'listings whose cost-per-click ad is paused, archived or whose campaign has ended, excluding any that are live again') + '; ads by eBay report day (UTC), orders by UK day' + (w.includes_today ? '; today is sampled and provisional' : '') + (imp.available ? '' : '; impressions unavailable before ' + ADTOOL_IMPRESSIONS_FROM),
+    note: (mode === 'active' ? 'live cost-per-click listings (ACTIVE ad in a RUNNING campaign on an ACTIVE listing)' : mode === 'dynamic' ? 'listings live in a running campaign whose name says dynamic (or DYN)' : mode === 'nocpc' ? 'ACTIVE listings with no live cost-per-click ad (general-only and unadvertised)' : 'listings whose cost-per-click ad is paused, archived or whose campaign has ended, excluding any that are live again') + '; ads by eBay report day (UTC), orders by UK day' + (w.includes_today ? '; today is sampled and provisional' : '') + (imp.available ? '' : '; impressions unavailable before ' + ADTOOL_IMPRESSIONS_FROM),
     computed_at: new Date().toISOString(),
     source: 'campaign_ads + campaigns' + (mode === 'post' ? ' + adtool_campaign_archive + adtool_campaign_ad_events' : '') + ', items_api, adtool_listing_day' + (w.includes_today ? ' + adtool_listing_today (sampled)' : '') + ', adtool_ads_daily (impressions), items_facts / adtool_orders (cost) · Sales Analysis law',
   };
@@ -9525,7 +9585,9 @@ async function adtWarmHourly(env) {
     /* Listing departments classifies all ~990 active listings and joins three windows, so its first open after
        the cache expires is one of the slow ones. Its answer cannot move between two rollups (ages turn over at
        midnight and the windows end yesterday), so it takes the hourly horizon like the rest. */
-    ['adtoolDepts', {}, true]];
+    ['adtoolDepts', {}, true],
+    /* owner, 27 Oct: the two listing sets, last, so a tight hour drops them before any page warmed before them */
+    ['adtoolCpcListings', { period: 'd30', mode: 'dynamic' }, true], ['adtoolCpcListings', { period: 'd30', mode: 'nocpc' }, true]];
   const out = []; const skippedNames = [];
   for (const j of jobs) {
     const action = j[0], payload = j[1], hourly = !!j[2];

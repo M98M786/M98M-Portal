@@ -1,4 +1,5 @@
-/* view-adtool-morning.js — Advertising Tool · Today at a glance, Alerts, Yesterday's report, ROAS target, Data health
+/* view-adtool-morning.js — Advertising Tool · Overview (was Today at a glance, with What to do today's period figures;
+ * owner, 27 Oct), Alerts, Past Situation (was Yesterday's report, with the day's advertising signals), ROAS target, Data health
  * (spec §7, Phase 5). Five hidden views, each behind its own preview flag. Galaxy tokens; gold the only accent,
  * #e0563f the only loss colour. Read-only except acknowledge / snooze / rule toggles and the ROAS target. */
 (function () {
@@ -65,44 +66,109 @@
   function openText(a) { if (a.hours_open != null && !isNaN(Number(a.hours_open))) { var hh = Number(a.hours_open); return hh < 24 ? Math.round(hh) + ' h' : Math.round(hh / 24) + ' d'; } return a.fired_at ? ago(a.fired_at) : '—'; }
   function moLine(lb, vl) { return '<div class="mo-line"><div class="lb">' + esc(lb) + '</div><div class="vl">' + vl + '</div></div>'; }
 
-  /* ---------------- Today at a glance (the sidebar calls it the same thing) ---------------- */
-  /* Phase 1B: today so far comes from the 5-minute grain (adtoolToday: per-listing rows, hour curve,
-     per-account totals) and the four spend tiles from adtoolCommand's windows. Every field that the
-     older engine does not send is guarded, so the page draws what it has and says what is missing. */
-  var CM = { data: null, today: null };
+  /* ---------------- Overview (owner, 27 Oct) ----------------
+     "What to do today" and "Today at a glance" merged under one title, in the order the owner's sheet
+     lays it out: the period bar, the account chips and the six period figures that opened What to do
+     today; then today so far, yesterday, the last 7 and 30 days, yesterday's rates, today by account
+     and today so far by slot, as Today at a glance drew them; then ONE hourly chart where the two
+     hour-by-hour charts were (money spent in red beside orders received in green, every UK hour of the
+     day); and "How up to date this is" closes the page.
+     Taken off on the owner's word, each with a pointer to where it still lives: listings spending today
+     (Ads command centre carries every listing for today and the last 3, 7 and 14 days), fleet ad spend
+     by date, and What to do today's account-to-account, day-by-day and how-far-it-is-worth-spending
+     panels. The period figures are What to do today's own (adtoolPlan, drawn by the function
+     view-adtool-plan.js exports), the today figures adtoolCommand's: two answers asked in parallel and
+     drawn apart, so the slower one never holds the other back. The account chips steer both;
+     adtoolCommand has always taken an account. */
+  var CM = { data: null, today: null, plan: null, account: '', accounts: [], period: null, seqCmd: 0, seqHero: 0 };
+  /* the hourly chart's two colours: red and green as the owner asked, stepped so a red-green
+     colour-blind reader still tells them apart (validated against this panel's own surface), and
+     never the only cue — red is always the left bar of the pair and every bar carries its figure */
+  var OV_SPEND = '#bd3d2d', OV_ORDERS = '#26ae6c';
   function num(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
   /* the engine's contract key is `tiles` (Phase 1B); `windows` / top-level are older engines */
   function cmWin(D, k) { var w = (D.tiles && D.tiles[k]) || (D.windows && D.windows[k]) || D[k] || null; return w && typeof w === 'object' ? w : null; }
   function cmRoas(w) { if (!w) return null; if (w.roas != null) return num(w.roas); var s = num(w.spend), r = num(w.attr_revenue); return s > 0 && r != null ? r / s : null; }
   function cmSum(rows, k) { return rows.reduce(function (t, r) { return t + (num(r[k]) || 0); }, 0); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function ukHourNow() { try { return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).format(new Date())) % 24; } catch (e) { return new Date().getUTCHours(); } }
   VIEWS.adtoolCommand = {
-    label: 'Today at a glance (ads)', hidden: true, order: 94, roles: ROLES, icon: '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>',
-    render: function () { return '<div class="an-wrap">' + adtHgroup('Today at a glance', 'Every account\'s spend and sales, today so far and the last 7 and 30 days', 'moCmdFresh') + '<div id="moCmd"><div class="an-empty">Loading…</div></div></div>'; },
+    label: 'Overview (ads)', hidden: true, order: 94, roles: ROLES, icon: '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>',
+    render: function () {
+      return '<div class="an-wrap">' + adtHgroup('Overview', 'The period you pick, then today across every account, hour by hour', 'moCmdFresh') +
+        '<div id="ovBar"></div><div id="ovAcct" class="wr-acct"></div>' +
+        '<div id="ovHero"><div class="an-empty">Loading…</div></div>' +
+        '<div id="moCmd"><div class="an-empty">Loading…</div></div></div>';
+    },
     init: function () {
+      /* remembered under What to do today's key, so the window picked there carries straight over */
+      CM.period = adtPeriodBar('ovBar', { page: 'adtoolPlan', def: 'd30', onChange: function (v) { CM.period = v; loadHero(false).catch(function () {}); } });
+      ovChips();
       loadCmd(false).catch(function () {});
-      /* live while the tab is open: hidden tabs wait, an expired session stops it (session-expiry law) */
-      adtPoll('moCmd', 300000, function () { return loadCmd(true); });
+      loadHero(false).catch(function () {});
+      /* live while the tab is open: hidden tabs wait, an expired session stops it (session-expiry law).
+         The period figures move only while the window reaches into today. */
+      adtPoll('moCmd', 300000, function () {
+        var p = loadCmd(true);
+        /* the period figures failing must never count against the poller, or ten of them would stop today's
+           figures refreshing too: only the today read decides whether the page is still live */
+        return adtIncludesToday(CM.plan && CM.plan.period, CM.period) ? Promise.all([p, loadHero(true).catch(function () {})]) : p;
+      });
     }
   };
+  function ovChips() {
+    var el = $('ovAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (CM.account ? '' : 'on') + '" data-a="">All accounts</button>' + CM.accounts.map(function (a) { return '<button class="' + (CM.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+      var a = this.getAttribute('data-a'); if (a === CM.account) return;
+      CM.account = a; ovChips();
+      loadHero(false).catch(function () {}); loadCmd(false).catch(function () {});
+    };
+  }
+  function ovAccounts(list) {
+    var names = (list || []).map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
+    if (names.length) { CM.accounts = names; ovChips(); }
+  }
+  /* each answer is drawn only if it is still the newest one asked for, so a slow answer for the account
+     clicked a moment ago can never paint over the account clicked since */
+  function loadHero(quiet) {
+    var my = ++CM.seqHero;
+    var p = adtPeriodParams(CM.period); if (CM.account) p.account = CM.account;
+    return api('adtoolPlan', p).then(function (d) {
+      if (my !== CM.seqHero) return;
+      CM.plan = d || {};
+      ovAccounts(d && d.accounts);
+      if (!$('ovHero')) return;
+      $('ovHero').innerHTML = typeof window.adtPlanHeroHtml === 'function' ? window.adtPlanHeroHtml(CM.plan) : '';
+      adtPeriodEcho('ovBar', d && d.period);
+    }).catch(function (e) {
+      if (my !== CM.seqHero) return;
+      if (!quiet && $('ovHero')) $('ovHero').innerHTML = '<div class="an-panel"><h3>The period figures did not load</h3><div class="an-sub">' + esc(e && e.message || 'They could not load.') + ' Today\'s figures below are not affected.</div></div>';
+      throw e;
+    });
+  }
   function loadCmd(quiet) {
     /* ONE request. adtoolCommand runs the today computation inside the engine and forwards all of it,
        totals_by_account included (engine added 14 Oct), so every today figure on this page comes off
-       that single answer. Until then the page also called adtoolToday purely for that one field, which
-       made the engine compute the same thing twice on every open of the portal's landing screen.
-       drawCmd still falls back to a second answer if one is ever passed, so nothing breaks either way. */
-    return api('adtoolCommand', {}).then(function (d) {
+       that single answer. drawCmd still falls back to a second answer if one is ever passed. */
+    var my = ++CM.seqCmd;
+    var p = CM.account ? { account: CM.account } : {};
+    return api('adtoolCommand', p).then(function (d) {
+      if (my !== CM.seqCmd) return;
       CM.data = d || {}; CM.today = null;
+      if (!CM.accounts.length && CM.data.totals_by_account) ovAccounts(CM.data.totals_by_account.map(function (a) { return a && a.account; }).filter(Boolean).sort());
       if ($('moCmd')) drawCmd();
       /* The page cache can still hold an answer written before the engine began forwarding
-         totals_by_account, for as long as that entry lives. Rather than keep a second request for
-         everyone for ever, ask for it ONLY when the field is actually absent, and redraw. In the
-         normal case this never fires and the page costs one request. */
+         totals_by_account, for as long as that entry lives. Ask for it ONLY when the field is
+         actually absent, and redraw. In the normal case this never fires. */
       if (!CM.data.totals_by_account) {
-        return api('adtoolToday', {}).then(function (t) {
+        return api('adtoolToday', p).then(function (t) {
+          if (my !== CM.seqCmd) return;
           CM.today = t || null; if ($('moCmd')) drawCmd();
         }).catch(function () { /* the table simply stays empty until the cached answer expires */ });
       }
-    }).catch(function (e) { if (!quiet) fail('moCmd', e); throw e; });
+    }).catch(function (e) { if (my !== CM.seqCmd) return; if (!quiet) fail('moCmd', e); throw e; });
   }
   function drawCmd() {
     var D = CM.data, T = CM.today || null;
@@ -117,9 +183,6 @@
     adtFreshShow('moCmdFresh', fresh);
     /* the four spend tiles: fleet figures carry no profit (owner, 27 Sep: profit is item-to-item only) */
     var repStatus = y.report_status != null ? String(y.report_status) : (D.report_status != null ? String(D.report_status) : null);
-    /* one plain sentence for what today's ad figures are, in place of the engine's own note */
-    var sampledToday = !!(D.ads_sampled || (today && today.ads_sampled));
-    var todayNote = sampledToday ? 'Ad figures are still updating through the day' : 'No ad figures from eBay yet today. They start arriving around 08:00 UK';
     var tile = function (label, w, sub, note) {
       if (!w) return kpi(label, '—', sub + '<br>not available yet');
       return kpi(label, gbp(w.spend, 0), gbp(w.attr_revenue, 0) + ' sales from ads · ROAS ' + roas(cmRoas(w)) + (w.attr_units != null ? ' · ' + w.attr_units + ' units from ads' : '') + '<br>' + sub + (note ? ' · <span class="an-neg">' + esc(note) + '</span>' : ''));
@@ -129,63 +192,63 @@
       tile('Yesterday', y.spend != null || y.attr_revenue != null ? y : null, esc(y.day || y.from || ''), repStatus != null && repStatus !== 'final' ? 'eBay figures still arriving' + (function (m) { var late = Object.keys(m || {}).filter(function (a) { return m[a] !== 'final'; }); return late.length ? ' (' + esc(late.join(', ')) + ')' : ''; })(y.report_status_by_account) : '') +
       tile('Last 7 days', cmWin(D, 'd7'), (function (w) { return w && w.from ? esc(w.from) + ' → ' + esc(w.to || '') : 'to yesterday'; })(cmWin(D, 'd7'))) +
       tile('Last 30 days', cmWin(D, 'd30'), (function (w) { return w && w.from ? esc(w.from) + ' → ' + esc(w.to || '') : 'to yesterday'; })(cmWin(D, 'd30'))) + '</div>';
-    h += '<div class="an-kpis">' + kpi('CPC yesterday', y.clicks > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') + kpi('Conversion rate yesterday', y.clicks > 0 && y.attr_units != null ? (Math.round(Number(y.attr_units) / Number(y.clicks) * 1000) / 10) + '%' : '—', 'units from ads ÷ clicks') + kpi('Orders yesterday, all channels', String(y.orders || 0), (y.units || 0) + ' units') + kpi('Open alerts', String((D.alerts && D.alerts.n) || 0), ((D.alerts && D.alerts.high) || 0) + ' high', (D.alerts && D.alerts.high) ? 'an-neg' : '') + kpi('Suggestions waiting', String(D.decisions_waiting || 0), 'suggestion only, nothing sent to eBay') + '</div>';
+    /* open alerts are counted across every account whichever chip is on: say so when one account is picked */
+    h += '<div class="an-kpis">' + kpi('CPC yesterday', y.clicks > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') + kpi('Conversion rate yesterday', y.clicks > 0 && y.attr_units != null ? (Math.round(Number(y.attr_units) / Number(y.clicks) * 1000) / 10) + '%' : '—', 'units from ads ÷ clicks') + kpi('Orders yesterday, all channels', String(y.orders || 0), (y.units || 0) + ' units') + kpi('Open alerts', String((D.alerts && D.alerts.n) || 0), ((D.alerts && D.alerts.high) || 0) + ' high' + (CM.account ? ' · all accounts' : ''), (D.alerts && D.alerts.high) ? 'an-neg' : '') + kpi('Suggestions waiting', String(D.decisions_waiting || 0), 'suggestion only, nothing sent to eBay') + '</div>';
     /* by account today: spend, attributed, ROAS, CPC, CVR, orders — never a profit figure */
     if (byAcct && byAcct.length) {
       h += '<div class="an-panel"><h3>Today by account' + src('today so far · every 5 min') + '</h3><div class="an-sub">Spend and sales from ads since 00:00 UTC, as far as eBay has reported. Orders are counted by UK day.</div><div class="an-scroll"><table class="an-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Sales from ads</th><th class="r">ROAS</th><th class="r">Clicks</th><th class="r">CPC</th><th class="r">Conversion rate</th><th class="r">Units from ads</th><th class="r">Orders</th><th class="r">Units</th></tr></thead><tbody>' +
-        byAcct.map(function (a) { var ck = num(a.clicks) || 0, sp = num(a.spend); return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(sp) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + roas(cmRoas(a)) + '</td><td class="r">' + ck + '</td><td class="r">' + (a.cpc != null ? gbp(a.cpc) : (ck > 0 && sp != null ? gbp(sp / ck) : '—')) + '</td><td class="r">' + (a.cvr != null ? (Math.round(Number(a.cvr) * 1000) / 10) + '%' : (ck > 0 && a.attr_units != null ? (Math.round(Number(a.attr_units) / ck * 1000) / 10) + '%' : '—')) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + (a.orders == null ? '—' : a.orders) + '</td><td class="r">' + (a.units == null ? '—' : a.units) + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+        byAcct.map(function (a) { var ck = num(a.clicks) || 0, sp = num(a.spend); return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(sp) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td><td class="r">' + roas(cmRoas(a)) + '</td><td class="r">' + ck + '</td><td class="r">' + (a.cpc != null ? gbp(a.cpc) : (ck > 0 && sp != null ? gbp(sp / ck) : '—')) + '</td><td class="r">' + (a.cvr != null ? (Math.round(Number(a.cvr) * 1000) / 10) + '%' : (ck > 0 && a.attr_units != null ? (Math.round(Number(a.attr_units) / ck * 1000) / 10) + '%' : '—')) + '</td><td class="r">' + (a.attr_units || 0) + '</td><td class="r">' + (a.orders == null ? '—' : a.orders) + '</td><td class="r">' + (a.units == null ? '—' : a.units) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        /* the listings table left this page (owner, 27 Oct: "kept elsewhere"): say where it lives */
+        '<div class="an-sub" style="margin:10px 0 0">Each listing\'s spend today, and over the last 3, 7 or 14 days, is on <a href="#adsCentre" style="color:var(--gold-a);font-weight:800">Ads command centre</a>.</div></div>';
     }
-    /* listings spending today against their own 28-day average per active day */
-    var items = D.items_today || (T && T.items) || [];
-    if (items.length) {
-      /* the engine's spend_today is the whole day's sum; the returned rows are the top 150 */
-      var total = num(D.spend_today) != null ? num(D.spend_today) : cmSum(items, 'spend');
-      var rows = items.slice().sort(function (a, b) { return (num(b.spend) || 0) - (num(a.spend) || 0); });
-      var sampled = rows.filter(function (r) { return r.spend != null; }).length, orderOnly = rows.length - sampled;
-      h += '<div class="an-panel"><h3>Listings spending today' + src('today so far · every 5 min') + '</h3><div class="an-sub">' + sampled + ' listing' + (sampled === 1 ? '' : 's') + ' with an ad reading today' + (orderOnly ? ' and ' + orderOnly + ' that only sold' : '') + ', biggest spend first' + (rows.length > 80 ? ', showing 80' : '') + '. ' + esc(todayNote) + '. Profit is each listing\'s own, over the orders we can already cost.</div>' +
-        '<div class="an-scroll"><table class="an-tbl"><thead><tr><th>Listing</th><th class="r">Spend today</th><th class="r">vs 28-day avg</th><th class="r">Clicks</th><th class="r">Units from ads</th><th class="r">Orders</th><th class="r">Profit</th><th class="r">Share of today</th></tr></thead><tbody>' +
-        rows.slice(0, 80).map(function (r) {
-          var sp = num(r.spend), av = num(r.avg_spend_active_day_28 != null ? r.avg_spend_active_day_28 : (r.spend_avg28 != null ? r.spend_avg28 : (r.avg28 != null ? r.avg28 : r.spend_28d_avg)));
-          var vs = '—';
-          if (av != null && sp != null) { if (av > 0) { var d = (sp - av) / av; vs = '<span class="' + (d > 0.15 ? 'an-neg' : d < -0.15 ? 'an-pos' : '') + '">' + (d >= 0 ? '▲ +' : '▼ −') + Math.round(Math.abs(d) * 100) + '%</span> <span class="an-empty" style="padding:0;display:inline">' + gbp(av) + '/active day</span>'; } else vs = sp > 0 ? '<span class="an-neg">▲ new</span>' : '—'; }
-          else if (sp != null && sp > 0 && r.avg_spend_active_day_28 === null) vs = '<span class="an-neg">▲ new</span>';
-          var share = r.spend_share != null ? num(r.spend_share) : (r.share_spend != null ? num(r.share_spend) : (total > 0 && sp != null ? sp / total : null));
-          return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(sp) + '</td><td class="r">' + vs + '</td><td class="r">' + (r.clicks == null ? '—' : r.clicks) + '</td><td class="r">' + (r.attr_units == null ? '—' : r.attr_units) + '</td><td class="r">' + (r.orders == null ? '—' : r.orders) + '</td><td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders, r.unpriced_orders) + '</td><td class="r">' + (share == null ? '—' : Math.round(share * 1000) / 10 + '%') + '</td></tr>';
-        }).join('') + '</tbody></table></div></div>';
-    } else if (T || D.items_today) {
-      h += '<div class="an-panel"><h3>Listings spending today' + src('today so far · every 5 min') + '</h3><div class="an-empty">No ad figures from eBay yet today. They start arriving around 08:00 UK.</div></div>';
-    }
-    /* hour by hour today from the 5-minute deltas; the carry hour (everything before the first sample) is stated, not plotted */
-    var hc = D.hour_curve || (T && T.hour_curve) || null;   /* identical copies: D is the home */
-    if (hc) {
-      var carry = num(D.carry_spend != null ? D.carry_spend : (T && T.carry_spend));
-      var byH = {}; hc.forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null) byH[hh] = x; });
-      var hrs = []; for (var i = 0; i < 24; i++) { var x = byH[i] || {}; hrs.push({ label: (i < 10 ? '0' : '') + i, value: num(x.spend) || 0, title: i + ':00 UK · ' + gbp(num(x.spend) || 0) + ' spend' + (x.attr_units != null ? ' · ' + x.attr_units + ' units from ads' : '') }); }
-      var any = hrs.some(function (x) { return x.value > 0; });
-      h += '<div class="an-panel"><h3>Today hour by hour' + src('today so far · every 5 min') + '</h3><div class="an-sub">Spend in each UK hour' + (carry != null && carry > 0 ? '. <b>' + gbp(carry) + ' had already been spent before the first reading today</b> and is not on the chart' : '') + '.</div>' +
-        (any ? chartBars(hrs, { height: 170, everyNth: 3, minGap: 32 }) : '<div class="an-empty">No ad figures from eBay yet today.</div>') + '</div>';
-    }
-    /* Bars you can read the value off, using the portal's own pill kit — the old version was heights
-       and a tooltip, which is a shape rather than a number. */
-    if (D.report_hours) { h += '<div class="an-panel"><h3>Yesterday hour by hour' + src('orders') + src('fleet profile') + '</h3>' +
-      '<div class="an-sub">Gold = units sold. Red = an hour well below the share of the day it usually takes.</div>' +
-      chartBars(D.report_hours.map(function (x) {
-        return { label: (x.hour < 10 ? '0' : '') + x.hour, value: Number(x.units) || 0, strong: (x.z != null && x.z <= -2),
-          title: x.hour + ':00 · ' + x.units + ' units' + (x.expected != null ? ', expected ' + x.expected : '') };
-      }), { height: 170, everyNth: 3, minGap: 32, strongColor: '#e0563f', fmt: function (v) { return String(Math.round(v)); } }) + '</div>'; }
     var slotsToday = D.today_slots || [];
     var tot = slotsToday.reduce(function (t, s) { return t + Number(s.units); }, 0);
     h += '<div class="an-panel"><h3>Today so far by slot' + src('orders') + '</h3><div class="an-sub">Against the times of day this fleet usually sells in.</div><table class="an-tbl"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Share</th><th class="r">Profile</th></tr></thead><tbody>' + SLOTS.map(function (s, i) { var r = slotsToday.filter(function (x) { return Number(x.slot) === i; })[0]; var u = r ? Number(r.units) : 0; var p = D.slot_profile && D.slot_profile.shares ? D.slot_profile.shares[i] : null; return '<tr><td>' + s + '</td><td class="r">' + u + '</td><td class="r">' + (tot ? Math.round(u / tot * 100) + '%' : '—') + '</td><td class="r">' + (p == null ? '—' : Math.round(p * 100) + '%') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-    if (D.by_date && D.by_date.length) h += '<div class="an-panel"><h3>Fleet ad spend by date' + src('eBay ads report') + '</h3>' +
-      '<div class="an-sub">Sundays in light gold. Hover a bar for that day\'s sales from ads and ROAS.</div>' +
-      chartBars(D.by_date.map(function (d) {
-        var sp = Number(d.spend) || 0, rv = d.attr_revenue != null ? Number(d.attr_revenue) : null;
-        return { label: String(d.day).slice(8), value: sp, strong: Number(d.weekday) === 6,
-          title: d.day + ' · ' + gbp(sp) + ' spend' + (rv != null ? ' · ' + gbp(rv) + ' sales from ads · ROAS ' + (sp > 0 ? roas(rv / sp) : '—') : '') };
-      }), { height: 180, everyNth: 3, minGap: 46 }) + '</div>';
+    h += ovHourlyPanel(D, T);
     h += '<div class="an-panel"><h3>How up to date this is</h3><div>' + [['Orders updated', ago(f.orders && f.orders.t)], ['eBay ad report covers up to', (f.ads_report_day && f.ads_report_day.d) || '—'], ['Last ad reading', ago(f.last_sample && f.last_sample.t)], ['Daily totals', ago(f.rollup && f.rollup.t)], ['Patterns', esc(f.profiles || 'not yet')], ['Forecast', esc(f.forecast || 'not yet')]].map(function (x) { return '<span class="mo-chip">' + esc(x[0]) + ': <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div></div>';
     h += '<div class="an-note">Computed ' + esc(String(D.computed_at || '').slice(11, 19)) + ' UTC · ' + esc(D.source || '') + ' · refreshes every 5 min while this tab is open</div>';
     $('moCmd').innerHTML = h;
+  }
+  /* "All account hourly spends" (owner, 27 Oct): in place of the two hour-by-hour charts, one chart of
+     the UK day with two bars per hour, money spent in red and orders received in green, side by side.
+     Spend is the 5-minute ad readings' within-hour deltas (hour_curve); what was spent before the first
+     reading of the day cannot be put in any hour and is stated under the title instead, never drawn as
+     an hour's own spending. Orders are counted by the UK hour they were placed, every channel
+     (today_hours, engine 27 Oct). An hour still to come has no bar; an hour before the first reading
+     has no red bar; an hour that has passed with nothing in it gets a hairline and a 0. */
+  function ovHourlyPanel(D, T) {
+    var hc = D.hour_curve || (T && T.hour_curve) || null;
+    var oh = Array.isArray(D.today_hours) ? D.today_hours : null;
+    var carry = num(D.carry_spend != null ? D.carry_spend : (T && T.carry_spend));
+    var carryHour = num(D.carry_hour_uk != null ? D.carry_hour_uk : (T && T.carry_hour_uk));
+    var sampled = !!(D.ads_sampled || (T && T.ads_sampled) || (hc && hc.length));
+    var spend = {}, orders = {}, units = {}, firstSpendHour = null, i;
+    (hc || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh == null) return; spend[hh] = (spend[hh] || 0) + (num(x.spend) || 0); if (firstSpendHour == null || hh < firstSpendHour) firstSpendHour = hh; });
+    (oh || []).forEach(function (x) { var hh = num(x.hour); if (hh == null) return; orders[hh] = (orders[hh] || 0) + (num(x.orders) || 0); units[hh] = (units[hh] || 0) + (num(x.units) || 0); });
+    var from = carryHour != null ? carryHour : firstSpendHour;
+    var nowH = ukHourNow(), pts = [], sumSpend = 0, sumOrders = 0, sumUnits = 0;
+    for (i = 0; i < 24; i++) {
+      var past = i <= nowH;
+      var a = sampled && past && from != null && i >= from ? Math.round((spend[i] || 0) * 100) / 100 : null;
+      var b = oh && past ? (orders[i] || 0) : null;
+      if (a != null) sumSpend += a;
+      if (b != null) { sumOrders += b; sumUnits += units[i] || 0; }
+      var when = pad2(i) + ':00–' + pad2((i + 1) % 24) + ':00 UK';
+      pts.push({ label: pad2(i), a: a, b: b,
+        titleA: when + ' · ' + (a == null ? (past ? 'spend not split by hour yet' : 'still to come') : gbp(a) + ' spent on ads'),
+        titleB: when + ' · ' + (b == null ? (past ? 'orders by hour not available yet' : 'still to come') : b + ' order' + (b === 1 ? '' : 's') + ' received' + (units[i] ? ' · ' + units[i] + ' unit' + (units[i] === 1 ? '' : 's') : '')) });
+    }
+    var title = CM.account ? 'Hourly spends · ' + CM.account : 'All account hourly spends';
+    var sub = 'Money spent on ads in red and orders received in green, in each UK hour of today.';
+    if (carry != null && carry > 0) sub += ' <b>' + gbp(carry) + ' had already been spent before the first reading today</b> and is not on the chart.';
+    if (!sampled) sub += ' No ad figures from eBay yet today. They start arriving around 08:00 UK.';
+    if (!oh) sub += ' Orders by the hour appear once the engine update of 27 Oct is live.';
+    var any = pts.some(function (p) { return p.a != null || p.b != null; });
+    return '<div class="an-panel"><h3>' + esc(title) + src('hourly spends', 'today so far · every 5 min') + '</h3><div class="an-sub">' + sub + '</div>' +
+      '<div class="wr-legend"><span><i style="background:' + OV_SPEND + '"></i>money spent</span><span><i style="background:' + OV_ORDERS + '"></i>orders received</span></div>' +
+      /* 48 bars do not shrink to a phone and stay readable: below ~860 px the chart keeps its size and scrolls sideways */
+      (any ? '<div class="an-scroll"><div style="min-width:860px">' + chartPairBars(pts, { colorA: OV_SPEND, colorB: OV_ORDERS, fmtA: chartMoney, fmtB: chartNum, aria: title + ': money spent and orders received in each UK hour of today' }) + '</div></div>' : '<div class="an-empty">Nothing to draw yet today.</div>') +
+      '<div class="an-sub" style="margin:8px 0 0">Each colour is drawn against its own busiest hour, so the two shapes line up; read the figure on each bar. So far today: <b>' + gbp(sumSpend) + '</b> spent in the hours shown' + (carry != null && carry > 0 ? ' plus <b>' + gbp(carry) + '</b> before the first reading' : '') + (oh ? ' · <b>' + sumOrders + '</b> order' + (sumOrders === 1 ? '' : 's') + ' (' + sumUnits + ' unit' + (sumUnits === 1 ? '' : 's') + ')' : '') + '.</div></div>';
   }
 
   /* ---------------- Alerts ---------------- */
@@ -220,7 +283,8 @@
           moLine('Urgency', '<span class="mo-urg ' + esc(urg) + '">' + esc(urg) + '</span> ' + esc(urgencyText(urg)) + ' · open ' + esc(openText(a)) + (a.acknowledged_by ? ' · acknowledged by ' + esc(a.acknowledged_by) : '') + (a.snoozed_until ? ' · snoozed to ' + esc(String(a.snoozed_until).slice(0, 10)) : '')) +
           '<div class="btns">' + (a.item_id ? '<button data-open="' + esc(a.item_id) + '">Open listing</button>' : '') + '<button data-snooze="' + esc(a.alert_id) + '">Snooze 3 d</button><button data-ack="' + esc(a.alert_id) + '">Acknowledge</button></div></div>';
       }).join('') : '<div class="an-empty">No open alerts in this filter.</div>') + '</div>';
-      h += '<div class="an-panel"><h3>Every check</h3><div class="an-sub">' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? 'Management can turn a check off. It stops firing and its open alerts clear on the next run.' : 'Management can turn checks on and off.') + '</div><table class="an-tbl"><thead><tr><th>Fires when</th><th>Why it matters</th><th>Severity</th><th class="r">Waits before firing again</th><th>What to do</th><th>State</th></tr></thead><tbody>' + D.rules.map(function (r) { return '<tr><td>' + esc(r.text) + '</td><td>' + esc(r.why_matters || r.why || '—') + '</td><td>' + esc(r.sev) + '</td><td class="r">' + r.cool + ' d</td><td>' + esc(r.action) + '</td><td>' + ((STATE.user && (STATE.user.super || ['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0)) ? '<button class="an-btn" style="padding:3px 8px;font-size:11px" data-rule="' + esc(r.rule_id) + '" data-en="' + (r.enabled ? 0 : 1) + '">' + (r.enabled ? 'on' : 'off') + '</button>' : (r.enabled ? 'on' : 'off')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      /* owner, 27 Oct: "Every check — removed". The panel listed every check with Management's on/off switch;
+         the checks keep running exactly as set, and the switch is still the adtoolAlerts 'rule' action. */
       h += '<div class="an-panel"><h3>History</h3><table class="an-tbl"><thead><tr><th>Check</th><th>Where</th><th>Fired</th><th>Cleared</th><th>Acknowledged</th></tr></thead><tbody>' + (D.history.length ? D.history.map(function (a) { return '<tr><td>' + esc(a.what || ruleText[a.rule || a.rule_id] || 'a check') + '</td><td>' + esc(a.item_id || a.account || '') + '</td><td>' + esc(String(a.fired_at).slice(0, 16)) + '</td><td>' + esc(String(a.cleared_at || '').slice(0, 16) || '—') + '</td><td>' + esc(a.acknowledged_by || '—') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="an-empty">nothing yet</td></tr>') + '</tbody></table></div>';
       h += '<div class="an-note">Last run: ' + (D.last_run ? esc(String(D.last_run.finished_at).slice(0, 16)) + ' · ' + esc(D.last_run.note) : 'not run yet') + '</div>';
       $('moAl').innerHTML = h;
@@ -233,11 +297,16 @@
     }).catch(function (e) { fail('moAl', e); });
   }
 
-  /* ---------------- Yesterday's report ---------------- */
+  /* ---------------- Past Situation (was Yesterday's report) ----------------
+     Owner, 27 Oct: "Advertising signals & Yesterday report to be merged under one title page, Past
+     Situation ... all information should be reflective of dates clicks." The report is drawn exactly as
+     before and already follows the day picked; the advertising signals about that same day now follow it
+     too, as the Advertising signals page draws them (view-signals.js, acknowledge with a comment
+     included). Signals leave the feed after a few days, and the panel says so rather than looking quiet. */
   var RP = { day: '', account: '' };
   VIEWS.adtoolReport = {
-    label: "Yesterday's report (ads)", hidden: true, order: 94, roles: ROLES, icon: '<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><path d="M9 13h7M9 17h7"/>',
-    render: function () { return '<div class="an-wrap">' + hg("Yesterday's report", 'Yesterday\'s spend and sales, and its best and worst listings') + '<div id="moRp"><div class="an-empty">Loading…</div></div></div>'; },
+    label: 'Past Situation (ads)', hidden: true, order: 94, roles: ROLES, icon: '<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><path d="M9 13h7M9 17h7"/>',
+    render: function () { return '<div class="an-wrap">' + hg('Past Situation', 'Pick a day: its spend and sales, hour by hour, its best and worst listings, and its advertising signals') + '<div id="moRp"><div class="an-empty">Loading…</div></div></div>'; },
     init: function () { loadReport(); }
   };
   function loadReport() {
@@ -248,7 +317,9 @@
       /* Never show an older day in silence. The owner opened this page, saw Sunday where he expected
          yesterday, and rightly asked what the hell he was looking at — the page knew and did not say. */
       var h = '';
-      if (D.yesterday && D.day !== D.yesterday) {
+      /* Past Situation (27 Oct): picking a day is what the page is for, so the warning is only for the case it was
+         written for, the page falling back to an older day on its own while yesterday's report is not in yet */
+      if (!RP.day && D.yesterday && D.day !== D.yesterday) {
         h += '<div class="an-note" style="border:1px solid rgba(224,86,63,.5);background:rgba(224,86,63,.08);color:#ffb3a6;margin-bottom:12px">' +
           '<b>This is not yesterday.</b> You are looking at <b>' + esc(D.day) + '</b>. ' +
           (D.yesterday_missing
@@ -295,7 +366,13 @@
       /* the ads-switched-on-or-off count used to be restated here as well as in the bullets above.
          One home per number: the bullet keeps it and points at the page that owns the detail. */
       h += '<div class="an-note">Open alerts ' + ((R.open_alerts && R.open_alerts.n) || 0) + ' (' + ((R.open_alerts && R.open_alerts.high) || 0) + ' high) · ' + (R.capped_listings || 0) + ' listings ran out of budget</div>';
+      /* the day's advertising signals (Advertising signals, merged in) — the ids are the ones its acknowledge repaints */
+      var sigOk = typeof window.sgAdSignalsForDay === 'function';
+      h += '<div class="an-panel" style="margin-top:12px"><h3>Advertising signals · ' + esc(R.day) + '</h3>' +
+        '<div class="an-sub">Worst CPC performers, listings that went negative and Wrong Advertising alarms about this day. Acknowledge each with a comment; who said what stays on the card.</div>' +
+        (sigOk ? '<div class="sig-dept-sum" id="sigAdSum">Loading…</div><div class="sig-list" id="sigAdAll"><div class="spinner"></div></div>' : '<div class="an-empty">Signals are not part of this build.</div>') + '</div>';
       $('moRp').innerHTML = h;
+      if (sigOk) window.sgAdSignalsForDay('sigAdAll', 'sigAdSum', R.day || D.day);
       var fs = document.querySelectorAll('#moRp .an-filters button'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { if (this.hasAttribute('data-d')) { RP.day = this.getAttribute('data-d'); } else if (this.hasAttribute('data-acc')) { RP.account = this.getAttribute('data-acc'); } loadReport(); };
       $('moPdf').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, pdf: 1 }).then(function (r) { var bin = atob(r.pdf_base64); var arr = new Uint8Array(bin.length); for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k); var blob = new Blob([arr], { type: 'application/pdf' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = r.filename; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 2000); b.disabled = false; }).catch(function (e) { toast(e.message || 'failed'); b.disabled = false; }); };
       $('moSend').onclick = function () { var b = this; b.disabled = true; api('adtoolReport', { day: D.day, send: 1 }).then(function () { toast('Sent to the management inbox'); b.disabled = false; }).catch(function (e) { toast(e.message); b.disabled = false; }); };
