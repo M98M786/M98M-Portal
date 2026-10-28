@@ -20136,6 +20136,24 @@ const ROUTES = {
     },
   },
 
+  /* 29 Oct (owner): "we will perform all operations from here" — connect a NEW selling account with no
+     portal session. Key-gated twins of ebayConsentLinks / ebaySubmitConsent: the link is minted per
+     account row, the single-use code is exchanged by the very same checked path (state must match the
+     row, spent codes refused), and the audit row names the sync key as the actor. Nothing is shown to
+     staff until the account's own data syncs. */
+  ebayConsentLinkKey: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      if (!account) throw new Error('SAY: account is needed');
+      const row = await ctx.env.DB.prepare("SELECT name, CASE WHEN COALESCE(oauth_ref,'') != '' THEN 1 ELSE 0 END AS connected FROM accounts WHERE name = ?1").bind(account).first();
+      if (!row) throw new Error('SAY: unknown account row — create it with syncAccounts first');
+      return { account, connected: !!row.connected, url: await ebayConsentUrl(ctx.env, account) };
+    },
+  },
+  ebaySubmitConsentKey: {
+    auth: 'sync', fn: async (p, ctx) => ROUTES.ebaySubmitConsent.fn(p, Object.assign({}, ctx, { email: String(ctx.email || 'sync-key') })),
+  },
+
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
