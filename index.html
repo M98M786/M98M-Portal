@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261028-2108';
+var BUILD = '20261028-2147';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2744,7 +2744,7 @@ VIEW_CSS.push(
     prefetch: function () { return api('adsBoard', {}); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
-          '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day — combined, per account, per item</span>' +
+          '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day, combined: per account, per item</span>' +
           '<span style="margin-left:auto;display:flex;gap:6px">' +
             '<button class="minibtn" data-ac-d="3">3d</button>' +
             '<button class="minibtn" data-ac-d="7">7d</button>' +
@@ -9998,7 +9998,7 @@ VIEW_CSS.push(
     prefetch: function () { return api('adsBoard', { days: 14 }); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Advertising <span class="goldtext">money</span></h1>' +
-        '<span class="sub">what the ads cost against what they brought back — per day, per account, against the 5× target</span>' +
+        '<span class="sub">what the ads cost against what they brought back, per day, per account, against the 5× target</span>' +
         '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
         [3, 7, 14, 30, 60].map(function (n) {
           return '<button class="minibtn' + (AM.days === n && !AM.from ? ' on' : '') + '" data-am-d="' + n + '">' + n + 'd</button>';
@@ -22662,12 +22662,12 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="dr-kpi"><div class="l">Eligible NOW · add them</div><div class="v" style="color:var(--' + (cov.eligible_now ? 'warn' : 'ok') + ')">' + (cov.eligible_now || 0) + '</div>' +
           '<div class="d" style="color:var(--text-3)">uncovered + past the 14-day revision rule</div></div>' +
         '<div class="dr-kpi"><div class="l">Blocked by 14-day rule</div><div class="v">' + (cov.blocked_14d || 0) + '</div>' +
-          '<div class="d" style="color:var(--text-3)">revised too recently — clock running</div></div>' +
+          '<div class="d" style="color:var(--text-3)">revised too recently, clock running</div></div>' +
         '<div class="dr-kpi"><div class="l">Ending within 2 days</div><div class="v" style="color:var(--' + (soon.length ? 'bad' : 'ok') + ')">' + soon.length + '</div>' +
           '<div class="d" style="color:var(--text-3)">management is lettered 2 days out</div></div>' +
         '</div>';
       if (soon.length) {
-        h += '<div class="ir-alert"><b style="color:var(--warn)">🟠 Ending soon — arrange the replacement events:</b>';
+        h += '<div class="ir-alert"><b style="color:var(--warn)">🟠 Ending soon, arrange the replacement events:</b>';
         soon.forEach(function (p) {
           h += '<div style="margin-top:4px"><b>' + esc(String(p.name || p.promo_id)) + '</b> · ' + esc(String(p.account)) +
             ' · ends ' + esc(String(p.end_at).slice(0, 10)) + ' · ' + (p.item_n || 0) + ' item(s)</div>';
@@ -22689,7 +22689,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       h += '<div class="scroll"><table class="mk-tbl"><thead><tr>' +
         '<th>Account</th><th>Sale event \u00b7 click for its listings + history</th><th>Type</th><th>Status</th><th>Discount</th><th>Items</th><th>Started</th><th>Ends</th></tr></thead><tbody>';
       if (!promos.length) {
-        h += '<tr><td colspan="8"><div class="empty">No promotions synced yet — the sync runs hourly at half past (or press "Pull now" on Account health → Engine ops → marketingSync).</div></td></tr>';
+        h += '<tr><td colspan="8"><div class="empty">No promotions synced yet. The sync runs hourly at half past (or press "Pull now" on Account health → Engine ops → marketingSync).</div></td></tr>';
       }
       promos.forEach(function (p) {
         var run = /RUNNING/i.test(String(p.status));
@@ -22706,7 +22706,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       h += '</tbody></table></div>';
       var el = (d && d.eligible) || [];
       if (el.length) {
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);font-weight:800;margin:14px 0 4px">🟠 Eligible now — in no running event, past the 14-day rule (' + ((d.coverage || {}).eligible_now || el.length) + ')</div>' +
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);font-weight:800;margin:14px 0 4px">🟠 Eligible now: in no running event, past the 14-day rule (' + ((d.coverage || {}).eligible_now || el.length) + ')</div>' +
           '<div class="scroll" style="max-height:280px"><table class="mk-tbl"><thead><tr><th>Listing</th><th>Account</th><th>Price</th><th>Last revision seen</th></tr></thead><tbody>';
         el.forEach(function (i) {
           h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(i.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
@@ -27495,7 +27495,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function pcComposer() {
     return '<div class="card enter d2 hidden" id="pcNewCard" style="margin-bottom:16px">' +
       '<div class="hd">Nominate a listing for CPC ' +
-        '<span class="hint">Management decides — nothing reaches the workbook before they approve</span></div>' +
+        '<span class="hint">Management decides: nothing reaches the workbook before they approve</span></div>' +
       '<div class="bd">' +
         '<div class="pc-grid">' +
           '<div class="field"><label>Account</label><div id="pcAccWrap">' +
@@ -27507,7 +27507,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<div class="field"><label>Date Listing Started</label><input class="pc-in" id="pcStarted" type="date"></div>' +
           '<div class="field"><label>Reason for Selection</label><select class="pc-sel" id="pcReason"></select></div>' +
           '<div class="field"><label>Our price</label>' +
-            '<input class="pc-in" id="pcOurPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="7.49 — a range like 8.87-12.97 is kept as written"></div>' +
+            '<input class="pc-in" id="pcOurPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="7.49, or a range like 8.87-12.97, kept as written"></div>' +
           '<div class="field"><label>Avg Sold Price</label>' +
             '<input class="pc-in" id="pcAvgSold" type="text" inputmode="decimal" autocomplete="off"></div>' +
           '<div class="field"><label>' + esc(PC_L30) + '</label>' +
@@ -27521,7 +27521,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<textarea class="pc-ta" id="pcComments" placeholder="Why this one is worth the ad spend"></textarea></div>' +
         '<div class="pc-box pc-blue"><div class="pc-k">Where this goes</div>' +
           '<div class="pc-txt">Every field is kept in full in the portal. On approval the record is mirrored into this ' +
-          'account&#39;s tab of the Potential CPC workbook — into the columns that tab actually carries, and the ' +
+          'account&#39;s tab of the Potential CPC workbook, into the columns that tab actually carries, and the ' +
           'decider is told which ones it does not. No column is ever added to the sheet.</div></div>' +
         '<div class="pc-btns"><button class="btn-gold" id="pcNewSend">Submit for Management review</button>' +
           '<button class="minibtn" id="pcNewCancel">Cancel</button>' +
@@ -27787,7 +27787,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var rows = PC.queue.filter(function (r) { return !want || pcNorm(r.account) === want; });
     if (!rows.length) {
       box.innerHTML = '<div class="pc-empty">Nothing here right now.' +
-        '<span>' + (PC.mayDecide ? 'The queue is clear — Advertising is not waiting on a decision.' : 'Team Lead sees this queue; Management decides (§4.3).') + '</span></div>';
+        '<span>' + (PC.mayDecide ? 'The queue is clear: Advertising is not waiting on a decision.' : 'Team Lead sees this queue; Management decides (§4.3).') + '</span></div>';
       return;
     }
     box.innerHTML = rows.map(pcQueueCardRow).join('');
@@ -27857,7 +27857,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<li>A <b>cpc_research</b> task (§8.3) is created for the Item Lister you name, with the deadline you set.</li>' +
           '<li>The lister works it and submits — §8.0b: nothing is Completed until the keywords and working are approved.</li>' +
           '<li>Only then does <b>the Advertising Manager switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
-          '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook — you will be told which columns that tab does not carry.</li>' +
+          '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook; you will be told which columns that tab does not carry.</li>' +
         '</ol>' +
         (win ? '<div class="pc-sub2" style="margin-top:8px">Campaign testing window (§8.0): 5:00–10:00 PM UK = ' + esc(win) + ' today.</div>' : '') +
       '</div>' +
@@ -27911,7 +27911,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
     btn.disabled = true;
     api('decidePotentialCpc', payload).then(function (res) {
-      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — the Advertising Manager has your comment.');
+      toast(act === 'approve' ? 'Approved: the research task is on its way.' : 'Rejected: the Advertising Manager has your comment.');
       pcShowResult(box, id, act === 'approve' ? pcApproveResult(res) : pcRejectResult(res));
       if (STATE.counts && STATE.counts.potentialCpc) { pcCount(Math.max(0, STATE.counts.potentialCpc - 1)); }
     }).catch(function (e) { btn.disabled = false; toast('Not decided: ' + e.message); });
@@ -27970,7 +27970,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     written = w.written || [];
     missing = w.skippedMissing || [];
     head = m.shadow
-      ? 'Held by the pilot gate — nothing was written to the live workbook yet.'
+      ? 'Held by the pilot gate: nothing was written to the live workbook yet.'
       : 'Written to the Potential CPC workbook.';
     txt = head + ' Tab: ' + (pcStr(w.tab) || '—') + '. Columns ' + (m.shadow ? 'it would fill' : 'filled') + ': ' +
       (written.length ? written.join(' · ') : 'none');
@@ -27995,7 +27995,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         toast('Campaign switched to ' + PC_CAMPAIGN_CPC + '.');
         html = '<div class="pc-box pc-gold"><div class="pc-k">Campaign switched</div><div class="pc-txt">' +
           esc((pcStr(res.previous_campaign) || 'No campaign') + ' → ' + PC_CAMPAIGN_CPC + '.') +
-          (res.shadow ? ' Recorded in the portal — the pilot gate is holding the live sheet write.' : '') +
+          (res.shadow ? ' Recorded in the portal; the pilot gate is holding the live sheet write.' : '') +
           ' CAMPAIGN_LOG updated' + (res.notified_to && res.notified_to.length ? ' · notified ' + esc(res.notified_to.join(', ')) : '') + '.</div></div>';
       } else {
         html = '<div class="pc-box pc-warn"><div class="pc-k">Campaign not changed</div><div class="pc-txt">The Main Sheet was not updated: ' +
@@ -37100,7 +37100,7 @@ function saveSchedule() {
     prefetch: function () { return api('trafficBoard', { range: 7 }); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">traffic</span></h1>' +
-          '<span class="sub">impressions, views, CTR and conversion — per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
+          '<span class="sub">impressions, views, CTR and conversion, per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
             '<button class="minibtn' + (TR.mode === 'today' ? ' on' : '') + '" id="trToday">Today</button>' +

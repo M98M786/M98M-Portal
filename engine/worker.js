@@ -5561,7 +5561,8 @@ const ADTOOL_ACTIONS = {
       const camps = JSON.parse(L.campaigns_json || '[]');
       let where = null; try { where = await adtWhereRows(env, iid); } catch (e) { where = null; }
       let profile = null; try { profile = await adtListingProfileBundle(env, iid); } catch (e) { profile = null; }
-      let forecast = null; try { forecast = await adtForecastBundle(env, iid); } catch (e) { forecast = null; }
+      /* 28 Oct spec: forecasting left the portal and nothing renders this field, so the two reads behind it are gone. */
+      let forecast = null;
       let decision = null; try { decision = await env.DB.prepare("SELECT day, batch, decision, rules_json, why, action, confidence, expected_value, outcome_score, COALESCE(outcome_provisional, 0) AS outcome_provisional FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC, batch LIMIT 1").bind(iid).first(); } catch (e) { decision = null; }
       let narrative = null; try { narrative = await env.DB.prepare("SELECT text, model, validated, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 ORDER BY day DESC LIMIT 1").bind(iid).first(); } catch (e) { narrative = null; }
       const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;

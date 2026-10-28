@@ -193,7 +193,7 @@
     prefetch: function () { return api('trafficBoard', { range: 7 }); },
     render: function () {
       return '<div class="hgroup enter d1"><h1>Account <span class="goldtext">traffic</span></h1>' +
-          '<span class="sub">impressions, views, CTR and conversion — per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
+          '<span class="sub">impressions, views, CTR and conversion, per account, per day, per listing · eBay’s own Traffic Report</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">' +
             '<button class="minibtn' + (TR.mode === 'today' ? ' on' : '') + '" id="trToday">Today</button>' +

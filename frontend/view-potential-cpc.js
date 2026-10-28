@@ -431,7 +431,7 @@
   function pcComposer() {
     return '<div class="card enter d2 hidden" id="pcNewCard" style="margin-bottom:16px">' +
       '<div class="hd">Nominate a listing for CPC ' +
-        '<span class="hint">Management decides — nothing reaches the workbook before they approve</span></div>' +
+        '<span class="hint">Management decides: nothing reaches the workbook before they approve</span></div>' +
       '<div class="bd">' +
         '<div class="pc-grid">' +
           '<div class="field"><label>Account</label><div id="pcAccWrap">' +
@@ -443,7 +443,7 @@
           '<div class="field"><label>Date Listing Started</label><input class="pc-in" id="pcStarted" type="date"></div>' +
           '<div class="field"><label>Reason for Selection</label><select class="pc-sel" id="pcReason"></select></div>' +
           '<div class="field"><label>Our price</label>' +
-            '<input class="pc-in" id="pcOurPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="7.49 — a range like 8.87-12.97 is kept as written"></div>' +
+            '<input class="pc-in" id="pcOurPrice" type="text" inputmode="decimal" autocomplete="off" placeholder="7.49, or a range like 8.87-12.97, kept as written"></div>' +
           '<div class="field"><label>Avg Sold Price</label>' +
             '<input class="pc-in" id="pcAvgSold" type="text" inputmode="decimal" autocomplete="off"></div>' +
           '<div class="field"><label>' + esc(PC_L30) + '</label>' +
@@ -457,7 +457,7 @@
           '<textarea class="pc-ta" id="pcComments" placeholder="Why this one is worth the ad spend"></textarea></div>' +
         '<div class="pc-box pc-blue"><div class="pc-k">Where this goes</div>' +
           '<div class="pc-txt">Every field is kept in full in the portal. On approval the record is mirrored into this ' +
-          'account&#39;s tab of the Potential CPC workbook — into the columns that tab actually carries, and the ' +
+          'account&#39;s tab of the Potential CPC workbook, into the columns that tab actually carries, and the ' +
           'decider is told which ones it does not. No column is ever added to the sheet.</div></div>' +
         '<div class="pc-btns"><button class="btn-gold" id="pcNewSend">Submit for Management review</button>' +
           '<button class="minibtn" id="pcNewCancel">Cancel</button>' +
@@ -723,7 +723,7 @@
     var rows = PC.queue.filter(function (r) { return !want || pcNorm(r.account) === want; });
     if (!rows.length) {
       box.innerHTML = '<div class="pc-empty">Nothing here right now.' +
-        '<span>' + (PC.mayDecide ? 'The queue is clear — Advertising is not waiting on a decision.' : 'Team Lead sees this queue; Management decides (§4.3).') + '</span></div>';
+        '<span>' + (PC.mayDecide ? 'The queue is clear: Advertising is not waiting on a decision.' : 'Team Lead sees this queue; Management decides (§4.3).') + '</span></div>';
       return;
     }
     box.innerHTML = rows.map(pcQueueCardRow).join('');
@@ -793,7 +793,7 @@
           '<li>A <b>cpc_research</b> task (§8.3) is created for the Item Lister you name, with the deadline you set.</li>' +
           '<li>The lister works it and submits — §8.0b: nothing is Completed until the keywords and working are approved.</li>' +
           '<li>Only then does <b>the Advertising Manager switch the campaign to ' + esc(PC_CAMPAIGN_CPC) + '</b>; CAMPAIGN_LOG records it and both sides are notified.</li>' +
-          '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook — you will be told which columns that tab does not carry.</li>' +
+          '<li>The nomination is mirrored into this account&#39;s tab of the Potential CPC workbook; you will be told which columns that tab does not carry.</li>' +
         '</ol>' +
         (win ? '<div class="pc-sub2" style="margin-top:8px">Campaign testing window (§8.0): 5:00–10:00 PM UK = ' + esc(win) + ' today.</div>' : '') +
       '</div>' +
@@ -847,7 +847,7 @@
 
     btn.disabled = true;
     api('decidePotentialCpc', payload).then(function (res) {
-      toast(act === 'approve' ? 'Approved — the research task is on its way.' : 'Rejected — the Advertising Manager has your comment.');
+      toast(act === 'approve' ? 'Approved: the research task is on its way.' : 'Rejected: the Advertising Manager has your comment.');
       pcShowResult(box, id, act === 'approve' ? pcApproveResult(res) : pcRejectResult(res));
       if (STATE.counts && STATE.counts.potentialCpc) { pcCount(Math.max(0, STATE.counts.potentialCpc - 1)); }
     }).catch(function (e) { btn.disabled = false; toast('Not decided: ' + e.message); });
@@ -906,7 +906,7 @@
     written = w.written || [];
     missing = w.skippedMissing || [];
     head = m.shadow
-      ? 'Held by the pilot gate — nothing was written to the live workbook yet.'
+      ? 'Held by the pilot gate: nothing was written to the live workbook yet.'
       : 'Written to the Potential CPC workbook.';
     txt = head + ' Tab: ' + (pcStr(w.tab) || '—') + '. Columns ' + (m.shadow ? 'it would fill' : 'filled') + ': ' +
       (written.length ? written.join(' · ') : 'none');
@@ -931,7 +931,7 @@
         toast('Campaign switched to ' + PC_CAMPAIGN_CPC + '.');
         html = '<div class="pc-box pc-gold"><div class="pc-k">Campaign switched</div><div class="pc-txt">' +
           esc((pcStr(res.previous_campaign) || 'No campaign') + ' → ' + PC_CAMPAIGN_CPC + '.') +
-          (res.shadow ? ' Recorded in the portal — the pilot gate is holding the live sheet write.' : '') +
+          (res.shadow ? ' Recorded in the portal; the pilot gate is holding the live sheet write.' : '') +
           ' CAMPAIGN_LOG updated' + (res.notified_to && res.notified_to.length ? ' · notified ' + esc(res.notified_to.join(', ')) : '') + '.</div></div>';
       } else {
         html = '<div class="pc-box pc-warn"><div class="pc-k">Campaign not changed</div><div class="pc-txt">The Main Sheet was not updated: ' +

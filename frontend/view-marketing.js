@@ -39,12 +39,12 @@
         '<div class="dr-kpi"><div class="l">Eligible NOW · add them</div><div class="v" style="color:var(--' + (cov.eligible_now ? 'warn' : 'ok') + ')">' + (cov.eligible_now || 0) + '</div>' +
           '<div class="d" style="color:var(--text-3)">uncovered + past the 14-day revision rule</div></div>' +
         '<div class="dr-kpi"><div class="l">Blocked by 14-day rule</div><div class="v">' + (cov.blocked_14d || 0) + '</div>' +
-          '<div class="d" style="color:var(--text-3)">revised too recently — clock running</div></div>' +
+          '<div class="d" style="color:var(--text-3)">revised too recently, clock running</div></div>' +
         '<div class="dr-kpi"><div class="l">Ending within 2 days</div><div class="v" style="color:var(--' + (soon.length ? 'bad' : 'ok') + ')">' + soon.length + '</div>' +
           '<div class="d" style="color:var(--text-3)">management is lettered 2 days out</div></div>' +
         '</div>';
       if (soon.length) {
-        h += '<div class="ir-alert"><b style="color:var(--warn)">🟠 Ending soon — arrange the replacement events:</b>';
+        h += '<div class="ir-alert"><b style="color:var(--warn)">🟠 Ending soon, arrange the replacement events:</b>';
         soon.forEach(function (p) {
           h += '<div style="margin-top:4px"><b>' + esc(String(p.name || p.promo_id)) + '</b> · ' + esc(String(p.account)) +
             ' · ends ' + esc(String(p.end_at).slice(0, 10)) + ' · ' + (p.item_n || 0) + ' item(s)</div>';
@@ -66,7 +66,7 @@
       h += '<div class="scroll"><table class="mk-tbl"><thead><tr>' +
         '<th>Account</th><th>Sale event \u00b7 click for its listings + history</th><th>Type</th><th>Status</th><th>Discount</th><th>Items</th><th>Started</th><th>Ends</th></tr></thead><tbody>';
       if (!promos.length) {
-        h += '<tr><td colspan="8"><div class="empty">No promotions synced yet — the sync runs hourly at half past (or press "Pull now" on Account health → Engine ops → marketingSync).</div></td></tr>';
+        h += '<tr><td colspan="8"><div class="empty">No promotions synced yet. The sync runs hourly at half past (or press "Pull now" on Account health → Engine ops → marketingSync).</div></td></tr>';
       }
       promos.forEach(function (p) {
         var run = /RUNNING/i.test(String(p.status));
@@ -83,7 +83,7 @@
       h += '</tbody></table></div>';
       var el = (d && d.eligible) || [];
       if (el.length) {
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);font-weight:800;margin:14px 0 4px">🟠 Eligible now — in no running event, past the 14-day rule (' + ((d.coverage || {}).eligible_now || el.length) + ')</div>' +
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);font-weight:800;margin:14px 0 4px">🟠 Eligible now: in no running event, past the 14-day rule (' + ((d.coverage || {}).eligible_now || el.length) + ')</div>' +
           '<div class="scroll" style="max-height:280px"><table class="mk-tbl"><thead><tr><th>Listing</th><th>Account</th><th>Price</th><th>Last revision seen</th></tr></thead><tbody>';
         el.forEach(function (i) {
           h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(i.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
