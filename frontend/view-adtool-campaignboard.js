@@ -24,11 +24,18 @@
     period: null, account: '', status: 'active', accounts: [], data: null,
     sort: { key: 'spend', dir: -1 },
     open: {},          /* account||campaign_id → true while its listings panel is open */
-    inside: {}         /* account||campaign_id → the adtoolCampaignListings payload, cached per load */
+    inside: {},        /* account||campaign_id → the adtoolCampaignListings payload, cached per load */
+    want: '',          /* the campaign id from #adtoolCampaignBoard/<campaign id>, opened once */
+    wantDone: false
   };
 
   VIEW_CSS.push([
     '.cbd-wrap{max-width:1420px}',
+    '.cbd-filterbar{border:1px solid var(--gold-line);border-radius:14px;padding:10px 14px 4px;margin:0 0 12px;background:var(--panel-2)}',
+    '.cbd-fl{display:flex;gap:10px;align-items:flex-start;margin-bottom:6px}',
+    '.cbd-fl>div{flex:1 1 auto;min-width:0}',
+    '.cbd-fk{flex:0 0 58px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;padding-top:7px}',
+    '.cbd-opened{border:1px solid var(--gold-b);border-radius:12px;padding:9px 13px;margin-bottom:12px;background:rgba(242,176,53,.08);font-size:12.5px;color:var(--text);line-height:1.55}',
     '.cbd-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}',
     '.cbd-filters button{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}',
     '.cbd-filters button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
@@ -206,13 +213,23 @@
     label: 'Campaigns', hidden: true, order: 96, roles: ROLES,
     icon: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="11" height="6" rx="1.5"/><path d="M17 17h4"/>',
     render: function () {
+      /* the two filters sit at the TOP, above everything they change, and each is labelled: the
+         spec asks for an Account filter and a Date filter on this page and a reader has to be able
+         to see which control is which before reading a single figure */
       return '<div class="cbd-wrap">' +
-        adtHgroup('Campaigns', 'Every campaign, the listings inside it, and what each spends over the period', 'cbdFresh') +
-        '<div id="cbdBar"></div>' +
-        '<div id="cbdAcct" class="cbd-filters"></div>' +
+        adtHgroup('Campaigns', 'Every campaign, the listings inside it, and what each spends', 'cbdFresh') +
+        '<div class="cbd-filterbar">' +
+          '<div class="cbd-fl"><span class="cbd-fk">Date</span><div id="cbdBar"></div></div>' +
+          '<div class="cbd-fl"><span class="cbd-fk">Account</span><div id="cbdAcct" class="cbd-filters"></div></div>' +
+        '</div>' +
         '<div id="cbdBody"><div class="cbd-empty">Loading…</div></div></div>';
     },
     init: function () {
+      /* #adtoolCampaignBoard/<campaign id> opens with THAT campaign expanded. The hash is the only
+         hand-off: a second tab opened on another campaign shows its own, never the first tab's. */
+      CB.want = String((window.adtRoute ? adtRoute().param : '') || '').trim();
+      CB.wantDone = false;
+      CB.open = {}; CB.inside = {}; CB.data = null;
       CB.period = adtPeriodBar('cbdBar', {
         page: 'adtoolCampaignBoard', def: 'd7', allowCustom: true,
         onChange: function (v) { CB.period = v; CB.inside = {}; load(false); }
@@ -221,6 +238,20 @@
       load(false).catch(function () {});
     }
   };
+
+  /* the campaign named in the hash, found once the payload is in hand: the row carries the account,
+     which the hash cannot, and the open key is the two together */
+  function applyWanted() {
+    if (!CB.want || CB.wantDone || !CB.data) return;
+    var rows = (CB.data.campaigns || []).filter(function (c) { return c && typeof c === 'object'; });
+    var hit = null;
+    for (var i = 0; i < rows.length; i++) { if (String(rows[i].campaign_id || '') === CB.want) { hit = rows[i]; break; } }
+    CB.wantDone = true;
+    if (!hit) return;
+    /* a chip filter that hides the campaign asked for would answer a different question */
+    if (CB.status && statusOf(hit) !== CB.status) CB.status = '';
+    CB.open[keyOf(hit)] = true;
+  }
 
   function acctChips() {
     var el = $('cbdAcct'); if (!el) return;
@@ -252,6 +283,7 @@
       if (!names.length && !CB.account) { names = ((d && d.accounts) || []).map(function (a) { return a && a.account; }); }
       names = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
       if (names.length) { CB.accounts = names; acctChips(); }
+      applyWanted();
       if (!$('cbdBody')) return;
       draw();
       adtPeriodEcho('cbdBar', d && d.period);
@@ -522,10 +554,14 @@
     var t = insideEl(k);
     if (t && t.cells[0] && CB.open[k]) t.cells[0].innerHTML = insideHtml(k);
   }
+  /* the fetch and the paint are separate: a row opened from the hash is asked for whether or not
+     its row element is on screen yet, and paint() fills it in when it is */
   function openInside(k) {
-    var tr = insideEl(k); if (!tr) return;
-    tr.hidden = false;
-    if (tr.cells[0]) tr.cells[0].innerHTML = insideHtml(k);
+    var tr = insideEl(k);
+    if (tr) {
+      tr.hidden = false;
+      if (tr.cells[0]) tr.cells[0].innerHTML = insideHtml(k);
+    }
     if (CB.inside[k]) return;
     var parts = k.split('||'), p = adtPeriodParams(CB.period);
     p.account = parts[0]; p.campaign_id = parts[1];
@@ -636,6 +672,14 @@
       '<span>·</span><span>' + esc(CB.account || 'all accounts') + '</span>' +
       '<span>·</span><span>' + cnt(num(D.campaigns_total) != null ? D.campaigns_total : (D.campaigns || []).length) + ' campaigns</span>' +
       src(moneyTag(D)) + '</div>';
+    if (CB.want) {
+      var opened = null;
+      (D.campaigns || []).forEach(function (c) { if (c && String(c.campaign_id || '') === CB.want) opened = c; });
+      h += '<div class="cbd-opened">' + (opened
+        ? 'Opened from a link on <b>' + esc(String(opened.name || CB.want)) + '</b>, below with its listings showing.'
+        : 'This page was opened on campaign <b>' + esc(CB.want) + '</b>, and no campaign with that number came back for this period and account. Widen the date or choose all accounts.') +
+        '</div>';
+    }
     h += totalsTiles(D);
     h += accountPanel(D);
     h += statusChips(D);

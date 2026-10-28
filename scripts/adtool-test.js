@@ -25,18 +25,19 @@ function run(argv) {
   const i13 = src.indexOf('/* ADTOOL-P13-PURE-BEGIN */'); const j13 = src.indexOf('/* ADTOOL-P13-PURE-END */');
   const i14 = src.indexOf('/* ADTOOL-P14-PURE-BEGIN */'); const j14 = src.indexOf('/* ADTOOL-P14-PURE-END */');
   const i15 = src.indexOf('/* ADTOOL-P15-PURE-BEGIN */'); const j15 = src.indexOf('/* ADTOOL-P15-PURE-END */');
+  const i16 = src.indexOf('/* ADTOOL-P16-PURE-BEGIN */'); const j16 = src.indexOf('/* ADTOOL-P16-PURE-END */');
   /* 24 Oct: the duplicate-safe ad merge, the truncation guard, the money-beats-status repair and the
      money-first rotation. Pure on purpose, so "an archived record must never win" is a test and not
      a hope. */
   const iAS = src.indexOf('/* ADSTATUS-PURE-BEGIN */'); const jAS = src.indexOf('/* ADSTATUS-PURE-END */');
   if (iAS < 0 || jAS < 0) return 'FAIL: ad-status block markers not found';
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -920,7 +921,7 @@ function run(argv) {
      house style, so the next entry anybody adds has to meet it too. `source_tables` is deliberately
      NOT judged: that column IS the technical provenance list, which is what it is for.
      --------------------------------------------------------------------------------------------- */
-  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13', 'ADTOOL_REGISTER_P14', 'ADTOOL_REGISTER_P15'];
+  const rgNames = ['ADTOOL_REGISTER_P1B', 'ADTOOL_REGISTER', 'ADTOOL_REGISTER_P2', 'ADTOOL_REGISTER_P3', 'ADTOOL_REGISTER_P4', 'ADTOOL_REGISTER_P5', 'ADTOOL_REGISTER_P6', 'ADTOOL_REGISTER_P9', 'ADTOOL_REGISTER_P10', 'ADTOOL_REGISTER_P11', 'ADTOOL_REGISTER_P13', 'ADTOOL_REGISTER_P14', 'ADTOOL_REGISTER_P15', 'ADTOOL_REGISTER_P16'];
   const rgAll = []; let rgParseFail = null;
   for (const nm of rgNames) {
     const i = src.indexOf('const ' + nm + ' = [');
@@ -930,7 +931,7 @@ function run(argv) {
       for (const row of new Function('return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))()) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
     } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
   }
-  t('register: all thirteen arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
+  t('register: all fourteen arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
 
   /* the words the audit found live in production copy, and what to say instead. Judged on the four
      prose fields only. */
@@ -1291,7 +1292,13 @@ function run(argv) {
   t('register: every new number has an entry naming the rule, the sources, when it recomputes and how it is rechecked', p15Reg.every(r => r && r.name && r.formula && r.sources && r.recompute && r.recheck), p15Reg.map((r, i) => r ? r.id : i));
   t('register: the entry for a day says plainly that a day is a UK day and that the clocks move', /UK days/.test(p15Reg[0].formula) && /clocks go back/.test(p15Reg[0].formula), p15Reg[0].formula.slice(0, 60));
   t('register: the entry for who changed something promises nobody is guessed', /Nobody is ever guessed/.test(p15Reg[3].formula), p15Reg[3].formula.slice(-40));
-  t('register: the by-hand list entry says in words that nothing on it reaches eBay', /not a timer/.test(p15Reg[8].formula) && /ever sent to eBay/.test(p15Reg[8].formula) && /read back/.test(p15Reg[8].formula), p15Reg[8].formula.slice(0, 60));
+  /* 28 Oct: this entry USED to promise that nothing on the peak page ever reaches eBay, and the test
+     held it to that wording. The owner's Change Spec made the system switch the list itself, so the
+     promise would now be a lie and the test has to hold the entry to the new truth instead: the hours
+     are an instruction, it is sent only for an account whose own switch is on, and it is written down
+     either way. A test that keeps asserting a promise the code has stopped keeping is worse than no
+     test, because it reads as proof the promise still stands. */
+  t('register: the by-hand list entry says the hours are an instruction, sent only where an account is switched on', /not a timer/.test(p15Reg[8].formula) && /own live switch is on/.test(p15Reg[8].formula) && /would-send/.test(p15Reg[8].formula) && /read back/.test(p15Reg[8].formula) && !/ever sent to eBay/.test(p15Reg[8].formula), p15Reg[8].formula.slice(0, 60));
   t('register: the suggested list entry prints no figure of its own, because the page prints the ones in force', !/\d/.test(p15Reg[6].formula), p15Reg[6].formula);
 
   /* (k) THE EXPLAINER HOOKS, end to end. A tag on a page carries a label; the shell matches that
@@ -1302,13 +1309,16 @@ function run(argv) {
      because the two halves can only be wrong about each other. */
   const readFile = (rel) => { const n = $.NSString.stringWithContentsOfFileEncodingError(root + '/' + rel, $.NSUTF8StringEncoding, null); return n && n.js ? n.js : ''; };
   const shellSrc = readFile('src/shell.html');
-  const viewSrc = ['frontend/view-adtool-stopped.js', 'frontend/view-adtool-activated.js', 'frontend/view-adtool-peak.js'].map(readFile).join('\n');
+  /* 28 Oct: there are two of these pages now, not three. view-adtool-activated.js was deleted when
+     the merge landed, and readFile answers '' for a file that is not there, so leaving it in the list
+     would have read as a page carrying no hooks at all rather than as a page that is gone. */
+  const viewSrc = ['frontend/view-adtool-stopped.js', 'frontend/view-adtool-peak.js'].map(readFile).join('\n');
   let regMap = null, regMapFail = null;
   try {
     const mi = shellSrc.indexOf('var ADT_REG_MAP = ['), mj = shellSrc.indexOf('\n];', mi);
     regMap = new Function('return ' + shellSrc.slice(mi + 'var ADT_REG_MAP = '.length, mj + 3))();
   } catch (e) { regMapFail = e.message; }
-  t('explainers: the shell\'s map of tag to note parses, and the three new pages were read', !regMapFail && regMap && regMap.length > 20 && viewSrc.length > 10000 && shellSrc.length > 10000, regMapFail || [regMap && regMap.length, viewSrc.length]);
+  t('explainers: the shell\'s map of tag to note parses, and both change-and-peak pages were read', !regMapFail && regMap && regMap.length > 20 && viewSrc.length > 10000 && shellSrc.length > 10000, regMapFail || [regMap && regMap.length, viewSrc.length]);
   /* the labels as they are written at the call sites. Each page has ONE place that builds the tag, so
      scanning for the tag itself would only find the template; the labels handed to it are what count,
      and they are literals on purpose so that this test can read them. */
@@ -1351,10 +1361,14 @@ function run(argv) {
   t('command centre: with no sort chosen the board keeps its own order, key for key, as the engine sent it', /items\.sort\(\(a, b\) => \(b\.waste - a\.waste\) \|\| \(b\.spend_today - a\.spend_today\) \|\| \(b\.spend_14d - a\.spend_14d\)\)/.test(src) && /if \(wa !== wb\) \{ return wb - wa; \}/.test(acSrc) && /if \(sa !== sb\) \{ return sb - sa; \}/.test(acSrc) && /acNum\(b\.spend_14d\) \|\| 0\) - \(acNum\(a\.spend_14d\) \|\| 0\)/.test(acSrc), null);
   t('command centre: a sort never asks the engine again, every heading says what it sorts by, and the choice is remembered', /acSortRows\(rows\)/.test(acSrc) && /AC\.items = \(d\.items \|\| \[\]\)/.test(acSrc) && (acSrc.match(/sorts: '/g) || []).length === 8 && /localStorage\.setItem\(AC_SORT_KEY/.test(acSrc) && /title="' \+ esc\('Sort by ' \+ c\.sorts\)/.test(acSrc), (acSrc.match(/sorts: '/g) || []).length);
   t('command centre: an empty cell sinks to the bottom whichever way a column is pointed, so a gap never reads as the smallest number', /if \(va == null\) \{ return 1; \}/.test(acSrc) && /if \(vb == null\) \{ return -1; \}/.test(acSrc) && /if \(!va && vb\) \{ return 1; \}/.test(acSrc), null);
+  /* 28 Oct: there are no longer TWO change pages. The owner's Change Spec merged activated and
+     stopped into one, so the second file and the shared page one handed to the other are both gone,
+     and these two tests now hold the merge to its own promise instead of the hand-off's. A page that
+     is deleted cannot be tested for how carefully it asked for something. */
   const actSrc = readFile('frontend/view-adtool-activated.js');
-  t('the two change pages: the shared page is asked for at RENDER time, never while the file is loading, because the files splice in name order', /typeof window\.adtChangeDayPage === 'function'/.test(actSrc) && !/^\s*(var|let|const)\s+PAGE\s*=\s*window\.adtChangeDayPage/m.test(actSrc) && /render: function \(\) \{[\s\S]{0,80}var p = page\(\);/.test(actSrc) && /Not available/.test(actSrc), null);
-  const viewCode = viewSrc.replace(/\/\*[\s\S]*?\*\//g, '');   /* the prose names the shared page too; this is about the code */
-  t('the two change pages: only one file hands the shared page over, and only the other one asks for it', (viewCode.match(/window\.adtChangeDayPage = /g) || []).length === 1 && (viewCode.match(/window\.adtChangeDayPage/g) || []).length === 3, (viewCode.match(/window\.adtChangeDayPage/g) || []).length);
+  const viewCode = viewSrc.replace(/\/\*[\s\S]*?\*\//g, '');   /* the prose names the old hand-off too; this is about the code */
+  t('changes: activated and stopped are ONE page now, so the second file and the page it was handed are gone', actSrc === '' && !/adtChangeDayPage/.test(viewCode) && !/adtChangeDayPage/.test(readFile('src/shell.html').replace(/\/\*[\s\S]*?\*\//g, '')), [actSrc.length, (viewCode.match(/adtChangeDayPage/g) || []).length]);
+  t('changes: the merged page asks the engine for each direction itself, which is what the engine was told to expect', (() => { const st = readFile('frontend/view-adtool-stopped.js'); return (st.match(/adtoolChangeDay/g) || []).length >= 2 && /direction: 'activated'|direction: dir/.test(st) && /var p = \{ direction: dir \}/.test(st); })(), (readFile('frontend/view-adtool-stopped.js').match(/adtoolChangeDay/g) || []).length);
   /* THE MOST DANGEROUS LINE IN THE BATCH. The campaign sync runs every five minutes and is the only
      way the portal sees eBay's campaigns at all. The added column is written where it is there, and a
      database the ALTER has not reached must still record the change on the old column list. */
@@ -1600,16 +1614,603 @@ function run(argv) {
   t('honesty: when the ad list was last read is a real column the engine can name, so a fresh database has it too', /"ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT"/.test(src), null);
   t('honesty: the ad-state event rows say whether a change came from the rolling read or from the money-beats-status repair', /adtoolAdEventsWrite\(env, acct, cid, prevSt, now, source\)|async function adtoolAdEventsWrite\(env, acct, cid, prevSt, now, source\)/.test(src) && /String\(source \|\| 'sync'\)\.slice\(0, 12\)/.test(src) && /nowSub, 'repair'\)/.test(src), null);
 
-  /* (m) the hard rule: nothing new is ever sent to eBay. The two new readers GET and nothing else. */
-  t('hard rule: the only eBay write in the whole advertising path is still the one the pause action always had', (() => {
+  /* (m) the hard rule: no eBay write endpoint is ever added. The readers GET and nothing else, and
+     the peak switch of 28 Oct sends through the endpoint table that was already there. */
+  t('hard rule: no new eBay write endpoint has been added, so the bulk ad-status URL is still written down exactly twice', (() => {
     const posts = (src.match(/method: 'POST'[\s\S]{0,400}?api\.ebay\.com\/sell\/marketing[^']*/g) || []);
     /* two mentions and only two: the endpoint table that names it, and the pause action that calls
-       it. Nothing added on 24 Oct sends anything to eBay. */
+       it by its full URL. The peak switch reaches it through ADTOOL_APPLY_ENDPOINTS, which is the
+       whole point: a second copy of the URL is a second path nobody is watching. */
     const bulk = (src.match(/bulk_update_ads_status_by_listing_id/g) || []);
     return bulk.length === 2 && !/ad_campaign\/' \+ encodeURIComponent\(cid\) \+ '\/ad'[\s\S]{0,120}method/.test(src) && posts.length <= 2;
   })(), [(src.match(/bulk_update_ads_status_by_listing_id/g) || []).length]);
   t('hard rule: the repair pass and the probe both go through the one read-only ad reader', (() => { const uses = (src.match(/adsFetchAdList\(/g) || []).length; return uses === 5 && /async function adsFetchAdList\(tok, acct, cid, budget\)/.test(src); })(), (src.match(/adsFetchAdList\(/g) || []).length);
   t('hard rule: the money read uses the spend already held per day and never adds a click fee on top of it, and never reads impressions', (() => { const rp = src.slice(src.indexOf('async function adsItems(env) {'), src.indexOf('/* The safety net for the dedicated cron slot')); return /SUM\(spend\) AS sp/.test(rp) && !/impressions/.test(rp) && !/cpc_spend/.test(rp); })(), null);
+
+
+  /* ---------------------------------------------------------------------------------------------
+     The owner's Change Spec, 28 Oct 2026. Four things the engine owes the rebuilt portal, and the
+     properties each of them has to keep: the three-way split of the live listings PARTITIONS them,
+     the dynamic rate says who answered, Potential CPC fails on each of its three conditions alone,
+     the hours format can be read or is refused with a reason, and the peak switch cannot send
+     anything for an account whose own live switch is off.
+     --------------------------------------------------------------------------------------------- */
+
+  /* (1) Entire Live Listings: every live listing in exactly one of three places */
+  /* THE PRODUCTION SHAPE, and nothing else. These fixtures used to carry `name`, which no membership
+     row in this engine has ever had: adtoolLiveSplitCompute builds them with `campaign_name`. The
+     fixtures passed while the page they stand for put every campaign the owner calls dynamic in the
+     wrong list, because the classifier read a field that was not there. A fixture that does not have
+     the shape of the real row is not a test, it is a second implementation agreeing with itself. */
+  const mCpc = { funding_model: 'COST_PER_CLICK', campaign_name: 'ABRT pay per click', ad_rate_strategy: '' };
+  const mDynName = { funding_model: 'COST_PER_SALE', campaign_name: 'General dynamic', ad_rate_strategy: '' };
+  const mDynEbay = { funding_model: 'COST_PER_SALE', campaign_name: 'General', ad_rate_strategy: 'DYNAMIC' };
+  const mFixed = { funding_model: 'COST_PER_SALE', campaign_name: 'General', ad_rate_strategy: 'FIXED' };
+  const mOwner = { funding_model: 'COST_PER_SALE', campaign_name: 'ZAREEN Dynamic general', ad_rate_strategy: '' };
+  const splitCases = [
+    [[], 'no_cpc'], [[mCpc], 'on_cpc'], [[mFixed], 'no_cpc'], [[mDynName], 'dynamic'], [[mDynEbay], 'dynamic'],
+    [[mOwner], 'dynamic'],
+    [[mCpc, mDynName], 'on_cpc'], [[mDynName, mCpc], 'on_cpc'], [[mFixed, mDynEbay], 'dynamic'], [[mFixed, mFixed], 'no_cpc'],
+  ];
+  t('split: a campaign the owner names dynamic, in the shape the page really builds, lands in Dynamic', F.adLiveSplitClass([mOwner]) === 'dynamic' && F.adDynamicRate(mOwner).source === 'name' && F.adDynamicRate({ campaign_name: 'General dynamic' }).dynamic === true, [F.adLiveSplitClass([mOwner]), F.adDynamicRate(mOwner)]);
+  t('split: the name is read under BOTH spellings and they agree, because the campaigns table says name and a membership row says campaign_name', F.adDynamicRate({ name: 'General dynamic' }).source === 'name' && F.adDynamicRate({ campaign_name: 'General dynamic' }).source === 'name' && F.adDynamicRate({ name: '', campaign_name: 'General dynamic' }).dynamic === true && F.adDynamicRate({ name: 'General dynamic', campaign_name: 'General' }).dynamic === true, null);
+  t('split: every pattern of memberships lands where the spec says it does', splitCases.every(c => F.adLiveSplitClass(c[0]) === c[1]), splitCases.map(c => [F.adLiveSplitClass(c[0]), c[1]]).filter(x => x[0] !== x[1]));
+  t('split: a listing on pay-per-click AND in a dynamic campaign counts as on pay-per-click, which is the figure a reader is after', F.adLiveSplitClass([mCpc, mDynEbay]) === 'on_cpc', F.adLiveSplitClass([mCpc, mDynEbay]));
+  t('split: the answer is always exactly one of the three, so no listing can be in two lists or in none', splitCases.every(c => F.ADTOOL_LIVE_SPLIT_CLASSES.filter(k => k === F.adLiveSplitClass(c[0])).length === 1) && F.ADTOOL_LIVE_SPLIT_CLASSES.length === 3, F.ADTOOL_LIVE_SPLIT_CLASSES);
+  t('split: the three counts add back up to the listings they were taken from', (() => {
+    const tally = { on_cpc: 0, dynamic: 0, no_cpc: 0 }; const n = 97;
+    for (let i = 0; i < n; i++) tally[F.adLiveSplitClass(splitCases[i % splitCases.length][0])]++;
+    return tally.on_cpc + tally.dynamic + tally.no_cpc === n;
+  })(), null);
+  t('split: the third place says which kind of third it is, and only the third does', (() => {
+    /* advertised on pay-on-sale at a fixed rate, and not advertised at all, are nothing alike: one
+       costs nothing until it sells, the other cannot sell through an ad. The owner's three words
+       cannot tell them apart, so they are counted apart INSIDE the third rather than made a fourth. */
+    const un = F.adLiveSplitClassify([]), gen = F.adLiveSplitClassify([mFixed]);
+    return un.split === 'no_cpc' && un.advertised === false && un.detail === 'unadvertised'
+      && gen.split === 'no_cpc' && gen.advertised === true && gen.detail === 'general'
+      && F.adLiveSplitClassify([mCpc]).detail === '' && F.adLiveSplitClassify([mDynEbay]).detail === ''
+      && F.adLiveSplitClassify([mCpc]).advertised === true;
+  })(), [F.adLiveSplitClassify([]), F.adLiveSplitClassify([mFixed])]);
+  t('split: the two kinds of the third place add back up to it, over every pattern of memberships', (() => {
+    let no = 0, gen = 0, un = 0;
+    for (const c of splitCases) { const v = F.adLiveSplitClassify(c[0]); if (v.split !== 'no_cpc') continue; no++; if (v.detail === 'general') gen++; else if (v.detail === 'unadvertised') un++; }
+    return no > 0 && gen > 0 && un > 0 && gen + un === no;
+  })(), null);
+  t('split: the owner’s three words are still the answer, and the detail never becomes a fourth place', F.ADTOOL_LIVE_SPLIT_CLASSES.length === 3 && splitCases.every(c => F.adLiveSplitClass(c[0]) === F.adLiveSplitClassify(c[0]).split), null);
+  t('split: the two kinds are counted on the fleet and on every account row, and every row of the third list carries its own (regex over the real source)', (() => {
+    const b = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
+    return /no_cpc_general: 0, no_cpc_unadvertised: 0/.test(b) && /fleet\['no_cpc_' \+ cl\.detail\]\+\+; bk\['no_cpc_' \+ cl\.detail\]\+\+;/.test(b) && /split_detail: cl\.detail/.test(b);
+  })(), null);
+  t('split: each of the three places has a name a reader would say out loud', F.ADTOOL_LIVE_SPLIT_CLASSES.every(k => /^[A-Z]/.test(F.ADTOOL_LIVE_SPLIT_NAMES[k])) && F.ADTOOL_LIVE_SPLIT_NAMES.on_cpc === 'On CPC now', F.ADTOOL_LIVE_SPLIT_NAMES);
+  t('one home per number: the fourth tab points at the page that already answers it instead of a second copy', /archive_action: 'adtoolCpcListings', archive_payload: \{ mode: 'post' \}/.test(src), null);
+  t('hard rule: neither new page returns a profit figure of any kind, so there is nothing above item level to strip', !/profit/i.test(src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'))), null);
+
+  /* (2) the dynamic ad rate, all three sources */
+  t('dynamic rate: eBay saying so is the answer, and the answer says eBay said it', JSON.stringify(F.adDynamicRate({ ad_rate_strategy: 'DYNAMIC', name: 'General' })) === JSON.stringify({ dynamic: true, source: 'ebay' }), F.adDynamicRate({ ad_rate_strategy: 'DYNAMIC', name: 'General' }));
+  t('dynamic rate: with nothing from eBay the campaign name decides, whatever case it is written in', F.adDynamicRate({ name: 'ZAREEN Dynamic general' }).source === 'name' && F.adDynamicRate({ ad_rate_strategy: '', name: 'dynamic' }).dynamic === true, [F.adDynamicRate({ name: 'ZAREEN Dynamic general' }), F.adDynamicRate({ ad_rate_strategy: '', name: 'dynamic' })]);
+  t('dynamic rate: neither says so, so it is not one, and the source is left empty', JSON.stringify(F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General' })) === JSON.stringify({ dynamic: false, source: '' }) && F.adDynamicRate(null).dynamic === false && F.adDynamicRate({}).source === '', [F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General' }), F.adDynamicRate(null)]);
+  t('dynamic rate: eBay saying FIXED does not overrule a name the owner calls dynamic, and the source shows which answered', F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }).dynamic === true && F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }).source === 'name', F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }));
+  t('columns: the rate strategy and the funding reply are nullable columns added behind a guard, with the old column list still behind them', /ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''/.test(src) && /ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''/.test(src) && /INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, ad_rate_strategy, funding_json, synced_at\)/.test(src) && (src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, synced_at\)/g) || []).length === 1, null);
+  t('honesty: the whole funding reply is kept, and kept long enough to read back, which 400 characters was not (regex over the real source)', /JSON\.stringify\(fs\)\.slice\(0, 1000\)/.test(src) && !/JSON\.stringify\(fs\)\.slice\(0, 400\)/.test(src) && /fs\.adRateStrategy/.test(src) && /adtoolFundingStrategy/.test(src), null);
+  t('honesty: a reply that does not carry the rate strategy keeps the one already on record instead of blanking it (regex over the real source)', (() => {
+    /* both writers run on the same five-minute tick, so both have to refuse the blank: the upsert
+       guards on excluded, the flagged field write on the bound value. One of them unguarded would
+       put the blank straight back. */
+    const up = /ad_rate_strategy = CASE WHEN COALESCE\(excluded\.ad_rate_strategy, ''\) <> '' THEN excluded\.ad_rate_strategy ELSE campaigns\.ad_rate_strategy END/.test(src);
+    const fw = /ad_rate_strategy = CASE WHEN \?6 <> '' THEN \?6 ELSE ad_rate_strategy END/.test(src);
+    return up && fw && !/DO UPDATE SET name=\?3, status=\?4, budget=\?5, funding_model=\?6, ad_rate_strategy=\?7/.test(src);
+  })(), null);
+  t('honesty: a database that has not caught up with the two columns still answers, from the campaign name', (() => { const m = src.slice(src.indexOf('async function adtCampaignRateMap'), src.indexOf('/* ---- Entire Live Listings')); return /catch \(e\) \{/.test(m) && (m.match(/SELECT account, campaign_id, name, status, funding_model/g) || []).length === 2; })(), null);
+
+  /* (3) Potential CPC: each of the three conditions failing on its own */
+  const pcR = F.adPotentialRules({});
+  t('potential: the two figures default to the owner’s own, and a manager’s own are used where he has set them', pcR.min_orders === 15 && pcR.quiet_days === 3 && F.adPotentialRules({ adtool_potential_min_orders: '8', adtool_potential_quiet_days: '7' }).min_orders === 8 && F.adPotentialRules({ adtool_potential_min_orders: '8', adtool_potential_quiet_days: '7' }).quiet_days === 7, [pcR, F.adPotentialRules({ adtool_potential_min_orders: '8', adtool_potential_quiet_days: '7' })]);
+  const pcPass = { orders_completed: 20, sold_qty: 3, on_cpc: false, cpc_in_quiet_window: false, last_cpc_day: null };
+  const pcWith = x => F.adPotentialCpc(Object.assign({}, pcPass, x), pcR);
+  t('potential: all three hold, so it is on the list with advice and nothing against it', (() => { const v = pcWith({}); return v.eligible && v.fails.length === 0 && /no click fee on record/.test(v.advice) && v.orders_completed === 20; })(), pcWith({}));
+  t('potential: too few sales on its own keeps it off, and that is the only reason given', (() => { const v = pcWith({ orders_completed: 14, sold_qty: 0 }); return !v.eligible && v.fails.length === 1 && /fewer than the 15/.test(v.why) && v.advice === ''; })(), pcWith({ orders_completed: 14, sold_qty: 0 }));
+  t('potential: being on pay-per-click already on its own keeps it off', (() => { const v = pcWith({ on_cpc: true }); return !v.eligible && v.fails.length === 1 && /already/.test(v.why); })(), pcWith({ on_cpc: true }));
+  t('potential: pay-per-click inside the quiet days on its own keeps it off, so this afternoon cannot undo this morning', (() => { const v = pcWith({ cpc_in_quiet_window: true, last_cpc_day: '2026-10-27' }); return !v.eligible && v.fails.length === 1 && /inside the last 3 day/.test(v.why); })(), pcWith({ cpc_in_quiet_window: true, last_cpc_day: '2026-10-27' }));
+  t('potential: all three failing at once gives all three reasons', pcWith({ orders_completed: 1, sold_qty: 0, on_cpc: true, cpc_in_quiet_window: true }).fails.length === 3, pcWith({ orders_completed: 1, sold_qty: 0, on_cpc: true, cpc_in_quiet_window: true }).fails);
+  t('potential: the sale count is the higher of our own and eBay’s, and the answer names which', pcWith({ orders_completed: 12, sold_qty: 19 }).orders_completed === 19 && /eBay/.test(pcWith({ orders_completed: 12, sold_qty: 19 }).orders_source) && /our own/.test(pcWith({ orders_completed: 19, sold_qty: 12 }).orders_source) && /agrees/.test(pcWith({ orders_completed: 19, sold_qty: 19 }).orders_source), [pcWith({ orders_completed: 12, sold_qty: 19 }).orders_source, pcWith({ orders_completed: 19, sold_qty: 12 }).orders_source, pcWith({ orders_completed: 19, sold_qty: 19 }).orders_source]);
+  t('potential: a listing advertised before says when, and one with no day on record never claims it was never advertised', (() => {
+    /* the click fees are a rolling record a fortnight deep. "Never advertised on pay-per-click" is a
+       claim about the listing; the record can only support a claim about itself, so the sentence says
+       there is no click fee ON RECORD, and names the oldest day the record reaches where it knows it. */
+    const was = pcWith({ last_cpc_day: '2026-09-01' }).advice;
+    const none = pcWith({ last_cpc_day: null }).advice;
+    const dated = pcWith({ last_cpc_day: null, records_from: '2026-10-15' });
+    return /last advertised on 2026-09-01/.test(was) && /no click fee on record/.test(none) && !/never advertised/.test(none)
+      && /no click fee on record since 2026-10-15/.test(dated.advice) && dated.records_from === '2026-10-15'
+      && dated.last_cpc_seen === 'no click fee on record since 2026-10-15'
+      && pcWith({ last_cpc_day: '2026-09-01' }).last_cpc_seen === 'the day eBay charged a click fee';
+  })(), [pcWith({ last_cpc_day: null }).advice, pcWith({ last_cpc_day: null, records_from: '2026-10-15' }).advice]);
+  t('potential: the figures in the sentence come from the rules in force, never from a number written into the code', /fewer than the 8/.test(F.adPotentialCpc({ orders_completed: 2, sold_qty: 0 }, { min_orders: 8, quiet_days: 7 }).why) && /last 7 day/.test(F.adPotentialCpc({ orders_completed: 20, sold_qty: 0, cpc_in_quiet_window: true }, { min_orders: 8, quiet_days: 7 }).why), null);
+  t('potential: the four counts are a partition, so a listing is in exactly one of them and the four add back up', (() => {
+    /* they were counted independently and a listing already on pay-per-click with too few orders was
+       counted twice, so the four could total more than the listings they came from. */
+    const cases = [
+      [{ on_cpc: true, ran_recently: true, orders_completed: 1 }, 'already_on_cpc'],
+      [{ on_cpc: false, ran_recently: true, orders_completed: 1 }, 'ran_recently'],
+      [{ on_cpc: false, ran_recently: false, orders_completed: 14 }, 'too_few_orders'],
+      [{ on_cpc: false, ran_recently: false, orders_completed: 15 }, 'eligible'],
+    ];
+    if (!cases.every(c => F.adPotentialBucket(c[0], pcR) === c[1])) return false;
+    if (F.ADTOOL_POTENTIAL_BUCKETS.join(',') !== 'already_on_cpc,ran_recently,too_few_orders,eligible') return false;
+    const tally = {}; for (const k of F.ADTOOL_POTENTIAL_BUCKETS) tally[k] = 0;
+    const n = 53; for (let i = 0; i < n; i++) tally[F.adPotentialBucket(cases[i % cases.length][0], pcR)]++;
+    const total = F.ADTOOL_POTENTIAL_BUCKETS.reduce((a, k) => a + tally[k], 0);
+    /* and the bucket agrees with the verdict: eligible there means eligible here, never both or neither */
+    const agree = cases.every(c => (F.adPotentialBucket(c[0], pcR) === 'eligible') === F.adPotentialCpc({ orders_completed: c[0].orders_completed, sold_qty: 0, on_cpc: c[0].on_cpc, cpc_in_quiet_window: c[0].ran_recently }, pcR).eligible);
+    return total === n && agree;
+  })(), null);
+  t('potential: the page really counts through the one bucket decision, and keeps no tally of its own beside it (regex over the real source)', (() => {
+    const b = src.slice(src.indexOf('async function adtoolPotentialCpcCompute'), src.indexOf('/* ---- Peak hours: the system switches'));
+    return /counts\[adPotentialBucket\(v, rules\)\]\+\+;/.test(b) && !/counts\.too_few_orders\+\+/.test(b) && !/counts\.already_on_cpc\+\+/.test(b) && !/counts\.ran_recently\+\+/.test(b) && !/counts\.eligible\+\+/.test(b);
+  })(), null);
+  t('potential: the manager’s own figure moves the partition with it, so nothing is counted against a number written into the code', F.adPotentialBucket({ orders_completed: 9 }, { min_orders: 8, quiet_days: 3 }) === 'eligible' && F.adPotentialBucket({ orders_completed: 9 }, { min_orders: 15, quiet_days: 3 }) === 'too_few_orders', null);
+  t('potential: the quiet window is counted in calendar days INCLUDING today, so three days reaches back to the day before yesterday (regex over the real source)', /const quietFrom = adtAddDays\(today, -\(rules\.quiet_days - 1\)\);/.test(src) && !/const quietFrom = adtAddDays\(today, -rules\.quiet_days\);/.test(src) && F.adtAddDays('2026-10-29', -(3 - 1)) === '2026-10-27', null);
+  t('potential: the click-fee read sits on the ACTIVE listings, so its ceiling is above the universe and not inside it (regex over the real source)', (() => {
+    const b = src.slice(src.indexOf('async function adtoolPotentialCpcCompute'), src.indexOf('/* ---- Peak hours: the system switches'));
+    return /FROM ads_daily ad JOIN items_api ia ON ia\.item_id = ad\.item_id WHERE ad\.cpc_spend > 0 AND ad\.date >= \?1 AND ia\.status = 'ACTIVE'/.test(b)
+      && /last_cpc_capped: lastCpcCapped/.test(b) && /lastCpcRows\.length >= ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(b)
+      && /SELECT MIN\(date\) AS d FROM ads_daily WHERE cpc_spend > 0 LIMIT 1/.test(b) && /records_from: recordsFrom/.test(b);
+  })(), null);
+  t('potential: the completed orders read leaves out cancelled, lost and refunded orders, and counts one row as one sale', /o\.status NOT IN \('CANCELLED', 'NOT_FOUND'\) AND COALESCE\(o\.refunded, 0\) <= 0/.test(src) && /SELECT o\.item_id, COUNT\(\*\) AS n FROM orders o JOIN items_api i/.test(src), null);
+
+  /* (4) the hours format */
+  const hp = F.adPeakHoursParse('17-23');
+  t('hours: 17-23 is on at 17:00 and off at 23:00, so hour 22 is inside it and 23 is not', JSON.stringify(hp.ranges) === JSON.stringify([[17, 23]]) && F.adInPeakRanges(17, hp.ranges) && F.adInPeakRanges(22, hp.ranges) && !F.adInPeakRanges(23, hp.ranges) && !F.adInPeakRanges(16, hp.ranges), hp);
+  t('hours: two stretches in one day are read as two', JSON.stringify(F.adPeakHoursParse('09-13,18-22').ranges) === JSON.stringify([[9, 13], [18, 22]]), F.adPeakHoursParse('09-13,18-22'));
+  t('hours: a stretch across midnight stays one stretch and reads correctly either side of it', (() => { const p2 = F.adPeakHoursParse('22-02'); return JSON.stringify(p2.ranges) === JSON.stringify([[22, 2]]) && F.adInPeakRanges(23, p2.ranges) && F.adInPeakRanges(0, p2.ranges) && F.adInPeakRanges(1, p2.ranges) && !F.adInPeakRanges(2, p2.ranges) && !F.adInPeakRanges(21, p2.ranges); })(), F.adPeakHoursParse('22-02'));
+  t('hours: overlapping and touching stretches are joined, so one boundary can only ever be switched once', JSON.stringify(F.adPeakHoursParse('09-13,11-15').ranges) === JSON.stringify([[9, 15]]) && JSON.stringify(F.adPeakHoursParse('09-13,13-15').ranges) === JSON.stringify([[9, 15]]) && JSON.stringify(F.adPeakHoursParse('18-22,09-13').ranges) === JSON.stringify([[9, 13], [18, 22]]), [F.adPeakHoursParse('09-13,11-15').ranges, F.adPeakHoursParse('09-13,13-15').ranges]);
+  t('hours: text that is not hours is refused with a reason, instead of stored and silently never acted on', ['evenings', '17', '17-', 'a-b', '25-30', '17-17', '', '   '].every(x => F.adPeakHoursParse(x).ranges === null && F.adPeakHoursParse(x).reason), ['evenings', '25-30', '17-17', ''].map(x => [x, F.adPeakHoursParse(x).reason]));
+  t('hours: every hour of the day is refused, because there is no boundary left to switch at', F.adPeakHoursParse('00-12,12-00').ranges === null && /every hour of the day/.test(F.adPeakHoursParse('00-12,12-00').reason), F.adPeakHoursParse('00-12,12-00').reason);
+  t('hours: more than six stretches in a day is refused', F.adPeakHoursParse('01-02,03-04,05-06,07-08,09-10,11-12,13-14').ranges === null, F.adPeakHoursParse('01-02,03-04,05-06,07-08,09-10,11-12,13-14').reason);
+  t('hours: they are written back in the form they were read as, so the page and the switch cannot disagree', F.adPeakHoursText(F.adPeakHoursParse('9-13, 18-22').ranges) === '09-13,18-22' && F.adPeakHoursText(F.adPeakHoursParse('22-02').ranges) === '22-02', F.adPeakHoursText(F.adPeakHoursParse('9-13, 18-22').ranges));
+  t('hours: what happens next is said in plain words, from either side of either boundary', F.adPeakNextChange(hp.ranges, 10) === 'on at 17:00' && F.adPeakNextChange(hp.ranges, 18) === 'off at 23:00' && F.adPeakNextChange(hp.ranges, 22) === 'off at 23:00' && F.adPeakNextChange(hp.ranges, 23) === 'on at 17:00', [F.adPeakNextChange(hp.ranges, 10), F.adPeakNextChange(hp.ranges, 18), F.adPeakNextChange(hp.ranges, 23)]);
+  t('hours: the help line says what the second number means, because nobody guesses that right', /on at 17:00 and off at 23:00/.test(F.ADTOOL_PEAK_HOURS_HELP) && /midnight/.test(F.ADTOOL_PEAK_HOURS_HELP), F.ADTOOL_PEAK_HOURS_HELP);
+  t('hours: text that cannot be read is refused as it is typed, with the reason and the help beside it', (() => { const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {')); return /adPeakHoursParse\(hours\)/.test(a) && /throw new Error\('SAY: ' \+ parsed\.reason/.test(a) && /ADTOOL_PEAK_HOURS_HELP/.test(a) && /adPeakHoursText\(parsed\.ranges\)/.test(a) && /const auto = \(!parsed\.ranges \|\|/.test(a); })(), null);
+  t('hours: a work-list row with no hours at all is still allowed, and stored with its switching off rather than looking armed', (() => { const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {')); return /const auto = \(!parsed\.ranges/.test(a) && !/give the hours this listing should run/.test(a) && F.adPeakHoursParse('').ranges === null; })(), null);
+
+  /* (5) the peak switch, and the one thing that decides whether anything leaves the worker */
+  const pkBase = { auto: 1, ranges: hp.ranges, live_cpc_ad: true, account_live_switch: true, account_switches_today: 0 };
+  const pkAt = (hour, believed, extra) => F.adPeakSwitchDecide(Object.assign({}, pkBase, { hour: hour, believed_state: believed }, extra || {}));
+  t('peak switch: on the hour the peak starts, a paused ad is sent back to running', pkAt(17, 'PAUSED').send === 'ACTIVE' && pkAt(17, 'PAUSED').mode === 'live', pkAt(17, 'PAUSED'));
+  t('peak switch: on the hour the peak ends, a running ad is paused', pkAt(23, 'ACTIVE').send === 'PAUSED' && pkAt(23, 'ACTIVE').mode === 'live', pkAt(23, 'ACTIVE'));
+  t('peak switch: the hour before the start and the last hour inside both change nothing', pkAt(16, 'PAUSED').send === null && pkAt(22, 'ACTIVE').send === null, [pkAt(16, 'PAUSED'), pkAt(22, 'ACTIVE')]);
+  t('peak switch: an ad already in the right state is left alone, which is what keeps one boundary to one instruction', pkAt(18, 'ACTIVE').send === null && /already running/.test(pkAt(18, 'ACTIVE').why) && pkAt(3, 'PAUSED').send === null && /already paused/.test(pkAt(3, 'PAUSED').why), [pkAt(18, 'ACTIVE'), pkAt(3, 'PAUSED')]);
+  t('peak switch: switching turned off for the listing, no hours, and no ad to switch each stop it on their own', pkAt(17, 'PAUSED', { auto: 0 }).send === null && pkAt(17, 'PAUSED', { ranges: [] }).send === null && pkAt(17, 'PAUSED', { live_cpc_ad: false }).send === null, [pkAt(17, 'PAUSED', { auto: 0 }).why, pkAt(17, 'PAUSED', { ranges: [] }).why, pkAt(17, 'PAUSED', { live_cpc_ad: false }).why]);
+  t('peak switch: with the account’s own switch OFF, every change at every hour of the day is written down and never sent', (() => {
+    for (let h = 0; h < 24; h++) {
+      const want = F.adInPeakRanges(h, hp.ranges) ? 'ACTIVE' : 'PAUSED';
+      const d = F.adPeakSwitchDecide(Object.assign({}, pkBase, { hour: h, believed_state: want === 'ACTIVE' ? 'PAUSED' : 'ACTIVE', account_live_switch: false }));
+      if (d.send !== want || d.mode !== 'would-send' || !/live switch is off/.test(d.why)) return false;
+    }
+    return true;
+  })(), null);
+  t('peak switch: with the switch ON the same changes go live, so the account’s switch is the only thing that decides', (() => {
+    for (let h = 0; h < 24; h++) {
+      const want = F.adInPeakRanges(h, hp.ranges) ? 'ACTIVE' : 'PAUSED';
+      const d = F.adPeakSwitchDecide(Object.assign({}, pkBase, { hour: h, believed_state: want === 'ACTIVE' ? 'PAUSED' : 'ACTIVE', account_live_switch: true }));
+      if (d.send !== want || d.mode !== 'live') return false;
+    }
+    return true;
+  })(), null);
+  t('peak switch: the daily ceiling holds a change back and says so, and nothing is marked live', (() => { const d = pkAt(17, 'PAUSED', { account_switches_today: F.ADTOOL_PEAK_SWITCH_CAP }); return d.send === 'ACTIVE' && d.mode === 'blocked' && /already had/.test(d.why); })(), pkAt(17, 'PAUSED', { account_switches_today: 20 }));
+  t('peak caps: twenty a day for an account, and the morning job’s quiet hours are deliberately not one of the rules here', F.adPeakApplyCaps({ account_switches_today: 19 }).allowed === true && F.adPeakApplyCaps({ account_switches_today: 20 }).allowed === false && F.ADTOOL_PEAK_SWITCH_CAP === 20 && F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 23).allowed === false && F.adPeakApplyCaps({ account_switches_today: 0 }).allowed === true, [F.adPeakApplyCaps({ account_switches_today: 20 }), F.adtApplyCaps({ account_actions_today: 0, listing_bid_changes_week: 0 }, 'status', 23)]);
+  t('peak switch: what the ad is doing now comes from whichever of eBay’s reading and our own record is the newer', (() => {
+    const rows = [{ ad_status: 'PAUSED', ad_synced_at: '2026-10-28 10:00:00' }];
+    const older = F.adtPeakBelieved(rows, { to: 'ACTIVE', at: '2026-10-28 09:00:00' });
+    const newer = F.adtPeakBelieved(rows, { to: 'ACTIVE', at: '2026-10-28 10:30:00' });
+    const none = F.adtPeakBelieved(rows, null);
+    const unstamped = F.adtPeakBelieved([{ ad_status: '', ad_synced_at: '2026-10-28 10:00:00' }], null);
+    return older.state === 'PAUSED' && /eBay/.test(older.from) && newer.state === 'ACTIVE' && /own record/.test(newer.from) && none.state === 'PAUSED' && unstamped.state === 'ACTIVE';
+  })(), null);
+  t('peak switch: the ad it switches is one that CAN be switched, paused ones included, because the shared live rule would never let it turn one back on', (() => { const q = src.slice(src.indexOf('const ADTOOL_PEAK_SWITCHABLE_SQL'), src.indexOf('const ADTOOL_PEAK_MANUAL_CAP')); return /COALESCE\(ca\.ad_status, ''\) <> 'ARCHIVED'/.test(q) && /c\.funding_model = 'COST_PER_CLICK'/.test(q) && /ia\.status = 'ACTIVE'/.test(q) && !/ca\.ad_status = 'ACTIVE'/.test(q); })(), null);
+  t('peak switch: the job holds exactly one request, inside the live branch, through the endpoint table rather than a URL of its own', (() => {
+    const j = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+    if (!j || (j.match(/await fetch\(/g) || []).length !== 1) return false;
+    const gate = j.indexOf("if (mode === 'live') {"), req = j.indexOf('await fetch(');
+    /* nothing stands between the live branch and the request but the cap counter, the try and the
+       token: measured in CODE, not characters, so the prose between them can be as long as it needs
+       to be. Anything else appearing there would be a second decision taken after the gate. */
+    const between = j.slice(gate + "if (mode === 'live') {".length, req).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
+    const allowed = /^doneToday\[macct\] = \(doneToday\[macct\] \|\| 0\) \+ 1; try \{ const tok = await ebayAccessToken\(env, macct\); const r =$/.test(between);
+    /* and `mode` can only BE 'live' where the pure answer said so and the account's own ceiling still allows it */
+    return gate > 0 && req > gate && allowed && /const mode = d\.mode === 'live' && !cap\.allowed \? 'blocked' : d\.mode;/.test(j) && /ADTOOL_APPLY_ENDPOINTS\.bulk_status_by_listing/.test(j) && !/api\.ebay\.com/.test(j);
+  })(), null);
+  t('peak switch: the account’s switch is read from the one place the morning apply job reads it', (() => { const j = src.slice(src.indexOf('async function adtPeakLiveSwitches(env) {'), src.indexOf('async function adtPeakLastSwitch')); return /portal_config WHERE key LIKE 'adtool_apply_live_%'/.test(j) && /String\(r\.value\) === 'on'/.test(j); })(), null);
+  t('peak switch: a change a daily ceiling held back is owed and tried again, because nothing was sent and nothing changed', /\(mode = 'would-send' OR \(mode = 'live' AND http_status >= 200 AND http_status < 300\)\)/.test(src), null);
+  t('peak switch: its rows keep the operation name the change pages read, so a switch is never read as somebody changing it on eBay', (() => { const j = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {')); return /decision_id, op, payload_json, mode, http_status, response, undo_json, at\) VALUES \(\?1, \?2, \?3, \?4, 'peak', 'status'/.test(j) && /if \(String\(r\.op \|\| ''\) !== 'status'\) continue;/.test(src); })(), null);
+  t('peak switch: every row carries the undo that puts the ad back, which is what the undo button sends', (() => { const j = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {')); return /undo: \{ op: 'status', campaign_id: cid, listing_id: id, to: d\.send === 'ACTIVE' \? 'PAUSED' : 'ACTIVE' \}/.test(j); })(), null);
+  t('peak switch: the job follows the page it belongs to, so switching the page off stops it deciding anything at all', (() => { const j = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {')); return /adtFlag\(env, 'adtool_page_peak'\)\) !== 'on'\) return;/.test(j); })(), null);
+  t('peak switch: it has an invocation of its OWN, one minute after each quarter hour, and shares a subrequest budget with nothing (regex over the real source)', (() => {
+    /* riding first in the twelve-job quarter-hour slot was not enough: every job in a slot shares one
+       invocation's budget, and the one job here that writes to eBay cannot be the one that starves. */
+    const own = /'1-59\/15 \* \* \* \*': \[adtoolPeakSwitch\],/.test(src);
+    const gone = !/'\*\/15 \* \* \* \*': \[adtoolPeakSwitch/.test(src);
+    const i = src.indexOf("'*/15 * * * *': [");
+    const slot = src.slice(i, src.indexOf('\n', i));
+    return own && gone && !/adtoolPeakSwitch/.test(slot) && (src.match(/adtoolPeakSwitch\]/g) || []).length === 1;
+  })(), null);
+  t('peak page: every by-hand row says what its hours were read as, what happens next, what the system last did, and whether that account is switched on', (() => { const m = (() => { const a = src.indexOf('const manual = manualRows.map(r => {'); return src.slice(a, src.indexOf('const allAccounts =', a)); })(); return /hours_parsed: parsed\.ranges/.test(m) && /next_change: parsed\.ranges \? adPeakNextChange/.test(m) && /last_switch: ls \? \{ at: ls\.at, to: ls\.to, mode: ls\.mode \} : null/.test(m) && /live_switch_on: !!liveSwitch\[a\]/.test(m) && /auto: auto/.test(m); })(), null);
+  t('peak page: the line promising nothing on the page reaches eBay is gone, because it stopped being true', !/never a timer: eBay cannot run an ad by the hour, so nothing here is sent to eBay/.test(src) && /the system switches these on at the start of their hours/.test(src), null);
+
+
+  /* ─── the review's findings on the one path to eBay, each held by the thing that was wrong ─── */
+  const pkJob = () => src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+
+  t('peak switch: the added column is born 0, so a row typed before switching existed is never armed by the deploy that added it (regex over the real source)', (() => {
+    /* DEFAULT 1 would have armed every free-text row on the list the moment this landed, on an
+       account whose live switch is already on. An existing row cannot consent to being automated. */
+    const alter = /ALTER TABLE adtool_peak_items ADD COLUMN auto INTEGER DEFAULT 0/.test(src) && !/ADD COLUMN auto INTEGER DEFAULT 1/.test(src);
+    const insert = /INSERT INTO adtool_peak_items \(account, item_id, hours, note, added_by, added_at, removed_by, removed_at, auto\)/.test(src);
+    const read = /COALESCE\(auto, 0\) = 1/.test(src) && !/COALESCE\(auto, 1\) = 1/.test(src);
+    const fallback = /const auto = Number\(row\.auto == null \? 0 : row\.auto\) \? 1 : 0;/.test(pkJob());
+    return alter && insert && read && fallback;
+  })(), null);
+
+  t('peak switch: a new row with readable hours is still born armed, and one with no hours is born off', (() => {
+    const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {'));
+    return /const auto = \(!parsed\.ranges \|\| \(p && p\.auto === false\) \|\| \(p && p\.auto === 0\)\) \? 0 : 1;/.test(a) && /, auto = \?6/.test(a);
+  })(), null);
+
+  t('peak switch: the sending has a stop button of its own and the job needs BOTH it and the page flag (regex over the real source)', (() => {
+    const j = pkJob();
+    return /adtFlag\(env, 'adtool_page_peak'\)\) !== 'on'\) return;/.test(j) && /adtFlag\(env, 'adtool_job_peakswitch'\)\) !== 'on'\) return;/.test(j)
+      && /for \(const key of \['adtool_page_changes', 'adtool_page_peak', 'adtool_job_peakswitch'\]\)/.test(src);
+  })(), null);
+
+  t('peak switch: the seed comment no longer promises that nothing on the peak page reaches eBay, because one account is switched on', !/the peak page writes nothing but its own\s*\n\s*by-hand list, and nothing on it reaches eBay/.test(src) && /is SWITCHED by a job/.test(src), null);
+
+  t('peak switch: the token and the switch test come off the AD’s own account, never the one typed on the list (regex over the real source)', (() => {
+    /* the switchable read joins on the listing id alone, so a row can come back for another account.
+       Gating on the typed account would mint a token for the wrong account and send a change to an
+       account nobody switched on. */
+    const j = pkJob();
+    const mint = /const tok = await ebayAccessToken\(env, macct\);/.test(j) && !/ebayAccessToken\(env, acct\)/.test(j);
+    const gate = /const on = !!switches\[macct\];/.test(j) && !/account_live_switch: !!switches\[acct\]/.test(j);
+    const cap = /adPeakApplyCaps\(\{ account_switches_today: doneToday\[macct\] \|\| 0 \}\)/.test(j) && !/doneToday\[acct\]/.test(j);
+    return mint && gate && cap;
+  })(), null);
+
+  t('peak switch: where the list and the ad name different accounts, a blocked row says which two and nothing is sent (regex over the real source)', (() => {
+    const j = pkJob();
+    const i = j.indexOf('if (!macct || macct !== acct) {'), f = j.indexOf('await fetch(');
+    return i > 0 && f > i && /'blocked', 0, \?6, '', datetime\('now'\)/.test(j) && /the peak list holds this listing under/.test(j) && /and the ad belongs to/.test(j) && /continue;/.test(j.slice(i, f));
+  })(), null);
+
+  t('peak switch: a standing account mismatch is written down once a day, not once a quarter hour (regex over the real source)', (() => {
+    /* it is a data fault that does not pass on its own, so the same blocked row every tick would bury
+       a day's real work under ninety-six copies of one complaint. A row a CAP held back is not
+       deduplicated: that change is still owed and is owed again on the next tick. */
+    const j = pkJob();
+    return /SELECT item_id, campaign_id FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'blocked' AND day = \?1 LIMIT 2000/.test(j)
+      && /if \(blockedToday\[id \+ '\|' \+ cid\]\) continue;/.test(j) && /blockedToday\[id \+ '\|' \+ cid\] = 1;/.test(j);
+  })(), null);
+  t('peak switch: an account whose switch is OFF is compared with its OWN shadow timeline, so one state change is one row and not one per ad rotation (regex over the real source)', (() => {
+    /* nothing is ever sent for that account, so eBay's reading can never move; comparing against it
+       wrote the same would-send row every quarter hour for ever. */
+    const j = pkJob();
+    return /const believed = on \? adtPeakBelieved\(camp, hist\.live\)\.state : \(hist\.shadow \? hist\.shadow\.to : ''\);/.test(j);
+  })(), null);
+
+  t('peak switch: told its own last would-send, the decision is to send nothing, which is what stops the churn', (() => {
+    /* the pure half of the rule above: believed == wanted, so nothing leaves and no row is written. */
+    const ranges = F.adPeakHoursParse('17-23').ranges;
+    const base = { auto: 1, ranges: ranges, live_cpc_ad: true, account_live_switch: false, account_switches_today: 0 };
+    const again = F.adPeakSwitchDecide(Object.assign({}, base, { hour: 18, believed_state: 'ACTIVE' }));
+    const first = F.adPeakSwitchDecide(Object.assign({}, base, { hour: 18, believed_state: '' }));
+    const flipped = F.adPeakSwitchDecide(Object.assign({}, base, { hour: 23, believed_state: 'ACTIVE' }));
+    return again.send === null && first.send === 'ACTIVE' && first.mode === 'would-send' && flipped.send === 'PAUSED' && flipped.mode === 'would-send';
+  })(), null);
+
+  t('peak switch: the last-switch read takes the NEWEST rows, not the oldest two thousand (regex over the real source)', (() => {
+    /* ORDER BY id ASC LIMIT 2000 returns the oldest rows once the window passes two thousand, so on a
+       busy day the job believed nothing had happened and sent every boundary again. */
+    const m = src.slice(src.indexOf('async function adtPeakLastSwitch'), src.indexOf('async function adtoolPeakSwitch'));
+    return /ORDER BY id DESC LIMIT 2000/.test(m) && !/ORDER BY id ASC LIMIT 2000/.test(m) && /if \(!slot\.newest\) slot\.newest = rec;/.test(m);
+  })(), null);
+
+  t('peak switch: the record is kept per listing AND campaign, because one send is one campaign (regex over the real source)', (() => {
+    const m = src.slice(src.indexOf('async function adtPeakLastSwitch'), src.indexOf('async function adtoolPeakSwitch'));
+    const keyed = /SELECT item_id, campaign_id, payload_json, mode, http_status, at FROM adtool_apply_log/.test(m) && /byKey\[item \+ '\|' \+ cid\]/.test(m);
+    const used = /last\.by_key\[id \+ '\|' \+ cid\]/.test(pkJob());
+    /* and the page reads the per-listing half of the same one pass, never a second read */
+    const page = /lastSwitch\.by_item\[id\]/.test(src) && /lastSwitch\.by_key\[id \+ '\|' \+ cid\]/.test(src);
+    return keyed && used && page;
+  })(), null);
+
+  t('peak switch: a campaign eBay refused is owed and tried again, and one it accepted is not (regex over the real source)', (() => {
+    /* a non-2xx live row never enters the map, so the believed state falls back to eBay's own reading
+       and the change is still owed; an accepted one is in the map and the next tick finds it done. */
+    const m = src.slice(src.indexOf('async function adtPeakLastSwitch'), src.indexOf('async function adtoolPeakSwitch'));
+    const only2xx = /\(mode = 'would-send' OR \(mode = 'live' AND http_status >= 200 AND http_status < 300\)\)/.test(m);
+    const believed = F.adtPeakBelieved([{ ad_status: 'PAUSED', ad_synced_at: '2026-10-28 17:05:00' }], null);
+    const accepted = F.adtPeakBelieved([{ ad_status: 'PAUSED', ad_synced_at: '2026-10-28 17:05:00' }], { to: 'ACTIVE', at: '2026-10-28 17:10:00' });
+    return only2xx && believed.state === 'PAUSED' && accepted.state === 'ACTIVE';
+  })(), null);
+
+  t('peak switch: a LIVE row is written the moment its send comes back, so a cut-short invocation can never leave a change without its log row (regex over the real source)', (() => {
+    const j = pkJob();
+    const f = j.indexOf('await fetch('), w = j.indexOf("if (mode === 'live') { await logRow.run(); written++; } else { stmts.push(logRow); }");
+    return f > 0 && w > f && /await adtBatch\(env, stmts\); written \+= stmts\.length;/.test(j) && !/written = stmts\.length;/.test(j);
+  })(), null);
+
+  t('peak switch: the morning apply’s thirty a day never counts a peak switch, and the peak’s twenty never counts a morning one (regex over the real source)', (() => {
+    /* one shared allowance meant an evening of boundaries could spend the morning run's whole day
+       before it woke up, and the morning would then apply nothing without a word about why. */
+    const a = src.slice(src.indexOf('async function adtoolApply(env) {'), src.indexOf('const ADTOOL_ACTIONS_P8'));
+    const morning = /WHERE day = \?1 AND mode = 'live' AND COALESCE\(decision_id, ''\) <> 'peak' GROUP BY account/.test(a);
+    const peak = /WHERE decision_id = 'peak' AND mode = 'live' AND day = \?1 GROUP BY account/.test(pkJob());
+    const caps = /per_account_per_day: 30, bid_changes_per_listing_per_week: 3[^}]*peak_switches_per_account_per_day: ADTOOL_PEAK_SWITCH_CAP/.test(src);
+    return morning && peak && caps && !/counts over EVERY live row including these/.test(src);
+  })(), null);
+
+  t('peak switch: undoing one turns its switching OFF too, or the next tick sends the very change somebody undid (regex over the real source)', (() => {
+    const u = src.slice(src.indexOf("if (p && p.op === 'undo') {"), src.indexOf('const today = ukDate(\'\');', src.indexOf("if (p && p.op === 'undo') {")));
+    return /String\(row\.decision_id \|\| ''\) === 'peak'/.test(u) && /UPDATE adtool_peak_items SET auto = 0 WHERE item_id = \?1/.test(u) && /peak_disarmed: peakDisarmed/.test(u) && u.indexOf('peakDisarmed = true') < u.indexOf('peak_disarmed: peakDisarmed');
+  })(), null);
+
+  t('apply log: the two senders have a table each and a tally each, so neither ever carries the other’s rows (regex over the real source)', (() => {
+    const b = src.slice(src.indexOf('adtoolApplyPage: {'), src.indexOf('/* ADTOOL-P8-END'));
+    const split = /WHERE COALESCE\(decision_id, ''\) <> 'peak' ORDER BY id DESC LIMIT 200/.test(b) && /WHERE COALESCE\(decision_id, ''\) = 'peak' ORDER BY id DESC LIMIT 100/.test(b);
+    const tallies = /AND COALESCE\(decision_id, ''\) <> 'peak' GROUP BY mode/.test(b) && /AND COALESCE\(decision_id, ''\) = 'peak' GROUP BY mode/.test(b);
+    const shape = /peak_log: logRows\(peakLog\)/.test(b) && /peak_counts_today: pc/.test(b) && /const pc = \{ live: 0, would_send: 0, blocked: 0 \};/.test(b);
+    return split && tallies && shape;
+  })(), null);
+
+  t('apply log: the note gives the quiet hours to the two runs alone, in a finished sentence', (() => {
+    const b = src.slice(src.indexOf('adtoolApplyPage: {'), src.indexOf('/* ADTOOL-P8-END'));
+    return /The quiet hours belong to the morning and evening runs alone;/.test(b) && !/the morning and evening runs’;/.test(b) && /keeps a daily ceiling of its own that this one never counts against/.test(b);
+  })(), null);
+
+  t('peak page: a row on an account already at its daily ceiling says blocked, instead of claiming the change is about to go (regex over the real source)', (() => {
+    /* the page passed nought switches today whatever the account had really had, so a row the job
+       would have held back read as one about to be sent. */
+    const ma = src.indexOf('const manual = manualRows.map(r => {');
+    const b = src.slice(ma, src.indexOf('const allAccounts =', ma));
+    const real = /account_switches_today: doneA/.test(b) && !/account_switches_today: 0/.test(b) && /const onSw = !!liveSwitch\[a\], doneA = peakDoneToday\[a\] \|\| 0;/.test(b);
+    const read = /WHERE decision_id = 'peak' AND mode = 'live' AND day = \?1 GROUP BY account/.test(src.slice(src.indexOf('const peakDoneToday = {};'), src.indexOf('const manual = manualRows.map(r => {')));
+    const state = /switch_state: d\.send \? d\.mode : '', switch_to: d\.send \|\| '', switch_note: d\.why,/.test(b);
+    /* and the pure answer at the ceiling really is 'blocked', so the field can say it */
+    const blocked = F.adPeakSwitchDecide({ auto: 1, ranges: F.adPeakHoursParse('17-23').ranges, hour: 17, live_cpc_ad: true, believed_state: 'PAUSED', account_live_switch: true, account_switches_today: F.ADTOOL_PEAK_SWITCH_CAP }).mode === 'blocked';
+    return real && read && state && blocked;
+  })(), null);
+
+  t('spend windows: a listing with no day in a window gets no number, because nought is a figure and "no day on record" is not (regex over the real source)', (() => {
+    /* a conditional SUM over no rows is 0 in SQL, so every listing with nothing in the window read as
+       having spent nothing, which a reader acts on differently. */
+    const i = src.indexOf('AS spend_3d, SUM(CASE WHEN day >= ?3 THEN 1 ELSE 0 END) AS days_3d');
+    const nulls = /spend_3d: Number\(r\.days_3d\) > 0 \? round2\(Number\(r\.spend_3d\) \|\| 0\) : null,/.test(src)
+      && /spend_7d: Number\(r\.days_7d\) > 0 \? round2\(Number\(r\.spend_7d\) \|\| 0\) : null,/.test(src)
+      && /spend_14d: Number\(r\.days_14d\) > 0 \? round2\(Number\(r\.spend_14d\) \|\| 0\) : null,/.test(src);
+    const none = /\{ spend_3d: null, spend_7d: null, spend_14d: null \}/.test(src) && !/\{ spend_3d: 0, spend_7d: 0, spend_14d: 0 \}/.test(src);
+    return i > 0 && nulls && none;
+  })(), null);
+
+  t('register: the rows the review rewrote say what is really true, in the house voice', (() => {
+    const r = id => rgAll.filter(x => x.id === id)[0] || {};
+    const ls = r('LIVE_SPLIT'), dy = r('AD_RATE_DYNAMIC'), lr = r('POTENTIAL_CPC_LAST_RUN'), oo = r('POTENTIAL_CPC_ORDERS'), dt = r('DECISIONS_TODAY');
+    return /SEPARATE count of the live listings/.test(ls.formula) && /prepared every hour/.test(ls.recompute)
+      && /prepared every hour/.test(r('POTENTIAL_CPC').recompute)
+      && /OR when the team/.test(dy.formula) && /does NOT overrule/.test(dy.formula) && /whole funding reply/.test(dy.formula)
+      && /as far back as the click-fee record goes/.test(lr.formula) && /no click fee on record/.test(lr.formula) && !/says it has never been advertised that way/.test(lr.formula)
+      && /counts ORDERS/.test(oo.formula) && /counts UNITS/.test(oo.formula) && /GREATER/.test(oo.formula)
+      && /every account/.test(dt.formula) && /exactly the rows the Decision page lists/.test(dt.formula);
+  })(), null);
+
+  /* (6) today by the hour: the orders half of the one chart on the Overview */
+  t('today by hour: the hours add up to the same orders and units the four parts of the day do', (() => {
+    const stamps = ['2026-10-28T00:10:00Z', '2026-10-28T06:30:00Z', '2026-10-28T06:40:00Z', '2026-10-28T11:05:00Z', '2026-10-28T16:59:00Z', '2026-10-28T22:45:00Z'];
+    const qtys = [1, 2, 1, 3, 1, 1];
+    const hA = {}, sA = {};
+    stamps.forEach((iso, i) => {
+      const uk = F.adtUkParts(Date.parse(iso)), q = Math.max(1, qtys[i]);
+      const h = (hA[uk.hour] = hA[uk.hour] || { hour_uk: uk.hour, orders: 0, units: 0 }); h.orders++; h.units += q;
+      const s2 = (sA[uk.slot] = sA[uk.slot] || { slot: uk.slot, orders: 0, units: 0 }); s2.orders++; s2.units += q;
+    });
+    const hs = Object.keys(hA).map(k => hA[k]), ss = Object.keys(sA).map(k => sA[k]);
+    const add = (l, k) => l.reduce((x, y) => x + y[k], 0);
+    return add(hs, 'orders') === stamps.length && add(hs, 'orders') === add(ss, 'orders') && add(hs, 'units') === add(ss, 'units') && add(hs, 'units') === qtys.reduce((a, b) => a + b, 0)
+      && hs.length === 5 && ss.length === 4 && hs.every(x => x.hour_uk >= 0 && x.hour_uk <= 23);
+  })(), null);
+  t('today by hour: both lists come out of ONE read of the orders, so they can never disagree', (() => {
+    const a = src.indexOf('const todayOrders = []; const slotAgg = {}; const hourAgg = {};');
+    if (a < 0) return false;
+    const blk = src.slice(a, a + 1500);
+    return (blk.match(/FROM orders WHERE created_at/g) || []).length === 1 && /slotAgg\[uk\.slot\]/.test(blk) && /hourAgg\[uk\.hour\]/.test(blk) && /today_hours: todayHours/.test(src);
+  })(), null);
+
+  /* (7) what a listing spent over the last three, seven and fourteen finished days */
+  t('spend windows: three, seven and fourteen days are nested and all three end yesterday, so they can never come out of order', (() => {
+    const day0 = '2026-10-28', yd = F.adtAddDays(day0, -1);
+    const rows = []; for (let i = 0; i < 28; i++) rows.push({ day: F.adtAddDays(day0, -i), spend: (i % 5) + 0.5 });
+    const add = from => rows.filter(r => r.day >= from && r.day <= yd).reduce((x, r) => x + r.spend, 0);
+    const s3 = add(F.adtAddDays(day0, -3)), s7 = add(F.adtAddDays(day0, -7)), s14 = add(F.adtAddDays(day0, -14));
+    return s3 > 0 && s3 <= s7 && s7 <= s14 && rows.filter(r => r.day > yd).length === 1;
+  })(), null);
+  t('spend windows: the three come out of the aggregate already being read, and not one of them reaches into today', /ROUND\(SUM\(CASE WHEN day >= \?3 THEN spend ELSE 0 END\), 2\) AS spend_3d/.test(src) && /AS spend_7d/.test(src) && /AS spend_14d/.test(src) && /adtAddDays\(today, -28\), yday, adtAddDays\(today, -3\), adtAddDays\(today, -7\), adtAddDays\(today, -14\)/.test(src) && /day >= \?1 AND day <= \?2/.test(src), null);
+  t('spend windows: the spend already carries the fee charged on clicks, so the click fee is never added on top of it', !/spend \+ cpc_spend[\s\S]{0,80}AS spend_3d/.test(src) && !/AS spend_3d[\s\S]{0,200}cpc_spend/.test(src), null);
+
+  /* (8) the two new pages: born on, gated before the cache, keyed by profit class */
+  t('flags: both new pages are born on, and a switch somebody has already set is left exactly as it stands', (() => { const a = src.indexOf("for (const key of ['adtool_page_livesplit', 'adtool_page_potential'])"); return a > 0 && /ON CONFLICT\(key\) DO NOTHING/.test(src.slice(a, a + 400)); })(), null);
+  t('gates: both new pages refuse by role BEFORE they look for a cached answer, and the key carries the profit class', (() => {
+    const blk = src.slice(src.indexOf('const ADTOOL_ACTIONS_P16 = {'), src.indexOf('/* ADTOOL-P16-END'));
+    const ok = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); if (i < 0) return false; const b = blk.slice(i, i + 1200); const g = b.indexOf('adtGate(ctx, null)'), f = b.indexOf("adtGate(ctx, 'adtool_page_"), m = b.indexOf('adtKvMemo('); return g >= 0 && f > g && m > f; });
+    return ok && (blk.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 2 && (blk.match(/adtGate\(ctx, null\)/g) || []).length === 2;
+  })(), null);
+  t('routes: both new actions carry the advertising prefix, so the router gates them by role and strips collective profit on the way out', /Object\.assign\(ROUTES, ADTOOL_ACTIONS_P16\)/.test(src) && /adtoolLiveSplit: \{/.test(src) && /adtoolPotentialCpc: \{/.test(src) && /adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000/.test(src), null);
+  t('bounds: every read the two new pages make is held to a window or a ceiling', (() => {
+    const blk = src.slice(src.indexOf('/* ---- Entire Live Listings'), src.indexOf('/* ---- Peak hours: the system switches'));
+    const selects = blk.match(/SELECT [\s\S]{0,600}?'/g) || [];
+    return /LIMIT ' \+ ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(blk) && /LIMIT 2000/.test(blk) && /day >= \?1 AND day <= \?2/.test(blk) && selects.length > 0;
+  })(), null);
+  /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
+     Overview prints as a tile of its own and which had stood at a hard nought since the Command
+     centre was written. */
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 10 && p16.some(r => r.id === 'DECISIONS_TODAY') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
+  t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
+  t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
+
+  /* ─────────────────────────────────────────────────────────────────────────────────────────────
+     (9) 28 OCT, THE RECONCILIATION. The engine half and the two frontend halves of this batch were
+     built on disjoint files and each reported green. They still disagreed about the NAMES of eight
+     figures, and a name the engine does not send renders as an empty cell, which a reader takes for
+     a nought. Each test below is one of those disagreements, held from both sides: the engine really
+     sends the field, and the page really reads it.
+     ───────────────────────────────────────────────────────────────────────────────────────────── */
+  const rdFile = (rel) => { const n = $.NSString.stringWithContentsOfFileEncodingError(root + '/' + rel, $.NSUTF8StringEncoding, null); return n && n.js ? n.js : ''; };
+  const cpcSrc = rdFile('frontend/view-adtool-cpc.js');
+  const pcSrc = rdFile('frontend/view-potential-cpc.js');
+  const pkSrc = rdFile('frontend/view-adtool-peak.js');
+  const splitBlk = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
+  const potBlk = src.slice(src.indexOf('async function adtoolPotentialCpcCompute'), src.indexOf('/* ---- Peak hours: the system switches'));
+
+  t('split: the fleet counts are nested under counts.fleet and the page reads the nest, not the flat spelling', /counts: \{ fleet: fleet, by_account:/.test(splitBlk) && /C\.fleet && typeof C\.fleet === 'object'/.test(cpcSrc), null);
+  t('split: the page never falls back to a capped list’s length before it has tried the totals the engine sends', (() => { const i = cpcSrc.indexOf('function splitCount('); const b = cpcSrc.slice(i, i + 700); return b.indexOf('totals') > 0 && b.indexOf('totals') < b.indexOf('list.length'); })(), null);
+  t('split: held back and the three totals are read from the objects the engine sends', /held_back: \{ on_cpc:/.test(splitBlk) && /totals: totals,/.test(splitBlk) && /D\.held_back && D\.held_back\[key\]/.test(cpcSrc) && /D\.totals && D\.totals\[key\]/.test(cpcSrc), null);
+  t('split: the invariant line reads classified against the INDEPENDENT active count, which is the whole point of it', /classified: sum, read: fleet\.active, active_counted: activeCounted/.test(splitBlk) && /num\(I\.classified\)/.test(cpcSrc) && /num\(I\.active_counted\)/.test(cpcSrc), null);
+  t('split: the engine’s own sentence is added only where the three do NOT add up, so no count is written out twice', (() => {
+    const i = cpcSrc.indexOf('function invariantLine('), j = cpcSrc.indexOf('/* ── 2 ·', i);
+    const body = cpcSrc.slice(i, j > i ? j : i + 2600);
+    const ok = body.slice(body.indexOf('They add up, so no listing is in two states or in none.'), body.indexOf('return \'<div class="cpc-inv bad">'));
+    /* both uses are on the bad branch; the ok branch adds nothing after its own full stop */
+    return /function invNote/.test(cpcSrc) && /I\.text != null/.test(cpcSrc) && (body.match(/invNote\(I\)/g) || []).length === 2 && !/invNote/.test(ok);
+  })(), null);
+  t('split: the classifier really reads the spelling the page really sends, which a regex over the source could not tell us', (() => {
+    /* this used to be a regex pinning `campaign_name: String(r.name || '')` in the engine next to a
+       regex over the view. Both were true and the page was still wrong, because nothing checked that
+       the function doing the classifying could read that name. So it is checked by calling it. */
+    const row = { funding_model: 'COST_PER_SALE', campaign_name: 'General dynamic', ad_rate_strategy: '' };
+    return F.adLiveSplitClass([row]) === 'dynamic' && /campaign_name: String\(r\.name \|\| ''\)/.test(splitBlk) && /bid_pct: adtMoneyNum\(rate\)/.test(splitBlk) && /campaign_name/.test(cpcSrc);
+  })(), null);
+  t('split: there is no `live` flag to read, so the page decides it from the ad status the engine does send', !/\blive: !!/.test(splitBlk) && /c\.live != null \? !!c\.live : String\(c\.ad_status \|\| ''\)\.toUpperCase\(\) !== 'PAUSED'/.test(cpcSrc), null);
+  t('split: the ad reading stamp is read under the name the engine sends it by', /ad_reading_at: r\.ad_synced_at/.test(splitBlk) && /o\.ad_reading_at != null/.test(cpcSrc), null);
+  t('split: no column asks for units, because the split answer carries none and a column of dashes reads as "sold nothing"', !/units_7d/.test(splitBlk) && !/r\.units_7d/.test(cpcSrc.slice(cpcSrc.indexOf('var SPLIT_COLS'), cpcSrc.indexOf('function splitSorter'))) && /campaigns_count/.test(splitBlk), null);
+  t('potential: the order count is read by the name the engine sends, so the column is never a row of dashes', /orders_completed: v\.orders_completed/.test(potBlk) && /'orders_completed', 'orders'/.test(pcSrc), null);
+  t('potential: the sentence about the record comes from the one place that builds it, so the row and the advice cannot disagree', /last_cpc_seen: v\.last_cpc_seen/.test(potBlk) && !/never in the last ' \+ ADTOOL_POTENTIAL_LOOKBACK_DAYS/.test(src) && /last_cpc_seen/.test(pcSrc) && !/never on record/.test(pcSrc), null);
+  t('potential: both reads this batch added are held to a ceiling as well as a window', (() => { const q = potBlk.match(/GROUP BY o\.item_id[^']*/) || [], d = potBlk.match(/GROUP BY item_id ORDER BY last_cpc[^']*/) || []; return /GROUP BY o\.item_id ORDER BY n DESC LIMIT ' \+ ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(potBlk) && /ORDER BY last_cpc DESC LIMIT ' \+ ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(potBlk) && q.length + d.length >= 1; })(), null);
+  t('peak: "the system switches it" is only said where the hours read AND there is an ad to switch', /switchable: sw\.length > 0/.test(src) && /r\.switchable === false/.test(pkSrc) && /no pay-per-click ad to switch, so nothing happens/.test(pkSrc), null);
+  t('peak: the row says what WOULD HAPPEN in the job’s own words and the page reads those words, so a row at the ceiling never reads as one about to be sent', /switch_state: d\.send \? d\.mode : '', switch_to: d\.send \|\| ''/.test(src) && /r\.switch_state/.test(pkSrc) && /'would-send':/.test(pkSrc) && /'blocked':/.test(pkSrc), null);
+  t('peak: hours the system cannot read print the engine’s own reason, not a general refusal', /hours_problem: parsed\.reason \|\| ''/.test(src) && /r\.hours_problem/.test(pkSrc), null);
+  t('peak: the daily ceiling on the banner comes from the answer, never typed into the page', /switch_caps: \{ per_account_per_day: ADTOOL_PEAK_SWITCH_CAP/.test(src) && /PK\.data && PK\.data\.switch_caps/.test(pkSrc) && !/20 switches/.test(pkSrc), null);
+
+  /* the pre-warm, the two stale claims, and the last place the portal stashed an item id */
+  t('warm: the two slow new pages are warmed, and LAST, so they cannot take an earlier page’s turn on a tight hour', (() => { const i = src.indexOf('const jobs = [[\'adtoolCpcListings\''); const b = src.slice(i, src.indexOf('const out = []; const skippedNames', i)); return /\['adtoolLiveSplit', \{\}, true\], \['adtoolPotentialCpc', \{\}, true\]\]/.test(b) && b.indexOf('adtoolLiveSplit') > b.indexOf('adtoolDepts'); })(), null);
+  t('product history: nothing in the portal stashes an item id any more, so a second tab shows its own listing', (() => ['frontend/view-adtool-morning.js', 'frontend/view-adtool-product.js', 'frontend/view-adsCentre.js', 'frontend/view-adtool-cpc.js', 'src/shell.html'].every(f => !/m98m:adtoolItem/.test(rdFile(f))))(), null);
+  t('links: nothing points at the page the merge deleted', (() => ['frontend/view-campaignWatch.js', 'frontend/view-adtool-stopped.js', 'frontend/view-adtool-morning.js'].every(f => !/href="#adtoolActivated/.test(rdFile(f))))(), null);
+  t('claims: the Decision page no longer says the hours are only ever a suggestion, now that one page does switch them', (() => { const r = rdFile('frontend/view-adtool-runtoday.js'); return /#adtoolPeak/.test(r) && !/Hours are a suggestion only, as eBay cannot schedule ads by the hour/.test(r); })(), null);
+  t('claims: Live apply gives the quiet hours to the two runs alone, names the other sender, and reads both ceilings out of the answer', (() => {
+    /* the page used to promise "nothing between 22:00 and 06:00" for everything that sends, which the
+       peak switch broke the day it landed. It must name the other sender, say the quiet hours do not
+       bind it, and take BOTH ceilings from the payload rather than typing either of them. */
+    const r = rdFile('frontend/view-adtool-stop.js');
+    return /The morning and evening runs/.test(r) && /#adtoolPeak/.test(r) && /quiet hours do not apply to it/.test(r)
+      && /caps\.peak_switches_per_account_per_day/.test(r) && /caps\.per_account_per_day/.test(r) && /decision_id/.test(r)
+      && !/\b30 actions\b/.test(r) && !/\b20 switches\b/.test(r);
+  })(), null);
+  t('apply log: the row says which sender wrote it, because every one of them writes the same operation', /decision_id, op, mode, http_status/.test(src) && /peak_switches_per_account_per_day: ADTOOL_PEAK_SWITCH_CAP/.test(src), null);
+  t('peak switch: the ceiling counts requests, so an account whose every send fails stops at the cap too', (() => {
+    const i = src.indexOf("if (mode === 'live') {", src.indexOf('async function adtoolPeakSwitch'));
+    const b = src.slice(i, i + 1400);
+    /* the count goes up before the request leaves, not after a 2xx comes back */
+    return b.indexOf("doneToday[acct] = (doneToday[acct] || 0) + 1;") < b.indexOf('await fetch(') && /if \(r\.ok \|\| r\.status === 204\) \{ sent\+\+; \}/.test(b);
+  })(), null);
+  t('overview: the hourly chart draws all 24 hours and claims nothing for an hour that has not arrived', (() => { const o = rdFile('frontend/view-adtool-overview.js'); return /for \(i = 0; i < 24; i\+\+\) \{\n      var hx/.test(o) && /var lastKnown = -1;/.test(o) && /this hour has not happened yet/.test(o) && /i > lastKnown/.test(o); })(), null);
+  t('overview: the decisions tile counts EXACTLY the rows the Decision page lists, over every account, with nothing filtered out (regex over the real source)', (() => {
+    /* the tile and the page it points at must read the same rows or one of them is lying. The page's
+       own list is day + anything but KEEP, with no account and no applied/undone filter, so the tile
+       is the same predicate and nothing else. `decisions_waiting` is gone with its old narrower read. */
+    const tile = /SELECT COUNT\(\*\) AS n FROM adtool_decisions WHERE day = \?1 AND decision <> 'KEEP'"\)\.bind\(today\)/.test(src);
+    const page = /FROM adtool_decisions d LEFT JOIN adtool_listings l ON l\.item_id = d\.item_id WHERE d\.day = \?1 AND d\.decision <> 'KEEP'/.test(src);
+    return tile && page && /decisions_today: decisionsToday, decisions_scope: 'all accounts'/.test(src) && !/decisions_waiting/.test(src.replace(/\/\*[\s\S]*?\*\//g, ''));
+  })(), null);
+  t('overview: and a database without the decisions table still draws the landing page, with the tile saying so', (() => { const i = src.indexOf('const alertSql = () =>'); const b = src.slice(i, i + 1600); return /catch \(e\) \{ alerts = null; decisionsToday = null; \}/.test(b) && /if \(!alerts\) alerts = await alertSql\(\)\.first\(\);/.test(b); })(), null);
+
+  /* ---- 28 Oct, second pass: what the Past situation note may claim, the signals window, the two
+     morning jobs that still have readers, and the new window's 7-day count ---- */
+
+  /* G1: the eBay sentence comes off the apply log and nothing else */
+  t('past situation: no live apply-log row for the day is the only case that may say nothing was sent to eBay', (() => {
+    const z = F.adtReportSentLive([]);
+    return z.total === 0 && z.morning === 0 && z.peak === 0 && z.sentence === 'nothing was sent to eBay that day';
+  })(), F.adtReportSentLive([]));
+  t('past situation: a day whose decisions were all shadow still owns up to the peak switch’s live sends', (() => {
+    /* the bug: adtool_decisions said shadow for every row, so the note said nothing was sent, while
+       the peak switch had moved real ads on the one account whose live switch is on. */
+    const z = F.adtReportSentLive([{ decision_id: 'peak', n: 4 }]);
+    return z.total === 4 && z.peak === 4 && z.morning === 0 && z.sentence === '4 changes were sent to eBay that day (4 by peak switching)';
+  })(), F.adtReportSentLive([{ decision_id: 'peak', n: 4 }]));
+  t('past situation: the two senders are counted apart, named, and the morning apply is read first', (() => {
+    const z = F.adtReportSentLive([{ decision_id: 'peak', n: 2 }, { decision_id: '', n: 5 }]);
+    return z.total === 7 && z.morning === 5 && z.peak === 2 && z.sentence === '7 changes were sent to eBay that day (5 by the morning apply, 2 by peak switching)';
+  })(), F.adtReportSentLive([{ decision_id: 'peak', n: 2 }, { decision_id: '', n: 5 }]));
+  t('past situation: a decision id that is not peak is the morning apply, however it is spelt, and one change reads in the singular', (() => {
+    const z = F.adtReportSentLive([{ decision_id: 'D-2026-10-27-6174', n: 1 }]);
+    return z.total === 1 && z.morning === 1 && z.sentence === '1 change was sent to eBay that day (1 by the morning apply)';
+  })(), F.adtReportSentLive([{ decision_id: 'D-2026-10-27-6174', n: 1 }]));
+  t('past situation: an empty count is not a send', F.adtReportSentLive([{ decision_id: 'peak', n: 0 }, { decision_id: '', n: null }]).sentence === 'nothing was sent to eBay that day', F.adtReportSentLive([{ decision_id: 'peak', n: 0 }]));
+  t('past situation: the note reads the apply log for the day, counts live rows only, and the old blanket claim is gone (regex over the real source)', (() => {
+    /* a would-send or blocked row is not a send, so the read asks for mode live and nothing else;
+       the decisions sentence and the eBay sentence are two sentences, not one clause. */
+    const reads = /FROM adtool_apply_log WHERE day = \?1 AND mode = 'live' GROUP BY CASE WHEN COALESCE\(decision_id, ''\) = 'peak'/.test(src);
+    const returns = /sent_live: \{ total: sent\.total, morning: sent\.morning, peak: sent\.peak \}/.test(src);
+    const apart = /the day’s decisions were made in shadow/.test(src) && /note: cap\(decSentence\) \+ '\. ' \+ cap\(sent\.sentence\)/.test(src);
+    return reads && returns && apart && !/all in shadow, nothing was sent to eBay/.test(src);
+  })(), null);
+
+  /* G2: the signals feed says which window it filtered by */
+  t('past situation: the signals feed returns the window it filters by, under the names the page already reads (regex over the real source)', (() => {
+    const eng = /window_days: pinDays, window_from: cutoff,/.test(src);
+    const cut = /const cutoff = new Date\(Date\.parse\(today \+ 'T12:00:00Z'\) - pinDays \* 86400000\)/.test(src);
+    const view = rdFile('frontend/view-adtool-morning.js');
+    return eng && cut && /d\.window_from/.test(view) && /d\.window_days/.test(view);
+  })(), null);
+
+  /* G3: the two morning jobs whose output is still read on a live page */
+  t('forecast and ROAS: both jobs stay in the 05:20 chain because live pages still read what they write (regex over the real source)', (() => {
+    /* the Sales forecast page and the ROAS target page are gone, but the jobs are not orphans.
+       adtool_roas is read by the account narratives; the forecast's cursor, its MASE check and its
+       register rows are all shown on Data health, and the hourly rollup calls the job regardless of
+       this slot, so dropping it would only make the schedule the page prints untrue. */
+    const slot = /'20 5 \* \* \*': \[adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas\]/.test(src);
+    const roasReader = /SELECT json FROM adtool_roas ORDER BY day DESC LIMIT 1/.test(src);
+    const catchUp = /try \{ await adtoolForecast\(env\); \} catch/.test(src);
+    const cursorShown = /forecast: await adtFlag\(env, 'adtool_forecast_cursor'\)/.test(src) && /D\.cursors\.forecast/.test(rdFile('frontend/view-adtool-morning.js'));
+    return slot && roasReader && catchUp && cursorShown;
+  })(), null);
+  t('register: no row sends the reader to a page this batch deleted (regex over the real source)', !/Sales forecast page|ROAS target page/.test(src.slice(src.indexOf('const ADTOOL_REGISTER_P4'), src.indexOf('const ADTOOL_FORECAST_BATCH'))), null);
+
+  /* G4: the new window's 7-day count is the new department's own rows */
+  t('new listings: the ladder reads the new department first and on age alone, so the 7-day count is the new rows and nothing else', (() => {
+    /* sold_life and units_30d are set high enough to be a TOP listing, so a pass here proves the age
+       test comes first; a listing live 7 days or less therefore cannot sit in another department. */
+    const hot = { sold_life: 99, units_30d: 99, units_prev30: 0 };
+    const R14 = Object.assign({}, F.ADTOOL_DEPT_DEFAULTS, { new_days: 14 });
+    let allNew = true; for (let a = 0; a <= 7; a++) if (F.adtDeptOf(Object.assign({ age_days: a }, hot), R14).key !== 'new') allNew = false;
+    return allNew && F.ADTOOL_DEPT_DEFAULTS.new_days >= 7;
+  })(), null);
+  t('new listings: the two counts can part only where the new window is shorter than 7 days, which is what the note claims', (() => {
+    const hot = { sold_life: 99, units_30d: 99, units_prev30: 0 };
+    const R5 = Object.assign({}, F.ADTOOL_DEPT_DEFAULTS, { new_days: 5 });
+    const inside = F.adtDeptOf(Object.assign({ age_days: 5 }, hot), R5).key === 'new';
+    const outside = F.adtDeptOf(Object.assign({ age_days: 6 }, hot), R5).key !== 'new';
+    /* and an age we do not have is not new on either side of the comparison */
+    const unknown = F.adtDeptOf({ age_days: null, sold_life: 0, units_30d: 0, units_prev30: 0 }, R5).key !== 'new';
+    return inside && outside && unknown;
+  })(), null);
+  t('new listings: the 7-day note says which rows it counted and reads the new window out of the rules (regex over the real source)', (() => {
+    const i = src.indexOf('last_7_days_note:');
+    const line = src.slice(i, src.indexOf('\n', i));
+    return /counted over every active listing rather than the rows listed here/.test(line)
+      && /' \+ rules\.new_days \+ '/.test(line)
+      && /shorter than 7 days/.test(line)
+      && !/14 days/.test(line);
+  })(), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

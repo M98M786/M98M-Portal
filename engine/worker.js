@@ -225,6 +225,18 @@ export default {
          adsItemsNet is one D1 read on a normal tick and runs the job only if no account has had a
          tick for 40 minutes. */
       '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
+      /* adtoolPeakSwitch has an INVOCATION OF ITS OWN, at :01 :16 :31 :46. It is one of the two jobs
+         in this file that can write to eBay, and riding first in the twelve-job quarter-hour slot
+         above was not enough: every job in a slot shares one invocation's subrequest budget, this one
+         fetches a token and a bulk ad-status write per change, and a peak that quietly stopped being
+         switched because a sync ahead of it ate the budget would be worse than one nobody automated.
+         Its own slot has its own budget and nothing else can touch it.
+         One minute after each quarter hour, not on it: the hours it switches at are whole hours, so
+         the only boundary that matters is the top of an hour and :01 honours it within a minute,
+         while :00 is the busiest minute in this map. A tick that never fires costs nothing either
+         way, because the job compares the state it wants with the state it believes and puts the ad
+         right on the next tick rather than replaying a missed boundary. */
+      '1-59/15 * * * *': [adtoolPeakSwitch],
       '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
       /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
          orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
@@ -2137,8 +2149,18 @@ async function adsSync(env) {
          truthfully show clicks against £0.00 — that is a fact about the campaign, not a bug, and
          the portal should be able to say so. */
       const funding = String((c.fundingStrategy && c.fundingStrategy.fundingModel) || '');
+      /* Owner batch 28 Oct: the ad RATE strategy, and the whole funding object as eBay sent it.
+         eBay marks a cost-per-sale campaign's rate as DYNAMIC or FIXED in adRateStrategy; up to now
+         the only way the portal could tell a dynamic campaign was the owner's own naming convention
+         ("dynamic" in the campaign name), which a rename quietly breaks. The raw object is kept
+         beside it, trimmed to 1000 characters, so what eBay actually sends is on record rather than
+         inferred: if a field is renamed or a new one appears, the evidence is in the row. 400 was too
+         short on the review: eBay nests the rate under fundingStrategy and a reply that spills past
+         the cut stores as truncated JSON nobody can read back, which defeats the point of keeping it. */
+      const fs = c.fundingStrategy || {};
       live[c.campaignId] = { name: String(c.campaignName || ''), status: String(c.campaignStatus || ''), budget, funding,
-        bid: String((c.fundingStrategy && c.fundingStrategy.bidPercentage) || ''), start: String(c.startDate || ''), end: String(c.endDate || '') };   /* ADTOOL P2: read here, stored only behind the flag */
+        bid: String(fs.bidPercentage || ''), start: String(c.startDate || ''), end: String(c.endDate || ''),
+        rate_strategy: String(fs.adRateStrategy || ''), funding_json: JSON.stringify(fs).slice(0, 1000) };   /* ADTOOL P2: read here, stored only behind the flag */
     }
     const prevRs = await env.DB.prepare('SELECT campaign_id, name, status, budget FROM campaigns WHERE account = ?1').bind(acct).all();
     const prev = {};
@@ -2211,13 +2233,43 @@ async function adsSync(env) {
       await queueNotify(env, 'advertising', 'Campaign changed', more, 'engine:campmore:' + acct);
     }
 
+    /* the two added columns are made sure of ONCE per isolate, before the upsert names them */
+    try { await ensureCampaignFundingColumns(env); } catch (e) { /* the fallback below still records the campaign */ }
     for (const id of Object.keys(live)) {
       const l = live[id];
-      await env.DB.prepare(
-        "INSERT INTO campaigns (account, campaign_id, name, status, budget, funding_model, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
-        "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, synced_at=datetime('now')"
-      ).bind(acct, id, l.name, l.status, l.budget, l.funding || '').run();
+      try {
+        /* a reply that does NOT carry adRateStrategy must never blank the one already on record. eBay
+           sends it on cost-per-sale campaigns and leaves it out elsewhere, and it leaves it out of the
+           odd reply besides, so an unconditional write turned a campaign eBay had called dynamic into
+           an unknown one every few minutes. Empty in, stored value kept; a real value always wins. */
+        await env.DB.prepare(
+          "INSERT INTO campaigns (account, campaign_id, name, status, budget, funding_model, ad_rate_strategy, funding_json, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
+          "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, " +
+          "ad_rate_strategy = CASE WHEN COALESCE(excluded.ad_rate_strategy, '') <> '' THEN excluded.ad_rate_strategy ELSE campaigns.ad_rate_strategy END, " +
+          "funding_json = CASE WHEN COALESCE(excluded.funding_json, '') NOT IN ('', '{}') THEN excluded.funding_json ELSE campaigns.funding_json END, " +
+          "synced_at=datetime('now')"
+        ).bind(acct, id, l.name, l.status, l.budget, l.funding || '', l.rate_strategy || '', l.funding_json || '').run();
+      } catch (e) {
+        /* the added columns have not reached this database: the campaign is still recorded exactly as
+           before, and adDynamicRate falls back to the owner's naming convention for it. Same shape of
+           fallback campaign_events got for its campaign_id on 22 Oct. */
+        await env.DB.prepare(
+          "INSERT INTO campaigns (account, campaign_id, name, status, budget, funding_model, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) " +
+          "ON CONFLICT(account, campaign_id) DO UPDATE SET name=?3, status=?4, budget=?5, funding_model=?6, synced_at=datetime('now')"
+        ).bind(acct, id, l.name, l.status, l.budget, l.funding || '').run();
+      }
     }
+    /* what eBay actually returned, on record for the first campaign of this account: the field names
+       inside fundingStrategy and the rate strategy itself, so the question "does eBay send
+       adRateStrategy at all" is answered by a row rather than by documentation. */
+    try {
+      const firstId = Object.keys(live)[0];
+      if (firstId) {
+        const f = live[firstId];
+        let keys = ''; try { keys = Object.keys(JSON.parse(f.funding_json || '{}')).join(','); } catch (e) { keys = '?'; }
+        await ctx_setSync(env, 'adtoolFundingStrategy', acct, (Object.keys(live).length + ' campaigns · first "' + String(f.name || firstId).slice(0, 40) + '" funding ' + (f.funding || '(none)') + ' · adRateStrategy ' + (f.rate_strategy || '(absent)') + ' · fundingStrategy fields ' + (keys || '(empty)')).slice(0, 300));
+      }
+    } catch (e) { /* a note, never a reason to fail a sync */ }
     /* ADTOOL P2 (Advertising Tool, flag adtool_campaign_truth): bid % and dates as nullable columns; a
        campaign that left eBay's list is archived before its row goes, so its id still resolves. */
     const adtP2 = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
@@ -2455,6 +2507,20 @@ async function ensureAdsReadingColumns(env) {
     try { await env.DB.prepare(s).run(); } catch (e) { /* already there, which is the usual case */ }
   }
   ADS_READING_COLS_OK = true;
+}
+/* Owner batch 28 Oct: how eBay sets a campaign's ad rate, and the funding object it sent, as two
+   nullable columns on the existing grain. Its own flag and its own pass, in the ensureAdsReadingColumns
+   way above, run by the campaign sync before it names either column and by the reader that classifies
+   live listings, because a column list the database has not caught up with must never be the thing
+   that takes a page down: every write that names them carries a fallback to the old list. */
+let ADS_FUNDING_COLS_OK = false;
+async function ensureCampaignFundingColumns(env) {
+  if (ADS_FUNDING_COLS_OK) return;
+  for (const s of ["ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''"]) {
+    try { await env.DB.prepare(s).run(); } catch (e) { /* already there, which is the usual case */ }
+  }
+  ADS_FUNDING_COLS_OK = true;
 }
 
 /* The rotation rate (fix 4). Two campaigns a tick meant a RUNNING campaign came round only every
@@ -5400,7 +5466,12 @@ const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunTo
      sync writes into it every few minutes, so it has to move. Peak times only reads finished days
      and a list people keep by hand, and the two writes behind that list drop this entry themselves
      rather than leaving the page two minutes stale. */
-  adtoolChangeDay: 60000, adtoolPeak: 120000 };
+  adtoolChangeDay: 60000, adtoolPeak: 120000,
+  /* 28 Oct: Entire Live Listings reads the campaign map, which the sync refreshes every few minutes,
+     and the finished day figures behind it, which move once an hour. Potential CPC reads orders and
+     finished days. Two minutes keeps a page flag switched off honoured inside the ceiling the gate
+     states, and still spares the owner the whole compute on every click between tabs. */
+  adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -5663,13 +5734,21 @@ async function adtoolRegisterSeedP2(env) {
 /* ---- writers, each called by the existing job that already holds the data ---- */
 async function adtoolCampaignFieldsWrite(env, acct, live) {
   await ensureAdtoolPhase2Schema(env);
-  const stmts = [];
+  /* 28 Oct: the rate strategy and the raw funding object travel with the bid and the dates here as
+     well as on the upsert, so the flagged path keeps them current even on a tick where the upsert's
+     own fallback had to drop them. Guarded the same way, with the old column list behind it. */
+  try { await ensureCampaignFundingColumns(env); } catch (e) { /* the fallback below writes the old three */ }
+  const stmts = [], old = [];
   for (const id of Object.keys(live)) {
     const l = live[id];
-    stmts.push(env.DB.prepare('UPDATE campaigns SET bid_pct = ?3, start_date = ?4, end_date = ?5 WHERE account = ?1 AND campaign_id = ?2')
+    /* the same rule as the upsert above, because this UPDATE runs on the same tick and would
+       otherwise put back the blank the upsert has just refused to write */
+    stmts.push(env.DB.prepare("UPDATE campaigns SET bid_pct = ?3, start_date = ?4, end_date = ?5, ad_rate_strategy = CASE WHEN ?6 <> '' THEN ?6 ELSE ad_rate_strategy END, funding_json = CASE WHEN ?7 NOT IN ('', '{}') THEN ?7 ELSE funding_json END WHERE account = ?1 AND campaign_id = ?2")
+      .bind(acct, id, l.bid == null ? '' : String(l.bid), String(l.start || ''), String(l.end || ''), String(l.rate_strategy || ''), String(l.funding_json || '')));
+    old.push(env.DB.prepare('UPDATE campaigns SET bid_pct = ?3, start_date = ?4, end_date = ?5 WHERE account = ?1 AND campaign_id = ?2')
       .bind(acct, id, l.bid == null ? '' : String(l.bid), String(l.start || ''), String(l.end || '')));
   }
-  await adtBatch(env, stmts);
+  try { await adtBatch(env, stmts); } catch (e) { await adtBatch(env, old); }
   return stmts.length;
 }
 async function adtoolCampaignArchiveWrite(env, acct, id, prev) {
@@ -6510,7 +6589,7 @@ const ADTOOL_REGISTER_P4 = [
   ['FORECAST_UNITS', 'Expected units per listing, 30 days ahead', 'A few ways of projecting are tried, from a simple one for listings that sell rarely to one that follows a weekly rhythm for listings that sell every day. Whichever did best on the listing\'s own past is the one shown, and if none of them beats simply repeating last week, last week is what you get.', 'adtool_listing_day, adtool_profiles', 'Every morning, and caught up through the day if it falls behind', 'Scored against simply repeating last week: a score under 1.0 beats it, and most listings with real sales do'],
   ['FORECAST_BAND', 'The likely range around a forecast', 'The forecast is run again two hundred times with the size of its own past misses thrown back in, and the range covers the middle eight runs in ten. Never below zero.', 'adtool_forecast', 'Every morning', 'About eight in ten of the real days land inside the range'],
   ['FORECAST_MONEY', 'Expected sales, spend and gain from a forecast', 'Expected units times the price for sales, expected units times what a unit has recently cost in ads for spend, and the expected gain from the ads, being the share that comes through ads times the margin, less that spend.', 'adtool_forecast, adtool_listings', 'Every morning', 'What actually happened is shown next to what was forecast, for the last fortnight'],
-  ['MODEL_SCORE', 'How well each way of forecasting did', 'Each way is tested on the listing\'s own last eight weeks, forecasting a fortnight ahead from a fresh start each week. It is scored against simply repeating last week, and on how often the real day landed inside its range.', 'adtool_model_scores', 'Every morning', 'The scores are shown on the Sales forecast page'],
+  ['MODEL_SCORE', 'How well each way of forecasting did', 'Each way is tested on the listing\'s own last eight weeks, forecasting a fortnight ahead from a fresh start each week. It is scored against simply repeating last week, and on how often the real day landed inside its range.', 'adtool_model_scores', 'Every morning', 'Each listing keeps the score of every way tried beside the one chosen, so the choice can be read back afterwards'],
 ];
 async function adtoolRegisterSeedP4(env) {
   const stmts = ADTOOL_REGISTER_P4.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 4, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 4").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
@@ -7128,13 +7207,25 @@ async function adtoolReport(env) {
     const dRow = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN applied_at <> '' THEN 1 ELSE 0 END) AS applied, SUM(CASE WHEN outcome_day <> '' THEN 1 ELSE 0 END) AS scored, SUM(CASE WHEN mode = 'shadow' THEN 1 ELSE 0 END) AS shadow FROM adtool_decisions WHERE day = ?1").bind(day).first();
     const dn = Number(dRow && dRow.n) || 0, dApplied = Number(dRow && dRow.applied) || 0, dScored = Number(dRow && dRow.scored) || 0, dShadow = Number(dRow && dRow.shadow) || 0;
     const dKinds = (await env.DB.prepare('SELECT decision, COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 GROUP BY decision ORDER BY n DESC').bind(day).all()).results || [];
+    /* What went to eBay on this day comes from the apply log, never from the decision rows. A
+       decision row says what the engine decided and in which mode it was recorded; it says nothing
+       about the peak switch, which sends on its own all day and writes only to adtool_apply_log.
+       Both senders stamp the log with the UK day they ran on, which is the day the report covers. */
+    const sentRows = (await env.DB.prepare("SELECT CASE WHEN COALESCE(decision_id, '') = 'peak' THEN 'peak' ELSE '' END AS decision_id, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' GROUP BY CASE WHEN COALESCE(decision_id, '') = 'peak' THEN 'peak' ELSE '' END").bind(day).all()).results || [];
+    const sent = adtReportSentLive(sentRows);
+    /* two sentences, not one clause: the first says what the engine decided and in which mode it was
+       recorded, the second says what reached eBay. The page prints the note straight after a full
+       stop of its own, so both start with a capital. */
+    const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+    const decSentence = !dn ? 'no decisions were written for ' + day
+      : dn + (dn === 1 ? ' decision' : ' decisions') + ' (' + dKinds.map(r => Number(r.n) + ' ' + String(r.decision).toLowerCase()).join(', ') + ')'
+        + (dShadow === dn ? ', the day’s decisions were made in shadow' : ', ' + dApplied + ' applied')
+        + (dScored ? ', ' + dScored + ' scored against what the listing actually did' : ', scored the next morning');
     const decSummary = {
       made: dn, applied: dApplied, scored: dScored, shadow: dShadow,
+      sent_live: { total: sent.total, morning: sent.morning, peak: sent.peak },
       by_decision: dKinds.reduce((o, r) => { o[r.decision] = Number(r.n); return o; }, {}),
-      note: !dn ? 'no decisions were written for ' + day
-        : dn + (dn === 1 ? ' decision' : ' decisions') + ' (' + dKinds.map(r => Number(r.n) + ' ' + String(r.decision).toLowerCase()).join(', ') + ')'
-          + (dShadow === dn ? ' — all in shadow, nothing was sent to eBay' : ' — ' + dApplied + ' applied')
-          + (dScored ? ', ' + dScored + ' scored against what the listing actually did' : ', scored the next morning')
+      note: cap(decSentence) + '. ' + cap(sent.sentence)
     };
     const report = { day, weekday: ADTOOL_DOW[wd], generated_at: new Date().toISOString(), fleet: Object.assign({ roas: roasY, cpc: y && y.clicks > 0 ? round2(y.spend / y.clicks) : null, cvr: y && y.clicks > 0 ? round2(y.attr_units / y.clicks) : null }, y), vs_7day: per(w7), vs_same_weekday_last_week: lw ? Object.assign({ roas: lw.spend > 0 ? round2(lw.attr_revenue / lw.spend) : null }, lw) : null, decisions: decSummary, by_account: byAcct, hours: hourRows, slots: slotZ, winners: win, losers: lose, profit_label: 'Profit (Sales Analysis law)', what_changed: bullets, ad_status_changes: Object.assign({}, evs, { uk_bounds: { from_utc: evB[0], to_utc: evB[1] }, changes_page: 'adtoolStopped' }), open_alerts: alerts, capped_listings: capN, sources: ['eBay ads report (T+1)', 'orders', 'Sales Analysis law', 'sampled hours (from 17 Sep)', 'fleet hour × weekday profile'] };
     await env.DB.prepare("INSERT INTO adtool_reports (day, generated_at, json, pdf_asset) VALUES (?1, ?2, ?3, '') ON CONFLICT(day) DO UPDATE SET generated_at = ?2, json = ?3").bind(day, report.generated_at, JSON.stringify(report)).run();
@@ -7175,6 +7266,12 @@ async function adtoolRoas(env) {
 const ADTOOL_ACTIONS_P5 = {
   adtoolCommand: {
     auth: 'any', fn: async (p, ctx) => {
+      /* 28 Oct: THE PAGE THIS FLAG IS NAMED AFTER NO LONGER EXISTS, and the flag still gates this
+         action. "Today at a glance" became blocks 2 to 5 of the Overview, which is the landing page,
+         and "Listings spending today" is a page of its own off the same answer. So turning
+         adtool_page_command off now empties most of the landing page and all of that one. The key is
+         deliberately NOT renamed: a rename would read as unset and turn the action off for everyone.
+         Leave it on. */
       await adtGate(ctx, 'adtool_page_command'); const env = ctx.env; await ensureAdtoolPhase5Schema(env);
       const today = ukDate(''), yday = adtAddDays(today, -1);
       const acct = String((p && p.account) || '').trim();
@@ -7201,23 +7298,67 @@ const ADTOOL_ACTIONS_P5 = {
       /* per-item today rows: spend today against the listing's average spend per ACTIVE day over the last 28 days
          (days with spend > 0, so a listing that ran three days is judged on three), and its share of today's spend */
       const items = todayPay.items;
-      const avg = {};
+      const avg = {}, back = {};
       if (items.length) {
         const ids = items.map(r => String(r.item_id));
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
-          for (const r of ((await env.DB.prepare('SELECT item_id, ROUND(SUM(spend), 2) AS spend, SUM(CASE WHEN spend > 0 THEN 1 ELSE 0 END) AS active_days FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN (' + chunk.map(() => '?').join(',') + ') GROUP BY item_id').bind(...[adtAddDays(today, -28), yday].concat(chunk)).all()).results || [])) avg[String(r.item_id)] = Number(r.active_days) > 0 ? round2(Number(r.spend) / Number(r.active_days)) : null;
+          /* Owner batch 28 Oct: the last 3, 7 and 14 FINISHED days beside spend today, for Listings
+             spending today. The same aggregate the 28-day average already costs: three conditional
+             sums instead of three more round trips. Every window ENDS YESTERDAY: eBay publishes a
+             day's ad report the day after, so a window reaching into today would read a listing as
+             having had a cheap day. `spend` already carries the click-fee leg at source, so
+             cpc_spend is never added to it. */
+          /* each window is counted as well as summed, because a conditional SUM over no rows is 0 in
+             SQL and 0 is a figure: "spent nothing" and "we hold no day for it" are different answers
+             and a reader acts on them differently. No day in the window, no number. */
+          for (const r of ((await env.DB.prepare('SELECT item_id, ROUND(SUM(spend), 2) AS spend, SUM(CASE WHEN spend > 0 THEN 1 ELSE 0 END) AS active_days, ROUND(SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END), 2) AS spend_3d, SUM(CASE WHEN day >= ?3 THEN 1 ELSE 0 END) AS days_3d, ROUND(SUM(CASE WHEN day >= ?4 THEN spend ELSE 0 END), 2) AS spend_7d, SUM(CASE WHEN day >= ?4 THEN 1 ELSE 0 END) AS days_7d, ROUND(SUM(CASE WHEN day >= ?5 THEN spend ELSE 0 END), 2) AS spend_14d, SUM(CASE WHEN day >= ?5 THEN 1 ELSE 0 END) AS days_14d FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN (' + chunk.map((_, j) => '?' + (j + 6)).join(',') + ') GROUP BY item_id').bind(...[adtAddDays(today, -28), yday, adtAddDays(today, -3), adtAddDays(today, -7), adtAddDays(today, -14)].concat(chunk)).all()).results || [])) {
+            avg[String(r.item_id)] = Number(r.active_days) > 0 ? round2(Number(r.spend) / Number(r.active_days)) : null;
+            back[String(r.item_id)] = {
+              spend_3d: Number(r.days_3d) > 0 ? round2(Number(r.spend_3d) || 0) : null,
+              spend_7d: Number(r.days_7d) > 0 ? round2(Number(r.spend_7d) || 0) : null,
+              spend_14d: Number(r.days_14d) > 0 ? round2(Number(r.spend_14d) || 0) : null,
+            };
+          }
         }
       }
       const spendToday = items.reduce((t, r) => t + (Number(r.spend) || 0), 0);
-      const itemsToday = items.map(r => Object.assign({}, r, { avg_spend_active_day_28: avg[String(r.item_id)] == null ? null : avg[String(r.item_id)], spend_vs_avg: (avg[String(r.item_id)] > 0 && r.spend != null) ? round2(Number(r.spend) / avg[String(r.item_id)]) : null, spend_share: spendToday > 0 && r.spend != null ? round2(Number(r.spend) / spendToday) : null }))
+      const itemsToday = items.map(r => Object.assign({}, r, { avg_spend_active_day_28: avg[String(r.item_id)] == null ? null : avg[String(r.item_id)], spend_vs_avg: (avg[String(r.item_id)] > 0 && r.spend != null) ? round2(Number(r.spend) / avg[String(r.item_id)]) : null, spend_share: spendToday > 0 && r.spend != null ? round2(Number(r.spend) / spendToday) : null }, back[String(r.item_id)] || { spend_3d: null, spend_7d: null, spend_14d: null }))
         .sort((a, b) => (Number(b.spend) || 0) - (Number(a.spend) || 0) || (Number(b.orders) || 0) - (Number(a.orders) || 0));
-      const alerts = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high FROM adtool_alerts WHERE cleared_at = '' AND (snoozed_until = '' OR snoozed_until < ?1)").bind(new Date().toISOString()).first();
+      /* the open alerts and today's decision count, in one round trip. The old `decisions_waiting`
+         stood at a hard 0 from the day the Command centre was written, and the Overview that replaced
+         it on 28 Oct prints it as a tile of its own: a tile that says nought for ever reads as
+         "nothing to look at", which is the one thing a tile like that must never say.
+         It is `decisions_today` now, and it counts EXACTLY the rows the Decision page lists: the same
+         day, the same "anything but leave it alone", across every account, with no filter for what
+         somebody has already applied or undone. The review caught the first attempt counting a
+         narrower set than the page it points at, which is the one way a tile and a page can
+         disagree. Scope is sent beside it so the tile can say which it is. */
+      const alertSql = () => env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high FROM adtool_alerts WHERE cleared_at = '' AND (snoozed_until = '' OR snoozed_until < ?1)").bind(new Date().toISOString());
+      let alerts = null, decisionsToday = null;
+      /* the decisions table belongs to a later phase than this action ensures, so the pair is tried
+         together and the alerts read stands on its own if the decisions table is not there yet. The
+         tile then says "not available yet" rather than a nought, and the landing page still draws:
+         a figure this page added must never be able to be the thing that takes it down. */
+      try {
+        const OA = await env.DB.batch([alertSql(),
+          env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND decision <> 'KEEP'").bind(today),
+        ]);
+        alerts = ((OA[0] || {}).results || [])[0] || null;
+        decisionsToday = Number((((OA[1] || {}).results || [])[0] || {}).n) || 0;
+      } catch (e) { alerts = null; decisionsToday = null; }
+      if (!alerts) alerts = await alertSql().first();
       const rep = await env.DB.prepare('SELECT json FROM adtool_reports WHERE day = ?1').bind(yday).first(); const report = rep ? JSON.parse(rep.json) : null;
-      /* today's orders by slot from `orders` (5-minute sync), not the hourly adtool_orders mirror */
-      const todayOrders = []; const slotAgg = {};
-      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const sl = adtUkParts(ms).slot; const s = (slotAgg[sl] = slotAgg[sl] || { slot: sl, units: 0, orders: 0 }); s.orders++; s.units += Math.max(1, Number(o.qty) || 1); }
+      /* today's orders by slot from `orders` (5-minute sync), not the hourly adtool_orders mirror.
+         Owner batch 28 Oct: the SAME read also counts the day by UK HOUR, for the one hourly chart
+         that replaces the two on the Overview: a red bar of money beside a green bar of orders.
+         One pass, one query: an order belongs to exactly one hour and exactly one slot, so the two
+         lists always add up to the same day. Hours with nothing in them are left out, the way
+         hour_curve leaves them out, and the chart fills the gaps itself. */
+      const todayOrders = []; const slotAgg = {}; const hourAgg = {};
+      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const uk = adtUkParts(ms); const qty = Math.max(1, Number(o.qty) || 1); const s = (slotAgg[uk.slot] = slotAgg[uk.slot] || { slot: uk.slot, units: 0, orders: 0 }); s.orders++; s.units += qty; const h = (hourAgg[uk.hour] = hourAgg[uk.hour] || { hour_uk: uk.hour, orders: 0, units: 0 }); h.orders++; h.units += qty; }
       for (const k of Object.keys(slotAgg).sort()) todayOrders.push(slotAgg[k]);
+      const todayHours = Object.keys(hourAgg).map(k => hourAgg[k]).sort((a, b) => a.hour_uk - b.hour_uk);
       const slotProf = await adtLatestProfiles(env, 'fleet', 'slot');
       const accounts = [];
       const byDate = (await env.DB.prepare('SELECT day, weekday, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '') + ' GROUP BY day ORDER BY day').bind(...(acct ? [adtAddDays(yday, -29), yday, acct] : [adtAddDays(yday, -29), yday])).all()).results || [];
@@ -7239,7 +7380,11 @@ const ADTOOL_ACTIONS_P5 = {
         totals_by_account: todayPay.totals_by_account,
         profit_label: 'Profit (Sales Analysis law)',
         yesterday: Object.assign({ day: yday, roas: y && y.spend > 0 ? round2(y.attr_revenue / y.spend) : null, cpc: y && y.clicks > 0 ? round2(y.spend / y.clicks) : null, cvr: y && y.clicks > 0 ? round2(y.attr_units / y.clicks) : null, report_status: reportStatus }, y),
-        alerts, decisions_waiting: 0, report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
+        alerts, decisions_today: decisionsToday, decisions_scope: 'all accounts', report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
+        /* the orders half of the one hourly chart: per UK hour of today, counted from the same read as
+           today_slots. The money half is hour_curve above, on the same hour_uk key, so the two bars of
+           an hour line up without the page having to reconcile anything. */
+        today_hours: todayHours,
         source: 'adtool_listing_today (sampled, provisional) + adtool_listing_day, orders, adtool_ads_intraday (hour curve), adtool_reports, adtool_alerts, sync_state',
       };
     },
@@ -8181,7 +8326,12 @@ async function adtoolApply(env) {
     const today = ukDate(''); const uk = adtUkParts(Date.now());
     const decs = (await env.DB.prepare("SELECT decision_id, account, item_id, decision, rules_json, inputs_json, mode, applied_at FROM adtool_decisions WHERE day = ?1 AND batch = 'morning' AND decision <> 'KEEP' AND confidence = 'confident' AND applied_at = ''").bind(today).all()).results || [];
     const perAcct = {}, bidWeek = {};
-    for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' GROUP BY account").bind(today).all()).results || [])) perAcct[r.account] = Number(r.n);
+    /* the morning apply's thirty-a-day ceiling counts the MORNING APPLY's own live rows and not the
+       peak switch's. The two senders keep separate ceilings: the peak switch runs every quarter hour
+       all day and would otherwise spend this job's allowance before it woke up, so a busy evening of
+       peak boundaries could silently stop the next morning's run from applying a single decision.
+       The peak switch's own ceiling is adPeakApplyCaps's, counted the same way over its own rows. */
+    for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND mode = 'live' AND COALESCE(decision_id, '') <> 'peak' GROUP BY account").bind(today).all()).results || [])) perAcct[r.account] = Number(r.n);
     for (const r of ((await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM adtool_apply_log WHERE op = 'bid' AND mode = 'live' AND day >= ?1 GROUP BY item_id").bind(adtAddDays(today, -7)).all()).results || [])) bidWeek[r.item_id] = Number(r.n);
     const switches = {}; for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live_%'").all()).results || [])) switches[r.key.replace('adtool_apply_live_', '')] = String(r.value) === 'on';
     const stmts = []; let live = 0, shadow = 0, capped = 0, blocked = 0;
@@ -8272,16 +8422,46 @@ const ADTOOL_ACTIONS_P8 = {
         const r = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const txt = (await r.text()).slice(0, 300);
         await env.DB.prepare("UPDATE adtool_apply_log SET undone_at = datetime('now'), response = response || ' | undo ' || ?2 WHERE id = ?1").bind(row.id, String(r.status) + ' ' + txt).run();
-        await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_APPLY_UNDO', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), row.item_id + '|' + row.campaign_id, undo.op + ' → ' + String(undo.to) + ' (' + r.status + ')').run();
-        return { ok: r.ok, status: r.status };
+        /* undoing a PEAK switch has to stop the switching as well as put the ad back, or the next
+           quarter-hour tick reads the ad as being in the wrong state for its hours and sends the very
+           change somebody has just undone. So the listing's switching is turned off and the row says
+           so: the hours stay on the list to be looked at, and somebody has to arm it again on the
+           page before the system touches it. Without this an undo was a fifteen minute reprieve. */
+        let peakDisarmed = false;
+        if (String(row.decision_id || '') === 'peak') {
+          try {
+            await env.DB.prepare('UPDATE adtool_peak_items SET auto = 0 WHERE item_id = ?1').bind(String(row.item_id)).run();
+            peakDisarmed = true;
+            await adtPeakCacheClear(env, String(row.account || ''));
+          } catch (e) { /* no column, so nothing is armed in the first place */ }
+        }
+        await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_APPLY_UNDO', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), row.item_id + '|' + row.campaign_id, undo.op + ' → ' + String(undo.to) + ' (' + r.status + ')' + (peakDisarmed ? ' + peak switching off' : '')).run();
+        return { ok: r.ok, status: r.status, peak_disarmed: peakDisarmed };
       }
       const today = ukDate('');
       const switches = (await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_apply_live_%' ORDER BY key").all()).results || [];
       const pre = (await env.DB.prepare("SELECT account, last_ok, cursor FROM sync_state WHERE job = 'adtoolApplyPreflight' AND account <> '' AND account <> '@lock' ORDER BY account").all()).results || [];
-      const log = await adtProductCells(env, (await env.DB.prepare('SELECT id, day, account, item_id, campaign_id, op, mode, http_status, substr(response, 1, 200) AS response, undone_at, at, payload_json FROM adtool_apply_log ORDER BY id DESC LIMIT 200').all()).results || []);
-      const counts = (await env.DB.prepare('SELECT mode, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 GROUP BY mode').bind(today).all()).results || [];
+      /* decision_id travels with the row from 28 Oct: every sender writes op 'status', so without it
+         a peak switch and a morning apply read identically in the log, and the peak switch is the one
+         that sends at an hour of its own. */
+      /* TWO logs, because there are two senders and they do not run at the same times or under the
+         same ceiling. The morning and evening runs write a handful of rows at 05:55; the peak switch
+         writes at every quarter hour all day, and left in one list of two hundred it buried a whole
+         morning's work by lunchtime. Same row shape, same reading, two tables on the page. */
+      const logRows = r => r.map(x => { let pl = {}; try { pl = JSON.parse(x.payload_json); } catch (e) {} return Object.assign(x, { payload: pl, payload_json: undefined }); });
+      const LOG_COLS = 'SELECT id, day, account, item_id, campaign_id, decision_id, op, mode, http_status, substr(response, 1, 200) AS response, undone_at, at, payload_json FROM adtool_apply_log ';
+      const log = await adtProductCells(env, (await env.DB.prepare(LOG_COLS + "WHERE COALESCE(decision_id, '') <> 'peak' ORDER BY id DESC LIMIT 200").all()).results || []);
+      const peakLog = await adtProductCells(env, (await env.DB.prepare(LOG_COLS + "WHERE COALESCE(decision_id, '') = 'peak' ORDER BY id DESC LIMIT 100").all()).results || []);
+      /* and the day's counts split the same way, so neither sender's tally ever carries the other's
+         rows. `counts` is the morning apply's, as it has always been. */
+      const counts = (await env.DB.prepare("SELECT mode, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND COALESCE(decision_id, '') <> 'peak' GROUP BY mode").bind(today).all()).results || [];
+      const pc = { live: 0, would_send: 0, blocked: 0 };
+      for (const r of ((await env.DB.prepare("SELECT mode, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND COALESCE(decision_id, '') = 'peak' GROUP BY mode").bind(today).all()).results || [])) {
+        const k = String(r.mode || '') === 'would-send' ? 'would_send' : String(r.mode || '');
+        if (pc[k] !== undefined) pc[k] = Number(r.n) || 0;
+      }
       const accounts = await apiAccounts(env);
-      return { day: today, accounts, switches, preflight: pre, log: log.map(r => { let pl = {}; try { pl = JSON.parse(r.payload_json); } catch (e) {} return Object.assign(r, { payload: pl, payload_json: undefined }); }), counts, caps: { per_account_per_day: 30, bid_changes_per_listing_per_week: 3, quiet_hours: '22:00–06:00 UK' }, endpoints: Object.keys(ADTOOL_APPLY_ENDPOINTS), note: 'Nothing is sent for an account whose switch is off; those rows are written as would-send so the night can be rehearsed.', computed_at: new Date().toISOString() };
+      return { day: today, accounts, switches, preflight: pre, log: logRows(log), peak_log: logRows(peakLog), counts, peak_counts_today: pc, caps: { per_account_per_day: 30, bid_changes_per_listing_per_week: 3, quiet_hours: '22:00–06:00 UK', peak_switches_per_account_per_day: ADTOOL_PEAK_SWITCH_CAP, peak_quiet_hours: false }, endpoints: Object.keys(ADTOOL_APPLY_ENDPOINTS), note: 'Nothing is sent for an account whose switch is off; those rows are written as would-send so the night can be rehearsed. The quiet hours belong to the morning and evening runs alone; the peak switch runs at the hours Management set for a listing, and keeps a daily ceiling of its own that this one never counts against.', computed_at: new Date().toISOString() };
     },
   },
 };
@@ -8580,6 +8760,10 @@ async function adtoolRunTodayCompute(env, acct) {
 const ADTOOL_ACTIONS_P9 = {
   adtoolPlan: {
     auth: 'any', fn: async (p, ctx) => {
+      /* 28 Oct: the page this flag is named after is gone and the flag still gates this action.
+         "What to do today" became block 1 of the Overview, the portal's landing page, so turning
+         adtool_page_plan off now takes the six tiles off the first screen anybody sees. The key is
+         deliberately not renamed: a rename would read as unset and turn the action off for everyone. */
       await adtGate(ctx, 'adtool_page_plan');
       const env = ctx.env;
       await ensureAdtoolPhase1Schema(env); await ensureAdtoolPhase9Register(env);
@@ -9521,11 +9705,18 @@ async function adtWarmHourly(env) {
      also sends account:''); adtKvCanon folds these onto the same key as {}, so both spellings are covered by the one
      entry. `hourly` = the page's default window ends yesterday and is honoured until the next rollup (adtWarmUntil);
      adtoolPlan carries the 5-minute Running-today block inside it, so it keeps the short 330 s horizon. */
-  const jobs = [['adtoolCpcListings', { period: 'd30', mode: 'active' }, true], ['adtoolCpcListings', { period: 'd30', mode: 'post' }, true], ['adtoolOverview', { period: 'd30' }, true], ['adtoolPlan', { period: 'd30' }, false], ['adtoolReport', {}, true], ['adtoolForecastLab', {}, true], ['adtoolAccounts', { account: '', period: 'd30' }, true], ['adtoolCategories', { period: 'd30' }, true],
+  const jobs = [['adtoolCpcListings', { period: 'd30', mode: 'active' }, true], ['adtoolCpcListings', { period: 'd30', mode: 'post' }, true], ['adtoolOverview', { period: 'd30' }, true], ['adtoolPlan', { period: 'd30' }, true] /* 28 Oct: the Overview is its only reader and reads the 30-day hero, so the hour-long horizon applies; the Sales forecast page is gone, so its lab is no longer warmed */, ['adtoolReport', {}, true], ['adtoolAccounts', { account: '', period: 'd30' }, true], ['adtoolCategories', { period: 'd30' }, true],
     /* Listing departments classifies all ~990 active listings and joins three windows, so its first open after
        the cache expires is one of the slow ones. Its answer cannot move between two rollups (ages turn over at
        midnight and the windows end yesterday), so it takes the hourly horizon like the rest. */
-    ['adtoolDepts', {}, true]];
+    ['adtoolDepts', {}, true],
+    /* Owner batch 28 Oct: the two pages born with this batch, LAST in the list on purpose. Entire
+       live listings classifies every active listing against the shared membership rule and Potential
+       CPC counts completed orders over the whole order book, so both are first-open pages of the slow
+       kind the owner has complained about twice. They go at the end so that on a tight hour the
+       budget is spent on the pages that were already here rather than taken from them: a skipped warm
+       costs one slow open, a displaced one costs a page its warm every hour. */
+    ['adtoolLiveSplit', {}, true], ['adtoolPotentialCpc', {}, true]];
   const out = []; const skippedNames = [];
   for (const j of jobs) {
     const action = j[0], payload = j[1], hourly = !!j[2];
@@ -9834,11 +10025,18 @@ async function adtoolDeptsCompute(env, p) {
     .map(r => Object.assign(cell(r), { campaign: r.campaign, budget_set: r.budget_set, cap: rules.day_cap, campaign_listings: campSize[(adOf[r.item_id] || {}).campaign_key] || 1 }));
   const newItems = rows.filter(r => r.dept === 'new').sort((x, y) => (x.age_days || 0) - (y.age_days || 0));
   const NEW_PAGE = 150;
+  /* last_7_days reads every active row and not just the new department's, and it comes to the same
+     set: the ladder reads the new department FIRST and on age alone, so a listing whose age is known
+     and is 7 days or less is in the new department for as long as a listing counts as new for 7 days
+     or more. Only a new window set under 7 days could part the two, and the note says so rather than
+     the count being quietly narrowed, because the owner's 7-day hold is the figure he asked for and
+     it would then be short of the listings he is holding back. ageOf returns null or a whole number
+     of days and never a blank, so the `!= null` guard is the same test the ladder makes. */
   const newWindow = {
     last_7_days: rows.filter(r => r.age_days != null && r.age_days <= 7).length,
     first_14_days: newItems.length,
     items: newItems.slice(0, NEW_PAGE), items_held_back: Math.max(0, newItems.length - NEW_PAGE),
-    last_7_days_note: 'How many of those went live in the last 7 days, the owner\'s window for holding a brand new listing out of advertising altogether.',
+    last_7_days_note: 'How many of those went live in the last 7 days, the owner\'s window for holding a brand new listing out of advertising altogether. It is counted over every active listing rather than the rows listed here, which is the same set of listings while one counts as new for its first ' + rules.new_days + ' days: anything live for 7 days or less is still a new listing. The two could only part if the new window were ever set shorter than 7 days.',
     note: 'A listing counts as new for its first ' + rules.new_days + ' days. While it is new its ad spend is capped at £' + rules.new_week_cap.toFixed(2) + ' for the week, on top of the £' + rules.day_cap.toFixed(2) + ' a day every listing gets.',
   };
   const PAGE = 300;
@@ -10722,17 +10920,23 @@ const ADTOOL_REGISTER_P15 = [
   ['CHANGE_ARCHIVE', 'The last fourteen days of changes', 'How many stops and how many starts fell on each of the last fourteen UK days, newest first, with a zero on a day nothing happened. Counted by reading the before and after states exactly as the rows themselves are read, so a day in this list and the same day opened as a page always agree.', 'adtool_campaign_ad_events, campaign_events', 'Worked out when you open the page', 'Unit tests on fourteen entries newest first, zeros on empty days, and a count that matches the rows'],
   ['PEAK_SUGGESTED', 'Listings that sell in one part of the day', 'A listing whose ad is live now, which sold at least the number of units set for it over the last four weeks, and which sold most of those units inside one part of the day: night, morning, afternoon or evening. Both the number of units and the share needed are figures a manager can change, and the page prints the ones in force rather than fixed ones. Being advertised means the same thing here as on every other advertising page.', 'campaign_ads, campaigns, items_api, adtool_listing_slot, adtool_listing_hour, adtool_listing_day', 'Worked out when you open the page, and held for a couple of minutes', 'Unit tests on worked examples either side of both figures, and on the figures themselves being changed'],
   ['PEAK_OFF_PEAK_SPEND', 'What a listing spends outside its own hours', 'The money a listing spent in the sampled hours that fall outside the stretches it actually sells in, over the last seven finished days. The first reading of each day is a running total since midnight and belongs to no hour of trading, so it is never counted. The stretches are the same ones the running page shows, by the same rule and just as advisory, because eBay cannot run an ad by the hour. It is part of the sampled hours, never of the whole week: the page prints the sampled total it sits inside and the full day figure apart from it, and the day figure is always the larger.', 'adtool_listing_hour, adtool_listing_day', 'Worked out with the suggested list', 'Unit tests leave out every hour inside a selling stretch and never count the first reading of a day'],
-  ['PEAK_MANUAL', 'The peak hours work list', 'The listings somebody has put on the peak hours list by hand, with the hours they wrote beside it, their note, who added it and when. It is a work list and a record, not a timer: nothing on this page is ever sent to eBay. Taking a listing off keeps its row with who took it off and when, so the list can be read back afterwards. A listing the figures already suggest can be added by hand as well, and then it counts on both lists.', 'adtool_peak_items, items_api, campaigns, campaign_ads, adtool_listing_day, adtool_listing_slot', 'As soon as somebody adds or removes one', 'The two lists and the overlap between them are counted straight from the rows on the page'],
+  ['PEAK_MANUAL', 'The peak hours work list', 'The listings somebody has put on the peak hours list by hand, with the hours they wrote beside it, their note, who added it and when. The hours are a working instruction, not a timer kept on paper: every quarter hour the system reads each row set to switch itself against its own hours and puts the ad right. That is sent to eBay only for an account whose own live switch is on, and written down as a would-send for every other account. Hours it cannot read are refused as they are typed. Taking a listing off keeps its row, with who took it off and when, so the list can be read back afterwards.', 'adtool_peak_items, items_api, campaigns, campaign_ads, adtool_listing_day, adtool_listing_slot, adtool_apply_log, portal_config', 'As soon as somebody adds or removes one, and every quarter hour for the switching', 'The two lists and the overlap between them are counted straight from the rows on the page, and the apply log is read back against eBay on the first account switched on'],
 ];
 let ADTOOL_P15_REG_OK = false;
 async function ensureAdtoolPhase15Register(env) {
   if (ADTOOL_P15_REG_OK) return;
   await ensureAdtoolPhase15Schema(env);
   const stmts = ADTOOL_REGISTER_P15.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 15, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 15").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
-  /* both pages are born ON. The change pages only read; the peak page writes nothing but its own
-     by-hand list, and nothing on it reaches eBay. A manager can switch either off in Flags, and a
-     switch somebody has already set is left exactly as it stands. */
-  for (const key of ['adtool_page_changes', 'adtool_page_peak']) {
+  /* all three are born ON, and a switch somebody has already set is left exactly as it stands.
+     The change pages only read. The peak page keeps its own by-hand list, and since 28 Oct that list
+     is SWITCHED by a job: the hours Management writes are sent to eBay as ACTIVE and PAUSED, live
+     only for an account whose own live-apply switch is on and written down as a would-send for every
+     other account. So the old line here ("nothing on it reaches eBay") is no longer true, and the
+     one account already switched on is the reason it matters.
+     `adtool_job_peakswitch` is the switching's own stop button, apart from the page's: the page can
+     stay open as a work list while the sending is stopped dead, which is what somebody wants at
+     03:00 when a boundary is going wrong. The job needs BOTH this and the page flag. */
+  for (const key of ['adtool_page_changes', 'adtool_page_peak', 'adtool_job_peakswitch']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
   }
   try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
@@ -10935,7 +11139,7 @@ async function adtoolChangeDayCompute(env, pay) {
 /* ---- Peak times only: the list the figures suggest, and the list people keep by hand ---- */
 const ADTOOL_PEAK_SUGGEST_CAP = 200;
 async function adtoolPeakCompute(env, acct) {
-  await ensureAdtoolPhase15Schema(env);
+  await ensureAdtoolPhase16Schema(env);   // P15's tables plus the by-hand list's own switch column
   const cfg = {};
   for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_peak_%'").all()).results || [])) cfg[String(r.key)] = r.value;
   const rules = adtPeakRules(cfg);
@@ -10949,7 +11153,13 @@ async function adtoolPeakCompute(env, acct) {
   const liveBy = {};
   for (const r of liveRows) (liveBy[String(r.item_id)] = liveBy[String(r.item_id)] || []).push(r);
 
-  const manualRows = (await env.DB.prepare("SELECT p.account, p.item_id, p.hours, p.note, p.added_by, p.added_at, ia.title, ia.image FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id WHERE p.removed_at = ''" + (acct ? ' AND p.account = ?1' : '') + ' ORDER BY p.added_at DESC LIMIT 500').bind(...ab).all()).results || [];
+  /* 28 Oct: the by-hand list now carries its own switch, so the page reads it too. Behind a try with
+     the old column list after it, in the way every added column in this file is read, so a database
+     that has not caught up with the ALTER shows the list rather than an error. */
+  const manualSql = cols => "SELECT p.account, p.item_id, p.hours, p.note, p.added_by, p.added_at" + cols + ", ia.title, ia.image FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id WHERE p.removed_at = ''" + (acct ? ' AND p.account = ?1' : '') + ' ORDER BY p.added_at DESC LIMIT 500';
+  let manualRows = [];
+  try { manualRows = (await env.DB.prepare(manualSql(', COALESCE(p.auto, 1) AS auto')).bind(...ab).all()).results || []; }
+  catch (e) { manualRows = ((await env.DB.prepare(manualSql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: 1 }, r)); }
   const manualSet = {};
   for (const r of manualRows) manualSet[String(r.item_id)] = r;
 
@@ -11039,13 +11249,57 @@ async function adtoolPeakCompute(env, acct) {
   });
   const sugSet = {};
   for (const s of suggested) sugSet[s.item_id] = 1;
+  /* 28 Oct: the page has to be able to show the truth about the switching, not a promise about it:
+     what the hours were read as, whether this row switches itself, what happens next, what the
+     system last did, and whether this account's live switch is on at all. On five of the six
+     accounts it is off and every one of those rows is a would-send and nothing more. */
+  const nowUk = adtUkParts(Date.now());
+  const liveSwitch = await adtPeakLiveSwitches(env);
+  const lastSwitch = await adtPeakLastSwitch(env, today);
+  const switchable = await adtPeakSwitchable(env, manualRows.map(r => String(r.item_id)));
+  /* how many peak switches each account has really had today, read the same way the job reads it.
+     It used to be passed in as nought, so a row on an account already at its ceiling told the reader
+     the change was about to go when the job would have held it back. One read, behind a try, because
+     the apply log belongs to the live-apply path and this page does not create it. */
+  const peakDoneToday = {};
+  try {
+    for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) peakDoneToday[String(r.account)] = Number(r.n) || 0;
+  } catch (e) { /* no log table yet: nothing has ever been sent, so nought is the true answer */ }
   const manual = manualRows.map(r => {
     const id = String(r.item_id), c = camp(id), u = slots[id] || [0, 0, 0, 0];
+    const a = String(r.account || '');
+    const parsed = adPeakHoursParse(r.hours);
+    const auto = Number(r.auto == null ? 1 : r.auto) ? 1 : 0;
+    const sw = switchable[id] || [];
+    const ls = lastSwitch.by_item[id] || null;
+    /* the same decision the job would take, taken the same way: per CAMPAIGN, against the believed
+       state for that campaign, with the account's real count of switches today. The row shows the
+       first campaign that would be sent, and the first campaign's answer where none would be. */
+    const onSw = !!liveSwitch[a], doneA = peakDoneToday[a] || 0;
+    const swByCamp = {};
+    for (const m of sw) (swByCamp[String(m.campaign_id || '')] = swByCamp[String(m.campaign_id || '')] || []).push(m);
+    let d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: false, believed_state: '', account_live_switch: onSw, account_switches_today: doneA });
+    for (const cid of Object.keys(swByCamp)) {
+      const hist = lastSwitch.by_key[id + '|' + cid] || { newest: null, live: null, shadow: null };
+      const believed = onSw ? adtPeakBelieved(swByCamp[cid], hist.live).state : (hist.shadow ? hist.shadow.to : '');
+      d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: true, believed_state: believed, account_live_switch: onSw, account_switches_today: doneA });
+      if (d.send) break;
+    }
     return {
-      item_id: id, account: String(r.account || ''), title: r.title ? String(r.title) : '', image: r.image ? String(r.image) : null,
+      item_id: id, account: a, title: r.title ? String(r.title) : '', image: r.image ? String(r.image) : null,
       live_now: !!liveBy[id], hours: String(r.hours || ''), note: String(r.note || ''), added_by: String(r.added_by || ''), added_at: String(r.added_at || ''),
       campaign_id: c.campaign_id, campaign_name: c.campaign_name,
-      spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((a, b) => a + b, 0), already_suggested: !!sugSet[id],
+      hours_parsed: parsed.ranges, hours_text: parsed.ranges ? adPeakHoursText(parsed.ranges) : '', hours_problem: parsed.reason || '',
+      auto: auto, switchable: sw.length > 0,
+      next_change: parsed.ranges ? adPeakNextChange(parsed.ranges, nowUk.hour) : '',
+      last_switch: ls ? { at: ls.at, to: ls.to, mode: ls.mode } : null,
+      live_switch_on: !!liveSwitch[a],
+      /* what WOULD HAPPEN, in the job's own words: 'live', 'would-send' or 'blocked', and empty where
+         nothing is owed. The state it would be put into is `switch_to` beside it, so a row held back
+         by the account's daily ceiling reads as blocked instead of as a change about to go. */
+      switch_state: d.send ? d.mode : '', switch_to: d.send || '', switch_note: d.why,
+      switches_today: doneA,
+      spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((a2, b) => a2 + b, 0), already_suggested: !!sugSet[id],
     };
   });
   const allAccounts = ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account));
@@ -11058,12 +11312,23 @@ async function adtoolPeakCompute(env, acct) {
     accounts: allAccounts,
     suggested: suggested, suggested_total: first.length, suggested_held_back: Math.max(0, first.length - suggested.length),
     manual: manual,
-    counts: { suggested: suggested.length, manual: manual.length, both: manual.filter(m => m.already_suggested).length },
+    counts: { suggested: suggested.length, manual: manual.length, both: manual.filter(m => m.already_suggested).length,
+      switching: manual.filter(m => m.auto && m.hours_parsed && m.switchable).length,
+      switching_live: manual.filter(m => m.auto && m.hours_parsed && m.switchable && m.live_switch_on).length,
+      hours_unreadable: manual.filter(m => m.hours && !m.hours_parsed).length },
     live_listings: Object.keys(liveBy).length,
-    sent_to_ebay: false,
-    hours_note: 'a work list and a record, never a timer: eBay cannot run an ad by the hour, so nothing here is sent to eBay',
+    /* 28 Oct, and the one line on this page that changed meaning: the system now switches the by-hand
+       list on and off at its own hours. It is no longer true that nothing here reaches eBay, but it
+       is still true for every account whose live switch is off, which on this fleet is most of them,
+       and those rows are written down and never sent. */
+    sent_to_ebay: true,
+    live_switches: liveSwitch,
+    accounts_live: Object.keys(liveSwitch).filter(k => liveSwitch[k]).sort(),
+    hours_note: 'the system switches these on at the start of their hours and off at the end, for an account whose live switch is on; for every other account the change is written down and nothing is sent',
+    hours_help: ADTOOL_PEAK_HOURS_HELP,
+    switch_caps: { per_account_per_day: ADTOOL_PEAK_SWITCH_CAP, runs: 'every quarter hour' },
     window: { slots: [slotFrom, yday], hours: [d7from, yday] },
-    sources: ['dayparts from the listing’s own sold units', 'sampled hours', 'the day figures for the last 7 finished days', 'the by-hand list'],
+    sources: ['dayparts from the listing’s own sold units', 'sampled hours', 'the day figures for the last 7 finished days', 'the by-hand list', 'the portal’s own record of what it sent'],
   };
 }
 async function adtPeakCacheClear(env, acct) {
@@ -11117,15 +11382,36 @@ const ADTOOL_ACTIONS_P15 = {
       await adtGate(ctx, null);
       await ensureAdtoolPhase15Register(ctx.env);
       await adtGate(ctx, 'adtool_page_peak');
+      await ensureAdtoolPhase16Schema(ctx.env);
       const env = ctx.env, iid = String((p && p.item_id) || '').replace(/\D/g, '');
       if (!iid) throw new Error('SAY: give a listing number');
       const hours = String((p && p.hours) || '').slice(0, 60), note = String((p && p.note) || '').slice(0, 500);
+      /* the hours are a WORKING instruction now, not a comment: the system switches the ad at them.
+         So text it cannot read is refused here, with the reason, rather than stored and silently
+         never acted on. The hours are stored back in the form they were read as, so the page and the
+         switch never disagree about what "17-23, 9-13" meant. */
+      const parsed = adPeakHoursParse(hours);
+      if (hours && !parsed.ranges) throw new Error('SAY: ' + parsed.reason + '. ' + ADTOOL_PEAK_HOURS_HELP);
+      const tidy = adPeakHoursText(parsed.ranges);
+      /* a row with no hours at all is still allowed, being the work-list entry this page has always
+         taken, but it cannot be switched, so it is stored with its switching off rather than left
+         looking armed. Everything else is born switching itself on. */
+      const auto = (!parsed.ranges || (p && p.auto === false) || (p && p.auto === 0)) ? 0 : 1;
       const by = String((ctx.user || {}).email || '');
       const it = await env.DB.prepare('SELECT account FROM items_api WHERE item_id = ?1').bind(iid).first();
       const a = it ? String(it.account || '') : '';
-      await env.DB.prepare("INSERT INTO adtool_peak_items (account, item_id, hours, note, added_by, added_at, removed_by, removed_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), '', '') ON CONFLICT(item_id) DO UPDATE SET account = ?1, hours = ?3, note = ?4, added_by = ?5, added_at = datetime('now'), removed_by = '', removed_at = ''").bind(a, iid, hours, note, by).run();
+      try {
+        await env.DB.prepare("INSERT INTO adtool_peak_items (account, item_id, hours, note, added_by, added_at, removed_by, removed_at, auto) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), '', '', ?6) ON CONFLICT(item_id) DO UPDATE SET account = ?1, hours = ?3, note = ?4, added_by = ?5, added_at = datetime('now'), removed_by = '', removed_at = '', auto = ?6").bind(a, iid, tidy, note, by, auto).run();
+      } catch (e) {
+        /* the added column has not reached this database: the row is still written with its hours */
+        await env.DB.prepare("INSERT INTO adtool_peak_items (account, item_id, hours, note, added_by, added_at, removed_by, removed_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), '', '') ON CONFLICT(item_id) DO UPDATE SET account = ?1, hours = ?3, note = ?4, added_by = ?5, added_at = datetime('now'), removed_by = '', removed_at = ''").bind(a, iid, tidy, note, by).run();
+      }
       await adtPeakCacheClear(env, a);
-      return { ok: true, item_id: iid, account: a, hours: hours, note: note, added_by: by, sent_to_ebay: false };
+      const sw = await adtPeakLiveSwitches(env);
+      return { ok: true, item_id: iid, account: a, hours: tidy, hours_parsed: parsed.ranges, auto: auto, note: note, added_by: by,
+        next_change: adPeakNextChange(parsed.ranges, adtUkParts(Date.now()).hour),
+        live_switch_on: !!sw[a],
+        sent_to_ebay: false, note_to_reader: sw[a] ? 'this account’s live switch is on, so the system will switch this listing at these hours' : 'this account’s live switch is off, so the change will be written down and nothing sent to eBay' };
     },
   },
   adtoolPeakRemove: {
@@ -11147,6 +11433,797 @@ const ADTOOL_ACTIONS_P15 = {
   },
 };
 /* ADTOOL-P15-END ================================================================================== */
+
+/* ADTOOL-P16-BEGIN =================================================================================
+   The owner's Change Spec of 28 Oct 2026. Four things the engine owes the rebuilt portal:
+
+     Entire Live Listings   every ACTIVE listing put in exactly one of three places, once, with the
+                            arithmetic that proves the three add back up to the active count.
+     Potential CPC          a list that fills itself, instead of a page waiting for somebody to
+                            nominate a listing by hand.
+     The dynamic ad rate    what eBay itself says about a campaign's rate, rather than the owner's
+                            naming convention, which a rename quietly breaks.
+     Peak hours             management keeps the list; the SYSTEM switches it on when the peak starts
+                            and off when it ends.
+
+   The peak switch is the ONE thing in this block that can reach eBay, and it goes through the only
+   sanctioned path in this file: the per-account live-apply switch (portal_config
+   adtool_apply_live_<account>), the daily caps, the ONE bulk ad-status endpoint already named in
+   ADTOOL_APPLY_ENDPOINTS and nothing new, and a row in adtool_apply_log for every decision with an
+   undo beside it. An account whose switch is off gets a would-send row and nothing else: the mode is
+   decided by a pure function, so "it cannot send with the switch off" is a unit test, not a hope. */
+/* ADTOOL-P16-PURE-BEGIN */
+function adDynamicRate(campaign) {
+  /* is this campaign's ad rate a dynamic one, and who said so.
+     eBay marks the rate on a cost-per-sale campaign as DYNAMIC or FIXED in fundingStrategy
+     .adRateStrategy, which the sync now keeps in campaigns.ad_rate_strategy. Where eBay has not said
+     (an older row, an account eBay sends nothing for, a cost-per-click campaign) the owner's own
+     naming convention stands in: he puts "dynamic" in the campaign's name, and the price rules have
+     read it that way since the review. eBay's own FIXED does NOT overrule the name, because the
+     fleet was built on the naming convention and a campaign he calls dynamic is managed as one; the
+     `source` says which of the two answered, so where they disagree the page can show both.
+     The name arrives under TWO spellings and both are read: `name` straight off the campaigns table,
+     and `campaign_name` on the membership rows the pages hand round, which is the shape the split
+     classifier passes in. Reading only one of them made every campaign the owner calls dynamic read
+     as a plain one on the page that exists to count them. */
+  const c = campaign || {};
+  if (String(c.ad_rate_strategy == null ? '' : c.ad_rate_strategy).toUpperCase() === 'DYNAMIC') return { dynamic: true, source: 'ebay' };
+  const nm = c.name == null || c.name === '' ? c.campaign_name : c.name;
+  if (String(nm == null ? '' : nm).toLowerCase().indexOf('dynamic') >= 0) return { dynamic: true, source: 'name' };
+  return { dynamic: false, source: '' };
+}
+function adLiveSplitClassify(memberships) {
+  /* one ACTIVE listing's live ad memberships → exactly one of three places, always, and for the
+     third one WHICH KIND of third it is.
+     On CPC beats dynamic: a listing in both a pay-per-click campaign and a dynamic pay-on-sale one is
+     spending per click, and that is the figure a reader is looking for. A listing with no live
+     membership at all falls to the third, so the three partition the active listings by construction
+     and the invariant line on the page is a check rather than a restatement.
+     The third place holds two very different listings, and the owner's three words cannot tell them
+     apart: one is advertised on pay-on-sale at a fixed rate, the other is not advertised at all. The
+     first costs nothing until it sells and the second cannot sell through an ad at all, so they are
+     counted apart inside the one list rather than split into a fourth place the owner never asked
+     for. `detail` is 'general' or 'unadvertised' on the third and empty on the other two. */
+  const rows = memberships || [];
+  const advertised = rows.length > 0;
+  for (const m of rows) if (String(m && m.funding_model) === 'COST_PER_CLICK') return { split: 'on_cpc', advertised: true, detail: '' };
+  for (const m of rows) if (adDynamicRate(m).dynamic) return { split: 'dynamic', advertised: true, detail: '' };
+  return { split: 'no_cpc', advertised: advertised, detail: advertised ? 'general' : 'unadvertised' };
+}
+function adLiveSplitClass(memberships) {
+  /* the owner's own three words, for every caller that wants the place and not the detail */
+  return adLiveSplitClassify(memberships).split;
+}
+const ADTOOL_LIVE_SPLIT_CLASSES = ['on_cpc', 'dynamic', 'no_cpc'];
+const ADTOOL_LIVE_SPLIT_NAMES = { on_cpc: 'On CPC now', dynamic: 'Dynamic', no_cpc: 'Without CPC' };
+
+/* ---- pure: Potential CPC, the list that fills itself ---- */
+const ADTOOL_POTENTIAL_DEFAULTS = { min_orders: 15, quiet_days: 3 };
+const ADTOOL_POTENTIAL_CONFIG_KEYS = { min_orders: 'adtool_potential_min_orders', quiet_days: 'adtool_potential_quiet_days' };
+function adPotentialRules(cfg) {
+  /* the two figures a manager can set, with the owner's own numbers standing in for anything he has
+     not set. Nothing prints a fixed threshold anywhere: the page prints what comes back from here. */
+  const c = cfg || {};
+  const num = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) || n <= 0 ? d : n; };
+  return {
+    min_orders: Math.round(num(c[ADTOOL_POTENTIAL_CONFIG_KEYS.min_orders], ADTOOL_POTENTIAL_DEFAULTS.min_orders)),
+    quiet_days: Math.round(num(c[ADTOOL_POTENTIAL_CONFIG_KEYS.quiet_days], ADTOOL_POTENTIAL_DEFAULTS.quiet_days)),
+  };
+}
+function adPotentialCpc(input, rules) {
+  /* one ACTIVE listing → does it belong on Potential CPC. All three have to hold:
+       1. it has sold enough times to be worth spending on,
+       2. it is not on pay-per-click now,
+       3. nothing has run pay-per-click on it for the last few days, so a listing somebody stopped
+          this morning is not suggested straight back the same afternoon.
+     The order count is the GREATER of our own completed orders and eBay's own sold count, and the
+     answer says which it came from: eBay's count resets when the quantity is revised, and our order
+     records do not reach back to the oldest listings, so neither of them alone is the truth. */
+  const r = Object.assign({}, ADTOOL_POTENTIAL_DEFAULTS, rules || {});
+  const i = input || {};
+  const mine = Math.max(0, Math.round(Number(i.orders_completed) || 0));
+  const ebay = Math.max(0, Math.round(Number(i.sold_qty) || 0));
+  const count = Math.max(mine, ebay);
+  const source = count === 0 ? 'no sale on record'
+    : ebay > mine ? 'eBay’s own sold count'
+      : mine > ebay ? 'our own completed orders'
+        : 'our own completed orders, which eBay’s count agrees with';
+  const onCpc = !!i.on_cpc;
+  const ranRecently = !!i.cpc_in_quiet_window;
+  const lastDay = i.last_cpc_day ? String(i.last_cpc_day) : null;
+  /* how far back the click-fee record itself reaches. eBay's click fees are a ROLLING record and age
+     out long before the window asked of them, so "no day on record" is not "never advertised": it is
+     "not inside the record", and the two are different claims. Where the oldest day on record is
+     known it is named, so the reader can see how short the record is and judge for themselves. */
+  const recFrom = i.records_from ? String(i.records_from) : null;
+  const noRecord = 'no click fee on record' + (recFrom ? ' since ' + recFrom : '');
+  const fails = [];
+  if (count < r.min_orders) fails.push('it has sold ' + count + ' time' + (count === 1 ? '' : 's') + ', fewer than the ' + r.min_orders + ' this list asks for');
+  if (onCpc) fails.push('it is on pay-per-click already');
+  if (ranRecently) fails.push('pay-per-click ran on it inside the last ' + r.quiet_days + ' day' + (r.quiet_days === 1 ? '' : 's'));
+  const sold = 'Sold ' + count + ' time' + (count === 1 ? '' : 's') + ' by ' + source;
+  const advice = fails.length ? ''
+    : lastDay
+      ? sold + ', and last advertised on ' + lastDay + ': worth putting back on pay-per-click.'
+      : sold + ', and ' + noRecord + ': worth a first bid.';
+  return {
+    eligible: fails.length === 0, orders_completed: count, orders_source: source,
+    orders_mine: mine, orders_ebay: ebay, last_cpc_day: lastDay, records_from: recFrom,
+    last_cpc_seen: lastDay ? 'the day eBay charged a click fee' : noRecord,
+    on_cpc: onCpc, ran_recently: ranRecently,
+    why: fails.length ? fails.join('; ') : advice, advice: advice, fails: fails,
+  };
+}
+/* F15 (the review): the four counts beside the list are a PARTITION, not four independent tallies.
+   They were counted independently and a listing already on pay-per-click with too few orders was
+   counted twice, so the four could add up to more than the listings they came from and a reader
+   adding them got a number bigger than the fleet. One listing, one bucket, in the order a reader
+   would ask the questions: is it already on, did it run recently, has it sold enough, otherwise it
+   is one for the list. */
+const ADTOOL_POTENTIAL_BUCKETS = ['already_on_cpc', 'ran_recently', 'too_few_orders', 'eligible'];
+function adPotentialBucket(verdict, rules) {
+  const r = Object.assign({}, ADTOOL_POTENTIAL_DEFAULTS, rules || {});
+  const v = verdict || {};
+  if (v.on_cpc) return 'already_on_cpc';
+  if (v.ran_recently) return 'ran_recently';
+  if ((Number(v.orders_completed) || 0) < r.min_orders) return 'too_few_orders';
+  return 'eligible';
+}
+
+/* ---- pure: peak hours, and the switching ---- */
+const ADTOOL_PEAK_SWITCH_CAP = 20;
+const ADTOOL_PEAK_HOURS_HELP = 'UK hours as HH-HH, more than one separated by commas: 17-23 means on at 17:00 and off at 23:00, and 22-02 runs through midnight';
+function adPeakHoursParse(text) {
+  /* the hours beside a peak listing, in a form the system can switch on.
+     Comma-separated UK ranges HH-HH. '17-23' is ON at 17:00 and OFF at 23:00, so the ad runs through
+     hour 22: the second number is the moment it stops, not the last hour it runs. '22-02' crosses
+     midnight. Overlapping and touching stretches are MERGED, because an hour that appears in two
+     stretches would otherwise produce two changes for one boundary.
+     Returns { ranges, hours, reason }: `ranges` is a list of [on, off] pairs, or null with `reason`
+     saying in plain words why the text could not be read. */
+  const raw = String(text == null ? '' : text).trim();
+  const bad = reason => ({ ranges: null, hours: [], reason: reason });
+  if (!raw) return bad('no hours given');
+  const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '');
+  if (!parts.length) return bad('no hours given');
+  if (parts.length > 6) return bad('more than six stretches in one day');
+  const set = {};
+  for (const part of parts) {
+    const m = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(part);
+    const shown = part.length > 14 ? part.slice(0, 14) + '…' : part;
+    if (!m) return bad('“' + shown + '” is not an hour range like 17-23');
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a > 23 || b > 23) return bad('“' + shown + '” names an hour outside 0 to 23');
+    if (a === b) return bad('“' + shown + '” starts and stops at the same hour, so it covers nothing');
+    let h = a;
+    while (h !== b) { set[h] = 1; h = (h + 1) % 24; }
+  }
+  const hours = Object.keys(set).map(Number).sort((x, y) => x - y);
+  /* every hour of the day leaves no boundary to switch on, and an ad that is always on does not need
+     this page at all, so it is refused rather than stored as a timer that never fires */
+  if (hours.length >= 24) return bad('that is every hour of the day, so there is nothing to switch');
+  const inSet = h => !!set[(h + 24) % 24];
+  const ranges = [];
+  for (let h = 0; h < 24; h++) {
+    if (!inSet(h) || inSet(h - 1)) continue;          // only the first hour of a stretch starts one
+    let end = h;
+    while (inSet(end)) end = (end + 1) % 24;          // walk to the hour it stops
+    ranges.push([h, end]);
+  }
+  return { ranges: ranges, hours: hours, reason: '' };
+}
+function adPeakHoursText(ranges) {
+  const pad = h => String(Number(h)).padStart(2, '0');
+  return (ranges || []).map(r => pad(r[0]) + '-' + pad(r[1])).join(',');
+}
+function adInPeakRanges(hour, ranges) {
+  /* is this UK hour inside one of the stretches. The stretch's second number is when it stops, so
+     that hour is OUTSIDE it: 17-23 covers 17 to 22 and not 23. */
+  const h = Number(hour);
+  if (!isFinite(h)) return false;
+  for (const r of (ranges || [])) {
+    if (!r || r.length < 2) continue;
+    const a = Number(r[0]), b = Number(r[1]);
+    if (a === b) continue;
+    if (a < b) { if (h >= a && h < b) return true; }
+    else if (h >= a || h < b) return true;             // the stretch crosses midnight
+  }
+  return false;
+}
+function adPeakNextChange(ranges, hour) {
+  /* the very next thing that happens to this listing, in words a reader does not have to decode:
+     'on at 17:00' or 'off at 23:00'. Worked out by walking the hours forward from this one, so a
+     stretch that crosses midnight answers the same way as one that does not. */
+  const h0 = Number(hour);
+  if (!ranges || !ranges.length || !isFinite(h0)) return '';
+  let prev = adInPeakRanges(h0, ranges);
+  for (let i = 1; i <= 24; i++) {
+    const h = (h0 + i) % 24;
+    const cur = adInPeakRanges(h, ranges);
+    if (cur !== prev) return (cur ? 'on at ' : 'off at ') + String(h).padStart(2, '0') + ':00';
+    prev = cur;
+  }
+  return '';
+}
+function adPeakApplyCaps(state) {
+  /* the peak switch's own daily ceiling: twenty switches per account per day, counted over the rows
+     THIS job wrote and no others.
+     The two ceilings are SEPARATE and neither counts the other's rows. It was written as one shared
+     allowance, and the review was right about what that costs: this job runs every quarter hour all
+     day, so an evening of boundaries would spend the morning apply's thirty before it ran, and the
+     morning would then apply nothing at all without one word about why. Twenty here and thirty there
+     means an account can see fifty live changes in a day, and that is the deliberate answer: each
+     sender is held to what its own work needs, and each is counted and shown apart on Live apply.
+     The one rule of adtApplyCaps deliberately NOT applied here is "nothing between 22:00 and 06:00
+     UK". A peak is very often an evening and the owner's own example stops at 23:00, so a quiet
+     hours rule would leave the ad running all night, which is the exact thing this job exists to
+     prevent. The bid cap does not apply either: this job never touches a bid, only a state. */
+  const n = Number((state && state.account_switches_today) || 0) || 0;
+  if (n >= ADTOOL_PEAK_SWITCH_CAP) return { allowed: false, reason: 'this account has already had ' + ADTOOL_PEAK_SWITCH_CAP + ' peak switches today' };
+  return { allowed: true, reason: '' };
+}
+function adPeakSwitchDecide(input) {
+  /* one row of the by-hand peak list, one quarter-hour tick: what to send eBay, if anything, and in
+     which mode. input: { auto, ranges, hour (UK 0-23), live_cpc_ad, believed_state,
+     account_live_switch, account_switches_today }.
+     The WANTED state is read from the hours and compared with what we believe the ad is doing now, so
+     a tick that never fired, or a worker asleep on the boundary minute, still puts the ad right on
+     the next tick, and a state that is already correct sends nothing, which is what keeps one state
+     change to one send.
+     The last line is the only thing that decides whether anything leaves this worker, and it is the
+     same shape adtoolApply has always used: live ONLY when the account's own switch is on and no cap
+     is holding it. With the switch off the answer is 'would-send', and the caller writes the row and
+     makes no request. */
+  const i = input || {};
+  const ranges = i.ranges || [];
+  const want = adInPeakRanges(i.hour, ranges) ? 'ACTIVE' : 'PAUSED';
+  const nothing = why => ({ send: null, want: '', mode: '', why: why });
+  if (!i.auto) return nothing('switching is off for this listing');
+  if (!ranges.length) return nothing('no hours to read');
+  if (!i.live_cpc_ad) return nothing('no pay-per-click ad to switch');
+  if (String(i.believed_state || '').toUpperCase() === want) return nothing('already ' + (want === 'ACTIVE' ? 'running' : 'paused'));
+  const on = !!i.account_live_switch;
+  const cap = adPeakApplyCaps({ account_switches_today: i.account_switches_today });
+  const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
+  const base = want === 'ACTIVE' ? 'inside its peak hours' : 'outside its peak hours';
+  return {
+    send: want, want: want, mode: mode,
+    why: base + (mode === 'live' ? '' : mode === 'would-send' ? ', written down and not sent: this account’s live switch is off' : ', held back: ' + cap.reason),
+  };
+}
+function adtPeakBelieved(rows, last) {
+  /* what the ad is doing now, as best this portal can know. eBay's own answer from the rolling ad
+     read is the truth about eBay; our own record is the truth about what we just did. The newer of
+     the two wins, because the ad read lags a campaign by up to an hour and sending the same
+     instruction again on every tick until it catches up would break "one change, one send", while
+     trusting only our own record would let the job sit still after somebody changed the ad by hand.
+     Both stamps are written by the same clock in the same shape, so comparing the text compares the
+     moment. */
+  let stamp = '', seen = '';
+  for (const r of (rows || [])) {
+    const at = String(r.ad_synced_at || '');
+    if (at >= stamp) { stamp = at; seen = String(r.ad_status || '') === 'PAUSED' ? 'PAUSED' : 'ACTIVE'; }
+  }
+  if (!seen) seen = 'ACTIVE';                       // an ad eBay has not stamped is one eBay is serving
+  if (last && last.to && (!stamp || String(last.at || '') > stamp)) return { state: last.to, from: 'the portal’s own record' };
+  return { state: seen, from: 'eBay’s last ad reading' };
+}
+/* ---- pure: what actually reached eBay on a report day, and which sender sent it ---- */
+function adtReportSentLive(rows) {
+  /* The report's note used to read adtool_decisions alone, so a day whose every decision row said
+     'shadow' was reported as a day on which nothing was sent to eBay. Two senders reach eBay
+     without ever writing to that table: the morning apply on an account whose live switch is on,
+     and the quarter-hourly peak switch. Both of them log to adtool_apply_log, so on the one account
+     that is switched on that sentence could be flatly false. The log's own live rows are the honest
+     source. 'peak' in decision_id is the peak switch; any other decision_id is the morning apply.
+     The sentence this returns is kept apart from the decisions sentence on purpose: a day whose
+     decisions were all written in shadow can still be a day the peak switch moved real ads. */
+  let morning = 0, peak = 0;
+  for (const r of (rows || [])) {
+    const n = Number(r && r.n) || 0;
+    if (n <= 0) continue;
+    if (String((r && r.decision_id) || '') === 'peak') peak += n; else morning += n;
+  }
+  const total = morning + peak;
+  if (!total) return { total: 0, morning: 0, peak: 0, sentence: 'nothing was sent to eBay that day' };
+  const by = [];
+  if (morning) by.push(morning + ' by the morning apply');
+  if (peak) by.push(peak + ' by peak switching');
+  return { total: total, morning: morning, peak: peak, sentence: total + (total === 1 ? ' change was' : ' changes were') + ' sent to eBay that day (' + by.join(', ') + ')' };
+}
+/* ADTOOL-P16-PURE-END */
+
+/* ---- schema: the peak list's own switch, and the campaign columns the sync now fills ---- */
+let ADTOOL_P16_SCHEMA_OK = false;
+async function ensureAdtoolPhase16Schema(env) {
+  if (ADTOOL_P16_SCHEMA_OK) return;
+  await ensureAdtoolPhase15Schema(env);
+  try { await ensureCampaignFundingColumns(env); } catch (e) { /* adDynamicRate falls back to the name */ }
+  /* whether the system switches this row for itself. The column is born 0 and every row already on
+     the list stays 0 until somebody saves it again.
+     It was written DEFAULT 1 first, and the review was right to stop it: the rows on this list were
+     typed as free text before switching existed, months of "evenings", "peak 5-11pm" and the like,
+     and a default of 1 would have armed the lot of them on an account whose live switch is already
+     on, the moment this deploy landed. An existing row cannot consent to being automated.
+     What is born armed is a row somebody saves WITH readable hours: adtoolPeakAdd names `auto` on
+     the insert and sets it to 1 when the hours parse and 0 when there are none, so a new row behaves
+     the way the page promises without the column's default deciding anything. Guarded, in the way
+     every added column in this file is. */
+  try { await env.DB.prepare('ALTER TABLE adtool_peak_items ADD COLUMN auto INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
+  ADTOOL_P16_SCHEMA_OK = true;
+}
+const ADTOOL_REGISTER_P16 = [
+  ['LIVE_SPLIT', 'Every live listing, in one of three places', 'Each listing eBay still shows as active goes in exactly one place: on pay-per-click if it has a live pay-per-click ad; dynamic if it has none of those but is live in a campaign whose rate is a dynamic one; and without pay-per-click if neither. Being advertised means the same thing here as on every other advertising page. The three counts are then checked against a SEPARATE count of the live listings, which is the real check: a listing in two places, or in none, shows up as the three not adding up, and the page says so. The third place counts two kinds apart inside itself: one is advertised on pay-on-sale, the other is not advertised at all.', 'campaign_ads, campaigns, items_api, adtool_listing_day', 'Worked out when you open the page and held for a couple of minutes after a read, while the all-accounts answer is prepared every hour so the page opens at once', 'Unit tests put every pattern of memberships in exactly one of the three, the two kinds of the third add back up to it, and the page’s own line checks the three against the separate active count'],
+  ['AD_RATE_DYNAMIC', 'Whether a campaign’s ad rate is a dynamic one', 'A campaign counts as dynamic when eBay says the rate is dynamic, OR when the team’s own name for it says dynamic. Either one alone is enough, and eBay calling the rate fixed does NOT overrule a campaign the team calls dynamic: the fleet has always been run on the naming convention. eBay’s reply is kept exactly as it arrives, with the whole funding reply beside it, so what eBay sent is on record rather than worked out afterwards. Each answer carries which of the two it came from, so a campaign where the name and eBay disagree can be seen rather than guessed at.', 'campaigns', 'Every few minutes, with the campaign list', 'The stored answer read back against eBay’s own campaign screen on a few campaigns of each kind'],
+  ['POTENTIAL_CPC', 'Listings worth putting on pay-per-click', 'A listing fills this list by itself when all three hold: it has sold at least the number of times set for it, it is not on pay-per-click now, and nothing has run pay-per-click on it for the last few days. Both figures are ones a manager can change and the page prints the ones in force. The last condition is what stops a listing somebody stopped this morning being suggested straight back the same afternoon.', 'orders, items_api, campaign_ads, campaigns, ads_daily, adtool_campaign_ad_events', 'Worked out when you open the page and held for a couple of minutes after a read, while the all-accounts answer is prepared every hour so the page opens at once', 'Unit tests on each of the three conditions failing on its own, and on all three holding'],
+  ['POTENTIAL_CPC_ORDERS', 'How many times a listing has sold', 'The GREATER of two counts that are not counted the same way, with the answer naming which of the two it came from. Our own order book counts ORDERS: one row is one order, counting every order eBay has not cancelled or lost and that was not refunded, however many units it carried. eBay’s own sold count counts UNITS, so an order of three reads as three there and as one here. The greater is taken because neither alone is the truth: eBay’s count resets when the quantity is revised, and our order records do not reach back to the oldest listings.', 'orders, items_api', 'Worked out with the list', 'Unit tests on each count being the higher one, and on the two agreeing'],
+  ['POTENTIAL_CPC_LAST_RUN', 'The last day pay-per-click ran on a listing', 'The most recent day eBay charged a click fee on the listing, as far back as the click-fee record goes, together with any day an ad on it was put back to running inside a pay-per-click campaign. The click-fee record is a rolling one and is usually far shorter than the window asked of it, so where there is no day the page says there is no click fee on record and names the oldest day the record reaches, which is an honest answer: it never claims the listing has never been advertised, because the record cannot know that.', 'ads_daily, adtool_campaign_ad_events, campaigns', 'Worked out with the list', 'The day read back against the listing’s own page, and the oldest day on record read back against the table'],
+  ['PEAK_HOURS_FORMAT', 'The hours beside a peak listing', 'London hours written as two numbers with a dash, more than one stretch separated by commas. The second number is the moment the ad stops, not the last hour it runs, so seventeen to twenty three runs from five in the afternoon until eleven at night. A stretch may cross midnight. Stretches that overlap or touch are joined into one, because an hour in two stretches would otherwise be switched twice. Anything that cannot be read is refused when it is typed, with the reason, rather than stored and silently ignored.', 'adtool_peak_items', 'As soon as somebody adds or changes one', 'Unit tests on good hours, hours across midnight, overlapping hours and text that is not hours at all'],
+  ['PEAK_SWITCH', 'The system switching a peak listing on and off', 'Every quarter hour, each listing on the by-hand peak list that is set to switch itself and has a pay-per-click ad is compared with its own hours: inside them the ad should be running, outside them it should be paused. Only a change is ever sent, so one boundary costs one instruction, and a quarter hour that never fired is put right on the next one. Sent only for an account whose own live switch is on, at most twenty times a day for an account, and written down either way with what was sent, what came back, and how to undo it. For every other account the row says what it would have sent and nothing leaves the portal.', 'adtool_peak_items, campaign_ads, campaigns, items_api, portal_config, adtool_apply_log', 'Every quarter hour', 'Unit tests on the hour either side of both boundaries, and on nothing being sent for an account whose switch is off'],
+  ['TODAY_HOURS', 'Orders received in each hour today', 'Orders and units for every hour of today so far, on a London clock, counted from the order records the five minute sync writes and not from the hourly mirror. It is the same read the day’s four parts are counted from, so the two always agree, and it sits beside the money spent in each hour on one chart. Cancelled orders are left out. An hour nothing arrived in is left out and the chart fills the gap.', 'orders', 'Every time the page is opened, within a minute of the last order sync', 'The hours add up to the same day the four parts of the day add up to'],
+  ['DECISIONS_TODAY', 'Decisions on today’s list', 'How many calls today’s run made that are something other than leave it alone. It is a count of exactly the rows the Decision page lists, by the same rule and over every account whichever account the reader is looking at, so the tile and that page can never disagree. It counts the whole list and not a backlog: a decision somebody has already acted on is still one of today’s calls and is still counted, because the Decision page still shows it. Until 28 Oct this figure was written as nought wherever it was printed, which read as nothing to look at.', 'adtool_decisions', 'Every time the page is opened', 'Counted against the rows the Decision page shows, for the same day'],
+  ['SPEND_BACK_WINDOWS', 'What a listing spent over the last three, seven and fourteen days', 'The listing’s own ad spend over the last three, seven and fourteen FINISHED days, beside what it has spent today. Every window ends yesterday, because eBay publishes a day’s ad report the day after and a window reaching into today would read every listing as having had a cheap day. The spend already carries the fee charged on clicks, so nothing is added on top of it. A day with no row simply does not count.', 'adtool_listing_day', 'Worked out when you open the page, and held for a minute', 'Unit tests on the three windows never being out of order, and the figures read back against the listing’s own page'],
+];
+let ADTOOL_P16_REG_OK = false;
+async function ensureAdtoolPhase16Register(env) {
+  if (ADTOOL_P16_REG_OK) return;
+  await ensureAdtoolPhase16Schema(env);
+  const stmts = ADTOOL_REGISTER_P16.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 16, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 16").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
+  /* both pages are born ON. Neither writes anything and neither reaches eBay: one counts the live
+     listings three ways and the other reads orders. A manager can switch either off in Flags, and a
+     switch somebody has already set is left exactly as it stands. */
+  for (const key of ['adtool_page_livesplit', 'adtool_page_potential']) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
+  }
+  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  ADTOOL_P16_REG_OK = true;
+}
+
+/* ---- the campaign map, with the rate strategy where the database has caught up ---- */
+async function adtCampaignRateMap(env, acct) {
+  /* every campaign this portal knows, with what eBay said about its rate. The added columns are read
+     behind a try, with the old column list as the fallback, so a database that has not caught up with
+     the ALTER answers from the campaign NAME instead of taking the page down. */
+  const ab = acct ? [acct] : [];
+  const w = acct ? ' WHERE account = ?1' : '';
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare('SELECT account, campaign_id, name, status, funding_model, ad_rate_strategy FROM campaigns' + w + ' ORDER BY account, campaign_id LIMIT 4000').bind(...ab).all()).results || [];
+  } catch (e) {
+    rows = (await env.DB.prepare('SELECT account, campaign_id, name, status, funding_model FROM campaigns' + w + ' ORDER BY account, campaign_id LIMIT 4000').bind(...ab).all()).results || [];
+  }
+  const map = {};
+  for (const r of rows) {
+    const d = adDynamicRate(r);
+    map[String(r.account || '') + '|' + String(r.campaign_id || '')] = {
+      account: String(r.account || ''), campaign_id: String(r.campaign_id || ''), name: String(r.name || ''),
+      status: String(r.status || ''), funding_model: String(r.funding_model || ''),
+      ad_rate_strategy: r.ad_rate_strategy == null ? '' : String(r.ad_rate_strategy),
+      dynamic: d.dynamic, dynamic_source: d.source,
+    };
+  }
+  return map;
+}
+
+/* ---- Entire Live Listings: every active listing, in one of three places ---- */
+const ADTOOL_LIVE_SPLIT_LIST_CAP = 500;
+const ADTOOL_LIVE_SPLIT_UNIVERSE_CAP = 4000;
+async function adtoolLiveSplitCompute(env, acct) {
+  await ensureAdtoolPhase16Schema(env);
+  const today = ukDate(''), yday = adtAddDays(today, -1), d7from = adtAddDays(today, -7);
+  const ab = acct ? [acct] : [];
+  const B = await env.DB.batch([
+    /* the universe this page partitions: bounded by the active status and by a ceiling four times the
+       size of the fleet, so a runaway listing table can never make one page read everything. Hitting
+       the ceiling shows up as the invariant line disagreeing with the independent count below, which
+       is exactly the right place for it to show up. */
+    env.DB.prepare("SELECT item_id, account, title, image FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY item_id LIMIT ' + ADTOOL_LIVE_SPLIT_UNIVERSE_CAP).bind(...ab),
+    /* an INDEPENDENT count, so "the three add up to the active total" is a check and not the same
+       number written twice */
+    env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...ab),
+    /* is this listing being advertised: the one membership rule the whole tool shares */
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...ab),
+  ]);
+  const items = (B[0] || {}).results || [];
+  const activeCounted = Number((((B[1] || {}).results || [])[0] || {}).n) || 0;
+  const liveRows = (B[2] || {}).results || [];
+  const rateMap = await adtCampaignRateMap(env, acct);
+
+  const liveBy = {};
+  for (const r of liveRows) (liveBy[String(r.item_id)] = liveBy[String(r.item_id)] || []).push(r);
+
+  /* seven finished days of the listing's own spend, for the listings that are actually on the page */
+  const spend7 = {};
+  const ids = items.map(r => String(r.item_id));
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, ROUND(SUM(spend), 2) AS spend FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ch, 2) + ' GROUP BY item_id').bind(d7from, yday, ...ch));
+  for (const rows of await adtBatchRead(env, stmts)) for (const r of rows) spend7[String(r.item_id)] = round2(Number(r.spend) || 0);
+
+  /* `no_cpc_general` and `no_cpc_unadvertised` sum to `no_cpc`: the same listings counted a second
+     way inside the one place, never a fourth place of their own. */
+  const blank = () => ({ on_cpc: 0, dynamic: 0, no_cpc: 0, no_cpc_general: 0, no_cpc_unadvertised: 0, active: 0 });
+  const fleet = blank(), byAcct = {};
+  const lists = { on_cpc: [], dynamic: [], no_cpc: [] };
+  const totals = { on_cpc: 0, dynamic: 0, no_cpc: 0 };
+  for (const it of items) {
+    const id = String(it.item_id), a = String(it.account || '');
+    const rows = (liveBy[id] || []).map(r => {
+      const k = String(r.account || '') + '|' + String(r.campaign_id || '');
+      const c = rateMap[k] || {};
+      const d = adDynamicRate({ ad_rate_strategy: c.ad_rate_strategy, name: r.name });
+      /* the ad rate the membership read already carries: the ad's own where eBay set one on the ad,
+         otherwise the campaign's. The Dynamic tab is about the rate, so the page would otherwise be
+         naming a dynamic rate without ever saying what it currently is. Nothing is read for it: both
+         columns come back on the shared membership query. */
+      const rate = (r.bid_pct === null || r.bid_pct === undefined || r.bid_pct === '') ? r.c_bid : r.bid_pct;
+      return {
+        campaign_id: String(r.campaign_id || ''), campaign_name: String(r.name || ''),
+        funding_model: String(r.funding_model || ''), ad_status: r.ad_status == null ? '' : String(r.ad_status),
+        ad_rate_strategy: c.ad_rate_strategy === undefined ? '' : c.ad_rate_strategy,
+        bid_pct: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
+        dynamic: d.dynamic, dynamic_source: d.source,
+        ad_reading_at: r.ad_synced_at ? String(r.ad_synced_at) : (r.ads_synced_at ? String(r.ads_synced_at) : null),
+      };
+    });
+    const cl = adLiveSplitClassify(rows), cls = cl.split;
+    fleet[cls]++; fleet.active++;
+    const bk = (byAcct[a] = byAcct[a] || Object.assign({ account: a }, blank()));
+    bk[cls]++; bk.active++;
+    totals[cls]++;
+    if (cl.detail) { fleet['no_cpc_' + cl.detail]++; bk['no_cpc_' + cl.detail]++; }
+    if (lists[cls].length < ADTOOL_LIVE_SPLIT_LIST_CAP) {
+      let stamp = null;
+      for (const c of rows) if (c.ad_reading_at && (!stamp || c.ad_reading_at > stamp)) stamp = c.ad_reading_at;
+      lists[cls].push({
+        item_id: id, account: a, title: String(it.title || ''), image: it.image ? String(it.image) : null,
+        split: cls, split_name: ADTOOL_LIVE_SPLIT_NAMES[cls], split_detail: cl.detail,
+        campaigns: rows, campaigns_count: rows.length,
+        ad_reading_at: stamp, spend_7d: spend7[id] === undefined ? 0 : spend7[id],
+      });
+    }
+  }
+  for (const k of ADTOOL_LIVE_SPLIT_CLASSES) lists[k].sort((x, y) => (y.spend_7d - x.spend_7d) || (y.campaigns_count - x.campaigns_count) || (x.item_id < y.item_id ? -1 : 1));
+  const sum = fleet.on_cpc + fleet.dynamic + fleet.no_cpc;
+  const invariant = {
+    ok: sum === fleet.active && fleet.active === activeCounted,
+    classified: sum, read: fleet.active, active_counted: activeCounted,
+    text: sum === fleet.active && fleet.active === activeCounted
+      ? 'All ' + activeCounted + ' live listings are in exactly one of the three lists: ' + fleet.on_cpc + ' on pay-per-click, ' + fleet.dynamic + ' dynamic, ' + fleet.no_cpc + ' without.'
+      : 'The three lists hold ' + sum + ' of the ' + activeCounted + ' live listings' + (fleet.active >= ADTOOL_LIVE_SPLIT_UNIVERSE_CAP ? ', because this page reads at most ' + ADTOOL_LIVE_SPLIT_UNIVERSE_CAP + ' at a time' : '') + '.',
+  };
+  return {
+    computed_at: new Date().toISOString(), account: acct || '', fresh: await adtFresh(env, 'day'),
+    counts: { fleet: fleet, by_account: Object.keys(byAcct).sort().map(k => byAcct[k]) },
+    invariant: invariant,
+    on_cpc: lists.on_cpc, dynamic: lists.dynamic, no_cpc: lists.no_cpc,
+    totals: totals,
+    held_back: { on_cpc: Math.max(0, totals.on_cpc - lists.on_cpc.length), dynamic: Math.max(0, totals.dynamic - lists.dynamic.length), no_cpc: Math.max(0, totals.no_cpc - lists.no_cpc.length) },
+    list_cap: ADTOOL_LIVE_SPLIT_LIST_CAP,
+    accounts: ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account)),
+    names: ADTOOL_LIVE_SPLIT_NAMES,
+    /* the fourth tab is not computed here. Listings that have left pay-per-click already have one
+       home, adtoolCpcListings with mode 'post', and one number keeps one home. */
+    archive_action: 'adtoolCpcListings', archive_payload: { mode: 'post' },
+    window: { spend: [d7from, yday] },
+    sent_to_ebay: false,
+    sources: ['the listings eBay still shows as active', 'the live ad memberships every advertising page shares', 'what eBay said about each campaign’s rate', 'the seven finished days before today'],
+  };
+}
+
+/* ---- Potential CPC: the list that fills itself ---- */
+const ADTOOL_POTENTIAL_LIST_CAP = 200;
+const ADTOOL_POTENTIAL_LOOKBACK_DAYS = 180;
+async function adtoolPotentialCpcCompute(env, acct) {
+  await ensureAdtoolPhase16Schema(env);
+  const cfg = {};
+  for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_potential_%'").all()).results || [])) cfg[String(r.key)] = r.value;
+  const rules = adPotentialRules(cfg);
+  const today = ukDate('');
+  /* "no pay-per-click for the last three days" means three CALENDAR days counting today, so three
+     days reaches back to the day before yesterday and not to four days ago. Counting today as one of
+     them is what the sentence says and what a reader checks it against; taking three OFF today gave
+     a four-day window and quietly held back a listing for a day longer than the rule asks. */
+  const quietFrom = adtAddDays(today, -(rules.quiet_days - 1));
+  const lookFrom = adtAddDays(today, -ADTOOL_POTENTIAL_LOOKBACK_DAYS);
+  const ab = acct ? [acct] : [];
+  const B = await env.DB.batch([
+    env.DB.prepare("SELECT item_id, account, title, image, price, COALESCE(sold_qty, 0) AS sold_qty FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY item_id LIMIT ' + ADTOOL_LIVE_SPLIT_UNIVERSE_CAP).bind(...ab),
+    /* completed orders EVER, per active listing: every order eBay has not cancelled or lost, and that
+       was not refunded. Joined to the active listings so the read never drags back every order we
+       have ever taken. One row is one order, which is what "sold fifteen times" means. */
+    env.DB.prepare("SELECT o.item_id, COUNT(*) AS n FROM orders o JOIN items_api i ON i.item_id = o.item_id WHERE i.status = 'ACTIVE' AND o.item_id <> '' AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') AND COALESCE(o.refunded, 0) <= 0" + (acct ? ' AND i.account = ?1' : '') + ' GROUP BY o.item_id ORDER BY n DESC LIMIT ' + ADTOOL_LIVE_SPLIT_UNIVERSE_CAP).bind(...ab),
+    /* on pay-per-click now: the shared membership rule, narrowed to pay-per-click campaigns */
+    env.DB.prepare(ADTOOL_LIVE_AD_SQL + " AND c.funding_model = 'COST_PER_CLICK'" + (acct ? ' AND c.account = ?1' : '')).bind(...ab),
+    /* the last day eBay charged a click fee on the listing, over the last half year, for the ACTIVE
+       listings this page is about and no others. Narrowing it to the active universe is what puts the
+       ceiling far ABOVE the thing being read rather than inside it: the table holds a row per listing
+       per day for every listing that has ever been advertised, ended ones included, so the ungated
+       read could reach the ceiling while live listings the page needs an answer for were still
+       unread. The newest day first, so if it ever did bite it could only drop the listings whose last
+       click fee is oldest, which are the ones the quiet-window test does not hold back anyway; and
+       the page is told when it bit rather than left to show a listing as quiet because its row was
+       the one dropped. */
+    env.DB.prepare("SELECT ad.item_id, MAX(ad.date) AS last_cpc FROM ads_daily ad JOIN items_api ia ON ia.item_id = ad.item_id WHERE ad.cpc_spend > 0 AND ad.date >= ?1 AND ia.status = 'ACTIVE'" + (acct ? ' AND ia.account = ?2' : '') + ' GROUP BY ad.item_id ORDER BY last_cpc DESC LIMIT ' + ADTOOL_LIVE_SPLIT_UNIVERSE_CAP).bind(...[lookFrom].concat(ab)),
+    /* and any ad put back to running inside a pay-per-click campaign during the quiet window: a
+       listing somebody restarted this morning has run pay-per-click today even though eBay will not
+       publish the fee until tomorrow */
+    env.DB.prepare("SELECT DISTINCT e.item_id FROM adtool_campaign_ad_events e JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id WHERE e.to_status = 'ACTIVE' AND c.funding_model = 'COST_PER_CLICK' AND e.seen_at >= ?1" + (acct ? ' AND e.account = ?2' : '') + ' LIMIT 2000').bind(...[quietFrom + ' 00:00:00'].concat(ab)),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...ab),
+    /* the oldest day the click-fee record itself reaches. One row, one aggregate. It is what lets the
+       page say "no click fee on record since" a real date instead of "never in the last half year",
+       which would be a claim about the listing when it is only a fact about the record: eBay's click
+       fees roll out of this table in a couple of weeks. */
+    env.DB.prepare('SELECT MIN(date) AS d FROM ads_daily WHERE cpc_spend > 0 LIMIT 1'),
+  ]);
+  const items = (B[0] || {}).results || [];
+  const mine = {}; for (const r of ((B[1] || {}).results || [])) mine[String(r.item_id)] = Number(r.n) || 0;
+  const onCpc = {}; for (const r of ((B[2] || {}).results || [])) onCpc[String(r.item_id)] = 1;
+  const lastCpcRows = (B[3] || {}).results || [];
+  const lastCpc = {}; for (const r of lastCpcRows) lastCpc[String(r.item_id)] = String(r.last_cpc || '');
+  const restarted = {}; for (const r of ((B[4] || {}).results || [])) restarted[String(r.item_id)] = 1;
+  const activeCounted = Number((((B[5] || {}).results || [])[0] || {}).n) || 0;
+  const recordsFrom = String((((B[6] || {}).results || [])[0] || {}).d || '') || null;
+  /* said out loud rather than left to be noticed: if the click-fee read ever reached its ceiling the
+     page is told, because a listing whose row was the one dropped would otherwise read as quiet. */
+  const lastCpcCapped = lastCpcRows.length >= ADTOOL_LIVE_SPLIT_UNIVERSE_CAP;
+
+  /* the four counts are a partition in the order a reader asks the questions, so they add back up to
+     the listings they were taken from. See adPotentialBucket. */
+  const counts = { active: activeCounted, read: items.length, already_on_cpc: 0, ran_recently: 0, too_few_orders: 0, eligible: 0 };
+  const rows = [];
+  for (const it of items) {
+    const id = String(it.item_id);
+    const last = lastCpc[id] || '';
+    const inQuiet = !!restarted[id] || (!!last && last >= quietFrom);
+    const v = adPotentialCpc({ orders_completed: mine[id] || 0, sold_qty: Number(it.sold_qty) || 0, on_cpc: !!onCpc[id], cpc_in_quiet_window: inQuiet, last_cpc_day: last || null, records_from: recordsFrom }, rules);
+    counts[adPotentialBucket(v, rules)]++;
+    if (!v.eligible) continue;
+    if (rows.length >= ADTOOL_POTENTIAL_LIST_CAP) continue;
+    rows.push({
+      item_id: id, account: String(it.account || ''), title: String(it.title || ''), image: it.image ? String(it.image) : null,
+      price: it.price == null ? null : round2(Number(it.price)),
+      orders_completed: v.orders_completed, orders_source: v.orders_source, orders_mine: v.orders_mine, orders_ebay: v.orders_ebay,
+      last_cpc_day: v.last_cpc_day, last_cpc_seen: v.last_cpc_seen,
+      on_cpc: false, advice: v.advice, why: v.why,
+    });
+  }
+  rows.sort((a, b) => (b.orders_completed - a.orders_completed) || (a.item_id < b.item_id ? -1 : 1));
+  return {
+    computed_at: new Date().toISOString(), account: acct || '', fresh: await adtFresh(env, 'day'),
+    rules: rules,
+    rules_text: 'sold at least ' + rules.min_orders + ' times, not on pay-per-click now, and no pay-per-click on it for ' + rules.quiet_days + ' day' + (rules.quiet_days === 1 ? '' : 's'),
+    items: rows, items_total: counts.eligible, items_held_back: Math.max(0, counts.eligible - rows.length), list_cap: ADTOOL_POTENTIAL_LIST_CAP,
+    counts: counts, count_order: ADTOOL_POTENTIAL_BUCKETS,
+    /* how far back the click fees on record reach, and whether their read hit its ceiling */
+    records_from: recordsFrom, last_cpc_capped: lastCpcCapped,
+    accounts: ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account)),
+    window: { quiet: [quietFrom, today], quiet_days_counted: rules.quiet_days, last_run_read_from: lookFrom },
+    sent_to_ebay: false,
+    sources: ['our own completed orders', 'eBay’s own sold count', 'the live ad memberships every advertising page shares', 'the click fees eBay has published', 'the ad state changes the sync has seen'],
+  };
+}
+
+/* ---- Peak hours: the system switches management's list ----
+   The switchable ad is NOT the shared ADTOOL_LIVE_AD_SQL membership. That rule treats a PAUSED
+   pay-per-click ad as not live, which is right everywhere else and wrong here: a paused ad is
+   exactly the one this job has to turn back ON when the peak starts. So the rule here is "an ad that
+   can be switched": a pay-per-click ad that is not archived, in a running campaign, on a listing
+   eBay still shows as active. */
+const ADTOOL_PEAK_SWITCHABLE_SQL = "SELECT ca.listing_id AS item_id, ca.account, ca.campaign_id, c.name, c.status AS c_status, c.funding_model, COALESCE(ca.ad_status, '') AS ad_status, ca.synced_at AS ad_synced_at FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id WHERE c.funding_model = 'COST_PER_CLICK' AND (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ia.status = 'ACTIVE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'";
+const ADTOOL_PEAK_MANUAL_CAP = 500;
+async function adtPeakSwitchable(env, ids) {
+  const out = {};
+  for (const ch of adtChunks(ids)) {
+    for (const r of ((await env.DB.prepare(ADTOOL_PEAK_SWITCHABLE_SQL + ' AND ca.listing_id IN ' + adtInList(ch, 0)).bind(...ch).all()).results || [])) (out[String(r.item_id)] = out[String(r.item_id)] || []).push(r);
+  }
+  return out;
+}
+async function adtPeakLiveSwitches(env) {
+  /* read exactly where adtoolApply reads it, and nowhere else: portal_config adtool_apply_live_<account> */
+  const switches = {};
+  for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live_%'").all()).results || [])) switches[String(r.key).replace('adtool_apply_live_', '')] = String(r.value) === 'on';
+  return switches;
+}
+async function adtPeakLastSwitch(env, today) {
+  /* the last state this job settled on, over today and yesterday, per LISTING AND CAMPAIGN. Two days
+     is enough by construction: every stretch of hours has a start and a stop, so each switching
+     listing changes state at least twice a day and its last change is always inside the window.
+     Keyed by item AND campaign because the state is set per campaign: one send per campaign, so one
+     record per campaign. Keyed by the listing alone, a listing in two campaigns had one record
+     between them, and the second campaign was read as already done the moment the first one was.
+     Newest FIRST, and the first row seen for a key is the one kept. It used to read `ORDER BY id ASC
+     LIMIT 2000`, which on a busy window returns the OLDEST two thousand rows and leaves today out
+     altogether: the job would then have believed nothing had happened all day and sent every boundary
+     again. Newest first also means the ceiling can only ever drop history nobody reads.
+     Rows counted: the live ones eBay accepted, and the would-send ones for accounts whose switch is
+     off: for those nothing was sent, but the shadow timeline is the point of them, and leaving them
+     out would write the same would-send row every quarter hour. Rows a cap HELD BACK are left out on
+     purpose: nothing was sent and nothing changed, so the change is still owed and is tried again,
+     and so is a live row eBay refused, because a non-2xx row never enters this map.
+     Three answers per key, from the one pass: `newest` of either kind for the page to show, `live`
+     for the believed state of an account that really sends, and `shadow` for the one rule a
+     would-send account has, which is "do not write the same would-send row again". */
+  const byKey = {}, byItem = {};
+  /* the apply log belongs to the live-apply path, which the peak page itself does not create. Read
+     behind a try so a database where that table has not been made yet shows the page with no history
+     beside each row, rather than refusing to show the list at all. */
+  let rows = [];
+  try { rows = (await env.DB.prepare("SELECT item_id, campaign_id, payload_json, mode, http_status, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 AND (mode = 'would-send' OR (mode = 'live' AND http_status >= 200 AND http_status < 300)) ORDER BY id DESC LIMIT 2000").bind(adtAddDays(today, -1)).all()).results || []; } catch (e) { rows = []; }
+  for (const r of rows) {
+    let p = {}; try { p = JSON.parse(String(r.payload_json || '{}')); } catch (e) { p = {}; }
+    const item = String(r.item_id || ''), cid = String(r.campaign_id || '');
+    const rec = { to: String(p.to || '').toUpperCase(), mode: String(r.mode || ''), at: String(r.at || ''), http_status: Number(r.http_status) || 0, campaign_id: cid };
+    const slot = (byKey[item + '|' + cid] = byKey[item + '|' + cid] || { newest: null, live: null, shadow: null });
+    if (!slot.newest) slot.newest = rec;
+    if (!slot.live && rec.mode === 'live') slot.live = rec;
+    if (!slot.shadow && rec.mode === 'would-send') slot.shadow = rec;
+    if (!byItem[item]) byItem[item] = rec;
+  }
+  return { by_key: byKey, by_item: byItem };
+}
+async function adtoolPeakSwitch(env) {
+  /* The second job in the tool that can write to eBay, and it writes nothing unless an account's own
+     switch is on. Everything about how it sends is adtoolApply's: the same switch key, the same log
+     table, the same endpoint, the same undo. */
+  await ensureAdtoolPhase16Schema(env);
+  await ensureAdtoolPhase8Schema(env);
+  /* the job follows the page it belongs to AND has a stop button of its own. Either one off and the
+     peak list goes back to being a work list: nothing is decided, nothing is written down, nothing
+     leaves the worker. Two switches because they answer two different questions, and the second one
+     is the one somebody reaches for at 03:00: `adtool_page_peak` takes the page away from everybody,
+     `adtool_job_peakswitch` stops the SENDING while the list stays readable. Both are seeded on. */
+  if ((await adtFlag(env, 'adtool_page_peak')) !== 'on') return;
+  if ((await adtFlag(env, 'adtool_job_peakswitch')) !== 'on') return;
+  const t = await adtJobStart(env, 'adtoolPeakSwitch');
+  let written = 0;
+  try {
+    const today = ukDate(''), uk = adtUkParts(Date.now());
+    let manual = [];
+    try {
+      manual = (await env.DB.prepare("SELECT account, item_id, hours, auto FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
+    } catch (e) {
+      manual = (await env.DB.prepare("SELECT account, item_id, hours FROM adtool_peak_items WHERE removed_at = '' ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
+    }
+    if (!manual.length) { await adtJobEnd(env, 'adtoolPeakSwitch', t, 0, 'ok', 'nothing on the peak hours list is set to switch itself'); return; }
+    const ids = manual.map(r => String(r.item_id));
+    const switchable = await adtPeakSwitchable(env, ids);
+    const switches = await adtPeakLiveSwitches(env);
+    const last = await adtPeakLastSwitch(env, today);
+    const doneToday = {};
+    for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) doneToday[String(r.account)] = Number(r.n) || 0;
+    /* the listing-and-campaign pairs already written down as blocked today. The mismatch below is a
+       standing data fault, not a passing one: left to itself it would write the same blocked row
+       every quarter hour and bury a day's real work under ninety-six copies of one complaint. One
+       read instead of those writes, and the fault is still on the record once. A row a CAP held back
+       is deliberately not in here: that change is still owed and each tick it is owed again. */
+    const blockedToday = {};
+    try {
+      for (const r of ((await env.DB.prepare("SELECT item_id, campaign_id FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'blocked' AND day = ?1 LIMIT 2000").bind(today).all()).results || [])) blockedToday[String(r.item_id) + '|' + String(r.campaign_id)] = 1;
+    } catch (e) { /* no log table yet: nothing has been written down, so nothing is a repeat */ }
+    const stmts = [];
+    let sent = 0, shadow = 0, held = 0, unparseable = 0, idle = 0, mismatched = 0;
+    for (const row of manual) {
+      const id = String(row.item_id), acct = String(row.account || '');
+      const parsed = adPeakHoursParse(row.hours);
+      if (!parsed.ranges) { unparseable++; continue; }     // refused when it was typed; never guessed at here
+      /* the read above already asks only for the rows set to switch themselves; on a database that has
+         not taken the column it asks for all of them, and then NOTHING is armed, because a row that
+         has never been saved against a switch has never been consented to. */
+      const auto = Number(row.auto == null ? 0 : row.auto) ? 1 : 0;
+      if (!auto) { idle++; continue; }
+      const rows = switchable[id] || [];
+      if (!rows.length) { idle++; continue; }               // no pay-per-click ad on it to switch
+      /* ONE DECISION PER CAMPAIGN, because the state is set per campaign and so is the record of
+         setting it. A listing in three campaigns is three sends and costs three of the account's
+         twenty, so the ceiling is read again for each one rather than once for the listing: otherwise
+         one listing in several campaigns could step over the cap inside a single tick. */
+      const byCamp = {};
+      for (const m of rows) (byCamp[String(m.campaign_id || '')] = byCamp[String(m.campaign_id || '')] || []).push(m);
+      for (const cid of Object.keys(byCamp)) {
+        const camp = byCamp[cid];
+        /* the account is taken from the AD, not from the peak list's own row. The switchable read
+           joins on the listing id alone, so a row can come back for an account other than the one
+           somebody typed the listing under, and gating on the typed one would mint a token for the
+           wrong account and send a change to an account nobody switched on. Where the two disagree,
+           nothing is sent and the row says which two accounts disagreed. */
+        const macct = String((camp[0] || {}).account || '');
+        const hist = last.by_key[id + '|' + cid] || { newest: null, live: null, shadow: null };
+        if (!macct || macct !== acct) {
+          mismatched++;
+          if (blockedToday[id + '|' + cid]) continue;      // already on the record today; one fault, one row
+          blockedToday[id + '|' + cid] = 1;
+          const reason = 'the peak list holds this listing under ' + (acct || 'no account') + ' and the ad belongs to ' + (macct || 'no account') + ': nothing sent';
+          const bad = { op: 'status', campaign_id: cid, listing_id: id, to: '', peak: true, hours: adPeakHoursText(parsed.ranges), why: 'peak hours: ' + reason, undo: null };
+          stmts.push(env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, 'peak', 'status', ?5, 'blocked', 0, ?6, '', datetime('now'))")
+            .bind(today, macct || acct, id, cid, JSON.stringify(bad), reason));
+          continue;
+        }
+        const on = !!switches[macct];
+        /* what we believe this campaign's ad is doing, and the two rules are not the same rule.
+           Switch ON: the newer of eBay's own ad reading and the portal's own record of a change it
+           really sent, which is adtPeakBelieved's whole job.
+           Switch OFF: nothing has ever been sent, so eBay's reading can never move and comparing
+           against it would write the same would-send row every quarter hour for ever, one per ad
+           rotation instead of one per state change. The shadow timeline is compared against itself:
+           the newest would-send row for this listing and campaign. No row yet, no belief, so the
+           first tick writes one row and every tick after it writes nothing until the state changes. */
+        const believed = on ? adtPeakBelieved(camp, hist.live).state : (hist.shadow ? hist.shadow.to : '');
+        const d = adPeakSwitchDecide({
+          auto: auto, ranges: parsed.ranges, hour: uk.hour, live_cpc_ad: true,
+          believed_state: believed, account_live_switch: on,
+          account_switches_today: doneToday[macct] || 0,
+        });
+        if (!d.send) { idle++; continue; }
+        const cap = adPeakApplyCaps({ account_switches_today: doneToday[macct] || 0 });
+        const mode = d.mode === 'live' && !cap.allowed ? 'blocked' : d.mode;
+        const step = { op: 'status', campaign_id: cid, listing_id: id, to: d.send, peak: true, hours: adPeakHoursText(parsed.ranges), why: 'peak hours: ' + d.why, undo: { op: 'status', campaign_id: cid, listing_id: id, to: d.send === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' } };
+        let status = 0, resp = mode === 'live' ? '' : (mode === 'would-send' ? 'account switch off, nothing sent' : cap.reason || 'held back');
+        if (mode === 'live') {
+          /* the ceiling counts REQUESTS, counted the moment this row commits to being a live one.
+             The count the job starts from is every live row of the day whatever eBay answered or
+             whether it answered at all, so counting successes here instead would let an account
+             whose every request fails go on sending for the rest of the tick, and the one run a cap
+             exists for is the one where something is going wrong. */
+          doneToday[macct] = (doneToday[macct] || 0) + 1;
+          try {
+            const tok = await ebayAccessToken(env, macct);
+            const r = await fetch(ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(cid), { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify({ requests: [{ listingId: String(id), adStatus: d.send }] }) });
+            status = r.status; resp = (await r.text()).slice(0, 400);
+            if (r.ok || r.status === 204) { sent++; }
+            await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('adtool (peak switch)', 'ADTOOL_PEAK_SWITCH', ?1, ?2, ?3, datetime('now'))").bind(id + '|' + cid, believed || '(not known)', d.send + ' (' + status + ')').run();
+          } catch (e) { status = 0; resp = String(e && e.message || e).slice(0, 200); }
+        } else if (mode === 'blocked') held++; else shadow++;
+        /* op stays 'status' and never a name of its own: the Activated and Stopped page puts a change
+           down to the portal only where an apply row with op 'status' points the same way, so a name
+           of its own would make every peak switch read as "changed on eBay by somebody we cannot
+           see". decision_id 'peak' is what tells these rows apart.
+           A LIVE row is committed HERE, one statement, before the loop can reach the next send: an
+           invocation cut short after a change has gone to eBay must never leave that change without
+           its log row, because the row is the undo and the record of who did it. Would-send and
+           blocked rows sent nothing, so they are batched at the end where they cost one round trip. */
+        const logRow = env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, 'peak', 'status', ?5, ?6, ?7, ?8, ?9, datetime('now'))")
+          .bind(today, macct, id, cid, JSON.stringify(step), mode, status, resp, JSON.stringify(step.undo));
+        if (mode === 'live') { await logRow.run(); written++; } else { stmts.push(logRow); }
+      }
+    }
+    await adtBatch(env, stmts); written += stmts.length;
+    const accountsOn = Object.keys(switches).filter(k => switches[k]);
+    await adtJobEnd(env, 'adtoolPeakSwitch', t, written, 'ok',
+      (accountsOn.length ? 'live for ' + accountsOn.join(', ') + ': ' + sent + ' sent' + (held ? ', ' + held + ' held by a cap' : '') + '; ' : 'no account is switched on: ') +
+      shadow + ' written as would-send, ' + idle + ' already in the right state' + (unparseable ? ', ' + unparseable + ' with hours that cannot be read' : '') +
+      (mismatched ? ', ' + mismatched + ' blocked because the list and the ad name different accounts' : ''));
+  } catch (e) { await adtJobEnd(env, 'adtoolPeakSwitch', t, written, 'error', String(e && e.message || e)); throw e; }
+}
+
+const ADTOOL_ACTIONS_P16 = {
+  adtoolLiveSplit: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* THE GATE RUNS BEFORE THE CACHE, AND MUST STAY THAT WAY. The cache key carries the caller's
+         profit class, not the caller's role, so a stored answer can never be the thing that decides
+         who may read the page: refuse first, then look for a cached answer. The role half runs before
+         the seed as well, so a caller who may not be here writes nothing at all, and the seed has to
+         come before the page-flag half because the seed is what puts the flag there. */
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase16Register(ctx.env);
+      await adtGate(ctx, 'adtool_page_livesplit');
+      const acct = String((p && p.account) || '').trim();
+      return adtKvMemo(ctx.env, 'adtoolLiveSplit', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolLiveSplit,
+        () => adtoolLiveSplitCompute(ctx.env, acct),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+  adtoolPotentialCpc: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase16Register(ctx.env);
+      await adtGate(ctx, 'adtool_page_potential');
+      const acct = String((p && p.account) || '').trim();
+      return adtKvMemo(ctx.env, 'adtoolPotentialCpc', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolPotentialCpc,
+        () => adtoolPotentialCpcCompute(ctx.env, acct),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+};
+/* ADTOOL-P16-END ================================================================================== */
 
 
 
@@ -19299,7 +20376,12 @@ const ROUTES = {
       const order = ['WENT NEGATIVE YESTERDAY', 'WORST CPC PERFORMER YESTERDAY', 'RETURNS ABOVE USUAL'];
       out.sort((a, b) => { if (a.date !== b.date) return a.date < b.date ? 1 : -1; const ta = order.indexOf(a.type), tb = order.indexOf(b.type); if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb); return Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0); });
       const MAX = 60;
+      /* The window the feed filters by, said out loud. Every row older than the cutoff is dropped
+         above as expired, so a reader asking about a day beyond it is asking about a day this feed
+         can no longer answer for. window_days is signals_pin_days and window_from is the oldest day
+         still kept, so a page can say which it is instead of showing an empty board as a quiet day. */
       return { signals: out.slice(0, MAX), count: Math.min(out.length, MAX), total: out.length, truncated: out.length > MAX, acknowledged, expired, types: order,
+        window_days: pinDays, window_from: cutoff,
         date: new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10), engine: true, refresh_started: refreshStarted };
     },
   },
@@ -20033,7 +21115,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -20222,6 +21304,7 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P10); /* ADTOOL sale events: who qualifies,
 Object.assign(ROUTES, ADTOOL_ACTIONS_P11); /* ADTOOL big update phase 3: CPC Active / Post listings, Advertising Overview */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P14); /* ADTOOL owner batch 18 Oct: Campaigns, the listings inside one, and where each listing advertises */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P15); /* ADTOOL owner batch 22 Oct: Stopped yesterday, Activated today, Peak times only */
+Object.assign(ROUTES, ADTOOL_ACTIONS_P16); /* ADTOOL owner batch 28 Oct: Entire Live Listings, Potential CPC */
 /* Phase 1A (27 Sep 2026): no collective profit leaves the engine for the ads portal. Every adtool action's answer
    passes through adtStripCollectiveProfit on the way out — profit keys survive only inside item-keyed rows, and the
    old est. ad profit never survives. The actions themselves no longer compute account or fleet profit; this is the

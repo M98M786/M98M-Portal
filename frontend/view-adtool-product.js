@@ -2,7 +2,17 @@
  * Hidden from every sidebar (hidden:true) and routable only by hash while its preview flag
  * (portal_config.adtool_page_product) is on; the engine refuses the data otherwise. Galaxy tokens
  * only: gold is the only accent, #e0563f the only loss colour, headings bold. Charts are Apache
- * ECharts bundled at assets/echarts.min.js (loaded once, on first use — CSP allows 'self'). */
+ * ECharts bundled at assets/echarts.min.js (loaded once, on first use — CSP allows 'self').
+ *
+ * THE ITEM TRAVELS IN THE HASH, AND NOWHERE ELSE (owner's Change Spec, 28 Oct 2026: "many tabs at
+ * once, each with its own data, the cache never brings back the same item"). #adtoolProduct/<item
+ * id> opens THAT listing; the bare #adtoolProduct opens empty, with the search box and the recently
+ * advertised chips and nothing restored. This page used to keep the last item in localStorage, so a
+ * second tab showed the first tab's listing and the bare page kept resurrecting whatever was last
+ * opened. There is no storage read or write left in this file: delete one and the other comes back.
+ *
+ * No forecast anywhere: the spec removes sales forecasting from the whole portal, this page's
+ * forecast band included. */
 (function () {
   var AT = { item: '', data: null, tab: 'week', echarts: null, charts: [] };
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
@@ -16,8 +26,10 @@
     '.at-search input{flex:1 1 320px;min-width:200px;background:var(--panel);border:1px solid var(--gold-line);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}' +
     '.at-search input:focus{outline:2px solid var(--gold-b);outline-offset:1px}' +
     '.at-recent{display:flex;gap:6px;flex-wrap:wrap;margin:-6px 0 12px}' +
-    '.at-chip{display:inline-block;padding:3px 9px;border-radius:999px;border:1px solid var(--gold-line);background:var(--panel);font-size:11.5px;color:var(--text-2);cursor:pointer}' +
+    '.at-chip{display:inline-flex;align-items:center;gap:7px;padding:3px 9px;border-radius:999px;border:1px solid var(--gold-line);background:var(--panel);font-size:11.5px;color:var(--text-2)}' +
     '.at-chip:hover{border-color:var(--gold-line-hi);color:var(--text)}' +
+    '.at-chip a{color:inherit;text-decoration:none}.at-chip a:hover{color:var(--gold-a)}' +
+    '.at-chip a[target]{color:var(--text-3);font-weight:800}' +
     '.at-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}' +
     '.at-panel h3{margin:0 0 4px;font-size:15px;font-weight:800}' +
     '.at-panel .at-sub{font-size:12px;color:var(--text-2);margin:0 0 10px}' +
@@ -230,28 +242,56 @@
     render: function () {
       return '<div class="at-wrap">' +
         adtHgroup('Product history', 'One listing\'s spend, sales and profit, day by day since our figures begin', 'atFresh') +
-        '<div class="at-search"><input id="atQ" type="search" placeholder="Item id or title, then press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
+        /* data-nodraft: the shell's draft keeper holds unsaved typing and puts it back when a page
+           re-opens. A search box is not unsaved work — without this, opening a bare #adtoolProduct
+           refilled it with the last item number typed in any other tab and toasted "Restored 1
+           unsaved field", which is exactly the carry-over between tabs this page was rewritten to
+           end. */
+        '<div class="at-search"><input id="atQ" type="search" data-nodraft placeholder="Item id or title, then press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
         '<div class="at-recent" id="atRecent"></div>' +
         '<div id="atBody"><div class="at-empty">Type an item id or part of a title. Recently advertised listings appear above.</div></div>' +
         '</div>';
     },
     init: function () {
       var q = $('atQ'), go = $('atGo');
-      /* hand-off + reload memory: the shell routes on the bare hash, so the item id lives in
-         localStorage (the portal's convention for cross-page hand-offs), never in the hash */
-      var last = ''; try { last = localStorage.getItem('m98m:adtoolItem') || ''; } catch (e) {}
-      if (/^\d{9,13}$/.test(last)) { AT.item = last; q.value = last; }
-      go.onclick = function () { AT.item = q.value.trim(); if (/^\d{9,13}$/.test(AT.item)) { load(AT.item); } else { search(AT.item); } };
+      /* the item comes from the ROUTE and from nothing else. A bare #adtoolProduct starts empty,
+         however many listings were opened before it, which is the owner's complaint fixed at the
+         source: there is nothing left for the page to restore. */
+      AT.item = ''; AT.data = null; AT.charts = [];
+      var want = String((window.adtRoute ? adtRoute().param : '') || '').trim();
+      if (/^\d{9,13}$/.test(want)) { AT.item = want; q.value = want; }
+      go.onclick = function () {
+        var v = q.value.trim();
+        /* an item id is a navigation, so it goes through the hash: this tab keeps its own item and
+           a reload or a copied link lands back on the same listing */
+        if (/^\d{9,13}$/.test(v)) { open(v); } else { search(v); }
+      };
       q.onkeydown = function (e) { if (e.key === 'Enter') go.onclick(); };
       api('adtoolSearch', { q: '' }).then(function (d) { recent(d.results || []); }).catch(function (e) { $('atRecent').innerHTML = '<span class="at-empty">' + esc(e.message || 'Search is not available.') + '</span>'; });
       if (AT.item) load(AT.item);
     }
   };
 
+  /* open a listing IN THIS TAB by moving the hash; the shell's router renders the page again and
+     init reads the new item off the route. Re-rendering by hand covers the case where the hash is
+     already the one asked for. */
+  function open(id) {
+    id = String(id || '').trim();
+    if (!/^\d{9,13}$/.test(id)) { toast('An item number is 9 to 13 digits.'); return; }
+    var want = 'adtoolProduct/' + id;
+    if (location.hash === '#' + want) { AT.item = id; load(id); } else { location.hash = want; }
+  }
+
+  /* the recently advertised chips: real links, so the title opens in this tab and the ↗ beside it
+     opens a tab of its own — the same pair every listing row in the portal now carries */
   function recent(list) {
-    $('atRecent').innerHTML = list.map(function (r) { return '<span class="at-chip" data-id="' + esc(r.item_id) + '" title="' + esc(r.title) + '">' + esc(r.item_id) + ' · ' + esc(String(r.title || '').slice(0, 34)) + '</span>'; }).join('');
-    var chips = document.querySelectorAll('#atRecent .at-chip');
-    for (var i = 0; i < chips.length; i++) chips[i].onclick = function () { $('atQ').value = this.getAttribute('data-id'); load(this.getAttribute('data-id')); };
+    $('atRecent').innerHTML = (list || []).map(function (r) {
+      var id = String(r.item_id == null ? '' : r.item_id);
+      if (!/^\d{9,13}$/.test(id)) return '';
+      return '<span class="at-chip"><a href="#adtoolProduct/' + esc(id) + '" data-adt-open="' + esc(id) + '" title="' + esc(r.title || id) + '">' +
+        esc(id) + ' · ' + esc(String(r.title || '').slice(0, 34)) + '</a>' +
+        '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\'s Product history in a new tab">↗</a></span>';
+    }).join('');
   }
   function search(q) {
     if (!q) return;
@@ -266,7 +306,7 @@
 
   function load(id) {
     AT.item = id;
-    try { localStorage.setItem('m98m:adtoolItem', id); } catch (e) {}
+    /* nothing is stored: the hash is the only record of which listing this tab is showing */
     $('atBody').innerHTML = '<div class="at-empty">Loading ' + esc(id) + '…</div>';
     var t0 = Date.now();
     Promise.all([api('adtoolListing', { item_id: id }), loadECharts().catch(function () { return null; })]).then(function (res) {
@@ -463,12 +503,12 @@
     var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
     var units = days.map(function (d) { return d.units; }); var attr = days.map(function (d) { return d.attr_units; }); var spend = days.map(function (d) { return d.spend; });
     var avg = units.map(function (_, i) { var a = units.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 10) / 10; });
-    var fc = AT.data.forecast && AT.data.forecast.rows ? AT.data.forecast.rows.slice(0, 14) : [];
-    if (fc.length) { x = x.concat(fc.map(function (r) { return r.target_day.slice(5); })); var pad = function (arr) { return arr.concat(fc.map(function () { return null; })); }; units = pad(units); attr = pad(attr); spend = pad(spend); avg = pad(avg); }
+    /* this chart used to run on past the last real day with a forecast band on the end. The spec
+       takes sales forecasting out of the portal, so the line now stops where the figures stop. */
     mount('atDaily', chartBase({ xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
       yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Ad spend', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: NEUTRAL }, barMaxWidth: 10 }, { name: 'Units (all channels)', type: 'line', data: units, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 4, areaStyle: { color: BAND } }, { name: '7-day average', type: 'line', data: avg, lineStyle: { color: WHITE55, width: 2 }, symbol: 'none' }, { name: 'Units from ads', type: 'scatter', data: attr, itemStyle: { color: GOLD2 }, symbolSize: 5 }].concat(fc.length ? [{ name: 'band', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_lo; })), stack: 'fb', lineStyle: { opacity: 0 }, symbol: 'none', silent: true }, { name: '14-day forecast, made ' + AT.data.forecast.made_day, type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return Math.round((r.units_hi - r.units_lo) * 100) / 100; })), stack: 'fb', lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(255,255,255,.12)' }, symbol: 'none' }, { name: 'Forecast', type: 'line', data: days.map(function () { return null; }).concat(fc.map(function (r) { return r.units_mean; })), lineStyle: { color: WHITE55, width: 2, type: 'dashed' }, symbol: 'none' }] : []) }));
+      series: [{ name: 'Ad spend', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: NEUTRAL }, barMaxWidth: 10 }, { name: 'Units (all channels)', type: 'line', data: units, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 4, areaStyle: { color: BAND } }, { name: '7-day average', type: 'line', data: avg, lineStyle: { color: WHITE55, width: 2 }, symbol: 'none' }, { name: 'Units from ads', type: 'scatter', data: attr, itemStyle: { color: GOLD2 }, symbolSize: 5 }] }));
   }
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';

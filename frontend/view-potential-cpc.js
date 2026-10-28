@@ -1,6 +1,14 @@
 /* view-potential-cpc.js — §9 POTENTIAL CPC LISTINGS (Advertising nominates → Management decides).
  * View: potentialCpc.
- * Backend: myPotentialCpc · submitPotentialCpc · potentialCpcQueue · decidePotentialCpc · switchPotentialCpcCampaign. */
+ * Backend: myPotentialCpc · submitPotentialCpc · potentialCpcQueue · decidePotentialCpc · switchPotentialCpcCampaign.
+ *
+ * 28 Oct 2026, the owner's Change Spec: "Potential CPC (self-filling: 15+ completed orders ever, not
+ * on CPC now, no CPC in last 3 days)". The engine fills that list itself and it sits at the TOP of
+ * this page, above the hand-written flow, which is kept exactly as it was: the list is a shortlist
+ * to nominate from, not a replacement for the nomination. The rule and its numbers are printed from
+ * the answer's own `rules`, never typed in here, so the page cannot drift from what the engine does.
+ * Engine action for that block: adtoolPotentialCpc. Its own class prefix: .pca-
+ */
 (function () {
 
   /* Backend vocabulary — PotentialCpc.gs spells these exactly this way; a mismatch is a rejected
@@ -90,6 +98,22 @@
     '.pc-empty{color:var(--text-2);font-weight:700;padding:10px 0}' +
     '.pc-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}' +
     '.pc-steps{margin:0;padding-left:17px;font-size:12.5px;line-height:1.7;font-weight:600;color:var(--text-2)}' +
+    /* the self-filling list at the top of the page — its own prefix, so nothing here can land on
+       the hand-written flow below it */
+    '.pca-rule{background:var(--panel-2);border:1px dashed var(--gold-line);border-radius:12px;padding:11px 14px;margin-bottom:12px;color:var(--text-2);font-size:12.5px;line-height:1.6}' +
+    '.pca-rule b{color:var(--text)}' +
+    '.pca-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}' +
+    '.pca-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:4px 12px;font:inherit;font-size:11.5px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}' +
+    '.pca-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}' +
+    '.pca-tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;min-width:720px}' +
+    '.pca-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:7px 10px;border-bottom:1px solid var(--gold-line);white-space:nowrap}' +
+    '.pca-tbl th.r{text-align:right}' +
+    '.pca-tbl td{padding:9px 10px;border-bottom:1px solid var(--gold-line);vertical-align:top}' +
+    '.pca-tbl td.r{text-align:right;white-space:nowrap}' +
+    '.pca-src{display:block;font-size:10px;color:var(--text-3);font-weight:700;line-height:1.45;margin-top:2px}' +
+    '.pca-advice{font-size:12px;color:var(--text-2);line-height:1.55;max-width:420px}' +
+    '.pca-empty{color:var(--text-2);font-weight:700;padding:12px 0;font-size:12.5px}' +
+    '.pca-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px}' +
     '@media (max-width:880px){' +
       '.pc-grid{grid-template-columns:1fr}' +
       '.pc-tbl{min-width:0}.pc-tbl thead{display:none}' +
@@ -222,18 +246,186 @@
     render: function () {
       var mine = pcMaySubmit(), review = pcMayReview();
       return '<div class="hgroup enter d1"><h1>Potential CPC</h1>' +
-          '<span class="sub">Items already live on an account, proven, and put forward for a CPC campaign</span>' +
+          '<span class="sub">Listings the figures put forward, and the ones the team nominates by hand</span>' +
           (mine ? '<button class="btn-gold" id="pcNewToggle" style="margin-left:auto">Nominate a listing</button>' : '') +
         '</div>' +
+        /* the self-filling list first: it is where a nomination should come from */
+        pcAutoCard() +
         (mine ? pcComposer() : '') +
         (review ? pcQueueCard() : '') +
         (mine ? pcMineCard() : '');
     },
     init: function () {
+      pcAutoLoad();
       if (pcMaySubmit()) { pcWireComposer(); pcWireMineBar(); pcLoadMine(); }
       if (pcMayReview()) { pcWireQueueBar(); pcLoadQueue(); }
     }
   };
+
+  // ============================== THE SELF-FILLING LIST (28 Oct spec) ==============================
+  /* The engine decides who is on this list; the page prints it, with the rule and its live numbers
+     in one sentence. Every field is read defensively under more than one name, because this block
+     and the engine half it reads land separately: a renamed field must show as "not known", never
+     as a blank cell a reader takes for a nought. */
+  var PCA = { account: '', data: null, err: '', busy: false };
+
+  function pcaNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+  function pcaCnt(v) { var n = pcaNum(v); return n == null ? '—' : Math.round(n).toLocaleString('en-GB'); }
+  function pcaFirst(o, names) {
+    for (var i = 0; i < names.length; i++) {
+      if (o && o[names[i]] !== undefined && o[names[i]] !== null && o[names[i]] !== '') return o[names[i]];
+    }
+    return null;
+  }
+  function pcaItems() {
+    var D = PCA.data; if (!D) return null;
+    var v = D.items || D.rows || D.listings;
+    return Array.isArray(v) ? v.filter(function (r) { return r && typeof r === 'object'; }) : null;
+  }
+  function pcaRules() { return (PCA.data && PCA.data.rules) || {}; }
+  function pcaDay(v) { var s = String(v == null ? '' : v).slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(s) ? s : ''; }
+
+  function pcAutoCard() {
+    return '<div class="card enter d2" style="margin-bottom:16px"><div class="hd">Put forward by the figures ' +
+      '<span class="hint">the engine fills this list itself · nothing here is sent to eBay</span></div>' +
+      '<div class="bd"><div id="pcAutoAcct" class="pca-chips"></div>' +
+      '<div id="pcAutoBody"><div class="spinner"></div></div></div></div>';
+  }
+
+  function pcAutoLoad() {
+    var box = $('pcAutoBody');
+    if (!box) { return; }
+    if (PCA.busy) { return; }
+    PCA.busy = true;
+    api('adtoolPotentialCpc', PCA.account ? { account: PCA.account } : {}).then(function (d) {
+      PCA.busy = false; PCA.data = d || {}; PCA.err = '';
+      pcAutoPaint();
+    }).catch(function (e) {
+      PCA.busy = false; PCA.data = null;
+      PCA.err = (e && e.message) || 'This list could not load.';
+      pcAutoPaint();
+    });
+  }
+
+  function pcAutoAccounts() {
+    var D = PCA.data; if (!D) { return []; }
+    var list = (D.accounts || []).map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
+    if (list.length) { return list; }
+    var seen = {}, out = [];
+    (pcaItems() || []).forEach(function (r) { var a = pcStr(r.account); if (a && !seen[a]) { seen[a] = 1; out.push(a); } });
+    return out.sort();
+  }
+  function pcAutoChips() {
+    var el = $('pcAutoAcct'); if (!el) { return; }
+    el.innerHTML = '<button class="pca-chip' + (PCA.account ? '' : ' on') + '" data-pcaa="">All accounts</button>' +
+      pcAutoAccounts().map(function (a) {
+        return '<button class="pca-chip' + (PCA.account === a ? ' on' : '') + '" data-pcaa="' + pcAttr(a) + '">' + esc(a) + '</button>';
+      }).join('');
+    var bs = el.querySelectorAll('[data-pcaa]'), i;
+    for (i = 0; i < bs.length; i++) {
+      bs[i].onclick = function () { PCA.account = this.getAttribute('data-pcaa') || ''; pcAutoChips(); pcAutoLoad(); };
+    }
+  }
+
+  /* THE RULE, ONCE, in one sentence, with the engine's own numbers in it. A threshold is never
+     typed here: where the answer does not carry one, the sentence says so instead of inventing it. */
+  function pcAutoRule() {
+    var R = pcaRules();
+    var minO = pcaNum(pcaFirst(R, ['min_orders', 'adtool_potential_min_orders', 'potential_min_orders', 'orders_min']));
+    var quiet = pcaNum(pcaFirst(R, ['quiet_days', 'adtool_potential_quiet_days', 'potential_quiet_days', 'days_quiet']));
+    if (minO == null && quiet == null) {
+      return '<div class="pca-rule"><b><span data-adtreg="how this list fills itself" title="how is this worked out">How this list fills itself.</span></b> A listing joins it when it has sold enough ' +
+        'to be proven, is not on a cost-per-click ad now, and has had no cost-per-click run recently. ' +
+        'The exact numbers are not in this answer, so none is shown here.</div>';
+    }
+    return '<div class="pca-rule"><b><span data-adtreg="how this list fills itself" title="how is this worked out">How this list fills itself.</span></b> A listing joins it when it has ' +
+      (minO == null ? 'enough completed orders' : '<b>' + pcaCnt(minO) + '</b> or more completed orders ever') +
+      ', is not on a cost-per-click ad now, and has had no cost-per-click run in the last ' +
+      (quiet == null ? 'few days' : '<b>' + pcaCnt(quiet) + '</b> ' + (Math.round(quiet) === 1 ? 'day' : 'days')) + '.</div>';
+  }
+
+  /* `orders_completed` is the engine's own name for this figure, and it leads the list: without it
+     every row of the column printed a dash, which on a column headed "Completed orders" reads as
+     a listing that has never sold -- the exact opposite of why it is on this list at all. */
+  function pcAutoOrders(r) {
+    var n = pcaNum(pcaFirst(r, ['orders_completed', 'orders', 'order_count', 'completed_orders', 'orders_ever', 'sold']));
+    var src = pcStr(pcaFirst(r, ['orders_source', 'order_source', 'count_source', 'source']));
+    return '<b>' + pcaCnt(n) + '</b>' + (src ? '<span class="pca-src">' + esc(src) + '</span>' : '');
+  }
+  /* HOW FAR BACK THE CLICK-FEE RECORD ITSELF REACHES. eBay's click fees are a rolling record that
+     ages out, so "no day on record" is not "never advertised": it is "not inside the record", and
+     the two are different claims about the same listing. `records_from` is the oldest day there is
+     a click fee for at all; when that day is LATER than the day the read started from, the record
+     is shorter than the window and saying "never in the last N days" would be a claim the answer
+     cannot make. The engine names it on the row and, for the whole read, on the answer. */
+  function pcaRecordsFrom(r) {
+    return pcaDay(pcaFirst(r || {}, ['records_from'])) || pcaDay(pcaFirst(PCA.data || {}, ['records_from']));
+  }
+  function pcaLookbackFrom() {
+    var W = (PCA.data && PCA.data.window) || {};
+    return pcaDay(pcaFirst(W, ['last_run_read_from'])) || pcaDay(pcaFirst(PCA.data || {}, ['last_run_read_from']));
+  }
+  /* true when the click-fee read stopped at its own ceiling: a last cost-per-click day may simply
+     not have been reached, so a blank one here is not proof the listing never ran */
+  function pcaCapped() {
+    var v = (PCA.data || {}).last_cpc_capped;
+    return v === true || v === 1 || v === '1' || v === 'true';
+  }
+  function pcAutoLastCpc(r) {
+    var d = pcaDay(pcaFirst(r, ['last_cpc_day', 'last_cpc', 'last_ad_day', 'last_cpc_date']));
+    if (d) { return esc(d); }
+    var from = pcaRecordsFrom(r), look = pcaLookbackFrom();
+    if (from && (!look || from > look)) {
+      return '<span class="pc-dim" title="the click-fee record does not go back any further than this">no click fee on record since ' + esc(from) + '</span>';
+    }
+    var seen = pcStr(pcaFirst(r, ['last_cpc_seen']));
+    return '<span class="pc-dim">' + esc(seen || 'not on record') + '</span>';
+  }
+  function pcAutoAdvice(r) {
+    var a = pcStr(pcaFirst(r, ['advice', 'why', 'note', 'reason']));
+    return a ? '<span class="pca-advice">' + esc(a) + '</span>' : '<span class="pc-dim">—</span>';
+  }
+
+  function pcAutoPaint() {
+    var box = $('pcAutoBody'); if (!box) { return; }
+    pcAutoChips();
+    if (PCA.err) {
+      box.innerHTML = '<div class="pca-empty">The self-filling list is not available.<span>' + esc(PCA.err) +
+        '</span><span>The nomination flow below is unaffected.</span></div>';
+      return;
+    }
+    var rows = pcaItems();
+    if (rows === null) {
+      box.innerHTML = '<div class="pca-empty">The self-filling list is not in this answer yet.' +
+        '<span>It is not that no listing qualifies. Nominate by hand below in the meantime.</span></div>';
+      return;
+    }
+    var D = PCA.data || {};
+    var h = pcAutoRule();
+    if (!rows.length) {
+      box.innerHTML = h + '<div class="pca-empty">No listing meets the rule above' +
+        (PCA.account ? ' on ' + esc(PCA.account) : '') + ' today.' +
+        '<span>That is a real answer, not a missing one. Nominate by hand below if you want one anyway.</span></div>';
+      return;
+    }
+    var total = pcaNum(pcaFirst(D, ['items_total', 'total'])), held = pcaNum(pcaFirst(D, ['items_held_back', 'held_back']));
+    h += '<div class="scroll"><table class="pca-tbl"><thead><tr>' +
+      '<th>Listing</th><th class="r">Completed orders</th><th>Last cost-per-click day</th><th>What to do</th>' +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        return '<tr><td>' + adtProductCell(r) + '</td>' +
+          '<td class="r">' + pcAutoOrders(r) + '</td>' +
+          '<td>' + pcAutoLastCpc(r) + '</td>' +
+          '<td>' + pcAutoAdvice(r) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<p class="pc-sub2" style="margin-top:9px">' + pcaCnt(rows.length) + ' listing' + (rows.length === 1 ? '' : 's') +
+      (total != null && total !== rows.length ? ' of ' + pcaCnt(total) : '') +
+      (PCA.account ? ' on ' + esc(PCA.account) : ' across all accounts') + '. ' +
+      (held != null && held > 0 ? pcaCnt(held) + ' more are not on the page; choose one account to reach them. ' : '') +
+      (pcaCapped() ? 'The read of eBay\'s click fees stopped at its own ceiling, so a last cost-per-click day may be missing from a row above. ' : '') +
+      'Nothing on this list is sent to eBay: take one and nominate it below.' +
+      (D.computed_at ? ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.' : '') + '</p>';
+    box.innerHTML = h;
+  }
 
   // ============================== NOMINATION FORM (§9, Advertising) ==============================
   function pcComposer() {

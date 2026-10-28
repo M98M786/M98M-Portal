@@ -1,300 +1,417 @@
-/* view-adtool-overview.js — Advertising Tool · Advertising overview (owner's brief, 27 Sep 2026: a NEW
- * "behaviour patterns" page — "compare last 7 days, last 10 days, previous comparable periods; up/down
- * of ROAS, spend, sales, profit, CPC, CVR; the purpose is the trend, not single numbers"). One line per
- * metric over the window (value pills), ONE up/down summary strip with a period switch (last 7 or
- * last 10, each against the comparable period before it) showing ▲/▼ and the delta, and, because the
- * portal never shows a collective profit figure,
- * the profit trend is drawn as counts of profitable vs losing listings per week plus a top-movers list of
- * individual items, not a fleet profit line. Hidden; flag adtool_page_overview. The daily series ends
- * yesterday (adtool_scope_day has no today row), so the page re-reads hourly — after each :20 rollup —
- * and only while the window reaches into today. Nothing here is sent to eBay.
- * Galaxy tokens only, gold the accent, #e0563f the loss / decline colour. */
+/* view-adtool-overview.js — Advertising Tool · Overview (the owner's Change Spec, 28 Oct 2026).
+ * The portal's landing page, and the merge of the two screens it replaces: "What to do today"
+ * (adtoolPlan) gives block 1, "Today at a glance" (adtoolCommand) gives blocks 2 to 5.
+ *   1  period bar, account chips and six tiles for the window the reader picks   · adtoolPlan
+ *   2  the status line, nine tiles, and today by account                         · adtoolCommand
+ *   3  today so far by slot                                                      · adtoolCommand
+ *   4  ONE hourly chart: money spent beside orders received, per UK hour         · adtoolCommand
+ *   5  how up to date this is                                                    · adtoolCommand
+ * Everything else the two old pages carried is gone from this portal, so each figure the merge
+ * kept has exactly one home. Account to account, Day by day, the spending limit, What to run and
+ * stop today, Switch off, Improving, Worth more money, Budget, Weekdays, Listings spending today,
+ * Fleet ad spend by date, the two old hour charts and Every check are all off this page; the
+ * listings table now has its own page. No profit figure appears here at all: profit is a listing's
+ * own and lives on the pages that show listings. Galaxy tokens; gold the accent, #e0563f the spend
+ * bar and the only loss colour, var(--ok) the orders bar. Nothing here is sent to eBay. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
-  var OV = { account: '', period: null, accounts: [], data: null, win: 'w7' };
+  var ORDERS_C = 'var(--ok)';
+  var ORDERS_INK = '#06281b';
+  var SLOTS = ['Night 00–06', 'Morning 06–12', 'Afternoon 12–17', 'Evening 17–24'];
+  var OV = { account: '', period: null, accounts: [], plan: null, cmd: null };
 
+  /* this file's own prefix. The declarations are the portal's usual tile / panel / table rules,
+     written here rather than borrowed from another spliced file, so the page cannot change shape
+     because somebody edited a class of theirs. */
   VIEW_CSS.push([
     '.ov-wrap{max-width:1240px}',
-    '.ov-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 8px}',
-    '.ov-chip{border:1px solid var(--gold-line);border-radius:12px;padding:9px 12px;background:var(--panel-2)}',
-    '.ov-chip .k{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
-    '.ov-chip .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
-    '.ov-chip .d{font-size:11.5px;margin-top:2px;font-weight:700}',
-    '.ov-chip .d.up{color:var(--gold-a)}.ov-chip .d.down{color:' + LOSS + '}.ov-chip .d.flat{color:var(--text-3)}',
-    '.ov-chip .d .was{color:var(--text-3);font-weight:600}',
-    '.ov-winlbl{font-size:12px;font-weight:800;color:var(--text-2);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}',
-    '.ov-panel{background:linear-gradient(var(--panel),var(--panel)),var(--bg0);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:14px}',
+    '.ov-acct{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.ov-acct button{background:var(--panel);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}',
+    '.ov-acct button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.ov-win{font-size:12px;color:var(--text-2);margin:0 0 12px;font-weight:600}',
+    '.ov-tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}',
+    '.ov-tile{flex:1 1 150px;border:1px solid var(--gold-line);border-radius:12px;padding:10px 14px;background:var(--panel-2)}',
+    '.ov-tile .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.ov-tile .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.ov-tile.gold .v{color:var(--gold-a)}.ov-tile.loss .v{color:' + LOSS + '}',
+    '.ov-tile .d{font-size:11.5px;color:var(--text-2);margin-top:2px;line-height:1.4}',
+    '.ov-status{margin:0 0 12px}',
+    '.ov-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}',
+    '.ov-kpi{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px}',
+    '.ov-kpi .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.ov-kpi .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}',
+    '.ov-kpi .d{font-size:11.5px;color:var(--text-2);margin-top:2px;line-height:1.45}',
+    '.ov-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
     '.ov-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
-    '.ov-panel .note{color:var(--text-2);font-size:12px;margin-bottom:10px;line-height:1.5}',
-    '.ov-metrics{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:980px){.ov-metrics{grid-template-columns:1fr}}',
-    '.ov-mcard{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel)}',
-    '.ov-mcard h4{margin:0 0 2px;font-size:12.5px;font-weight:800;color:var(--text)}',
-    '.ov-mcard .sub{font-size:11px;color:var(--text-2);margin-bottom:2px}',
-    '.ov-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.ov-grid2{grid-template-columns:1fr}}',
-    '.ov-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}',
-    '.ov-tbl th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line)}',
-    '.ov-tbl th.r{text-align:right}',
-    '.ov-tbl td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
-    '.ov-tbl td.r{text-align:right;white-space:nowrap}',
-    '.ov-neg{color:' + LOSS + ';font-weight:700}.ov-pos{color:var(--gold-a);font-weight:700}',
-    '.ov-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
-    '.ov-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
-    '.ov-legend{display:flex;gap:14px;font-size:11px;font-weight:800;color:var(--text-3);margin:0 0 6px;flex-wrap:wrap}',
+    '.ov-sub{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.5}',
+    '.ov-carry{font-size:12px;color:var(--text-2);margin:-4px 0 8px;line-height:1.5}',
+    '.ov-tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}',
+    '.ov-tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:6px 8px;border-bottom:1px solid var(--gold-line);font-weight:800}',
+    '.ov-tbl td{padding:6px 8px;border-bottom:1px solid var(--gold-line);vertical-align:top;color:var(--text)}',
+    '.ov-tbl td.r,.ov-tbl th.r{text-align:right}',
+    '.ov-scroll{overflow-x:auto}',
+    '.ov-neg{color:#ffb3a6}',
+    '.ov-empty{color:var(--text-3);font-size:13px;padding:6px 0}',
+    '.ov-src{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:8px;vertical-align:middle;font-weight:800;cursor:pointer}',
+    '.ov-chip{display:inline-block;padding:3px 9px;border-radius:999px;border:1px solid var(--gold-line);background:var(--panel);font-size:11.5px;color:var(--text-2);margin:0 6px 6px 0}',
+    '.ov-legend{display:flex;gap:14px;font-size:11px;font-weight:800;color:var(--text-3);margin:0 0 4px;flex-wrap:wrap}',
     '.ov-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}',
-    '.ov-legend i.ov-hatch{background:repeating-linear-gradient(45deg,var(--gold-b) 0 2px,transparent 2px 5px);border:1px dashed var(--gold-b);box-sizing:border-box}'
+    '.ov-foot{font-size:12px;color:var(--text-2);margin-top:8px;line-height:1.5}'
   ].join(''));
 
-  function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
-  /* ONE money format across the four advertising view files: thousands separated, two decimals
-     unless the caller asks for fewer. The same figure must not read £1,234 on one page and
-     £1234.00 on the next. This function is byte-identical in view-adtool-morning.js,
-     view-adtool-analytics.js and view-adtool-product.js — change one and change all four. */
+  function num(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+  /* ONE money format across the advertising view files: thousands separated, two decimals unless
+     the caller asks for fewer. The same figure must not read £1,234 on one page and £1234.00 on
+     the next. Pence are for per-day and part-day money; a finished window total is called with 0. */
   function gbp(v, d) {
     if (v == null || v === '' || isNaN(Number(v))) return '—';
     var n = Number(v), p = d == null ? 2 : Number(d);
     return (n < 0 ? '−£' : '£') + Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: p, maximumFractionDigits: p });
   }
-  function gbp0(n) { return gbp(n, 0); }
-  function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
-  function roasTxt(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
+  function gbp0(v) { return gbp(v, 0); }
+  function roas(v) { v = num(v); return v == null ? '—' : v.toFixed(2) + '×'; }
   function pct(v) { v = num(v); return v == null ? '—' : (Math.round(v * 1000) / 10) + '%'; }
-  function pctSign(v) { v = num(v); if (v == null) return '—'; return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(Math.round(v * 1000) / 10) + '%'; }
-  function src(t) { return '<span class="ov-src" data-adtreg="' + esc(t) + '" title="how is this computed">' + esc(t) + '</span>'; }
-  function ratio(t, b) { t = num(t); b = num(b); if (b == null || b === 0 || t == null) return null; return t / b; }
-
-  /* how each metric is drawn and judged. good: +1 higher is better, −1 lower is better (CPC), 0 neutral (spend). */
-  var METRICS = [
-    { key: 'spend', label: 'Spend', money: true, good: 0, fmt: function (v) { return chartMoney(v); } },
-    { key: 'attr_revenue', label: 'Sales from ads', money: true, good: 1, fmt: function (v) { return chartMoney(v); } },
-    { key: 'roas', label: 'ROAS', good: 1, ref: 1, fmt: function (v) { return (Math.round(v * 100) / 100) + '×'; }, ratio: ['attr_revenue', 'spend'] },
-    { key: 'cpc', label: 'CPC', money: true, good: -1, fmt: function (v) { return chartMoney(v); }, ratio: ['spend', 'clicks'] },
-    { key: 'cvr', label: 'Conversion rate', good: 1, fmt: function (v) { return (Math.round(v * 1000) / 10) + '%'; }, pctScale: true, ratio: ['attr_units', 'clicks'] }
-  ];
-  var STRIP_METRICS = [
-    { key: 'spend', label: 'Spend', good: 0, fmt: gbp0 },
-    { key: 'attr_revenue', label: 'Sales from ads', good: 1, fmt: gbp0 },
-    { key: 'roas', label: 'ROAS', good: 1, fmt: roasTxt, ratio: ['attr_revenue', 'spend'] },
-    { key: 'cpc', label: 'CPC', good: -1, fmt: gbp, ratio: ['spend', 'clicks'] },
-    { key: 'cvr', label: 'Conversion rate', good: 1, fmt: pct, ratio: ['attr_units', 'clicks'] },
-    { key: 'orders', label: 'Orders', good: 1, fmt: cnt },
-    { key: 'units', label: 'Units', good: 1, fmt: cnt }
-  ];
+  function cnt(v) { v = num(v); return v == null ? '—' : String(Math.round(v)); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  /* `t` is the LOOKUP key the register box matches on and must stay stable when the wording
+     changes; `shown` is what the reader sees. Reword arg 2, never arg 1. */
+  function src(t, shown) { return '<span class="ov-src" data-adtreg="' + esc(t) + '" title="how is this worked out">' + esc(shown || t) + '</span>'; }
+  function kpi(k, v, d, c) { return '<div class="ov-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
+  function tile(k, v, d, c) { return '<div class="ov-tile ' + (c || '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + d + '</div></div>'; }
+  function ago(t) {
+    if (!t) return 'never';
+    var ms = Date.now() - new Date(String(t).replace(' ', 'T') + (String(t).endsWith('Z') ? '' : 'Z')).getTime();
+    if (isNaN(ms)) return esc(String(t).slice(0, 16));
+    var m = Math.round(ms / 60000);
+    return m < 60 ? m + ' min ago' : (m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago');
+  }
 
   VIEWS.adtoolOverview = {
-    label: 'Advertising overview (ads)', hidden: true, order: 62, roles: ROLES,
+    label: 'Overview', hidden: true, order: 62, roles: ROLES,
     icon: '<path d="M3 3v18h18"/><path d="m6 15 4-4 3 3 5-7"/>',
     render: function () {
-      return '<div class="ov-wrap">' + adtHgroup('Advertising overview', 'Where spend, sales, return and cost per click are heading over the period you pick', 'ovFresh') +
-        '<div id="ovBar"></div><div id="ovAcct" class="an-filters"></div>' +
-        '<div id="ovBody"><div class="ov-empty">Loading…</div></div></div>';
+      return '<div class="ov-wrap">' + adtHgroup('Overview', 'Where the ad money went, and how today is going') +
+        '<div id="ovBar"></div><div id="ovAcct" class="ov-acct"></div>' +
+        '<div id="ovHero"><div class="ov-empty">Loading…</div></div>' +
+        '<div id="ovToday"><div class="ov-empty">Loading…</div></div></div>';
     },
     init: function () {
-      OV.period = adtPeriodBar('ovBar', { page: 'adtoolOverview', def: 'd30', onChange: function (v) { OV.period = v; load(false); } });
+      OV.period = adtPeriodBar('ovBar', { page: 'adtoolOverview', def: 'd30', onChange: function (v) { OV.period = v; loadPlan(false); } });
       acctChips();
-      load(false).catch(function () {});
+      loadPlan(false)['catch'](function () {});
+      loadCmd(false)['catch'](function () {});
+      /* today moves every 5 minutes. adtPoll skips hidden tabs and stops for good on an 'auth'
+         refusal (the session-expiry law). */
+      adtPoll('ovToday', 300000, function () { return loadCmd(true); });
     }
   };
+
+  /* ── block 1 · the window the reader picks (adtoolPlan) ──────────────────────────────────── */
 
   function acctChips() {
     var el = $('ovAcct'); if (!el) return;
     el.innerHTML = '<button class="' + (OV.account ? '' : 'on') + '" data-a="">All accounts</button>' +
       OV.accounts.map(function (a) { return '<button class="' + (OV.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
     var bs = el.querySelectorAll('button');
-    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { OV.account = this.getAttribute('data-a'); acctChips(); load(false); };
+    /* ONE chip for the whole page. It used to move block 1 only, so the reader picked an account
+       and the nine tiles, the account table, the slots and the hourly chart under it went on
+       answering for the whole fleet with nothing saying so. Both halves are re-asked. */
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { OV.account = this.getAttribute('data-a'); acctChips(); loadPlan(false)['catch'](function () {}); loadCmd(false)['catch'](function () {}); };
   }
-  function load(quiet) {
+  function loadPlan(quiet) {
     var p = adtPeriodParams(OV.period); if (OV.account) p.account = OV.account;
-    return api('adtoolOverview', p).then(function (d) {
-      OV.data = d || {};
+    return api('adtoolPlan', p).then(function (d) {
+      OV.plan = d || {};
       var names = (d && d.accounts) || [];
       if (names.length) { OV.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); }
-      if (!$('ovBody')) return;
-      draw();
-      adtPeriodEcho('ovBar', d && d.period); adtFreshShow('ovFresh', d && d.fresh);
-      /* nothing on this page moves before the next :20 rollup (the series has no today row), so the live
-         re-read is hourly, not every 5 minutes; adtPoll keeps the hidden-tab and 'auth' guards */
-      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovBody', 3600000, function () { return load(true); }); } else { adtPollStop('ovBody'); }
-    }).catch(function (e) {
-      if (!quiet && $('ovBody')) $('ovBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'This page could not load.') + '</div></div>';
+      if (!$('ovHero')) return;
+      $('ovHero').innerHTML = heroBlock(OV.plan);
+      adtPeriodEcho('ovBar', d && d.period);
+      /* a window that reaches into today moves every 5 minutes; a finished window does not */
+      if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovHero', 300000, function () { return loadPlan(true); }); } else { adtPollStop('ovHero'); }
+    })['catch'](function (e) {
+      if (!quiet && $('ovHero')) $('ovHero').innerHTML = '<div class="ov-panel"><h3>Not available</h3><div class="ov-sub">' + esc(e && e.message ? e.message : 'This block could not load.') + '</div></div>';
+      throw e;
+    });
+  }
+  /* the window the block stands on: the engine names it (`period`); the page never assumes 30 */
+  function windowText(D) {
+    var P = D.period;
+    if (P && (P.label || P.from)) return adtPeriodText(P).replace(/^./, function (c) { return c.toLowerCase(); });
+    var w = D.window || {}, days = num(w.days);
+    return 'last ' + (days != null ? days : 30) + ' days to yesterday' + (w.from && w.to ? ' (' + w.from + ' → ' + w.to + ')' : '');
+  }
+  function windowDays(D) {
+    var d = num(D.hero && D.hero.days);
+    if (d == null) d = num(D.period && D.period.days);
+    if (d == null) d = num(D.window && D.window.days);
+    return d && d > 0 ? d : 30;
+  }
+  function heroBlock(D) {
+    if (!D || typeof D !== 'object') return '<div class="ov-empty">No figures for this period.</div>';
+    var H = D.hero || D.summary || null, days = windowDays(D);
+    if (!H) return '<div class="ov-empty">No figures for this period.</div>';
+    var ro = num(H.roas);
+    if (ro == null && num(H.spend) > 0 && num(H.attr_revenue) != null) ro = num(H.attr_revenue) / num(H.spend);
+    var spendDay = num(H.spend_day), salesDay = num(H.attr_revenue_day != null ? H.attr_revenue_day : H.revenue_day);
+    if (spendDay == null && num(H.spend) != null) spendDay = num(H.spend) / days;
+    if (salesDay == null && num(H.attr_revenue) != null) salesDay = num(H.attr_revenue) / days;
+    var acct = D.account && D.account !== 'all' ? D.account : 'all accounts';
+    var h = '<div class="ov-win"><b>' + esc(acct) + '</b> · ' + esc(windowText(D)) +
+      (num(H.listings) != null ? ' · ' + cnt(H.listings) + ' listings with spend' : '') +
+      (D.period && D.period.includes_today ? ' · today is still updating' : '') + src('eBay ads report') + '</div>';
+    h += '<div class="ov-tiles">' +
+      tile('Spend', gbp0(H.spend), esc(gbp(spendDay)) + ' a day over ' + days + ' day' + (days === 1 ? '' : 's'), 'gold') +
+      tile('Sales from ads', gbp0(H.attr_revenue), esc(gbp(salesDay)) + ' a day · the sales eBay credits to the ads') +
+      tile('ROAS', roas(ro), 'sales from ads ÷ spend', ro != null && ro < 1 ? 'loss' : 'gold') +
+      tile('CPC', gbp(H.cpc), esc(cnt(H.clicks)) + ' clicks') +
+      tile('Conversion rate', pct(H.cvr), esc(cnt(H.attr_units)) + ' units from ads ÷ clicks') +
+      tile('Orders', cnt(H.orders), esc(cnt(H.units)) + ' units, all channels') +
+      '</div>';
+    return h;
+  }
+
+  /* ── blocks 2 to 5 · today (adtoolCommand) ───────────────────────────────────────────────── */
+
+  /* the engine's contract key is `tiles`; `windows` / top-level are older engines */
+  function cmWin(D, k) { var w = (D.tiles && D.tiles[k]) || (D.windows && D.windows[k]) || D[k] || null; return w && typeof w === 'object' ? w : null; }
+  function cmRoas(w) { if (!w) return null; if (w.roas != null) return num(w.roas); var s = num(w.spend), r = num(w.attr_revenue); return s > 0 && r != null ? r / s : null; }
+  function cmSum(rows, k) { return rows.reduce(function (t, r) { return t + (num(r[k]) || 0); }, 0); }
+
+  function loadCmd(quiet) {
+    /* ONE request: adtoolCommand runs the today computation inside the engine and forwards all of
+       it, totals_by_account included, so every today figure on this page comes off that answer. */
+    return api('adtoolCommand', OV.account ? { account: OV.account } : {}).then(function (d) {
+      OV.cmd = d || {};
+      if ($('ovToday')) drawToday();
+    })['catch'](function (e) {
+      if (!quiet && $('ovToday')) $('ovToday').innerHTML = '<div class="ov-panel"><h3>Not available</h3><div class="ov-sub">' + esc(e && e.message ? e.message : 'Today could not load.') + '</div></div>';
       throw e;
     });
   }
 
-  function draw() {
-    var D = OV.data, h = '';
-    if (!D || typeof D !== 'object') { $('ovBody').innerHTML = '<div class="ov-empty">No data for this period.</div>'; return; }
-    h += windowStrip(D);
-    h += trendPanel(D);
-    h += profitPanel(D);
-    h += moversPanel(D);
-    h += '<div class="an-sub" style="margin-top:8px">' + esc(D.source || '') + (D.computed_at ? ' · computed ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC' : '') + '</div>';
-    $('ovBody').innerHTML = h;
-    /* the window buttons redraw from the answer already in hand — no second read */
-    var wb = document.querySelectorAll('#ovWin button');
-    for (var i = 0; i < wb.length; i++) wb[i].onclick = function () { OV.win = this.getAttribute('data-w'); draw(); };
+  function drawToday() {
+    var D = OV.cmd || {};
+    var h = statusBlock(D) + tilesBlock(D) + accountBlock(D) + slotBlock(D) + hourBlock(D) + freshBlock(D);
+    /* an answer with no `source` used to print a bare " · " in front of the rest of the footer */
+    var foot = [];
+    if (D.source) foot.push(esc(String(D.source)));
+    if (D.computed_at) foot.push('computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC');
+    foot.push('refreshes every 5 min while this tab is open');
+    h += '<div class="ov-foot">' + foot.join(' · ') + '</div>';
+    $('ovToday').innerHTML = h;
   }
 
-  function totalOf(w, m) {
-    if (!w) return null;
-    var cell = w[m.key];
-    if (cell && typeof cell === 'object' && ('value' in cell)) return num(cell.value);
-    if (m.ratio) return ratio(w[m.ratio[0]], w[m.ratio[1]]);
-    return num(cell);
-  }
-  function dirOf(w, m) { var cell = w && w[m.key]; if (cell && typeof cell === 'object' && cell.dir) return String(cell.dir); return null; }
-
-  /* the up/down strip: each metric's value now, the arrow, and the % move from the previous comparable
-     period. A decline in a "higher is better" metric (or a rise in CPC) is #e0563f; a favourable move is gold.
-     ONE row, not two. This page used to print the same seven figures twice — last 7 against the previous 7,
-     then last 10 against the previous 10, stacked. The period is a choice now and each number appears once;
-     both periods are still here, one button apart. */
-  function windowStrip(D) {
-    var W = D.windows || {};
-    var ten = OV.win === 'w10';
-    var last = W[ten ? 'last10' : 'last7'], prev = W[ten ? 'prev10' : 'prev7'];
-    var has7 = !!(W.last7 || W.prev7), has10 = !!(W.last10 || W.prev10);
-    var label = ten ? 'Last 10 days against the previous 10' : 'Last 7 days against the previous 7';
-    if (!last && !prev) return '';
-    var tabs = (has7 && has10) ? '<div class="an-filters" id="ovWin"><button class="' + (ten ? '' : 'on') + '" data-w="w7">Last 7 days</button><button class="' + (ten ? 'on' : '') + '" data-w="w10">Last 10 days</button></div>' : '';
-    var chips = STRIP_METRICS.map(function (m) {
-      var now = totalOf(last, m), was = totalOf(prev, m);
-      var d = (now != null && was != null && was !== 0) ? (now - was) / Math.abs(was) : null;
-      var explicit = dirOf(last, m);
-      var moveUp = explicit ? explicit === 'up' : (d != null && d > 0.0005);
-      var moveDown = explicit ? explicit === 'down' : (d != null && d < -0.0005);
-      var flat = !moveUp && !moveDown;
-      var favourable = m.good === 0 ? null : ((m.good > 0 && moveUp) || (m.good < 0 && moveDown));
-      var cls = flat ? 'flat' : (m.good === 0 ? 'flat' : (favourable ? 'up' : 'down'));
-      var arrow = moveUp ? '▲' : (moveDown ? '▼' : '■');
-      return '<div class="ov-chip"><div class="k">' + esc(m.label) + '</div><div class="v">' + esc(m.fmt(now)) + '</div>' +
-        '<div class="d ' + cls + '">' + arrow + ' ' + (d == null ? '—' : pctSign(d)) + ' <span class="was">from ' + esc(m.fmt(was)) + '</span></div></div>';
-    }).join('');
-    return tabs + '<div class="ov-winlbl">' + esc(label) + src('overview') + '</div><div class="ov-strip">' + chips + '</div>';
+  /* block 2a — the status line: when today was last read, how often, and what is still missing */
+  function statusBlock(D) {
+    var fresh = D.fresh || null, f = D.freshness || {};
+    if (!fresh && f.last_sample && f.last_sample.t) fresh = { grain: 'today', sampled_at: f.last_sample.t, cadence: '5 min' };
+    var tag = fresh ? adtFreshTag(fresh) : '';
+    return '<div class="ov-status">' + (tag || '<span class="ov-chip">Today has not been read yet</span>') + '</div>';
   }
 
-  /* one line per metric over the window, value pills, a 1× reference on ROAS. The series is the fleet's
-     (or the account's) daily figures from adtool_scope_day. */
-  function trendPanel(D) {
-    var series = (D.series || []).filter(function (r) { return r && r.day; });
-    if (!series.length) return '<div class="ov-panel"><h3>Trend</h3><div class="note">No daily figures for this period yet.</div></div>';
-    var cards = METRICS.map(function (m) {
-      return '<div class="ov-mcard"><h4>' + esc(m.label) + '</h4><div class="sub">' + esc(dayRange(series)) + '</div>' + lineChart(series, m) + '</div>';
-    }).join('');
-    /* the series can never hold today: the daily grain has no today row. Say where it ends, never "today". */
-    var endsOn = String(D.series_to || series[series.length - 1].day || '').slice(0, 10);
-    return '<div class="ov-panel"><h3>Where each metric is heading' + src('overview') + '</h3>' +
-      '<div class="note">Each line is the daily figure, with its value on the point. Below the 1× line on ROAS the ads cost more than they brought back. The days end yesterday' + (endsOn ? ' (' + esc(endsOn) + ')' : '') + '. For today, see <b>Today at a glance</b> or <b>What to do today</b>.</div>' +
-      '<div class="ov-metrics">' + cards + '</div></div>';
+  /* block 2b — the nine tiles */
+  function tilesBlock(D) {
+    var y = cmWin(D, 'yesterday') || {};
+    var byAcct = D.totals_by_account || null;
+    var today = cmWin(D, 'today');
+    if (!today && byAcct && byAcct.length) {
+      today = { spend: cmSum(byAcct, 'spend'), attr_revenue: cmSum(byAcct, 'attr_revenue'), attr_units: cmSum(byAcct, 'attr_units'), clicks: cmSum(byAcct, 'clicks'), orders: cmSum(byAcct, 'orders'), units: cmSum(byAcct, 'units') };
+    }
+    var repStatus = y.report_status != null ? String(y.report_status) : (D.report_status != null ? String(D.report_status) : null);
+    var win = function (label, w, sub, note) {
+      if (!w) return kpi(label, '—', sub + '<br>not available yet');
+      return kpi(label, gbp0(w.spend), gbp0(w.attr_revenue) + ' sales from ads · ROAS ' + roas(cmRoas(w)) +
+        (w.attr_units != null ? ' · ' + w.attr_units + ' units from ads' : '') + '<br>' + sub +
+        (note ? ' · <span class="ov-neg">' + note + '</span>' : ''));
+    };
+    var lateAccounts = function (m) { var late = Object.keys(m || {}).filter(function (a) { return m[a] !== 'final'; }); return late.length ? ' (' + esc(late.join(', ')) + ')' : ''; };
+    var h = '<div class="ov-kpis">' +
+      win('Today so far', today,
+        (today && today.ads_sampled === false ? 'no ad figures from eBay yet today, orders only' : 'still updating, read every 5 minutes') +
+        (today && today.sampled_at ? ' · ' + esc(String(today.sampled_at).slice(11, 16)) + ' UTC' : '') +
+        (today && num(today.pending) > 0 ? ' · ' + today.pending + ' order' + (num(today.pending) === 1 ? '' : 's') + ' not costed yet' : '')) +
+      win('Yesterday', (y.spend != null || y.attr_revenue != null) ? y : null, esc(y.day || y.from || ''),
+        repStatus != null && repStatus !== 'final' ? 'eBay figures still arriving' + lateAccounts(y.report_status_by_account) : '') +
+      win('Last 7 days', cmWin(D, 'd7'), (function (w) { return w && w.from ? esc(w.from) + ' → ' + esc(w.to || '') : 'to yesterday'; })(cmWin(D, 'd7'))) +
+      win('Last 30 days', cmWin(D, 'd30'), (function (w) { return w && w.from ? esc(w.from) + ' → ' + esc(w.to || '') : 'to yesterday'; })(cmWin(D, 'd30'))) +
+      '</div>';
+    /* `decisions_waiting` stood at a hard nought from the day it was written. The tile reads the
+       Decision page's own count instead, and says in its own label that this one figure does not
+       follow the account chip: it is counted across every account, the way that page counts it. */
+    var decisions = num(D.decisions_today);
+    var scope = String(D.decisions_scope || 'all accounts');
+    var fleetOnly = OV.account ? ' · all accounts' : '';
+    h += '<div class="ov-kpis">' +
+      kpi('CPC yesterday', num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') +
+      kpi('Conversion rate yesterday', num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—', 'units from ads ÷ clicks') +
+      kpi('Orders yesterday, all channels', y.orders != null ? cnt(y.orders) : '—', y.units != null ? y.units + ' units' : 'not available yet') +
+      kpi('Open alerts' + fleetOnly, D.alerts && D.alerts.n != null ? String(D.alerts.n) : '—', D.alerts && D.alerts.n != null ? ((D.alerts.high || 0) + ' high') : 'not available yet', (D.alerts && D.alerts.high) ? 'ov-neg' : '') +
+      kpi('Decisions today · ' + scope, decisions == null ? '—' : String(decisions),
+        (decisions == null ? 'not available yet' : 'what the Decision page lists today') + src('decisions today')) +
+      '</div>';
+    return h;
   }
-  function dayRange(series) { var a = series[0].day, b = series[series.length - 1].day; return String(a).slice(5) + ' → ' + String(b).slice(5); }
 
-  function lineChart(series, m) {
-    var vals = series.map(function (r) {
-      /* the engine's own figure first (cpc / cvr / roas arrive computed, null when the denominator is zero);
-         the ratio from the raw columns only when the row lacks it */
-      var v = num(r[m.key]);
-      if (v == null && m.ratio) v = ratio(r[m.ratio[0]], r[m.ratio[1]]);
-      return v;
-    });
-    var W = 460, H = 150, L = 44, R = 14, T = 18, B = 22;
-    var present = vals.filter(function (v) { return v != null; });
-    if (!present.length) return '<div class="ov-empty">no data</div>';
-    var mx = Math.max.apply(null, present), mn = Math.min.apply(null, present);
-    if (m.ref != null) mx = Math.max(mx, m.ref);
-    if (mn > 0) mn = 0;   /* baseline at zero so the line's height reads as its true size, not a zoomed slice */
-    var span = (mx - mn) || 1;
-    var n = series.length;
-    var xAt = function (i) { return L + (n <= 1 ? 0 : (i / (n - 1)) * (W - L - R)); };
-    var yAt = function (v) { return H - B - ((v - mn) / span) * (H - T - B); };
+  /* block 2c — today by account: spend, sales from ads, ROAS, CPC, conversion rate, orders. No
+     profit: a profit figure added up across listings is not a figure this portal shows. */
+  function accountBlock(D) {
+    var rows = D.totals_by_account || null;
+    if (!rows || !rows.length) return '';
+    return '<div class="ov-panel"><h3>Today by account' + src('today so far · every 5 min') + '</h3>' +
+      '<div class="ov-sub">Spend and sales from ads since 00:00 UTC, as far as eBay has reported. Orders are counted by UK day.</div>' +
+      '<div class="ov-scroll"><table class="ov-tbl"><thead><tr><th>Account</th><th class="r">Spend</th><th class="r">Sales from ads</th><th class="r">ROAS</th><th class="r">Clicks</th><th class="r">CPC</th><th class="r">Conversion rate</th><th class="r">Units from ads</th><th class="r">Orders</th><th class="r">Units</th></tr></thead><tbody>' +
+      rows.map(function (a) {
+        var ck = num(a.clicks) || 0, sp = num(a.spend);
+        return '<tr><td>' + esc(a.account) + '</td><td class="r">' + gbp(sp) + '</td><td class="r">' + gbp(a.attr_revenue) + '</td>' +
+          '<td class="r">' + roas(cmRoas(a)) + '</td><td class="r">' + ck + '</td>' +
+          '<td class="r">' + (a.cpc != null ? gbp(a.cpc) : (ck > 0 && sp != null ? gbp(sp / ck) : '—')) + '</td>' +
+          '<td class="r">' + (a.cvr != null ? pct(a.cvr) : (ck > 0 && a.attr_units != null ? pct(Number(a.attr_units) / ck) : '—')) + '</td>' +
+          '<td class="r">' + (a.attr_units == null ? '—' : a.attr_units) + '</td><td class="r">' + (a.orders == null ? '—' : a.orders) + '</td>' +
+          '<td class="r">' + (a.units == null ? '—' : a.units) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+  }
+
+  /* block 3 — today so far by slot, against the times of day this fleet usually sells in */
+  function slotBlock(D) {
+    var head = '<div class="ov-panel"><h3>Today so far by slot' + src('orders') + '</h3>' +
+      '<div class="ov-sub">Against the times of day this fleet usually sells in.</div>';
+    /* no list at all is "not counted yet"; an empty list is a real "nothing yet today" */
+    if (!Array.isArray(D.today_slots)) return head + '<div class="ov-empty">Today\'s orders have not been counted yet.</div></div>';
+    var rows = D.today_slots;
+    var tot = rows.reduce(function (t, s) { return t + (num(s.units) || 0); }, 0);
+    return head +
+      '<table class="ov-tbl"><thead><tr><th>Slot</th><th class="r">Units</th><th class="r">Share</th><th class="r">Profile</th></tr></thead><tbody>' +
+      SLOTS.map(function (s, i) {
+        var r = rows.filter(function (x) { return Number(x.slot) === i; })[0];
+        var u = r ? Number(r.units) : 0;
+        var p = D.slot_profile && D.slot_profile.shares ? D.slot_profile.shares[i] : null;
+        return '<tr><td>' + esc(s) + '</td><td class="r">' + u + '</td><td class="r">' + (tot ? Math.round(u / tot * 100) + '%' : '—') + '</td><td class="r">' + (p == null ? '—' : Math.round(p * 100) + '%') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  /* the value pills the chart kit draws are sized by their own text, so the page can work out
+     where each one will land and move the ones that would sit on top of each other. These two
+     numbers are chartValueDots' own, and must be passed to it unchanged. */
+  var PILL_FS = 8.5, PILL_H = PILL_FS + 6;
+  function pillW(label) { var t = String(label); return Math.max(PILL_FS + 9, t.length * PILL_FS * 0.60 + 9); }
+  function declash(pills) {
+    var placed = [], i, j, p, q, lift, pass;
+    pills = pills.slice().sort(function (a, b) { return a.x - b.x || a.y - b.y; });
+    for (i = 0; i < pills.length; i++) {
+      p = pills[i];
+      for (pass = 0; pass < 8; pass++) {
+        lift = null;
+        for (j = 0; j < placed.length; j++) {
+          q = placed[j];
+          if (Math.abs(p.x - q.x) >= (pillW(p.label) + pillW(q.label)) / 2) continue;
+          if (Math.abs(p.y - q.y) >= PILL_H) continue;
+          if (lift == null || q.y < lift) lift = q.y;
+        }
+        if (lift == null) break;
+        if (lift - PILL_H < 10) break;       /* no room left above: leave it where it is */
+        p.y = lift - PILL_H;
+      }
+      placed.push(p);
+    }
+  }
+
+  /* block 4 — ONE hourly chart. Per UK hour of today a red bar of money beside a green bar of
+     orders: the spend comes from the 5-minute ad readings (hour_curve) and the orders from the
+     order sync (today_hours), on the same hour key, so the two bars of an hour line up. Drawn
+     with the portal's own value-pill kit and no library. The two series count different things,
+     so each is drawn against its own busiest hour and every bar carries its figure. */
+  function hourBlock(D) {
+    var head = '<h3>Today hour by hour' + src('today hour by hour', 'today so far · every 5 min') + '</h3>' +
+      '<div class="ov-sub">Money spent and orders received in each UK hour.</div>';
+    var curve = (Array.isArray(D.hour_curve) && D.hour_curve.length) ? D.hour_curve : null;
+    var ords = (Array.isArray(D.today_hours) && D.today_hours.length) ? D.today_hours : null;
+    var missing = [];
+    if (!curve) missing.push('Spend by hour is not available yet.');
+    if (!ords) missing.push(D.today_hours ? 'No orders yet today.' : 'Orders by hour are not available yet.');
+    if (!curve && !ords) {
+      return '<div class="ov-panel">' + head + '<div class="ov-empty">' + esc(missing.join(' ')) + '</div></div>';
+    }
+    var sp = {}, od = {}, un = {}, i;
+    (curve || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) sp[hh] = num(x.spend) || 0; });
+    (ords || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) { od[hh] = num(x.orders) || 0; un[hh] = num(x.units) || 0; } });
+    var W = 980, H = 280, L = 46, R = 12, T = 46, B = 30;
+    var zero = H - B, plot = zero - T, slot = (W - L - R) / 24;
+    var maxS = 0, maxO = 0;
+    for (i = 0; i < 24; i++) { maxS = Math.max(maxS, sp[i] || 0); maxO = Math.max(maxO, od[i] || 0); }
+    /* THE DAY IS NOT OVER. Both halves leave out an hour nothing happened in, so the chart has to
+       draw all 24 or the hours would not line up with the clock. But an hour that has not arrived
+       yet is not a nought: the LAST hour either half has anything for is as far as the day has got,
+       and past that the bar is drawn as an empty slot with no figure on it and a tooltip that says
+       so. Printing a row of "£0" pills across the afternoon at ten in the morning is the clearest
+       way there is to make a reader think the money stopped. */
+    var lastKnown = -1;
+    for (i = 0; i < 24; i++) { if (sp[i] != null || od[i] != null) lastKnown = i; }
+    var scS = maxS > 0 ? plot / maxS : 0, scO = maxO > 0 ? plot / maxO : 0;
     var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
-    [0, 0.5, 1].forEach(function (f) {
-      var gv = mn + span * f, gy = yAt(gv);
-      s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="rgba(255,255,255,.07)" stroke-width="1"/>' +
-        '<text x="' + (L - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#66707c">' + esc(m.fmt(gv)) + '</text>';
-    });
-    if (m.ref != null && m.ref >= mn && m.ref <= mx) {
-      var ry = yAt(m.ref);
-      s += '<line x1="' + L + '" y1="' + ry.toFixed(1) + '" x2="' + (W - R) + '" y2="' + ry.toFixed(1) + '" stroke="rgba(224,86,63,.45)" stroke-width="1" stroke-dasharray="4 3"/>' +
-        '<text x="' + (W - R) + '" y="' + (ry - 3).toFixed(1) + '" text-anchor="end" font-size="8.5" fill="rgba(224,86,63,.8)">' + esc(m.fmt(m.ref)) + '</text>';
+    s += '<line x1="' + L + '" y1="' + zero + '" x2="' + (W - R) + '" y2="' + zero + '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
+    var redDots = [], grnDots = [], all = [];
+    for (i = 0; i < 24; i++) {
+      var hx = L + i * slot, v = sp[i], o = od[i], u = un[i];
+      var ahead = i > lastKnown;
+      var tip = ahead ? pad2(i) + ':00 UK · this hour has not happened yet'
+        : pad2(i) + ':00 UK · ' + (curve ? gbp(v == null ? 0 : v) + ' spent' : 'spend not available yet') + ' · ' +
+        (ords ? (o == null ? 0 : o) + ' order' + ((o || 0) === 1 ? '' : 's') + ', ' + (u == null ? 0 : u) + ' unit' + ((u || 0) === 1 ? '' : 's') : 'orders not available yet');
+      var rd = null, gd = null;
+      if (ahead) {
+        /* the slot is kept, so the hours still line up with the clock, and nothing is claimed in it */
+        s += '<rect x="' + (hx + slot * 0.10).toFixed(1) + '" y="' + (zero - 1.5).toFixed(1) + '" width="' + (slot * 0.78).toFixed(1) + '" height="1.5" rx="0.75" fill="rgba(255,255,255,.10)"><title>' + esc(tip) + '</title></rect>';
+      }
+      if (curve && !ahead) {
+        var hs = Math.max(1.5, (v || 0) * scS), xs = hx + slot * 0.10, ws = slot * 0.36, ys = zero - hs;
+        s += '<rect x="' + xs.toFixed(1) + '" y="' + ys.toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hs.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tip) + '</title></rect>';
+        rd = { x: xs + ws / 2, y: ys - 9, label: chartMoney(v || 0), title: tip };
+      }
+      if (ords && !ahead) {
+        var ho = Math.max(1.5, (o || 0) * scO), xo = hx + slot * 0.52, wo = slot * 0.36, yo = zero - ho;
+        s += '<rect x="' + xo.toFixed(1) + '" y="' + yo.toFixed(1) + '" width="' + wo.toFixed(1) + '" height="' + ho.toFixed(1) + '" rx="2.5" fill="' + ORDERS_C + '"><title>' + esc(tip) + '</title></rect>';
+        gd = { x: xo + wo / 2, y: yo - 9, label: chartNum(o || 0), title: tip };
+      }
+      /* the two pills of an hour are only 16 units apart across, so when the two bars finish at a
+         similar height the higher pill is lifted clear rather than printed over the other one */
+      if (rd && gd && Math.abs(rd.y - gd.y) < PILL_H) { if (rd.y <= gd.y) rd.y = gd.y - PILL_H; else gd.y = rd.y - PILL_H; }
+      if (rd) { rd.y = Math.max(10, rd.y); rd.red = true; all.push(rd); }
+      if (gd) { gd.y = Math.max(10, gd.y); all.push(gd); }
+      if (i % 3 === 0 || i === 23) {
+        s += '<text x="' + (hx + slot * 0.5).toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="9.5" fill="#66707c">' + pad2(i) + '</text>';
+      }
     }
-    var pts = [];
-    for (var i = 0; i < n; i++) {
-      if (vals[i] == null) continue;
-      pts.push({ x: xAt(i), y: yAt(vals[i]), label: null, _v: vals[i], _day: series[i].day });
-    }
-    var every = n > 8 ? Math.ceil(n / 6) : 1;
-    var pill = pts.map(function (p, idx) {
-      var showLabel = (idx % every === 0) || idx === pts.length - 1;
-      return { x: p.x, y: p.y, label: showLabel ? m.fmt(p._v) : null, title: String(p._day) + ': ' + m.fmt(p._v) };
-    });
-    s += chartLineSeries(pill, { color: 'var(--gold-b)', width: 2.2, minGap: 40 });
-    /* x labels: first, middle, last */
-    [0, Math.floor(n / 2), n - 1].forEach(function (i) {
-      if (i < 0 || i >= n) return;
-      s += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="8.5" fill="#66707c">' + esc(String(series[i].day).slice(5)) + '</text>';
-    });
+    /* …and the pill of one hour can still reach into the next hour's, because a wide figure is
+       wider than the gap between two bars. Left to right, any pill that would print over one
+       already placed is lifted clear above it. A figure you cannot read is not a figure. */
+    declash(all);
+    all.forEach(function (p) { (p.red ? redDots : grnDots).push(p); });
+    s += chartValueDots(redDots, { color: LOSS, ink: '#fff', fontSize: PILL_FS, minGap: 0 });
+    s += chartValueDots(grnDots, { color: ORDERS_C, ink: ORDERS_INK, fontSize: PILL_FS, minGap: 0 });
     s += '</svg>';
-    return s;
+    var carry = num(D.carry_spend);
+    var notes = [];
+    if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart.');
+    if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
+    if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
+    missing.forEach(function (m) { notes.push(esc(m)); });
+    var legend = '<div class="ov-legend"><span><i style="background:' + LOSS + '"></i>money spent' + (maxS > 0 ? ', busiest hour ' + esc(gbp0(maxS)) : '') + '</span>' +
+      '<span><i style="background:' + ORDERS_C + '"></i>orders received' + (maxO > 0 ? ', busiest hour ' + esc(cnt(maxO)) : '') + '</span></div>';
+    return '<div class="ov-panel">' + head + (notes.length ? '<div class="ov-carry">' + notes.join(' ') + '</div>' : '') + legend + s + '</div>';
   }
 
-  /* profit trend WITHOUT a collective figure: counts of profitable vs losing listings per week. */
-  function profitPanel(D) {
-    var pv = D.profit_view || null;
-    var weeks = pv && (pv.weeks || pv.by_week) ? (pv.weeks || pv.by_week) : null;
-    if (!weeks && pv && Array.isArray(pv.profitable_listings)) {
-      /* per-week arrays keyed the same length */
-      weeks = pv.profitable_listings.map(function (p, i) { var l = (pv.losing_listings || [])[i] || {}; return { week: p.week || l.week, profitable: p.count != null ? p.count : p.value, losing: l.count != null ? l.count : l.value }; });
-    }
-    if (!weeks || !weeks.length) return '';
-    var curWk = pv && pv.current_week ? String(pv.current_week) : '';
-    var norm = weeks.map(function (w) {
-      var key = String(w.week || w.iso_week || ''), days = num(w.days);
-      /* the current ISO week runs Monday → yesterday (the daily grain has no today row), so its counts are
-         still filling: the engine marks it `partial`; without that field, fewer than 7 rolled days or the
-         current-week key says the same */
-      var partial = w.partial != null ? !!w.partial : (days != null ? days < 7 : (!!curWk && key === curWk));
-      return { week: key, days: days, partial: partial, profitable: num(w.profitable != null ? w.profitable : w.profitable_listings), losing: num(w.losing != null ? w.losing : w.losing_listings) };
-    });
-    var anyPartial = norm.some(function (w) { return w.partial; });
-    function bars(pick, color) {
-      return chartBars(norm.map(function (w) {
-        var lbl = (w.week || '').replace(/^\d{4}-?/, 'W');
-        if (w.partial) lbl += w.days != null ? ' · ' + Math.round(w.days) + ' d' : ' · so far';
-        return { label: lbl, value: num(w[pick]) || 0, muted: w.partial, title: (w.week || '') + ': ' + cnt(w[pick]) + ' ' + pick + ' listings' + (w.partial ? ' (week in progress' + (w.days != null ? ', ' + Math.round(w.days) + ' of 7 days counted' : ', Monday to yesterday') + ')' : '') };
-      }), { height: 140, color: color, pillColor: color, fmt: function (v) { return String(Math.round(v)); }, minGap: 0 });
-    }
-    return '<div class="ov-panel"><h3>Profit trend, as listing counts' + src('overview') + '</h3>' +
-      '<div class="note">Profit is never added up across listings, so the trend here is how many listings <b>made money</b> each week and how many <b>lost</b>. More gold and less red, week on week, is the shape you want.' +
-      (anyPartial ? ' The hatched bar is <b>this week so far</b>, Monday to yesterday, so read it against the finished weeks only once it is complete.' : '') + '</div>' +
-      '<div class="ov-legend"><span><i style="background:var(--gold-b)"></i>Profitable listings</span><span><i style="background:' + LOSS + '"></i>Losing listings</span>' +
-      (anyPartial ? '<span><i class="ov-hatch"></i>Week in progress</span>' : '') + '</div>' +
-      '<div class="ov-grid2"><div class="ov-mcard"><h4>Profitable listings / week</h4>' + bars('profitable', 'var(--gold-b)') + '</div>' +
-      '<div class="ov-mcard"><h4>Losing listings / week</h4>' + bars('losing', LOSS) + '</div></div></div>';
-  }
-
-  /* top movers: individual items, previous vs current profit and % change (owner: "Top Risers / Top
-     Decliners — image, name, item ID, account, previous, current, % change"). Item rows only. */
-  function moversPanel(D) {
-    var pv = D.profit_view || {}, movers = (pv.top_movers || D.top_movers || []).filter(function (r) { return r && typeof r === 'object'; });
-    if (!movers.length) return '';
-    movers.forEach(function (r) { if (r.pct == null) { var a = num(r.cur_profit), b = num(r.prev_profit); r._pct = (a != null && b != null && b !== 0) ? (a - b) / Math.abs(b) : null; } else r._pct = num(r.pct); });
-    var risers = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) > num(r.prev_profit); }).sort(function (a, b) { return (b._pct || 0) - (a._pct || 0); }).slice(0, 8);
-    var decliners = movers.filter(function (r) { return num(r.cur_profit) != null && num(r.prev_profit) != null && num(r.cur_profit) < num(r.prev_profit); }).sort(function (a, b) { return (a._pct || 0) - (b._pct || 0); }).slice(0, 8);
-    function tbl(rows, riser) {
-      if (!rows.length) return '<div class="ov-empty">none in this period</div>';
-      return '<div class="an-scroll"><table class="ov-tbl"><thead><tr><th>Listing</th><th class="r">Was</th><th class="r">Now</th><th class="r">Change</th></tr></thead><tbody>' +
-        rows.map(function (r) {
-          var p = r._pct;
-          return '<tr><td>' + adtProductCell(r) + '</td>' +
-            '<td class="r">' + adtProfitCell(r.prev_profit) + '</td>' +
-            '<td class="r">' + adtProfitCell(r.cur_profit) + '</td>' +
-            '<td class="r ' + (riser ? 'ov-pos' : 'ov-neg') + '">' + (p == null ? '—' : pctSign(p)) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    }
-    return '<div class="ov-panel"><h3>Top movers, item by item' + src('overview') + '</h3>' +
-      '<div class="note">The listings whose own profit moved most against the period before. Profit is per listing, never added up.</div>' +
-      '<div class="ov-grid2"><div class="ov-mcard"><h4>Top risers</h4>' + tbl(risers, true) + '</div>' +
-      '<div class="ov-mcard"><h4>Top decliners</h4>' + tbl(decliners, false) + '</div></div></div>';
+  /* block 5 — how up to date this is. The forecast chip is gone with the forecast. */
+  function freshBlock(D) {
+    var f = D.freshness || {};
+    var chips = [
+      ['Orders updated', ago(f.orders && f.orders.t)],
+      ['eBay ad report covers up to', (f.ads_report_day && f.ads_report_day.d) || '—'],
+      ['Last ad reading', ago(f.last_sample && f.last_sample.t)],
+      ['Daily totals', ago(f.rollup && f.rollup.t)],
+      ['Patterns', String(f.profiles || 'not yet')]
+    ];
+    return '<div class="ov-panel"><h3>How up to date this is</h3><div>' +
+      chips.map(function (x) { return '<span class="ov-chip">' + esc(x[0]) + ': <b>' + esc(x[1]) + '</b></span>'; }).join('') + '</div></div>';
   }
 })();

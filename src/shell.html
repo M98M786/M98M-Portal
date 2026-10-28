@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolRoasTarget','adtoolHealthPage','adtoolForecastLab','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -904,7 +904,10 @@ var DRAFT = (function(){
     var mv = $('mainView');
     if(!mv || !mv.contains(el)) return;
     LAST_TYPED_AT = Date.now();
-    var view = (location.hash || '').replace('#', '');   /* the router keeps the view key in the hash */
+    /* the view KEY only: #adtoolProduct/366628303582 keeps its draft under adtoolProduct, the same key
+       restore() reads, so a parameterised page neither strands one entry per item nor refills a box
+       from another tab's item (28 Oct review) */
+    var view = (window.adtRoute ? adtRoute().key : (location.hash || '').replace('#', '').split('/')[0]);
     if(!view) return;
     var k = fieldKey(el);
     var val = (el.type === 'checkbox' || el.type === 'radio') ? { c: !!el.checked } : { v: String(el.value) };
@@ -1341,7 +1344,12 @@ var ADT_REG_MAP = [
   [/the change archive/i, ['CHANGE_ARCHIVE', 'CHANGE_DAY']],
   [/one part of the day/i, ['PEAK_SUGGESTED']],
   [/spend outside the peak/i, ['PEAK_OFF_PEAK_SPEND']],
-  [/the peak hours work list/i, ['PEAK_MANUAL']]
+  [/the peak hours work list/i, ['PEAK_MANUAL']],
+  /* 28 Oct spec: the pages that print these numbers carry no other tag that reaches their rows. */
+  [/the hours for this listing|who switches it|peak switching/i, ['PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_MANUAL']],
+  [/orders in each hour|today hour by hour/i, ['TODAY_HOURS', 'adtool_ads_intraday', 'adtool_listing_today']],
+  [/how this list fills itself|put forward by the figures/i, ['POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN']],
+  [/decisions today/i, ['DECISIONS_TODAY', 'adtool_decisions']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -1586,7 +1594,8 @@ function enterApp(user){
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','staffReports','perf','team','meetings','agenda'] },
-    { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','adtoolActivated','adtoolStopped','adtoolPeak','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    /* 28 Oct: Activated today merged into Activated and stopped (adtoolStopped), so its key left. */
+    { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','adtoolStopped','adtoolPeak','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','approvedArchive','huntRevised','huntRevisions','huntRecords','ideaBox'] },
@@ -1606,8 +1615,10 @@ function enterApp(user){
        actions — not copies. Their labels are left exactly as the owner knows them; where an
        advertising-tool page carried a near-identical name the TOOL page is renamed, because two
        "command centres" in one sidebar is the duplication the owner asked us to remove. */
-    var ADS_MERGED = { adSignals: 1, adsCentre: 1, marketing: 1, campaignWatch: 1,
-      traffic: 1, liveSplit: 1, wrongAds: 1, advertising: 1, potentialCpc: 1, keywordApprovals: 1 };
+    /* 28 Oct spec: Advertising signals, Wrong advertising, Campaign watch and Live listings fold
+       into merged advertising pages (Past situation, Where each listing advertises, Entire live
+       listings); Keyword approvals leaves the portal. The company portal keeps all five as they are. */
+    var ADS_MERGED = { adsCentre: 1, marketing: 1, traffic: 1, advertising: 1, potentialCpc: 1 };
     /* The sidebar line and the page's own heading must read the same, or a reader cannot tell which
        page they landed on. These three were renamed here when their TOOL names were "Command centre"
        and the like and collided with the eleven above; the copy pass has since retitled the pages
@@ -1626,16 +1637,21 @@ function enterApp(user){
     });
     /* Grouped by the question each group answers, and a merged page sits in the SAME group as the
        tool page covering its subject, so the two are read together instead of being hunted for. */
+    /* 28 Oct, the owner's Change Spec: ten pages in a fixed order, then Management (management
+       email accounts only), then everything the spec keeps below the ten. Keys stay what they
+       were wherever a page continues, so old links, the pre-warm and the page cache keep working;
+       labels come from the view files. */
     NAV_DEPTS = [
-      { name: 'Every morning', keys: ['adtoolPlan', 'adtoolCommand', 'adtoolRunToday', 'adtoolStop', 'adtoolAlerts', 'adSignals', 'adtoolReport', 'adtoolActivated', 'adtoolStopped'] },
-      { name: 'Listing departments', keys: ['adtoolDepts'] },
-      { name: 'Products',      keys: ['adtoolCpc', 'adtoolPeak', 'liveSplit', 'wrongAds', 'adtoolProduct', 'adtoolForecast'] },
-      { name: 'The money',     keys: ['advertising', 'adsCentre', 'adtoolRoas', 'adtoolOverview'] },
-      { name: 'Campaigns',     keys: ['adtoolCampaignBoard', 'adtoolItemCampaigns', 'campaignWatch', 'adtoolCampaigns', 'marketing', 'adtoolSales'] },
-      { name: 'Traffic and keywords', keys: ['traffic', 'potentialCpc', 'keywordApprovals'] },
-      { name: 'The fleet',     keys: ['adtoolAccounts', 'adtoolCategories', 'adtoolCases', 'adtoolSlots'] },
-      { name: 'Data health',   keys: ['adtoolHealth'] }
+      { name: 'Advertising', keys: ['adtoolOverview', 'traffic', 'adtoolRunToday', 'adtoolProduct', 'adtoolCpc', 'adtoolPeak', 'adtoolItemCampaigns', 'adtoolSales', 'marketing', 'adtoolStopped'] },
+      { name: 'Management',  keys: ['advertising', 'adtoolAccounts', 'adtoolStop', 'adtoolHealth'] },
+      { name: 'More',        keys: ['adtoolReport', 'potentialCpc', 'adtoolSpendingToday', 'adtoolCampaignBoard', 'adsCentre', 'adtoolCampaigns', 'adtoolCategories', 'adtoolCases', 'adtoolSlots', 'adtoolNewListings', 'adtoolAlerts', 'adtoolDepts'] }
     ];
+    /* "Only management email accounts can see it; staff email accounts get no access." Enforced in
+       ONE place rather than in four view files: the Management group's pages are re-gated here to
+       the two management roles (canSee also honours a per-person modules grant, as everywhere). */
+    ['advertising', 'adtoolAccounts', 'adtoolStop', 'adtoolHealth'].forEach(function (k) {
+      if (VIEWS[k]) { VIEWS[k].roles = ['Management', 'Ops Head']; }
+    });
     /* The owner chose this portal's landing page. Advertising tasks is now the first entry of the
        first group, which satisfies "the first page in the menu of that department" without moving
        anybody off the screen they asked to land on.
@@ -1658,8 +1674,9 @@ function enterApp(user){
       adsCss.textContent = '.empty{color:var(--text-2);font-weight:700;padding:16px 0;font-size:12.5px}';
       document.head.appendChild(adsCss);
     } catch (e) {}
-    landing = (VIEWS.adtoolCommand && canSee(VIEWS.adtoolCommand))
-      ? 'adtoolCommand'
+    /* 28 Oct spec: Overview is the first page in the portal */
+    landing = (VIEWS.adtoolOverview && canSee(VIEWS.adtoolOverview))
+      ? 'adtoolOverview'
       : (((viewList()[0] || {}).key) || 'home');
   }
   var placed = {};
@@ -1717,10 +1734,18 @@ function enterApp(user){
     }
   };
   /* A #view hash wins over the default landing: a reload lands where you were, and a link
-     opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back. */
-  var fromHash = (location.hash || '').replace(/^#/, '');
+     opened in a new tab opens the right screen. Unknown or unpermitted hashes fall back.
+     28 Oct (owner's spec, rule 3: "many tabs at once, each with its own data"): the hash may carry
+     a parameter, #adtoolProduct/<item id> or #adtoolCampaignBoard/<campaign id>, so a link opened
+     in a new tab shows THAT item and not whatever the last tab left in localStorage. The router
+     renders the key; the view reads adtRoute().param in its init. */
+  var fromHash = adtRoute().key;
   if (fromHash && VIEWS[fromHash] && canSee(VIEWS[fromHash])) { landing = fromHash; }
-  show('appShell'); location.hash = landing; renderView(landing);
+  show('appShell');
+  /* only rewrite the hash when it names a different page: rewriting it to the bare key would
+     throw away the parameter the new tab was opened with */
+  if (adtRoute().key !== landing) { location.hash = landing; }
+  renderView(landing);
   var navTo = function(key){
     var links = document.querySelectorAll('.nav a');
     for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
@@ -1728,7 +1753,7 @@ function enterApp(user){
     renderView(key);
   };
   window.addEventListener('hashchange', function(){
-    var k = (location.hash || '').replace(/^#/, '');
+    var k = adtRoute().key;
     if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
   });
   if(typeof startPolling==='function'){ try{ startPolling(); }catch(e){} }
@@ -1858,6 +1883,16 @@ function adtCampaignLink(campaignId, name, opts){
    item link"). r = {item_id, account, title, image}; opts: {open:false} drops the Product-history
    hand-off (the title is then plain text), {compact:true} narrows it. The image is lazy and falls
    back to a box glyph when it is missing or fails to load (the error listener below). */
+/* adtRoute(): the hash, read as {key, param, query}. '#adtoolProduct/123' → key 'adtoolProduct',
+   param '123'. '#x?a=1&b=2' → query {a:'1', b:'2'}. Never throws; an empty hash is {key:''}. */
+function adtRoute(){
+  var h = String(location.hash || '').replace(/^#/, '');
+  var m = h.match(/^([A-Za-z0-9_]+)(?:\/([^?]*))?(?:\?(.*))?$/);
+  var out = { key: m ? m[1] : h, param: m && m[2] ? decodeURIComponent(m[2]) : '', query: {} };
+  if (m && m[3]) { m[3].split('&').forEach(function(kv){ var i = kv.indexOf('='); var k = decodeURIComponent(i < 0 ? kv : kv.slice(0, i)); if (k) out.query[k] = decodeURIComponent(i < 0 ? '' : kv.slice(i + 1)); }); }
+  return out;
+}
+window.adtRoute = adtRoute;
 function adtProductCell(r, opts){
   r = r || {}; opts = opts || {};
   var id = String(r.item_id == null ? '' : r.item_id).trim(), img = safeUrl(r.image);
@@ -1866,11 +1901,12 @@ function adtProductCell(r, opts){
   var h = '<div class="adt-pc' + (opts.compact ? ' compact' : '') + '">';
   h += img ? '<img class="adt-pc-img" src="' + esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<span class="adt-pc-img adt-pc-none" aria-hidden="true">📦</span>';
   h += '<div class="adt-pc-b">';
-  h += open ? '<a class="adt-pc-t" href="#adtoolProduct" data-adt-open="' + esc(id) + '" title="' + esc(title) + '">' + esc(title) + '</a>'
+  h += open ? '<a class="adt-pc-t" href="#adtoolProduct/' + esc(id) + '" data-adt-open="' + esc(id) + '" title="' + esc(title) + '">' + esc(title) + '</a>'
             : '<div class="adt-pc-t" title="' + esc(title) + '">' + esc(title) + '</div>';
   h += '<div class="adt-pc-m">' + (id ? '<span class="adt-pc-id">' + esc(id) + '</span>' : '') +
        (r.account ? '<span class="adt-pc-a">' + esc(r.account) + '</span>' : '') +
        (/^\d{9,13}$/.test(id) ? '<a class="adt-pc-e" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener" title="open on eBay">eBay ↗</a>' : '') +
+       (open ? '<a class="adt-pc-e" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\'s Product history in a new tab">History ↗</a>' : '') +
        '</div></div></div>';
   return h;
 }
@@ -2068,14 +2104,16 @@ function adtPoll(containerId, everyMs, fn){
   return { stop: function () { adtPollStop(containerId); } };
 }
 function adtPollStop(containerId){ if (ADT_POLLS[containerId]) { clearInterval(ADT_POLLS[containerId]); delete ADT_POLLS[containerId]; } }
-/* one listener for every product cell: the hand-off to Product history goes through localStorage
-   (the portal's cross-page convention) and a broken image becomes the box glyph */
+/* one listener for every product cell: the hand-off to Product history is the ROUTE
+   (#adtoolProduct/<id>), never localStorage. The owner's spec, 28 Oct: a second tab used to show
+   the first tab's product because the item id carried over through storage; the item now travels
+   in the hash, so every tab carries its own. A broken image becomes the box glyph. */
 document.addEventListener('click', function(ev){
   var a = ev.target && ev.target.closest ? ev.target.closest('[data-adt-open]') : null; if (!a) return;
+  if (ev.metaKey || ev.ctrlKey || ev.button === 1 || a.getAttribute('target') === '_blank') return;   /* let the browser open a new tab */
   ev.preventDefault();
-  var id = a.getAttribute('data-adt-open');
-  try { localStorage.setItem('m98m:adtoolItem', id); } catch (e) {}
-  if (location.hash === '#adtoolProduct') { renderView('adtoolProduct'); } else { location.hash = 'adtoolProduct'; }
+  var id = a.getAttribute('data-adt-open'), want = 'adtoolProduct/' + id;
+  if (location.hash === '#' + want) { renderView('adtoolProduct'); } else { location.hash = want; }
 });
 document.addEventListener('error', function(ev){
   var t = ev.target; if (!t || !t.classList || !t.classList.contains('adt-pc-img') || t.tagName !== 'IMG') return;

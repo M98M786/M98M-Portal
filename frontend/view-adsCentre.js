@@ -34,6 +34,9 @@ VIEW_CSS.push(
     '.acc-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
     '.ac-waste td:first-child{border-left:3px solid var(--bad)}' +
+    /* the two links under an item: eBay, and this listing\'s own Product history in a new tab */
+    '.ac-eb{color:var(--text-3);font-weight:800;text-decoration:none}' +
+    '.ac-eb:hover{color:var(--gold-a)}' +
     /* R7-8 organic vs promoted split */
     '.ac-split{border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;background:var(--panel-2);margin-bottom:16px}' +
     '.ac-split-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin-bottom:9px}' +
@@ -54,13 +57,23 @@ VIEW_CSS.push(
      commands center"). The rows are already in hand, so a sort never asks the engine again. Each
      column heading says what it sorts by; numbers sort numerically, text alphabetically, and an
      empty cell sinks to the bottom whichever way the column is pointed. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+  /* Owner's Change Spec, 28 Oct 2026: "Ads Command Centre (product click opens Product History in a
+     new tab)". The title used to be the eBay link, so a click left the portal; it now opens this
+     listing's own Product history in a tab of its own, and the eBay link keeps its place beside the
+     item number. The hash carries the item, so a second tab shows ITS listing and not this one's. */
   var AC_COLS = [
     { key: 'title', label: 'Item', text: true, sorts: 'the listing title, A to Z',
       val: function (r) { return String(r.title || r.item_id || ''); },
       cell: function (r) {
-        return '<a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
-          esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
-          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) +
+        var id = String(r.item_id == null ? '' : r.item_id).trim();
+        var known = /^\d{9,13}$/.test(id);
+        var title = esc(String(r.title || r.item_id || '').slice(0, 80));
+        return (known
+          ? '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" style="color:inherit" title="open this listing\u2019s Product history in a new tab">' + title + '</a>'
+          : title) +
+          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(id) + ' \u00b7 ' + esc(String(r.account)) +
+          (known ? ' \u00b7 <a class="ac-eb" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer" title="open on eBay">eBay \u2197</a>' +
+            ' \u00b7 <a class="ac-eb" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\u2019s Product history in a new tab">History \u2197</a>' : '') +
           (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>';
       } },
     { key: 'spend_today', label: 'Spend today', sorts: 'what the listing has spent on ads today',

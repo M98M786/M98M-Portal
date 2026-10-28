@@ -1,27 +1,37 @@
-/* view-adtool-runtoday.js — Advertising Tool · Running today (owner's brief, 27 Sep 2026: "what should be
- * running today, and what should be stopped, on the basis of the previous history, today's ad wastage and
- * today's performance, showing proper reasoning"). Hidden; flag adtool_page_runtoday. One row per advertised
- * listing from adtoolRunToday: the verdict (run / stop / watch), the sentence that explains it from the last
- * four same weekdays, last week's same day, today so far from the 5-minute grain, the hours to run and to
- * avoid, the best historical week, the morning batch's decision if any, the lever a hand can move and whose
- * hand. The period is today, fixed; the page refreshes every 5 minutes while it is open. Nothing here is
- * sent to eBay. Galaxy tokens only; gold the accent, #e0563f the loss colour. */
+/* view-adtool-runtoday.js — Advertising Tool · Decision (owner's Change Spec, 28 Oct 2026: the merge of
+ * "Running today" and "Stop today"). One row per advertised listing from adtoolRunToday: the verdict
+ * (run / stop / watch), the sentence that explains it from the last four same weekdays, last week's same
+ * day, today so far from the 5-minute grain, the hours to run and to avoid, the best historical week, the
+ * morning batch's own decision, the lever a hand can move and whose hand.
+ * Running today as it was, plus exactly the three changes the spec names:
+ *   (a) the last-four-same-weekdays chart enlarged, with every bar's own profit on it;
+ *   (b) Stop today's tiles beside Running today's three — BOTH Stop tiles, each saying which check
+ *       it counts, from adtoolStopToday;
+ *   (c) Reduce and Push filter buttons beside All / Stop / Run / Watch, filtering on the morning
+ *       decision rather than on the weekday verdict.
+ * The live-apply panel and the apply log are not here: they live on Live apply, which is the only place
+ * anything can reach eBay. The period is today, fixed; the page refreshes every 5 minutes while open.
+ * Galaxy tokens only; gold the accent, #e0563f the loss colour. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var RT = { account: '', filter: '', data: null };
+  var DECISIONS = { REDUCE: 1, PUSH: 1 };
+  var RT = { account: '', filter: '', data: null, stop: null };
 
   VIEW_CSS.push(
     '.rt-wrap{max-width:1320px}' +
     '.rt-top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--text-2);font-weight:600}' +
+    '.rt-cap{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin:2px 0 6px}' +
     '.rt-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}' +
-    '.rt-c{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;cursor:pointer}' +
+    '.rt-c{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px}' +
+    '.rt-c[data-f]{cursor:pointer}' +
     '.rt-c.on{border-color:var(--gold-b);background:rgba(242,176,53,.1)}' +
     '.rt-c .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.rt-c .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}' +
     '.rt-c.run .v{color:var(--gold-a)}.rt-c.stop .v{color:' + LOSS + '}.rt-c.watch .v{color:var(--text-2)}' +
-    '.rt-c .d{font-size:11.5px;color:var(--text-2);margin-top:2px}' +
+    '.rt-c.d-stop .v{color:' + LOSS + '}.rt-c.d-push .v{color:var(--gold-a)}.rt-c.d-reduce .v{color:var(--text)}.rt-c.d-keep .v{color:var(--text-2)}.rt-c.d-score .v{color:var(--text)}' +
+    '.rt-c .d{font-size:11.5px;color:var(--text-2);margin-top:2px;line-height:1.45}' +
     '.rt-note{font-size:12px;color:var(--text-2);background:var(--panel-2);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.5}' +
     '.rt-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}' +
     '.rt-tbl th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}' +
@@ -33,7 +43,10 @@
     '.rt-dec{display:inline-block;padding:1px 7px;border-radius:6px;border:1px solid var(--gold-line);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}' +
     '.rt-dec.STOP{color:#ffb3a6;border-color:rgba(224,86,63,.5)}.rt-dec.PUSH{color:var(--gold-a);border-color:rgba(242,176,53,.45)}.rt-dec.REDUCE{color:var(--text);border-color:rgba(242,176,53,.3)}' +
     '.rt-empty{color:var(--text-3);font-size:13px;padding:10px 0}' +
-    '.rt-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
+    '.rt-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}' +
+    /* the same small grey as .rt-src and nothing else: no dotted underline, no pointer. A note that
+       is not a register link must not wear the look of one. */
+    '.rt-dim{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700}'
   );
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -50,15 +63,18 @@
   function fail(e) { if ($('rtBody')) $('rtBody').innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'This page could not load.') + '</div></div>'; }
 
   VIEWS.adtoolRunToday = {
-    label: 'Running today (ads)', hidden: true, order: 93, roles: ROLES,
+    label: 'Decision', hidden: true, order: 93, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
     render: function () {
-      return '<div class="rt-wrap">' + adtHgroup('Running today', 'Which listings should run today, which should stop, and why', 'rtFresh') +
+      return '<div class="rt-wrap">' + adtHgroup('Decision', 'Which listings should run today, which should stop, and why', 'rtFresh') +
         '<div id="rtAcct" class="an-filters"></div><div id="rtBody"><div class="rt-empty">Loading…</div></div></div>';
     },
     init: function () {
+      /* a closure outlives a visit: drop yesterday's score so a page re-opened the next morning
+         does not paint the previous day's figure before asking for a new one */
+      RT.data = null; RT.stop = null; RT.filter = '';
       acctChips();
-      load(false).catch(function () {});
+      load(false)['catch'](function () {});
       /* today moves every 5 minutes; adtPoll waits on hidden tabs and stops on an 'auth' refusal (session-expiry law) */
       adtPoll('rtBody', 300000, function () { return load(true); });
     }
@@ -75,18 +91,32 @@
     var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { RT.account = this.getAttribute('data-a'); acctChips(); load(false); };
   }
   function load(quiet) {
-    return api('adtoolRunToday', RT.account ? { account: RT.account } : {}).then(function (D) {
-      RT.data = D || {};
+    /* the rows, the weekday verdict and this morning's decision all come off adtoolRunToday, one
+       row per listing. adtoolStopToday is read for ONE figure, yesterday's score, which is a
+       finished day and does not move: it is asked for once when the page opens and not again on
+       the 5-minute poll. It is fleet-wide and may be off or empty, so it can never hold the page
+       back — its own tile says so instead. */
+    var a = api('adtoolRunToday', RT.account ? { account: RT.account } : {}).then(function (D) { RT.data = D || {}; });
+    var b = RT.stop ? Promise.resolve()
+      : api('adtoolStopToday', {}).then(function (D) { RT.stop = D || {}; })['catch'](function (e) { RT.stop = { error: (e && e.message) || 'could not load' }; });
+    return Promise.all([a, b]).then(function () {
       if (!$('rtBody')) return;
       acctChips();
       draw();
-      adtFreshShow('rtFresh', D && D.fresh);
-    }).catch(function (e) { if (!quiet) fail(e); throw e; });
+      adtFreshShow('rtFresh', RT.data && RT.data.fresh);
+    })['catch'](function (e) { if (!quiet) fail(e); throw e; });
   }
 
   /* the verdict order is the action order: stop first (money leaking now), then run, then watch;
      inside a verdict the listing spending most today comes first */
   var ORDER = { stop: 0, run: 1, watch: 2 };
+  function decisionOf(r) { return String((r && r.morning_decision && r.morning_decision.decision) || '').toUpperCase(); }
+  function rowPasses(r) {
+    var f = RT.filter;
+    if (!f) return true;
+    if (DECISIONS[f]) return decisionOf(r) === f;
+    return String(r.verdict || 'watch').toLowerCase() === f;
+  }
   function draw() {
     var D = RT.data, rows = (D.rows || []).filter(function (r) { return r && typeof r === 'object'; });
     var counts = D.counts || {};
@@ -95,21 +125,73 @@
     var P = D.period, when = P && (P.label || P.from) ? adtPeriodText(P) : 'today';
     h += '<div class="rt-top"><span>' + esc(when) + '</span><span>·</span><span>' + esc(RT.account || 'all accounts') + '</span><span>·</span><span>' + rows.length + ' advertised listing' + (rows.length === 1 ? '' : 's') + '</span>' +
       (D.computed_at ? '<span>·</span><span>updated ' + esc(hhmm(D.computed_at)) + '</span>' : '') + src('run today verdict') + '</div>';
+    h += '<div class="rt-cap">On the last four same weekdays</div>';
     h += '<div class="rt-counts">' + [['stop', 'Stop today', 'lost on 3 of the last 4 same weekdays and over the last 7 days'], ['run', 'Run today', 'earned on the last same weekdays, or earning over 7 days above break-even'], ['watch', 'Watch', 'some orders are not costed yet, so we cannot say']].map(function (x) {
       return '<div class="rt-c ' + x[0] + (RT.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '"><div class="k">' + esc(x[1]) + '</div><div class="v">' + cnt(counts[x[0]]) + '</div><div class="d">' + esc(x[2]) + '</div></div>';
     }).join('') + '</div>';
-    h += '<div class="rt-note"><b>How to read a row.</b> <b>Stop</b> means the listing lost money on at least three of the last four same weekdays and over the last 7 days. <b>Run</b> means it made money. <b>Watch</b> means some orders are not costed yet, so we cannot say. Hours are a suggestion only, as eBay cannot schedule ads by the hour. Nothing here is sent to eBay.</div>';
-    h += '<div class="an-filters">' + [['', 'All'], ['stop', 'Stop'], ['run', 'Run'], ['watch', 'Watch']].map(function (x) { return '<button class="' + (RT.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
-    var shown = rows.filter(function (r) { return !RT.filter || String(r.verdict || 'watch').toLowerCase() === RT.filter; })
+    h += decisionTiles();
+    h += '<div class="rt-note"><b>How to read a row.</b> <b>Stop</b> means the listing lost money on at least three of the last four same weekdays and over the last 7 days. <b>Run</b> means it made money. <b>Watch</b> means some orders are not costed yet, so we cannot say. The <b>Stop, Reduce, Push and Keep</b> tiles are this morning\'s own call on each listing, scored the next day against the profit it actually made. The hours on a row are a suggestion: eBay cannot schedule ads by the hour, and the only place the portal switches an ad at an hour of its own is <a href="#adtoolPeak" style="color:var(--gold-a);font-weight:800">Peak time listings</a>, for the listings Management puts on that list.</div>';
+    h += '<div class="an-filters">' + [['', 'All'], ['stop', 'Stop'], ['run', 'Run'], ['watch', 'Watch'], ['REDUCE', 'Reduce'], ['PUSH', 'Push']].map(function (x) { return '<button class="' + (RT.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    var shown = rows.filter(rowPasses)
       .sort(function (a, b) { var oa = ORDER[String(a.verdict || 'watch').toLowerCase()], ob = ORDER[String(b.verdict || 'watch').toLowerCase()]; if (oa == null) oa = 3; if (ob == null) ob = 3; if (oa !== ob) return oa - ob; return (num(b.today && b.today.spend) || 0) - (num(a.today && a.today.spend) || 0); });
-    if (!shown.length) { h += '<div class="rt-empty">' + (rows.length ? 'No listing carries this verdict today.' : 'No ad figures from eBay yet today. They start arriving around 08:00 UK.') + '</div>'; }
-    else {
+    if (!shown.length) {
+      h += '<div class="rt-empty">' + (!rows.length ? 'No ad figures from eBay yet today. They start arriving around 08:00 UK.'
+        : (DECISIONS[RT.filter] ? 'No listing here carries that decision this morning.' : 'No listing carries this verdict today.')) + '</div>';
+    } else {
       h += '<div class="an-scroll"><table class="rt-tbl"><thead><tr><th>Listing</th><th>Why' + src('run today verdict') + '</th><th>Last 4 same weekdays</th><th>Today so far' + src('today grain', 'today\'s samples') + '</th><th>Hours today' + src('hour bands', 'hours') + '</th><th>Best week · decision</th><th>What to change · who</th></tr></thead><tbody>' +
         shown.map(rowHtml).join('') + '</tbody></table></div>';
     }
     h += '<div class="rt-sm" style="margin-top:8px">' + esc(D.source || '') + '</div>';
     $('rtBody').innerHTML = h;
     var fs = document.querySelectorAll('#rtBody [data-f]'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { var f = this.getAttribute('data-f'); RT.filter = RT.filter === f && this.classList.contains('rt-c') ? '' : f; draw(); };
+  }
+
+  /* (b) the four decision tiles beside the weekday verdict, plus yesterday's score. Both Stop tiles
+     stand: the one above counts the weekday-history verdict, this one counts the stop calls the
+     morning run made. They answer different questions and can disagree, which is the point.
+     THE TILES COUNT THE ROWS UNDER THEM. They used to add up adtoolStopToday's own tally, which
+     groups by batch as well as by decision, so a listing decided in the evening run and again in
+     the morning run was counted twice and every tile stood above a shorter list; it was also
+     fleet-wide while the list below it followed the account chip. Both are gone by construction:
+     the decision comes off the same `rows` the Reduce and Push buttons filter, one per listing,
+     already narrowed to the chosen account. adtoolStopToday is left with yesterday's score alone. */
+  function decisionTiles() {
+    var S = RT.stop;
+    var rows = ((RT.data && RT.data.rows) || []).filter(function (r) { return r && typeof r === 'object'; });
+    var plain = function (k, v, d, cls) { return '<div class="rt-c ' + cls + '"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div><div class="d">' + d + '</div></div>'; };
+    var counts = {}, none = 0;
+    rows.forEach(function (r) {
+      var d = decisionOf(r);
+      if (!d) { none++; return; }
+      var c = String((r.morning_decision && r.morning_decision.confidence) || '').toLowerCase();
+      counts[d] = (counts[d] || 0) + 1;
+      if (c) counts[d + '|' + c] = (counts[d + '|' + c] || 0) + 1;
+    });
+    var cap = '<div class="rt-cap">This morning\'s own call on each listing · ' + esc(RT.account || 'all accounts') +
+      (none ? ' · ' + none + ' of them have no decision this morning' : '') + '</div>';
+    var conf = function (k) {
+      var c = counts[k + '|confident'] || 0, w = counts[k + '|watch'] || 0;
+      if (!c && !w) return 'no confidence recorded';
+      return c + ' confident' + (w ? ' · ' + w + ' watch' : '');
+    };
+    /* the tile is the FINAL scores only; a score still waiting on costs / fees / the ads report is named
+       beside it, never counted — the engine re-scores it on later runs (outcome_provisional) */
+    var ySc = (S && S.yesterday_score) || {};
+    var yProv = Number(ySc.provisional) || 0, yN = Number(ySc.n) || 0;
+    var yTile, ySub;
+    if (!S) { yTile = '—'; ySub = 'not available yet'; }
+    else if (S.error) { yTile = '—'; ySub = 'could not be read: ' + esc(String(S.error)); }
+    else {
+      yTile = yN ? Number(ySc.r) + ' of ' + yN + (yProv ? ' <span class="rt-dim">· ' + yProv + ' still updating</span>' : '') : (yProv ? '<span class="rt-dim">' + yProv + ' still updating</span>' : '—');
+      ySub = yN ? Math.round(Number(ySc.r) / yN * 100) + ' % right' + (yProv ? ' (we check the rest again as costs and eBay figures land)' : '') : (yProv ? 'no final score yet, we check again as costs and eBay figures land' : 'nothing scored yet');
+    }
+    return cap + '<div class="rt-counts">' +
+      plain('Stop', String(counts.STOP || 0), esc(conf('STOP')) + ' · this morning\'s call, scored tomorrow', 'd-stop') +
+      plain('Reduce', String(counts.REDUCE || 0), esc(conf('REDUCE')), 'd-reduce') +
+      plain('Push', String(counts.PUSH || 0), esc(conf('PUSH')), 'd-push') +
+      plain('Keep', String(counts.KEEP || 0), 'left alone', 'd-keep') +
+      plain('Yesterday\'s score · all accounts', yTile, ySub, 'd-score') +
+      '</div>';
   }
 
   function rowHtml(r) {
@@ -131,10 +213,10 @@
     var best = '<div class="rt-sm">' + (BW && (BW.week || num(BW.spend) != null) ? 'best week <b>' + esc(String(BW.week || '')) + '</b>: ' + gbp(BW.spend) + ' spend → ' + gbp(BW.attr_revenue) + ' sales from ads · profit ' + adtProfitCell(BW.actual_profit, BW.pending_cost_orders, BW.pending_fee_orders) : 'no best week yet') + '</div>';
     /* the chip is the STOP / REDUCE / PUSH label (`decision`); the prose `action` follows it; older answers carried only the prose */
     var decLabel = MD ? String(MD.decision || '').toUpperCase() : '';
-    best += MD && (MD.decision || MD.action || MD.why) ? '<div class="rt-sm" style="margin-top:6px"><span class="rt-dec ' + esc(decLabel) + '">' + esc(decLabel || 'decision') + '</span> ' + (MD.action ? '<b>' + esc(String(MD.action)) + '</b> · ' : '') + esc(String(MD.why || '')) + (MD.batch ? ' <span class="adt-pf-p">· ' + esc(String(MD.batch) === 'boundary' ? 'evening' : String(MD.batch)) + ' run, nothing sent to eBay</span>' : '') + '</div>' : '<div class="rt-sm" style="margin-top:6px">no morning decision</div>';
+    best += MD && (MD.decision || MD.action || MD.why) ? '<div class="rt-sm" style="margin-top:6px"><span class="rt-dec ' + esc(decLabel) + '">' + esc(decLabel || 'decision') + '</span> ' + (MD.action ? '<b>' + esc(String(MD.action)) + '</b> · ' : '') + esc(String(MD.why || '')) + (MD.batch ? ' <span class="adt-pf-p">· ' + esc(String(MD.batch) === 'boundary' ? 'evening' : String(MD.batch)) + ' run</span>' : '') + '</div>' : '<div class="rt-sm" style="margin-top:6px">no morning decision</div>';
     return '<tr class="' + esc(v) + '"><td>' + adtVerdictPill(v) + '<div style="margin-top:6px">' + adtProductCell(r) + '</div></td>' +
       '<td>' + why + '</td>' +
-      '<td>' + miniBars(hist) + '</td>' +
+      '<td>' + weekdayBars(hist) + '</td>' +
       '<td>' + today + '</td>' +
       '<td>' + adtHourStrip(r.hour_bands) + '</td>' +
       '<td>' + best + '</td>' +
@@ -153,30 +235,34 @@
     return out + ' today so far ' + gbp(T.spend) + ' spend, ' + cnt(T.attr_units) + ' units.';
   }
 
-  /* four small bars of the listing's own profit on the last four same weekdays, value pills from the
-     chart kit. chartBars draws at 980 units wide and would shrink its labels past reading in a table cell,
-     so this is the same idea at a cell's size. Gold = earned, #e0563f = lost, faint = not fully priced. */
-  function miniBars(hist) {
+  /* (a) the last four same weekdays, at a size that can be read. Each bar is the listing's OWN profit
+     on that weekday — gold earned, #e0563f lost, faint when not every order is costed — and every bar
+     carries its figure, so the four add up to the profit the Why column states. chartBars draws at
+     980 units wide and would shrink its labels past reading inside a table cell, so this is the same
+     idea, with the same value pills, at a cell's size. */
+  function weekdayBars(hist) {
     var rows = hist.slice(-4);
     if (!rows.length) return '<div class="rt-sm">no same-weekday history</div>';
-    var W = 230, H = 84, L = 6, R = 6, T = 18, B = 16, mx = 1;
+    var W = 300, H = 200, L = 8, R = 8, T = 14, B = 34, mx = 1;
     rows.forEach(function (r) { mx = Math.max(mx, Math.abs(num(r.actual_profit) || 0)); });
     var anyNeg = rows.some(function (r) { return (num(r.actual_profit) || 0) < 0; });
-    var zero = anyNeg ? T + (H - T - B) / 2 : H - B, scale = (zero - T) / mx, bw = (W - L - R) / rows.length;
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:230px;max-width:100%;height:auto;display:block" role="img">';
+    var base = H - B, zero = anyNeg ? (T + base) / 2 : base;
+    /* every bar is labelled, so a bar may only climb as far as leaves its own pill room */
+    var scale = Math.max(10, (zero - T) - 18) / mx, bw = (W - L - R) / rows.length;
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:300px;max-width:100%;height:auto;display:block" role="img">';
     s += '<line x1="' + L + '" y1="' + zero.toFixed(1) + '" x2="' + (W - R) + '" y2="' + zero.toFixed(1) + '" stroke="rgba(255,255,255,.14)" stroke-width="1"/>';
     var dots = [];
     rows.forEach(function (r, i) {
-      var v = num(r.actual_profit), unp = isUnpriced(r), uc = unpricedCount(r), noRow = r.has_row === false, hgt = Math.max(1.5, Math.abs(v || 0) * scale);
+      var v = num(r.actual_profit), unp = isUnpriced(r), uc = unpricedCount(r), noRow = r.has_row === false, hgt = Math.max(2, Math.abs(v || 0) * scale);
       if (noRow) v = null;
-      var x = L + i * bw + bw * 0.18, w = Math.max(2, bw * 0.64), y = (v || 0) >= 0 ? zero - hgt : zero;
+      var x = L + i * bw + bw * 0.18, w = Math.max(3, bw * 0.64), y = (v || 0) >= 0 ? zero - hgt : zero;
       var fill = v == null ? 'rgba(255,255,255,.12)' : (v < 0 ? LOSS : 'var(--gold-b)');
       var title = (r.day || '') + ' (' + wdOfDay(r.day) + ') · ' + (noRow ? 'no ads or orders' : 'spend ' + gbp(r.spend) + ' · ' + cnt(r.attr_units) + ' units from ads · profit ' + (v == null ? '—' : gbp(v)) + (unp ? ' · ' + (uc != null && uc > 0 ? uc + ' order' + (uc === 1 ? '' : 's') + ' not costed' : 'not fully costed') : ''));
-      s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) + '" rx="2" fill="' + fill + '"' + (unp ? ' opacity=".55"' : '') + '><title>' + esc(title) + '</title></rect>';
-      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle" font-size="8.5" fill="#66707c">' + esc(String(r.day || '').slice(5)) + '</text>';
-      dots.push({ x: x + w / 2, y: ((v || 0) >= 0 ? y : zero + hgt) + ((v || 0) >= 0 ? -9 : 10), label: v == null ? '—' : chartMoney(v) + (unp ? '*' : ''), title: title });
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) + '" rx="3" fill="' + fill + '"' + (unp ? ' opacity=".55"' : '') + '><title>' + esc(title) + '</title></rect>';
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="#66707c">' + esc(String(r.day || '').slice(5)) + '</text>';
+      dots.push({ x: x + w / 2, y: ((v || 0) >= 0 ? y : zero + hgt) + ((v || 0) >= 0 ? -11 : 12), label: v == null ? '—' : chartMoney(v) + (unp ? '*' : ''), title: title });
     });
-    s += chartValueDots(dots, { color: 'var(--gold-a)', ink: '#1c1200', fontSize: 8.5, minGap: 0 });
+    s += chartValueDots(dots, { color: 'var(--gold-a)', ink: '#1c1200', fontSize: 10, minGap: 0 });
     s += '</svg>';
     var anyUnp = rows.some(isUnpriced);
     return s + (anyUnp ? '<div class="rt-sm">* not every order costed yet</div>' : '');

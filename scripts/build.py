@@ -151,28 +151,31 @@ def build_frontend():
     return views
 
 
-# The company portal's ADVERTISING group, brought into the advertising portal as the same pages
-# (owner, 14 Oct). Files, not keys, because a file may carry more than one page: view-truthAds.js
-# holds Live listings and Wrong advertising, view-cpc.js holds Keyword approvals, and
-# view-deptTasks.js registers Advertising tasks inside a per-department loop.
+# The company portal's ADVERTISING pages brought into the advertising portal as the same files
+# (owner, 14 Oct; trimmed to the five the 28 Oct Change Spec keeps). Files, not keys, because a
+# file may carry more than one page (view-signals.js carries three; only adSignals is wanted here).
 ADS_MERGED_FILES = [
-    # view-deptTasks.js was spliced here for Advertising tasks until 18 Oct, when the owner said
-    # that page is not needed in this portal. Dropping the file also takes the Listing, Hunting,
-    # Orders and CS boards back out, which only ever arrived as passengers.
-    'view-signals.js',          # Advertising signals
+    # 28 Oct (owner's Change Spec): view-signals.js, view-campaignWatch.js, view-truthAds.js and
+    # view-cpc.js left this splice. Their pages fold into merged advertising pages (Past situation,
+    # Where each listing advertises, Entire live listings) and Keyword approvals leaves the portal.
+    # The company portal still splices every one of them, unchanged.
     'view-adsCentre.js',        # Ads command centre
     'view-marketing.js',        # Marketing
-    'view-campaignWatch.js',    # Campaign watch
     'view-traffic.js',          # Traffic
-    'view-truthAds.js',         # Live listings + Wrong advertising
-    'view-advertisingMoney.js', # Advertising
+    'view-advertisingMoney.js', # Advertising (money)
     'view-potential-cpc.js',    # Potential CPC
-    'view-cpc.js',              # Keyword approvals (and the hidden CPC research page)
+    # view-signals.js rides along HIDDEN: Past situation shows that day's advertising signals, but
+    # acknowledging one (comment required, server-enforced) lives on the signals page. It is not in
+    # ADS_MERGED, so it never appears in the sidebar; a hidden view is still routable by hash, and
+    # Past situation links to #adSignals for the acknowledgement. Its clock-in wrapper is already
+    # guarded by M98M_ADS_ONLY, so nothing else from that file wakes up here.
+    'view-signals.js',
 ]
-# The eleven pages the owner named, which the shell's ADS_MERGED allowlist must also carry.
-ADS_MERGED_KEYS = ['adSignals', 'adsCentre', 'marketing', 'campaignWatch',
-                   'traffic', 'liveSplit', 'wrongAds', 'advertising', 'potentialCpc',
-                   'keywordApprovals']
+# The five merged pages the 28 Oct spec keeps, which the shell's ADS_MERGED allowlist must also carry.
+# ADS_HIDDEN_KEYS ride along hidden (routable by hash, never in the sidebar): Past situation's
+# acknowledgement link opens #adSignals, so losing it would silently break that page.
+ADS_MERGED_KEYS = ['adsCentre', 'marketing', 'traffic', 'advertising', 'potentialCpc']
+ADS_HIDDEN_KEYS = ['adSignals']
 
 
 def build_ads():
@@ -238,13 +241,14 @@ def build_ads():
     if missing:
         sys.exit('ERROR: the ads build dropped %d advertising view(s) the modules declare: %s'
                  % (len(missing), ', '.join(missing)))
-    # The same tripwire for the merged pages. `tasksAds` is registered as VIEWS[D.key] inside a
-    # loop, so the regex above cannot see it; it is asserted by the loop's own marker instead.
+    # The same tripwire for the merged pages, and for the hidden page that must ride along.
     gone = [k for k in ADS_MERGED_KEYS if ('VIEWS.%s =' % k) not in page]
-    if gone:
-        sys.exit('ERROR: the ads build is missing %d merged advertising page(s): %s'
-                 % (len(gone), ', '.join(sorted(gone))))
+    gone_hidden = [k for k in ADS_HIDDEN_KEYS if ('VIEWS.%s =' % k) not in page]
+    if gone or gone_hidden:
+        sys.exit('ERROR: the ads build is missing %d merged/hidden advertising page(s): %s'
+                 % (len(gone) + len(gone_hidden), ', '.join(sorted(gone + gone_hidden))))
     print('ads -> merged company pages: %d of %d present' % (len(ADS_MERGED_KEYS) - len(gone), len(ADS_MERGED_KEYS)))
+    print('ads -> hidden company pages: %d of %d present' % (len(ADS_HIDDEN_KEYS) - len(gone_hidden), len(ADS_HIDDEN_KEYS)))
     return views
 
 

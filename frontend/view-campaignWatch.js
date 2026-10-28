@@ -276,7 +276,14 @@
         h += '<tr><td>' + esc(cwStr(r.account)) + '</td>' +
           '<td><div style="font-weight:700;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
           '<a href="https://www.ebay.co.uk/itm/' + esc(cwStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(cwStr(r.title) || cwStr(r.item_id)) + '</a></div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r.item_id)) + '</div></td>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(cwStr(r.item_id)) +
+          /* rule 2 of the spec: every listing row carries a History link to Product history, in BOTH
+             portals. This table is the company portal's only home for the in-no-campaign rows (the
+             advertising portal sends them to Where each listing advertises), so without this they
+             were the one set of listing rows in that build with no way through to their own
+             history: an eBay link and nothing else. */
+          (/^\d{9,13}$/.test(cwStr(r.item_id)) ? ' <a href="#adtoolProduct/' + esc(cwStr(r.item_id)) + '" target="_blank" rel="noopener" title="open this listing\'s Product history in a new tab" style="color:var(--gold-a);font-weight:700">History &#8599;</a>' : '') +
+          '</div></td>' +
           '<td class="cw-num">£' + (Number(r.price) || 0).toFixed(2) + '</td>' +
           '<td class="cw-num">' + (Number(r.sold_30d) || 0) + '</td></tr>';
       });
@@ -341,8 +348,9 @@
       h += '<li><span class="cw-when">' + esc(cwPKT(e.at)) + '</span>' + esc(cwStr(e.account)) + ' · ' + line + (cwStr(e.actor) ? ' · by ' + esc(cwStr(e.actor)) : '') + '</li>';
     });
     /* this feed is the LAST THIRTY changes of every kind, live. Whole days of them, read as stops and
-       starts with the listing behind each one, are on the two change pages, which keep a fortnight. */
-    h += '</ul><p style="margin:6px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">One whole day at a time, with the listings behind each change and a fortnight of archive, is on <a href="#adtoolStopped" style="color:var(--gold-a);font-weight:800">Stopped yesterday</a> and <a href="#adtoolActivated" style="color:var(--gold-a);font-weight:800">Activated today</a>.</p>';
+       starts with the listing behind each one, are on the change page, which keeps a fortnight. The
+       two change pages became one on 28 Oct, so this points at the one that remains. */
+    h += '</ul><p style="margin:6px 0 0;font-size:11.5px;color:var(--text-3);font-weight:600">One whole day at a time, both directions, with the listings behind each change and a fortnight of archive, is on <a href="#adtoolStopped" style="color:var(--gold-a);font-weight:800">Activated and stopped</a>.</p>';
     box.innerHTML = h;
   }
 

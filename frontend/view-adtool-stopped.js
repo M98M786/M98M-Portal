@@ -1,19 +1,16 @@
-/* view-adtool-stopped.js — Advertising · Stopped yesterday (owner's batch, 22 Oct 2026: "make a page
- * on portal that tells you the items you stopped yesterday ... keep the archive so that we can see
- * working archive ... add details that can give clear presentation about yesterday").
+/* view-adtool-stopped.js — Advertising · Activated and stopped (owner's Change Spec, 28 Oct 2026:
+ * "Activated & Stopped — MERGE: adtoolActivated + adtoolStopped, today + yesterday + archive").
  *
- * This file carries BOTH day pages. The owner asked for two screens that differ only in the direction
- * they look at, so there is one implementation here and the other registration lives in
- * view-adtool-activated.js, which calls the factory this file hands it on `window.adtChangeDayPage`.
- * One page, one set of words, one set of sums: the two screens can never come to disagree.
+ * One page where two used to be. It opens on today and the day before, each showing what was STARTED
+ * and what was STOPPED on that UK day, side by side; the 14-day strip and the date box open any
+ * other day, and the day before it comes with it. The two directions are two reads of the same
+ * action, so the same sums answer both halves and the page cannot come to disagree with itself.
  *
- * The day is a UK day, midnight to midnight, and any past day can be opened from the date box, the
- * previous and next buttons, or the 14-day strip, which is the working archive the owner asked for.
  * The reader is told, on the page and not in a footnote, which changes the tool itself made and which
  * were seen on eBay, because the sync cannot see who changed something on eBay and must never guess.
  *
  * Read-only: nothing on this page is ever sent to eBay. No profit above item level, by the Sales
- * Analysis law; these pages deal in stops, starts, spend, units and hours. Galaxy tokens only, gold
+ * Analysis law; this page deals in stops, starts, spend, units and hours. Galaxy tokens only, gold
  * the accent, #e0563f the loss colour. Engine action: adtoolChangeDay. Own class prefix: .cdy-
  */
 (function () {
@@ -34,15 +31,26 @@
     '.cdy-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:4px 12px;font:inherit;font-size:11.5px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}',
     '.cdy-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
     '.cdy-chip .n{opacity:.75;margin-left:6px;font-variant-numeric:tabular-nums}',
+    '.cdy-chip .up{color:var(--gold-a);font-weight:800}.cdy-chip .dn{color:' + LOSS + ';font-weight:800}',
+    '.cdy-chip.on .up,.cdy-chip.on .dn{color:var(--gold-ink)}',
     '.cdy-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}',
+    '.cdy-dayhd{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;margin:18px 0 8px}',
+    '.cdy-dayhd h2{margin:0;font-size:17px;font-weight:800;color:var(--text)}',
+    '.cdy-dayhd .w{font-size:12px;color:var(--text-3);font-weight:700}',
     '.cdy-line{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:13px;color:var(--text);line-height:1.6}',
     '.cdy-line b{color:var(--text)}',
-    '.cdy-tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
-    '.cdy-tile{flex:1 1 140px;border:1px solid var(--gold-line);border-radius:12px;padding:9px 13px;background:var(--panel-2)}',
-    '.cdy-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
-    '.cdy-tile .v{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.cdy-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}@media(max-width:900px){.cdy-pair{grid-template-columns:1fr}}',
+    '.cdy-half{border:1px solid var(--gold-line);border-radius:14px;padding:12px 14px;background:var(--panel)}',
+    '.cdy-half.start{border-color:rgba(242,176,53,.45)}',
+    '.cdy-half.stop{border-color:rgba(224,86,63,.45)}',
+    '.cdy-half h4{margin:0 0 8px;font-size:13px;font-weight:800;color:var(--text)}',
+    '.cdy-half.start h4{color:var(--gold-a)}.cdy-half.stop h4{color:' + LOSS + '}',
+    '.cdy-tiles{display:flex;gap:8px;flex-wrap:wrap}',
+    '.cdy-tile{flex:1 1 110px;border:1px solid var(--gold-line);border-radius:12px;padding:8px 11px;background:var(--panel-2)}',
+    '.cdy-tile .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
+    '.cdy-tile .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
     '.cdy-tile.gold .v{color:var(--gold-a)}.cdy-tile.loss .v{color:' + LOSS + '}',
-    '.cdy-tile .d{font-size:11px;color:var(--text-2);margin-top:2px;line-height:1.45}',
+    '.cdy-tile .d{font-size:10.5px;color:var(--text-2);margin-top:2px;line-height:1.45}',
     '.cdy-who{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}',
     '.cdy-whoc{flex:1 1 240px;border:1px solid var(--gold-line);border-radius:14px;padding:12px 15px;background:var(--panel)}',
     '.cdy-whoc.tool{border-color:var(--gold-b);background:rgba(242,176,53,.08)}',
@@ -67,6 +75,9 @@
     '.cdy-tbl tr.start td:first-child{box-shadow:inset 3px 0 0 var(--gold-b)}',
     '.cdy-scroll{overflow-x:auto}',
     '.cdy-when{white-space:nowrap;font-weight:700}',
+    '.cdy-dir{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border:1px solid var(--gold-line);color:var(--text-2)}',
+    '.cdy-dir.on{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
+    '.cdy-dir.off{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
     '.cdy-kind{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:800;white-space:nowrap;border:1px solid var(--gold-line);color:var(--text-2)}',
     '.cdy-kind.off{color:#ffb3a6;border-color:rgba(224,86,63,.5)}',
     '.cdy-kind.on{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
@@ -86,7 +97,7 @@
     '.cdy-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}'
   ].join(''));
 
-  /* ── the two directions, in the owner's words ─────────────────────────────────────────────────── */
+  /* ── the two directions, in the owner's words ─────────────────────────────────────────────── */
   var KINDS = {
     stopped: [
       ['ad_paused', 'ad paused'],
@@ -103,15 +114,17 @@
       ['campaign_created', 'new campaign']
     ]
   };
-  function kindWord(direction, k) {
-    var list = KINDS[direction] || [], i;
-    for (i = 0; i < list.length; i++) { if (list[i][0] === k) return list[i][1]; }
-    list = (KINDS.stopped).concat(KINDS.activated);
+  function kindWord(k) {
+    var list = KINDS.stopped.concat(KINDS.activated), i;
     for (i = 0; i < list.length; i++) { if (list[i][0] === k) return list[i][1]; }
     return String(k || '').replace(/_/g, ' ') || 'change';
   }
+  function dirWord(dir, cap) {
+    var w = dir === 'activated' ? 'started' : 'stopped';
+    return cap ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+  }
 
-  /* ── formatters. a figure with nothing behind it prints the empty marker, never a zero ────────── */
+  /* ── formatters. a figure with nothing behind it prints the empty marker, never a zero ─────── */
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
   function gbp(n) { var v = num(n); if (v == null) return '—'; return (v < 0 ? '−£' : '£') + Math.abs(v).toFixed(2); }
   function cnt(n) { var v = num(n); return v == null ? '—' : Math.round(v).toLocaleString('en-GB'); }
@@ -125,8 +138,8 @@
     return (Math.abs(v) < 10 && v !== Math.round(v)) ? v.toFixed(1) : Math.round(v).toLocaleString('en-GB');
   }
   function unitsWord(n) { var v = num(n); return unitsNum(n) + ' unit' + (v === 1 ? '' : 's'); }
-  /* the explainer hook. Only these four labels have a pattern of their own in the register map, so
-     only these four are ever used: an unknown label opens the whole register, which is noise. */
+  /* the explainer hook. Only these labels have a pattern of their own in the register map, so only
+     these are ever used: an unknown label opens the whole register, which is noise. */
   function reg(label, shown) {
     return '<span class="cdy-reg" data-adtreg="' + esc(label) + '" title="how is this worked out">' + esc(shown || label) + '</span>';
   }
@@ -149,6 +162,10 @@
     var t = new Date(d + 'T12:00:00Z'); if (isNaN(t.getTime())) return d;
     try { return t.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }); } catch (e) { return d.slice(5); }
   }
+  function dayWord(d) {
+    var today = adtUkDay();
+    return d === today ? 'today' : (d === dayShift(today, -1) ? 'yesterday' : '');
+  }
   /* the engine sends the UK clock time on at_uk; at_utc is the fallback and is converted here */
   function ukClock(r) {
     var a = String((r && r.at_uk) || '');
@@ -168,496 +185,555 @@
   }
   function isCampaignRow(r) { return !String((r && r.item_id) || '').trim(); }
 
-  /* ── one page, built for a direction ─────────────────────────────────────────────────────────── */
-  function makePage(cfg) {
-    cfg = cfg || {};
-    var DIR = cfg.direction === 'activated' ? 'activated' : 'stopped';
-    var ID = String(cfg.id || ('cdy' + DIR));
-    var BODY = ID + 'Body', ACCT = ID + 'Acct', FRESH = ID + 'Fresh', DATE = ID + 'Date';
-    var WORD = DIR === 'activated' ? 'started' : 'stopped';
-    var S = { day: '', account: '', kind: '', data: null };
+  /* ── the page's own state. `day` is the day at the top; the block under it is the day before ── */
+  var S = { day: '', account: '', dir: '', kind: '', got: {}, err: {}, busy: false };
 
-    function title() { return cfg.title || (DIR === 'activated' ? 'Activated today' : 'Stopped yesterday'); }
-    function sub() {
-      return cfg.sub || (DIR === 'activated'
-        ? 'Every ad and campaign started on a chosen UK day'
-        : 'Every ad and campaign stopped on a chosen UK day');
-    }
-
-    function render() {
-      return '<div class="cdy-wrap">' + adtHgroup(title(), sub(), FRESH) +
-        '<div id="' + ID + 'Day" class="cdy-day"></div>' +
-        '<div id="' + ID + 'Strip" class="cdy-strip"></div>' +
-        '<div id="' + ACCT + '" class="cdy-filters"></div>' +
-        '<div id="' + BODY + '"><div class="cdy-empty">Loading…</div></div></div>';
-    }
-
-    function init() {
-      dayBar();
-      load(false).catch(function () {});
-      /* today moves while the page is open; adtPoll skips hidden tabs and stops on an 'auth' refusal */
-      adtPoll(BODY, 120000, function () { return shownDay() === adtUkDay() ? load(true) : Promise.resolve(); });
-    }
-
-    function shownDay() { return dayOk(S.day) || dayOk(S.data && S.data.day); }
-
-    function load(quiet) {
-      var p = {};
-      if (dayOk(S.day)) p.day = dayOk(S.day);
-      if (S.account) p.account = S.account;
-      p.direction = DIR;
-      return api('adtoolChangeDay', p).then(function (D) {
-        S.data = D || {};
-        if (dayOk(S.data.day)) S.day = dayOk(S.data.day);
-        if (!$(BODY)) return;
-        dayBar();
-        acctChips();
-        draw();
-        adtFreshShow(FRESH, S.data.fresh);
-      }).catch(function (e) {
-        if (!quiet && $(BODY)) {
-          $(BODY).innerHTML = '<div class="cdy-panel"><h3>Not available</h3><div class="cdy-sub">' +
-            esc((e && e.message) || 'This page could not load.') + '</div></div>';
-        }
-        throw e;
-      });
-    }
-
-    /* ── the day picker and the 14-day working archive ─────────────────────────────────────────── */
-    function archive() {
-      var A = (S.data && S.data.archive) || [];
-      return A.filter(function (a) { return a && dayOk(a.day); });
-    }
-    function archiveCount(a) { return DIR === 'activated' ? num(a.activated) : num(a.stopped); }
-    function dayBar() {
-      var el = $(ID + 'Day');
-      if (el) {
-        var d = shownDay(), today = adtUkDay(), atEnd = !d || d >= today;
-        el.innerHTML = '<button class="cdy-btn" data-cdystep="-1"' + (d ? '' : ' disabled') + '>Previous day</button>' +
-          '<input type="date" id="' + DATE + '" value="' + esc(d) + '" max="' + esc(today) + '">' +
-          '<button class="cdy-btn" data-cdystep="1"' + (atEnd ? ' disabled' : '') + '>Next day</button>' +
-          (d === today ? '' : '<button class="cdy-btn go" data-cdyday="' + esc(DIR === 'activated' ? today : dayShift(today, -1)) + '">' +
-            (DIR === 'activated' ? 'Today' : 'Yesterday') + '</button>') +
-          '<span class="cdy-daytxt">' + esc(d ? dayLong(d) + (d === today ? ' (today)' : '') : 'no day chosen yet') + '</span>';
-        var inp = $(DATE);
-        if (inp) inp.onchange = function () { var v = dayOk(this.value); if (v) go(v); };
-        var bs = el.querySelectorAll('[data-cdystep]');
-        for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
-          var step = Number(this.getAttribute('data-cdystep')) || 0, base = shownDay() || adtUkDay();
-          var next = dayShift(base, step);
-          if (next && next <= adtUkDay()) go(next);
-        };
-        var gs = el.querySelectorAll('[data-cdyday]');
-        for (var g = 0; g < gs.length; g++) gs[g].onclick = function () { go(this.getAttribute('data-cdyday')); };
-      }
-      var strip = $(ID + 'Strip');
-      if (!strip) return;
-      var A = archive();
-      if (!A.length) { strip.innerHTML = ''; return; }
-      var cur = shownDay();
-      strip.innerHTML = '<span class="cdy-daytxt" style="align-self:center;margin-right:4px">Last ' + A.length + ' days</span>' +
-        A.map(function (a) {
-          var n = archiveCount(a);
-          return '<button class="cdy-chip' + (a.day === cur ? ' on' : '') + '" data-cdyday="' + esc(a.day) + '" title="' +
-            esc(dayLong(a.day) + ': ' + cnt(n) + ' ' + WORD) + '">' + esc(dayShort(a.day)) +
-            '<span class="n">' + cnt(n) + '</span></button>';
-        }).join('');
-      var cs = strip.querySelectorAll('[data-cdyday]');
-      for (var c = 0; c < cs.length; c++) cs[c].onclick = function () { go(this.getAttribute('data-cdyday')); };
-    }
-    function go(day) {
-      day = dayOk(day); if (!day) return;
-      S.day = day; S.kind = '';
-      dayBar();
-      load(false).catch(function () {});
-    }
-
-    /* ── account chips ─────────────────────────────────────────────────────────────────────────── */
-    function accountRows() {
-      var A = (S.data && S.data.accounts) || [];
-      return A.filter(function (a) { return a && typeof a === 'object' && a.account; });
-    }
-    /* EVERY account, not only the ones with a change on this day. The engine sends the whole list on
-       all_accounts for exactly this reason: a chip reloads the page for one account, and the answer it
-       sends back then names only that account, so a list built from the answer would strand the reader
-       on whichever account they picked first. */
-    function accountNames() {
-      var all = (((S.data && S.data.all_accounts) || [])
-        .map(function (a) { return typeof a === 'string' ? a : (a && a.account); })
-        .filter(Boolean));
-      if (all.length) return all;
-      var names = accountRows().map(function (a) { return a.account; });
-      if (!names.length) {
-        var seen = {};
-        rows().forEach(function (r) { if (r.account && !seen[r.account]) { seen[r.account] = 1; names.push(r.account); } });
-        names.sort();
-      }
-      return names;
-    }
-    function acctChips() {
-      var el = $(ACCT); if (!el) return;
-      var by = {};
-      accountRows().forEach(function (a) { by[a.account] = num(a.ads); });
-      el.innerHTML = '<button class="cdy-chip' + (S.account ? '' : ' on') + '" data-cdya="">All accounts</button>' +
-        accountNames().map(function (a) {
-          return '<button class="cdy-chip' + (S.account === a ? ' on' : '') + '" data-cdya="' + esc(a) + '">' + esc(a) +
-            (by[a] == null ? '' : '<span class="n">' + cnt(by[a]) + '</span>') + '</button>';
-        }).join('');
-      var bs = el.querySelectorAll('[data-cdya]');
-      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
-        S.account = this.getAttribute('data-cdya') || '';
-        S.kind = '';
-        acctChips();
-        /* ASK AGAIN rather than filter what is in hand. The counts above come from the engine and
-           cover every change on the day, so filtering here would leave one account's rows sitting
-           under the whole fleet's totals; and the engine caps its rows, so asking for one account
-           is also the only way to see more of them. */
-        load(false).catch(function () {});
-      };
-    }
-
-    function rows() {
-      return ((S.data && S.data.rows) || []).filter(function (r) { return r && typeof r === 'object'; });
-    }
-    function shownRows() {
-      return rows().filter(function (r) {
-        if (S.account && String(r.account || '') !== S.account) return false;
-        if (S.kind && String(r.kind || '') !== S.kind) return false;
-        return true;
-      });
-    }
-
-    /* ── 1 · the day in one line ───────────────────────────────────────────────────────────────── */
-    /* the engine sends the summary; when a field is missing the page counts the same thing from the
-       rows it has, so a thin answer still reads as a day rather than as a row of dashes */
-    function summary() {
-      var raw = (S.data && S.data.summary) || {};
-      var R = rows(), ads = 0, items = {}, camps = {}, campLvl = 0, tool = 0, ebay = 0, moved = 0;
-      R.forEach(function (r) {
-        var id = String(r.item_id || '').trim();
-        if (id) { ads++; items[id] = 1; } else { campLvl++; }
-        var ck = String(r.campaign_id || r.campaign_name || '');
-        if (ck) camps[r.account + '|' + ck] = 1;
-        if (String(r.who || '') === 'tool') tool++; else ebay++;
-        if (/_(removed|added)$/.test(String(r.kind || '')) && id) moved++;
-      });
-      var pick = function (k, fallback) { var v = num(raw[k]); return v == null ? fallback : v; };
-      /* `campaigns` is how many of the changes were AT campaign level; `campaigns_touched` is how many
-         campaigns the day's changes landed in at all. A day of ninety paused ads inside six campaigns
-         that were never themselves touched has none of the first and six of the second, so one number
-         cannot stand for both and the page names each where it prints it. */
-      return {
-        ads: pick('ads', ads),
-        listings: pick('listings', Object.keys(items).length),
-        campaigns: pick('campaigns', campLvl),
-        campaigns_touched: pick('campaigns_touched', Object.keys(camps).length),
-        removed_or_added: pick('removed_or_added', moved),
-        spend_day_before: num(raw.spend_day_before),
-        units_day_before: num(raw.units_day_before),
-        by_tool: pick('by_tool', tool),
-        by_ebay: pick('by_ebay', ebay)
-      };
-    }
-    /* `hook` is the explainer tag ALREADY BUILT by the caller, so the label it carries is a literal
-       at the call site where a reader of this file can see which note that tile opens. */
-    function tile(k, v, d, cls, hook) {
-      return '<div class="cdy-tile ' + (cls || '') + '"><div class="k">' + esc(k) + (hook || '') +
-        '</div><div class="v">' + v + '</div><div class="d">' + esc(d) + '</div></div>';
-    }
-    function oneLine(T) {
-      var d = shownDay(), today = adtUkDay();
-      var when = d ? dayLong(d) + (d === today ? ' (today)' : (d === dayShift(today, -1) ? ' (yesterday)' : '')) : 'this day';
-      var h = '<div class="cdy-line"><b>' + esc(when) + '.</b> ' +
-        (n0(T.ads) || n0(T.campaigns)
-          ? cnt(T.ads) + ' ' + plural(T.ads, 'ad was ', 'ads were ') + WORD + ' on ' + cnt(T.listings) + ' ' +
-            plural(T.listings, 'listing', 'listings') + ' across ' + cnt(T.campaigns_touched) + ' ' +
-            plural(T.campaigns_touched, 'campaign', 'campaigns') +
-            (n0(T.campaigns) ? ', and ' + cnt(T.campaigns) + ' ' + plural(T.campaigns, 'campaign was', 'campaigns were') + ' ' + WORD + ' outright' : '') +
-            esc(S.account ? ', on ' + S.account : '') + '. '
-          : 'Nothing was ' + WORD + ' on this day' + esc(S.account ? ' on ' + S.account : '') + '. ');
-      if (T.spend_day_before != null || T.units_day_before != null) {
-        h += 'Over the 7 days before, those listings were spending <b>' + gbp(T.spend_day_before) + ' a day</b> and selling <b>' +
-          unitsWord(T.units_day_before) + ' a day</b>. ';
-      }
-      h += 'The tool made <b>' + cnt(T.by_tool) + '</b> of the changes and <b>' + cnt(T.by_ebay) +
-        '</b> ' + plural(T.by_ebay, 'was', 'were') + ' seen on eBay.</div>';
-      return h;
-    }
-    /* the hook label is a LITERAL at every call site: the explainer resolves it through the shell's
-       map of label to note, and a label that is assembled somewhere else cannot be checked. */
-    function tiles(T) {
-      return '<div class="cdy-tiles">' +
-        tile(DIR === 'activated' ? 'Ads started' : 'Ads stopped', cnt(T.ads), 'changes at ad level', DIR === 'activated' ? 'gold' : 'loss', reg('changes on this day', 'how')) +
-        tile('Listings', cnt(T.listings), 'listings behind those ads', '', reg('changes on this day', 'how')) +
-        tile('Campaigns', cnt(T.campaigns_touched),
-          'campaigns the changes landed in' + (n0(T.campaigns) ? ', ' + cnt(T.campaigns) + ' ' + plural(T.campaigns, 'change was', 'changes were') + ' to a campaign itself' : ''), '', reg('changes on this day', 'how')) +
-        tile(DIR === 'activated' ? 'Added to campaigns' : 'Taken out of campaigns', cnt(T.removed_or_added),
-          DIR === 'activated' ? 'ads that joined a campaign' : 'ads that left a campaign', '', reg('changes on this day', 'how')) +
-        tile('Was spending a day', gbp(T.spend_day_before), 'those listings, over the 7 days before', 'gold', reg('the 7 days before', 'how')) +
-        tile('Was selling a day', unitsNum(T.units_day_before), 'units a day, over the 7 days before', '', reg('the 7 days before', 'how')) +
-        '</div>';
-    }
-    /* the split a manager asks for first, so it is a panel of its own and not a line in a table */
-    function whoBlock(T) {
-      var t = n0(T.by_tool), e = n0(T.by_ebay), tot = t + e;
-      var pct = tot > 0 ? Math.round(t / tot * 100) : 0;
-      return '<div class="cdy-panel"><h3>Who made these changes' + reg('who changed it', 'how') + '</h3>' +
-        '<div class="cdy-sub">Our own tool against everything else. The portal cannot see who made a change on eBay, so those are never put to a name.</div>' +
-        (tot > 0 ? '<div class="cdy-split"><span class="t" style="width:' + pct + '%"></span><span class="e" style="width:' + (100 - pct) + '%"></span></div>' : '') +
-        '<div class="cdy-who">' +
-        '<div class="cdy-whoc tool"><div class="k">The tool made</div><div class="v">' + cnt(t) + '</div>' +
-        '<div class="d">' + (tot > 0 ? pct + '% of the day' : 'nothing yet') + ', written in its own log with the operation and whether it was sent</div></div>' +
-        '<div class="cdy-whoc"><div class="k">Seen on eBay</div><div class="v">' + cnt(e) + '</div>' +
-        '<div class="d">' + (tot > 0 ? (100 - pct) + '% of the day' : 'nothing yet') + ', found by the sync comparing eBay against the last read, so the portal cannot see who</div></div>' +
-        '</div></div>';
-    }
-
-    /* ── 2 · by account ────────────────────────────────────────────────────────────────────────── */
-    function accountPanel(T) {
-      var A = accountRows();
-      if (!A.length) return '';
-      var sums = { ads: 0, campaigns: 0, touched: 0, listings: 0, spend: 0, haveSpend: false };
-      A.forEach(function (a) {
-        sums.ads += n0(a.ads); sums.campaigns += n0(a.campaigns); sums.touched += n0(a.campaigns_touched); sums.listings += n0(a.listings);
-        var v = num(a.spend_day_before); if (v != null) { sums.spend += v; sums.haveSpend = true; }
-      });
-      return '<div class="cdy-panel"><h3>By account</h3>' +
-        '<div class="cdy-sub">The same day, account by account.</div>' +
-        '<div class="cdy-scroll"><table class="cdy-tbl"><thead><tr><th>Account</th>' +
-        '<th class="r">' + (DIR === 'activated' ? 'Ads started' : 'Ads stopped') + '</th>' +
-        '<th class="r" title="campaigns the day\'s changes landed in, counted once each">Campaigns touched</th>' +
-        '<th class="r" title="changes to a campaign itself rather than to one of its ads">Campaign changes</th>' +
-        '<th class="r">Listings</th><th class="r">Was spending a day</th></tr></thead><tbody>' +
-        A.slice().sort(function (x, y) { return n0(y.ads) - n0(x.ads); }).map(function (a) {
-          return '<tr><td><b>' + esc(a.account) + '</b></td><td class="r">' + cnt(a.ads) + '</td>' +
-            '<td class="r">' + cnt(a.campaigns_touched) + '</td><td class="r">' + cnt(a.campaigns) + '</td>' +
-            '<td class="r">' + cnt(a.listings) + '</td>' +
-            '<td class="r">' + gbp(a.spend_day_before) + '</td></tr>';
-        }).join('') +
-        '<tr class="cdy-tot"><td>All accounts</td><td class="r">' + cnt(num(T.ads) != null ? T.ads : sums.ads) + '</td>' +
-        '<td class="r">' + cnt(num(T.campaigns_touched) != null ? T.campaigns_touched : sums.touched) + '</td>' +
-        '<td class="r">' + cnt(num(T.campaigns) != null ? T.campaigns : sums.campaigns) + '</td>' +
-        '<td class="r">' + cnt(num(T.listings) != null ? T.listings : sums.listings) + '</td>' +
-        '<td class="r">' + (num(T.spend_day_before) != null ? gbp(T.spend_day_before) : (sums.haveSpend ? gbp(sums.spend) : '—')) + '</td></tr>' +
-        '</tbody></table></div></div>';
-    }
-
-    /* ── 3 · the 14 days, the same counts as the strip above ───────────────────────────────────── */
-    function archivePanel() {
-      var A = archive();
-      if (A.length < 2) return '';
-      var pts = A.slice().reverse().map(function (a) {
-        var n = archiveCount(a);
-        return {
-          label: dayShort(a.day), value: n0(n), strong: a.day === shownDay(),
-          title: dayLong(a.day) + ': ' + cnt(num(a.stopped)) + ' stopped, ' + cnt(num(a.activated)) + ' started'
-        };
-      });
-      return '<div class="cdy-panel"><h3>The last ' + A.length + ' days' + reg('the change archive', 'how') + '</h3>' +
-        '<div class="cdy-sub">How many ads and campaigns were ' + WORD + ' each day. Click a day above to open it.</div>' +
-        chartBars(pts, { height: 150, fmt: chartNum, everyNth: 1 }) + '</div>';
-    }
-
-    /* ── 4 · the list ──────────────────────────────────────────────────────────────────────────── */
-    function kindChips() {
-      var R = rows().filter(function (r) { return !S.account || String(r.account || '') === S.account; });
-      var counts = {}, order = [];
-      R.forEach(function (r) {
-        var k = String(r.kind || '');
-        if (counts[k] == null) { counts[k] = 0; order.push(k); }
-        counts[k]++;
-      });
-      var known = (KINDS[DIR] || []).map(function (x) { return x[0]; });
-      var list = known.filter(function (k) { return counts[k]; }).concat(order.filter(function (k) { return known.indexOf(k) < 0; }));
-      if (!list.length) return '';
-      return '<div class="cdy-filters"><button class="cdy-chip' + (S.kind ? '' : ' on') + '" data-cdyk="">Everything<span class="n">' +
-        cnt(R.length) + '</span></button>' + list.map(function (k) {
-          return '<button class="cdy-chip' + (S.kind === k ? ' on' : '') + '" data-cdyk="' + esc(k) + '">' +
-            esc(kindWord(DIR, k)) + '<span class="n">' + cnt(counts[k]) + '</span></button>';
-        }).join('') + '</div>';
-    }
-
-    function whoCell(r) {
-      if (String(r.who || '') === 'tool') {
-        var t = r.tool || {};
-        /* the log's own mode words are not reader words: only 'live' means it reached eBay, and
-           everything else was written and held back, however the log spells it */
-        var mode = String(t.mode || '');
-        return '<div class="cdy-sm"><b>The tool</b>' + (t.op ? ' · ' + esc(String(t.op)) : '') + '</div>' +
-          '<div class="cdy-sm2">' + esc(mode === 'live' ? 'sent to eBay' : (mode ? 'written, not sent to eBay' : 'from the log of its own actions')) +
-          (t.decision_id ? ' · ' + esc(String(t.decision_id)) : '') + '</div>';
-      }
-      return '<div class="cdy-sm">Changed on eBay</div><div class="cdy-sm2">the portal cannot see who</div>';
-    }
-    function decisionCell(r) {
-      var d = r.decision;
-      if (!d || typeof d !== 'object' || !(d.decision || d.why)) return '<div class="cdy-sm2">no morning decision</div>';
-      var label = String(d.decision || '').toUpperCase();
-      return '<div class="cdy-sm"><b>' + esc(label || 'decision') + '</b>' +
-        (d.batch ? ' <span class="cdy-sm2">· ' + esc(String(d.batch) === 'boundary' ? 'evening run' : String(d.batch) + ' run') + '</span>' : '') + '</div>' +
-        (d.why ? '<div class="cdy-sm2">' + esc(String(d.why)) + '</div>' : '');
-    }
-    function beforeCell(r) {
-      var b = r.before;
-      if (!b || typeof b !== 'object') return '<div class="cdy-sm2">no figures for the 7 days before</div>';
-      var sp = num(b.spend_day), un = num(b.units_day), ro = num(b.roas), dys = num(b.days);
-      if (sp == null && un == null && ro == null) return '<div class="cdy-sm2">no figures for the 7 days before</div>';
-      return '<div class="cdy-sm"><b>' + gbp(sp) + '</b> a day · ' + unitsWord(un) + ' a day</div>' +
-        '<div class="cdy-sm2">ROAS <span class="' + (ro == null ? '' : (ro < 1 ? 'cdy-neg' : 'cdy-pos')) + '">' + roasTxt(ro) + '</span>' +
-        (dys == null ? '' : ' · over ' + cnt(dys) + ' ' + plural(dys, 'day', 'days')) + '</div>';
-    }
-    function campaignCell(r) {
-      var name = String(r.campaign_name || r.campaign_id || '');
-      if (!name) return '<span class="cdy-sm2">no campaign on this change</span>';
-      var h = '<span class="cdy-camp">' + adtCampaignLink(r.campaign_id, name) + '</span>';
-      if (String(r.campaign_id_source || '') === 'matched by name') {
-        h += '<span class="cdy-mark" title="this row was recorded before the campaign id was kept, so the link is matched by the campaign name within the account">matched by name</span>';
-      } else if (String(r.campaign_id_source || '') === 'unknown') {
-        h += '<span class="cdy-mark" title="no campaign id was recorded and the name does not match a campaign on this account, so there is no link">no link</span>';
-      }
-      if (r.campaign_status_now) h += '<div class="cdy-sm2">now ' + esc(String(r.campaign_status_now)) + '</div>';
-      return h;
-    }
-    function whatCell(r) {
-      var k = String(r.kind || '');
-      var cls = DIR === 'activated' ? 'on' : 'off';
-      var h = '<span class="cdy-kind ' + cls + '">' + esc(kindWord(DIR, k)) + '</span>';
-      if (r.from || r.to) {
-        h += '<div class="cdy-sm2">' + esc(String(r.from || 'not in a campaign')) + ' → ' + esc(String(r.to || 'gone')) + '</div>';
-      }
-      return h;
-    }
-    function subjectCell(r) {
-      if (!isCampaignRow(r)) return adtProductCell(r);
-      var held = num(r.listings);
-      return '<div class="cdy-sm"><b>' + esc(String(r.campaign_name || r.campaign_id || 'a campaign')) + '</b></div>' +
-        '<div class="cdy-sm2">' + (held == null ? 'a whole campaign, no listing count recorded' : 'a whole campaign, holding ' + cnt(held) + ' ' + plural(held, 'ad', 'ads')) +
-        (r.account ? ' · ' + esc(String(r.account)) : '') + '</div>';
-    }
-    function rowHtml(r) {
-      var wasSelling = n0(r.before && r.before.units_day) > 0;
-      var cls = DIR === 'activated' ? 'start' : (wasSelling ? 'sold' : '');
-      var live = r.live_now;
-      return '<tr class="' + cls + '"><td class="cdy-when">' + esc(ukClock(r)) + '</td>' +
-        '<td>' + whatCell(r) + '</td>' +
-        '<td>' + subjectCell(r) + '</td>' +
-        '<td>' + campaignCell(r) + '</td>' +
-        '<td>' + whoCell(r) + '</td>' +
-        '<td>' + decisionCell(r) + '</td>' +
-        '<td>' + beforeCell(r) + '</td>' +
-        '<td>' + (live == null ? '<span class="cdy-sm2">not known</span>'
-          : '<span class="cdy-tag ' + (live ? 'live' : 'gone') + '">' + (live ? 'live now' : 'not live') + '</span>') + '</td></tr>';
-    }
-    function listPanel() {
-      var R = shownRows();
-      var head = '<thead><tr><th>UK time</th><th>What happened</th><th>Listing or campaign</th>' +
-        '<th>Campaign</th><th>Who or what</th><th>That morning</th><th>The 7 days before</th>' +
-        '<th>Live now</th></tr></thead>';
-      var h = '<div class="cdy-panel"><h3>' + (DIR === 'activated' ? 'Everything started' : 'Everything stopped') + '</h3>' +
-        '<div class="cdy-sub">Newest first' + (S.account ? ', on ' + esc(S.account) : ', grouped by account') + '. ' +
-        (DIR === 'activated'
-          ? 'A gold edge marks a start, so a listing that was losing money and is now running again stands out.'
-          : 'A red edge marks a listing that was selling before it was stopped.') + '</div>';
-      if (!R.length) {
-        return h + '<div class="cdy-empty">' + (rows().length
-          ? 'Nothing in this filter on this day.'
-          : 'Nothing was ' + WORD + ' on this day.') + '</div></div>';
-      }
-      var body = '';
-      if (!S.account) {
-        var order = [], byAcct = {};
-        R.forEach(function (r) {
-          var a = String(r.account || 'no account');
-          if (!byAcct[a]) { byAcct[a] = []; order.push(a); }
-          byAcct[a].push(r);
-        });
-        body = order.map(function (a) {
-          return '<tr class="cdy-grp"><td colspan="8">' + esc(a) + ' · ' + cnt(byAcct[a].length) + ' ' +
-            plural(byAcct[a].length, 'change', 'changes') + '</td></tr>' + byAcct[a].map(rowHtml).join('');
-        }).join('');
-      } else {
-        body = R.map(rowHtml).join('');
-      }
-      return h + '<div class="cdy-scroll"><table class="cdy-tbl">' + head + '<tbody>' + body + '</tbody></table></div></div>';
-    }
-
-    /* ── 5 · honesty ───────────────────────────────────────────────────────────────────────────── */
-    function honesty() {
-      var D = S.data || {}, h = '<div class="cdy-honest"><h3>How to read this day</h3>';
-      var held = num(D.rows_held_back), total = num(D.rows_total);
-      h += '<p><b>The day.</b> This page covers a UK day, midnight to midnight' +
-        (shownDay() ? ' on ' + esc(dayLong(shownDay())) : '') + '.' +
-        (D.uk_bounds && (D.uk_bounds.from_utc || D.uk_bounds.to_utc)
-          ? ' The changes are the ones recorded from ' + esc(utcClock(D.uk_bounds.from_utc)) + ' to ' +
-            esc(utcClock(D.uk_bounds.to_utc)) + ' UTC, which is that UK day.'
-          : '') + '</p>';
-      if (held != null && held > 0) {
-        h += '<p><b>' + cnt(held) + ' ' + plural(held, 'change is', 'changes are') + ' not on the page.</b> ' +
-          'The newest ' + cnt(total != null ? Math.max(0, total - held) : rows().length) + ' are shown. ' +
-          'The counts above cover every change on the day, shown or not. Choose one account to see more of them.</p>';
-      }
-      h += '<p><b>Who changed something.</b> A change is put to the tool only when the log the tool keeps of its ' +
-        'own actions holds it for the same listing or campaign on the same UK day. Everything else was found by comparing eBay against ' +
-        'the last read, and the portal cannot see who made it, so no name is ever guessed.</p>';
-      var matched = rows().filter(function (r) { return String(r.campaign_id_source || '') === 'matched by name'; }).length;
-      if (matched > 0) {
-        h += '<p><b>' + cnt(matched) + ' campaign ' + plural(matched, 'link is', 'links are') + ' matched by name.</b> ' +
-          'Older campaign changes were recorded with the campaign name and no id, so the link is found by matching ' +
-          'that name within the account. Each one is marked on its row.</p>';
-      }
-      h += '<p>Nothing on this page is ever sent to eBay.' +
-        (D.computed_at ? ' Worked out at ' + esc(utcClock(D.computed_at)) + ' UTC.' : '') + '</p>';
-      return h + '</div>';
-    }
-
-    /* ── draw and wire ─────────────────────────────────────────────────────────────────────────── */
-    function draw() {
-      var box = $(BODY); if (!box) return;
-      var D = S.data || {}, T = summary();
-      var h = '<div class="cdy-top"><span><b>' + esc(title()) + '</b></span><span>·</span>' +
-        '<span>' + esc(shownDay() ? dayLong(shownDay()) : 'no day chosen yet') + '</span><span>·</span>' +
-        '<span>' + esc(S.account || 'all accounts') + '</span><span>·</span>' +
-        '<span>' + cnt(num(D.rows_total) != null ? D.rows_total : rows().length) + ' ' +
-        plural(num(D.rows_total) != null ? D.rows_total : rows().length, 'change', 'changes') + '</span></div>';
-      h += oneLine(T);
-      h += tiles(T);
-      h += whoBlock(T);
-      h += accountPanel(T);
-      h += archivePanel();
-      h += kindChips();
-      h += listPanel();
-      h += honesty();
-      box.innerHTML = h;
-      var ks = box.querySelectorAll('[data-cdyk]');
-      for (var i = 0; i < ks.length; i++) ks[i].onclick = function () {
-        var k = this.getAttribute('data-cdyk') || '';
-        S.kind = S.kind === k ? '' : k;
-        draw();
-      };
-      var ds = box.querySelectorAll('[data-cdyday]');
-      for (var j = 0; j < ds.length; j++) ds[j].onclick = function () { go(this.getAttribute('data-cdyday')); };
-    }
-
-    return { render: render, init: init, direction: DIR };
+  function slot(day, dir) { return day + '|' + dir; }
+  function got(day, dir) { return S.got[slot(day, dir)] || null; }
+  function rowsOf(day, dir) {
+    var D = got(day, dir);
+    return D ? ((D.rows || []).filter(function (r) { return r && typeof r === 'object'; })
+      .map(function (r) { return r.direction ? r : Object.assign({}, r, { direction: dir }); })) : [];
   }
-
-  /* view-adtool-activated.js registers the other direction off this factory. Both files are spliced
-     into both portals, so the classes above are always present wherever the factory is used. */
-  window.adtChangeDayPage = makePage;
-
-  var STOPPED = makePage({
-    id: 'cdyS', direction: 'stopped', title: 'Stopped yesterday',
-    sub: 'Every ad and campaign stopped on a chosen UK day'
-  });
+  function dayRows(day) {
+    return rowsOf(day, 'activated').concat(rowsOf(day, 'stopped')).filter(function (r) {
+      if (S.account && String(r.account || '') !== S.account) return false;
+      if (S.dir && String(r.direction || '') !== S.dir) return false;
+      if (S.kind && String(r.kind || '') !== S.kind) return false;
+      return true;
+    }).sort(function (a, b) { return String(b.at_utc || b.at_uk || '').localeCompare(String(a.at_utc || a.at_uk || '')); });
+  }
+  function shownDay() { return dayOk(S.day) || adtUkDay(); }
+  function prevDay() { return dayShift(shownDay(), -1); }
 
   VIEWS.adtoolStopped = {
-    label: 'Stopped yesterday', /* 22 Oct: NOT hidden. Every other advertising-tool page is hidden here and lives only in
-       the /ads/ portal, but the owner asked for these three "on portal" alongside a sort on
-       the Ads command centre, which is a company-portal page. They are carried by both
-       builds, so they appear in both sidebars. */
+    label: 'Activated and stopped',
+    /* NOT hidden. Every other advertising-tool page is hidden here and lives only in the /ads/
+       portal, but the owner asked for this one "on portal" as well, so it is carried by both builds
+       and appears in both sidebars. */
     hidden: false, order: 94, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
-    render: STOPPED.render,
-    init: STOPPED.init
+    render: function () {
+      return '<div class="cdy-wrap">' +
+        adtHgroup('Activated and stopped', 'What was started and what was stopped, today and the day before', 'cdyFresh') +
+        '<div id="cdyDay" class="cdy-day"></div>' +
+        '<div id="cdyStrip" class="cdy-strip"></div>' +
+        '<div id="cdyAcct" class="cdy-filters"></div>' +
+        '<div id="cdyBody"><div class="cdy-empty">Loading…</div></div></div>';
+    },
+    init: function () {
+      /* the closure outlives a visit: drop every answer on entry so a page re-opened later asks
+         again instead of painting an old day */
+      S.got = {}; S.err = {}; S.day = ''; S.dir = ''; S.kind = '';
+      dayBar();
+      load(false).catch(function () {});
+      /* today moves while the page is open; adtPoll skips hidden tabs and stops for good on an
+         'auth' refusal (the session-expiry law) */
+      adtPoll('cdyBody', 120000, function () {
+        if (shownDay() !== adtUkDay()) return Promise.resolve();
+        S.got = {};
+        return load(true);
+      });
+    }
   };
+
+  /* ── loading: two days, two directions, four reads of ONE action ──────────────────────────── */
+  function ask(day, dir) {
+    var k = slot(day, dir);
+    if (S.got[k]) return Promise.resolve();
+    var p = { direction: dir };
+    if (dayOk(day)) p.day = dayOk(day);
+    if (S.account) p.account = S.account;
+    return api('adtoolChangeDay', p).then(function (D) {
+      S.got[k] = D || {}; delete S.err[k];
+    }).catch(function (e) {
+      S.got[k] = null;
+      S.err[k] = (e && e.message) || 'This day could not load.';
+    });
+  }
+  function load(quiet) {
+    if (S.busy) return Promise.resolve();
+    S.busy = true;
+    var top = shownDay(), prev = dayShift(top, -1);
+    /* the chosen day first, so the page paints as soon as there is anything to read; the day before
+       follows and fills its own block */
+    return Promise.all([ask(top, 'activated'), ask(top, 'stopped')]).then(function () {
+      if (!$('cdyBody')) return;
+      dayBar(); acctChips(); draw();
+      adtFreshShow('cdyFresh', (got(top, 'stopped') || got(top, 'activated') || {}).fresh);
+      return Promise.all([ask(prev, 'activated'), ask(prev, 'stopped')]);
+    }).then(function () {
+      S.busy = false;
+      if (!$('cdyBody')) return;
+      dayBar(); acctChips(); draw();
+    }).catch(function (e) {
+      S.busy = false;
+      if (!quiet && $('cdyBody')) {
+        $('cdyBody').innerHTML = '<div class="cdy-panel"><h3>Not available</h3><div class="cdy-sub">' +
+          esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      }
+      throw e;
+    });
+  }
+  function go(day) {
+    day = dayOk(day); if (!day) return;
+    S.day = day; S.kind = '';
+    dayBar();
+    load(false).catch(function () {});
+  }
+
+  /* ── the day picker and the 14-day working archive ────────────────────────────────────────── */
+  function archive() {
+    var D = got(shownDay(), 'stopped') || got(shownDay(), 'activated') || null;
+    var A = (D && D.archive) || [];
+    return A.filter(function (a) { return a && dayOk(a.day); });
+  }
+  function dayBar() {
+    var el = $('cdyDay');
+    if (el) {
+      var d = shownDay(), today = adtUkDay(), atEnd = d >= today;
+      el.innerHTML = '<button class="cdy-btn" data-cdystep="-1">Previous day</button>' +
+        '<input type="date" id="cdyDate" value="' + esc(d) + '" max="' + esc(today) + '">' +
+        '<button class="cdy-btn" data-cdystep="1"' + (atEnd ? ' disabled' : '') + '>Next day</button>' +
+        (d === today ? '' : '<button class="cdy-btn go" data-cdyday="' + esc(today) + '">Back to today</button>') +
+        '<span class="cdy-daytxt">' + esc(dayLong(d)) + (dayWord(d) ? ' (' + dayWord(d) + ')' : '') +
+        ', with ' + esc(dayLong(dayShift(d, -1))) + ' under it</span>';
+      var inp = $('cdyDate');
+      if (inp) inp.onchange = function () { var v = dayOk(this.value); if (v) go(v); };
+      var bs = el.querySelectorAll('[data-cdystep]');
+      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+        var step = Number(this.getAttribute('data-cdystep')) || 0;
+        var next = dayShift(shownDay(), step);
+        if (next && next <= adtUkDay()) go(next);
+      };
+      var gs = el.querySelectorAll('[data-cdyday]');
+      for (var g = 0; g < gs.length; g++) gs[g].onclick = function () { go(this.getAttribute('data-cdyday')); };
+    }
+    var strip = $('cdyStrip');
+    if (!strip) return;
+    var A = archive();
+    if (!A.length) { strip.innerHTML = ''; return; }
+    var cur = shownDay();
+    strip.innerHTML = '<span class="cdy-daytxt" style="align-self:center;margin-right:4px">Last ' + A.length + ' days</span>' +
+      A.map(function (a) {
+        var st = num(a.stopped), ac = num(a.activated);
+        return '<button class="cdy-chip' + (a.day === cur ? ' on' : '') + '" data-cdyday="' + esc(a.day) + '" title="' +
+          esc(dayLong(a.day) + ': ' + cnt(ac) + ' started, ' + cnt(st) + ' stopped') + '">' + esc(dayShort(a.day)) +
+          '<span class="n"><span class="up">' + cnt(ac) + '</span> / <span class="dn">' + cnt(st) + '</span></span></button>';
+      }).join('');
+    var cs = strip.querySelectorAll('[data-cdyday]');
+    for (var c = 0; c < cs.length; c++) cs[c].onclick = function () { go(this.getAttribute('data-cdyday')); };
+  }
+
+  /* ── account chips ────────────────────────────────────────────────────────────────────────── */
+  function anyPayload() {
+    var keys = Object.keys(S.got);
+    for (var i = 0; i < keys.length; i++) if (S.got[keys[i]]) return S.got[keys[i]];
+    return null;
+  }
+  function accountRows(day, dir) {
+    var D = got(day, dir);
+    return D ? ((D.accounts || []).filter(function (a) { return a && typeof a === 'object' && a.account; })) : [];
+  }
+  /* EVERY account, not only the ones with a change on this day. The engine sends the whole list on
+     all_accounts for exactly this reason: a chip reloads the page for one account, and the answer it
+     sends back then names only that account, so a list built from the answer would strand the reader
+     on whichever account they picked first. */
+  function accountNames() {
+    var D = anyPayload();
+    var all = (((D && D.all_accounts) || []).map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean));
+    if (all.length) return all;
+    var names = [], seen = {};
+    [shownDay(), prevDay()].forEach(function (d) {
+      ['activated', 'stopped'].forEach(function (dir) {
+        accountRows(d, dir).forEach(function (a) { if (!seen[a.account]) { seen[a.account] = 1; names.push(a.account); } });
+        rowsOf(d, dir).forEach(function (r) { if (r.account && !seen[r.account]) { seen[r.account] = 1; names.push(r.account); } });
+      });
+    });
+    names.sort();
+    return names;
+  }
+  function acctChips() {
+    var el = $('cdyAcct'); if (!el) return;
+    el.innerHTML = '<button class="cdy-chip' + (S.account ? '' : ' on') + '" data-cdya="">All accounts</button>' +
+      accountNames().map(function (a) {
+        return '<button class="cdy-chip' + (S.account === a ? ' on' : '') + '" data-cdya="' + esc(a) + '">' + esc(a) + '</button>';
+      }).join('');
+    var bs = el.querySelectorAll('[data-cdya]');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
+      S.account = this.getAttribute('data-cdya') || '';
+      S.kind = '';
+      /* ASK AGAIN rather than filter what is in hand. The counts come from the engine and cover
+         every change on the day, so filtering here would leave one account's rows sitting under the
+         whole fleet's totals; and the engine caps its rows, so asking for one account is also the
+         only way to see more of them. */
+      S.got = {};
+      acctChips();
+      load(false).catch(function () {});
+    };
+  }
+
+  /* ── one day, one direction: the summary the engine sends, counted again from the rows where a
+     field is missing, so a thin answer still reads as a day rather than a row of dashes ───────── */
+  function summary(day, dir) {
+    var D = got(day, dir);
+    var raw = (D && D.summary) || {};
+    var R = rowsOf(day, dir), ads = 0, items = {}, camps = {}, campLvl = 0, tool = 0, ebay = 0, moved = 0;
+    R.forEach(function (r) {
+      var id = String(r.item_id || '').trim();
+      if (id) { ads++; items[id] = 1; } else { campLvl++; }
+      var ck = String(r.campaign_id || r.campaign_name || '');
+      if (ck) camps[r.account + '|' + ck] = 1;
+      if (String(r.who || '') === 'tool') tool++; else ebay++;
+      if (/_(removed|added)$/.test(String(r.kind || '')) && id) moved++;
+    });
+    var pick = function (k, fallback) { var v = num(raw[k]); return v == null ? fallback : v; };
+    /* `campaigns` is how many of the changes were AT campaign level; `campaigns_touched` is how many
+       campaigns the day's changes landed in at all. A day of ninety paused ads inside six campaigns
+       that were never themselves touched has none of the first and six of the second, so one number
+       cannot stand for both and the page names each where it prints it. */
+    return {
+      have: !!D,
+      ads: pick('ads', ads),
+      listings: pick('listings', Object.keys(items).length),
+      campaigns: pick('campaigns', campLvl),
+      campaigns_touched: pick('campaigns_touched', Object.keys(camps).length),
+      removed_or_added: pick('removed_or_added', moved),
+      spend_day_before: num(raw.spend_day_before),
+      units_day_before: num(raw.units_day_before),
+      by_tool: pick('by_tool', tool),
+      by_ebay: pick('by_ebay', ebay),
+      rows_total: num(D && D.rows_total),
+      rows_held_back: num(D && D.rows_held_back)
+    };
+  }
+  /* `hook` is the explainer tag ALREADY BUILT by the caller, so the label it carries is a literal
+     at the call site where a reader of this file can see which note that tile opens. */
+  function tile(k, v, d, cls, hook) {
+    return '<div class="cdy-tile ' + (cls || '') + '"><div class="k">' + esc(k) + (hook || '') +
+      '</div><div class="v">' + v + '</div><div class="d">' + esc(d) + '</div></div>';
+  }
+  function half(day, dir) {
+    var T = summary(day, dir), k = slot(day, dir);
+    var cls = dir === 'activated' ? 'start' : 'stop';
+    var h = '<div class="cdy-half ' + cls + '"><h4>' + dirWord(dir, true) + '</h4>';
+    if (S.err[k]) return h + '<div class="cdy-empty">' + esc(S.err[k]) + '</div></div>';
+    if (!T.have) return h + '<div class="cdy-empty">Loading…</div></div>';
+    h += '<div class="cdy-tiles">' +
+      tile('Ads ' + dirWord(dir), cnt(T.ads), 'changes at ad level', dir === 'activated' ? 'gold' : 'loss', reg('changes on this day', 'how')) +
+      tile('Listings', cnt(T.listings), 'listings behind those ads', '', reg('changes on this day', 'how')) +
+      tile('Campaigns', cnt(T.campaigns_touched),
+        'campaigns the changes landed in' + (n0(T.campaigns) ? ', ' + cnt(T.campaigns) + ' ' + plural(T.campaigns, 'change was', 'changes were') + ' to a campaign itself' : ''), '', reg('changes on this day', 'how')) +
+      tile(dir === 'activated' ? 'Added to campaigns' : 'Taken out of campaigns', cnt(T.removed_or_added),
+        dir === 'activated' ? 'ads that joined a campaign' : 'ads that left a campaign', '', reg('changes on this day', 'how')) +
+      tile('Was spending a day', gbp(T.spend_day_before), 'those listings, over the 7 days before', 'gold', reg('the 7 days before', 'how')) +
+      tile('Was selling a day', unitsNum(T.units_day_before), 'units a day, over the 7 days before', '', reg('the 7 days before', 'how')) +
+      '</div>';
+    return h + '</div>';
+  }
+  function oneLine(day) {
+    var A = summary(day, 'activated'), P = summary(day, 'stopped');
+    var word = dayWord(day);
+    var h = '<div class="cdy-line"><b>' + esc(dayLong(day)) + (word ? ' (' + word + ')' : '') + '.</b> ';
+    if (!A.have && !P.have) return h + 'This day has not come back yet.</div>';
+    if (!n0(A.ads) && !n0(P.ads) && !n0(A.campaigns) && !n0(P.campaigns)) {
+      return h + 'Nothing was started or stopped' + esc(S.account ? ' on ' + S.account : '') + ' on this day.</div>';
+    }
+    h += '<b>' + cnt(A.ads) + '</b> ' + plural(A.ads, 'ad was', 'ads were') + ' started and <b>' + cnt(P.ads) + '</b> ' +
+      plural(P.ads, 'ad was', 'ads were') + ' stopped, on ' + cnt(n0(A.listings) + n0(P.listings)) + ' ' +
+      plural(n0(A.listings) + n0(P.listings), 'listing', 'listings') +
+      esc(S.account ? ', on ' + S.account : '') + '. ';
+    if (P.spend_day_before != null || P.units_day_before != null) {
+      h += 'Over the 7 days before, the listings that were stopped had been spending <b>' + gbp(P.spend_day_before) +
+        ' a day</b> and selling <b>' + unitsWord(P.units_day_before) + ' a day</b>. ';
+    }
+    h += 'The tool made <b>' + cnt(n0(A.by_tool) + n0(P.by_tool)) + '</b> of the changes and <b>' +
+      cnt(n0(A.by_ebay) + n0(P.by_ebay)) + '</b> ' + plural(n0(A.by_ebay) + n0(P.by_ebay), 'was', 'were') + ' seen on eBay.</div>';
+    return h;
+  }
+  /* the split a manager asks for first, so it is a panel of its own and not a line in a table */
+  function whoBlock(day) {
+    var A = summary(day, 'activated'), P = summary(day, 'stopped');
+    var t = n0(A.by_tool) + n0(P.by_tool), e = n0(A.by_ebay) + n0(P.by_ebay), tot = t + e;
+    var pct = tot > 0 ? Math.round(t / tot * 100) : 0;
+    return '<div class="cdy-panel"><h3>Who made these changes' + reg('who changed it', 'how') + '</h3>' +
+      '<div class="cdy-sub">Our own tool against everything else, both directions together. The portal cannot see who made a change on eBay, so those are never put to a name.</div>' +
+      (tot > 0 ? '<div class="cdy-split"><span class="t" style="width:' + pct + '%"></span><span class="e" style="width:' + (100 - pct) + '%"></span></div>' : '') +
+      '<div class="cdy-who">' +
+      '<div class="cdy-whoc tool"><div class="k">The tool made</div><div class="v">' + cnt(t) + '</div>' +
+      '<div class="d">' + (tot > 0 ? pct + '% of the day' : 'nothing yet') + ', written in its own log with the operation and whether it was sent</div></div>' +
+      '<div class="cdy-whoc"><div class="k">Seen on eBay</div><div class="v">' + cnt(e) + '</div>' +
+      '<div class="d">' + (tot > 0 ? (100 - pct) + '% of the day' : 'nothing yet') + ', found by the sync comparing eBay against the last read, so the portal cannot see who</div></div>' +
+      '</div></div>';
+  }
+
+  /* ── by account, both directions side by side ─────────────────────────────────────────────── */
+  function accountPanel(day) {
+    var by = {}, order = [];
+    ['activated', 'stopped'].forEach(function (dir) {
+      accountRows(day, dir).forEach(function (a) {
+        var k = String(a.account);
+        if (!by[k]) { by[k] = { account: k, activated: 0, stopped: 0, listings: 0, touched: 0, spend: null }; order.push(k); }
+        by[k][dir] += n0(a.ads);
+        by[k].listings += n0(a.listings);
+        by[k].touched += n0(a.campaigns_touched);
+        var v = num(a.spend_day_before);
+        if (v != null) by[k].spend = n0(by[k].spend) + v;
+      });
+    });
+    if (!order.length) return '';
+    var rows = order.map(function (k) { return by[k]; }).sort(function (x, y) { return (y.activated + y.stopped) - (x.activated + x.stopped); });
+    var sum = rows.reduce(function (t, g) { t.activated += g.activated; t.stopped += g.stopped; t.listings += g.listings; t.touched += g.touched; if (g.spend != null) t.spend = n0(t.spend) + g.spend; return t; },
+      { activated: 0, stopped: 0, listings: 0, touched: 0, spend: null });
+    return '<div class="cdy-panel"><h3>By account</h3>' +
+      '<div class="cdy-sub">The same day, account by account, both directions.</div>' +
+      '<div class="cdy-scroll"><table class="cdy-tbl"><thead><tr><th>Account</th>' +
+      '<th class="r">Ads started</th><th class="r">Ads stopped</th>' +
+      '<th class="r" title="campaigns the day\'s changes landed in, counted once each">Campaigns touched</th>' +
+      '<th class="r">Listings</th><th class="r">Was spending a day</th></tr></thead><tbody>' +
+      rows.map(function (g) {
+        return '<tr><td><b>' + esc(g.account) + '</b></td>' +
+          '<td class="r cdy-pos">' + cnt(g.activated) + '</td><td class="r cdy-neg">' + cnt(g.stopped) + '</td>' +
+          '<td class="r">' + cnt(g.touched) + '</td><td class="r">' + cnt(g.listings) + '</td>' +
+          '<td class="r">' + gbp(g.spend) + '</td></tr>';
+      }).join('') +
+      '<tr class="cdy-tot"><td>' + (S.account ? esc(S.account) : 'All accounts') + '</td>' +
+      '<td class="r">' + cnt(sum.activated) + '</td><td class="r">' + cnt(sum.stopped) + '</td>' +
+      '<td class="r">' + cnt(sum.touched) + '</td><td class="r">' + cnt(sum.listings) + '</td>' +
+      '<td class="r">' + gbp(sum.spend) + '</td></tr></tbody></table></div></div>';
+  }
+
+  /* ── the list, both directions in one table ───────────────────────────────────────────────── */
+  function whoCell(r) {
+    if (String(r.who || '') === 'tool') {
+      var t = r.tool || {};
+      /* the log's own mode words are not reader words: only 'live' means it reached eBay, and
+         everything else was written and held back, however the log spells it */
+      var mode = String(t.mode || '');
+      return '<div class="cdy-sm"><b>The tool</b>' + (t.op ? ' · ' + esc(String(t.op)) : '') + '</div>' +
+        '<div class="cdy-sm2">' + esc(mode === 'live' ? 'sent to eBay' : (mode ? 'written, not sent to eBay' : 'from the log of its own actions')) +
+        (t.decision_id ? ' · ' + esc(String(t.decision_id)) : '') + '</div>';
+    }
+    return '<div class="cdy-sm">Changed on eBay</div><div class="cdy-sm2">the portal cannot see who</div>';
+  }
+  function decisionCell(r) {
+    var d = r.decision;
+    if (!d || typeof d !== 'object' || !(d.decision || d.why)) return '<div class="cdy-sm2">no morning decision</div>';
+    var label = String(d.decision || '').toUpperCase();
+    return '<div class="cdy-sm"><b>' + esc(label || 'decision') + '</b>' +
+      (d.batch ? ' <span class="cdy-sm2">· ' + esc(String(d.batch) === 'boundary' ? 'evening run' : String(d.batch) + ' run') + '</span>' : '') + '</div>' +
+      (d.why ? '<div class="cdy-sm2">' + esc(String(d.why)) + '</div>' : '');
+  }
+  function beforeCell(r) {
+    var b = r.before;
+    if (!b || typeof b !== 'object') return '<div class="cdy-sm2">no figures for the 7 days before</div>';
+    var sp = num(b.spend_day), un = num(b.units_day), ro = num(b.roas), dys = num(b.days);
+    if (sp == null && un == null && ro == null) return '<div class="cdy-sm2">no figures for the 7 days before</div>';
+    return '<div class="cdy-sm"><b>' + gbp(sp) + '</b> a day · ' + unitsWord(un) + ' a day</div>' +
+      '<div class="cdy-sm2">ROAS <span class="' + (ro == null ? '' : (ro < 1 ? 'cdy-neg' : 'cdy-pos')) + '">' + roasTxt(ro) + '</span>' +
+      (dys == null ? '' : ' · over ' + cnt(dys) + ' ' + plural(dys, 'day', 'days')) + '</div>';
+  }
+  function campaignCell(r) {
+    var name = String(r.campaign_name || r.campaign_id || '');
+    if (!name) return '<span class="cdy-sm2">no campaign on this change</span>';
+    var h = '<span class="cdy-camp">' + adtCampaignLink(r.campaign_id, name) + '</span>';
+    if (String(r.campaign_id_source || '') === 'matched by name') {
+      h += '<span class="cdy-mark" title="this row was recorded before the campaign id was kept, so the link is matched by the campaign name within the account">matched by name</span>';
+    } else if (String(r.campaign_id_source || '') === 'unknown') {
+      h += '<span class="cdy-mark" title="no campaign id was recorded and the name does not match a campaign on this account, so there is no link">no link</span>';
+    }
+    if (r.campaign_status_now) h += '<div class="cdy-sm2">now ' + esc(String(r.campaign_status_now)) + '</div>';
+    return h;
+  }
+  function whatCell(r) {
+    var dir = String(r.direction || 'stopped');
+    var h = '<span class="cdy-dir ' + (dir === 'activated' ? 'on' : 'off') + '">' + esc(dirWord(dir)) + '</span> ' +
+      '<span class="cdy-kind ' + (dir === 'activated' ? 'on' : 'off') + '">' + esc(kindWord(String(r.kind || ''))) + '</span>';
+    if (r.from || r.to) {
+      h += '<div class="cdy-sm2">' + esc(String(r.from || 'not in a campaign')) + ' → ' + esc(String(r.to || 'gone')) + '</div>';
+    }
+    return h;
+  }
+  function subjectCell(r) {
+    if (!isCampaignRow(r)) return adtProductCell(r);
+    var held = num(r.listings);
+    return '<div class="cdy-sm"><b>' + esc(String(r.campaign_name || r.campaign_id || 'a campaign')) + '</b></div>' +
+      '<div class="cdy-sm2">' + (held == null ? 'a whole campaign, no listing count recorded' : 'a whole campaign, holding ' + cnt(held) + ' ' + plural(held, 'ad', 'ads')) +
+      (r.account ? ' · ' + esc(String(r.account)) : '') + '</div>';
+  }
+  function rowHtml(r) {
+    var dir = String(r.direction || 'stopped');
+    var wasSelling = n0(r.before && r.before.units_day) > 0;
+    var cls = dir === 'activated' ? 'start' : (wasSelling ? 'sold' : '');
+    var live = r.live_now;
+    return '<tr class="' + cls + '"><td class="cdy-when">' + esc(ukClock(r)) + '</td>' +
+      '<td>' + whatCell(r) + '</td>' +
+      '<td>' + subjectCell(r) + '</td>' +
+      '<td>' + campaignCell(r) + '</td>' +
+      '<td>' + whoCell(r) + '</td>' +
+      '<td>' + decisionCell(r) + '</td>' +
+      '<td>' + beforeCell(r) + '</td>' +
+      '<td>' + (live == null ? '<span class="cdy-sm2">not known</span>'
+        : '<span class="cdy-tag ' + (live ? 'live' : 'gone') + '">' + (live ? 'live now' : 'not live') + '</span>') + '</td></tr>';
+  }
+  function listPanel(day) {
+    var R = dayRows(day);
+    var head = '<thead><tr><th>UK time</th><th>What happened</th><th>Listing or campaign</th>' +
+      '<th>Campaign</th><th>Who or what</th><th>That morning</th><th>The 7 days before</th>' +
+      '<th>Live now</th></tr></thead>';
+    var h = '<div class="cdy-panel"><h3>Everything that changed</h3>' +
+      '<div class="cdy-sub">Newest first' + (S.account ? ', on ' + esc(S.account) : ', grouped by account') + '. ' +
+      'A gold edge marks a start; a red edge marks a listing that was selling before it was stopped.</div>';
+    var everything = rowsOf(day, 'activated').concat(rowsOf(day, 'stopped'));
+    if (!R.length) {
+      return h + '<div class="cdy-empty">' + (everything.length
+        ? 'Nothing in this filter on this day.'
+        : 'Nothing was started or stopped on this day.') + '</div></div>';
+    }
+    var body = '';
+    if (!S.account) {
+      var order = [], byAcct = {};
+      R.forEach(function (r) {
+        var a = String(r.account || 'no account');
+        if (!byAcct[a]) { byAcct[a] = []; order.push(a); }
+        byAcct[a].push(r);
+      });
+      body = order.map(function (a) {
+        return '<tr class="cdy-grp"><td colspan="8">' + esc(a) + ' · ' + cnt(byAcct[a].length) + ' ' +
+          plural(byAcct[a].length, 'change', 'changes') + '</td></tr>' + byAcct[a].map(rowHtml).join('');
+      }).join('');
+    } else {
+      body = R.map(rowHtml).join('');
+    }
+    var h2 = '';
+    ['activated', 'stopped'].forEach(function (dir) {
+      var T = summary(day, dir);
+      if (T.rows_held_back != null && T.rows_held_back > 0) {
+        h2 += '<div class="cdy-sm2" style="margin-top:6px">' + cnt(T.rows_held_back) + ' ' +
+          plural(T.rows_held_back, 'change that was ', 'changes that were ') + dirWord(dir) +
+          ' on this day ' + plural(T.rows_held_back, 'is', 'are') + ' not on the page, of ' + cnt(T.rows_total) +
+          ' in all. The counts above cover every one of them; choose one account to see more.</div>';
+      }
+    });
+    return h + '<div class="cdy-scroll"><table class="cdy-tbl">' + head + '<tbody>' + body + '</tbody></table></div>' + h2 + '</div>';
+  }
+
+  /* ── the filter bar: both directions, then the kinds in whichever direction is in force ───── */
+  function filterBar(day) {
+    var all = rowsOf(day, 'activated').concat(rowsOf(day, 'stopped')).filter(function (r) { return !S.account || String(r.account || '') === S.account; });
+    if (!all.length) return '';
+    var counts = {}, order = [];
+    all.forEach(function (r) {
+      if (S.dir && String(r.direction || '') !== S.dir) return;
+      var k = String(r.kind || '');
+      if (counts[k] == null) { counts[k] = 0; order.push(k); }
+      counts[k]++;
+    });
+    var known = KINDS.stopped.concat(KINDS.activated).map(function (x) { return x[0]; });
+    var list = known.filter(function (k) { return counts[k]; }).concat(order.filter(function (k) { return known.indexOf(k) < 0; }));
+    var nA = all.filter(function (r) { return r.direction === 'activated'; }).length;
+    var nS = all.length - nA;
+    var h = '<div class="cdy-filters">' +
+      '<button class="cdy-chip' + (S.dir ? '' : ' on') + '" data-cdyd="">Both<span class="n">' + cnt(all.length) + '</span></button>' +
+      '<button class="cdy-chip' + (S.dir === 'activated' ? ' on' : '') + '" data-cdyd="activated">Started<span class="n">' + cnt(nA) + '</span></button>' +
+      '<button class="cdy-chip' + (S.dir === 'stopped' ? ' on' : '') + '" data-cdyd="stopped">Stopped<span class="n">' + cnt(nS) + '</span></button>' +
+      '</div>';
+    if (list.length) {
+      h += '<div class="cdy-filters"><button class="cdy-chip' + (S.kind ? '' : ' on') + '" data-cdyk="">Everything</button>' +
+        list.map(function (k) {
+          return '<button class="cdy-chip' + (S.kind === k ? ' on' : '') + '" data-cdyk="' + esc(k) + '">' +
+            esc(kindWord(k)) + '<span class="n">' + cnt(counts[k]) + '</span></button>';
+        }).join('') + '</div>';
+    }
+    return h;
+  }
+
+  /* ── the 14 days, the same counts as the strip above ──────────────────────────────────────── */
+  function archivePanel() {
+    var A = archive();
+    if (A.length < 2) return '';
+    var pts = [];
+    A.slice().reverse().forEach(function (a) {
+      pts.push({ label: dayShort(a.day), value: n0(a.activated), strong: a.day === shownDay(),
+        title: dayLong(a.day) + ': ' + cnt(num(a.activated)) + ' started' });
+      pts.push({ label: '', value: -n0(a.stopped), muted: false,
+        title: dayLong(a.day) + ': ' + cnt(num(a.stopped)) + ' stopped' });
+    });
+    return '<div class="cdy-panel"><h3>The last ' + A.length + ' days' + reg('the change archive', 'how') + '</h3>' +
+      '<div class="cdy-sub">Each day as a pair: what was started above the line, what was stopped below it. Click a day in the strip above to open it.</div>' +
+      chartBars(pts, { height: 170, fmt: function (v) { return String(Math.abs(Math.round(v))); }, everyNth: 2, minGap: 26 }) + '</div>';
+  }
+
+  /* ── honesty ──────────────────────────────────────────────────────────────────────────────── */
+  function honesty() {
+    var D = anyPayload() || {}, h = '<div class="cdy-honest"><h3>How to read these days</h3>';
+    h += '<p><b>The days.</b> Each block covers a UK day, midnight to midnight. The day at the top is the one ' +
+      'you chose; the block under it is the day before it, so a change and what followed it are read together.' +
+      (D.uk_bounds && (D.uk_bounds.from_utc || D.uk_bounds.to_utc)
+        ? ' For the chosen day the changes are the ones recorded from ' + esc(utcClock(D.uk_bounds.from_utc)) + ' to ' +
+          esc(utcClock(D.uk_bounds.to_utc)) + ' UTC, which is that UK day.'
+        : '') + '</p>';
+    h += '<p><b>Who changed something.</b> A change is put to the tool only when the log the tool keeps of its ' +
+      'own actions holds it for the same listing or campaign on the same UK day. Everything else was found by comparing eBay against ' +
+      'the last read, and the portal cannot see who made it, so no name is ever guessed.</p>';
+    var matched = 0;
+    [shownDay(), prevDay()].forEach(function (d) {
+      ['activated', 'stopped'].forEach(function (dir) {
+        matched += rowsOf(d, dir).filter(function (r) { return String(r.campaign_id_source || '') === 'matched by name'; }).length;
+      });
+    });
+    if (matched > 0) {
+      h += '<p><b>' + cnt(matched) + ' campaign ' + plural(matched, 'link is', 'links are') + ' matched by name.</b> ' +
+        'Older campaign changes were recorded with the campaign name and no id, so the link is found by matching ' +
+        'that name within the account. Each one is marked on its row.</p>';
+    }
+    h += '<p>Nothing on this page is ever sent to eBay.' +
+      (D.computed_at ? ' Worked out at ' + esc(utcClock(D.computed_at)) + ' UTC.' : '') + '</p>';
+    return h + '</div>';
+  }
+
+  /* ── one day block ────────────────────────────────────────────────────────────────────────── */
+  function dayBlock(day, lead) {
+    var word = dayWord(day);
+    return '<div class="cdy-dayhd"><h2>' + esc(dayLong(day)) + '</h2>' +
+      '<span class="w">' + esc(word ? word : (lead ? 'the day you chose' : 'the day before')) + '</span></div>' +
+      oneLine(day) +
+      '<div class="cdy-pair">' + half(day, 'activated') + half(day, 'stopped') + '</div>' +
+      whoBlock(day) +
+      accountPanel(day) +
+      filterBar(day) +
+      listPanel(day);
+  }
+
+  /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
+  function draw() {
+    var box = $('cdyBody'); if (!box) return;
+    var top = shownDay(), prev = prevDay();
+    var A = summary(top, 'activated'), P = summary(top, 'stopped');
+    var h = '<div class="cdy-top"><span><b>Activated and stopped</b></span><span>·</span>' +
+      '<span>' + esc(dayLong(top)) + '</span><span>·</span>' +
+      '<span>' + esc(S.account || 'all accounts') + '</span><span>·</span>' +
+      '<span>' + cnt(n0(A.ads) + n0(P.ads)) + ' ' + plural(n0(A.ads) + n0(P.ads), 'change', 'changes') + '</span></div>';
+    h += dayBlock(top, true);
+    h += dayBlock(prev, false);
+    h += archivePanel();
+    h += honesty();
+    box.innerHTML = h;
+
+    var ds = box.querySelectorAll('[data-cdyd]');
+    for (var i = 0; i < ds.length; i++) ds[i].onclick = function () {
+      var d = this.getAttribute('data-cdyd') || '';
+      S.dir = S.dir === d ? '' : d;
+      S.kind = '';
+      draw();
+    };
+    var ks = box.querySelectorAll('[data-cdyk]');
+    for (var j = 0; j < ks.length; j++) ks[j].onclick = function () {
+      var k = this.getAttribute('data-cdyk') || '';
+      S.kind = S.kind === k ? '' : k;
+      draw();
+    };
+    var gs = box.querySelectorAll('[data-cdyday]');
+    for (var g = 0; g < gs.length; g++) gs[g].onclick = function () { go(this.getAttribute('data-cdyday')); };
+  }
 })();
