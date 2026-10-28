@@ -20154,6 +20154,21 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => ROUTES.ebaySubmitConsent.fn(p, Object.assign({}, ctx, { email: String(ctx.email || 'sync-key') })),
   },
 
+  /* 29 Oct (owner): a row was created under a misspelt name ("Rabia Masoof") before the account ever
+     consented. Drops an accounts row ONLY while it holds no token and is switched off — a connected
+     account can never be removed this way. Audited. */
+  accountDropUnconnected: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const account = String(p.account || '');
+      if (!account) throw new Error('SAY: account is needed');
+      const r = await ctx.env.DB.prepare("DELETE FROM accounts WHERE name = ?1 AND COALESCE(oauth_ref,'') = '' AND COALESCE(api_enabled,0) = 0").bind(account).run();
+      const n = (r.meta && r.meta.changes) || 0;
+      await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('sync-key', 'ACCOUNT_DROP_UNCONNECTED', ?1, '', ?2, datetime('now'))")
+        .bind(account, n ? 'row dropped' : 'nothing dropped (connected or absent)').run();
+      return { account, dropped: n };
+    },
+  },
+
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
