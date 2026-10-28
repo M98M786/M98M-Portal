@@ -2037,10 +2037,12 @@ function run(argv) {
 
   /* (8) the two new pages: born on, gated before the cache, keyed by profit class */
   t('flags: both new pages are born on, and a switch somebody has already set is left exactly as it stands', (() => { const a = src.indexOf("for (const key of ['adtool_page_livesplit', 'adtool_page_potential'])"); return a > 0 && /ON CONFLICT\(key\) DO NOTHING/.test(src.slice(a, a + 400)); })(), null);
-  t('gates: both new pages refuse by role BEFORE they look for a cached answer, and the key carries the profit class', (() => {
+  t('gates: both new pages refuse by role BEFORE they look for a cached answer, on the memoised path and on the warm\'s raw path, and the key carries the profit class', (() => {
     const blk = src.slice(src.indexOf('const ADTOOL_ACTIONS_P16 = {'), src.indexOf('/* ADTOOL-P16-END'));
-    const ok = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); if (i < 0) return false; const b = blk.slice(i, i + 1200); const g = b.indexOf('adtGate(ctx, null)'), f = b.indexOf("adtGate(ctx, 'adtool_page_"), m = b.indexOf('adtKvMemo('); return g >= 0 && f > g && m > f; });
-    return ok && (blk.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 2 && (blk.match(/adtGate\(ctx, null\)/g) || []).length === 2;
+    const ok = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); if (i < 0) return false; const b = blk.slice(i, i + 1800); const g = b.indexOf('adtGate(ctx, null)'), f = b.indexOf("adtGate(ctx, 'adtool_page_"), m = b.indexOf('adtKvMemo('); return g >= 0 && f > g && m > f; });
+    /* each page has two paths, fn (memoised) and raw (the hourly warm's, no memo): both refuse by role first, so four gates */
+    const rawOk = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); const b = blk.slice(i, i + 1800); const r = b.indexOf('raw: async'); const rg = b.indexOf('adtGate(ctx, null)', r), rc = b.indexOf('Compute(ctx.env', r); return r > 0 && rg > r && rc > rg; });
+    return ok && rawOk && (blk.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 2 && (blk.match(/adtGate\(ctx, null\)/g) || []).length === 4;
   })(), null);
   t('routes: both new actions carry the advertising prefix, so the router gates them by role and strips collective profit on the way out', /Object\.assign\(ROUTES, ADTOOL_ACTIONS_P16\)/.test(src) && /adtoolLiveSplit: \{/.test(src) && /adtoolPotentialCpc: \{/.test(src) && /adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000/.test(src), null);
   t('bounds: every read the two new pages make is held to a window or a ceiling', (() => {
@@ -2100,6 +2102,10 @@ function run(argv) {
   t('peak: the daily ceiling on the banner comes from the answer, never typed into the page', /switch_caps: \{ per_account_per_day: ADTOOL_PEAK_SWITCH_CAP/.test(src) && /PK\.data && PK\.data\.switch_caps/.test(pkSrc) && !/20 switches/.test(pkSrc), null);
 
   /* the pre-warm, the two stale claims, and the last place the portal stashed an item id */
+  t('warm (regex over the source): the three routes that memoise inside fn expose raw, and the warm prefers raw, so the hourly put is the only put for those keys', (() => {
+    const okWarm = /const data = await \(route\.raw \|\| route\.fn\)\(payload, ctx\)/.test(src);
+    return okWarm && ['adtoolLiveSplit', 'adtoolPotentialCpc', 'adtoolDepts'].every(a => { const i = src.indexOf('  ' + a + ': {'); const b = src.slice(i, i + 1400); return i > 0 && /\n    raw: async \(p, ctx\) => \{ await adtGate\(ctx, null\);/.test(b) && b.indexOf('raw:') < b.indexOf('fn: async'); });
+  })(), null);
   t('warm: the two slow new pages are warmed, and LAST, so they cannot take an earlier page’s turn on a tight hour', (() => { const i = src.indexOf('const jobs = [[\'adtoolCpcListings\''); const b = src.slice(i, src.indexOf('const out = []; const skippedNames', i)); return /\['adtoolLiveSplit', \{\}, true\], \['adtoolPotentialCpc', \{\}, true\]\]/.test(b) && b.indexOf('adtoolLiveSplit') > b.indexOf('adtoolDepts'); })(), null);
   t('product history: nothing in the portal stashes an item id any more, so a second tab shows its own listing', (() => ['frontend/view-adtool-morning.js', 'frontend/view-adtool-product.js', 'frontend/view-adsCentre.js', 'frontend/view-adtool-cpc.js', 'src/shell.html'].every(f => !/m98m:adtoolItem/.test(rdFile(f))))(), null);
   t('links: nothing points at the page the merge deleted', (() => ['frontend/view-campaignWatch.js', 'frontend/view-adtool-stopped.js', 'frontend/view-adtool-morning.js'].every(f => !/href="#adtoolActivated/.test(rdFile(f))))(), null);

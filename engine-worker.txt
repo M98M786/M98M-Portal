@@ -9752,7 +9752,12 @@ const ADTOOL_ACTIONS_P11 = {
     },
   },
   adtoolDepts: {
-    auth: 'any', fn: async (p, ctx) => {
+    auth: 'any',
+    /* The hourly warm calls raw (route.raw || route.fn), so its hour-long put is the only put for this key.
+       Through fn, the memo's own two-minute put and the warm's put are unordered, and the short one
+       landing second threw the hour away (28 Oct review). raw runs the gates fn runs, then the compute. */
+    raw: async (p, ctx) => { await adtGate(ctx, null); await ensureAdtoolPhaseDeptsRegister(ctx.env); await adtGate(ctx, 'adtool_page_depts'); return adtoolDeptsCompute(ctx.env, { account: String((p && p.account) || '').trim() }); },
+    fn: async (p, ctx) => {
       /* THE GATE RUNS BEFORE THE CACHE, AND MUST STAY THAT WAY. A cache hit that skipped the role
          check has shipped in this codebase before: the cache key carries the caller's profit class,
          not the caller's role, so a stored answer can never be the thing that decides who may read
@@ -12197,7 +12202,12 @@ async function adtoolPeakSwitch(env) {
 
 const ADTOOL_ACTIONS_P16 = {
   adtoolLiveSplit: {
-    auth: 'any', fn: async (p, ctx) => {
+    auth: 'any',
+    /* The hourly warm calls raw (route.raw || route.fn), so its hour-long put is the only put for this key.
+       Through fn, the memo's own two-minute put and the warm's put are unordered, and the short one
+       landing second threw the hour away (28 Oct review). raw runs the gates fn runs, then the compute. */
+    raw: async (p, ctx) => { await adtGate(ctx, null); await ensureAdtoolPhase16Register(ctx.env); await adtGate(ctx, 'adtool_page_livesplit'); return adtoolLiveSplitCompute(ctx.env, String((p && p.account) || '').trim()); },
+    fn: async (p, ctx) => {
       /* THE GATE RUNS BEFORE THE CACHE, AND MUST STAY THAT WAY. The cache key carries the caller's
          profit class, not the caller's role, so a stored answer can never be the thing that decides
          who may read the page: refuse first, then look for a cached answer. The role half runs before
@@ -12213,7 +12223,12 @@ const ADTOOL_ACTIONS_P16 = {
     },
   },
   adtoolPotentialCpc: {
-    auth: 'any', fn: async (p, ctx) => {
+    auth: 'any',
+    /* The hourly warm calls raw (route.raw || route.fn), so its hour-long put is the only put for this key.
+       Through fn, the memo's own two-minute put and the warm's put are unordered, and the short one
+       landing second threw the hour away (28 Oct review). raw runs the gates fn runs, then the compute. */
+    raw: async (p, ctx) => { await adtGate(ctx, null); await ensureAdtoolPhase16Register(ctx.env); await adtGate(ctx, 'adtool_page_potential'); return adtoolPotentialCpcCompute(ctx.env, String((p && p.account) || '').trim()); },
+    fn: async (p, ctx) => {
       await adtGate(ctx, null);
       await ensureAdtoolPhase16Register(ctx.env);
       await adtGate(ctx, 'adtool_page_potential');
