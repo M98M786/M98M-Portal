@@ -20116,8 +20116,14 @@ const ROUTES = {
       }
       /* 10 Oct (owner): the CS reply study reads buyer conversations through the API — GetMyMessages
          (inbox + sent bodies) and GetMemberMessages (item Q&A with the seller's answers), both read-only. */
-      if (['GetItem', 'ReviseFixedPriceItem', 'GetSellerList', 'GetMyMessages', 'GetMemberMessages'].indexOf(call) < 0) {
-        throw new Error('SAY: call must be GetItem, ReviseFixedPriceItem, GetSellerList, GetMyMessages, GetMemberMessages or taxonomyAspects');
+      /* 29 Oct (owner): copy a listing from one M98M account to another — VerifyAddFixedPriceItem (dry run,
+         fees + errors, creates nothing), AddFixedPriceItem (the create), UploadSiteHostedPictures (re-host the
+         source photos under the destination seller when eBay refuses a cross-seller PictureURL) and read-only
+         GetUserPreferences (the destination's business-policy ids). Same sync-key gate, token stays here. */
+      const TRADE_CALLS = ['GetItem', 'ReviseFixedPriceItem', 'GetSellerList', 'GetMyMessages', 'GetMemberMessages',
+        'VerifyAddFixedPriceItem', 'AddFixedPriceItem', 'UploadSiteHostedPictures', 'GetUserPreferences'];
+      if (TRADE_CALLS.indexOf(call) < 0) {
+        throw new Error('SAY: call must be one of ' + TRADE_CALLS.join(', ') + ' or taxonomyAspects');
       }
       const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
       const r = await fetch('https://api.ebay.com/ws/api.dll', {
