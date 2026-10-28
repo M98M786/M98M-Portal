@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261028-2152';
+var BUILD = '20261028-2300';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -7359,6 +7359,10 @@ VIEW_CSS.push(
     if (!L || typeof L !== 'object') return '<span class="pkt-sm2">never switched</span>';
     var to = String(L.to || '').toUpperCase(), mode = String(L.mode || '').toLowerCase();
     var word = to === 'ACTIVE' ? 'switched on' : (to === 'PAUSED' ? 'switched off' : 'changed');
+    if (L.refused) {
+      /* eBay answered the request with a refusal: nothing changed, and the job will not ask again until the hours change */
+      return '<span class="pkt-sm2">eBay refused ' + (to === 'ACTIVE' ? 'switching on' : 'switching off') + ' (HTTP ' + esc(String(L.http_status || '')) + ')' + (L.at ? ' at ' + esc(String(L.at).slice(11, 16)) + ' UTC' : '') + '; not asked again until the hours change</span>';
+    }
     var how = mode === 'live' ? 'sent to eBay'
       : mode === 'blocked' ? 'held back, so nothing was sent'
       : mode ? 'written down, not sent to eBay' : 'mode not recorded';

@@ -11286,9 +11286,9 @@ async function adtoolPeakCompute(env, acct) {
     for (const m of sw) (swByCamp[String(m.campaign_id || '')] = swByCamp[String(m.campaign_id || '')] || []).push(m);
     let d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: false, believed_state: '', account_live_switch: onSw, account_switches_today: doneA });
     for (const cid of Object.keys(swByCamp)) {
-      const hist = lastSwitch.by_key[id + '|' + cid] || { newest: null, live: null, shadow: null };
+      const hist = lastSwitch.by_key[id + '|' + cid] || { newest: null, live: null, shadow: null, refused: null };
       const believed = onSw ? adtPeakBelieved(swByCamp[cid], hist.live).state : (hist.shadow ? hist.shadow.to : '');
-      d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: true, believed_state: believed, account_live_switch: onSw, account_switches_today: doneA });
+      d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: true, believed_state: believed, account_live_switch: onSw, account_switches_today: doneA, refused_to: hist.refused ? hist.refused.to : '', refused_status: hist.refused ? hist.refused.http_status : 0 });
       if (d.send) break;
     }
     return {
@@ -11298,7 +11298,7 @@ async function adtoolPeakCompute(env, acct) {
       hours_parsed: parsed.ranges, hours_text: parsed.ranges ? adPeakHoursText(parsed.ranges) : '', hours_problem: parsed.reason || '',
       auto: auto, switchable: sw.length > 0,
       next_change: parsed.ranges ? adPeakNextChange(parsed.ranges, nowUk.hour) : '',
-      last_switch: ls ? { at: ls.at, to: ls.to, mode: ls.mode } : null,
+      last_switch: ls ? { at: ls.at, to: ls.to, mode: ls.mode, http_status: ls.http_status || 0, refused: !!ls.refused } : null,
       live_switch_on: !!liveSwitch[a],
       /* what WOULD HAPPEN, in the job's own words: 'live', 'would-send' or 'blocked', and empty where
          nothing is owed. The state it would be put into is `switch_to` beside it, so a row held back
@@ -11414,6 +11414,9 @@ const ADTOOL_ACTIONS_P15 = {
       }
       await adtPeakCacheClear(env, a);
       const sw = await adtPeakLiveSwitches(env);
+      /* the add is the act that arms a listing, so it is written to the audit trail with who did it (28 Oct:
+         three live sends on AZHAR ABRT had no readable record of who had added the listings) */
+      try { await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_PEAK_ADD', ?2, '', ?3, datetime('now'))").bind(by, iid, (tidy || '(no hours)') + (auto ? ' · switches itself' : ' · not switched')).run(); } catch (e) { /* the trail must never block the add */ }
       return { ok: true, item_id: iid, account: a, hours: tidy, hours_parsed: parsed.ranges, auto: auto, note: note, added_by: by,
         next_change: adPeakNextChange(parsed.ranges, adtUkParts(Date.now()).hour),
         live_switch_on: !!sw[a],
@@ -11688,6 +11691,10 @@ function adPeakSwitchDecide(input) {
   if (!ranges.length) return nothing('no hours to read');
   if (!i.live_cpc_ad) return nothing('no pay-per-click ad to switch');
   if (String(i.believed_state || '').toUpperCase() === want) return nothing('already ' + (want === 'ACTIVE' ? 'running' : 'paused'));
+  /* eBay already refused this very change (a 4xx other than 429): the same request gets the same answer,
+     so it is not asked again until the hours flip the wanted state. The row that was refused stays the
+     record of it, which is what the page shows. */
+  if (i.refused_to && String(i.refused_to).toUpperCase() === want) return nothing('eBay refused this change (HTTP ' + (Number(i.refused_status) || '4xx') + '); not asked again until the hours change');
   const on = !!i.account_live_switch;
   const cap = adPeakApplyCaps({ account_switches_today: i.account_switches_today });
   const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
@@ -12053,14 +12060,20 @@ async function adtPeakLastSwitch(env, today) {
      behind a try so a database where that table has not been made yet shows the page with no history
      beside each row, rather than refusing to show the list at all. */
   let rows = [];
-  try { rows = (await env.DB.prepare("SELECT item_id, campaign_id, payload_json, mode, http_status, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 AND (mode = 'would-send' OR (mode = 'live' AND http_status >= 200 AND http_status < 300)) ORDER BY id DESC LIMIT 2000").bind(adtAddDays(today, -1)).all()).results || []; } catch (e) { rows = []; }
+  try { rows = (await env.DB.prepare("SELECT item_id, campaign_id, payload_json, mode, http_status, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 AND (mode = 'would-send' OR (mode = 'live' AND ((http_status >= 200 AND http_status < 300) OR (http_status >= 400 AND http_status < 500 AND http_status <> 429)))) ORDER BY id DESC LIMIT 2000").bind(adtAddDays(today, -1)).all()).results || []; } catch (e) { rows = []; }
   for (const r of rows) {
     let p = {}; try { p = JSON.parse(String(r.payload_json || '{}')); } catch (e) { p = {}; }
     const item = String(r.item_id || ''), cid = String(r.campaign_id || '');
     const rec = { to: String(p.to || '').toUpperCase(), mode: String(r.mode || ''), at: String(r.at || ''), http_status: Number(r.http_status) || 0, campaign_id: cid };
-    const slot = (byKey[item + '|' + cid] = byKey[item + '|' + cid] || { newest: null, live: null, shadow: null });
+    /* `refused`: the newest live row eBay answered with a 4xx other than 429. Asking again every quarter
+       hour gets the same answer and burns the account's daily ceiling (28 Oct, a 404 on AZHAR ABRT),
+       so a refusal is the last word for that wanted state until the hours change the wanted state.
+       It is NOT a believed state: `live` stays the 2xx rows, so the ad is still read from eBay. */
+    rec.refused = rec.mode === 'live' && rec.http_status >= 400 && rec.http_status < 500;
+    const slot = (byKey[item + '|' + cid] = byKey[item + '|' + cid] || { newest: null, live: null, shadow: null, refused: null });
     if (!slot.newest) slot.newest = rec;
-    if (!slot.live && rec.mode === 'live') slot.live = rec;
+    if (!slot.live && rec.mode === 'live' && !rec.refused) slot.live = rec;
+    if (!slot.refused && rec.refused) slot.refused = rec;
     if (!slot.shadow && rec.mode === 'would-send') slot.shadow = rec;
     if (!byItem[item]) byItem[item] = rec;
   }
@@ -12157,6 +12170,7 @@ async function adtoolPeakSwitch(env) {
           auto: auto, ranges: parsed.ranges, hour: uk.hour, live_cpc_ad: true,
           believed_state: believed, account_live_switch: on,
           account_switches_today: doneToday[macct] || 0,
+          refused_to: hist.refused ? hist.refused.to : '', refused_status: hist.refused ? hist.refused.http_status : 0,
         });
         if (!d.send) { idle++; continue; }
         const cap = adPeakApplyCaps({ account_switches_today: doneToday[macct] || 0 });

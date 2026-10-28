@@ -508,6 +508,10 @@
     if (!L || typeof L !== 'object') return '<span class="pkt-sm2">never switched</span>';
     var to = String(L.to || '').toUpperCase(), mode = String(L.mode || '').toLowerCase();
     var word = to === 'ACTIVE' ? 'switched on' : (to === 'PAUSED' ? 'switched off' : 'changed');
+    if (L.refused) {
+      /* eBay answered the request with a refusal: nothing changed, and the job will not ask again until the hours change */
+      return '<span class="pkt-sm2">eBay refused ' + (to === 'ACTIVE' ? 'switching on' : 'switching off') + ' (HTTP ' + esc(String(L.http_status || '')) + ')' + (L.at ? ' at ' + esc(String(L.at).slice(11, 16)) + ' UTC' : '') + '; not asked again until the hours change</span>';
+    }
     var how = mode === 'live' ? 'sent to eBay'
       : mode === 'blocked' ? 'held back, so nothing was sent'
       : mode ? 'written down, not sent to eBay' : 'mode not recorded';
