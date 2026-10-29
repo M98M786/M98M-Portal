@@ -21281,6 +21281,32 @@ const ROUTES = {
     },
   },
 
+  /* 30 Oct (owner): "do it from API" — a connected account's Seller Hub drafts. Drafts made in the web
+     listing form are invisible to every public eBay API; the only API-visible unpublished listings are
+     Inventory-API offers. This proxy lets the build session look for those (inventory items, offers,
+     publish) on the account's own token, allow-listed paths only; the token stays here. */
+  ebayRestCall: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const method = String(p.method || 'GET').toUpperCase(), path = String(p.path || '');
+      const ok = [
+        /^\/sell\/inventory\/v1\/inventory_item(\?|$)/, /^\/sell\/inventory\/v1\/inventory_item\/[^/?]+$/,
+        /^\/sell\/inventory\/v1\/offer(\?|$)/, /^\/sell\/inventory\/v1\/offer\/[^/?]+$/, /^\/sell\/inventory\/v1\/offer\/[^/?]+\/publish$/,
+        /^\/sell\/inventory\/v1\/location(\?|$)/, /^\/sell\/inventory\/v1\/inventory_item_group\/[^/?]+$/,
+        /^\/sell\/account\/v1\/[a-z_]+(\?|$)/,
+      ];
+      if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
+      if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
+      const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
+      const r = await fetch('https://api.ebay.com' + path, {
+        method,
+        headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
+          'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
+        body: method === 'POST' && p.body ? JSON.stringify(p.body) : undefined,
+      });
+      return { status: r.status, body: await r.text() };
+    },
+  },
+
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
