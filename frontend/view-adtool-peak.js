@@ -15,12 +15,25 @@
  * exact text it will send. The thresholds behind the suggestions are printed from the live config
  * the answer carries, never typed in here.
  *
- * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove. Own class prefix: .pkt-
+ * 31 Oct: a listing's hours now say WHICH CAMPAIGN they switch (owner: "give option in peak
+ * listings to select campaign, in which campaign we need to run this product?"). The picker offers
+ * the running pay-per-click campaigns that listing has an ad in, read from the engine so the page
+ * can never offer one the save would turn down, and left alone it means every pay-per-click
+ * campaign the listing is in, which is what this list has always done.
+ *
+ * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove, adtoolPeakCampaigns.
+ * Own class prefix: .pkt-
  */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
-  var PK = { tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [] };
+  /* `item`, `note` and `pick` are the ADD FORM's own state. They live here and not in the DOM
+     because every control on the hours picker redraws the whole form, and a form rebuilt from the
+     DOM loses the item number somebody typed a moment ago. `camps` is the campaign list for
+     `campFor`, and nothing else: a list read for one listing is never shown against another. */
+  var PK = { tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
+    item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false };
+  var campTimer = null;
 
   VIEW_CSS.push([
     '.pkt-wrap{max-width:1420px}',
@@ -64,6 +77,8 @@
     '.pkt-add{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}',
     '.pkt-add label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800}',
     '.pkt-add input{background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:6px 9px;min-width:150px}',
+    '.pkt-add select{background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:6px 9px;min-width:250px;max-width:420px}',
+    '.pkt-add select[disabled]{color:var(--text-3)}',
     '.pkt-rng{display:flex;flex-direction:column;gap:7px;margin:8px 0}',
     '.pkt-rngrow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-2);font-weight:700}',
     '.pkt-rngrow select{background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:5px 8px}',
@@ -201,6 +216,8 @@
     },
     init: function () {
       PK.data = null; PK.edit = null; PK.ranges = [{ from: 17, to: 23 }];
+      PK.item = ''; PK.note = ''; PK.pick = ''; PK.pickName = '';
+      PK.camps = null; PK.campFor = ''; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
       /* #adtoolPeak?tab=manual opens on the hand-kept list, so a link can point at either tab and a
          second tab of the browser keeps its own */
       var q = (window.adtRoute ? (adtRoute().query || {}) : {}).tab;
@@ -435,19 +452,116 @@
     return h + '</div>';
   }
 
+  /* ── WHICH CAMPAIGN. The listing's own pay-per-click campaigns, read from the engine so the page
+     can only ever offer one the save would accept, and the default is the behaviour this list has
+     always had: every pay-per-click campaign the listing is in.
+     The picker REDRAWS ITSELF rather than being redrawn by the form. Somebody is typing in the box
+     above it, and rebuilding the form under their hands would take away both what they had typed
+     and the button they were about to press. ── */
+  function formItem() { return (PK.edit && PK.edit !== '') ? String(PK.edit) : String(PK.item || ''); }
+  function adStatusWords(v) {
+    var t = String(v == null ? '' : v).toUpperCase().trim();
+    if (t === 'PAUSED') return 'ad paused';
+    /* a pay-per-click ad eBay has not stamped is one eBay is serving, which is how the switching
+       itself reads an unstamped ad: the two must not say different things about one ad */
+    if (t === 'ACTIVE' || t === '') return 'ad running';
+    return 'ad ' + t.toLowerCase();
+  }
+  /* the campaign's own state, said only where it is something other than plain running: every
+     campaign on this list is a running one, so printing "running" against all of them adds nothing,
+     while an ending campaign is worth knowing before somebody ties a listing's hours to it. */
+  function campWords(v) {
+    var t = String(v == null ? '' : v).toUpperCase().trim();
+    if (!t || t.indexOf('RUNNING') >= 0) return '';
+    return ' · campaign ' + t.toLowerCase().replace(/_/g, ' ');
+  }
+  /* the campaign this form is set to, where it is NOT one of the ones on offer. The engine offers
+     the campaigns the listing has a running pay-per-click ad in, and a listing switched off outside
+     its own hours has none in the campaign it runs in until the hours bring it back. The choice is
+     kept and said plainly rather than dropped: dropping it would send the next save as every
+     campaign, which would silently widen what somebody narrowed on purpose. */
+  function campaignKnown() {
+    if (!PK.pick) return true;
+    return (PK.camps || []).filter(function (c) { return String((c && c.campaign_id) || '') === PK.pick; }).length > 0;
+  }
+  function campaignSelect(forItem) {
+    if (!forItem) return '<select disabled><option>type the item number first</option></select>';
+    if (PK.campErr) return '<select disabled><option>' + esc(PK.campErr) + '</option></select>';
+    if (PK.campFor !== forItem) {
+      return '<select disabled><option>' + (PK.campBusy ? 'reading its campaigns…' : 'type the item number first') + '</option></select>';
+    }
+    var L = PK.camps || [];
+    /* in none of them, and set to none either: the engine says why in its own words */
+    if (!L.length && campaignKnown()) return '<select disabled><option>' + esc(PK.campNote || 'it has no pay-per-click campaign to choose from') + '</option></select>';
+    return '<select data-pkcamp="1"><option value=""' + (PK.pick ? '' : ' selected') + '>every pay-per-click campaign it is in</option>' +
+      (campaignKnown() ? '' : '<option value="' + esc(PK.pick) + '" selected>' +
+        esc(String(PK.pickName || PK.pick) + ' · no ad running in it just now') + '</option>') +
+      L.map(function (c) {
+        var cid = String((c && c.campaign_id) || '');
+        return '<option value="' + esc(cid) + '"' + (PK.pick === cid ? ' selected' : '') + '>' +
+          esc(String((c && c.campaign_name) || cid) + ' · ' + adStatusWords(c && c.ad_status) + campWords(c && c.status)) + '</option>';
+      }).join('') + '</select>';
+  }
+  function campaignInner(forItem) {
+    return '<div class="pkt-add" style="margin-bottom:4px"><label>Which campaign' + reg('which campaign', 'how') +
+      campaignSelect(forItem) + '</label></div>' +
+      '<div class="pkt-sm2">The hours switch the ad in this campaign only. Its ads in other campaigns are left as they are.' +
+      (PK.pick ? '' : ' Left as it is, they switch every pay-per-click campaign it is in.') +
+      (campaignKnown() ? '' : '<br><span class="pkt-bad">This listing has no pay-per-click ad running in that campaign just now, so a save will be turned down until you choose another. The row is left as it is either way.</span>') +
+      '</div>';
+  }
+  function paintCamp() {
+    var el = $('pktCampWrap'); if (!el) return;
+    el.innerHTML = campaignInner(formItem());
+    wireCamp();
+  }
+  function wireCamp() {
+    var el = $('pktCampWrap'); if (!el) return;
+    var ss = el.querySelectorAll('[data-pkcamp]');
+    for (var i = 0; i < ss.length; i++) ss[i].onchange = function () {
+      PK.pick = String(this.value || '');
+      var hit = (PK.camps || []).filter(function (c) { return String((c && c.campaign_id) || '') === PK.pick; })[0];
+      if (hit) PK.pickName = String(hit.campaign_name || '');
+      paintCamp();
+    };
+  }
+  function loadCampaigns(id) {
+    var want = String(id || '');
+    if (!want || PK.campFor === want) { paintCamp(); return; }
+    PK.campBusy = true; PK.campErr = ''; PK.camps = null; PK.campNote = '';
+    paintCamp();
+    api('adtoolPeakCampaigns', { item_id: want }).then(function (D) {
+      PK.campBusy = false; PK.campFor = want;
+      PK.camps = (D && D.campaigns) || [];
+      PK.campNote = String((D && D.note) || '');
+      paintCamp();
+    }).catch(function (e) {
+      PK.campBusy = false; PK.campFor = ''; PK.camps = null;
+      PK.campErr = (e && e.message) || 'its campaigns could not be read';
+      paintCamp();
+    });
+  }
+  function loadCampaignsSoon(id) {
+    if (campTimer) { clearTimeout(campTimer); campTimer = null; }
+    campTimer = setTimeout(function () { campTimer = null; loadCampaigns(id); }, 350);
+  }
+
   /* ── the hours picker, shared by the add form and the per-row edit ────────────────────────── */
   function pickerHtml(title, idPrefix, withItem, withNote) {
     var bad = rangesBad(PK.ranges), txt = rangesText(PK.ranges);
     var h = '<div class="pkt-form"><h4>' + esc(title) + '</h4>';
     if (withItem) {
       h += '<div class="pkt-add" style="margin-bottom:8px">' +
-        '<label>Item number<input type="text" id="' + idPrefix + 'Item" inputmode="numeric" placeholder="item number"></label>' +
-        (withNote ? '<label>Note, optional<input type="text" id="' + idPrefix + 'Note" placeholder="why it belongs on the list"></label>' : '') +
+        '<label>Item number<input type="text" id="' + idPrefix + 'Item" inputmode="numeric" placeholder="item number" value="' + esc(String(PK.item || '')) + '"></label>' +
+        (withNote ? '<label>Note, optional<input type="text" id="' + idPrefix + 'Note" placeholder="why it belongs on the list" value="' + esc(String(PK.note || '')) + '"></label>' : '') +
         '</div>';
     } else if (withNote) {
       h += '<div class="pkt-add" style="margin-bottom:8px">' +
-        '<label>Note, optional<input type="text" id="' + idPrefix + 'Note" placeholder="why it belongs on the list"></label></div>';
+        '<label>Note, optional<input type="text" id="' + idPrefix + 'Note" placeholder="why it belongs on the list" value="' + esc(String(PK.note || '')) + '"></label></div>';
     }
+    /* the campaign sits with the item number and above the hours, because it is the same question:
+       which ad do these hours belong to */
+    h += '<div id="pktCampWrap">' + campaignInner(formItem()) + '</div>';
     h += '<div class="pkt-preset">' + PRESETS.map(function (p, i) {
       return '<button type="button" data-pkpreset="' + i + '">' + esc(p[0]) + '</button>';
     }).join('') + '</div>';
@@ -478,9 +592,23 @@
     var p = parsedRanges(r);
     if (!p || !p.length) return '<span class="pkt-tag quiet">set to switch itself</span>' +
       '<div class="pkt-sm2">but its hours cannot be read, so nothing is switched</div>';
-    if (r.switchable === false) return '<span class="pkt-tag quiet">set to switch itself</span>' +
-      '<div class="pkt-sm2">but it has no pay-per-click ad to switch, so nothing happens</div>';
+    if (r.switchable === false) {
+      /* two different reasons, and they are not interchangeable: a listing with no pay-per-click ad
+         at all, and a listing whose ad is in other campaigns but not in the one this row names */
+      return '<span class="pkt-tag quiet">set to switch itself</span>' +
+        '<div class="pkt-sm2">' + (r.campaign_missing
+          ? 'but it has no pay-per-click ad in the campaign named below, so nothing happens'
+          : 'but it has no pay-per-click ad to switch, so nothing happens') + '</div>';
+    }
     return '<span class="pkt-tag live">the system switches it</span>';
+  }
+  /* WHICH CAMPAIGN this row runs in. One named, and its hours switch that campaign's ad alone; none
+     named, and they switch every pay-per-click campaign the listing is in, which is what every row
+     on this list did before the choice existed. */
+  function campChosen(r) {
+    var cid = String((r && r.campaign_id) || '').trim();
+    if (!cid) return '<div class="pkt-sm2">all its pay-per-click campaigns</div>';
+    return '<div class="pkt-sm">' + adtCampaignLink(cid, String((r && r.campaign_name) || '') || cid) + '</div>';
   }
   function hoursCell(r) {
     var txt = String(r.hours || '').trim();
@@ -572,7 +700,7 @@
           (s ? '<div style="margin-top:4px"><span class="pkt-mark" title="the system suggests this one too">system suggested</span></div>' : '') +
           '<div class="pkt-acts"><button class="pkt-btn ghost" data-pkedit="' + esc(id) + '">Change hours</button><button class="pkt-btn ghost" data-pkrm="' + esc(id) + '">Remove</button></div></td>' +
           '<td>' + hoursCell(r) + '</td>' +
-          '<td>' + autoCell(r) + '</td>' +
+          '<td>' + autoCell(r) + campChosen(r) + '</td>' +
           '<td>' + nextCell(r) + '</td>' +
           '<td>' + lastCell(r) + '</td>' +
           '<td>' + switchCell(r) + '</td>' +
@@ -641,6 +769,23 @@
       if (p) { PK.ranges = p[1].map(function (r) { return { from: r.from, to: r.to }; }); draw(); }
     };
 
+    /* the item number and the note are kept in PK as they are typed, so the next redraw of the
+       hours shows them back rather than wiping them, and a whole item number asks the engine for
+       that listing's campaigns a moment after the typing stops */
+    var itEl = $('pktAddItem');
+    if (itEl) itEl.oninput = function () {
+      PK.item = String(this.value || '').replace(/\s+/g, '');
+      if (/^\d{9,13}$/.test(PK.item)) { loadCampaignsSoon(PK.item); return; }
+      if (PK.campFor || PK.campErr || PK.campBusy) {
+        PK.campFor = ''; PK.camps = null; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
+        PK.pick = ''; PK.pickName = '';
+        paintCamp();
+      }
+    };
+    var ntEl = $('pktAddNote');
+    if (ntEl) ntEl.oninput = function () { PK.note = String(this.value || ''); };
+    wireCamp();
+
     var save = $('pktAddSave');
     if (save) save.onclick = function () {
       var it = $('pktAddItem'), nt = $('pktAddNote');
@@ -648,7 +793,7 @@
       if (!/^\d{9,13}$/.test(id)) { toast('Type the item number first.'); return; }
       var bad = rangesBad(PK.ranges);
       if (bad) { toast(bad); return; }
-      add({ item_id: id, hours: rangesText(PK.ranges), note: nt ? String(nt.value || '').trim() : '' }, this);
+      add({ item_id: id, hours: rangesText(PK.ranges), note: nt ? String(nt.value || '').trim() : '', campaign_id: campForSave(id, null) }, this);
     };
     var edSave = $('pktEdSave');
     if (edSave) edSave.onclick = function () {
@@ -657,7 +802,7 @@
       if (bad) { toast(bad); return; }
       var row = null;
       manual().forEach(function (r) { if (String(r.item_id || '') === id) row = r; });
-      add({ item_id: id, hours: rangesText(PK.ranges), note: row ? String(row.note || '') : '' }, this);
+      add({ item_id: id, hours: rangesText(PK.ranges), note: row ? String(row.note || '') : '', campaign_id: campForSave(id, row) }, this);
     };
     var edCancel = $('pktEdCancel');
     if (edCancel) edCancel.onclick = function () { PK.edit = null; draw(); };
@@ -669,8 +814,14 @@
       manual().forEach(function (r) { if (String(r.item_id || '') === id) row = r; });
       var p = row ? parsedRanges(row) : null;
       PK.ranges = (p && p.length) ? p : [{ from: 17, to: 23 }];
+      /* the change form opens on the campaign the row already runs in, so saving new hours keeps it
+         rather than quietly putting the listing back across every campaign */
+      PK.pick = String((row && row.campaign_id) || '');
+      PK.pickName = String((row && row.campaign_name) || '');
+      PK.campFor = ''; PK.camps = null; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
       PK.edit = id;
       draw();
+      loadCampaigns(id);
     };
 
     var rs = box.querySelectorAll('[data-pkrm]');
@@ -682,14 +833,25 @@
     };
   }
 
+  /* THE CAMPAIGN A SAVE MAY SEND, which is only ever one the picker was showing FOR THIS LISTING.
+     Where its campaigns could not be read, a change keeps the campaign the row already had and an
+     add sends none: neither one invents a campaign, and a change never silently puts a listing back
+     across every campaign because one read failed. */
+  function campForSave(id, row) {
+    if (PK.campFor === String(id || '')) return String(PK.pick || '');
+    return String((row && row.campaign_id) || '');
+  }
   function add(payload, el) {
     if (PK.busy) return;
     PK.busy = true;
     if (el) el.disabled = true;
     api('adtoolPeakAdd', payload).then(function () {
-      toast(payload.hours ? 'Saved: the system will switch it at ' + payload.hours : 'Added to the peak times list');
+      toast((payload.hours ? 'Saved: the system will switch it at ' + payload.hours : 'Added to the peak times list') +
+        (payload.campaign_id ? ', in one campaign only' : ''));
       PK.tab = 'manual';
       PK.edit = null;
+      PK.item = ''; PK.note = ''; PK.pick = ''; PK.pickName = '';
+      PK.camps = null; PK.campFor = ''; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
       PK.busy = false;
       return load(false);
     }).catch(function (e) {

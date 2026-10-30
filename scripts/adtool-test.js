@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -2053,8 +2053,8 @@ function run(argv) {
   /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
      Overview prints as a tile of its own and which had stood at a hard nought since the Command
      centre was written. */
-  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 10 && p16.some(r => r.id === 'DECISIONS_TODAY') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
-  t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 11 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
   t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
   t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
 
@@ -2096,10 +2096,195 @@ function run(argv) {
   t('potential: the order count is read by the name the engine sends, so the column is never a row of dashes', /orders_completed: v\.orders_completed/.test(potBlk) && /'orders_completed', 'orders'/.test(pcSrc), null);
   t('potential: the sentence about the record comes from the one place that builds it, so the row and the advice cannot disagree', /last_cpc_seen: v\.last_cpc_seen/.test(potBlk) && !/never in the last ' \+ ADTOOL_POTENTIAL_LOOKBACK_DAYS/.test(src) && /last_cpc_seen/.test(pcSrc) && !/never on record/.test(pcSrc), null);
   t('potential: both reads this batch added are held to a ceiling as well as a window', (() => { const q = potBlk.match(/GROUP BY o\.item_id[^']*/) || [], d = potBlk.match(/GROUP BY item_id ORDER BY last_cpc[^']*/) || []; return /GROUP BY o\.item_id ORDER BY n DESC LIMIT ' \+ ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(potBlk) && /ORDER BY last_cpc DESC LIMIT ' \+ ADTOOL_LIVE_SPLIT_UNIVERSE_CAP/.test(potBlk) && q.length + d.length >= 1; })(), null);
-  t('peak: "the system switches it" is only said where the hours read AND there is an ad to switch', /switchable: sw\.length > 0/.test(src) && /r\.switchable === false/.test(pkSrc) && /no pay-per-click ad to switch, so nothing happens/.test(pkSrc), null);
+  t('peak: "the system switches it" is only said where the hours read AND there is an ad to switch', /switchable: pickC\.rows\.length > 0/.test(src) && /r\.switchable === false/.test(pkSrc) && /no pay-per-click ad to switch, so nothing happens/.test(pkSrc), null);
   t('peak: the row says what WOULD HAPPEN in the job’s own words and the page reads those words, so a row at the ceiling never reads as one about to be sent', /switch_state: d\.send \? d\.mode : '', switch_to: d\.send \|\| ''/.test(src) && /r\.switch_state/.test(pkSrc) && /'would-send':/.test(pkSrc) && /'blocked':/.test(pkSrc), null);
   t('peak: hours the system cannot read print the engine’s own reason, not a general refusal', /hours_problem: parsed\.reason \|\| ''/.test(src) && /r\.hours_problem/.test(pkSrc), null);
   t('peak: the daily ceiling on the banner comes from the answer, never typed into the page', /switch_caps: \{ per_account_per_day: ADTOOL_PEAK_SWITCH_CAP/.test(src) && /PK\.data && PK\.data\.switch_caps/.test(pkSrc) && !/20 switches/.test(pkSrc), null);
+
+
+  /* ═══ WHICH CAMPAIGN a peak listing runs in (owner, 31 Oct: "give option in peak listings to
+     select campaign, in which campaign we need to run this product?"). Every rule of it is held
+     here: the filter itself as a pure function, and each promise around it over the real source. ═══ */
+  const pcAds = [
+    { campaign_id: 'C1', name: 'General', ad_status: 'ACTIVE' },
+    { campaign_id: 'C2', name: 'Evening push', ad_status: 'PAUSED' },
+    { campaign_id: 'C3', name: 'Third', ad_status: '' },
+  ];
+  t('which campaign: a row naming none acts on every pay-per-click ad the listing has, which is what this list has always done', (() => {
+    const a = F.adPeakCampaignPick(pcAds, ''), b = F.adPeakCampaignPick(pcAds, null), c = F.adPeakCampaignPick(pcAds, '  ');
+    return a.rows.length === 3 && a.chosen === '' && a.missing === false && a.all_campaigns === true &&
+      b.rows.length === 3 && b.missing === false && c.rows.length === 3 && c.chosen === '';
+  })(), F.adPeakCampaignPick(pcAds, ''));
+  t('which campaign: a row naming one acts on that campaign’s ad ALONE, and the listing’s other ads are not in the answer at all', (() => {
+    const r = F.adPeakCampaignPick(pcAds, 'C2');
+    return r.rows.length === 1 && r.rows[0].campaign_id === 'C2' && r.chosen === 'C2' && r.missing === false &&
+      r.all_campaigns === false && r.rows.filter(x => x.campaign_id !== 'C2').length === 0;
+  })(), F.adPeakCampaignPick(pcAds, 'C2'));
+  t('which campaign: a PAUSED ad in the chosen campaign is still the ad it acts on, because turning that one back on is the whole point', (() => {
+    const r = F.adPeakCampaignPick(pcAds, 'C2');
+    return r.rows.length === 1 && r.rows[0].ad_status === 'PAUSED';
+  })(), null);
+  t('which campaign: naming a campaign the listing has no ad in acts on NOTHING and says so, rather than switching the others in its place', (() => {
+    const r = F.adPeakCampaignPick(pcAds, 'C9');
+    return r.rows.length === 0 && r.missing === true && r.chosen === 'C9' && r.all_campaigns === false;
+  })(), F.adPeakCampaignPick(pcAds, 'C9'));
+  t('which campaign: with no ad on the listing at all, naming one is missing and naming none is simply nothing to do', (() => {
+    const named = F.adPeakCampaignPick([], 'C1'), none = F.adPeakCampaignPick(null, '');
+    return named.rows.length === 0 && named.missing === true && none.rows.length === 0 && none.missing === false;
+  })(), null);
+  t('which campaign: the id is matched as text, so an id that happens to be a number is the same campaign either way', (() => {
+    const r = F.adPeakCampaignPick([{ campaign_id: 12345 }, { campaign_id: 'C1' }], '12345');
+    return r.rows.length === 1 && r.missing === false;
+  })(), null);
+
+  t('which campaign: the column is added guarded, beside the switch it belongs with, and born blank so no existing row changes the day it lands (regex over the real source)', (() => {
+    const sch = src.slice(src.indexOf('async function ensureAdtoolPhase16Schema(env) {'), src.indexOf('const ADTOOL_REGISTER_P16'));
+    const added = /try \{ await env\.DB\.prepare\("ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''"\)\.run\(\); \} catch \(e\)/.test(sch);
+    const blank = !/ADD COLUMN campaign_id TEXT NOT NULL/.test(src) && !/ADD COLUMN campaign_id TEXT DEFAULT 'all'/.test(src);
+    /* beside the switch, in the one place every added column on this table is added */
+    return added && blank && sch.indexOf('ADD COLUMN auto INTEGER DEFAULT 0') < sch.indexOf('ADD COLUMN campaign_id');
+  })(), null);
+
+  t('which campaign: the picker and the save read ONE list, the ads the switch job itself can act on (adtPeakSwitchable, paused ads included) and never a second rule (regex over the real source)', (() => {
+    const fn = src.slice(src.indexOf('async function adtPeakCampaignsFor(env, iid) {'), src.indexOf('async function adtPeakCacheClear'));
+    const shared = /\(await adtPeakSwitchable\(env, \[id\]\)\)\[id\] \|\| \[\]/.test(fn) && !/adtCampaignStmt\(/.test(fn) && !/c\.status LIKE/.test(fn) && !/ca\.ad_status = /.test(fn);
+    const cpcOnly = /String\(r\.funding_model \|\| ''\) !== 'COST_PER_CLICK'\) continue;/.test(fn);
+    /* one definition and exactly two callers: the action behind the picker, and the save */
+    const callers = (src.match(/adtPeakCampaignsFor\(/g) || []).length === 3;
+    return shared && cpcOnly && callers;
+  })(), [(src.match(/adtPeakCampaignsFor\(/g) || []).length]);
+
+  t('which campaign: the action is gated like the page it belongs to, is never cached, and names the campaigns newest ad reading first (regex over the real source)', (() => {
+    const blk = p15Src.slice(p15Src.indexOf('  adtoolPeakCampaigns: {'));
+    const body = blk.slice(0, blk.indexOf('\n  },'));
+    const gated = body.indexOf('adtGate(ctx, null)') >= 0 && body.indexOf('ensureAdtoolPhase15Register') > body.indexOf('adtGate(ctx, null)') &&
+      body.indexOf("adtGate(ctx, 'adtool_page_peak')") > body.indexOf('ensureAdtoolPhase15Register');
+    const uncached = body.indexOf('adtKvMemo') < 0;
+    const shape = /campaigns: camps\.map\(c => \(\{ campaign_id: c\.campaign_id, campaign_name: c\.campaign_name, funding_model: c\.funding_model, ad_status: c\.ad_status, status: c\.status \}\)\)/.test(body) &&
+      /note: camps\.length \? '' : 'this listing has no pay-per-click ad in a running campaign at the moment, so there is no campaign to choose'/.test(body);
+    const newest = /String\(b\.ad_synced_at \|\| ''\)\.localeCompare\(String\(a\.ad_synced_at \|\| ''\)\)/.test(src);
+    return gated && uncached && shape && newest;
+  })(), null);
+
+  t('which campaign: the save checks it against that list BEFORE it writes a single row, and refuses with the reason (regex over the real source)', (() => {
+    const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {'));
+    const checked = /const offered = await adtPeakCampaignsFor\(env, iid\);/.test(a) && /const hit = offered\.filter\(c => c\.campaign_id === want\)\[0\];/.test(a) &&
+      /if \(!hit\) \{\n\s*throw new Error\('SAY: ' \+ \(offered\.length/.test(a);
+    /* BEFORE: the check and its refusal both stand ahead of every write this action makes */
+    const order = a.indexOf('adtPeakCampaignsFor(env, iid)') < a.indexOf('INSERT INTO adtool_peak_items') &&
+      a.indexOf("throw new Error('SAY: ' + (offered.length") < a.indexOf('INSERT INTO adtool_peak_items');
+    const names = /that campaign is not one this listing has a pay-per-click ad in/.test(a);
+    return checked && order && names;
+  })(), null);
+
+  t('which campaign: the row carries it, with the two older column lists still behind it, and a named campaign is never quietly dropped (regex over the real source)', (() => {
+    const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {'));
+    const full = /INSERT INTO adtool_peak_items \(account, item_id, hours, note, added_by, added_at, removed_by, removed_at, auto, campaign_id\)/.test(a) && /, auto = \?6, campaign_id = \?7/.test(a);
+    /* a database without the column still takes a row with NO campaign; a row WITH one is refused
+       outright, because saving it as every campaign is the opposite of what was asked for */
+    const kept = /if \(cid\) throw new Error\('SAY: this database cannot record a campaign against a peak listing yet/.test(a);
+    const older = /INSERT INTO adtool_peak_items \(account, item_id, hours, note, added_by, added_at, removed_by, removed_at, auto\)/.test(a) &&
+      /INSERT INTO adtool_peak_items \(account, item_id, hours, note, added_by, added_at, removed_by, removed_at\)/.test(a);
+    return full && kept && older;
+  })(), null);
+
+  t('which campaign: the audit row and the answer both name the campaign, so the record says which ad was armed (regex over the real source)', (() => {
+    const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {'));
+    const audit = /'ADTOOL_PEAK_ADD'[\s\S]{0,400}\(cid \? 'campaign ' \+ \(cname \|\| cid\) \+ ' \(' \+ cid \+ '\)' : 'every pay-per-click campaign it is in'\)/.test(a);
+    const answer = /campaign_id: cid, campaign_name: cname,/.test(a) && /only its ad in ' \+ \(cname \|\| cid\) \+ ' is switched: its ads in other campaigns are left as they are/.test(a);
+    return audit && answer;
+  })(), null);
+
+  t('which campaign: the job narrows the ads ONCE, before it decides anything, so nothing below that line can see the ads it left out (regex over the real source)', (() => {
+    const j = pkJob();
+    const read = /SELECT account, item_id, hours, auto, campaign_id FROM adtool_peak_items WHERE removed_at = '' AND COALESCE\(auto, 0\) = 1/.test(j);
+    const filtered = /const pick = adPeakCampaignPick\(rows, row\.campaign_id\);/.test(j) && /for \(const m of pick\.rows\)/.test(j) && !/for \(const m of rows\)/.test(j);
+    const order = j.indexOf('const pick = adPeakCampaignPick(') < j.indexOf('const byCamp = {};') &&
+      j.indexOf('const byCamp = {};') < j.indexOf('await fetch(');
+    return read && filtered && order;
+  })(), null);
+
+  t('which campaign: a chosen campaign with no ad left sends NOTHING and is written down once a day, the same way a standing account mismatch is (regex over the real source)', (() => {
+    const j = pkJob();
+    const i = j.indexOf('if (pick.missing) {'), f = j.indexOf('await fetch(');
+    const deduped = /if \(blockedToday\[id \+ '\|' \+ gone\]\) continue;/.test(j) && /blockedToday\[id \+ '\|' \+ gone\] = 1;/.test(j);
+    const written = /'peak', 'status', \?5, 'blocked', 0, \?6, '', datetime\('now'\)/.test(j) &&
+      /the peak list runs this listing in one campaign only and that campaign has no pay-per-click ad for it to switch: nothing sent/.test(j);
+    /* and it leaves the row there: no request can be reached from inside that branch */
+    const stops = i > 0 && f > i && /continue;/.test(j.slice(i, f)) && /campaignGone\+\+;/.test(j);
+    return deduped && written && stops && /blocked because the campaign the list names has no ad to switch/.test(j);
+  })(), null);
+
+  t('which campaign: the eBay gate is untouched, so the account switch and the daily ceiling are still the only things that decide what is sent (regex over the real source)', (() => {
+    const j = pkJob();
+    /* the filter picks WHICH ads; it must not have become a second answer to WHETHER anything goes */
+    const gate = /const on = !!switches\[macct\];/.test(j) && /const mode = d\.mode === 'live' && !cap\.allowed \? 'blocked' : d\.mode;/.test(j) &&
+      /const tok = await ebayAccessToken\(env, macct\);/.test(j) && (j.match(/await fetch\(/g) || []).length === 1;
+    const pureUntouched = !/campaign/i.test(String(F.adPeakSwitchDecide)) && !/campaign/i.test(String(F.adPeakApplyCaps));
+    return gate && pureUntouched;
+  })(), null);
+
+  t('which campaign: the page says which campaign the row runs in, blank for all of them, and takes the row’s decision for that campaign alone (regex over the real source)', (() => {
+    const ma = src.indexOf('const manual = manualRows.map(r => {');
+    const m = src.slice(ma, src.indexOf('const allAccounts =', ma));
+    const read = /COALESCE\(p\.campaign_id, ''\) AS campaign_id/.test(src);
+    const fields = /campaign_id: pickC\.chosen, campaign_name: cRow \? String\(cRow\.name \|\| ''\) : '',/.test(m) && /campaign_missing: pickC\.missing,/.test(m);
+    const decided = /const pickC = adPeakCampaignPick\(sw, r\.campaign_id\);/.test(m) && /for \(const m of pickC\.rows\)/.test(m) && /switchable: pickC\.rows\.length > 0,/.test(m);
+    return read && fields && decided;
+  })(), null);
+
+  t('which campaign: the picker is on both forms, defaults to every campaign, and the save only ever sends one the picker was showing for that listing', (() => {
+    const asks = /api\('adtoolPeakCampaigns', \{ item_id: want \}\)/.test(pkSrc);
+    const dflt = />every pay-per-click campaign it is in<\/option>/.test(pkSrc);
+    /* one picker, built once and put on the add form and the change form by the same function */
+    const both = (pkSrc.match(/<div id="pktCampWrap">/g) || []).length === 1 && /campaign_id: campForSave\(id, null\)/.test(pkSrc) && /campaign_id: campForSave\(id, row\)/.test(pkSrc);
+    const onlyShown = /if \(PK\.campFor === String\(id \|\| ''\)\) return String\(PK\.pick \|\| ''\);/.test(pkSrc) && /return String\(\(row && row\.campaign_id\) \|\| ''\);/.test(pkSrc);
+    return asks && dflt && both && onlyShown;
+  })(), null);
+
+  t('which campaign: the copy under the picker is plain, the row links the campaign, and the page keeps its own class prefix', (() => {
+    const copy = /The hours switch the ad in this campaign only\. Its ads in other campaigns are left as they are\./.test(pkSrc);
+    const row = /all its pay-per-click campaigns/.test(pkSrc) && /adtCampaignLink\(cid, String\(\(r && r\.campaign_name\) \|\| ''\) \|\| cid\)/.test(pkSrc);
+    const why = /but it has no pay-per-click ad in the campaign named below, so nothing happens/.test(pkSrc) && /r\.campaign_missing/.test(pkSrc);
+    const prefix = /\.pkt-add select\{/.test(pkSrc) && !/\.adt-add select\{/.test(pkSrc);
+    /* and every field the engine sends against a campaign is used: its name, what its ad is doing,
+       and the campaign's own state where that is something other than plain running */
+    const used = /function campWords/.test(pkSrc) && /campWords\(c && c\.status\)/.test(pkSrc) && /adStatusWords\(c && c\.ad_status\)/.test(pkSrc);
+    if (!used) return false;
+    /* and no threshold or ceiling is typed into any of it */
+    return copy && row && why && prefix && !/20 switches/.test(pkSrc);
+  })(), null);
+
+  t('which campaign: a campaign the listing has no ad in RIGHT NOW is never dropped from the choice, because dropping it would widen what somebody narrowed', (() => {
+    /* the engine offers the campaigns a listing has a RUNNING pay-per-click ad in, and a listing the
+       hours have switched off has none in the campaign it runs in until the hours bring it back.
+       Dropping the choice would send the next save as every campaign; it is kept, said plainly, and
+       a save the engine turns down leaves the row exactly as it was. */
+    const kept = /function campaignKnown\(\)/.test(pkSrc) && /no ad running in it just now/.test(pkSrc) &&
+      !/if \(PK\.pick && !PK\.camps\.filter\(/.test(pkSrc);
+    const warned = /so a save will be turned down until you choose another\. The row is left as it is either way\./.test(pkSrc);
+    return kept && warned;
+  })(), null);
+
+  t('which campaign: the item number and the note survive a redraw of the hours, which is what lets the picker fill at all', (() => {
+    const kept = /value="' \+ esc\(String\(PK\.item \|\| ''\)\) \+ '"/.test(pkSrc) && /value="' \+ esc\(String\(PK\.note \|\| ''\)\) \+ '"/.test(pkSrc);
+    const typed = /itEl\.oninput = function \(\)/.test(pkSrc) && /loadCampaignsSoon\(PK\.item\)/.test(pkSrc);
+    /* the picker repaints itself and never the form: a form rebuilt mid-typing loses both the box
+       and the button somebody was reaching for */
+    const own = /function paintCamp\(\)/.test(pkSrc) && /el\.innerHTML = campaignInner\(formItem\(\)\)/.test(pkSrc);
+    return kept && typed && own;
+  })(), null);
+
+  t('which campaign: the explainer tag beside the picker opens the register entry that states the rule', (() => {
+    const tagged = /reg\('which campaign', 'how'\)/.test(pkSrc);
+    let keys = null;
+    for (const row of (regMap || [])) { if (row[0].test('which campaign')) { keys = row[1]; break; } }
+    const hit = keys ? rgAll.filter(r => keys.some(k => String(r.sources).indexOf(k) >= 0 || r.id === k)).map(r => r.id) : [];
+    const entry = rgAll.filter(r => r.id === 'PEAK_CAMPAIGN')[0];
+    return tagged && hit.indexOf('PEAK_CAMPAIGN') >= 0 &&
+      entry && /its hours switch the ad in that campaign alone/.test(entry.formula) &&
+      /every pay-per-click campaign the listing is in/.test(entry.formula) && !/—/.test(entry.formula);
+  })(), null);
 
   /* the pre-warm, the two stale claims, and the last place the portal stashed an item id */
   /* a refusal is eBay's last word for that wanted state: the same request is not repeated every quarter hour */
