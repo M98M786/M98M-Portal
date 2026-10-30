@@ -54,7 +54,7 @@
     '.pkt-tag.live{color:var(--gold-a);border-color:rgba(242,176,53,.45)}',
     '.pkt-tag.off{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
     '.pkt-tag.quiet{color:var(--text-3);border-style:dashed}',
-    '.pkt-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;border:1px solid var(--gold-line-hi);color:var(--gold-a);white-space:nowrap}',
+    '.pkt-acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}.pkt-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;border:1px solid var(--gold-line-hi);color:var(--gold-a);white-space:nowrap}',
     '.pkt-neg{color:' + LOSS + ';font-weight:800}.pkt-pos{color:var(--gold-a);font-weight:700}',
     '.pkt-btn{background:var(--gold-b);color:var(--gold-ink);border:0;border-radius:8px;padding:6px 13px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}',
     '.pkt-btn.ghost{background:transparent;color:var(--text-2);border:1px solid var(--gold-line)}',
@@ -557,7 +557,7 @@
     h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr>' +
       '<th>Listing</th><th>Hours, UK time' + reg('the hours for this listing', 'how') + '</th><th>Who switches it' + reg('who switches it', 'how') + '</th><th>Next change</th><th>Last change</th>' +
       '<th>Live apply on this account</th><th>Note</th><th>Added by</th><th>Live now</th>' +
-      '<th class="r">Spend, 7 days</th><th></th>' +
+      '<th class="r">Spend, 7 days</th>' +
       '</tr></thead><tbody>' + rows.map(function (r) {
         var id = String(r.item_id || '');
         var editing = PK.edit === id;
@@ -565,8 +565,12 @@
           return '<tr><td colspan="11">' + pickerHtml('New hours for ' + id, 'pktEd', false, false) + '</td></tr>';
         }
         var s = sugg[id];
+        /* the row's two actions live under the listing, in the first column: at the far right of an eleven-column
+           table they sat behind the horizontal scroll on an ordinary window, and the owner read that as the
+           remove option having been taken away (30 Oct). */
         return '<tr><td>' + adtProductCell(r) +
-          (s ? '<div style="margin-top:4px"><span class="pkt-mark" title="the system suggests this one too">system suggested</span></div>' : '') + '</td>' +
+          (s ? '<div style="margin-top:4px"><span class="pkt-mark" title="the system suggests this one too">system suggested</span></div>' : '') +
+          '<div class="pkt-acts"><button class="pkt-btn ghost" data-pkedit="' + esc(id) + '">Change hours</button><button class="pkt-btn ghost" data-pkrm="' + esc(id) + '">Remove</button></div></td>' +
           '<td>' + hoursCell(r) + '</td>' +
           '<td>' + autoCell(r) + '</td>' +
           '<td>' + nextCell(r) + '</td>' +
@@ -576,9 +580,7 @@
           '<td><div class="pkt-sm">' + esc(String(r.added_by || 'not recorded')) + '</div>' +
           '<div class="pkt-sm2">' + esc(whenTxt(r.added_at)) + '</div></td>' +
           '<td>' + liveTag(r.live_now) + '</td>' +
-          '<td class="r">' + gbp(r.spend_7d) + '</td>' +
-          '<td><button class="pkt-btn ghost" data-pkedit="' + esc(id) + '">Change hours</button>' +
-          '<div style="margin-top:5px"><button class="pkt-btn ghost" data-pkrm="' + esc(id) + '">Remove</button></div></td></tr>';
+          '<td class="r">' + gbp(r.spend_7d) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     return h + '</div>';
   }
