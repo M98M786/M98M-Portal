@@ -21307,6 +21307,26 @@ const ROUTES = {
     },
   },
 
+  /* 28 Oct (owner): "how much is coming in the next few days, ABRT and Azhar Bhai" — a read-only,
+     sync-keyed window on eBay's own payment truth, so the token never leaves the worker (the same
+     stance as ebayTradeCall). GET only, and only two feeds: the finances feed (signed — funds
+     summary, transactions by status, payouts) and the fulfillment order feed (payment holds with
+     eBay's expected release date). Nothing here can write to eBay. */
+  ebayFinanceRead: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const url = String(p.url || '');
+      const signed = /^https:\/\/apiz\.ebay\.com\/sell\/finances\/v1\/(transaction|payout|seller_funds_summary|transaction_summary)(\?|$)/.test(url);
+      const plain = /^https:\/\/api\.ebay\.com\/sell\/fulfillment\/v1\/order(\/[0-9A-Za-z!_-]+)?(\?|$)/.test(url);
+      if (!signed && !plain) throw new Error('SAY: url must be a finances read or a fulfillment order read');
+      const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
+      const r = signed
+        ? await ebaySignedFetch(ctx.env, url, tok, { headers: { accept: 'application/json' } })
+        : await fetch(url, { headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } });
+      return { status: r.status, body: await r.text() };
+    },
+  },
+
+
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
