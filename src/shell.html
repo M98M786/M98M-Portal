@@ -1642,9 +1642,10 @@ function enterApp(user){
        were wherever a page continues, so old links, the pre-warm and the page cache keep working;
        labels come from the view files. */
     NAV_DEPTS = [
-      { name: 'Advertising', keys: ['adtoolOverview', 'traffic', 'adtoolRunToday', 'adtoolProduct', 'adtoolCpc', 'adtoolPeak', 'adtoolItemCampaigns', 'adtoolSales', 'marketing', 'adtoolStopped'] },
+      /* owner, 31 Oct: Ads command centre joins the main Advertising pages */
+      { name: 'Advertising', keys: ['adtoolOverview', 'traffic', 'adtoolRunToday', 'adtoolProduct', 'adtoolCpc', 'adtoolPeak', 'adtoolItemCampaigns', 'adtoolSales', 'marketing', 'adtoolStopped', 'adsCentre'] },
       { name: 'Management',  keys: ['advertising', 'adtoolAccounts', 'adtoolStop', 'adtoolHealth'] },
-      { name: 'More',        keys: ['adtoolReport', 'potentialCpc', 'adtoolSpendingToday', 'adtoolCampaignBoard', 'adsCentre', 'adtoolCampaigns', 'adtoolCategories', 'adtoolCases', 'adtoolSlots', 'adtoolNewListings', 'adtoolAlerts', 'adtoolDepts'] }
+      { name: 'More',        keys: ['adtoolReport', 'potentialCpc', 'adtoolSpendingToday', 'adtoolCampaignBoard', 'adtoolCampaigns', 'adtoolCategories', 'adtoolCases', 'adtoolSlots', 'adtoolNewListings', 'adtoolAlerts', 'adtoolDepts'] }
     ];
     /* "Only management email accounts can see it; staff email accounts get no access." Enforced in
        ONE place rather than in four view files: the Management group's pages are re-gated here to
