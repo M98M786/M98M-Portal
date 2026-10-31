@@ -16608,13 +16608,13 @@ function prCanSee(user) { return PR_SEE_ROLES.indexOf(String((user || {}).role |
 /* The calculator's category bands. l1 is tested on the FIRST segment of eBay's "A > B > C" path,
    sub (when present) on the rest — sub-bands sit above their parent so they win. */
 const PR_BANDS = [
-  { name: 'Home › Power Strips & Surge Protectors', tiers: [[250, 9.9], [PR_INF, 7.9]], red: true, l1: /^home/, sub: /power strip|surge/ },
+  { name: 'Home › Power Strips & Surge Protectors', tiers: [[250, 9.9], [PR_INF, 7.9]], red: true, l1: /^home/, sub: /power strip|surge|extension lead/ },
   { name: 'Home › Appliances / DIY Tools & Workshop', tiers: [[400, 6.9], [PR_INF, 3]], red: true, l1: /^home/, sub: /applianc|diy tool|power tool|hand tool|workshop/ },
-  { name: 'Home › Furniture / Bath / Plumbing', tiers: [[500, 10.9], [1000, 7.9], [PR_INF, 3]], red: true, l1: /^home/, sub: /furniture|^bath|plumbing/ },
+  { name: 'Home › Furniture / Bath / Plumbing', tiers: [[500, 10.9], [1000, 7.9], [PR_INF, 3]], red: true, l1: /^home/, sub: /^furniture|^bath( |$)|plumbing/ },
   { name: 'Home, Furniture & DIY (lighting, etc.)', tiers: [[500, 11.9], [PR_INF, 7.9]], red: true, l1: /^home/, sub: null },
   { name: 'Vehicle › Tyres / GPS Sat Nav / Power Tools', tiers: [[750, 6.9], [PR_INF, 3]], red: false, l1: /^vehicle/, sub: /tyre|tire|sat nav|gps/ },
   { name: 'Vehicle Parts & Accessories (auto electrical)', tiers: [[750, 9.5], [PR_INF, 3]], red: false, l1: /^vehicle|^car/, sub: null },
-  { name: 'Computers › Laptops/Desktops/Tablets/Drives/Printers', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^computer/, sub: /laptop|desktop|^tablet|drive|printer/ },
+  { name: 'Computers › Laptops/Desktops/Tablets/Drives/Printers', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^computer/, sub: /^(laptops & netbooks|desktops & all-in-one|tablets & ebook|drives, storage|printers, scanners)/ },
   { name: 'Computers, Tablets & Networking (mouse, keyboard, USB)', tiers: [[PR_INF, 9.9]], red: false, l1: /^computer/, sub: null },
   { name: 'Health › Hair Extensions & Wigs', tiers: [[PR_INF, 11.9]], red: false, l1: /^health/, sub: /hair extension|wig/ },
   { name: 'Health › Electronic Smoking', tiers: [[PR_INF, 12.9]], red: false, l1: /^health/, sub: /smoking|vap(e|ing)/ },
@@ -16630,12 +16630,12 @@ const PR_BANDS = [
   { name: 'Sporting Goods', tiers: [[PR_INF, 10.9]], red: false, l1: /^sporting/, sub: null },
   { name: 'Toys › Tents', tiers: [[250, 10.9], [PR_INF, 7.9]], red: false, l1: /^toys/, sub: /tent/ },
   { name: 'Toys & Games', tiers: [[PR_INF, 10.9]], red: false, l1: /^toys/, sub: null },
-  { name: 'Video Games › Consoles', tiers: [[400, 6.9], [PR_INF, 2]], red: false, l1: /^video games/, sub: /^consoles/ },
+  { name: 'Video Games › Consoles', tiers: [[400, 6.9], [PR_INF, 2]], red: false, l1: /^video games/, sub: /^(video game )?consoles/ },
   { name: 'Video Games & Consoles', tiers: [[PR_INF, 9.9]], red: false, l1: /^video games/, sub: null },
   { name: 'Baby', tiers: [[PR_INF, 10.9]], red: false, l1: /^baby/, sub: null },
-  { name: 'Sound › TVs/Headphones/HiFi/Home Cinema', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^sound/, sub: /^tv|headphone|hi-?fi|home cinema|home audio/ },
+  { name: 'Sound › TVs/Headphones/HiFi/Home Cinema', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^sound/, sub: /^tvs?( >|$)|^home audio|^home cinema|^hi-?fi|> headphones( >|$)|^headphones( >|$)/ },
   { name: 'Sound & Vision', tiers: [[PR_INF, 9.9]], red: false, l1: /^sound/, sub: null },
-  { name: 'Cameras › Camcorders/Digital/Film/Lenses', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^camera/, sub: /camcorder|digital camera|film camera|lens/ },
+  { name: 'Cameras › Camcorders/Digital/Film/Lenses', tiers: [[1000, 6.9], [PR_INF, 3]], red: false, l1: /^camera/, sub: /^camcorders|^digital cameras|^film photography|^lenses/ },
   { name: 'Cameras & Photography', tiers: [[PR_INF, 9.9]], red: false, l1: /^camera/, sub: null },
   { name: 'Business, Office & Industrial', tiers: [[PR_INF, 12.5]], red: false, l1: /^business/, sub: null },
   { name: 'Crafts', tiers: [[PR_INF, 12.9]], red: false, l1: /^craft/, sub: null },
@@ -16729,51 +16729,83 @@ function prTier(delta) {
   return pc >= 100 ? 'critical' : pc >= 50 ? 'red' : pc >= 30 ? 'serious' : pc >= 20 ? 'moderate' : pc >= 10 ? 'low' : '';
 }
 function prTierTarget(ali) { const a = Number(ali) || 0; return a < 5 ? 1.5 : a <= 10 ? 2 : 3; }
-/* One listing judged. x carries the 30-day ledgers; the verdicts are the owner's law of 30 Sept:
-   under target with CPC under £2 a unit → raise the price; under target with CPC £2+ → the campaign is
-   the problem; in a live campaign £1+ above tier AND 20%+ margin → room to reduce; within 5p = on target. */
+/* A sourcing link carries the AliExpress price in its pdp_npi parameter ("…!GBP!2.22!2.14!…" —
+   list then current); the hunt form's Source Price is "3.02 - 3.30" (the higher end is the rule). */
+function prLinkCost(url) {
+  let u = String(url || '');
+  if (!u) return 0;
+  try { u = decodeURIComponent(u); } catch (e) { /* keep raw */ }
+  const m = u.replace(/%21/g, '!').match(/GBP!([0-9]+(?:\.[0-9]+)?)(?:!([0-9]+(?:\.[0-9]+)?))?/);
+  if (!m) return 0;
+  const a = Number(m[1]) || 0, b = Number(m[2]) || 0;
+  return round2(b > 0 ? b : a);
+}
+function prHuntCost(v) {
+  const s = String(v || '').replace(/[£,]/g, '');
+  const m = s.match(/([0-9]+(?:\.[0-9]+)?)\s*[-–—]\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (m) return round2(Math.max(Number(m[1]) || 0, Number(m[2]) || 0));
+  const n = Number((s.match(/[0-9]+(?:\.[0-9]+)?/) || [''])[0]);
+  return n > 0 ? round2(n) : 0;
+}
+/* One listing judged TWICE (owner, 31 Oct — "two rules"): NEUTRAL — no advertising cost at all, is the
+   minimum profit criterion met by the price itself; and WITH ADS — the last 14 days' advertising charged
+   per unit sold in those 14 days (CPC ex VAT × 1.2 as the calculator does, General spend as a rate on
+   the sale). Whether to run CPC on a listing is the owner's call after the neutral verdict. Verdicts are
+   the 30 Sept law: under target with CPC under £2 a unit → raise the price; CPC £2+ → the campaign is
+   the problem; £1+ above tier AND 20%+ margin → room to reduce; within 5p = on target. The cost chain:
+   the Main Sheet → the orders' own paid cost (30 days, then 180) → the hunt's source price → the link. */
 function prJudge(x) {
   const n = (v) => Number(v) || 0;
-  const price = n(x.price), units = n(x.units30);
-  const paid = (units > 0 && n(x.revenue30) > 0) ? round2(n(x.revenue30) / units) : price;
+  const price = n(x.price), units30 = n(x.units30), units14 = n(x.units14);
+  const paid = (units30 > 0 && n(x.revenue30) > 0) ? round2(n(x.revenue30) / units30) : price;
   const sheetAli = n(x.ali);
   const paidAli = n(x.cost_units30) > 0 ? round2(n(x.cost30) / n(x.cost_units30)) : 0;
-  const ali = sheetAli > 0 ? sheetAli : paidAli;
-  const aliSrc = sheetAli > 0 ? 'sheet' : paidAli > 0 ? 'orders' : '';
-  const cpcU = units > 0 ? round2(n(x.cpc30) / units) : 0;
-  const c = x.campaign || null;
-  const isCpc = !!(c && c.is_cpc);
-  const isGeneral = !!(c && !c.is_cpc && /RUNNING/i.test(String(c.status || '')));
-  let adRate = 0;
-  if (isGeneral) {
-    const b = Number(String(c.bid_pct || '').replace(/[^0-9.]/g, ''));
-    adRate = (b > 0 && b < 40) ? b / 100 : (n(x.revenue30) > 0 ? Math.min(0.3, n(x.gen30) / n(x.revenue30)) : 0);
-  }
+  const paidAliLong = n(x.cost_units180) > 0 ? round2(n(x.cost180) / n(x.cost_units180)) : 0;
+  const huntAli = n(x.hunt_cost), linkAli = n(x.link_cost);
+  const sane = (c) => c > 0 && (!(price > 0) || c <= price * 0.7);
+  let ali = 0, aliSrc = '';
+  if (sheetAli > 0) { ali = sheetAli; aliSrc = 'sheet'; }
+  else if (paidAli > 0) { ali = paidAli; aliSrc = 'orders'; }
+  else if (paidAliLong > 0) { ali = paidAliLong; aliSrc = 'orders 180d'; }
+  else if (sane(huntAli)) { ali = huntAli; aliSrc = 'hunt'; }
+  else if (sane(linkAli)) { ali = linkAli; aliSrc = 'link'; }
   const band = x.band || PR_BAND_OTHER;
-  const chain = paid > 0 ? prChain(paid, band, adRate, ali, cpcU) : null;
   const tierT = ali > 0 ? prTierTarget(ali) : null;
   const pctT = paid > 0 ? round2(0.15 * paid) : null;
   const target = tierT === null ? null : round2(Math.max(tierT, pctT || 0));
-  const actual = chain ? chain.actual : null;
-  const gap = (actual !== null && target !== null) ? round2(actual - target) : null;
-  const req = (ali > 0 && paid > 0) ? prRequiredPrice(band, adRate, ali, cpcU, tierT, 0.15) : null;
-  const newList = (req !== null && paid > 0) ? round2(price * req / paid) : null;
+  const spend14 = round2(n(x.cpc14) + n(x.gen14));
+  const judge = (cpcU, adRate, prefix, mode) => {
+    const chain = paid > 0 ? prChain(paid, band, adRate, ali, cpcU) : null;
+    const actual = chain ? chain.actual : null;
+    const gap = (actual !== null && target !== null) ? round2(actual - target) : null;
+    const req = (ali > 0 && paid > 0) ? prRequiredPrice(band, adRate, ali, cpcU, tierT, 0.15) : null;
+    const newList = (req !== null && paid > 0) ? round2(price * req / paid) : null;
+    const cpcMax = (chain && target !== null) ? round2(Math.max(0, 0.8 * (paid - chain.deduct - ali) - target)) : null;
+    let seg, loss = false;
+    if (!(ali > 0) || gap === null) seg = 'cost_missing';
+    else if (mode === 'ads' && units14 === 0) seg = spend14 > 0 ? 'spending_no_sales' : 'dormant';
+    else if (gap >= -0.05) seg = (actual >= tierT + 1 && actual >= 0.20 * paid) ? 'reduce' : 'on_target';
+    else seg = (mode === 'ads' && cpcU >= 2) ? 'ads_high' : 'raise';
+    if (chain && ali > 0 && actual < 0 && (mode === 'neutral' || units14 > 0)) loss = true;
+    const out = {};
+    out[prefix + 'actual'] = actual; out[prefix + 'gap'] = gap; out[prefix + 'required'] = req; out[prefix + 'new_list'] = newList;
+    out[prefix + 'segment'] = seg; out[prefix + 'loss'] = loss; out[prefix + 'cpc_max'] = cpcMax;
+    out[prefix + 'deduct'] = chain ? chain.deduct : null; out[prefix + 'earn'] = chain ? chain.earn : null;
+    out[prefix + 'net'] = chain ? chain.net : null; out[prefix + 'vat'] = chain ? chain.vat_hmrc : null;
+    out[prefix + 'chain'] = chain;
+    return out;
+  };
+  const cpcU14 = units14 > 0 ? round2(n(x.cpc14) / units14) : 0;
+  const adRate14 = (units14 > 0 && n(x.revenue14) > 0) ? Math.min(0.3, n(x.gen14) / n(x.revenue14)) : 0;
   const feeShare = n(x.fee_rev30) > 0 ? round2(n(x.fees30) / n(x.fee_rev30) * 100) : null;
-  const spend30 = round2(n(x.cpc30) + n(x.gen30));
-  let seg, loss = false;
-  if (!(ali > 0)) seg = 'cost_missing';
-  else if (units === 0) seg = spend30 > 0 ? 'spending_no_sales' : 'dormant';
-  else if (gap >= -0.05) seg = ((isCpc || isGeneral) && actual >= tierT + 1 && actual >= 0.20 * paid) ? 'reduce' : 'on_target';
-  else seg = cpcU >= 2 ? 'ads_high' : 'raise';
-  if (chain && units > 0 && actual < 0) loss = true;
-  const cpcMax = (chain && target !== null) ? round2(Math.max(0, 0.8 * (paid - chain.deduct - ali) - target)) : null;
-  return { price, paid, ali, ali_source: aliSrc, ali_sheet: sheetAli, ali_paid: paidAli,
-    units_30d: units, units_7d: n(x.units7), orders_30d: n(x.orders30), revenue_30d: round2(n(x.revenue30)), refunded_30d: round2(n(x.refunded30)),
-    cpc_30d: round2(n(x.cpc30)), gen_30d: round2(n(x.gen30)), clicks_30d: n(x.clicks30), cpc_per_unit: cpcU, ad_rate_pct: round2(adRate * 100),
+  return Object.assign({ price, paid, ali, ali_source: aliSrc, ali_sheet: sheetAli, ali_paid: paidAli,
+    units_30d: units30, units_14d: units14, units_7d: n(x.units7), orders_30d: n(x.orders30),
+    revenue_30d: round2(n(x.revenue30)), revenue_14d: round2(n(x.revenue14)), refunded_30d: round2(n(x.refunded30)),
+    cpc_30d: round2(n(x.cpc30)), gen_30d: round2(n(x.gen30)), cpc_14d: round2(n(x.cpc14)), gen_14d: round2(n(x.gen14)), spend_14d: spend14,
+    clicks_14d: n(x.clicks14), clicks_30d: n(x.clicks30), cpc_per_unit_14d: cpcU14, ad_rate_14d_pct: round2(adRate14 * 100),
     fee_share_observed: feeShare, band: band.name, band_rate: band.tiers[0][1], band_source: band.source || '',
-    deduct: chain ? chain.deduct : null, earn: chain ? chain.earn : null, net: chain ? chain.net : null, vat: chain ? chain.vat_hmrc : null, actual,
-    target, target_tier: tierT, target_pct: pctT, gap, required_price: req, new_list_price: newList, cpc_max: cpcMax,
-    segment: seg, loss, is_cpc: isCpc, is_general: isGeneral, chain };
+    target, target_tier: tierT, target_pct: pctT, is_cpc: !!(x.campaign && x.campaign.is_cpc) },
+    judge(0, 0, 'n_', 'neutral'), judge(cpcU14, adRate14, 'a_', 'ads'));
 }
 function prDaysBetween(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
 /* The formal supplier assessment Zaid asked for: every cost move in 90 days grouped by the supplier
@@ -16781,7 +16813,7 @@ function prDaysBetween(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') -
 function prSupplierAssessment(hist, supOf, acctOf, d30, yday, today) {
   const groups = {};
   for (const h of hist) {
-    const nameRaw = String(h.supplier || supOf[h.item_id] || '').trim();
+    const nameRaw = String(h.supplier || supOf[h.item_id] || '').trim().replace(/^(https?:\/\/[^?#]+).*$/i, '$1');
     const key = nameRaw ? nameRaw.toLowerCase() : '— no supplier named · ' + String(h.account || acctOf[h.item_id] || '');
     const g = groups[key] || (groups[key] = { supplier: nameRaw || key, items: {}, accounts: {}, changes_90d: 0, changes_30d: 0, rises_30d: 0, drops_30d: 0, drift: 0, worst: '', days: {}, last: '' });
     g.changes_90d++; g.items[h.item_id] = 1;
@@ -21674,9 +21706,10 @@ const ROUTES = {
     },
   },
   /* 31 Oct (Zaid's price-revision brief): the Price revision desk's one read — every ACTIVE listing
-     judged by the calculator (prJudge), the open supplier-cost alerts with their tier and what to
-     do about each, the supplier assessment, and the decisions already taken. Money is per unit at
-     the price buyers actually paid in the last 30 days (the list price when nothing sold). */
+     judged by the calculator (prJudge) twice, neutral and with the last 14 days' ads; the open
+     supplier-cost alerts with their tier and what to do about each; the supplier assessment; the
+     decisions already taken. Money is per unit at the price buyers actually paid in the last 30 days
+     (the list price when nothing sold). */
   priceRevisionBoard: {
     auth: 'any', fn: async (p, ctx) => {
       if (!prCanSee(ctx.user)) throw new AuthError('auth');
@@ -21686,13 +21719,13 @@ const ROUTES = {
       const n = (v) => Number(v) || 0;
       const today = ukDate('');
       const day = (back) => ukDate(new Date(Date.now() - back * 86400000).toISOString());
-      const d7 = day(6), d30 = day(29), d90 = day(89), yday = day(1), d14 = day(14);
+      const d7 = day(6), d14 = day(13), d30 = day(29), d90 = day(89), d180 = day(179), yday = day(1), dHold = day(14);
       const withA = (arr) => arr.concat(acct ? [acct] : []);
       const acctSql = (col, idx) => (acct ? ' AND ' + col + ' = ?' + idx : '');
       let items;
       const itemSql = (withPath) =>
         'SELECT i.item_id, i.account, i.title, i.price, i.image, i.sold_30d, ' + (withPath ? "COALESCE(i.primary_category, '')" : "''") + ' AS path, ' +
-        "COALESCE(f.ali_cost, 0) AS ali_cost, COALESCE(f.category, '') AS sheet_cat, COALESCE(f.current_sup, '') AS supplier, COALESCE(f.enriched_at, '') AS facts_at " +
+        "COALESCE(f.ali_cost, 0) AS ali_cost, COALESCE(f.category, '') AS sheet_cat, COALESCE(f.current_sup, '') AS supplier, COALESCE(f.enriched_at, '') AS facts_at, COALESCE(f.sup1_link, '') AS f1 " +
         'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id ' +
         "WHERE i.status = 'ACTIVE'" + acctSql('i.account', 1);
       try { items = (await DB.prepare(itemSql(true)).bind(...withA([])).all()).results || []; }
@@ -21702,13 +21735,20 @@ const ROUTES = {
         'SELECT item_id, COUNT(*) AS orders_n, SUM(qty) AS units, SUM(sold) AS revenue, SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost, ' +
         'SUM(CASE WHEN cost > 0 THEN qty ELSE 0 END) AS cost_units, SUM(CASE WHEN ebay_fees > 0 THEN ebay_fees ELSE 0 END) AS fees, ' +
         'SUM(CASE WHEN ebay_fees > 0 THEN sold ELSE 0 END) AS fee_rev, SUM(CASE WHEN refunded > 0 THEN refunded ELSE 0 END) AS refunded, ' +
-        'SUM(CASE WHEN date(created_at) >= ?2 THEN qty ELSE 0 END) AS units_7d ' +
-        "FROM orders WHERE status NOT IN ('NOT_FOUND', 'CANCELLED') AND date(created_at) >= ?1" + acctSql('account', 3) + ' GROUP BY item_id'
-      ).bind(...withA([d30, d7])).all()).results || [])) o30[r.item_id] = r;
+        'SUM(CASE WHEN date(created_at) >= ?2 THEN qty ELSE 0 END) AS units_7d, ' +
+        'SUM(CASE WHEN date(created_at) >= ?3 THEN qty ELSE 0 END) AS units_14d, SUM(CASE WHEN date(created_at) >= ?3 THEN sold ELSE 0 END) AS revenue_14d ' +
+        "FROM orders WHERE status NOT IN ('NOT_FOUND', 'CANCELLED') AND date(created_at) >= ?1" + acctSql('account', 4) + ' GROUP BY item_id'
+      ).bind(...withA([d30, d7, d14])).all()).results || [])) o30[r.item_id] = r;
+      const o180 = {};
+      for (const r of ((await DB.prepare(
+        'SELECT item_id, SUM(cost) AS cost, SUM(qty) AS cost_units FROM orders WHERE cost > 0 AND qty > 0 AND status NOT IN (\'NOT_FOUND\', \'CANCELLED\') AND date(created_at) >= ?1' + acctSql('account', 2) + ' GROUP BY item_id'
+      ).bind(...withA([d180])).all().catch(() => ({ results: [] }))).results || [])) o180[r.item_id] = r;
       const a30 = {};
       for (const r of ((await DB.prepare(
-        'SELECT item_id, SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) + SUM(cpc_clicks) AS clicks FROM ads_daily WHERE date >= ?1' + acctSql('account', 2) + ' GROUP BY item_id'
-      ).bind(...withA([d30])).all()).results || [])) a30[r.item_id] = r;
+        'SELECT item_id, SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) + SUM(cpc_clicks) AS clicks, ' +
+        'SUM(CASE WHEN date >= ?2 THEN spend ELSE 0 END) AS gen14, SUM(CASE WHEN date >= ?2 THEN cpc_spend ELSE 0 END) AS cpc14, SUM(CASE WHEN date >= ?2 THEN clicks + cpc_clicks ELSE 0 END) AS clicks14 ' +
+        'FROM ads_daily WHERE date >= ?1' + acctSql('account', 3) + ' GROUP BY item_id'
+      ).bind(...withA([d30, d14])).all()).results || [])) a30[r.item_id] = r;
       const camp = {};
       const cr = await DB.prepare(
         'SELECT ca.listing_id, c.name, c.status, c.funding_model, ca.ad_status, ca.bid_pct FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id' + (acct ? ' WHERE ca.account = ?1' : '')
@@ -21730,6 +21770,16 @@ const ROUTES = {
         const cur = promo[r.item_id];
         if (!cur || pct > cur.pct) promo[r.item_id] = { name: r.name, type: r.type, discount: r.discount, pct, end_at: r.end_at };
       }
+      /* the cost fallbacks (545 live listings had no cost on the first morning): the hunt's own source
+         price and the first sourcing link's price — portal-saved link, the sheet's, the go-live record's, the hunt's */
+      const huntOf = {};
+      for (const r of ((await DB.prepare(
+        "SELECT pv.item_id, json_extract(h.vals, '$.\"Source Price\"') AS sp, json_extract(h.vals, '$.\"Product Link 1 Main supplier\"') AS l1 FROM provenance pv JOIN hunt_rows h ON h.hunt_id = pv.hunt_id"
+      ).all().catch(() => ({ results: [] }))).results || [])) huntOf[r.item_id] = { cost: prHuntCost(r.sp), link: String(r.l1 || '') };
+      const s1Of = {};
+      for (const r of ((await DB.prepare("SELECT item_id, s1 FROM sourcing WHERE COALESCE(s1, '') != ''").all().catch(() => ({ results: [] }))).results || [])) s1Of[r.item_id] = String(r.s1 || '');
+      const gOf = {};
+      for (const r of ((await DB.prepare("SELECT item_id, ali_link FROM golive WHERE COALESCE(ali_link, '') != ''").all().catch(() => ({ results: [] }))).results || [])) gOf[r.item_id] = String(r.ali_link || '');
       const hist = (await DB.prepare(
         'SELECT item_id, account, old_cost, new_cost, delta_p, tier, supplier, seen_at, seen_day FROM cost_history WHERE seen_day >= ?1' + acctSql('account', 2) + ' ORDER BY seen_at'
       ).bind(...withA([d90])).all().catch(() => ({ results: [] }))).results || [];
@@ -21748,13 +21798,15 @@ const ROUTES = {
       const lastDec = {};
       for (const d of decs) if (!lastDec[d.item_id]) lastDec[d.item_id] = d;
       const rows = items.map((it) => {
-        const o = o30[it.item_id] || {}, a = a30[it.item_id] || {};
-        const j = prJudge({ price: it.price, ali: it.ali_cost, units30: o.units, orders30: o.orders_n, revenue30: o.revenue, cost30: o.cost, cost_units30: o.cost_units,
+        const o = o30[it.item_id] || {}, a = a30[it.item_id] || {}, ol = o180[it.item_id] || {}, hu = huntOf[it.item_id] || {};
+        const linkCost = [s1Of[it.item_id], it.f1, gOf[it.item_id], hu.link].map(prLinkCost).filter((c) => c > 0)[0] || 0;
+        const j = prJudge({ price: it.price, ali: it.ali_cost, units30: o.units, units14: o.units_14d, orders30: o.orders_n, revenue30: o.revenue, revenue14: o.revenue_14d,
+          cost30: o.cost, cost_units30: o.cost_units, cost180: ol.cost, cost_units180: ol.cost_units, hunt_cost: hu.cost, link_cost: linkCost,
           fees30: o.fees, fee_rev30: o.fee_rev, refunded30: o.refunded, units7: o.units_7d, cpc30: a.cpc, gen30: a.gen, clicks30: a.clicks,
-          campaign: camp[it.item_id] || null, band: prBandFor(it.path, it.sheet_cat) });
-        delete j.chain;
+          cpc14: a.cpc14, gen14: a.gen14, clicks14: a.clicks14, campaign: camp[it.item_id] || null, band: prBandFor(it.path, it.sheet_cat) });
+        delete j.n_chain; delete j.a_chain;
         const h = hm[it.item_id] || null, d = lastDec[it.item_id] || null;
-        const held = !!(d && d.verdict === 'keep' && String(d.at || '').slice(0, 10) >= d14);
+        const held = !!(d && d.verdict === 'keep' && String(d.at || '').slice(0, 10) >= dHold);
         return Object.assign({ item_id: it.item_id, account: it.account, title: it.title, image: it.image || '', supplier: it.supplier || '', facts_at: it.facts_at || '',
           sale: promo[it.item_id] || null, campaign: camp[it.item_id] || null,
           cost_changes_30d: h ? h.n30 : 0, cost_changes_90d: h ? h.n90 : 0, cost_days_30d: h ? Object.keys(h.days30).length : 0,
@@ -21762,7 +21814,7 @@ const ROUTES = {
           decision: d ? { verdict: d.verdict, note: d.note, by: d.by_email, at: d.at, task_id: d.task_id, price_target: d.price_target } : null, held }, j);
       });
       const SEG_RANK = { raise: 0, ads_high: 1, spending_no_sales: 2, cost_missing: 3, reduce: 4, on_target: 5, dormant: 6 };
-      rows.sort((a, b) => ((b.loss ? 1 : 0) - (a.loss ? 1 : 0)) || (SEG_RANK[a.segment] - SEG_RANK[b.segment]) || ((a.gap === null ? 99 : a.gap) - (b.gap === null ? 99 : b.gap)) || (b.units_30d - a.units_30d));
+      rows.sort((a, b) => ((b.n_loss ? 1 : 0) - (a.n_loss ? 1 : 0)) || (SEG_RANK[a.n_segment] - SEG_RANK[b.n_segment]) || ((a.n_gap === null ? 99 : a.n_gap) - (b.n_gap === null ? 99 : b.n_gap)) || (b.units_30d - a.units_30d));
       const byId = {};
       for (const r of rows) byId[r.item_id] = r;
       const alertsRaw = (await DB.prepare(
@@ -21774,39 +21826,44 @@ const ROUTES = {
         const r = byId[w.item_id] || null, h = hm[w.item_id] || null;
         const delta = round2(n(w.new_cost) - n(w.old_cost));
         const tier = String(w.tier || '') || prTier(delta);
-        const after = (r && r.actual !== null && r.actual !== undefined) ? r.actual : null;   // the facts already hold the new cost
+        /* judged neutral — a cost rise is a pricing matter whatever the ads do; the facts already hold the new cost */
+        const after = (r && r.n_actual !== null && r.n_actual !== undefined) ? r.n_actual : null;
         const before = after !== null ? round2(after + 0.8 * delta) : null;
         let sug = null;
         if (r && r.target !== null && after !== null) {
           if (r.units_30d === 0) sug = { kind: 'end', text: 'no sale in 30 days and the cost is climbing — end it, or re-source it before it sells' };
           else if (after >= r.target - 0.05) sug = { kind: 'absorb', text: 'still £' + after.toFixed(2) + ' a unit against a £' + r.target.toFixed(2) + ' target — the listing absorbs it' };
-          else if (r.required_price !== null && r.required_price <= r.paid * 1.25) sug = { kind: 'revise', new_price: r.new_list_price, text: 'revise to £' + (r.new_list_price || 0).toFixed(2) + ' — buyers pay £' + r.paid.toFixed(2) + ' now, £' + r.required_price.toFixed(2) + ' clears the target' };
-          else sug = { kind: 'end', text: 'it would need £' + (r.required_price || 0).toFixed(2) + ' (' + Math.round(((r.required_price || 0) / r.paid - 1) * 100) + '% up) — the market will not wear it; end it or change supplier' };
+          else if (r.n_required !== null && r.n_required <= r.paid * 1.25) sug = { kind: 'revise', new_price: r.n_new_list, text: 'revise to £' + (r.n_new_list || 0).toFixed(2) + ' — buyers pay £' + r.paid.toFixed(2) + ' now, £' + r.n_required.toFixed(2) + ' clears the target' };
+          else sug = { kind: 'end', text: 'it would need £' + (r.n_required || 0).toFixed(2) + ' (' + Math.round(((r.n_required || 0) / r.paid - 1) * 100) + '% up) — the market will not wear it; end it or change supplier' };
         } else if (!r) sug = { kind: 'gone', text: 'the listing is no longer active' };
         return { item_id: w.item_id, account: w.account, old_cost: n(w.old_cost), new_cost: n(w.new_cost), delta, tier, tier_label: PR_TIER_LABEL[tier] || 'Under 10p',
           alerted_at: w.alerted_at, acked_by: w.acked_by || '', acked_at: w.acked_at || '', note: w.note || '', open: !String(w.acked_at || ''),
-          title: r ? r.title : '', paid: r ? r.paid : null, units_30d: r ? r.units_30d : null, segment: r ? r.segment : '', target: r ? r.target : null,
+          title: r ? r.title : '', paid: r ? r.paid : null, units_30d: r ? r.units_30d : null, segment: r ? r.n_segment : '', target: r ? r.target : null,
           before, after, suggestion: sug, supplier: r ? r.supplier : '', changes_30d: h ? h.n30 : 0, days_changed_30d: h ? Object.keys(h.days30).length : 0,
-          changed_yesterday: !!(h && h.yday), changed_today: !!(h && h.today), required_price: r ? r.required_price : null, new_list_price: r ? r.new_list_price : null };
+          changed_yesterday: !!(h && h.yday), changed_today: !!(h && h.today), required_price: r ? r.n_required : null, new_list_price: r ? r.n_new_list : null };
       }).sort((a, b) => ((b.open ? 1 : 0) - (a.open ? 1 : 0)) || (TIER_SORT[a.tier] - TIER_SORT[b.tier]) || (String(b.alerted_at) < String(a.alerted_at) ? -1 : 1));
       const supOf = {}, acctOf = {};
       for (const it of items) { supOf[it.item_id] = it.supplier || ''; acctOf[it.item_id] = it.account; }
       const suppliers = prSupplierAssessment(hist, supOf, acctOf, d30, yday, today);
       const count = (f) => rows.filter(f).length;
-      const counts = { items: rows.length, raise: count((r) => r.segment === 'raise'), ads_high: count((r) => r.segment === 'ads_high'), reduce: count((r) => r.segment === 'reduce'),
-        on_target: count((r) => r.segment === 'on_target'), dormant: count((r) => r.segment === 'dormant'), spending_no_sales: count((r) => r.segment === 'spending_no_sales'),
-        cost_missing: count((r) => r.segment === 'cost_missing'), loss: count((r) => r.loss), held: count((r) => r.held), selling_30d: count((r) => r.units_30d > 0),
+      const modeCounts = (pfx) => ({
+        raise: count((r) => r[pfx + 'segment'] === 'raise'), ads_high: count((r) => r[pfx + 'segment'] === 'ads_high'), reduce: count((r) => r[pfx + 'segment'] === 'reduce'),
+        on_target: count((r) => r[pfx + 'segment'] === 'on_target'), dormant: count((r) => r[pfx + 'segment'] === 'dormant'), spending_no_sales: count((r) => r[pfx + 'segment'] === 'spending_no_sales'),
+        loss: count((r) => r[pfx + 'loss']), raise_sold: count((r) => r[pfx + 'segment'] === 'raise' && r.units_30d > 0),
+        gap_month: round2(rows.filter((r) => (r[pfx + 'segment'] === 'raise' || r[pfx + 'segment'] === 'ads_high') && r[pfx + 'gap'] !== null).reduce((s, r) => s + Math.max(0, -r[pfx + 'gap']) * r.units_30d, 0)) });
+      const counts = { items: rows.length, cost_missing: count((r) => r.n_segment === 'cost_missing'), held: count((r) => r.held), selling_30d: count((r) => r.units_30d > 0), selling_14d: count((r) => r.units_14d > 0),
+        cost_sources: rows.reduce((m, r) => { const k = r.ali_source || 'none'; m[k] = (m[k] || 0) + 1; return m; }, {}),
         alerts_open: alerts.filter((a) => a.open).length, alerts_by_tier: alerts.filter((a) => a.open).reduce((m, a) => { m[a.tier || 'none'] = (m[a.tier || 'none'] || 0) + 1; return m; }, {}),
         suppliers: suppliers.length, suppliers_downgrade: suppliers.filter((s) => s.verdict === 'downgrade').length, suppliers_watch: suppliers.filter((s) => s.verdict === 'watch').length,
-        gap_month: round2(rows.filter((r) => (r.segment === 'raise' || r.segment === 'ads_high') && r.gap !== null).reduce((s, r) => s + Math.max(0, -r.gap) * r.units_30d, 0)) };
-      return { rows, alerts, suppliers, decisions: decs.slice(0, 120), counts, as_of: new Date().toISOString(), windows: { d7, d30, d90, today },
+        neutral: modeCounts('n_'), ads: modeCounts('a_') };
+      return { rows, alerts, suppliers, decisions: decs.slice(0, 120), counts, as_of: new Date().toISOString(), windows: { d7, d14, d30, d90, today },
         can_act: MGMT_ROLES.indexOf(ctx.user.role) >= 0 || !!ctx.user.super,
-        benchmarks: { tier_targets: { under_5: 1.5, to_10: 2, over_10: 3 }, margin_pct: 15, cpc_line: 2, tolerance: 0.05, tiers: { low: 10, moderate: 20, serious: 30, red: 50, critical: 100 } },
-        note: 'Judged exactly as the Order earning calculator: banded FVF for the eBay category, the per-order fee, 0.35% regulatory, the General campaign rate, 20% VAT on eBay fees, CPC × 1.2, and the sheet\'s VAT-to-HMRC column — Actual profit a unit at the price buyers paid in the last 30 days (the list price when nothing sold). Ali cost is the Central Main Sheet\'s cost (the orders\' own paid cost when the sheet has none). Targets: £1.50 / £2 / £3 a unit by Ali tier and 15% of the price, whichever binds; within 5p counts as on target.' };
+        benchmarks: { tier_targets: { under_5: 1.5, to_10: 2, over_10: 3 }, margin_pct: 15, cpc_line: 2, tolerance: 0.05, ads_window_days: 14, tiers: { low: 10, moderate: 20, serious: 30, red: 50, critical: 100 } },
+        note: 'Judged exactly as the Order earning calculator: banded FVF for the eBay category, the per-order fee, 0.35% regulatory, 20% VAT on eBay fees, CPC × 1.2, and the sheet\'s VAT-to-HMRC column — Actual profit a unit at the price buyers paid in the last 30 days (the list price when nothing sold). Neutral = no advertising cost at all; With ads = the last 14 days\' CPC and General spend charged per unit sold in those 14 days. Ali cost: the Central Main Sheet\'s cost, else the orders\' own paid cost, else the hunt\'s source price, else the sourcing link\'s price. Targets: £1.50 / £2 / £3 a unit by Ali tier and 15% of the price, whichever binds; within 5p counts as on target.' };
     },
   },
   /* Item-ID search on the same desk: the listing's cost (sheet + what was actually paid), its
-     sourcing links, supplier, the calculator breakdown, its cost history, alerts and decisions. */
+     sourcing links, supplier, the calculator breakdown both ways, its cost history, alerts and decisions. */
   priceItemDetail: {
     auth: 'any', fn: async (p, ctx) => {
       if (!prCanSee(ctx.user)) throw new AuthError('auth');
@@ -21824,7 +21881,7 @@ const ROUTES = {
       try { it = await DB.prepare(sql(true)).bind(id).first(); } catch (e) { it = await DB.prepare(sql(false)).bind(id).first(); }
       if (!it) throw new Error('SAY: no listing with item ID ' + id + ' in the portal — it syncs from eBay hourly');
       const day = (back) => ukDate(new Date(Date.now() - back * 86400000).toISOString());
-      const today = ukDate(''), d7 = day(6), d30 = day(29), d60 = day(59), yday = day(1);
+      const today = ukDate(''), d7 = day(6), d14 = day(13), d30 = day(29), d180 = day(179), yday = day(1);
       const s = await DB.prepare('SELECT s1, s2, s3, updated_by, updated_at FROM sourcing WHERE item_id = ?1').bind(id).first().catch(() => null);
       const g = await DB.prepare('SELECT ali_link, lister, live_at FROM golive WHERE item_id = ?1').bind(id).first().catch(() => null);
       const pv = await DB.prepare('SELECT hunter_email, lister_email, hunt_id FROM provenance WHERE item_id = ?1').bind(id).first().catch(() => null);
@@ -21840,19 +21897,24 @@ const ROUTES = {
         }
       }
       const orders = (await DB.prepare(
-        'SELECT order_id, created_at, qty, sold, cost, ebay_fees, refunded, status FROM orders WHERE item_id = ?1 AND date(created_at) >= ?2 AND status NOT IN (\'NOT_FOUND\', \'CANCELLED\') ORDER BY created_at DESC LIMIT 80'
-      ).bind(id, d60).all().catch(() => ({ results: [] }))).results || [];
-      const o = { orders_n: 0, units: 0, revenue: 0, cost: 0, cost_units: 0, fees: 0, fee_rev: 0, refunded: 0, units_7d: 0 };
+        'SELECT order_id, created_at, qty, sold, cost, ebay_fees, refunded, status FROM orders WHERE item_id = ?1 AND date(created_at) >= ?2 AND status NOT IN (\'NOT_FOUND\', \'CANCELLED\') ORDER BY created_at DESC LIMIT 400'
+      ).bind(id, d180).all().catch(() => ({ results: [] }))).results || [];
+      const o = { orders_n: 0, units: 0, revenue: 0, cost: 0, cost_units: 0, fees: 0, fee_rev: 0, refunded: 0, units_7d: 0, units_14d: 0, revenue_14d: 0, cost180: 0, cost_units180: 0 };
       const paidCosts = {};
       for (const r of orders) {
-        if (String(r.created_at || '').slice(0, 10) < d30) continue;
+        const dd = String(r.created_at || '').slice(0, 10);
+        if (n(r.cost) > 0 && n(r.qty) > 0) { o.cost180 += n(r.cost); o.cost_units180 += n(r.qty); }
+        if (dd < d30) continue;
         o.orders_n++; o.units += n(r.qty); o.revenue += n(r.sold);
         if (n(r.cost) > 0) { o.cost += n(r.cost); o.cost_units += n(r.qty); const c = round2(n(r.cost) / Math.max(1, n(r.qty))); paidCosts[c] = (paidCosts[c] || 0) + 1; }
         if (n(r.ebay_fees) > 0) { o.fees += n(r.ebay_fees); o.fee_rev += n(r.sold); }
         if (n(r.refunded) > 0) o.refunded += n(r.refunded);
-        if (String(r.created_at || '').slice(0, 10) >= d7) o.units_7d += n(r.qty);
+        if (dd >= d14) { o.units_14d += n(r.qty); o.revenue_14d += n(r.sold); }
+        if (dd >= d7) o.units_7d += n(r.qty);
       }
-      const a = await DB.prepare('SELECT SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) + SUM(cpc_clicks) AS clicks FROM ads_daily WHERE item_id = ?1 AND date >= ?2').bind(id, d30).first().catch(() => null) || {};
+      const a = await DB.prepare(
+        'SELECT SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) + SUM(cpc_clicks) AS clicks, SUM(CASE WHEN date >= ?3 THEN spend ELSE 0 END) AS gen14, SUM(CASE WHEN date >= ?3 THEN cpc_spend ELSE 0 END) AS cpc14, SUM(CASE WHEN date >= ?3 THEN clicks + cpc_clicks ELSE 0 END) AS clicks14 FROM ads_daily WHERE item_id = ?1 AND date >= ?2'
+      ).bind(id, d30, d14).first().catch(() => null) || {};
       let campaign = null;
       const cr = await DB.prepare('SELECT c.name, c.status, c.funding_model, ca.ad_status, ca.bid_pct FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE ca.listing_id = ?1').bind(id).all().catch(() => ({ results: [] }));
       for (const r of (cr.results || [])) {
@@ -21863,14 +21925,17 @@ const ROUTES = {
       const sr = await DB.prepare("SELECT p.name, p.type, p.discount, p.end_at FROM promo_members pm JOIN promotions p ON p.account = pm.account AND p.promo_id = pm.promo_id WHERE pm.item_id = ?1 AND p.status LIKE '%RUNNING%'").bind(id).all().catch(() => ({ results: [] }));
       for (const r of (sr.results || [])) { const m = String(r.discount || '').match(/(\d+(?:\.\d+)?)\s*%/); const pct = m ? Number(m[1]) : 0; if (!sale || pct > sale.pct) sale = { name: r.name, type: r.type, discount: r.discount, pct, end_at: r.end_at }; }
       const band = prBandFor(it.path, it.sheet_cat);
-      const j = prJudge({ price: it.price, ali: it.ali_cost, units30: o.units, orders30: o.orders_n, revenue30: o.revenue, cost30: o.cost, cost_units30: o.cost_units,
-        fees30: o.fees, fee_rev30: o.fee_rev, refunded30: o.refunded, units7: o.units_7d, cpc30: a.cpc, gen30: a.gen, clicks30: a.clicks, campaign, band });
-      const chainAtTarget = (j.required_price && j.ali > 0) ? prChain(j.required_price, band, j.ad_rate_pct / 100, j.ali, j.cpc_per_unit) : null;
+      const linkCost = [s && s.s1, it.f1, g && g.ali_link, hunt && hunt.link1].map(prLinkCost).filter((c) => c > 0)[0] || 0;
+      const j = prJudge({ price: it.price, ali: it.ali_cost, units30: o.units, units14: o.units_14d, orders30: o.orders_n, revenue30: o.revenue, revenue14: o.revenue_14d,
+        cost30: o.cost, cost_units30: o.cost_units, cost180: o.cost180, cost_units180: o.cost_units180, hunt_cost: hunt ? prHuntCost(hunt.source_price) : 0, link_cost: linkCost,
+        fees30: o.fees, fee_rev30: o.fee_rev, refunded30: o.refunded, units7: o.units_7d, cpc30: a.cpc, gen30: a.gen, clicks30: a.clicks, cpc14: a.cpc14, gen14: a.gen14, clicks14: a.clicks14, campaign, band });
+      const nChain = j.n_chain, aChain = j.a_chain;
+      delete j.n_chain; delete j.a_chain;
       const history = (await DB.prepare('SELECT old_cost, new_cost, delta_p, tier, supplier, seen_at, seen_day FROM cost_history WHERE item_id = ?1 ORDER BY seen_at DESC LIMIT 60').bind(id).all().catch(() => ({ results: [] }))).results || [];
       const alerts = (await DB.prepare("SELECT old_cost, new_cost, sell_price, margin_after, alerted_at, COALESCE(tier, '') AS tier, acked_by, acked_at, note FROM price_watch WHERE item_id = ?1 ORDER BY alerted_at DESC LIMIT 20").bind(id).all().catch(() => ({ results: [] }))).results || [];
       const decisions = (await DB.prepare('SELECT id, verdict, note, price_now, price_target, segment, by_email, at, task_id FROM price_decisions WHERE item_id = ?1 ORDER BY id DESC LIMIT 20').bind(id).all().catch(() => ({ results: [] }))).results || [];
       const isUrl = (v) => /^https?:\/\//i.test(String(v || '').trim());
-      const pick = (cands) => { for (const [src, v] of cands) if (isUrl(v)) return { url: String(v).trim(), src }; return null; };
+      const pick = (cands) => { for (const [src, v] of cands) if (isUrl(v)) return { url: String(v).trim(), src, price: prLinkCost(v) }; return null; };
       const links = [
         pick([['portal', s && s.s1], ['sheet', it.f1], ['go-live', g && g.ali_link], ['hunt', hunt && hunt.link1]]),
         pick([['portal', s && s.s2], ['sheet', it.f2], ['hunt', hunt && hunt.link2]]),
@@ -21881,10 +21946,11 @@ const ROUTES = {
         item: { item_id: it.item_id, account: it.account, title: it.title, image: it.image || '', status: it.status, price: n(it.price), sold_30d: n(it.sold_30d), category_path: it.path || '', sheet_category: it.sheet_cat || '',
           supplier: it.supplier || '', facts_at: it.facts_at || '', sheet_oe: n(it.oe), sheet_profit: n(it.sheet_profit), sheet_campaign: it.sheet_campaign || '', sheet_campaign_type: it.sheet_campaign_type || '',
           hunter: pv ? pv.hunter_email || '' : '', lister: pv ? pv.lister_email || '' : (g ? g.lister || '' : ''), live_at: g ? g.live_at || '' : '' },
-        cost: { sheet: n(it.ali_cost), paid_avg_30d: j.ali_paid, paid_costs_seen: Object.keys(paidCosts).map((c) => ({ cost: Number(c), orders: paidCosts[c] })).sort((x, y) => y.orders - x.orders).slice(0, 8),
-          hunt_source_price: hunt ? hunt.source_price || '' : '', used: j.ali, source: j.ali_source },
+        cost: { sheet: n(it.ali_cost), paid_avg_30d: j.ali_paid, paid_avg_180d: o.cost_units180 > 0 ? round2(o.cost180 / o.cost_units180) : 0,
+          paid_costs_seen: Object.keys(paidCosts).map((c) => ({ cost: Number(c), orders: paidCosts[c] })).sort((x, y) => y.orders - x.orders).slice(0, 8),
+          hunt_source_price: hunt ? hunt.source_price || '' : '', link_price: linkCost, used: j.ali, source: j.ali_source },
         links, hunt, sourcing_saved_by: s ? s.updated_by || '' : '', sourcing_saved_at: s ? s.updated_at || '' : '',
-        judge: Object.assign({}, j, { chain: undefined }), chain: j.chain, chain_at_required: chainAtTarget, band: { name: band.name, rate: band.tiers[0][1], red: !!band.red, source: band.source },
+        judge: j, chain_neutral: nChain, chain_ads: aChain, band: { name: band.name, rate: band.tiers[0][1], red: !!band.red, source: band.source },
         campaign, sale,
         history, alerts, decisions,
         fluctuation: { changes_30d: h30.length, changes_all: history.length, rises_30d: h30.filter((h) => n(h.delta_p) > 0).length, drops_30d: h30.filter((h) => n(h.delta_p) < 0).length,
