@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -3538,6 +3538,101 @@ function run(argv) {
   t('§4 videos: a listing PHOTO address under /g/ decodes the same way, which is why only the video thumbnail is ever read for a video date (real photo id)',
     F.adVideoThumbDate('https://i.ebayimg.com/images/g/odcAAeSww81qO7t9/s-l140.jpg', Date.parse('2026-10-31T00:00:00Z')).iso === '2026-06-24 11:11:57', null);
 
+  /* 4.2b THE SECOND SIGNAL AND THE RULE THAT PICKS BETWEEN THEM (31 Oct follow-up). Three live
+     videos read back by hand through the ebayRestCall route on 31 October, one per account, with the
+     expirationDate eBay returned and the thumbnail address it returned beside it. On all three the
+     expiry less a year is the thumbnail's second plus one, which is what makes the cross-check
+     worth having: a date nobody can check is a date nobody can trust. */
+  const vreal = [
+    ['qdAAAeSwBXtq0oFs', '2027-10-16T19:56:29Z', '2026-10-16 19:56:28', '2026-10-16'],   /* AZHAR ABRT */
+    ['swoAAeSwGClq11kf', '2027-10-20T12:05:52Z', '2026-10-20 12:05:51', '2026-10-20'],   /* Amna Baji */
+    ['0~gAAeSwSZJqz6mX', '2027-10-14T16:11:04Z', '2026-10-14 16:11:03', '2026-10-14'],   /* Azhar Bhai */
+  ];
+  const vat = Date.parse('2026-10-31T04:00:00Z');
+  t('§4 videos: eBay’s expiry date LESS ONE YEAR names the upload second, on three live videos read back by hand on 31 October',
+    vreal.every(r => {
+      const e = F.adVideoExpiryDate(r[1], vat);
+      /* the expiry is the thumbnail's second plus one on every one of the three */
+      return e.day === r[3] && e.ts === F.adVideoThumbDate(r[0], vat).ts + 1 && e.note === '';
+    }), vreal.map(r => [r[1], F.adVideoExpiryDate(r[1], vat).iso]));
+  t('§4 videos: the year comes off the CALENDAR and not off 365 days, so a leap year does not shift the clock, and an expiry that is missing, unreadable or out of range comes back null with the reason',
+    (() => {
+      /* across 29 February 2028: a video uploaded 1 March 2027 expires 1 March 2028 */
+      const leap = F.adVideoExpiryDate('2028-03-01T09:15:00Z', Date.parse('2027-06-01T00:00:00Z'));
+      const none = F.adVideoExpiryDate('', vat), junk = F.adVideoExpiryDate('last Tuesday', vat);
+      const old = F.adVideoExpiryDate('1990-01-01T00:00:00Z', vat), ahead = F.adVideoExpiryDate('2099-01-01T00:00:00Z', vat);
+      return leap.iso === '2027-03-01 09:15:00' &&
+        none.day === null && none.note && junk.day === null && junk.note &&
+        old.day === null && old.note && ahead.day === null && ahead.note;
+    })(), null);
+  t('§4 videos: BOTH SIGNALS AND THEY AGREE — the day is the thumbnail’s, the gap is the measured seconds, and the source says the expiry agreed (the AZHAR ABRT video, end to end)',
+    (() => {
+      const d = F.adVideoMediaDate('https://i.ebayimg.com/00/s/MTA4MFgxMDgw/z/qdAAAeSwBXtq0oFs/$_26.PNG?set_id=880000500F', '2027-10-16T19:56:29Z', vat);
+      return d.day === '2026-10-16' && d.iso === '2026-10-16 19:56:28' && d.gap_seconds === 1 &&
+        d.source === F.ADTOOL_VIDEO_DATE_BOTH && d.source === 'eBay media (thumbnail, expiry agrees)' && d.note === '' &&
+        d.thumbnail.picture_id === 'qdAAAeSwBXtq0oFs' && d.expiry.iso === '2026-10-16 19:56:29' &&
+        /* and all three live videos agree inside the tolerance, every one of them by a single second */
+        vreal.every(r => { const x = F.adVideoMediaDate(r[0], r[1], vat); return x.source === F.ADTOOL_VIDEO_DATE_BOTH && x.day === r[3] && x.gap_seconds === 1; });
+    })(), null);
+  t('§4 videos: ONE SIGNAL ONLY — each is used on its own and NAMED for which it was, so a reader can tell a cross-checked date from a bare one',
+    (() => {
+      const thumbOnly = F.adVideoMediaDate('qdAAAeSwBXtq0oFs', '', vat);
+      const expiryOnly = F.adVideoMediaDate('', '2027-10-16T19:56:29Z', vat);
+      return thumbOnly.day === '2026-10-16' && thumbOnly.source === F.ADTOOL_VIDEO_DATE_THUMB && thumbOnly.gap_seconds === null &&
+        /* and it says WHY there was no second signal rather than leaving the row blank about it */
+        /no expiry date came back/.test(thumbOnly.note) &&
+        expiryOnly.day === '2026-10-16' && expiryOnly.source === F.ADTOOL_VIDEO_DATE_EXPIRY && expiryOnly.gap_seconds === null &&
+        /no thumbnail to read/.test(expiryOnly.note);
+    })(), null);
+  t('§4 videos: THEY DISAGREE — the THUMBNAIL is kept, because that is the half verified on 1,246 pictures, and the gap is written down in seconds rather than averaged away',
+    (() => {
+      /* the same video with an expiry a fortnight out: the day stays the thumbnail's */
+      const d = F.adVideoMediaDate('qdAAAeSwBXtq0oFs', '2027-10-30T19:56:29Z', vat);
+      /* and one just outside the tolerance, which is the boundary the rule turns on */
+      const edge = F.adVideoMediaDate('qdAAAeSwBXtq0oFs', '2027-10-16T19:57:30Z', vat);
+      const inside = F.adVideoMediaDate('qdAAAeSwBXtq0oFs', '2027-10-16T19:57:28Z', vat);
+      return d.day === '2026-10-16' && d.source === F.ADTOOL_VIDEO_DATE_THUMB && d.gap_seconds === 1209601 &&
+        /the thumbnail is the one kept/.test(d.note) && /2026-10-30 19:56:29/.test(d.note) &&
+        edge.gap_seconds === F.ADTOOL_VIDEO_DATE_AGREE_S + 2 && edge.source === F.ADTOOL_VIDEO_DATE_THUMB &&
+        inside.gap_seconds === F.ADTOOL_VIDEO_DATE_AGREE_S && inside.source === F.ADTOOL_VIDEO_DATE_BOTH;
+    })(), null);
+  t('§4 videos: NEITHER SIGNAL — the day is null with both reasons and never a nought, and the gap is null because nothing was compared, which is not the same as nothing apart',
+    (() => {
+      const n = F.adVideoMediaDate('', '', vat);
+      const bad = F.adVideoMediaDate('AAAAAAAAAAAAAAAA', 'not a date', vat);
+      const agreed = F.adVideoMediaDate('qdAAAeSwBXtq0oFs', '2027-10-16T19:56:28Z', vat);
+      return n.day === null && n.iso === null && n.source === '' && n.gap_seconds === null &&
+        /no thumbnail to read/.test(n.note) && /no expiry date came back/.test(n.note) &&
+        bad.day === null && bad.gap_seconds === null && bad.note &&
+        /* 0 seconds apart is a real reading and comes back as 0, never as null */
+        agreed.gap_seconds === 0 && agreed.source === F.ADTOOL_VIDEO_DATE_BOTH;
+    })(), null);
+  t('§4 videos: every name the rule hands out is on the declared list of date sources, and the name the rows written before this change carry is still on it',
+    (() => {
+      const names = [F.ADTOOL_VIDEO_DATE_BOTH, F.ADTOOL_VIDEO_DATE_THUMB, F.ADTOOL_VIDEO_DATE_EXPIRY, F.ADTOOL_VIDEO_DATE_REFUSED];
+      return names.every(n => F.ADTOOL_VIDEO_DATE_SOURCES.indexOf(n) >= 0) &&
+        F.ADTOOL_VIDEO_DATE_SOURCES.indexOf('media thumbnail') >= 0 &&
+        F.ADTOOL_VIDEO_DATE_SOURCES.indexOf('item page thumbnail') >= 0 &&
+        F.ADTOOL_VIDEO_DATE_SOURCES.indexOf('lister record') >= 0 &&
+        F.ADTOOL_VIDEO_DATE_SOURCES.indexOf('unknown date') >= 0 &&
+        F.ADTOOL_VIDEO_DATE_REFUSED === 'refused';
+    })(), F.ADTOOL_VIDEO_DATE_SOURCES);
+  t('§4 videos: a GetItem refusal carries eBay’s OWN words out — the error code and its one-line message — because the first 120 characters of a Trading reply are the XML preamble and say nothing (the real Knives refusal, 31 Oct)',
+    (() => {
+      const real = '<?xml version="1.0" encoding="UTF-8"?>\n<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Timestamp>2026-10-31T04:22:33.851Z</Timestamp><Ack>Failure</Ack><Errors><ShortMessage>This listing was removed for violating our Knives policy.</ShortMessage><LongMessage>This listing was removed for violating our Knives policy.</LongMessage><ErrorCode>21920397</ErrorCode><SeverityCode>Error</SeverityCode></Errors><Version>1193</Version><Build>E1193_CORE_API_19146280_R1</Build><Item/></GetItemResponse>';
+      const r = F.adVideoIdsFromXml(real);
+      /* the preamble a "first 120 characters" note would have recorded instead */
+      const head = real.replace(/\s+/g, ' ').slice(0, 120);
+      const hidden = F.adVideoIdsFromXml('<GetItemResponse><Ack>Failure</Ack><Errors><ShortMessage>This listing has a policy violation. It&apos;s hidden until you can fix it.</ShortMessage><ErrorCode>21920398</ErrorCode></Errors></GetItemResponse>');
+      return !r.readable && r.reason === 'error 21920397: This listing was removed for violating our Knives policy.' &&
+        head.indexOf('Knives') < 0 && head.indexOf('Ack') < 0 &&
+        /* eBay's own escapes are turned back into the character, so the note reads as a sentence */
+        hidden.reason === 'error 21920398: This listing has a policy violation. It’s hidden until you can fix it.' &&
+        /* a readable reply carries no reason, and a refusal with no error block still says it was refused */
+        F.adVideoIdsFromXml('<Ack>Success</Ack><Item/>').reason === '' &&
+        F.adVideoIdsFromXml('<Ack>Failure</Ack>').reason === '' && !F.adVideoIdsFromXml('<Ack>Failure</Ack>').readable;
+    })(), null);
+
   /* 4.3 THE BEFORE-AND-AFTER, against the 18 October workbook’s own listings and its own figures.
      Three real listings out of final.json: the windows, both sides, the change and the rest of the
      account. If this port ever disagrees with that workbook, these three say so. */
@@ -3699,16 +3794,36 @@ function run(argv) {
       /* one POST in the whole section, and it is GetItem */
       const posts = (block.match(/method: 'POST'/g) || []).length;
       return posts === 1 && /'X-EBAY-API-CALL-NAME': 'GetItem'/.test(block) &&
-        /apim\.ebay\.com\/commerce\/media\/v1_beta\/video\//.test(block) &&
+        /* 31 Oct: the media read goes through the shared REST call, which is the ONE place the host
+           is chosen, and the video code only ever asks it for a GET */
+        /await ebayRestFetch\(env, acct, 'GET', '\/commerce\/media\/v1_beta\/video\/' \+ vid\)/.test(block) &&
+        !/ebayRestFetch\(env, acct, '(POST|PUT|DELETE|PATCH)'/.test(block) &&
         /www\.ebay\.co\.uk\/itm\//.test(block) &&
         !/method: '(PUT|DELETE|PATCH)'/.test(block) && !/fetch\(/.test(board);
     })(), null);
-  t('§4 videos (real source): the media read is allowed as a GET on its own host and nothing else on /commerce/media/ can be written',
+  t('§4 videos (real source): the date pass and the ebayRestCall route make the SAME media read through ONE function — same host chosen from the path, same headers, and a token minted for the account it was handed',
     (() => {
       const rest = src.slice(src.indexOf('  ebayRestCall: {'), src.indexOf('  ebayFinanceRead: {'));
+      const shared = src.slice(src.indexOf('async function ebayRestFetch(env, account, method, path, body) {'), src.indexOf('/* eBay\'s own accepted-carrier list'));
+      const block = src.slice(src.indexOf('async function adVideoThumbFetch(env, acct, videoId, itemId) {'), src.indexOf('async function adtoolVideoSweep(env) {'));
       return /\^\\\/commerce\\\/media\\\/v1_beta\\\/video/.test(rest) &&
-        /if \(media && method !== 'GET'\) throw new Error\('SAY: the video read is GET only'\);/.test(rest) &&
-        /\(media \? 'https:\/\/apim\.ebay\.com' : 'https:\/\/api\.ebay\.com'\)/.test(rest);
+        /* nothing on /commerce/media/ can be written, by the route's own refusal */
+        /throw new Error\('SAY: the video read is GET only'\);/.test(rest) &&
+        /* the route no longer builds the call itself: it hands it to the shared one */
+        /await ebayRestFetch\(ctx\.env, String\(p\.account \|\| ''\), method, path/.test(rest) &&
+        !/await fetch\(/.test(rest) &&
+        /* and the host, the headers and the token all live in that one function */
+        (src.match(/async function ebayRestFetch\(/g) || []).length === 1 &&
+        /const host = \/\^\\\/commerce\\\/media\\\/\/\.test\(p\) \? 'https:\/\/apim\.ebay\.com' : 'https:\/\/api\.ebay\.com';/.test(shared) &&
+        /const tok = await ebayAccessToken\(env, String\(account \|\| ''\)\);/.test(shared) &&
+        /'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB'/.test(shared) &&
+        /* it hands the refusal back rather than throwing, because the status and the body are what
+           the row records */
+        /return \{ status: r\.status, ok: r\.ok, body: text,/.test(shared) &&
+        /* and the video lookup builds no eBay call of its own bar the item page, which is not a
+           REST read at all */
+        (block.match(/await fetch\(/g) || []).length === 1 &&
+        /await fetch\('https:\/\/www\.ebay\.co\.uk\/itm\/' \+ iid/.test(block);
     })(), null);
   t('§4 videos (real source): both cohorts are named in ONE place and an unknown cohort is refused by BOTH of the Overview’s actions, never answered for the whole fleet',
     (() => {
@@ -3802,13 +3917,16 @@ function run(argv) {
         job.indexOf('await fetch(') > job.indexOf('await Promise.all(batch.map(async (r) => {') &&
         job.lastIndexOf('await adVideoThumbFetch(') > job.lastIndexOf('await Promise.all(batch.map(async (r) => {');
     })(), null);
-  t('\u00a74 sweep speed (real source): the cap is spent BEFORE the reads go out, counted in pairs on the date pass, and the clock and the cap are judged between slices \u2014 so eight replies landing together cannot carry the run past its ceiling',
+  t('\u00a74 sweep speed (real source): the cap is spent BEFORE the reads go out, the date pass still RESERVES a pair and then charges the item pages it really read, and the clock and the cap are judged between slices \u2014 so eight replies landing together cannot carry the run past its ceiling',
     (() => {
       const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
       return /const room = ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches;/.test(job) &&
         /const room = Math\.floor\(\(ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches\) \/ 2\);/.test(job) &&
         (job.match(/const batch = room < slice\.length \? slice\.slice\(0, room\) : slice;/g) || []).length === 2 &&
-        /fetches \+= batch\.length;/.test(job) && /fetches \+= batch\.length \* 2;/.test(job) &&
+        /* 31 Oct: a lookup is ONE small read now, so both passes charge a read apiece up front and
+           the date pass adds the item pages it actually had to fall back to */
+        (job.match(/fetches \+= batch\.length;/g) || []).length === 2 && !/fetches \+= batch\.length \* 2;/.test(job) &&
+        /fetches \+= found\.reduce\(\(n, f\) => n \+ Math\.max\(0, f\.reads - 1\), 0\);/.test(job) &&
         (job.match(/if \(Date\.now\(\) > deadline\) \{ stopped = 'deadline'; break; \}/g) || []).length === 2 &&
         (job.match(/if \(batch\.length < slice\.length\) \{ stopped = 'cap'; break; \}/g) || []).length === 2 &&
         /* and whatever a cut-short pass did read is still written */
@@ -3828,6 +3946,117 @@ function run(argv) {
         /else if \(fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP\) stopped = 'cap';/.test(job) &&
         /* and no ceiling is typed into the sentence a reader is shown */
         !/40 ?s|700 reads|forty seconds/.test(job.slice(job.indexOf('const covered =')));
+    })(), null);
+
+  /* 4.10 THE REFUSAL LOOP (31 Oct follow-up). A refusal was counted and thrown away, writing no row,
+     so checked_at stayed empty and the listing stayed at the head of the never-checked rotation and
+     was re-asked every run for ever. Once the fleet was covered that WAS the rotation: six listings
+     an hour, every one of them a listing eBay had removed over a policy breach, and no row anywhere
+     saying so. These hold the fix to the shape of the fault. */
+  t('§4 refusals (real source): a refusal is WRITTEN DOWN — the row records that the check happened, eBay’s status and eBay’s own reason — so the listing leaves the never-checked head of the rotation instead of being re-asked every hour for ever',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      const refusal = job.slice(job.indexOf('refused++;'), job.indexOf('asked++;'));
+      return /if \(!rep\.got \|\| !rep\.got\.readable\) \{/.test(job) &&
+        /* the old shape is gone: counted and dropped with nothing written */
+        !/\{ refused\+\+; continue; \}/.test(job) &&
+        /* the row records the check, so the rotation moves on, and the 7-day interval is the retry */
+        /INSERT INTO adtool_listing_video \(account, item_id, checked_at, date_checked_at, date_source, note\)/.test(refusal) &&
+        /checked_at = datetime\('now'\), date_checked_at = datetime\('now'\), note = \?3,/.test(refusal) &&
+        /* eBay's status AND its own words, not the preamble a blind body slice would have caught */
+        /'HTTP ' \+ rep\.status \+ ': ' \+ \(\(rep\.got && rep\.got\.reason\) \|\| rep\.head \|\| 'eBay gave no reason'\)/.test(refusal) &&
+        /\.slice\(0, 120\)/.test(job) &&
+        /* a call that never completed is NOT a refusal: nothing of eBay's to record, so it waits */
+        /if \(!rep\.answered\) continue;/.test(job) &&
+        job.indexOf('if (!rep.answered) continue;') < job.indexOf('refused++;');
+    })(), null);
+  t('§4 refusals (real source): the refusal write does NOT go through the listing upsert’s ON CONFLICT — that one stamps video_gone_on, which would turn "eBay would not answer" into "the video has been taken off" — and it leaves a date already recovered alone',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      const refusal = job.slice(job.indexOf('refused++;'), job.indexOf('asked++;'));
+      const upsert = job.slice(job.indexOf('asked++;'), job.indexOf('if (batch.length < slice.length)'));
+      /* two upserts in the job, and only the listing one touches the video columns */
+      return (job.match(/ON CONFLICT\(account, item_id\) DO UPDATE SET/g) || []).length === 2 &&
+        !/video_gone_on/.test(refusal) && !/video_count/.test(refusal) && !/first_seen/.test(refusal) && !/video_ids_json/.test(refusal) &&
+        /video_gone_on = CASE WHEN \?4 > 0 THEN ''/.test(upsert) &&
+        /* and a row that already has a date keeps the source that date came from */
+        /date_source = CASE WHEN COALESCE\(video_added_on, ''\) = '' THEN \?4 ELSE date_source END/.test(refusal) &&
+        !/video_added_on = /.test(refusal);
+    })(), null);
+  t('§4 refusals: the rotation picks never-checked first, so a refusal that writes no row is re-asked for ever — the write is what makes the 7-day interval the retry, and an ended listing eBay removed is never asked about again',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /WHERE i\.account = \?1 AND \(COALESCE\(v\.checked_at, ''\) = '' OR \(i\.status = 'ACTIVE' AND substr\(v\.checked_at, 1, 10\) < \?2\)\)/.test(job) &&
+        /ORDER BY \(i\.status = 'ACTIVE'\) DESC, COALESCE\(v\.checked_at, ''\) ASC/.test(job) &&
+        /const stale = adtAddDays\(today, -ADTOOL_VIDEO_RECHECK_DAYS\);/.test(job) &&
+        F.ADTOOL_VIDEO_RECHECK_DAYS === 7;
+    })(), null);
+  t('§4 refusals: the count a reader sees is the number of rows actually written as refused, and the Videos panel counts them so a cohort short of the fleet has an explanation on the page',
+    (() => {
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      return /refused_by_ebay: cover \? Number\(cover\.refused\) \|\| 0 : null,/.test(board) &&
+        /SUM\(CASE WHEN date_source = \?/.test(board) &&
+        /ADTOOL_VIDEO_DATE_REFUSED/.test(board) &&
+        /* and the sentence beside it names no ceiling of its own */
+        /Where eBay refuses to answer for a listing/.test(board);
+    })(), null);
+
+  /* 4.11 FORTY A RUN, AND THE BOARD TOLD AT ONCE */
+  t('§4 dating rate: forty lookups a run, four in flight, and the ceiling is read from the constant rather than typed into the query',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return F.ADTOOL_VIDEO_SWEEP_DATES === 40 && F.ADTOOL_VIDEO_SWEEP_DATE_PARALLEL === 4 &&
+        /const ADTOOL_VIDEO_SWEEP_DATES = 40;/.test(src) &&
+        /ORDER BY COALESCE\(date_checked_at, ''\) ASC LIMIT " \+ ADTOOL_VIDEO_SWEEP_DATES/.test(job) &&
+        /* forty lookups at one read each sit well inside the run's own fetch ceiling even with every
+           one of them falling back to the item page */
+        F.ADTOOL_VIDEO_SWEEP_DATES * 2 < F.ADTOOL_VIDEO_SWEEP_FETCH_CAP &&
+        /* and the never-looked-up rows come first, with the given-up ones behind them on the same clock */
+        /COALESCE\(date_checked_at, ''\) = '' OR date_checked_at < datetime\('now', '-" \+ ADTOOL_VIDEO_RECHECK_DAYS \+ " day'\)/.test(job);
+    })(), null);
+  t('§4 dating rate: the date pass reads the TWO signals through the cross-checking rule, names the item page for what it is, and still falls back to the lister’s record before blank',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /const dec = adVideoMediaDate\(thumb, got\.expires, Date\.now\(\)\);/.test(job) &&
+        /source = got\.step === 'item page' \? 'item page thumbnail' : dec\.source;/.test(job) &&
+        /if \(\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(u\)\) \{ day = u; source = 'lister record'; \}/.test(job) &&
+        /if \(f\.day\) dated\+\+; else \{ source = 'unknown date'; lost\+\+; \}/.test(job) &&
+        /* the decode is never read twice, and never off the thumbnail alone */
+        !/adVideoThumbDate\(thumb\)/.test(job);
+    })(), null);
+  t('§4 dating rate (real source): a run that dated anything DROPS the board’s memo, by the prefix the memo key itself is built from, so the before-and-after shows for every listing dated this run instead of the window’s worth of the old answer',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      const clear = src.slice(src.indexOf('async function adVideoBoardCacheClear(env) {'), src.indexOf('const ADTOOL_ACTIONS_P15 = {'));
+      return /if \(dated\) \{ const gone = await adVideoBoardCacheClear\(env\);/.test(job) &&
+        /* dropped after the writes land, not before them */
+        job.indexOf('adVideoBoardCacheClear') > job.lastIndexOf('written += await adtBatch(env, stmts);') &&
+        /prefix: adtKvPrefix\('adtoolVideoBoard'\)/.test(clear) &&
+        /* never fatal, and bounded, because this runs inside a job with a clock to keep */
+        /catch \(e\) \{ \/\* no listing, no clear/.test(clear) && /for \(let page = 0; page < 10; page\+\+\)/.test(clear) &&
+        /* and the ceiling it falls back on when there is no listing is the page's own two minutes,
+           which is short enough that a memo surviving the clear is a page minutes behind and not a
+           page a day behind */
+        /adtoolVideoBoard: 120000 \};/.test(src);
+    })(), null);
+  t('§4 dating rate: every memo entry of an action shares the prefix its key is built from, so clearing by prefix cannot miss a window or an account somebody opened',
+    (() => {
+      const pre = F.adtKvPrefix('adtoolVideoBoard');
+      const keys = [F.adtKvKey('adtoolVideoBoard', 'p', {}), F.adtKvKey('adtoolVideoBoard', 'np', {}),
+        F.adtKvKey('adtoolVideoBoard', 'p', { account: 'AZHAR ABRT' }), F.adtKvKey('adtoolVideoBoard', 'p', { period: 'd14', from: '2026-10-17', to: '2026-10-30' })];
+      const uniq = {}; for (const k of keys) uniq[k] = 1;
+      return pre === 'adt:rt:adtoolVideoBoard:' && keys.every(k => k.indexOf(pre) === 0) &&
+        Object.keys(uniq).length === 4 &&
+        /* and another action's entries are NOT under it */
+        F.adtKvKey('adtoolPeak', 'p', {}).indexOf(pre) !== 0;
+    })(), null);
+  t('§4 dating rate (real source): the before-and-after runs for EVERY dated listing the cohort read hands back, not for a page of them, and the cohort ceiling is well clear of the fleet’s videos',
+    (() => {
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      return /const dated = CO\.rows\.filter\(r => \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(String\(r\.video_added_on \|\| ''\)\)\);/.test(board) &&
+        /for \(const r of dated\) \{/.test(board) &&
+        /* no LIMIT of its own on the loop, and the cohort read's ceiling is hundreds */
+        !/dated\.slice\(/.test(board) && F.ADTOOL_PEAK_COHORT_CAP >= 500;
     })(), null);
 
   /* 4.8 ITEM 0 (§3 leftover): the real hours one click away, from the SAME assembling function the

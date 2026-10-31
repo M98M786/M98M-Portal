@@ -589,6 +589,32 @@ async function ebayAccessToken(env, accountName) {
   return t.access_token;
 }
 
+/* ONE EBAY REST READ, ONE FUNCTION (31 Oct). The ebayRestCall route and the video sweep's date pass
+   were each building this call for themselves, which is how the same media read came to work by hand
+   and behave differently inside a job: two header sets, two host choices, two places for a token to
+   be minted for the wrong account. Both go through here now, so "the same call the route makes" is a
+   fact about the code and not a hope.
+   THE HOST IS CHOSEN FROM THE PATH. Everything eBay serves under /sell/ and /commerce/taxonomy/ is on
+   api.ebay.com; the Media API is served from apim.ebay.com alone, and a read sent to the wrong one of
+   those two comes back refused with nothing to say why.
+   THE TOKEN IS THE NAMED ACCOUNT'S OWN and is minted here, so it never leaves the worker, and a
+   caller that passes the wrong account gets eBay's own refusal rather than another seller's answer.
+   IT RETURNS, NEVER THROWS, ON A REFUSAL: the status and the body are what the caller records. */
+async function ebayRestFetch(env, account, method, path, body) {
+  const m = String(method || 'GET').toUpperCase();
+  const p = String(path || '');
+  const host = /^\/commerce\/media\//.test(p) ? 'https://apim.ebay.com' : 'https://api.ebay.com';
+  const tok = await ebayAccessToken(env, String(account || ''));
+  const r = await fetch(host + p, {
+    method: m,
+    headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
+      'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
+    body: (m === 'POST' && body) ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  return { status: r.status, ok: r.ok, body: text, host: host, path: p, account: String(account || '') };
+}
+
 /* eBay's own accepted-carrier list (A4: never a manual mapping) — one Trading call per account
    per week, cached on the accounts row. Falls back to the last cached list on any eBay hiccup. */
 async function acceptedCarriers(env, account, tok) {
@@ -5501,7 +5527,11 @@ function adtKvCanon(action, payload) {
   }
   return out;
 }
-function adtKvKey(action, cls, payload) { const js = JSON.stringify(adtKvCanon(action, payload)); return 'adt:rt:' + action + ':' + cls + ':' + adtSeedFrom(js).toString(36) + '.' + js.length; }
+/* EVERY MEMO ENTRY OF ONE ACTION SHARES THIS PREFIX, and the key is built from it, so a clearer that
+   wants to drop an action's entries without knowing which windows and accounts were asked for cannot
+   drift from the thing that named them. */
+function adtKvPrefix(action) { return 'adt:rt:' + action + ':'; }
+function adtKvKey(action, cls, payload) { const js = JSON.stringify(adtKvCanon(action, payload)); return adtKvPrefix(action) + cls + ':' + adtSeedFrom(js).toString(36) + '.' + js.length; }
 function adtWarmUntil(nowMs, minAheadMs) {
   /* how long an HOURLY-grain warm entry stays good: until the next :20 rollup has had five minutes to land (hh:25),
      at least `minAheadMs` (default 5 min) ahead so a warm that itself finished at :24 is not born dead. The pages
@@ -12080,6 +12110,31 @@ async function adtPeakCacheClear(env, acct) {
   }
   for (const k of keys) { try { await env.HOT.delete(k); } catch (e) { /* the read window catches it within the minute */ } }
 }
+/* THE VIDEOS BOARD'S MEMO, dropped after a sweep that dated a listing (31 Oct, §4 item 4).
+   BY PREFIX AND NOT BY KEY. The peak clearer above can name its keys because that page is asked for
+   with at most an account; this one's key carries the window as well, and a reader may have opened it
+   on any window at all, so naming them would mean guessing which and leaving the rest stale. Every
+   entry of the action shares the prefix the key is built from, which is the one thing that cannot go
+   out of step with the naming.
+   IT NEVER THROWS AND IT NEVER BLOCKS THE JOB. A memo that survives this is a page a couple of
+   minutes behind, which is the ceiling the page already states, and that is not worth failing a
+   sweep over. The page count is bounded, so a KV listing that kept handing back cursors cannot turn
+   this into a loop inside a job that has a clock to keep. */
+async function adVideoBoardCacheClear(env) {
+  let dropped = 0;
+  try {
+    let cursor = '';
+    for (let page = 0; page < 10; page++) {
+      const opts = { prefix: adtKvPrefix('adtoolVideoBoard'), limit: 200 };
+      if (cursor) opts.cursor = cursor;
+      const r = await env.HOT.list(opts);
+      for (const k of ((r && r.keys) || [])) { try { await env.HOT.delete(k.name); dropped++; } catch (e) { /* one key is not the job */ } }
+      if (!r || r.list_complete || !r.cursor) break;
+      cursor = r.cursor;
+    }
+  } catch (e) { /* no listing, no clear: the TTL still expires the entry inside the page's own ceiling */ }
+  return dropped;
+}
 
 const ADTOOL_ACTIONS_P15 = {
   adtoolChangeDay: {
@@ -13864,13 +13919,34 @@ const ADTOOL_VIDEO_WINDOW_CAP = 30;         /* the 18 Oct study's own ceiling on
 const ADTOOL_VIDEO_WINDOWS = [14, 28];      /* the two the Decision page's department asks for */
 const ADTOOL_VIDEO_DATA_START = '2026-05-16';  /* the day the engine's order history begins */
 const ADTOOL_VIDEO_API_TRUTH = 'These are listing-level metrics for listings with video. eBay gives us the video IDs on a listing and nothing more: no play count and no watch time, and its traffic and ad reports are per listing, never per video play. Orders, units, revenue, ad spend and profit are daily, so the before and after on those is exact. Views and the click-through rate arrive only as a 7-day and a 30-day window, so a before-and-after on them is shown only where the portal holds a reading from before the video date.';
-const ADTOOL_VIDEO_DATE_SOURCES = ['media thumbnail', 'item page thumbnail', 'lister record', 'unknown date'];
+/* THE DATE SOURCES, NAMED ONCE. A row's date_source is printed word for word on the Overview's
+   video panel and in the Run-today table, so these are the words a reader sees and they belong here
+   rather than typed at the point of writing.
+   31 OCT FOLLOW-UP: eBay's video record carries TWO signals for the upload instant, so the name now
+   says which of them answered and whether they agreed; 'media thumbnail' could not tell a date that
+   had been cross-checked from one that had not. That old name STAYS on the list: it is what the rows
+   dated before this change already carry, and dropping it would make them read as a source nobody
+   recognises. 'refused' is the row eBay would not answer for at all. */
+const ADTOOL_VIDEO_DATE_AGREE_S = 60;   /* the two signals count as agreeing inside this many seconds */
+const ADTOOL_VIDEO_DATE_BOTH = 'eBay media (thumbnail, expiry agrees)';
+const ADTOOL_VIDEO_DATE_THUMB = 'eBay media (thumbnail)';
+const ADTOOL_VIDEO_DATE_EXPIRY = 'eBay media (expiry less a year)';
+const ADTOOL_VIDEO_DATE_REFUSED = 'refused';
+const ADTOOL_VIDEO_DATE_SOURCES = [ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY,
+  'media thumbnail', 'item page thumbnail', 'lister record', ADTOOL_VIDEO_DATE_REFUSED, 'unknown date'];
 /* THE SWEEP'S OWN CEILINGS, here rather than beside the job, so the register's prose and the page's
    own sentence are written FROM them: a number repeated in words goes wrong the day somebody changes
    the number. */
 const ADTOOL_VIDEO_SWEEP_PER_ACCOUNT = 120;   /* the brief's own ceiling */
 const ADTOOL_VIDEO_SWEEP_FETCH_CAP = 700;     /* fleet-wide, inside one invocation's subrequest budget */
-const ADTOOL_VIDEO_SWEEP_DATES = 12;          /* date lookups a run: a page read is ~1 MB, so few */
+/* DATE LOOKUPS A RUN. Twelve was set when a lookup meant a media read AND, almost always, the public
+   item page behind it at about a megabyte. It does not: eBay's own video record answers with both the
+   thumbnail address and the expiry date, so the normal lookup is ONE small GET and the item page is
+   only ever read when that record gives nothing. Twelve an hour meant the undated tail left by a
+   morning's discovery waited most of a day for a date it could have had in the next hour; forty, four
+   in flight, is ten rounds of one small read, and it dates the whole video cohort in a handful of runs
+   rather than a day and a half. The fetch cap and the clock still decide when a run ends. */
+const ADTOOL_VIDEO_SWEEP_DATES = 40;
 const ADTOOL_VIDEO_RECHECK_DAYS = 7;
 const ADTOOL_VIDEO_SWEEP_MS = 40000;
 /* HOW MANY READS ARE IN THE AIR AT ONCE (31 Oct follow-up). Asked one after another a GetItem reply
@@ -13902,17 +13978,27 @@ function adtFetchSlices(list, n) {
 /* THE VIDEO IDS ON A LISTING, out of a Trading GetItem reply. Regex and not a parser: this worker has
    no XML parser and every other eBay read in this file is read the same way. A reply with the element
    and no ids inside it is a listing with no video, which is not the same thing as a reply we could not
-   read, so the two are returned apart. */
+   read, so the two are returned apart.
+   31 OCT: A REFUSAL NOW CARRIES EBAY'S OWN WORDS. The sweep writes the reason on to the row, and the
+   first 120 characters of a Trading reply are the XML preamble and the timestamp -- boilerplate that
+   tells the next person nothing -- so the error code and eBay's own one-line message are lifted out
+   and handed back as `reason`. This is what the six listings stuck in the rotation turned out to be:
+   "This listing was removed for violating our Knives policy.", code 21920397, and five like it. */
 function adVideoIdsFromXml(xml) {
   const s = String(xml || '');
-  if (!s) return { ids: [], readable: false, note: 'nothing came back' };
+  if (!s) return { ids: [], readable: false, note: 'nothing came back', reason: '' };
   const fail = s.indexOf('<Ack>Failure</Ack>') >= 0;
   const ids = [];
   const re = /<VideoID[^>]*>([^<]+)<\/VideoID>/g;
   let m;
   while ((m = re.exec(s))) { const v = String(m[1]).trim(); if (v && ids.indexOf(v) < 0) ids.push(v); }
-  if (fail && !ids.length) return { ids: [], readable: false, note: 'eBay refused this item' };
-  return { ids: ids, readable: true, note: '' };
+  if (fail && !ids.length) {
+    const msg = s.match(/<ShortMessage>([^<]*)<\/ShortMessage>/), code = s.match(/<ErrorCode>([^<]*)<\/ErrorCode>/);
+    const words = String((msg && msg[1]) || '').replace(/&apos;/g, '’').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
+    const reason = [code ? 'error ' + String(code[1]).trim() : '', words].filter(Boolean).join(': ');
+    return { ids: [], readable: false, note: 'eBay refused this item', reason: reason };
+  }
+  return { ids: ids, readable: true, note: '', reason: '' };
 }
 
 /* THE VIDEO'S OWN UPLOAD DATE, out of its thumbnail's picture id (18 Oct, verified on 1,246 listing
@@ -13943,6 +14029,64 @@ function adVideoThumbDate(urlOrId, nowMs) {
   if (ts < 1262304000 || ts * 1000 > now + 7 * 86400000) return { ts: ts, iso: null, day: null, picture_id: id, note: 'the decoded time is not a believable upload time' };
   const iso = new Date(ts * 1000).toISOString().replace('T', ' ').slice(0, 19);
   return { ts: ts, iso: iso, day: iso.slice(0, 10), picture_id: id, note: '' };
+}
+
+/* THE SECOND SIGNAL: expirationDate LESS ONE YEAR. eBay's video record carries an expiry a reader
+   can check the thumbnail against, because eBay sets it to the upload instant plus exactly one year.
+   Read back by hand on 31 October on three accounts' videos:
+     expirationDate 2027-10-16T19:56:29Z  thumbnail qdAAAeSwBXtq0oFs  2026-10-16 19:56:28
+     expirationDate 2027-10-20T12:05:52Z  thumbnail swoAAeSwGClq11kf  2026-10-20 12:05:51
+     expirationDate 2027-10-14T16:11:04Z  thumbnail 0~gAAeSwSZJqz6mX  2026-10-14 16:11:03
+   one second apart in every case, the expiry being the later of the two.
+   THE YEAR COMES OFF THE CALENDAR, not off 365 days, so the clock time survives a leap year. The one
+   calendar date this cannot do is 29 February, which has no counterpart a year earlier: that one
+   rolls to 1 March, the two signals then disagree by a day, and the rule below keeps the thumbnail.
+   Out of range comes back null with the reason, exactly as the thumbnail decode does, never a date. */
+function adVideoExpiryDate(expiresIso, nowMs) {
+  const raw = String(expiresIso || '').trim();
+  if (!raw) return { ts: null, iso: null, day: null, note: 'no expiry date came back' };
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return { ts: null, iso: null, day: null, note: 'the expiry date is not a readable instant' };
+  const ms = Date.UTC(Number(m[1]) - 1, Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+  if (isNaN(ms)) return { ts: null, iso: null, day: null, note: 'the expiry date is not a readable instant' };
+  const ts = Math.round(ms / 1000);
+  const now = Number(nowMs) || Date.now();
+  /* the same floor and ceiling the thumbnail decode uses, and for the same reason: eBay's picture
+     store starts well after 2010, and nothing was uploaded next week. */
+  if (ts < 1262304000 || ts * 1000 > now + 7 * 86400000) return { ts: ts, iso: null, day: null, note: 'the expiry date gives an upload time that is not believable' };
+  const iso = new Date(ts * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  return { ts: ts, iso: iso, day: iso.slice(0, 10), note: '' };
+}
+
+/* THE UPLOAD DAY OUT OF EBAY'S VIDEO RECORD, TWO SIGNALS CROSS-CHECKED (31 Oct follow-up). Until now
+   only the thumbnail was read, so the date on a row was a decode nobody could check. Both signals
+   come out of the one small read, so checking costs nothing:
+   BOTH ANSWER AND AGREE -> the thumbnail's day, and the source says the expiry agreed, so a reader
+     can tell a cross-checked date from a bare one at a glance.
+   ONLY ONE ANSWERS -> that one, named for what it is.
+   THEY DISAGREE -> the THUMBNAIL is kept, because it is the signal verified on 1,246 listing photos
+     and on all 102 video thumbnails of the 18 October study, and the gap is written into the note in
+     seconds rather than averaged away or quietly dropped.
+   NEITHER ANSWERS -> null with both reasons. A day is never guessed and never a nought.
+   The gap is null when there is no second signal to measure one against, never 0, because 0 seconds
+   apart is a real reading and "nothing to compare" is not. */
+function adVideoMediaDate(thumbUrl, expiresIso, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const thumb = adVideoThumbDate(thumbUrl, now);
+  const expiry = adVideoExpiryDate(expiresIso, now);
+  const out = { day: null, iso: null, source: '', gap_seconds: null, thumbnail: thumb, expiry: expiry, note: '' };
+  if (thumb.day && expiry.day) {
+    const gap = Math.abs(Number(thumb.ts) - Number(expiry.ts));
+    out.day = thumb.day; out.iso = thumb.iso; out.gap_seconds = gap;
+    if (gap <= ADTOOL_VIDEO_DATE_AGREE_S) { out.source = ADTOOL_VIDEO_DATE_BOTH; return out; }
+    out.source = ADTOOL_VIDEO_DATE_THUMB;
+    out.note = 'the expiry date names ' + expiry.iso + ', ' + gap + ' seconds from the thumbnail; the thumbnail is the one kept';
+    return out;
+  }
+  if (thumb.day) { out.day = thumb.day; out.iso = thumb.iso; out.source = ADTOOL_VIDEO_DATE_THUMB; out.note = expiry.note; return out; }
+  if (expiry.day) { out.day = expiry.day; out.iso = expiry.iso; out.source = ADTOOL_VIDEO_DATE_EXPIRY; out.note = thumb.note; return out; }
+  out.note = [thumb.note, expiry.note].filter(Boolean).join('; ');
+  return out;
 }
 
 /* THE EQUAL WINDOWS EACH SIDE OF THE UPLOAD DAY — the 18 Oct analysis, rule for rule.
@@ -14269,7 +14413,7 @@ const ADTOOL_REGISTER_P16 = [
   ['SPEND_BACK_WINDOWS', 'What a listing spent over the last three, seven and fourteen days', 'The listing’s own ad spend over the last three, seven and fourteen FINISHED days, beside what it has spent today. Every window ends yesterday, because eBay publishes a day’s ad report the day after and a window reaching into today would read every listing as having had a cheap day. The spend already carries the fee charged on clicks, so nothing is added on top of it. A day with no row simply does not count.', 'adtool_listing_day', 'Worked out when you open the page, and held for a minute', 'Unit tests on the three windows never being out of order, and the figures read back against the listing’s own page'],
   /* the 31 Oct brief, §4: the videos on our listings, and what happened to sales after each one */
   ['VIDEO_COHORT', 'Which listings carry a video', 'eBay’s own answer, asked listing by listing: GetItem carries the video IDs on a listing, and a listing with at least one is in. The sweep works through the fleet active listings first and longest-unchecked first, so every live listing is asked about within a day and again every ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days. Beside eBay’s answer sits the portal’s own record, where a lister marks the video stage done, and the two differences are listed rather than reconciled away: a video nobody recorded, and a record with no video. A listing counts from the day we can prove it carried the video, which is its upload day where that decoded and otherwise the first day the sweep saw it.', 'items_api, adtool_listing_video, listing_ladder', 'Every hour, up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account, and each live listing again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after it was last asked about', 'The sweep’s own count read back against the 102 listings the 18 October study found, and unit tests on the two difference lists'],
-  ['VIDEO_ADDED_ON', 'The day a video went on a listing', 'eBay publishes no upload date for a video, so it is recovered from the video thumbnail’s picture address: sixteen characters that decode to twelve bytes whose ninth to twelfth, read as one number, are the second the file was uploaded. Verified on 1,246 listing photos and on all 102 video thumbnails of the 18 October study. The item page’s own uploadDate is NOT this: it matched the listing’s start time on all 102, to the minute, so it is the listing date and is never read. Where the thumbnail cannot be reached the lister’s own record date is used and marked as such, and where there is neither the day is blank, never a guess.', 'adtool_listing_video, listing_ladder', 'With the sweep, and only for a listing whose day is not known yet', 'The decoded day read back against the 102 dates the 18 October study recovered, and unit tests on the decode itself'],
+  ['VIDEO_ADDED_ON', 'The day a video went on a listing', 'eBay publishes no upload date, so the day comes from its own record of the video, which names that moment twice. First the thumbnail’s picture address: sixteen characters decoding to twelve bytes whose ninth to twelfth are the second the file was stored, verified on 1,246 photos and all 102 thumbnails of the 18 October study. Second the expiry date, eBay’s own upload moment plus a year. Agreeing to within the minute, the day is marked cross-checked; where one answers it is named; where they differ the thumbnail wins and the gap sits beside it. The item page’s uploadDate is the listing’s start time and is never read. Failing that, the lister’s record date, marked as such, otherwise blank.', 'adtool_listing_video, listing_ladder', 'With the sweep, and only for a listing whose day is not known yet', 'The decoded day read back against the 102 dates the 18 October study recovered, the two signals read back against one another on three accounts’ live videos, and unit tests on both decodes and on the rule that picks between them'],
   ['VIDEO_BEFORE_AFTER', 'Sales before and after the video', 'Equal windows each side of the upload day, with that day itself in neither of them because the video went on part way through it. The window is the shorter of three: the days since the video, the history before it, and the ceiling asked for, which is ' + ADTOOL_VIDEO_WINDOWS.join(' days and then ') + ' days once that many exist either side. Units and takings come from the order book, cancelled and lost orders left out, on London dates; the ad spend is the click fee already booked against the listing’s day. Beside each listing sits the rest of its account over the same dates, so a fortnight when the whole account fell is not read as the video’s doing.', 'adtool_listing_day, orders, adtool_listing_video, adtool_listings', 'Worked out when the page is opened, over finished days only', 'The same arithmetic as the 18 October workbook, unit tested against three of its own listings'],
   /* the 31 Oct brief, §5: how old a figure may be before the tile beside it says so, and the
      five-minute reading everything about today stands on */
@@ -15202,34 +15346,55 @@ async function ensureAdtoolVideoSchema(env) {
   ADTOOL_VIDEO_SCHEMA_OK = true;
 }
 
-/* THE VIDEO'S THUMBNAIL, in the order the brief sets out, and the step that answered is recorded.
-   1. the Sell Media API's own record of the video, read with the account's token;
+/* EBAY'S OWN RECORD OF ONE VIDEO, in the order the brief sets out, and the step that answered is
+   recorded along with what eBay said:
+   1. the Sell Media API's own record of the video, read THROUGH THE SAME FUNCTION the ebayRestCall
+      route reads it through, with the listing's own account;
    2. the public item page, where the thumbnail address sits in the HTML;
    and the caller falls back to the lister's own record date when neither answers.
-   BOTH ARE READS. The media call is a GET and the item page is a GET, and a refusal is recorded as a
-   refusal rather than retried in a loop. */
+   WHY THE SHARED CALL. This read had its own hand-built fetch, with a shorter header set than the
+   route's, and that is exactly the kind of difference that makes a media read work when a person runs
+   it and fail inside a job -- a wrong host, a thinner header, a token minted for another account --
+   with the row recording nothing either way. There is now one call, and when it is refused the status
+   and the first 120 characters of eBay's reply are handed back so they can be written on the row.
+   BOTH SIGNALS COME BACK FROM STEP 1. The media record carries the thumbnail address AND the expiry
+   date, which is the upload instant plus a year, so the cross-check costs no extra read.
+   `reads` IS WHAT THIS ACTUALLY SPENT, so the job's own fetch tally is the truth rather than a
+   worst-case guess: one read in the normal case, two when the item page had to be tried as well. */
 async function adVideoThumbFetch(env, acct, videoId, itemId) {
   const tried = [];
+  const out = { thumb: '', expires: '', step: '', reads: 0, status: null, body_head: '', tried: tried };
   const vid = String(videoId || '').replace(/[^0-9a-zA-Z_-]/g, '').slice(0, 64);
   if (vid) {
     try {
-      const tok = await ebayAccessToken(env, acct);
-      /* the Media API lives on apim.ebay.com, not api.ebay.com, which is why it is named apart from
-         every other REST read in this file. v1_beta is the only version eBay publishes for it. */
-      const r = await fetch('https://apim.ebay.com/commerce/media/v1_beta/video/' + vid, {
-        headers: { authorization: 'Bearer ' + tok, accept: 'application/json', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
-      });
-      const body = await r.text();
+      out.reads++;
+      /* the Media API lives on apim.ebay.com and not api.ebay.com; ebayRestFetch chooses that from
+         the path. v1_beta is the only version eBay publishes for it. */
+      const r = await ebayRestFetch(env, acct, 'GET', '/commerce/media/v1_beta/video/' + vid);
+      out.status = r.status;
+      out.body_head = String(r.body || '').replace(/\s+/g, ' ').slice(0, 120);
       if (r.ok) {
-        const m = body.match(/https?:\/\/[^"'\s]*i\.ebayimg\.com[^"'\s]*\/(?:z|g)\/[A-Za-z0-9_~-]{16}\/[^"'\s]*/);
-        if (m) return { thumb: m[0], source: 'media thumbnail', tried: tried.concat(['media read: a thumbnail address came back']) };
-        tried.push('media read: eBay answered and the reply carries no thumbnail address');
-      } else tried.push('media read: eBay answered ' + r.status);
+        let rec = null;
+        try { rec = JSON.parse(r.body); } catch (e) { rec = null; }
+        /* the regex is the fallback and not the reader: a JSON body is read as JSON, and the pattern
+           only catches a reply shaped in some way this code did not expect. */
+        const fromJson = (rec && rec.thumbnail && String(rec.thumbnail.imageUrl || '')) || '';
+        const m = fromJson ? null : String(r.body || '').match(/https?:\/\/[^"'\s]*i\.ebayimg\.com[^"'\s]*\/(?:z|g)\/[A-Za-z0-9_~-]{16}\/[^"'\s]*/);
+        out.thumb = fromJson || (m ? m[0] : '');
+        out.expires = (rec && String(rec.expirationDate || '')) || '';
+        if (out.thumb || out.expires) {
+          out.step = 'media';
+          tried.push('media read: eBay answered ' + r.status + ' with ' + (out.thumb ? 'a thumbnail address' : 'no thumbnail address') + ' and ' + (out.expires ? 'an expiry date' : 'no expiry date'));
+          return out;
+        }
+        tried.push('media read: eBay answered ' + r.status + ' and the reply carries neither a thumbnail address nor an expiry date. Its reply begins: ' + out.body_head);
+      } else tried.push('media read: eBay answered ' + r.status + ', and its reply begins: ' + out.body_head);
     } catch (e) { tried.push('media read: ' + String((e && e.message) || e).slice(0, 120)); }
-  }
+  } else tried.push('media read: the row holds no video id to ask about');
   const iid = String(itemId || '').replace(/\D/g, '');
   if (iid) {
     try {
+      out.reads++;
       const r = await fetch('https://www.ebay.co.uk/itm/' + iid, { headers: { 'accept-language': 'en-GB', 'user-agent': 'Mozilla/5.0 (compatible; M98M-portal/1.0)' } });
       if (r.ok) {
         const html = await r.text();
@@ -15237,12 +15402,12 @@ async function adVideoThumbFetch(env, acct, videoId, itemId) {
            a listing PHOTO under /g/ decodes the same way but is the photo's date and not the
            video's, so only the video thumbnail is accepted here. */
         const m = html.match(/https?:\/\/i\.ebayimg\.com\/[^"'\s]*\/z\/[A-Za-z0-9_~-]{16}\/\$_2[0-9]\.(?:PNG|png|jpg|JPG)[^"'\s]*/);
-        if (m) return { thumb: m[0], source: 'item page thumbnail', tried: tried.concat(['item page: a video thumbnail address came back']) };
+        if (m) { out.thumb = m[0]; out.step = 'item page'; tried.push('item page: a video thumbnail address came back'); return out; }
         tried.push('item page: the page came back and carries no video thumbnail address');
       } else tried.push('item page: eBay answered ' + r.status + ' to this worker');
     } catch (e) { tried.push('item page: ' + String((e && e.message) || e).slice(0, 120)); }
   }
-  return { thumb: '', source: '', tried: tried };
+  return out;
 }
 
 /* THE SWEEP. eBay's own answer to "does this listing carry a video", asked listing by listing on the
@@ -15307,16 +15472,44 @@ async function adtoolVideoSweep(env) {
           const body = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>' + iid + '</ItemID><OutputSelector>Item.VideoDetails</OutputSelector></GetItemRequest>';
           try {
             const res = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' }, body: body });
-            if (!res.ok) return { iid: iid, got: null };             /* transport or 5xx: asked again next run */
-            return { iid: iid, got: adVideoIdsFromXml(await res.text()) };
-          } catch (e) { return { iid: iid, got: null }; }
+            const txt = await res.text();
+            /* WHAT EBAY SAID IS CARRIED OUT OF HERE whichever way it went, because a refusal is now
+               written on to the row and the status and the reply are the only things that explain it. */
+            return { iid: iid, answered: true, status: res.status, head: String(txt || '').replace(/\s+/g, ' ').slice(0, 120), got: res.ok ? adVideoIdsFromXml(txt) : null };
+          } catch (e) { return { iid: iid, answered: false, status: null, head: '', got: null }; }
         }));
         /* the counting and the writing are done here, back in one thread and in the slice's own
            order, so what the run reports and the order it writes in do not depend on which reply
            happened to come back first. */
         for (const rep of replies) {
-          if (!rep.got) continue;
-          if (!rep.got.readable) { refused++; continue; }             /* eBay refused this item: left unchecked */
+          if (!rep.got || !rep.got.readable) {
+            /* THE REFUSAL LOOP, CLOSED (31 Oct). A refusal used to be counted and dropped, writing no
+               row at all, so checked_at stayed empty and the listing sat at the head of the
+               never-checked rotation and was re-asked every single run, for ever. Once the fleet was
+               covered that was the WHOLE rotation: six listings, re-asked hourly, nothing else left to
+               ask about and nothing on any row to say why. All six turned out to be listings eBay had
+               removed over a policy breach -- GetItem answers 200 and Ack Failure for those, and it
+               always will -- so the only way out is to write the refusal down.
+               NOTHING OF EBAY'S IS INVENTED HERE. The row records that the check happened, what eBay
+               answered and in its own words why, and NOT a video count, a first_seen or a gone-on day:
+               a refusal tells us nothing about whether the listing has a video.
+               A CALL THAT NEVER COMPLETED IS NOT A REFUSAL. No status, no body, nothing of eBay's to
+               record, so it is left for the next run exactly as before.
+               NOT THROUGH THE UPSERT ABOVE. That statement's ON CONFLICT writes video_count 0 and
+               stamps video_gone_on on any listing that previously had a video, which would turn
+               "eBay would not answer" into "the video has been taken off". This one writes the check
+               columns and nothing else, and leaves a date already recovered alone. */
+            if (!rep.answered) continue;
+            refused++;
+            const why = ('HTTP ' + rep.status + ': ' + ((rep.got && rep.got.reason) || rep.head || 'eBay gave no reason')).slice(0, 300);
+            stmts.push(env.DB.prepare(
+              "INSERT INTO adtool_listing_video (account, item_id, checked_at, date_checked_at, date_source, note) VALUES (?1, ?2, datetime('now'), datetime('now'), ?4, ?3) " +
+              'ON CONFLICT(account, item_id) DO UPDATE SET' +
+              " checked_at = datetime('now'), date_checked_at = datetime('now'), note = ?3," +
+              " date_source = CASE WHEN COALESCE(video_added_on, '') = '' THEN ?4 ELSE date_source END"
+            ).bind(acct, rep.iid, why, ADTOOL_VIDEO_DATE_REFUSED));
+            continue;
+          }
           asked++;
           const n = rep.got.ids.length;
           if (n > 0) withVideo++;
@@ -15342,9 +15535,16 @@ async function adtoolVideoSweep(env) {
          and the next run starts from them. */
       written += await adtBatch(env, stmts);
     });
-    /* THE DATE PASS, a few listings a run. A date costs a media read and often a megabyte of item
-       page, so it is kept well apart from the cheap GetItem rotation above and only ever runs for a
-       listing whose day is not known yet. The lister's own record is the last resort before blank. */
+    /* THE DATE PASS, forty listings a run. It is kept apart from the GetItem rotation above and only
+       ever runs for a listing whose day is not known yet. The lister's own record is the last resort
+       before blank.
+       31 OCT: A DATE IS ONE SMALL READ. It was written as though every date cost a media read AND a
+       megabyte of item page, and so it was rationed to twelve an hour; eBay's own video record answers
+       with the thumbnail address and the expiry date together, so the normal lookup is one small GET
+       and the item page is the fallback it hardly ever reaches. Forty an hour, four in flight.
+       IT STILL RIDES BEHIND THE ROTATION, by the clock and the cap: on a day when the rotation has the
+       whole fleet to ask about it spends the run and the dates wait, which is the right way round,
+       because a listing has to be found to carry a video before its day is worth looking for. */
     if (Date.now() > deadline) stopped = 'deadline';
     else if (fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) stopped = 'cap';
     else {
@@ -15357,20 +15557,30 @@ async function adtoolVideoSweep(env) {
         " ORDER BY COALESCE(date_checked_at, '') ASC LIMIT " + ADTOOL_VIDEO_SWEEP_DATES
       ).all()).results || [];
       const stmts = [];
-      /* FOUR AT A TIME, and the cap counted in PAIRS, because one lookup is a media read and an item
-         page: room for three reads is room for one lookup and not for two. */
+      /* FOUR AT A TIME. The ROOM is still judged in PAIRS, because a lookup whose media read gives
+         nothing goes on to read the item page, and reserving for that worst case is what stops a run
+         from starting a lookup it has no budget to finish. What is CHARGED is what was actually spent:
+         one read a lookup up front, and the item pages the slice really had to read added after. */
       for (const slice of adtFetchSlices(need, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL)) {
         if (Date.now() > deadline) { stopped = 'deadline'; break; }
         const room = Math.floor((ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches) / 2);
         if (room <= 0) { stopped = 'cap'; break; }
         const batch = room < slice.length ? slice.slice(0, room) : slice;
-        fetches += batch.length * 2;
+        fetches += batch.length;
         const found = await Promise.all(batch.map(async (r) => {
           let ids = [];
           try { ids = JSON.parse(String(r.video_ids_json || '[]')) || []; } catch (e) { ids = []; }
           const got = await adVideoThumbFetch(env, String(r.account), ids[0] || '', String(r.item_id));
           let day = null, source = '', thumb = String(got.thumb || ''), note = (got.tried || []).join('; ').slice(0, 300);
-          if (thumb) { const dec = adVideoThumbDate(thumb); if (dec.day) { day = dec.day; source = got.source; } else note = (note + '; decode: ' + dec.note).slice(0, 300); }
+          /* THE TWO SIGNALS, CROSS-CHECKED, out of the one media read. The item page carries only the
+             thumbnail, so a date off that step is named for the step and not for the cross-check. */
+          const dec = adVideoMediaDate(thumb, got.expires, Date.now());
+          if (dec.day) {
+            day = dec.day;
+            source = got.step === 'item page' ? 'item page thumbnail' : dec.source;
+            if (dec.gap_seconds != null) note = (note + '; the two signals are ' + dec.gap_seconds + 's apart').slice(0, 300);
+          }
+          if (dec.note) note = (note + '; ' + dec.note).slice(0, 300);
           if (!day) {
             /* THE LISTER'S OWN RECORD, marked as such: it is the day the stage was ticked and not the
                day eBay stored the file, so it is used only when eBay gave us nothing. */
@@ -15378,10 +15588,16 @@ async function adtoolVideoSweep(env) {
             const u = String((lad && lad.updated_at) || '').slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(u)) { day = u; source = 'lister record'; }
           }
-          return { row: r, day: day, source: source, thumb: thumb, note: note };
+          return { row: r, day: day, source: source, thumb: thumb, note: note, reads: Number(got.reads) || 0 };
         }));
+        /* the item pages this slice really had to read, charged now that it is known. The media read
+           itself was charged before the slice went out. */
+        fetches += found.reduce((n, f) => n + Math.max(0, f.reads - 1), 0);
         for (const f of found) {
           let source = f.source;
+          /* A LOOKUP THAT GOT NOWHERE IS STILL WRITTEN, with eBay's own status and the first 120
+             characters of its reply already in the note, so the row says why rather than coming round
+             again in a week with nothing to show for the last attempt. */
           if (f.day) dated++; else { source = 'unknown date'; lost++; }
           stmts.push(env.DB.prepare("UPDATE adtool_listing_video SET video_added_on = ?3, date_source = ?4, thumb_url = ?5, note = ?6, date_checked_at = datetime('now') WHERE account = ?1 AND item_id = ?2")
             .bind(String(f.row.account), String(f.row.item_id), f.day, source, f.thumb, f.note));
@@ -15390,6 +15606,13 @@ async function adtoolVideoSweep(env) {
       }
       written += await adtBatch(env, stmts);
     }
+    /* THE BOARD'S MEMO GOES THE MOMENT A DATE LANDS (§4, item 4). The Videos board is memoised, and
+       the before-and-after only exists for a listing with a date, so a run that dated a listing has
+       changed the answer that memo is holding: dropping it is what makes the next person to open the
+       page see the before-and-after for everything dated this run rather than the window's worth of
+       the old answer. Best effort and never fatal -- a memo that outlives this is a page a couple of
+       minutes behind, which is the ceiling it already states. */
+    if (dated) { const gone = await adVideoBoardCacheClear(env); if (gone) notes.push('the board’s memo was dropped so the new dates show at once'); }
     const covered = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS v FROM adtool_listing_video').first().catch(() => null);
     notes.push(asked + ' asked about, ' + withVideo + ' carry a video, ' + dated + ' dated, ' + lost + ' with no date eBay would give us');
     if (refused) notes.push(refused + ' refused by eBay');
@@ -15465,9 +15688,10 @@ async function adtoolVideoBoardCompute(env, p, ctx) {
   const cover = await env.DB.prepare(
     'SELECT COUNT(*) AS on_record, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS with_video, ' +
     "SUM(CASE WHEN video_count > 0 AND COALESCE(video_added_on, '') = '' THEN 1 ELSE 0 END) AS undated, " +
-    "SUM(CASE WHEN COALESCE(video_count, 0) = 0 AND COALESCE(video_gone_on, '') <> '' THEN 1 ELSE 0 END) AS gone, MAX(checked_at) AS last_checked " +
+    "SUM(CASE WHEN COALESCE(video_count, 0) = 0 AND COALESCE(video_gone_on, '') <> '' THEN 1 ELSE 0 END) AS gone, " +
+    'SUM(CASE WHEN date_source = ?' + (acct ? '2' : '1') + ' THEN 1 ELSE 0 END) AS refused, MAX(checked_at) AS last_checked ' +
     'FROM adtool_listing_video' + (acct ? ' WHERE account = ?1' : '')
-  ).bind(...(acct ? [acct] : [])).first().catch(() => null);
+  ).bind(...(acct ? [acct, ADTOOL_VIDEO_DATE_REFUSED] : [ADTOOL_VIDEO_DATE_REFUSED])).first().catch(() => null);
   const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])).first().catch(() => null);
   const sweepJob = await env.DB.prepare("SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolVideoSweep' ORDER BY started_at DESC LIMIT 1").first().catch(() => null);
   const onRecord = cover ? Number(cover.on_record) || 0 : null, liveN = live ? Number(live.n) || 0 : null;
@@ -15478,9 +15702,14 @@ async function adtoolVideoBoardCompute(env, p, ctx) {
     /* a listing that carried a video and no longer does. It is out of the cohort, because the cohort
        is the listings that carry one now, and it is counted here so the fact does not vanish with it. */
     video_taken_off: cover ? Number(cover.gone) || 0 : null,
+    /* A LISTING EBAY WILL NOT ANSWER FOR, counted rather than hidden. Every one of these so far has
+       been a listing eBay removed over a policy breach, and it is counted here because a reader who
+       can see six listings nobody can ask about has an explanation for a cohort six short of the
+       fleet, where a silent skip leaves them reading the sweep as broken. */
+    refused_by_ebay: cover ? Number(cover.refused) || 0 : null,
     last_checked_at: cover ? (cover.last_checked || null) : null,
     last_sweep: sweepJob ? { started_at: sweepJob.started_at, finished_at: sweepJob.finished_at || null, status: sweepJob.status || '', note: sweepJob.note || '' } : null,
-    note: 'The sweep asks eBay about up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account each hour, active listings first and longest-unchecked first, and asks again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after a live listing was last asked about. A listing that has ended is asked about once, because its video cannot change.',
+    note: 'The sweep asks eBay about up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account each hour, active listings first and longest-unchecked first, and asks again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after a live listing was last asked about. A listing that has ended is asked about once, because its video cannot change. Where eBay refuses to answer for a listing, which so far has always been a listing it removed over a policy breach, its own reason is written on the row and the listing waits out the same interval rather than being asked about again every hour.',
   };
   cohort.by_date_source = (await env.DB.prepare(
     "SELECT COALESCE(NULLIF(date_source, ''), 'not looked up yet') AS date_source, COUNT(*) AS n FROM adtool_listing_video WHERE video_count > 0" +
@@ -24871,8 +25100,13 @@ const ROUTES = {
         try { ids = JSON.parse(String((r && r.video_ids_json) || '[]')) || []; } catch (e) { ids = []; }
         let fetched = null;
         if (p && p.fetch_thumb) {
+          /* THE SAME LOOKUP THE DATE PASS MAKES, step for step, so a date that will not come back can
+             be settled from here: which step answered, what eBay's status was, the first 120
+             characters of its reply, and the two signals beside the day they agree on. */
           const got = await adVideoThumbFetch(env, String((r && r.account) || (meta && meta.account) || ''), ids[0] || '', item);
-          fetched = { thumb: got.thumb || '', source: got.source || '', tried: got.tried || [], decoded: got.thumb ? adVideoThumbDate(got.thumb) : null };
+          fetched = { thumb: got.thumb || '', expires: got.expires || '', step: got.step || '', reads: got.reads || 0,
+            status: got.status == null ? null : Number(got.status), body_head: got.body_head || '', tried: got.tried || [],
+            decoded: adVideoMediaDate(got.thumb, got.expires, Date.now()) };
         }
         const dayRows = (r && r.video_added_on) ? await q('days', 'SELECT day, orders, units, revenue, cpc_spend FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day', [item, yday]) : null;
         const ctrlRows = (r && r.video_added_on && r.account) ? await q('control days', 'SELECT day, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE account = ?1 AND day <= ?2 AND item_id NOT IN (SELECT item_id FROM adtool_listing_video WHERE video_count > 0) GROUP BY day', [String(r.account), yday]) : null;
@@ -24919,7 +25153,10 @@ const ROUTES = {
         cohort_sql: adPeakCohortSql(adVideoCohortEntries(rows || [])).slice(0, 2000),
         cohort_listings: adVideoCohortEntries(rows || []).length,
         windows_asked_for: ADTOOL_VIDEO_WINDOWS, window_cap: ADTOOL_VIDEO_WINDOW_CAP, history_starts: ADTOOL_VIDEO_DATA_START,
-        date_recipe: ['the Sell Media API video read', 'the public item page', 'the lister\'s own record date', 'blank, marked unknown'],
+        date_recipe: ['the Sell Media API video read, whose thumbnail picture id and expiry date are cross-checked against one another',
+          'the public item page, which carries the thumbnail alone', 'the lister\'s own record date', 'blank, marked unknown'],
+        date_sources: ADTOOL_VIDEO_DATE_SOURCES,
+        date_agree_seconds: ADTOOL_VIDEO_DATE_AGREE_S,
         one: one, agreement: agreement,
         sweep: { slots: slots, per_account_cap: ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, fetch_cap: ADTOOL_VIDEO_SWEEP_FETCH_CAP, dates_per_run: ADTOOL_VIDEO_SWEEP_DATES, recheck_days: ADTOOL_VIDEO_RECHECK_DAYS, deadline_ms: ADTOOL_VIDEO_SWEEP_MS, runs: jobs },
         flags: cfg,
@@ -25789,16 +26026,12 @@ const ROUTES = {
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
       if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
-      const media = /^\/commerce\/media\//.test(path);
-      if (media && method !== 'GET') throw new Error('SAY: the video read is GET only');
-      const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
-      const r = await fetch((media ? 'https://apim.ebay.com' : 'https://api.ebay.com') + path, {
-        method,
-        headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
-          'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
-        body: method === 'POST' && p.body ? JSON.stringify(p.body) : undefined,
-      });
-      return { status: r.status, body: await r.text() };
+      if (/^\/commerce\/media\//.test(path) && method !== 'GET') throw new Error('SAY: the video read is GET only');
+      /* THE CALL ITSELF IS THE SHARED ONE. The video sweep's date pass reads the very same media path
+         through this same function, so what works here is what the job does: same host, same headers,
+         same token minted for the named account. */
+      const r = await ebayRestFetch(ctx.env, String(p.account || ''), method, path, method === 'POST' ? p.body : null);
+      return { status: r.status, body: r.body };
     },
   },
 
