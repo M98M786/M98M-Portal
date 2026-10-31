@@ -26662,6 +26662,29 @@ const ROUTES = {
   },
 
 
+  /* 1 Nov (owner): "is eBay applying the 20% off Promoted Listings Priority fees promotion?" — a
+     read-only, sync-keyed window on the Marketing API, the same stance as ebayFinanceRead: the token
+     never leaves the worker. GET only on campaigns and their ads, report metadata, report tasks and
+     finished reports, plus the one POST that creates a report task (asking eBay for a report changes
+     nothing). Nothing here can create, change, pause or end a campaign, ad, bid or budget. */
+  ebayMarketingRead: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const url = String(p.url || ''), method = String(p.method || 'GET').toUpperCase();
+      const readable = /^https:\/\/api\.ebay\.com\/sell\/marketing\/v1\/(ad_campaign(\/[0-9]+(\/ad(\/[0-9]+)?)?)?|ad_report_metadata(\/[A-Za-z_]+)?|ad_report_task(\/[0-9]+)?|ad_report\/[0-9]+)(\?[^#]*)?$/.test(url);
+      const creates = /^https:\/\/api\.ebay\.com\/sell\/marketing\/v1\/ad_report_task$/.test(url);
+      if (method === 'GET' ? !readable : !(method === 'POST' && creates)) throw new Error('SAY: url must be a marketing campaign/report read, or a report-task create');
+      const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
+      const init = { method, headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } };
+      if (method === 'POST') { init.headers['content-type'] = 'application/json'; init.body = JSON.stringify(p.body || {}); }
+      const r = await fetch(url, init);
+      const ct = String(r.headers.get('content-type') || ''), loc = String(r.headers.get('location') || '');
+      if (/json|text|xml/i.test(ct) || r.status === 202 || r.status === 204) return { status: r.status, content_type: ct, location: loc, body: await r.text() };
+      const buf = new Uint8Array(await r.arrayBuffer());
+      let raw = '';
+      for (let i = 0; i < buf.length; i++) raw += String.fromCharCode(buf[i]);
+      return { status: r.status, content_type: ct, location: loc, body_b64: btoa(raw) };
+    },
+  },
   ebaySubmitConsent: {
     auth: 'mgmt', fn: async (p, ctx) => {
       const account = String(p.account || ''), code = String(p.code || '').trim();
