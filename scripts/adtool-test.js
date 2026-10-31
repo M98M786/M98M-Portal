@@ -2590,6 +2590,10 @@ function run(argv) {
     return /pk_item/.test(sql) && sql.indexOf('123') >= 0 && sql.indexOf('DROP') < 0 &&
       sql.indexOf('456') < 0 && sql.indexOf('yesterday') < 0 && sql.indexOf('789') < 0;
   })(), F.adPeakCohortSql([{ item_id: '123', added_day: '2026-10-01', removed_day: '' }]));
+  t('peak cohort: a list of six hundred is ONE json_each term, never a compound SELECT (D1 refused 94 UNION ALL terms on 31 Oct)', (() => {
+    const sql = F.adPeakCohortSql(Array.from({ length: 600 }, (_, i) => ({ item_id: String(100000000000 + i), added_day: '2026-10-01', removed_day: i % 7 === 0 ? '2026-10-20' : '' })));
+    return sql.indexOf('UNION ALL') < 0 && (sql.match(/json_each\(/g) || []).length === 1 && /pk_item/.test(sql) && /pk_from/.test(sql) && /pk_to/.test(sql) && sql.indexOf('100000000599') > 0 && sql.indexOf('2026-10-20') > 0;
+  })(), null);
   t('peak cohort: an EMPTY list gives a table with no rows, never a filter that quietly vanished', (() => {
     const sql = F.adPeakCohortSql([]);
     const j = F.adPeakCohortJoin(sql, 'item_id', 'day');

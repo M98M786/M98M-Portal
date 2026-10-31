@@ -12465,10 +12465,14 @@ function adPeakCohortSql(entries) {
     if (!/^[0-9]{1,19}$/.test(id)) continue;
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from)) continue;
     if (to && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to)) continue;
-    parts.push('SELECT \'' + id + '\' AS pk_item, \'' + from + '\' AS pk_from, \'' + (to || '') + '\' AS pk_to');
+    parts.push({ i: id, f: from, t: to || '' });
   }
   if (!parts.length) return '(SELECT \'\' AS pk_item, \'\' AS pk_from, \'\' AS pk_to WHERE 1 = 0)';
-  return '(' + parts.join(' UNION ALL ') + ')';
+  /* ONE json_each() over a JSON literal, not a UNION ALL per listing: SQLite caps the terms of a compound
+     SELECT, and the live list (94 listings on 31 Oct) was already past D1's limit, so every 7- and 28-day
+     cohort read failed on the first night. Every value was pattern-checked above (digits and dates only),
+     so the literal carries nothing that needs quoting. */
+  return '(SELECT json_extract(value, \'$.i\') AS pk_item, json_extract(value, \'$.f\') AS pk_from, json_extract(value, \'$.t\') AS pk_to FROM json_each(\'' + JSON.stringify(parts) + '\'))';
 }
 function adPeakCohortJoin(sql, itemCol, dayCol) {
   /* THE ONE ITEM FILTER. Every cohort query is the query the Overview already runs with this join
