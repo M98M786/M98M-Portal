@@ -48,7 +48,13 @@
     item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false,
     /* the Peak-time overview's own state: the window its period bar is on, the two cohort answers,
        and which tile the reader has opened the listings behind. */
-    pkoPeriod: null, pkoPlan: null, pkoCmd: null, pkoList: '' };
+    pkoPeriod: null, pkoPlan: null, pkoCmd: null, pkoList: '',
+    /* the 24-hour pattern's own state (owner's brief, 31 Oct, §3). `cell` is the one hour somebody
+       has clicked, as 'item|day|hour', so its reason stays on the page instead of living in a
+       tooltip nobody can read on a touch screen. `dataFor` is the listing whose data is expanded.
+       `holdBy` remembers who set a hold FROM THE WRITE'S OWN ANSWER, because the list read does not
+       carry it: a name is shown only where this page watched it being set. */
+    cell: '', dataFor: '', holdBy: {}, holdBusy: '' };
   var campTimer = null;
 
   VIEW_CSS.push([
@@ -124,7 +130,37 @@
     '.pkt-badge.red{color:' + LOSS + ';border-color:rgba(224,86,63,.55)}',
     '.pkt-recon{font-size:12px;color:var(--text-2);margin:2px 0 10px;line-height:1.55}',
     '.pkt-recon.bad{color:' + LOSS + ';font-weight:700}',
-    '.pkt-row{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}'
+    '.pkt-row{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}',
+    /* ── the 24-hour pattern (owner's brief, 31 Oct, §3). This file's own prefix throughout. ── */
+    '.pkt-sched{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;padding:2px 0 2px}',
+    '.pkt-schedb{flex:0 1 430px;min-width:290px}',
+    '.pkt-dayk{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800;margin:0 0 4px}',
+    '.pkt-strip{display:grid;grid-template-columns:repeat(24,1fr);gap:2px}',
+    '.pkt-strip .c{height:17px;border-radius:3px;background:rgba(255,255,255,.07);border:1px solid transparent;padding:0;font:inherit;cursor:pointer}',
+    '.pkt-strip .c.on{background:var(--gold-b)}',
+    '.pkt-strip .c.dead{background:rgba(224,86,63,.45);border-color:rgba(224,86,63,.65)}',
+    '.pkt-strip .c.held{background:rgba(255,255,255,.3)}',
+    '.pkt-strip .c.now{border-color:var(--text);border-width:2px}',
+    '.pkt-strip .c.pick{outline:2px solid var(--gold-a);outline-offset:1px}',
+    '.pkt-strip .l{font-size:8.5px;color:var(--text-3);text-align:center;font-variant-numeric:tabular-nums;line-height:1.5}',
+    '.pkt-legend{display:flex;gap:9px;flex-wrap:wrap;margin-top:5px;font-size:10px;color:var(--text-3);font-weight:700}',
+    '.pkt-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}',
+    '.pkt-legend i.on{background:var(--gold-b)}.pkt-legend i.off{background:rgba(255,255,255,.07)}',
+    '.pkt-legend i.dead{background:rgba(224,86,63,.45)}.pkt-legend i.held{background:rgba(255,255,255,.3)}',
+    '.pkt-pick{margin-top:5px;font-size:11px;color:var(--text);line-height:1.5;border-left:2px solid var(--gold-b);padding-left:7px}',
+    '.pkt-hold{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}',
+    '.pkt-hold button{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:3px 11px;font:inherit;font-size:11px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap}',
+    '.pkt-hold button.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
+    '.pkt-hold button[disabled]{opacity:.5;cursor:default}',
+    '.pkt-link{background:transparent;border:0;padding:0;font:inherit;font-size:11px;font-weight:800;color:var(--gold-a);cursor:pointer;text-decoration:underline;text-underline-offset:2px}',
+    '.pkt-data{margin-top:8px;border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel-2)}',
+    '.pkt-data h5{margin:0 0 6px;font-size:12px;font-weight:800;color:var(--text)}',
+    '.pkt-htbl{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}',
+    '.pkt-htbl th{text-align:left;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:4px 6px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.pkt-htbl td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text-2)}',
+    '.pkt-htbl td.hr{color:var(--text);font-weight:700;white-space:nowrap}',
+    '.pkt-htbl tr.nowrow td{background:rgba(242,176,53,.08)}',
+    '.pkt-sub2{background:rgba(255,255,255,.015)}'
   ].join(''));
 
   /* adtSlot in the engine: 0 night 00-06, 1 morning 06-12, 2 afternoon 12-17, 3 evening 17-24, UK hours */
@@ -192,6 +228,9 @@
      start runs past midnight and is said so in words, which is the one case a reader gets wrong. ── */
   function hh(n) { n = Math.max(0, Math.min(23, Math.round(Number(n) || 0))); return (n < 10 ? '0' : '') + n; }
   function clock(n) { return hh(n) + ':00'; }
+  /* the END of a stretch, which the engine writes as the hour the ad stops and so may be 24. hh()
+     clamps to 23, which would print a window running to midnight as one ending an hour early. */
+  function clockTo(n) { var v = Math.round(Number(n) || 0); return v >= 24 ? 'midnight' : clock(v); }
   function rangesText(ranges) {
     return (ranges || []).filter(function (r) { return r && r.from != null && r.to != null; })
       .map(function (r) { return hh(r.from) + '-' + hh(r.to); }).join(',');
@@ -257,6 +296,7 @@
       PK.data = null; PK.edit = null; PK.ranges = [{ from: 17, to: 23 }];
       PK.item = ''; PK.note = ''; PK.pick = ''; PK.pickName = '';
       PK.camps = null; PK.campFor = ''; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
+      PK.cell = ''; PK.dataFor = ''; PK.holdBy = {}; PK.holdBusy = '';
       /* #adtoolPeak?tab=manual opens on the hand-kept list, so a link can point at either tab and a
          second tab of the browser keeps its own */
       var q = (window.adtRoute ? (adtRoute().query || {}) : {}).tab;
@@ -384,6 +424,12 @@
       'at the end it is paused. That is a change on eBay, so it only happens on an account whose live-apply switch ' +
       'is on. <b>Where that switch is off nothing is sent:</b> the change is written down as what would have been ' +
       'sent, and the row says so.' +
+      /* the one sentence the brief asks for, in plain words. The hours somebody typed stay the
+         envelope, so the worst a wrong pattern can do is leave an ad paused in an hour that has
+         never sold: it can never put an ad into an hour nobody asked for. */
+      ' <b>Inside those hours the system now reads each listing\'s own 24 hours' + reg('the 24-hour pattern', 'how') +
+      '</b> and keeps the ad paused through the stretches it has never sold in, so the hours somebody typed are the ' +
+      'most a listing can run and never more.' +
       (s
         ? ' ' + (s.fleet ? '' : 'For the accounts on this list, ') + (s.on.length
           ? (s.fleet ? 'Live apply is on for <b>' : 'live apply is on for <b>') + esc(s.on.join(', ')) + '</b>' + (s.off.length ? ' and off for ' + esc(s.off.join(', ')) + '.' : '.')
@@ -402,6 +448,227 @@
     return '<div class="pkt-rules"><b>What the system suggests.</b> A listing is suggested when it is advertised now, ' +
       'has sold at least <b>' + cnt(minU) + ' ' + plural(minU, 'unit', 'units') + '</b> over the last <b>' + cnt(win) + ' ' +
       plural(win, 'day', 'days') + '</b>, and at least <b>' + shareTxt(share) + '</b> of those units land in one part of the day.</div>';
+  }
+  /* HOW THE PATTERN DECIDES, in the engine's own sentence. Every figure in it is read out of the
+     answer: `plan_rules_text` is built by the engine from the six settings a manager can change, so
+     changing one in Management changes these words too. Nothing here is typed, and a figure the
+     answer does not carry says so rather than standing in for one. */
+  function patternLine() {
+    var D = PK.data || {}, R = D.plan_rules || null, C = D.counts || {};
+    var txt = String(D.plan_rules_text == null ? '' : D.plan_rules_text).trim();
+    var note = String(D.plan_note == null ? '' : D.plan_note).trim();
+    var h = '<div class="pkt-rules"><b>How it decides' + reg('dead hours', 'how') + '</b> ';
+    h += txt ? esc(txt) + '.' : 'The figures behind the pattern are not in this answer, so none is shown here.';
+    if (R && R.plan_time) h += ' The day ahead is worked out at <b>' + esc(String(R.plan_time)) + '</b> UK, and again at each cut between two parts of the day for any listing whose shape has moved.';
+    if (note) h += '<br>' + esc(note) + '.';
+    /* the same rules counted over the rows in front of the reader, so the sentence above has a tally
+       beside it. Each of the five is the engine's own count over this account's rows. */
+    var bits = [];
+    if (num(C.on_schedule) != null) bits.push('<b>' + cnt(C.on_schedule) + '</b> on a schedule');
+    if (num(C.on_pattern) != null) bits.push('<b>' + cnt(C.on_pattern) + '</b> narrowed by the pattern');
+    if (num(C.pattern_proposed) != null) bits.push('<b>' + cnt(C.pattern_proposed) + '</b> with dead hours put forward and not acted on');
+    if (num(C.held) != null) bits.push('<b>' + cnt(C.held) + '</b> held by hand' + reg('held on or off', 'how'));
+    if (num(C.not_tracking) != null) bits.push('<b>' + cnt(C.not_tracking) + '</b> no longer playing on their own pattern');
+    if (bits.length) h += '<br>On the hand-kept list: ' + bits.join(' · ') + '.';
+    return h + '</div>';
+  }
+
+  /* ══ THE 24-HOUR PATTERN, PER ROW (owner's brief, 31 Oct, §3) ═══════════════════════════════
+     The planner writes each listing's day and this prints what it wrote. Nothing here works a
+     schedule out for itself: reading four weeks of hours for every row on an open page is not a
+     page, and two answers to one question is how a screen comes to disagree with the job that
+     actually switches the ad. Where the planner has written nothing the row says so, which is a
+     listing running on its typed hours exactly as it did before any of this existed. ══ */
+  function ukHourNow() {
+    try {
+      var p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date());
+      var v = Number((p.filter(function (x) { return x.type === 'hour'; })[0] || {}).value);
+      return isFinite(v) ? (v % 24) : null;
+    } catch (e) { return null; }
+  }
+  /* the words for each source the planner can write, and the sentence behind them. 'hold' carries
+     which way somebody held it, so the two holds never read as one. */
+  function srcWords(s, hold) {
+    var k = String(s == null ? '' : s);
+    if (k === 'hold') {
+      var w = String(hold || '') === 'off' ? 'held off' : 'held on';
+      return [w, 'somebody has held this listing, so neither its hours nor its pattern decides anything today'];
+    }
+    if (k === 'pattern') return ['from its pattern', 'inside its own hours, with the hours it has never sold in switched off'];
+    if (k === 'typed') return ['typed hours', 'its own hours, with nothing taken off them by the pattern'];
+    if (k === 'proposal') return ['proposal: not enough days observed yet', 'today runs on the hours somebody typed, and the dead hours the pattern found are put forward for somebody to look at'];
+    if (k === 'none') return ['no hours the system can read', 'there is nothing to schedule for this listing, so nothing is switched'];
+    return null;
+  }
+  /* which class an hour's cell wears. The reason the planner wrote beside the hour is what decides
+     it, so a cell can never disagree with the line under the strip. */
+  function cellKind(state, reason) {
+    var r = String(reason == null ? '' : reason);
+    if (r.indexOf('held ') === 0) return 'held';
+    if (r.indexOf('dead window') === 0) return 'dead';
+    return String(state) === 'ON' ? 'on' : '';
+  }
+  var CELL_WORDS = { on: 'the ad runs', dead: 'the ad is paused: a dead hour', held: 'held by hand', '': 'the ad is paused' };
+  function hourStrip(id, sch, label) {
+    if (!sch || !Array.isArray(sch.states) || sch.states.length !== 24) {
+      return '<div class="pkt-schedb"><div class="pkt-dayk">' + esc(label) + '</div>' +
+        '<div class="pkt-sm2">The system has written no schedule for this day, so this listing runs on the hours somebody typed for it.</div></div>';
+    }
+    var reasons = Array.isArray(sch.reasons) ? sch.reasons : [];
+    var day = String(sch.day || '');
+    var nowH = day && day === adtUkDay() ? ukHourNow() : null;
+    var i, h = '<div class="pkt-schedb"><div class="pkt-dayk">' + esc(label) + (day ? ' · ' + esc(day) : '') + '</div><div class="pkt-strip">';
+    for (i = 0; i < 24; i++) {
+      var kind = cellKind(sch.states[i], reasons[i]);
+      var why = String(reasons[i] == null ? '' : reasons[i]);
+      h += '<button type="button" class="c ' + kind + (nowH === i ? ' now' : '') +
+        (PK.cell === id + '|' + day + '|' + i ? ' pick' : '') + '" data-pkcell="' + esc(id + '|' + day + '|' + i) + '"' +
+        ' title="' + esc(clock(i) + ' UK · ' + CELL_WORDS[kind] + (why ? ' · ' + why : '')) + '"' +
+        ' aria-label="' + esc(clock(i) + ' ' + CELL_WORDS[kind]) + '"></button>';
+    }
+    for (i = 0; i < 24; i++) h += '<div class="l">' + (i % 6 === 0 ? i : '') + '</div>';
+    h += '</div>';
+    h += '<div class="pkt-legend"><span><i class="on"></i>runs</span><span><i class="off"></i>paused</span>' +
+      '<span><i class="dead"></i>dead hour</span><span><i class="held"></i>held</span>' +
+      (nowH == null ? '' : '<span>the hour outlined is the one running now</span>') + '</div>';
+    /* the clicked hour's reason, kept on the page. A tooltip cannot be read on a touch screen and
+       cannot be copied into a message to whoever keeps the list. */
+    var key = String(PK.cell || ''), parts = key.split('|');
+    if (parts.length === 3 && parts[0] === id && parts[1] === day) {
+      var n = Number(parts[2]);
+      if (isFinite(n) && n >= 0 && n <= 23) {
+        h += '<div class="pkt-pick"><b>' + esc(clock(n)) + ' to ' + esc(clockTo(n + 1)) + ' UK</b> · ' +
+          esc(CELL_WORDS[cellKind(sch.states[n], reasons[n])]) +
+          (reasons[n] ? '<br>' + esc(String(reasons[n])) : '') + '</div>';
+      }
+    }
+    return h + '</div>';
+  }
+  /* WHO SET A HOLD. The list read does not carry it, so a name is shown only where this page watched
+     the hold being set: the write's own answer names who did it. Anything else would be a guess. */
+  function holdByLine(id, hold) {
+    if (hold !== 'on' && hold !== 'off') return '';
+    var b = PK.holdBy[String(id)];
+    if (!b || !b.by) return '<div class="pkt-sm2">Who set this hold is not in this answer.</div>';
+    return '<div class="pkt-sm2">Held ' + esc(hold) + ' by <b>' + esc(String(b.by)) + '</b>' + (b.at ? ' · ' + esc(whenTxt(b.at)) : '') + '</div>';
+  }
+  function holdControl(r) {
+    var id = String(r.item_id || '');
+    var hold = String(r.hold == null ? '' : r.hold);
+    if (!hold) {
+      return '<div class="pkt-sm2">This answer does not say whether anybody is holding this listing, so the hold cannot be set from here.</div>';
+    }
+    var busy = PK.holdBusy === id;
+    var opts = [['auto', 'Automatic'], ['on', 'Hold on'], ['off', 'Hold off']];
+    return '<div class="pkt-dayk">Hold' + reg('held on or off', 'how') + '</div>' +
+      '<div class="pkt-hold">' + opts.map(function (o) {
+        return '<button type="button" class="' + (hold === o[0] ? 'on' : '') + '" data-pkhold="' + esc(id + '|' + o[0]) + '"' +
+          (busy || hold === o[0] ? ' disabled' : '') + '>' + esc(o[1]) + '</button>';
+      }).join('') + '</div>' +
+      '<div class="pkt-sm2">Automatic leaves the day to the schedule. A hold keeps the ad running, or paused, all day whatever the hours and the pattern say.' +
+      (Number(r.auto) ? '' : ' This listing is not set to switch itself, so a hold is written down and nothing switches it.') + '</div>' +
+      holdByLine(id, hold);
+  }
+  /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, with
+     the figures it stands on. The money and the clicks in each hour are NOT in this answer: the
+     planner reads them and keeps its conclusion, so the honest thing is to print the conclusion and
+     name the gap rather than show an empty column where a figure should be. */
+  function dataPanel(r, sugg) {
+    var id = String(r.item_id || '');
+    if (PK.dataFor !== id) return '';
+    var T = r.schedule_today, M = r.schedule_tomorrow;
+    var tr = Array.isArray(T && T.reasons) ? T.reasons : [], mr = Array.isArray(M && M.reasons) ? M.reasons : [];
+    var nowH = T && String(T.day || '') === adtUkDay() ? ukHourNow() : null;
+    var h = '<div class="pkt-data"><h5>The data behind this' + reg('the 24-hour pattern', 'how') + '</h5>';
+    h += '<div class="pkt-sm2" style="margin-bottom:8px">The hours the planner wrote for this listing and what put each of them there. ' +
+      'The money, the clicks and the sales in each hour are not in this answer: the planner reads them and keeps its answer, ' +
+      'so what is shown here is what it decided and not the readings behind it.</div>';
+    if (!T && !M) {
+      h += '<div class="pkt-empty">The system has written no schedule for this listing, for today or for tomorrow.</div>';
+    } else {
+      h += '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Hour, UK</th><th>Today' +
+        (T && T.day ? ' · ' + esc(String(T.day)) : '') + '</th><th>Why today</th><th>Tomorrow' +
+        (M && M.day ? ' · ' + esc(String(M.day)) : '') + '</th></tr></thead><tbody>';
+      for (var i = 0; i < 24; i++) {
+        var ts = T && T.states ? String(T.states[i]) : '', ms = M && M.states ? String(M.states[i]) : '';
+        h += '<tr' + (nowH === i ? ' class="nowrow"' : '') + '><td class="hr">' + esc(clock(i)) + (nowH === i ? ' · now' : '') + '</td>' +
+          '<td>' + (ts ? esc(CELL_WORDS[cellKind(ts, tr[i])]) : '<span class="pkt-sm2">no schedule</span>') + '</td>' +
+          '<td>' + (tr[i] ? esc(String(tr[i])) : '<span class="pkt-sm2">not recorded</span>') + '</td>' +
+          '<td>' + (ms ? esc(CELL_WORDS[cellKind(ms, mr[i])]) + (mr[i] ? ' <span class="pkt-sm2">· ' + esc(String(mr[i])) + '</span>' : '') : '<span class="pkt-sm2">no schedule yet</span>') + '</td></tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    /* the figures the answer DOES carry about the pattern, each one printed from the answer */
+    var days = num(r.profile_days), ca = T && T.computed_at ? String(T.computed_at) : '';
+    h += '<div class="pkt-sm" style="margin-top:8px"><b>Days of hours the pattern was read over:</b> ' +
+      (days == null ? 'not available yet' : cnt(days) + ' ' + plural(days, 'day', 'days')) +
+      (ca ? ' · <b>worked out</b> ' + esc(whenTxt(ca)) : '') + '</div>';
+    h += windowsLine('Switched off today by the pattern', r.dead_windows, 'nothing today');
+    h += windowsLine('Put forward and not acted on', r.dead_proposal, 'nothing put forward');
+    /* the four parts of the day, where the suggestion list has judged this listing: that row carries
+       the part of the day its units land in and the hours its money was sampled over, and this list's
+       own rows do not. Where it is not on that list there is nothing to show and the panel says so. */
+    if (sugg) {
+      h += '<div class="pkt-sm" style="margin-top:6px"><b>The part of the day its units land in:</b> ' +
+        esc(slotName(sugg)) + ' · ' + shareOf(sugg) + ' of ' + cnt(sugg.units_28d) + ' ' + plural(sugg.units_28d, 'unit', 'units') +
+        (slotHours(sugg) ? ' · ' + esc(slotHours(sugg)) : '') + '</div>' +
+        '<div style="margin-top:4px">' + adtHourStrip({ run: sugg.run || [], avoid: sugg.avoid || [], basis: String(sugg.hour_basis || '') }) + '</div>';
+    } else {
+      h += '<div class="pkt-sm2" style="margin-top:6px">The four parts of the day are not worked out for this listing in this answer: it is not on the suggested list.</div>';
+    }
+    return h + '<div style="margin-top:8px"><button type="button" class="pkt-btn ghost" data-pkdataclose="1">Close</button></div></div>';
+  }
+  function windowsLine(label, list, empty) {
+    var L = Array.isArray(list) ? list.filter(function (w) { return w && w.from != null && w.to != null; }) : null;
+    if (!L) return '<div class="pkt-sm2">' + esc(label) + ': not in this answer</div>';
+    if (!L.length) return '<div class="pkt-sm2">' + esc(label) + ': ' + esc(empty) + '</div>';
+    return '<div class="pkt-sm"><b>' + esc(label) + ':</b> ' + L.map(function (w) {
+      return esc(clock(w.from) + ' to ' + clockTo(w.to));
+    }).join(', ') + '</div>';
+  }
+  /* the whole block that sits under one listing row: the two strips, where the day came from, how
+     many days it was read over, the data link, and the hold. */
+  function patternBlock(r, sugg) {
+    var id = String(r.item_id || '');
+    var T = r.schedule_today, M = r.schedule_tomorrow;
+    var src = T ? srcWords(T.source, r.hold) : null;
+    var days = num(r.profile_days);
+    var h = '<div class="pkt-sched">' + hourStrip(id, T, 'Today') + hourStrip(id, M, 'Tomorrow') +
+      '<div class="pkt-schedb">' + holdControl(r) + '</div></div>';
+    h += '<div class="pkt-sm" style="margin-top:6px">';
+    h += src ? '<b>' + esc(src[0]) + '</b> · ' + esc(src[1]) : (T ? '<b>' + esc(String(T.source || 'not recorded')) + '</b>' : '<b>no schedule written</b> · this listing runs on the hours somebody typed for it');
+    h += ' · <b>days observed:</b> ' + (days == null ? 'not available yet' : cnt(days) + ' ' + plural(days, 'day', 'days'));
+    h += '</div>';
+    /* whether the listing is still playing on the shape the pattern was read from, in the engine's
+       own words: a listing that has stopped goes back to its typed hours, and that is the difference
+       between "typed hours" and "from its pattern" above. */
+    var tk = r.tracking;
+    if (tk && typeof tk === 'object' && tk.tracking != null) {
+      h += '<div class="pkt-sm2">' + (tk.tracking ? 'Still playing on its pattern' : 'No longer playing on its pattern') +
+        (tk.note ? ': ' + esc(String(tk.note)) : '') + '</div>';
+    } else {
+      h += '<div class="pkt-sm2">Whether it is still playing on its pattern is not in this answer.</div>';
+    }
+    h += nextSwitchLine(r);
+    h += '<div style="margin-top:5px"><button type="button" class="pkt-link" data-pkdata="' + esc(id) + '">' +
+      (PK.dataFor === id ? 'Hide the data behind this' : 'Data behind this') + '</button></div>';
+    h += dataPanel(r, sugg);
+    return h;
+  }
+  /* THE NEXT TIME THE SCHEDULE CHANGES THIS LISTING, which is not the same question as the next time
+     its typed hours do: a dead stretch inside those hours changes state where the hours alone would
+     not. The Next change column keeps the hours' own answer, and this is the schedule's. */
+  function nextSwitchLine(r) {
+    var N = r.next_switch;
+    if (!N || typeof N !== 'object' || !N.at) {
+      return '<div class="pkt-sm2">The schedule has nothing further to change for this listing in the next two days, or there is no schedule to read it from.</div>';
+    }
+    var to = String(N.to || '').toUpperCase();
+    var hrs = num(N.hours_from_now);
+    return '<div class="pkt-sm"><b>Next change on the schedule:</b> ' +
+      (to === 'ON' ? 'back on' : to === 'OFF' ? 'paused' : esc(to || 'changed')) + ' at <b>' + esc(String(N.at)) + '</b> UK' +
+      (hrs == null ? '' : ', in ' + cnt(hrs) + ' ' + plural(hrs, 'hour', 'hours')) +
+      (N.reason ? '<div class="pkt-sm2">' + esc(String(N.reason)) + '</div>' : '') + '</div>';
   }
 
   /* ── tabs ─────────────────────────────────────────────────────────────────────────────────── */
@@ -761,7 +1028,11 @@
           '<td><div class="pkt-sm">' + esc(String(r.added_by || 'not recorded')) + '</div>' +
           '<div class="pkt-sm2">' + esc(whenTxt(r.added_at)) + '</div></td>' +
           '<td>' + liveTag(r.live_now) + '</td>' +
-          '<td class="r">' + gbp(r.spend_7d) + '</td></tr>';
+          '<td class="r">' + gbp(r.spend_7d) + '</td></tr>' +
+          /* THE DAY THE PLANNER WROTE, under the row it belongs to. A second row rather than an
+             eleventh column: two 24-cell strips, where the day came from, the hold and the data
+             behind it do not fit in a cell, and the listing above keeps its own History link. */
+          '<tr class="pkt-sub2"><td colspan="10">' + patternBlock(r, s) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     return h + '</div>';
   }
@@ -964,6 +1235,7 @@
       (D.computed_at ? '<span>·</span><span>worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC</span>' : '') + '</div>';
     h += banner();
     h += rulesLine();
+    h += patternLine();
     h += tabs(C);
     h += PK.tab === 'manual' ? manualPanel() : suggestedPanel();
     box.innerHTML = h;
@@ -1072,6 +1344,63 @@
       if (!confirm('Take ' + id + ' off the peak times list?\n\nThe row is kept as a record of what was decided, and the system stops switching it.')) return;
       remove(id, this);
     };
+
+    /* ── the 24-hour pattern's own controls ─────────────────────────────────────────────────── */
+    var cs = box.querySelectorAll('[data-pkcell]');
+    for (i = 0; i < cs.length; i++) cs[i].onclick = function () {
+      var k = this.getAttribute('data-pkcell') || '';
+      PK.cell = PK.cell === k ? '' : k;
+      draw();
+    };
+    var dts = box.querySelectorAll('[data-pkdata]');
+    for (i = 0; i < dts.length; i++) dts[i].onclick = function () {
+      var id = this.getAttribute('data-pkdata') || '';
+      PK.dataFor = PK.dataFor === id ? '' : id;
+      draw();
+    };
+    var dcs = box.querySelectorAll('[data-pkdataclose]');
+    for (i = 0; i < dcs.length; i++) dcs[i].onclick = function () { PK.dataFor = ''; draw(); };
+    var hs = box.querySelectorAll('[data-pkhold]');
+    for (i = 0; i < hs.length; i++) hs[i].onclick = function () {
+      var p = String(this.getAttribute('data-pkhold') || '').split('|');
+      if (p.length < 2 || !p[0]) { toast('This row has no item number.'); return; }
+      setHold(p[0], p[1], this);
+    };
+  }
+
+  /* HOLDING A LISTING ON OR OFF BY HAND. It sends nothing itself: a hold is a wanted state in a
+     column, and the only thing that reaches eBay is the quarter-hourly switch, on an account whose
+     own live switch is on. The confirm says which of the two it will be, in the engine's own words
+     after the write, so the page cannot promise something the engine did not do. */
+  var HOLD_ASK = {
+    auto: 'Put this listing back on the schedule?\n\nIts own hours decide the day again, with the hours it has never sold in switched off.',
+    on: 'Keep this listing running all day?\n\nIts hours and its pattern stop deciding anything for it until somebody puts it back on the schedule.',
+    off: 'Keep this listing paused all day?\n\nIts ad stays off whatever its hours and its pattern say, until somebody puts it back on the schedule.'
+  };
+  function setHold(id, hold, el) {
+    var ask = HOLD_ASK[String(hold)];
+    if (!ask) { toast('That is not a hold this page can set.'); return; }
+    if (PK.holdBusy) return;
+    if (!confirm(ask + '\n\nListing ' + id + '. Nothing is sent to eBay by this on its own: the next quarter-hourly ' +
+      'tick puts the ad right, and only on an account whose live-apply switch is on.')) return;
+    PK.holdBusy = String(id);
+    if (el) el.disabled = true;
+    api('adtoolPeakHold', { item_id: id, hold: hold }).then(function (R) {
+      PK.holdBusy = '';
+      /* who set it comes back on the write and nowhere else, so it is kept here for the rest of this
+         visit and shown against the row */
+      if (R && R.set_by) PK.holdBy[String(id)] = { by: String(R.set_by), at: new Date().toISOString() };
+      toast((R && R.note_to_reader) ? String(R.note_to_reader)
+        : (hold === 'auto' ? 'Back on the schedule' : 'Held ' + hold));
+      /* a listing nobody armed is not switched by a hold either, and the engine says so in its own
+         words rather than leaving somebody to wonder why nothing happened */
+      if (R && R.takes_effect === false && R.takes_effect_note) toast(String(R.takes_effect_note));
+      return load(false);
+    }).catch(function (e) {
+      PK.holdBusy = '';
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That hold could not be set.');
+    });
   }
 
   /* THE CAMPAIGN A SAVE MAY SEND, which is only ever one the picker was showing FOR THIS LISTING.

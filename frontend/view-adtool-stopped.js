@@ -94,7 +94,11 @@
     '.cdy-honest p{margin:0 0 8px}.cdy-honest p:last-child{margin-bottom:0}',
     '.cdy-honest b{color:var(--text)}',
     '.cdy-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
-    '.cdy-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}'
+    '.cdy-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}',
+    /* ── automatic or by hand (owner's brief, 31 Oct, §3). This file's own prefix. ── */
+    '.cdy-by{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border:1px solid var(--gold-line);color:var(--text-2)}',
+    '.cdy-by.auto{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.08)}',
+    '.cdy-by.hand{color:var(--text-2);border-style:dashed}'
   ].join(''));
 
   /* ── the two directions, in the owner's words ─────────────────────────────────────────────── */
@@ -379,12 +383,19 @@
     var D = got(day, dir);
     var raw = (D && D.summary) || {};
     var R = rowsOf(day, dir), ads = 0, items = {}, camps = {}, campLvl = 0, tool = 0, ebay = 0, moved = 0;
+    var autoN = 0, handN = 0, peakN = 0, byKnown = 0;
     R.forEach(function (r) {
       var id = String(r.item_id || '').trim();
       if (id) { ads++; items[id] = 1; } else { campLvl++; }
       var ck = String(r.campaign_id || r.campaign_name || '');
       if (ck) camps[r.account + '|' + ck] = 1;
       if (String(r.who || '') === 'tool') tool++; else ebay++;
+      /* AUTOMATIC OR BY HAND, counted from the rows. The engine's by_tool / by_ebay are the SAME
+         rule over every change on the day, rows held back included, so they are the figures the
+         day summary prints; these two are the fallback for an answer that carries neither. */
+      var by = String(r.by == null ? '' : r.by).toLowerCase();
+      if (by === 'automatic') { autoN++; byKnown++; } else if (by === 'manual') { handN++; byKnown++; }
+      if (String(r.by_sender || '') === 'peak switching') peakN++;
       if (/_(removed|added)$/.test(String(r.kind || '')) && id) moved++;
     });
     var pick = function (k, fallback) { var v = num(raw[k]); return v == null ? fallback : v; };
@@ -403,6 +414,12 @@
       units_day_before: num(raw.units_day_before),
       by_tool: pick('by_tool', tool),
       by_ebay: pick('by_ebay', ebay),
+      /* the owner's two words over the same split. by_tool and by_ebay cover the WHOLE day; the two
+         counted off the rows cover only the rows on the page, so they stand in and nothing else. */
+      by_automatic: pick('by_tool', autoN),
+      by_manual: pick('by_ebay', handN),
+      by_counted_rows: byKnown,
+      by_peak_rows: peakN,
       rows_total: num(D && D.rows_total),
       rows_held_back: num(D && D.rows_held_back)
     };
@@ -464,7 +481,29 @@
       '<div class="d">' + (tot > 0 ? pct + '% of the day' : 'nothing yet') + ', written in its own log with the operation and whether it was sent</div></div>' +
       '<div class="cdy-whoc"><div class="k">Seen on eBay</div><div class="v">' + cnt(e) + '</div>' +
       '<div class="d">' + (tot > 0 ? (100 - pct) + '% of the day' : 'nothing yet') + ', found by the sync comparing eBay against the last read, so the portal cannot see who</div></div>' +
-      '</div></div>';
+      '</div>' + byLine(day, A, P) + '</div>';
+  }
+  /* THE DAY COUNTED BOTH WAYS (owner's brief, 31 Oct, §3): the same split again, in the owner's own
+     two words, so the chip on each row has a total standing behind it. The two figures are the
+     engine's own counts over every change on the day, held back rows included, by the same rule the
+     chips are. The peak switching's own share is counted off the rows on the page and says so,
+     because the engine sends no tally of its own for it. */
+  function byLine(day, A, P) {
+    var a = num(A.by_automatic), m = num(A.by_manual), a2 = num(P.by_automatic), m2 = num(P.by_manual);
+    if (a == null && a2 == null && m == null && m2 == null) {
+      return '<div class="cdy-sub">Whether these changes were automatic or by hand is not in this answer.</div>';
+    }
+    var auto = n0(a) + n0(a2), hand = n0(m) + n0(m2);
+    var pk = n0(A.by_peak_rows) + n0(P.by_peak_rows), seen = n0(A.by_counted_rows) + n0(P.by_counted_rows);
+    return '<div class="cdy-sub">In the owner\'s own words: <b>' + cnt(auto) + '</b> ' +
+      plural(auto, 'change was', 'changes were') + ' <span class="cdy-by auto">automatic</span> and <b>' + cnt(hand) + '</b> ' +
+      plural(hand, 'was', 'were') + ' <span class="cdy-by hand">manual</span>, which is the same rule as the two cards above. ' +
+      (seen > 0
+        ? (pk > 0
+          ? 'Of the ' + cnt(seen) + ' ' + plural(seen, 'change', 'changes') + ' listed on this page, <b>' + cnt(pk) + '</b> ' +
+            plural(pk, 'was', 'were') + ' sent by the peak switching, which is the one sender that goes at an hour of its own.'
+          : 'None of the changes listed on this page was sent by the peak switching.')
+        : '') + '</div>';
   }
 
   /* ── by account, both directions side by side ─────────────────────────────────────────────── */
@@ -504,6 +543,30 @@
   }
 
   /* ── the list, both directions in one table ───────────────────────────────────────────────── */
+  /* AUTOMATIC OR BY HAND (owner's brief, 31 Oct, §3), in the owner's own two words. It is the SAME
+     rule as the "Who or what" lines under it, read once in the engine and printed twice here: a
+     change is automatic only where the portal's own record of what it sent matches it. `by_sender`
+     names which of the portal's senders it was, and the peak switching is the one that sends at an
+     hour of its own. `by_minutes_before` is how long before the change that send went out, which is
+     the difference between the same event and only the same day, and it is null and never nought
+     where a stamp could not be read. */
+  function byChip(r) {
+    var by = String(r.by == null ? '' : r.by).toLowerCase().trim();
+    if (by !== 'automatic' && by !== 'manual') {
+      return '<div class="cdy-sm2">Whether this was automatic or by hand is not in this answer.</div>';
+    }
+    var auto = by === 'automatic';
+    var sender = String(r.by_sender || '').trim();
+    var mins = num(r.by_minutes_before);
+    var bits = [];
+    if (auto && sender) bits.push(sender);
+    if (auto && mins != null) {
+      bits.push(mins <= 0 ? 'in the same minute' : cnt(mins) + ' ' + plural(mins, 'minute', 'minutes') + ' before eBay reported it');
+    }
+    if (auto && r.by_close === false) bits.push('the same day rather than the same moment');
+    return '<div><span class="cdy-by ' + (auto ? 'auto' : 'hand') + '" title="' + esc(String(r.by_note || '')) + '">' +
+      esc(by) + '</span></div>' + (bits.length ? '<div class="cdy-sm2">' + esc(bits.join(' · ')) + '</div>' : '');
+  }
   function whoCell(r) {
     if (String(r.who || '') === 'tool') {
       var t = r.tool || {};
@@ -570,7 +633,7 @@
       '<td>' + whatCell(r) + '</td>' +
       '<td>' + subjectCell(r) + '</td>' +
       '<td>' + campaignCell(r) + '</td>' +
-      '<td>' + whoCell(r) + '</td>' +
+      '<td>' + byChip(r) + whoCell(r) + '</td>' +
       '<td>' + decisionCell(r) + '</td>' +
       '<td>' + beforeCell(r) + '</td>' +
       '<td>' + (live == null ? '<span class="cdy-sm2">not known</span>'
@@ -676,6 +739,12 @@
     h += '<p><b>Who changed something.</b> A change is put to the tool only when the log the tool keeps of its ' +
       'own actions holds it for the same listing or campaign on the same UK day. Everything else was found by comparing eBay against ' +
       'the last read, and the portal cannot see who made it, so no name is ever guessed.</p>';
+    /* the rule behind the automatic / manual chip, in the engine's own words rather than typed here:
+       the number of minutes inside which a send and a change read as one event is a setting, and a
+       sentence typed in this file would go on printing the old figure after somebody moved it. */
+    if (D.by_note) {
+      h += '<p><b>Automatic or by hand.</b> ' + esc(String(D.by_note)) + '.</p>';
+    }
     var matched = 0;
     [shownDay(), prevDay()].forEach(function (d) {
       ['activated', 'stopped'].forEach(function (dir) {

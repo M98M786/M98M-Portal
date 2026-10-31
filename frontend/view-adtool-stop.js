@@ -7,11 +7,22 @@
  * the listings are: one home per number. Galaxy tokens; gold the accent, #e0563f the loss colour. */
 (function () {
   var ROLES = ['Management', 'Ops Head'];
-  var ST = { apply: null, scores: null };
+  /* `flags` is the portal_config rows as adtoolFlags sends them, which is what is STORED; `plan` is
+     the peak page's own answer, which carries the figures the engine is actually deciding on. Both,
+     because a key nobody has set still has an effective figure and only the engine knows it. */
+  var ST = { apply: null, scores: null, flags: null, flagsErr: '', plan: null, planErr: '', busy: '' };
   VIEW_CSS.push(
     '.st-live{border:1px solid rgba(224,86,63,.45);border-radius:14px;padding:14px 16px;background:rgba(224,86,63,.05);margin-bottom:12px}' +
     '.st-live h3{margin:0 0 4px;font-size:15px;font-weight:800}' +
-    '.st-sw{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--gold-line);font-size:12px;margin:0 8px 8px 0}.st-sw.on{border-color:#e0563f;color:#ffb3a6}'
+    '.st-sw{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--gold-line);font-size:12px;margin:0 8px 8px 0}.st-sw.on{border-color:#e0563f;color:#ffb3a6}' +
+    /* ── the pattern engine's settings (owner's brief, 31 Oct, §3). This file's own prefix. ── */
+    '.st-cfg{width:100%;border-collapse:collapse;font-size:12px}' +
+    '.st-cfg th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}' +
+    '.st-cfg td{padding:8px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}' +
+    '.st-cfg td.v{font-variant-numeric:tabular-nums;font-weight:800;white-space:nowrap}' +
+    '.st-cfg code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--text-3)}' +
+    '.st-cfg .w{font-size:11.5px;color:var(--text-2);line-height:1.5;max-width:420px}' +
+    '.st-unset{font-size:10.5px;color:var(--text-3);font-weight:700}'
   );
   function gbp(v, d) { if (v == null || isNaN(v)) return '—'; var n = Number(v); var s = '£' + Math.abs(n).toFixed(d == null ? 2 : d); return n < 0 ? '−' + s : s; }
   function num(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
@@ -131,14 +142,176 @@
       + rows + '</tbody></table></div>';
   }
 
+  /* ══ THE PATTERN ENGINE'S SETTINGS (owner's brief, 31 Oct, §3) ══════════════════════════════
+     The six figures behind the 24-hour pattern, with what each one means in plain words.
+     NOTHING HERE IS TYPED. The effective figure is read off the peak page's own answer
+     (`plan_rules`), which is what the engine is really deciding on, and whether a key has been set
+     at all is read off the config store itself. A figure printed in this file would go on being
+     printed after somebody changed it, which is the one fault a settings page cannot have.
+     The write is the portal's existing one: adtoolFlags takes any adtool_ key from Management and
+     writes it to portal_config with an audit row, which is the same path the page flags use. ══ */
+  var PEAK_KEYS = [
+    ['adtool_peak_lookback_days', 'lookback_days', 'How far back the pattern is read',
+      'The number of days of hourly figures each listing\'s 24-hour shape is read over. A longer window is steadier and slower to notice a change; a shorter one follows the listing but can be swayed by one odd week.', 'days'],
+    ['adtool_peak_min_days', 'min_days', 'Days needed before it acts',
+      'How many days of hours a listing must have before the pattern is allowed to switch its ad off at all. Short of this the dead hours it finds are put forward as a suggestion and the listing runs on the hours somebody typed.', 'days'],
+    ['adtool_peak_dead_min_clicks', 'dead_min_clicks', 'Clicks before an hour counts as dead',
+      'An hour only counts as dead once it has spent money or drawn at least this many clicks and sold nothing on every day watched. It stops a quiet hour nobody ever advertised in from reading as an hour that fails.', 'clicks'],
+    ['adtool_peak_proven_share', 'proven_share', 'The share that is never switched off',
+      'The part of the day holding at least this share of a listing\'s sales is never switched off, whatever its hours look like. It is the floor under the whole thing: the pattern can trim the edges of a listing\'s day and never its middle.', '%'],
+    ['adtool_peak_min_block_h', 'min_block_h', 'The shortest stretch worth switching',
+      'Nothing is switched for a stretch shorter than this. An ad put back on for one hour and off again is churn on eBay for no gain, and every switch counts against the account\'s daily ceiling.', 'hours'],
+    ['adtool_peak_plan_time', 'plan_time', 'When the day ahead is worked out',
+      'The UK time the planner writes the next day\'s schedule at. It also runs again at each cut between two parts of the day, for any listing whose shape has moved that day.', '']
+  ];
+  function flagRow(key) {
+    var L = (ST.flags && ST.flags.flags) || [];
+    for (var i = 0; i < L.length; i++) { if (L[i] && String(L[i].key) === key) return L[i]; }
+    return null;
+  }
+  function planRules() { return (ST.plan && ST.plan.plan_rules) || null; }
+  /* A SETTING THIS PAGE DOES NOT NAME. The planner's own rules are sent as one object, and the six
+     above are the ones with words written for them. If the engine ever grows a seventh, a page that
+     only knew about six would hide it, and a setting nobody can see is a setting nobody can check.
+     So anything else in `plan_rules` is listed too, with its figure and no description, rather than
+     left out. The two worked-out fields are skipped: they are not settings, they are the share as a
+     fraction and the window the weighting calls recent. */
+  var PLAN_DERIVED = { proven_share_of_one: 1, recent_days: 1 };
+  function extraRules() {
+    var R = planRules(); if (!R) return [];
+    var named = {};
+    PEAK_KEYS.forEach(function (k) { named[k[1]] = 1; });
+    return Object.keys(R).filter(function (f) { return !named[f] && !PLAN_DERIVED[f]; });
+  }
+  function cfgBlock() {
+    var h = '<div class="an-panel"><h3>Pattern engine settings' + src('dead hours', 'how') + '</h3>';
+    var R = planRules();
+    h += '<div class="an-sub">The six figures behind the 24-hour pattern on ' +
+      '<a href="#adtoolPeak?tab=manual" style="color:var(--gold-a);font-weight:800">Peak time listings</a>. ' +
+      'They decide when a listing\'s ad is kept paused inside the hours somebody typed for it. The hours stay the ' +
+      'envelope whatever these say: the pattern can only switch a listing off inside them, never on outside them.' +
+      (ST.plan && ST.plan.plan_rules_text ? ' In the engine\'s own words: ' + esc(String(ST.plan.plan_rules_text)) + '.' : '') +
+      '</div>';
+    if (!R) {
+      h += '<div class="an-note">The figures the engine is deciding on could not be read' +
+        (ST.planErr ? ': ' + esc(ST.planErr) : '') + ', so none is shown here. What is stored is still listed below.</div>';
+    }
+    if (ST.flagsErr) {
+      h += '<div class="an-note">The settings store could not be read: ' + esc(ST.flagsErr) + '</div>';
+    }
+    h += '<table class="st-cfg"><thead><tr><th>Setting</th><th>In force</th><th>Stored</th><th>What it means</th>' +
+      (mayEditCfg() ? '<th></th>' : '') + '</tr></thead><tbody>';
+    h += PEAK_KEYS.map(function (k) {
+      var row = flagRow(k[0]);
+      /* IN FORCE comes from the engine; STORED is the config store itself. A key nobody has set is
+         not nought: the engine stands on its own figure and the row says so. */
+      var live = R && R[k[1]] != null && R[k[1]] !== '' ? String(R[k[1]]) : '';
+      return '<tr><td><b>' + esc(k[2]) + '</b><div><code>' + esc(k[0]) + '</code></div></td>' +
+        '<td class="v">' + (live ? esc(live) + (k[4] ? ' ' + esc(k[4]) : '') : '<span class="st-unset">not available yet</span>') + '</td>' +
+        '<td class="v">' + (row && row.value !== '' && row.value != null
+          ? esc(String(row.value)) + (row.updated_at ? '<div class="an-sub" style="margin:2px 0 0;font-weight:400">set ' + esc(String(row.updated_at).slice(0, 16)) + '</div>' : '')
+          : '<span class="st-unset">not set, so the engine stands on its own figure</span>') + '</td>' +
+        '<td class="w">' + esc(k[3]) + '</td>' +
+        (mayEditCfg() ? '<td><button class="an-btn" style="padding:3px 9px;font-size:11px" data-stcfg="' + esc(k[0]) + '"' +
+          (ST.busy === k[0] ? ' disabled' : '') + '>Change</button></td>' : '') + '</tr>';
+    }).join('');
+    h += extraRules().map(function (f) {
+      var key = 'adtool_peak_' + f, row = flagRow(key);
+      return '<tr><td><b>' + esc(f.replace(/_/g, ' ')) + '</b><div><code>' + esc(key) + '</code></div></td>' +
+        '<td class="v">' + esc(String(R[f])) + '</td>' +
+        '<td class="v">' + (row && row.value !== '' && row.value != null
+          ? esc(String(row.value)) + (row.updated_at ? '<div class="an-sub" style="margin:2px 0 0;font-weight:400">set ' + esc(String(row.updated_at).slice(0, 16)) + '</div>' : '')
+          : '<span class="st-unset">not set, so the engine stands on its own figure</span>') + '</td>' +
+        '<td class="w"><span class="st-unset">This setting is newer than this page, so there are no words for it here yet. The sentence above, which the engine writes itself, says what it does.</span></td>' +
+        (mayEditCfg() ? '<td><button class="an-btn" style="padding:3px 9px;font-size:11px" data-stcfgx="' + esc(key) + '"' +
+          (ST.busy === key ? ' disabled' : '') + '>Change</button></td>' : '') + '</tr>';
+    }).join('');
+    h += '</tbody></table>';
+    h += '<div class="an-sub" style="margin-top:8px">' +
+      (mayEditCfg()
+        ? 'A change is written to the portal\'s own settings with who made it, and the planner picks it up on its next run. <b>Nothing is sent to eBay by changing one of these.</b> They decide what the system wants; the only thing that reaches eBay is the quarter-hourly switch, on an account switched on above.'
+        : 'These are read-only for your role. Changing one is for Management and the Ops Head.') +
+      (ST.plan && ST.plan.plan_note ? '<br>' + esc(String(ST.plan.plan_note)) + '.' : '') + '</div>';
+    return h + '</div>';
+  }
+  function mayEditCfg() { return isManager(); }
+  function cfgAsk(key, label, unit, current) {
+    var now = current === '' || current == null ? 'nothing stored' : String(current);
+    var typed = prompt(label + '\n\nStored now: ' + now +
+      (key === 'adtool_peak_plan_time' ? '\n\nType a UK time as HH:MM, for example 23:30.' : '\n\nType a whole number' + (unit ? ' of ' + unit : '') + '.'), '');
+    if (typed == null) return null;
+    var v = String(typed).trim();
+    if (!v) { toast('Nothing typed, so nothing was changed.'); return null; }
+    if (key === 'adtool_peak_plan_time') {
+      if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(v)) { toast('That is not a UK time as HH:MM.'); return null; }
+    } else if (!/^\d{1,4}$/.test(v)) {
+      toast('That is not a whole number.'); return null;
+    }
+    return v;
+  }
+  function setCfg(key, el) {
+    if (ST.busy) return;
+    var spec = null;
+    for (var i = 0; i < PEAK_KEYS.length; i++) { if (PEAK_KEYS[i][0] === key) spec = PEAK_KEYS[i]; }
+    /* a setting the engine has grown since this page was written: it is changed the same way, with
+       the key itself standing in for the words nobody has written for it yet */
+    if (!spec && /^adtool_peak_[a-z0-9_]+$/.test(String(key))) {
+      var f = String(key).replace(/^adtool_peak_/, '').replace(/_/g, ' ');
+      spec = [key, '', f, 'This setting is newer than this page, so there are no words for it here. Change it only if you know what it does.', ''];
+    }
+    if (!spec) { toast('That is not a setting this page can change.'); return; }
+    var row = flagRow(key);
+    var v = cfgAsk(key, spec[2], spec[4], row ? row.value : '');
+    if (v == null) return;
+    if (!confirm('Change "' + spec[2] + '" to ' + v + (spec[4] ? ' ' + spec[4] : '') + '?\n\n' + spec[3] +
+      '\n\nThe planner picks this up on its next run and every sentence beside it on the pages follows. Nothing is sent to eBay by this.')) return;
+    ST.busy = key;
+    if (el) el.disabled = true;
+    api('adtoolFlags', { set: { key: key, value: v } }).then(function () {
+      ST.busy = '';
+      toast('Saved: ' + spec[2] + ' is now ' + v);
+      /* both reads again: what is stored has changed, and so has what the engine decides on */
+      ST.flags = null; ST.plan = null;
+      loadCfg();
+    })['catch'](function (e) {
+      ST.busy = '';
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That could not be saved.');
+    });
+  }
+  function paintCfg() {
+    var el = $('stCfg'); if (!el) return;
+    el.innerHTML = cfgBlock();
+    var bs = el.querySelectorAll('[data-stcfg]');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { setCfg(this.getAttribute('data-stcfg'), this); };
+    var xs = el.querySelectorAll('[data-stcfgx]');
+    for (var j = 0; j < xs.length; j++) xs[j].onclick = function () { setCfg(this.getAttribute('data-stcfgx'), this); };
+  }
+  function loadCfg() {
+    if (!$('stCfg')) return;
+    $('stCfg').innerHTML = '<div class="an-panel"><h3>Pattern engine settings</h3><div class="an-empty">Loading…</div></div>';
+    var a = api('adtoolFlags', {}).then(function (D) { ST.flags = D || {}; ST.flagsErr = ''; })
+      ['catch'](function (e) { ST.flags = null; ST.flagsErr = (e && e.message) || 'the settings could not be read'; });
+    /* the peak page's own answer, for the figures the engine is really deciding on. It can refuse
+       (that page has a flag of its own), and the block still shows what is stored. */
+    var b = api('adtoolPeak', {}).then(function (D) { ST.plan = D || {}; ST.planErr = ''; })
+      ['catch'](function (e) { ST.plan = null; ST.planErr = (e && e.message) || 'the peak page could not be read'; });
+    return Promise.all([a, b]).then(function () { paintCfg(); });
+  }
+
   VIEWS.adtoolStop = {
     label: 'Live apply', hidden: true, order: 93, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6"/>',
     render: function () {
       return '<div class="an-wrap"><div class="hgroup enter d1"><h1>Live apply</h1><span class="sub">The only place this tool can change anything on eBay</span></div>' +
-        '<div id="stLive"><div class="an-empty">Loading…</div></div><div id="stBody"></div></div>';
+        '<div id="stLive"><div class="an-empty">Loading…</div></div><div id="stCfg"></div><div id="stBody"></div></div>';
     },
-    init: function () { loadLive(); loadScores(); }
+    init: function () {
+      /* a closure outlives a visit: drop both answers on entry so a page re-opened later asks again
+         instead of painting a setting somebody has since changed */
+      ST.flags = null; ST.plan = null; ST.flagsErr = ''; ST.planErr = ''; ST.busy = '';
+      loadLive(); loadCfg(); loadScores();
+    }
   };
 
   /* ── the switches, the caps, the apply log and its undo ──────────────────────────────────── */

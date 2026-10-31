@@ -77,7 +77,13 @@
     '.wla-age{display:block;font-size:10px;color:var(--text-3);font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}',
     '.wla-age.old{color:var(--text-2)}',
     '.wla-clash{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(224,86,63,.55);color:' + LOSS + ';white-space:nowrap}',
-    '.wla-clash-why{display:block;font-size:10px;color:' + LOSS + ';font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}'
+    '.wla-clash-why{display:block;font-size:10px;color:' + LOSS + ';font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}',
+    /* ── the peak hours chip (owner's brief, 31 Oct, §3). This file's own prefix: nothing here
+       borrows a class from another spliced file, and nothing lends one either. ── */
+    '.wla-peak{display:inline-block;margin-top:4px;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.03em;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
+    '.wla-peak.on{color:var(--gold-a);border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.08)}',
+    '.wla-peak.off{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
+    '.wla-peak.quiet{color:var(--text-3);border-style:dashed}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -284,6 +290,40 @@
     }).join('') + '</div>';
   }
 
+  /* ── WHERE A LISTING IS ON THE PEAK HOURS LIST (owner's brief, 31 Oct, §3) ────────────────────
+     The state the system wants this listing's ad in at this hour, and when that next changes. It is
+     NOT a reading of eBay: eBay's own word about an ad is on the campaign cards beside it, and the
+     two must never be read as one. A listing that is not on the peak list has no chip at all, which
+     means nothing is switching it rather than that it is off.
+     The `at` the engine sends is a UK day and hour, written as "YYYY-MM-DD HH:00" for a change
+     tomorrow and as "HH:00" where it has no day. The chip prints the hour, because "off at 23:00"
+     is what a reader is asking, and the full stamp rides in the tooltip. */
+  function peakWhen(at) {
+    var s = String(at == null ? '' : at).trim();
+    var m = s.match(/(\d\d:\d\d)/);
+    return m ? m[1] : '';
+  }
+  function peakChip(it) {
+    var P = it && it.peak;
+    if (!P || typeof P !== 'object' || !P.on_list) return '';
+    var why = String(((WL.main && WL.main.rules) || {}).peak || '');
+    var now = String(P.state_now == null ? '' : P.state_now).toUpperCase();
+    var to = String(P.next_switch_to || '').toUpperCase();
+    var when = peakWhen(P.next_switch_at);
+    var tail = when
+      ? ', ' + (to === 'ACTIVE' || to === 'ON' ? 'on' : to === 'PAUSED' || to === 'OFF' ? 'off' : 'changes') + ' at ' + when
+      : '';
+    var title = (P.hours ? 'its hours: ' + P.hours + '. ' : '') +
+      (P.hold === 'on' ? 'Somebody is holding it on. ' : P.hold === 'off' ? 'Somebody is holding it off. ' : '') +
+      (P.schedule_source ? 'Today comes from: ' + P.schedule_source + '. ' : '') +
+      (P.next_switch_at ? 'Next change: ' + P.next_switch_at + ' UK. ' : '') + why;
+    if (now !== 'ON' && now !== 'OFF') {
+      return '<span class="wla-peak quiet" title="' + esc(title) + '">peak: on the list, nothing scheduling it</span>';
+    }
+    return '<span class="wla-peak ' + (now === 'ON' ? 'on' : 'off') + '" title="' + esc(title) + '">' +
+      'peak: ' + now + ' now' + esc(tail) + '</span>';
+  }
+
   /* THE CONTRADICTION THIS PAGE CAN SEE. A listing eBay billed in the last 3 days with no live ad on
      record is the shape of the fault that was reported: an archived ad is left out of this page
      altogether, so one wrong ARCHIVED reading shows a listing as advertising nowhere while eBay
@@ -336,7 +376,7 @@
     h += '<div class="wla-scroll"><table class="wla-tbl"><thead><tr>' +
       '<th>Listing</th><th>How many</th><th>What it has been doing</th><th>The campaigns, and what to do</th>' +
       '</tr></thead><tbody>' + rows.map(function (it) {
-        return '<tr class="multi"><td>' + adtProductCell(it) + '</td>' +
+        return '<tr class="multi"><td>' + adtProductCell(it) + peakChip(it) + '</td>' +
           '<td>' + stateCell(it) + '</td>' +
           '<td>' + historyCell(it) + '</td>' +
           '<td>' + campaignsCell(it, true) + '</td></tr>';
@@ -370,7 +410,7 @@
       '</tr></thead><tbody>' + rows.map(function (it) {
         var n = num(it.live_count), multi = n != null && n > 1;
         return '<tr class="' + (multi ? 'multi' : '') + '">' +
-          '<td>' + adtProductCell(it) + '</td>' +
+          '<td>' + adtProductCell(it) + peakChip(it) + '</td>' +
           '<td>' + stateCell(it) + '</td>' +
           '<td class="r">' + gbp(it.price) + '</td>' +
           '<td class="r">' + cnt(it.sold_30d) + '</td>' +
@@ -402,7 +442,7 @@
       '<th>Listing</th><th class="r">Price</th><th class="r">Sold 30 d</th><th class="r">Spend 3 d</th>' +
       '<th class="r">Spend 7 d</th><th>Anything on record</th>' +
       '</tr></thead><tbody>' + rows.map(function (it) {
-        return '<tr><td>' + adtProductCell(it) + '</td>' +
+        return '<tr><td>' + adtProductCell(it) + peakChip(it) + '</td>' +
           '<td class="r">' + gbp(it.price) + '</td>' +
           '<td class="r">' + cnt(it.sold_30d) + '</td>' +
           '<td class="r">' + gbp(it.spend_3d) + '</td>' +
@@ -453,6 +493,14 @@
     }
     h += ' <b>Everything on this page is a reading, except the two controls in Duplication: those act on eBay, ' +
       'and each one asks before it goes.</b>';
+    /* THE PEAK CHIP IS NOT A READING OF EBAY, and this page's whole note is about readings, so the
+       one line that says so comes from the engine rather than from here: a sentence typed in this
+       file would go on being printed after the rule behind it changed. */
+    var peakN = num(D.peak_listings), peakRule = String(((D.rules || {}).peak) || '');
+    if (peakRule) {
+      h += ' <b>The peak chip is not a reading.</b> ' + esc(peakRule) +
+        (peakN == null ? '' : ' ' + cnt(peakN) + ' ' + plural(peakN, 'listing is', 'listings are') + ' on that list in this read.');
+    }
     if (D.computed_at) h += ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.';
     return h + '</div>';
   }

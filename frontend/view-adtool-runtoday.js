@@ -17,7 +17,9 @@
   var LOSS = '#e0563f';
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   var DECISIONS = { REDUCE: 1, PUSH: 1 };
-  var RT = { account: '', filter: '', data: null, stop: null };
+  /* `peakOpen` is the small list behind the Stop today tile's second line; `peakBusy` is the one
+     listing a hold is being written for, so two clicks cannot send two holds at once. */
+  var RT = { account: '', filter: '', data: null, stop: null, peakOpen: false, peakBusy: '' };
 
   VIEW_CSS.push(
     '.rt-wrap{max-width:1320px}' +
@@ -46,7 +48,21 @@
     '.rt-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}' +
     /* the same small grey as .rt-src and nothing else: no dotted underline, no pointer. A note that
        is not a register link must not wear the look of one. */
-    '.rt-dim{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700}'
+    '.rt-dim{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700}' +
+    /* ── the pattern engine's own OFF windows for today (owner's brief, 31 Oct, §3). This file's
+       own prefix: nothing here borrows a class from another spliced file. ── */
+    '.rt-c .pk{display:block;margin-top:5px;font-size:11px;line-height:1.45;color:var(--text-2);background:transparent;border:0;padding:0;font:inherit;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:2px}' +
+    '.rt-c .pk b{color:var(--gold-a)}' +
+    '.rt-c .pk.flat{cursor:default;text-decoration:none}' +
+    '.rt-pkp{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin:0 0 12px}' +
+    '.rt-pkp h4{margin:0 0 4px;font-size:13px;font-weight:800;color:var(--text)}' +
+    '.rt-pkp .s{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}' +
+    '.rt-pkr{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}' +
+    '.rt-pkr .w{flex:1 1 220px;min-width:180px;font-size:11.5px;color:var(--text-2);line-height:1.5}' +
+    '.rt-pkr .w b{color:var(--text)}' +
+    '.rt-pkb{background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:4px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;align-self:center}' +
+    '.rt-pkb:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
+    '.rt-pkb[disabled]{opacity:.5;cursor:default}'
   );
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -72,7 +88,7 @@
     init: function () {
       /* a closure outlives a visit: drop yesterday's score so a page re-opened the next morning
          does not paint the previous day's figure before asking for a new one */
-      RT.data = null; RT.stop = null; RT.filter = '';
+      RT.data = null; RT.stop = null; RT.filter = ''; RT.peakOpen = false; RT.peakBusy = '';
       acctChips();
       load(false)['catch'](function () {});
       /* today moves every 5 minutes; adtPoll waits on hidden tabs and stops on an 'auth' refusal (session-expiry law) */
@@ -127,8 +143,10 @@
       (D.computed_at ? '<span>·</span><span>updated ' + esc(hhmm(D.computed_at)) + '</span>' : '') + src('run today verdict') + '</div>';
     h += '<div class="rt-cap">On the last four same weekdays</div>';
     h += '<div class="rt-counts">' + [['stop', 'Stop today', 'lost on 3 of the last 4 same weekdays and over the last 7 days'], ['run', 'Run today', 'earned on the last same weekdays, or earning over 7 days above break-even'], ['watch', 'Watch', 'some orders are not costed yet, so we cannot say']].map(function (x) {
-      return '<div class="rt-c ' + x[0] + (RT.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '"><div class="k">' + esc(x[1]) + '</div><div class="v">' + cnt(counts[x[0]]) + '</div><div class="d">' + esc(x[2]) + '</div></div>';
+      return '<div class="rt-c ' + x[0] + (RT.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '"><div class="k">' + esc(x[1]) + '</div><div class="v">' + cnt(counts[x[0]]) + '</div><div class="d">' + esc(x[2]) + '</div>' +
+        (x[0] === 'stop' ? peakOffLine() : '') + '</div>';
     }).join('') + '</div>';
+    h += peakOffPanel();
     h += decisionTiles();
     h += '<div class="rt-note"><b>How to read a row.</b> <b>Stop</b> means the listing lost money on at least three of the last four same weekdays and over the last 7 days. <b>Run</b> means it made money. <b>Watch</b> means some orders are not costed yet, so we cannot say. The <b>Stop, Reduce, Push and Keep</b> tiles are this morning\'s own call on each listing, scored the next day against the profit it actually made. The hours on a row are a suggestion: eBay cannot schedule ads by the hour, and the only place the portal switches an ad at an hour of its own is <a href="#adtoolPeak" style="color:var(--gold-a);font-weight:800">Peak time listings</a>, for the listings Management puts on that list.</div>';
     h += '<div class="an-filters">' + [['', 'All'], ['stop', 'Stop'], ['run', 'Run'], ['watch', 'Watch'], ['REDUCE', 'Reduce'], ['PUSH', 'Push']].map(function (x) { return '<button class="' + (RT.filter === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
@@ -144,6 +162,91 @@
     h += '<div class="rt-sm" style="margin-top:8px">' + esc(D.source || '') + '</div>';
     $('rtBody').innerHTML = h;
     var fs = document.querySelectorAll('#rtBody [data-f]'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { var f = this.getAttribute('data-f'); RT.filter = RT.filter === f && this.classList.contains('rt-c') ? '' : f; draw(); };
+    /* the second line lives INSIDE the Stop today tile, which is itself a filter button, so its own
+       click has to stop there: without this, opening the list also filtered the table to stops */
+    var ps = document.querySelectorAll('#rtBody [data-rtpeak]');
+    for (var j = 0; j < ps.length; j++) ps[j].onclick = function (e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      RT.peakOpen = !RT.peakOpen;
+      draw();
+    };
+    var pc = document.querySelectorAll('#rtBody [data-rtpeakclose]');
+    for (var k = 0; k < pc.length; k++) pc[k].onclick = function () { RT.peakOpen = false; draw(); };
+    var hb = document.querySelectorAll('#rtBody [data-rthold]');
+    for (var m = 0; m < hb.length; m++) hb[m].onclick = function () {
+      var id = this.getAttribute('data-rthold');
+      if (!id) { toast('That row has no item number.'); return; }
+      holdOn(id, this);
+    };
+  }
+
+  /* ══ THE PATTERN ENGINE'S OWN STOPS FOR TODAY (owner's brief, 31 Oct, §3) ═══════════════════
+     The Stop today tile counts listings a reader has to decide about. This second line counts the
+     ones the system has ALREADY stopped, for stretches of today, inside the hours somebody typed for
+     them, because they have never sold in those hours. It is not a verdict and it is not a decision
+     for anybody to act on, which is why it sits beside the tile rather than in the table: it is there
+     so somebody can see what was stopped, and overrule it from here if they disagree. ══ */
+  function peakOff() {
+    var L = RT.data && RT.data.peak_off_windows_today;
+    return Array.isArray(L) ? L.filter(function (r) { return r && typeof r === 'object'; }) : null;
+  }
+  /* the end of a stretch is the hour the ad stops, so it may be 24: printed as midnight rather than
+     clamped to 23:00, which would read as a window ending an hour early */
+  function hourTxt(n) { var v = Math.round(Number(n) || 0); return v >= 24 ? 'midnight' : (v < 10 ? '0' : '') + v + ':00'; }
+  function windowsTxt(ws) {
+    var L = (ws || []).filter(function (w) { return w && w.from != null && w.to != null; });
+    if (!L.length) return 'no stretch recorded';
+    return L.map(function (w) { return hourTxt(w.from) + ' to ' + hourTxt(w.to); }).join(', ');
+  }
+  function peakOffLine() {
+    var L = peakOff();
+    if (L == null) return '<span class="pk flat">Whether the pattern engine is holding any listing off today is not in this answer.</span>';
+    if (!L.length) return '<span class="pk flat">' + esc(String((RT.data && RT.data.peak_off_note) || 'No listing on the peak hours list is being held off inside its own hours today.')) + '</span>';
+    return '<button type="button" class="pk" data-rtpeak="1" title="show the listings and the stretches"><b>' + L.length + '</b> ' +
+      (L.length === 1 ? 'listing has off windows' : 'listings have off windows') + ' planned today by the pattern engine' +
+      (RT.peakOpen ? ' (hide)' : '') + '</button>';
+  }
+  function peakOffPanel() {
+    if (!RT.peakOpen) return '';
+    var L = peakOff();
+    if (!L || !L.length) return '';
+    return '<div class="rt-pkp"><h4>Held off today by the pattern engine' + src('the 24-hour pattern', 'how') + '</h4>' +
+      '<div class="s">' + esc(String((RT.data && RT.data.peak_off_note) || '')) + ' The hours somebody typed are the most these listings can run; ' +
+      'these stretches sit inside those hours. <b>Hold on</b> keeps a listing running all day instead, whatever its hours and its ' +
+      'pattern say, and is undone from <a href="#adtoolPeak?tab=manual" style="color:var(--gold-a);font-weight:800">Peak time listings</a>.</div>' +
+      L.map(function (r) {
+        var id = String(r.item_id || '');
+        var held = String(r.hold || '') === 'on';
+        return '<div class="rt-pkr"><div style="flex:1 1 280px;min-width:230px">' + adtProductCell(r) + '</div>' +
+          '<div class="w"><b>Off</b> ' + esc(windowsTxt(r.windows)) + ' UK' +
+          (r.hours ? '<br>its own hours: ' + esc(String(r.hours)) : '') +
+          '<br>' + esc(r.source ? 'from ' + (String(r.source) === 'pattern' ? 'its pattern' : String(r.source) === 'hold' ? 'a hold somebody set' : String(r.source)) : 'source not recorded') +
+          (r.reason ? '<br>' + esc(String(r.reason)) : '') + '</div>' +
+          '<button type="button" class="rt-pkb" data-rthold="' + esc(id) + '"' +
+          (held || RT.peakBusy === id ? ' disabled' : '') + '>' + (held ? 'already held on' : 'Hold on') + '</button></div>';
+      }).join('') +
+      '<div style="margin-top:10px"><button type="button" class="rt-pkb" data-rtpeakclose="1">Close</button></div></div>';
+  }
+  /* the same write the Peak time listings page makes, with the same confirm. It sends nothing itself:
+     a hold is a wanted state in a column, and only the quarter-hourly switch reaches eBay, on an
+     account whose own live-apply switch is on. */
+  function holdOn(id, el) {
+    if (RT.peakBusy) return;
+    if (!confirm('Keep listing ' + id + ' running all day?\n\nIts hours and its pattern stop deciding anything for it until somebody puts it back ' +
+      'on the schedule from Peak time listings. Nothing is sent to eBay by this on its own: the next quarter-hourly tick puts the ad right, ' +
+      'and only on an account whose live-apply switch is on.')) return;
+    RT.peakBusy = String(id);
+    if (el) el.disabled = true;
+    api('adtoolPeakHold', { item_id: id, hold: 'on' }).then(function (R) {
+      RT.peakBusy = '';
+      toast((R && R.note_to_reader) ? String(R.note_to_reader) : 'Held on');
+      if (R && R.takes_effect === false && R.takes_effect_note) toast(String(R.takes_effect_note));
+      return load(false);
+    })['catch'](function (e) {
+      RT.peakBusy = '';
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That hold could not be set.');
+    });
   }
 
   /* (b) the four decision tiles beside the weekday verdict, plus yesterday's score. Both Stop tiles

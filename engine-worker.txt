@@ -11778,7 +11778,7 @@ async function adtoolPeakCompute(env, acct) {
       today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
       tomorrow: schM && schM.readable ? Object.assign({ day: tomorrowUk }, schM) : null, uk: nowUk,
     });
-    const showSch = s => !s || !s.readable ? null : { day: s.day, states: s.states, source: s.source, reasons: s.reasons, dead_windows: s.dead_windows, proposal: s.proposal, profile_days: s.profile_days, computed_at: s.computed_at, note: s.dead_note };
+    const showSch = s => !s || !s.readable ? null : { day: s.day, states: s.states, source: s.source, reasons: s.reasons, dead_windows: s.dead_windows, proposal: s.proposal, given_back: s.given_back, windows_outside_envelope: s.windows_outside_envelope, profile_days: s.profile_days, computed_at: s.computed_at, note: s.dead_note };
     /* TRACKING comes off the schedule row the planner decided it on, so this page and that job give one
        answer to one question. Where there is no row for today, it falls back to the drift record alone
        and says so: the full comparison needs the listing's own four weeks of hours, which belongs to the
@@ -11816,6 +11816,8 @@ async function adtoolPeakCompute(env, acct) {
       schedule_today: showSch(schT), schedule_tomorrow: showSch(schM),
       dead_windows: schT && schT.readable ? schT.dead_windows : [],
       dead_proposal: schT && schT.readable ? schT.proposal : [],
+      dead_given_back: schT && schT.readable ? schT.given_back : [],
+      dead_outside_hours: schT && schT.readable ? schT.windows_outside_envelope : [],
       profile_days: schT && schT.readable ? schT.profile_days : null,
       tracking: track,
       /* the next time the SCHEDULE changes this listing's state, which is not the same question as the
@@ -11854,7 +11856,9 @@ async function adtoolPeakCompute(env, acct) {
     plan_rules_text: 'the pattern is read over the last ' + adPeakPlanRules(cfg).lookback_days + ' days and only acted on from ' + adPeakPlanRules(cfg).min_days +
       ' days of hours onwards; an hour counts as dead only after it has spent money or drawn ' + adPeakPlanRules(cfg).dead_min_clicks +
       ' clicks and sold nothing on every day watched; the part of the day holding ' + adPeakPlanRules(cfg).proven_share +
-      '% of a listing’s sales is never switched off; and nothing is switched for a stretch under ' + adPeakPlanRules(cfg).min_block_h + ' hours',
+      '% of a listing’s sales is never switched off, and no part of the day is proven at all under ' + adPeakPlanRules(cfg).proven_min_orders +
+      ' sales in the window; and nothing is switched for a stretch under ' + adPeakPlanRules(cfg).min_block_h +
+      ' hours, a stretch left shorter than that having the cheapest dead hour beside it given back instead',
     plan_note: 'the hours somebody typed are the envelope: the pattern can only switch a listing off inside them, never on outside them',
     live_listings: Object.keys(liveBy).length,
     /* 28 Oct, and the one line on this page that changed meaning: the system now switches the by-hand
@@ -12865,10 +12869,11 @@ function adPeakReconcile(input) {
    AND NOTHING NEW REACHES EBAY. Every function here decides a WANTED STATE and writes it down. The one
    place a state leaves this worker is the quarter-hourly switch job, through the account's own live
    switch, the daily caps and the refusal rule it has always had, none of which this section touches. */
-const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, min_block_h: 2, plan_time: '23:30' };
+const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30' };
 const ADTOOL_PEAK_PLAN_CONFIG_KEYS = {
   lookback_days: 'adtool_peak_lookback_days', min_days: 'adtool_peak_min_days', dead_min_clicks: 'adtool_peak_dead_min_clicks',
-  proven_share: 'adtool_peak_proven_share', min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time',
+  proven_share: 'adtool_peak_proven_share', proven_min_orders: 'adtool_peak_proven_min_orders',
+  min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time',
 };
 /* the three cuts between the four parts of the day, which are adtSlot's own cuts and not a second set:
    the re-evaluation happens where the shape of the day changes. */
@@ -12879,9 +12884,12 @@ const ADTOOL_PEAK_HOLDS = ['auto', 'on', 'off'];
 const ADTOOL_PEAK_SCHEDULE_STATES = ['ON', 'OFF'];
 function adPeakPad(h) { return String(Math.round(Number(h) || 0)).padStart(2, '0'); }
 function adPeakPlanRules(cfg) {
-  /* the six figures a manager can set, with the owner's own numbers standing in for anything he has not
-     set. NOTHING PRINTS A FIXED FIGURE ANYWHERE: every sentence this section writes reads its numbers
-     back out of here, so changing one in Management changes the words beside it too. */
+  /* the seven figures a manager can set, with the owner's own numbers standing in for anything he has
+     not set. NOTHING PRINTS A FIXED FIGURE ANYWHERE: every sentence this section writes reads its
+     numbers back out of here, so changing one in Management changes the words beside it too.
+     The seventh arrived with the live probe of 31 Oct, which found a part of the day proven on two
+     orders out of three: a share is a proportion, and a proportion of almost nothing is not evidence,
+     so there is now a floor of sales under which no part of the day is proven at all. */
   const c = cfg || {}, K = ADTOOL_PEAK_PLAN_CONFIG_KEYS, D = ADTOOL_PEAK_PLAN_DEFAULTS;
   const num = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) || n <= 0 ? d : n; };
   const pt = String(c[K.plan_time] == null ? '' : c[K.plan_time]).trim();
@@ -12894,6 +12902,10 @@ function adPeakPlanRules(cfg) {
     min_days: Math.max(1, Math.round(num(c[K.min_days], D.min_days))),
     dead_min_clicks: Math.max(0, Math.round(c[K.dead_min_clicks] === undefined || c[K.dead_min_clicks] === null || c[K.dead_min_clicks] === '' || isNaN(Number(c[K.dead_min_clicks])) ? D.dead_min_clicks : Number(c[K.dead_min_clicks]))),
     proven_share: share, proven_share_of_one: Math.round(share) / 100,
+    /* HOW MANY SALES IT TAKES BEFORE THAT SHARE MEANS ANYTHING. Nought is allowed and is a manager
+       switching the floor off on purpose, which is how this behaved before the floor existed, so it
+       is read the way the click figure is read rather than treated as nothing set. */
+    proven_min_orders: Math.max(0, Math.round(c[K.proven_min_orders] === undefined || c[K.proven_min_orders] === null || c[K.proven_min_orders] === '' || isNaN(Number(c[K.proven_min_orders])) ? D.proven_min_orders : Number(c[K.proven_min_orders]))),
     min_block_h: Math.min(12, Math.max(1, Math.round(num(c[K.min_block_h], D.min_block_h)))),
     plan_time: /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(pt) ? pt : D.plan_time,
     recent_days: 7,
@@ -13001,25 +13013,42 @@ function adPeakDeadHours(profile, opts) {
      A PROVEN SLOT is never dead. The part of the day a listing's sales really come from is read by the
      same four cuts adtSlot makes everywhere else, on REAL orders, and a slot holding at least the share
      asked for is left alone hour by hour. That is the one guard against a quiet hour in the middle of a
-     listing's best stretch being read as waste.
+     listing's best stretch being read as waste. IT TAKES A FLOOR OF SALES AS WELL AS A SHARE: the live
+     probe of 31 Oct found a listing with three orders in the whole window handed a proven part of the
+     day on two of them, which then protected every hour of that part of the day whatever it spent. A
+     share is a proportion, and a proportion of three orders says nothing about the shape of a day, so
+     below the floor there is no proven slot at all and the note says that is why.
      A WINDOW is a run of touching dead hours, and it is formed on the RING: hours 23 and 00 touch, in the
      same way the typed hours already cross midnight, so a dead stretch over midnight is one window and
      not two halves each too short to count.
      TOO SHORT TO STAND is dropped. A window under the minimum block would switch the ad twice for an
-     hour or two and flap, which costs a send, costs an account's daily ceiling and buys nothing. And an
-     ON stretch left shorter than the minimum block BETWEEN TWO windows is swallowed into the OFF only
-     where NOTHING IN IT HAS EVER SOLD; where it sells, neither window either side of it is applied,
-     because switching on for one hour and off again is the same flapping seen from the other side.
-     "Nothing in it has ever sold" and not "every hour of it is dead", because touching dead hours are
-     already one window, so a gap between two windows always holds an hour that is not dead. What it
-     holds is an hour that has never sold for one of the OTHER reasons: no reading at all, or nothing
-     ever spent in it. Running the ad through one of those buys nothing either, so the gap goes. The
-     proven slot still wins: a quiet hour inside the part of the day a listing's sales come from is never
-     swallowed, the same as it is never dead. */
+     hour or two and flap, which costs a send, costs an account's daily ceiling and buys nothing.
+
+     AN ON STRETCH TOO SHORT TO STAND IS WIDENED, NOT PAID FOR BY DROPPING THE WHOLE WINDOW. Where
+     nothing in that stretch has ever sold it is swallowed into the OFF, as before: running the ad
+     through an hour with no reading at all, or one nothing was ever spent in, buys nothing either.
+     Where it HAS sold, the hour that sells is the one thing here that must not be touched, so the
+     stretch is widened instead: the dead hour beside it that the least money goes out in is GIVEN
+     BACK, hour by hour, until the ad would run for at least the minimum block, and whatever is left of
+     the window is then applied as long as it is still a block in its own right. That is the 31 Oct
+     finding and the owner's own logic both: an hour that sells keeps the ad on, an hour that only
+     spends loses it, and dropping five dead hours to protect one hour at each end was neither. Before
+     this, "neither window either side is applied" left a listing spending through five hours it had
+     never once sold in because it had sold at 17:00 and again at 23:00.
+
+     THE HOURS SOMEBODY TYPED ARE READ HERE TOO, as the envelope and nothing more. The length of an ON
+     stretch is a fact about the day the listing will actually run: outside the typed hours the ad is
+     off already, so the hour either side of a dead stretch is only something to switch for where the
+     typed hours cover it. A dead stretch lying wholly outside them is reported and never applied,
+     because those hours are off in any case. No hours handed over reads as the whole day, which is
+     what this function did before it was told about them.
+     The proven slot still wins over all of it: a quiet hour inside the part of the day a listing's
+     sales come from is never swallowed and never given away, the same as it is never dead. */
   const D = ADTOOL_PEAK_PLAN_DEFAULTS, o = opts || {};
   const pick = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) ? d : n; };
   const minClicks = Math.max(0, Math.round(pick(o.dead_min_clicks, D.dead_min_clicks)));
   const sharePct = Math.min(100, Math.max(0, Math.round(pick(o.proven_share, D.proven_share))));
+  const minOrders = Math.max(0, Math.round(pick(o.proven_min_orders, D.proven_min_orders)));
   const minBlock = Math.min(12, Math.max(1, Math.round(pick(o.min_block_h, D.min_block_h))));
   const hrs = (profile && profile.hours) || [];
   const H = h => hrs[((h % 24) + 24) % 24] || {};
@@ -13028,7 +13057,9 @@ function adPeakDeadHours(profile, opts) {
   let total = 0;
   for (let h = 0; h < 24; h++) { const v = n(H(h), 'orders_raw'); slotOrders[adtSlot(h)] += v; total += v; }
   const proven = [];
-  for (let s = 0; s < 4; s++) if (total > 0 && slotOrders[s] / total >= sharePct / 100) proven.push(s);
+  /* the floor first, then the share: too few sales and nothing is proven, however they are spread */
+  const provenReady = total >= minOrders;
+  for (let s = 0; s < 4; s++) if (provenReady && total > 0 && slotOrders[s] / total >= sharePct / 100) proven.push(s);
   const inProven = h => proven.indexOf(adtSlot(((h % 24) + 24) % 24)) >= 0;
   const dead = [], productive = [], why = {};
   for (let h = 0; h < 24; h++) {
@@ -13051,49 +13082,129 @@ function adPeakDeadHours(profile, opts) {
     while (isDead(end) && len < 24) { end = (end + 1) % 24; len++; }
     raw.push({ from: h, to: end, hours: len });
   }
-  const kept = raw.filter(w => w.hours >= minBlock);
-  const tooShort = raw.filter(w => w.hours < minBlock);
+  const words = w => adPeakPad(w.from) + '-' + adPeakPad(w.to);
+  const spendOf = h => n(H(h), 'spend_raw');
+  const clicksOf = h => n(H(h), 'clicks_raw');
+  const hoursOf = w => { const out = []; let h = ((Math.round(Number(w.from)) % 24) + 24) % 24; for (let k = 0; k < Math.round(Number(w.hours)); k++) { out.push(h); h = (h + 1) % 24; } return out; };
+  /* THE ENVELOPE. The hours somebody typed, read here only to judge how long the ad would really be on
+     for: no hours handed over means the whole day, which is what this function assumed before it was
+     told about them. */
+  const envR = (o.typed_ranges || []).filter(r => r && r.length >= 2 && Number(r[0]) !== Number(r[1]));
+  const inEnv = h => !envR.length || adInPeakRanges(((h % 24) + 24) % 24, envR);
+  const outside = raw.filter(w => hoursOf(w).every(h => !inEnv(h)));
+  const inside = raw.filter(w => hoursOf(w).some(h => inEnv(h)));
+  const kept = inside.filter(w => w.hours >= minBlock);
+  const tooShort = inside.filter(w => w.hours < minBlock);
   const notes = [];
   for (const w of tooShort) notes.push('the ' + w.hours + ' dead hour' + (w.hours === 1 ? '' : 's') + ' from ' + adPeakPad(w.from) + ':00 is too short a stretch to switch for, so it is left running');
-  /* the gap between two kept windows, walked forward on the ring: the hours the ad would be ON for */
-  const gapHours = (a, b) => { const out = []; let h = ((a % 24) + 24) % 24; const stop = ((b % 24) + 24) % 24; let g = 0; while (h !== stop && g < 24) { out.push(h); h = (h + 1) % 24; g++; } return out; };
-  let list = kept.slice().sort((x, y) => x.from - y.from);
-  for (let guard = 0; guard < 24; guard++) {
-    if (list.length < 2) break;
-    let changed = false;
-    for (let i = 0; i < list.length; i++) {
-      const w = list[i], j = (i + 1) % list.length, nx = list[j];
-      if (j === i) continue;
-      const gap = gapHours(w.to, nx.from);
-      if (!gap.length || gap.length >= minBlock) continue;
-      const rest = list.filter((_, k) => k !== i && k !== j);
-      if (gap.every(h => neverSold(h) && !inProven(h))) {
-        notes.push('nothing has ever sold in the ' + gap.length + ' hour' + (gap.length === 1 ? '' : 's') + ' from ' + adPeakPad(w.to) + ':00 either, and they are too few to switch for on their own, so the two stretches either side run as one');
-        rest.push({ from: w.from, to: nx.to, hours: w.hours + gap.length + nx.hours, merged: true });
-      } else {
-        notes.push('leaving the ad on for only ' + gap.length + ' hour' + (gap.length === 1 ? '' : 's') + ' from ' + adPeakPad(w.to) + ':00 would switch it twice for nothing, so neither stretch either side of it is applied');
-      }
-      list = rest.sort((x, y) => x.from - y.from);
-      changed = true; break;
+  for (const w of outside) notes.push('the dead stretch ' + words(w) + ' lies outside the hours somebody typed, which already keep the ad off right through it, so nothing is applied there');
+  /* the hours the ad would be OFF for, as a day of switches rather than a list of windows: every rule
+     below moves one hour at a time and the windows are read back off it at the end. */
+  const off = new Array(24).fill(false);
+  for (const w of kept) for (const h of hoursOf(w)) off[h] = true;
+  const liveOn = h => { const x = ((h % 24) + 24) % 24; return inEnv(x) && !off[x]; };
+  const onRuns = () => {
+    /* the stretches the ad would actually be ON for: inside the typed hours and not inside a window,
+       walked on the ring so a stretch over midnight is one stretch. */
+    const out = [];
+    let on = 0;
+    for (let h = 0; h < 24; h++) if (liveOn(h)) on++;
+    if (!on) return out;
+    if (on >= 24) return [{ from: 0, to: 24, hours: 24 }];
+    for (let h = 0; h < 24; h++) {
+      if (!liveOn(h) || liveOn(h - 1)) continue;
+      let end = h, len = 0;
+      while (liveOn(end) && len < 24) { end = (end + 1) % 24; len++; }
+      out.push({ from: h, to: end, hours: len });
     }
-    if (!changed) break;
+    return out;
+  };
+  const given = [];
+  for (let guard = 0; guard < 48; guard++) {
+    const shorts = onRuns().filter(r => r.hours < minBlock);
+    if (!shorts.length) break;
+    let acted = false;
+    for (const run of shorts) {
+      const hrs = hoursOf(run);
+      const before = (run.from + 23) % 24, after = ((run.to % 24) + 24) % 24;
+      /* swallowed: it has never sold, it is not inside the proven part of the day, it has a window on
+         both sides, and nothing in it was given back on an earlier pass */
+      if (off[before] && off[after] && hrs.every(h => given.indexOf(h) < 0 && neverSold(h) && !inProven(h))) {
+        for (const h of hrs) off[h] = true;
+        notes.push('nothing has ever sold in the ' + hrs.length + ' hour' + (hrs.length === 1 ? '' : 's') + ' from ' + adPeakPad(run.from) + ':00 either, and they are too few to switch for on their own, so the stretches either side run as one');
+        acted = true; break;
+      }
+      /* widened: the dead hour beside it that the least money goes out in is given back. Clicks break a
+         tie in money and the hour's own number breaks a tie in both, so the same day always answers the
+         same way. Only an hour inside the typed hours can be given back, because giving back an hour
+         the envelope keeps off would lengthen nothing. */
+      const cand = [before, after].filter(h => off[h] && inEnv(h));
+      if (!cand.length) continue;
+      cand.sort((x, y) => (spendOf(x) - spendOf(y)) || (clicksOf(x) - clicksOf(y)) || (x - y));
+      const back = cand[0];
+      off[back] = false; given.push(back);
+      notes.push('the ad would run for only ' + hrs.length + ' hour' + (hrs.length === 1 ? '' : 's') + ' from ' + adPeakPad(run.from) + ':00, which is under the ' + minBlock + ' it takes to be worth switching for, so ' + adPeakPad(back) + ':00 is given back to it: of the dead hours beside that stretch it is the one the least money goes out in');
+      acted = true; break;
+    }
+    if (!acted) {
+      for (const run of shorts) notes.push('the hours somebody typed leave the ad on for only ' + run.hours + ' hour' + (run.hours === 1 ? '' : 's') + ' from ' + adPeakPad(run.from) + ':00 and there is no dead hour beside it to give back, so it is left exactly as it is');
+      break;
+    }
   }
-  const words = w => adPeakPad(w.from) + '-' + adPeakPad(w.to);
+  const givenBack = given.filter(h => !off[h]).slice().sort((x, y) => x - y);
+  /* the windows read back off the day, after everything given back and everything swallowed */
+  const finalWins = [];
+  let offCount = 0;
+  for (let h = 0; h < 24; h++) if (off[h]) offCount++;
+  if (offCount >= 24) finalWins.push({ from: 0, to: 24, hours: 24 });
+  else for (let h = 0; h < 24; h++) {
+    if (!off[h] || off[(h + 23) % 24]) continue;
+    let end = h, len = 0;
+    while (off[end] && len < 24) { end = (end + 1) % 24; len++; }
+    finalWins.push({ from: h, to: end, hours: len });
+  }
+  /* what is left of a window after giving an hour back can itself be under the block, and then it is
+     left running like any other stretch too short to switch for. Dropping it only ever makes the ON
+     stretch either side of it longer, so it cannot bring back the flapping this whole rule prevents. */
+  const shrunk = finalWins.filter(w => w.hours < minBlock);
+  for (const w of shrunk) notes.push('what is left of the dead stretch at ' + words(w) + ' is under the ' + minBlock + ' hours it takes to switch for, so it is left running as well');
+  const list = finalWins.filter(w => w.hours >= minBlock);
+  const applyList = list.map(w => ({
+    from: w.from, to: w.to, hours: w.hours,
+    /* the hours handed back at this window's own edges, so the page and the schedule's reasons can name
+       them rather than a reader wondering why a dead hour is running */
+    given_back: givenBack.filter(h => h === (w.from + 23) % 24 || h === ((w.to % 24) + 24) % 24),
+  }));
+  for (const h of givenBack) why[h] = (why[h] || '') + ', and it is left running so the ad is not switched on and off again inside ' + minBlock + ' hours';
+  const provenNote = total > 0 && !provenReady
+    ? 'No part of the day is proven for this listing: only ' + total + ' order' + (total === 1 ? '' : 's') + ' came back in the whole window, and a part of the day is proven from ' + minOrders + ' orders upwards, so a share of too few sales never keeps an hour running on its own.'
+    : '';
+  const givenNote = givenBack.length
+    ? 'Given back so the ad is not switched twice for one hour: ' + givenBack.map(h => adPeakPad(h) + ':00').join(', ') + '.'
+    : '';
+  const outsideNote = outside.length
+    ? 'Outside the hours somebody typed, so reported and never applied: ' + outside.map(words).join(', ') + '.'
+    : '';
+  const head = !hrs.length ? 'There is no hourly reading for this listing at all, so no hour can be called dead.'
+    : !dead.length ? 'Every hour this listing spends in has sold in it at some point in the window, or sits inside the part of the day its sales come from, so there is nothing to switch off.'
+      : (list.length
+        ? 'Dead: ' + list.map(words).join(', ') + (proven.length ? '. Never switched off: the ' + proven.map(s => ADTOOL_SLOT_NAMES[s]).join(' and the ') : '') + '.'
+        : 'There are dead hours, but no stretch of them long enough to switch for.');
   return {
     dead: dead.slice(), productive_hours: productive.slice(),
-    windows: list.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    windows: applyList, windows_applied: applyList,
     windows_found: raw.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
-    windows_dropped: tooShort.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    windows_dropped: tooShort.concat(shrunk).map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    windows_outside_envelope: outside.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    given_back: givenBack,
+    envelope: envR.length ? adPeakHoursText(envR) : '',
     proven_slots: proven.slice(), proven_slot_names: proven.map(s => ADTOOL_SLOT_NAMES[s]),
+    proven_ready: provenReady, proven_note: provenNote,
     slot_orders: slotOrders.slice(), orders_total: total,
     days_observed: Number(profile && profile.days_observed) || 0,
-    rules: { dead_min_clicks: minClicks, proven_share: sharePct, min_block_h: minBlock },
+    rules: { dead_min_clicks: minClicks, proven_share: sharePct, proven_min_orders: minOrders, min_block_h: minBlock },
     why: why, adjustments: notes,
-    note: !hrs.length ? 'There is no hourly reading for this listing at all, so no hour can be called dead.'
-      : !dead.length ? 'Every hour this listing spends in has sold in it at some point in the window, or sits inside the part of the day its sales come from, so there is nothing to switch off.'
-        : (list.length
-          ? 'Dead: ' + list.map(words).join(', ') + (proven.length ? '. Never switched off: the ' + proven.map(s => ADTOOL_SLOT_NAMES[s]).join(' and the ') : '') + '.'
-          : 'There are dead hours, but no stretch of them long enough to switch for.'),
+    note: [head, givenNote, outsideNote, provenNote].filter(x => x).join(' '),
   };
 }
 function adPeakSchedule(input) {
@@ -13137,11 +13248,21 @@ function adPeakSchedule(input) {
   }
   const applied = ok && tracking && wins.length > 0;
   const deadAt = h => applied ? wins.filter(w => adInPeakRanges(h, [[Number(w.from), Number(w.to)]]))[0] || null : null;
+  /* THE HOURS GIVEN BACK, named in the reason for the hour itself and in the reason for the stretch
+     that gave them up. They are dead hours the ad still runs through, so a reader looking at the day
+     would otherwise see the pattern contradicting itself: the window says those hours never sell and
+     the day says the ad is on. Carried on the window by adPeakDeadHours, so what is written down here
+     and what the rule decided can never be two different things. */
+  const backOf = w => (w && w.given_back ? w.given_back : []).map(h => Math.round(Number(h))).filter(h => isFinite(h) && h >= 0 && h <= 23);
+  const backSet = {};
+  if (applied) for (const w of wins) for (const h of backOf(w)) backSet[h] = 1;
+  const backWords = w => { const b = backOf(w); return b.length ? ', with ' + b.map(h => adPeakPad(h) + ':00').join(' and ') + ' left running either side' : ''; };
   for (let h = 0; h < 24; h++) {
     if (!adInPeakRanges(h, ranges)) { states.push('OFF'); reasons.push('outside its hours'); continue; }
     const w = deadAt(h);
-    if (w) { states.push('OFF'); reasons.push('dead window ' + adPeakPad(w.from) + '-' + adPeakPad(w.to)); continue; }
-    states.push('ON'); reasons.push('inside its hours');
+    if (w) { states.push('OFF'); reasons.push('dead window ' + adPeakPad(w.from) + '-' + adPeakPad(w.to) + backWords(w)); continue; }
+    states.push('ON');
+    reasons.push(backSet[h] ? 'inside its hours, left running so the ad is not switched twice for one hour' : 'inside its hours');
   }
   const source = !ok ? 'proposal' : (!tracking ? 'typed' : (wins.length ? 'pattern' : 'typed'));
   const why = source === 'pattern'
@@ -13402,6 +13523,39 @@ async function ensureAdtoolPhase16Schema(env) {
   ].map(s => env.DB.prepare(s)));
   ADTOOL_P16_SCHEMA_OK = true;
 }
+let ADTOOL_PEAK_CFG_OK = false;
+async function ensureAdtoolPeakPlanConfig(env) {
+  /* THE PATTERN ENGINE'S OWN SETTINGS, SEEDED WHEREVER THEY ARE FIRST NEEDED.
+     The live probe of 31 Oct found not one of these eight keys on the database: the seed ran from the
+     page-side ensure alone, and nobody had opened the page on this deployment. So the planner read its
+     own stop flag, found nothing where 'on' should have been, read that as off and returned at once:
+     the 23:30 planning run would have planned nothing at all, every night, in silence.
+     A missing row and a row somebody has switched off are therefore kept apart by SEEDING BEFORE
+     READING, in every job and on every route that reads one of these, and not by letting an absent
+     flag mean yes, which would make a manager's 'off' indistinguishable from a database that has never
+     been written to.
+     DO NOTHING on conflict throughout, so a figure somebody has already changed is never written back
+     over, and once per isolate, so a job that runs every quarter hour is not eight D1 writes every
+     quarter hour for the life of the worker. */
+  if (ADTOOL_PEAK_CFG_OK) return;
+  const K = ADTOOL_PEAK_PLAN_CONFIG_KEYS, D = ADTOOL_PEAK_PLAN_DEFAULTS;
+  const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, value);
+  /* the planner's own stop flag, beside the switch job's. Born on, because the owner asked for this to
+     run in automation; off and the peak list goes back to running on typed hours alone, with every
+     schedule row still readable. The pair answer two different questions: adtool_page_peak takes the
+     page away from everybody, adtool_job_peakplan stops the PLANNING while the switching carries on
+     from whatever rows are already there. */
+  const stmts = [one('adtool_job_peakplan', 'on')];
+  /* the seven figures the pattern engine runs on, seeded at the owner's own numbers and settable from
+     Management afterwards. Seeded rather than left unset so a manager opening the settings sees what is
+     in force instead of a blank. Nothing prints a fixed figure anywhere: adPeakPlanRules is what every
+     sentence in this section reads its numbers out of, and it falls back to these same defaults, so a
+     seed that has not landed yet changes no answer. */
+  for (const k of ['lookback_days', 'min_days', 'dead_min_clicks', 'proven_share', 'proven_min_orders', 'min_block_h', 'plan_time']) {
+    stmts.push(one(K[k], String(D[k])));
+  }
+  try { await adtBatch(env, stmts); ADTOOL_PEAK_CFG_OK = true; } catch (e) { /* a default; never let it stop a job, and try again on the next run */ }
+}
 const ADTOOL_REGISTER_P16 = [
   ['LIVE_SPLIT', 'Every live listing, in one of three places', 'Each listing eBay still shows as active goes in exactly one place: on pay-per-click if it has a live pay-per-click ad; dynamic if it has none of those but is live in a campaign whose rate is a dynamic one; and without pay-per-click if neither. Being advertised means the same thing here as on every other advertising page. The three counts are then checked against a SEPARATE count of the live listings, which is the real check: a listing in two places, or in none, shows up as the three not adding up, and the page says so. The third place counts two kinds apart inside itself: one is advertised on pay-on-sale, the other is not advertised at all.', 'campaign_ads, campaigns, items_api, adtool_listing_day', 'Worked out when you open the page and held for a couple of minutes after a read, while the all-accounts answer is prepared every hour so the page opens at once', 'Unit tests put every pattern of memberships in exactly one of the three, the two kinds of the third add back up to it, and the page’s own line checks the three against the separate active count'],
   ['AD_RATE_DYNAMIC', 'Whether a campaign’s ad rate is a dynamic one', 'A campaign counts as dynamic when eBay says the rate is dynamic, OR when the team’s own name for it says dynamic. Either one alone is enough, and eBay calling the rate fixed does NOT overrule a campaign the team calls dynamic: the fleet has always been run on the naming convention. eBay’s reply is kept exactly as it arrives, with the whole funding reply beside it, so what eBay sent is on record rather than worked out afterwards. Each answer carries which of the two it came from, so a campaign where the name and eBay disagree can be seen rather than guessed at.', 'campaigns', 'Every few minutes, with the campaign list', 'The stored answer read back against eBay’s own campaign screen on a few campaigns of each kind'],
@@ -13419,7 +13573,7 @@ const ADTOOL_REGISTER_P16 = [
   ['PEAK_SALES_IN_OUT', 'Orders inside and outside the peak hours', 'Every order for a listing on the list is placed in the London hour it arrived in and judged against that listing’s own hours: inside them or outside them, for today, the last seven days and the last twenty eight. An order only counts for a day the listing was actually on the list. eBay does not say which hour a click or a sale it credits to an ad happened in, so this is the hour the ORDER arrived and not the hour of the click, and the page says so. A listing whose hours cannot be read is left out rather than having all of its orders read as landing outside hours it never had.', 'adtool_peak_items, orders', 'Worked out when the section is opened, within a minute of the last order sync', 'Unit tests on an order either side of both boundaries and on a listing’s day before it joined the list not counting'],
   /* the 31 Oct brief, §3: the 24-hour pattern engine and the dead-hour switch-off */
   ['PEAK_PROFILE', 'A listing’s own 24-hour span', 'What each hour of the day did for one listing over the lookback: the money spent in it, the clicks, the orders, the units and the takings, with how many days we hold a reading for that hour, on how many it spent, and on how many it sold. Read from the hourly roll-up alone, so the portal has one hourly figure and not two. Today is kept out of the pattern, because a part day reads as quiet in every hour the clock has not reached. Days are weighted as the owner asked: the same weekday’s last four occurrences count double, and so do the last seven.', 'adtool_listing_hour, adtool_ads_intraday, orders', 'Every night at the planning tick, and again at a cut between two parts of the day for a listing the drift check flagged', 'Unit tests on the weighting, on today being out of the pattern, and on a day counted twice by both reasons'],
-  ['PEAK_DEAD_HOURS', 'The hours a listing never sells in', 'An hour is dead when money went out in it on at least one day we hold a reading for, and not one order came back in it on any of them: one sale, in one hour, on one day keeps the hour. An hour that never spent and drew too few clicks is not dead either, having no waste to cut. And the part of the day a listing’s sales come from is never switched off hour by hour, however quiet one hour inside it looks. Touching dead hours join into one stretch, counted round midnight. A stretch too short to switch for is left running.', 'adtool_listing_hour, adtool_listing_slot, portal_config', 'With the profile', 'Unit tests on a dead window inside the hours, on a stretch too short being dropped, on a quiet hour inside a proven slot never being dead, and on the running gap being swallowed only when it was dead itself'],
+  ['PEAK_DEAD_HOURS', 'The hours a listing never sells in', 'An hour is dead when money went out in it on a day we have a reading for and no order came back on any of them: one sale, in one hour, on one day keeps the hour. An hour that never spent and drew too few clicks is not dead. The part of the day a listing’s sales come from is never switched off, and nothing is that part until the listing has sold enough for a share to mean anything. Touching dead hours join into one stretch, counted round midnight. A stretch too short to switch for is left running, and so is the cheapest dead hour beside one that would leave the ad on for less.', 'adtool_listing_hour, adtool_listing_slot, adtool_peak_items, portal_config', 'With the profile', 'Unit tests on a dead window inside the hours, on a stretch too short being dropped, on a quiet hour inside a proven slot never being dead, on the running gap being swallowed only when it was dead itself, on the owner’s own worked example of an hour being given back at each end of a stretch, on the cheaper of the two hours beside a gap being the one given back, and on two orders in a window proving no part of a day'],
   ['PEAK_SCHEDULE', 'The day a listing will actually run', 'Twenty four states, one for each UK hour, each with a short line saying why it reads that way. The hours somebody typed are the envelope and this can only narrow them: outside them the ad is off as before, inside them it is on unless a dead stretch takes it off, and nothing here can put an ad into an hour nobody asked for. A dead stretch is applied only once there are enough days behind the pattern and the listing is still playing on it; short of either, the day runs on the typed hours and the dead stretches come back as a suggestion. A day with no row runs on its typed hours.', 'adtool_peak_schedule, adtool_peak_items, adtool_listing_hour, adtool_regimes, portal_config', 'Every night at the planning tick, and at 06:00, noon and 17:00 for a listing the drift check flagged', 'Unit tests on the envelope never widening, on too few days giving a suggestion rather than a schedule, and on a hold overruling both'],
   ['PEAK_HOLD', 'Holding a listing on or off by hand', 'A listing on the peak list can be held on for the whole day or off for the whole day, and a hold overrules both its typed hours and its pattern, with a reason printed against every hour. Only Management, an Ops Head or an Advertising Manager may set one, and who set it and when is written to the audit trail. Every row is born on the schedule, which is what the list did before holds existed. A hold decides a wanted state and nothing more: it reaches eBay only through the quarter-hourly switch, for an account whose live switch is on, under the same ceiling and refusal rule as every other change.', 'adtool_peak_items, audit, adtool_apply_log', 'As soon as somebody sets one, and every quarter hour for the switching', 'Unit tests on a hold on and a hold off beating the schedule, and the audit row read back against the actor'],
   ['PEAK_TRACKING', 'Whether a listing is still playing on its pattern', 'The owner’s own condition for keeping a listing on its 24-hour pattern, answered by the drift rule the portal already has rather than a second one beside it: today’s hours are compared with the pattern’s by the same measure, against the same threshold, with the same floor of orders either side below which that rule declines to call a drift. Where the pattern check has already written a change of shape for the listing, that record is the answer and the day it was written is named. Too few orders either side is still tracking. A listing no longer tracking falls back to its typed hours, and the schedule says so.', 'adtool_regimes, adtool_listing_hour, adtool_profiles', 'With the schedule', 'Unit tests on a drift record deciding it, on the order floor, and on the two shapes agreeing'],
@@ -13436,25 +13590,10 @@ async function ensureAdtoolPhase16Register(env) {
   for (const key of ['adtool_page_livesplit', 'adtool_page_potential']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
   }
-  /* the planner's own stop flag, beside the switch job's. Born on, because the owner asked for this to
-     run in automation; off and the peak list goes back to running on typed hours alone, with every
-     schedule row still readable. The pair answer two different questions: adtool_page_peak takes the
-     page away from everybody, adtool_job_peakplan stops the PLANNING while the switching carries on from
-     whatever rows are already there. */
-  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_job_peakplan', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
-  /* the six figures the pattern engine runs on, seeded at the owner's own numbers and settable from
-     Management afterwards. Seeded rather than left unset so a manager opening the settings sees what is
-     in force instead of a blank, and DO NOTHING so a figure somebody has already changed is never
-     written back over. Nothing prints a fixed figure anywhere: adPeakPlanRules is what every sentence in
-     this section reads its numbers out of. */
-  for (const pair of [[ADTOOL_PEAK_PLAN_CONFIG_KEYS.lookback_days, String(ADTOOL_PEAK_PLAN_DEFAULTS.lookback_days)],
-    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.min_days, String(ADTOOL_PEAK_PLAN_DEFAULTS.min_days)],
-    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.dead_min_clicks, String(ADTOOL_PEAK_PLAN_DEFAULTS.dead_min_clicks)],
-    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.proven_share, String(ADTOOL_PEAK_PLAN_DEFAULTS.proven_share)],
-    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.min_block_h, String(ADTOOL_PEAK_PLAN_DEFAULTS.min_block_h)],
-    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.plan_time, String(ADTOOL_PEAK_PLAN_DEFAULTS.plan_time)]]) {
-    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(pair[0], pair[1]));
-  }
+  /* the planner's stop flag and the seven figures, through the one seed every job and route shares.
+     Kept here as well as in the jobs: a page opening is still the commonest way these land, and the
+     page-side call is the one that was there before the probe found the keys missing. */
+  try { await ensureAdtoolPeakPlanConfig(env); } catch (e) { /* a default; never let it stop a page */ }
   try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
   ADTOOL_P16_REG_OK = true;
 }
@@ -13822,6 +13961,12 @@ function adtPeakScheduleRow(r) {
     reasons: parse(r && r.reasons_json, null) || [],
     dead_windows: Array.isArray(dead.windows) ? dead.windows : [],
     proposal: Array.isArray(dead.proposal) ? dead.proposal : [],
+    /* the dead hours the ad still runs through, because switching off there would have left it on for
+       less than a block, and the stretches the typed hours already keep off. Both are read back off the
+       row rather than worked out again, so the page cannot disagree with the night that decided it. */
+    given_back: Array.isArray(dead.given_back) ? dead.given_back : [],
+    windows_outside_envelope: Array.isArray(dead.windows_outside_envelope) ? dead.windows_outside_envelope : [],
+    proven_note: String(dead.proven_note || ''),
     proven_slots: Array.isArray(dead.proven_slots) ? dead.proven_slots : [],
     productive_hours: Array.isArray(dead.productive_hours) ? dead.productive_hours : [],
     dead_note: String(dead.note || ''),
@@ -13892,7 +14037,7 @@ async function adtPeakPlanOne(env, row, ctxIn) {
      the weighting cannot move a dead hour. "It has never sold in this hour" is a statement about days
      and must not lean towards some of them. The weighting does its work in the tracking check, where
      the shape of the pattern is what today is compared against. */
-  const dead = adPeakDeadHours(profile, c.rules);
+  const dead = adPeakDeadHours(profile, Object.assign({}, c.rules, { typed_ranges: hours.ranges }));
   const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: c.drift || '' });
   const sch = adPeakSchedule({
     typed_ranges: hours.ranges, dead_windows: dead.windows, hold: adtPeakHoldOf(row),
@@ -13906,7 +14051,11 @@ async function adtPeakPlanOne(env, row, ctxIn) {
     schedule: sch, dead: dead, tracking: track, profile: profile,
     dead_json: {
       windows: sch.applied ? dead.windows : [], proposal: sch.proposal,
-      proven_slots: dead.proven_slots, productive_hours: dead.productive_hours,
+      /* the hours a dead stretch gave back so the ad is not switched twice for one hour, and the
+         stretches the typed hours already keep off: both are read off the page beside the day. */
+      given_back: sch.applied ? dead.given_back : [], windows_outside_envelope: dead.windows_outside_envelope,
+      proven_slots: dead.proven_slots, proven_note: dead.proven_note,
+      productive_hours: dead.productive_hours,
       days_observed: profile.days_observed, min_days: c.rules.min_days,
       tracking: track.tracking, tracking_note: track.note, drift_detected_day: track.drift_detected_day,
       note: dead.note, adjustments: dead.adjustments, rules: dead.rules,
@@ -13926,6 +14075,10 @@ async function adtoolPeakPlan(env) {
      It sends nothing. Everything it writes is a wanted state in a table, and the only thing that ever
      leaves this worker is the quarter-hourly switch below, under the gate it has always had. */
   await ensureAdtoolPhase16Schema(env);
+  /* SEEDED BEFORE READ, and that order is the whole of the 31 Oct finding: this job's own stop flag is
+     one of the rows the seed writes, so reading it first on a database no page had been opened on gave
+     a blank, a blank is not 'on', and the planner returned having planned nothing. */
+  await ensureAdtoolPeakPlanConfig(env);
   /* the same pair of switches the switch job answers to, and for the same reason: the page flag takes
      the whole feature away from everybody, and the job flag stops the PLANNING while every schedule
      already written stays readable and the switching carries on from it. Both are seeded on. */
@@ -14043,6 +14196,10 @@ async function adtoolPeakSwitch(env) {
      `adtool_job_peakswitch` stops the SENDING while the list stays readable. Both are seeded on. */
   if ((await adtFlag(env, 'adtool_page_peak')) !== 'on') return;
   if ((await adtFlag(env, 'adtool_job_peakswitch')) !== 'on') return;
+  /* the same seed the planner and the probe call, so the settings exist on a database whose only
+     visitor is this job. Its own gate above is untouched and runs first, exactly as it always has:
+     this is a default being written down after the decision to carry on, never part of it. */
+  await ensureAdtoolPeakPlanConfig(env);
   const t = await adtJobStart(env, 'adtoolPeakSwitch');
   let written = 0;
   try {
@@ -23315,6 +23472,11 @@ const ROUTES = {
         } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return null; }
       };
       try { await ensureAdtoolPhase16Schema(env); } catch (e) { readErrors.push('schema: ' + String((e && e.message) || e).slice(0, 160)); }
+      /* the same seed the two jobs call, before the settings are read: an evidence route that printed
+         the defaults while the database held nothing would say the engine was configured when it was
+         not, which is the one thing this route exists to catch. The route still sends nothing and
+         still decides nothing; the eight rows it may write are the documented defaults. */
+      try { await ensureAdtoolPeakPlanConfig(env); } catch (e) { readErrors.push('config seed: ' + String((e && e.message) || e).slice(0, 160)); }
       const rules = await adtPeakPlanRulesFor(env).catch(e => { readErrors.push('config: ' + String((e && e.message) || e).slice(0, 160)); return adPeakPlanRules({}); });
       const uk = adtUkParts(Date.now());
       const today = uk.date, tomorrow = adtAddDays(today, 1);
@@ -23343,7 +23505,7 @@ const ROUTES = {
         const rows = hourRows[id] || [];
         const hours = adPeakHoursParse(row.hours);
         const profile = adPeakProfile(rows, { today: today, for_day: day, lookback_days: rules.lookback_days, recent_days: rules.recent_days });
-        const dead = adPeakDeadHours(profile, rules);
+        const dead = adPeakDeadHours(profile, Object.assign({}, rules, { typed_ranges: hours.ranges || [] }));
         const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: drift[id] || '' });
         const hold = adtPeakHoldOf(row);
         const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking });

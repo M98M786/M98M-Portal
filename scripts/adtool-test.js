@@ -2844,14 +2844,18 @@ function run(argv) {
     return out;
   };
   const pkRules = F.adPeakPlanRules({});
-  t('§3 defaults: the six figures are the owner’s own, and each is read from portal_config and never typed into a sentence',
+  t('§3 defaults: the seven figures are the owner’s own, and each is read from portal_config and never typed into a sentence',
     pkRules.lookback_days === 28 && pkRules.min_days === 14 && pkRules.dead_min_clicks === 5 && pkRules.proven_share === 60 &&
-    pkRules.min_block_h === 2 && pkRules.plan_time === '23:30' && pkRules.proven_share_of_one === 0.6 &&
-    F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.lookback_days === 'adtool_peak_lookback_days' && F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.plan_time === 'adtool_peak_plan_time', pkRules);
-  t('§3 defaults: a manager’s own figures are taken, a mistyped share is held to the range it means something in, and a plan time that is not a time falls back',
+    pkRules.proven_min_orders === 5 && pkRules.min_block_h === 2 && pkRules.plan_time === '23:30' && pkRules.proven_share_of_one === 0.6 &&
+    F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.lookback_days === 'adtool_peak_lookback_days' && F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.plan_time === 'adtool_peak_plan_time' &&
+    F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.proven_min_orders === 'adtool_peak_proven_min_orders', pkRules);
+  t('§3 defaults: a manager’s own figures are taken, a mistyped share is held to the range it means something in, a floor of nought is a floor switched off on purpose, and a plan time that is not a time falls back',
     (() => {
-      const r = F.adPeakPlanRules({ adtool_peak_lookback_days: '14', adtool_peak_min_days: '7', adtool_peak_dead_min_clicks: '0', adtool_peak_proven_share: '140', adtool_peak_min_block_h: '3', adtool_peak_plan_time: 'half eleven' });
-      return r.lookback_days === 14 && r.min_days === 7 && r.dead_min_clicks === 0 && r.proven_share === 100 && r.min_block_h === 3 && r.plan_time === '23:30';
+      const r = F.adPeakPlanRules({ adtool_peak_lookback_days: '14', adtool_peak_min_days: '7', adtool_peak_dead_min_clicks: '0', adtool_peak_proven_share: '140', adtool_peak_proven_min_orders: '12', adtool_peak_min_block_h: '3', adtool_peak_plan_time: 'half eleven' });
+      return r.lookback_days === 14 && r.min_days === 7 && r.dead_min_clicks === 0 && r.proven_share === 100 && r.proven_min_orders === 12 &&
+        r.min_block_h === 3 && r.plan_time === '23:30' &&
+        F.adPeakPlanRules({ adtool_peak_proven_min_orders: '0' }).proven_min_orders === 0 &&
+        F.adPeakPlanRules({ adtool_peak_proven_min_orders: 'five' }).proven_min_orders === 5;
     })(), F.adPeakPlanRules({ adtool_peak_proven_share: '140', adtool_peak_plan_time: 'half eleven' }));
 
   const pk20 = F.adPeakProfile(pkRows(20), { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
@@ -2946,11 +2950,15 @@ function run(argv) {
       const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
       return d.windows.length === 1 && d.windows[0].from === 23 && d.windows[0].to === 1 && d.windows[0].hours === 2;
     })(), null);
-  t('§3 dead hours: a running gap too short to stand between two dead stretches is swallowed only where nothing in it has ever sold; where it sells, neither stretch either side of it is applied',
+  t('§3 dead hours: a running gap too short to stand between two dead stretches is swallowed where nothing in it has ever sold, and WIDENED where it sells, by giving an hour back rather than dropping both stretches (31 Oct finding F2)',
     (() => {
       /* two dead stretches of four hours with a three-hour gap between them and a minimum block of four.
          The gap is not DEAD, because touching dead hours are already one window: its hours have simply
-         never sold, for one of the other reasons. Switching the ad on through them buys nothing. */
+         never sold, for one of the other reasons. Switching the ad on through them buys nothing.
+         Where the gap DOES sell, the hour that sells is the one thing that must not be touched, so the
+         gap is widened to the block instead: the cheapest dead hour beside it comes back, and what is
+         left of each stretch is applied if it is still a block in its own right. Until 31 Oct this case
+         dropped both stretches, which left every one of the eight dead hours running. */
       const build = gap => {
         const rows = [];
         for (let d = 1; d <= 20; d++) {
@@ -2965,7 +2973,124 @@ function run(argv) {
       const unread = build('unread'), free = build('free'), sells = build('sells');
       const one = d => d.windows.length === 1 && d.windows[0].from === 0 && d.windows[0].to === 11 && d.windows[0].hours === 11 && /run as one/.test(d.adjustments.join(' '));
       return one(unread) && one(free) && unread.dead.join(',') === '0,1,2,3,7,8,9,10' &&
-        sells.windows.length === 0 && /neither stretch either side/.test(sells.adjustments.join(' '));
+        sells.given_back.join(',') === '3' &&
+        sells.windows.length === 1 && sells.windows[0].from === 7 && sells.windows[0].to === 11 && sells.windows[0].hours === 4 &&
+        sells.windows_applied === sells.windows &&
+        sells.windows_dropped.length === 1 && sells.windows_dropped[0].from === 0 && sells.windows_dropped[0].to === 3 &&
+        /03:00 is given back/.test(sells.adjustments.join(' ')) && /left running as well/.test(sells.adjustments.join(' ')) &&
+        !/neither stretch either side/.test(sells.adjustments.join(' '));
+    })(), null);
+  /* the owner's worked example of the new rule, on the shape the live probe found: a stretch of dead
+     evening hours with one hour at each end of it that sells, inside hours that reach midnight. */
+  const pkGiveBack = (() => {
+    const perDay = { 18: 2.85, 19: 1.63, 20: 2.54, 21: 3.38, 22: 4.85 };
+    const rows = [];
+    for (let d = 1; d <= 22; d++) {
+      /* the morning and the afternoon, so no one part of the day holds the share and the evening is not
+         proven: whether these hours are dead is not what this fixture is about. 10 and 11 spend and
+         never sell, and lie OUTSIDE the typed hours. */
+      rows.push({ day: pkDay(d), hour: 9, orders: d <= 8 ? 1 : 0, units: d <= 8 ? 1 : 0, revenue: 11, spend: 0.9, clicks: 3 });
+      for (const h of [10, 11]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.8, clicks: 3 });
+      rows.push({ day: pkDay(d), hour: 14, orders: d <= 8 ? 1 : 0, units: d <= 8 ? 1 : 0, revenue: 11, spend: 0.9, clicks: 3 });
+      /* the evening: 17 and 23 sell, 18 to 22 spend every day and have never once sold */
+      rows.push({ day: pkDay(d), hour: 17, orders: d <= 6 ? 1 : 0, units: d <= 6 ? 1 : 0, revenue: 12, spend: 1.2, clicks: 4 });
+      for (const h of [18, 19, 20, 21, 22]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: perDay[h], clicks: 6 });
+      rows.push({ day: pkDay(d), hour: 23, orders: d <= 6 ? 1 : 0, units: d <= 6 ? 1 : 0, revenue: 12, spend: 1.1, clicks: 4 });
+    }
+    const prof = F.adPeakProfile(rows, { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
+    const typed = F.adPeakHoursParse('17-00').ranges;
+    return {
+      profile: prof, typed: typed,
+      dead: F.adPeakDeadHours(prof, Object.assign({}, pkRules, { typed_ranges: typed })),
+      blind: F.adPeakDeadHours(prof, pkRules),
+    };
+  })();
+  t('§3 dead hours: the owner’s worked example — dead 18-23 with one sale at 17 and one at 23 gives ON 17-19, OFF 19-22 and ON 22-00, with the hour given back at each end named (31 Oct finding F2)',
+    (() => {
+      const d = pkGiveBack.dead, p = pkGiveBack.profile;
+      const sch = F.adPeakSchedule({ typed_ranges: pkGiveBack.typed, dead_windows: d.windows, hold: 'auto', min_days_ok: p.days_observed >= pkRules.min_days, tracking: true });
+      const on = [];
+      for (let h = 0; h < 24; h++) if (sch.states[h] === 'ON' && (h === 0 || sch.states[h - 1] !== 'ON')) { let e = h; while (e < 24 && sch.states[e] === 'ON') e++; on.push(h + '-' + e); }
+      return p.days_observed === 22 && d.dead.join(',') === '10,11,18,19,20,21,22' &&
+        d.windows_found.map(w => w.from + '-' + w.to).join(',') === '10-12,18-23' &&
+        d.windows.length === 1 && d.windows[0].from === 19 && d.windows[0].to === 22 && d.windows[0].hours === 3 &&
+        d.windows[0].given_back.join(',') === '18,22' && d.given_back.join(',') === '18,22' &&
+        /18:00 is given back/.test(d.adjustments.join(' ')) && /22:00 is given back/.test(d.adjustments.join(' ')) &&
+        /Given back so the ad is not switched twice/.test(d.note) &&
+        on.join(' ') === '17-19 22-24' && sch.off_windows.length === 1 && sch.off_windows[0].from === 19 && sch.off_windows[0].to === 22 &&
+        /18:00 and 22:00 left running either side/.test(sch.reasons[20]) &&
+        /left running so the ad is not switched twice/.test(sch.reasons[18]) && /left running so the ad is not switched twice/.test(sch.reasons[22]) &&
+        /left running so the ad is not switched/.test(d.why[18]);
+    })(), (() => { const d = pkGiveBack.dead; return [d.dead, d.windows, d.given_back]; })());
+  t('§3 dead hours: the hours somebody typed are what make those stretches visible — the same listing read without them keeps the whole stretch and gives nothing back, and a stretch wholly outside them is reported and never applied',
+    (() => {
+      const d = pkGiveBack.dead, b = pkGiveBack.blind;
+      return b.windows.map(w => w.from + '-' + w.to).join(',') === '10-12,18-23' && b.given_back.length === 0 && b.envelope === '' &&
+        d.envelope === '17-00' &&
+        d.windows_outside_envelope.length === 1 && d.windows_outside_envelope[0].from === 10 && d.windows_outside_envelope[0].to === 12 &&
+        d.windows.every(w => w.from !== 10) && /outside the hours somebody typed/.test(d.adjustments.join(' ')) &&
+        /reported and never applied/.test(d.note);
+    })(), null);
+  t('§3 dead hours: of the two dead hours beside a gap it is the one the least money goes out in that is given back, whichever side it is on',
+    (() => {
+      /* hours 09-18 typed, dead 9 to 11 and 13 to 15, and the one-hour gap at 12 sells. The hour beside
+         the gap on each side is dead, so the money decides which of them comes back. */
+      const build = (s11, s13) => {
+        const rows = [];
+        for (let d = 1; d <= 20; d++) {
+          rows.push({ day: pkDay(d), hour: 3, orders: 2, units: 2, revenue: 20, spend: 0.2, clicks: 2 });   // the night holds the share, far from the hours typed
+          for (const h of [9, 10]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 1.0, clicks: 4 });
+          rows.push({ day: pkDay(d), hour: 11, orders: 0, units: 0, revenue: 0, spend: s11, clicks: 4 });
+          rows.push({ day: pkDay(d), hour: 12, orders: d <= 3 ? 1 : 0, units: d <= 3 ? 1 : 0, revenue: 9, spend: 0.5, clicks: 4 });
+          rows.push({ day: pkDay(d), hour: 13, orders: 0, units: 0, revenue: 0, spend: s13, clicks: 4 });
+          for (const h of [14, 15]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 1.0, clicks: 4 });
+          for (const h of [16, 17]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0, clicks: 0 });
+        }
+        return F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), Object.assign({}, pkRules, { typed_ranges: F.adPeakHoursParse('09-18').ranges }));
+      };
+      const after = build(3.0, 0.4), before = build(0.4, 3.0);
+      return after.dead.join(',') === '9,10,11,13,14,15' && after.proven_slots.join(',') === '0' &&
+        after.given_back.join(',') === '13' &&
+        after.windows.map(w => w.from + '-' + w.to).join(',') === '9-12,14-16' &&
+        after.windows[1].given_back.join(',') === '13' && after.windows[0].given_back.length === 0 &&
+        before.given_back.join(',') === '11' &&
+        before.windows.map(w => w.from + '-' + w.to).join(',') === '9-11,13-16' &&
+        before.windows[0].given_back.join(',') === '11' && before.windows[1].given_back.length === 0;
+    })(), null);
+  t('§3 dead hours: a part of the day is not proven on two orders — below the floor of sales there is no proven part at all, and the note says why (31 Oct finding F3)',
+    (() => {
+      /* the live shape: three orders in the whole window, two of them in the night, and two night hours
+         that spend every day and have never sold. On the share alone the night was proven and those two
+         hours were protected; with the floor they are dead, which is what they are. */
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        for (const h of [1, 2]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.6, clicks: 4 });
+        rows.push({ day: pkDay(d), hour: 3, orders: (d === 4 || d === 9) ? 1 : 0, units: (d === 4 || d === 9) ? 1 : 0, revenue: 9, spend: 0.6, clicks: 4 });
+        rows.push({ day: pkDay(d), hour: 18, orders: d === 7 ? 1 : 0, units: d === 7 ? 1 : 0, revenue: 9, spend: 0.6, clicks: 4 });
+      }
+      const prof = F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 });
+      const d = F.adPeakDeadHours(prof, pkRules);
+      return d.orders_total === 3 && d.slot_orders.join(',') === '2,0,0,1' &&
+        d.proven_ready === false && d.proven_slots.length === 0 &&
+        d.dead.join(',') === '1,2' && d.windows.length === 1 && d.windows[0].from === 1 && d.windows[0].to === 3 &&
+        d.rules.proven_min_orders === pkRules.proven_min_orders &&
+        new RegExp('only ' + d.orders_total + ' orders came back in the whole window').test(d.note) &&
+        new RegExp('proven from ' + pkRules.proven_min_orders + ' orders upwards').test(d.note) &&
+        d.proven_note.length > 20 && d.note.indexOf(d.proven_note) >= 0;
+    })(), null);
+  t('§3 dead hours: the floor is a figure and not a rule of its own — set to nought by a manager, the share alone proves the part of the day again and those hours stop being dead',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        for (const h of [1, 2]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.6, clicks: 4 });
+        rows.push({ day: pkDay(d), hour: 3, orders: (d === 4 || d === 9) ? 1 : 0, units: (d === 4 || d === 9) ? 1 : 0, revenue: 9, spend: 0.6, clicks: 4 });
+        rows.push({ day: pkDay(d), hour: 18, orders: d === 7 ? 1 : 0, units: d === 7 ? 1 : 0, revenue: 9, spend: 0.6, clicks: 4 });
+      }
+      const prof = F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 });
+      const noFloor = F.adPeakDeadHours(prof, Object.assign({}, pkRules, { proven_min_orders: 0 }));
+      return noFloor.proven_slots.join(',') === '0' && noFloor.proven_ready === true && noFloor.dead.length === 0 &&
+        noFloor.windows.length === 0 && /never switched off/.test(noFloor.why[1]) && noFloor.proven_note === '' &&
+        noFloor.rules.proven_min_orders === 0;
     })(), null);
   t('§3 dead hours: a quiet hour inside the part of the day its sales come from is never swallowed into a dead stretch either, the same as it is never dead',
     (() => {
@@ -3239,13 +3364,39 @@ function run(argv) {
   t('§3 tables: the schedule table holds exactly the columns the brief names, one row per listing per UK day, and the hold column is added guarded (real source)',
     /CREATE TABLE IF NOT EXISTS adtool_peak_schedule \(account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY \(account, item_id, day\)\)/.test(src) &&
     /try \{ await env\.DB\.prepare\("ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'"\)\.run\(\); \} catch \(e\) \{/.test(src), null);
-  t('§3 config: the planner’s stop flag and the six figures are seeded, and a figure somebody has already set is never written back over (real source)',
+  t('§3 config: the planner’s stop flag and the seven figures are seeded by ONE function, never written back over a figure somebody has set (real source)',
     (() => {
-      const seed = src.slice(src.indexOf('async function ensureAdtoolPhase16Register(env) {'), src.indexOf('/* ---- the campaign map, with the rate strategy where the database has caught up ---- */'));
-      const keys = ['adtool_peak_lookback_days', 'adtool_peak_min_days', 'adtool_peak_dead_min_clicks', 'adtool_peak_proven_share', 'adtool_peak_min_block_h', 'adtool_peak_plan_time'];
-      return /'adtool_job_peakplan', 'on'/.test(seed) && (seed.match(/ON CONFLICT\(key\) DO NOTHING/g) || []).length >= 3 &&
-        keys.every(k => seed.indexOf('ADTOOL_PEAK_PLAN_CONFIG_KEYS.' + k.replace('adtool_peak_', '')) >= 0 || seed.indexOf(k) >= 0) &&
+      const seed = src.slice(src.indexOf('async function ensureAdtoolPeakPlanConfig(env) {'), src.indexOf('const ADTOOL_REGISTER_P16 = ['));
+      const keys = ['lookback_days', 'min_days', 'dead_min_clicks', 'proven_share', 'proven_min_orders', 'min_block_h', 'plan_time'];
+      return seed.length > 200 && /'adtool_job_peakplan', 'on'/.test(seed) &&
+        /ON CONFLICT\(key\) DO NOTHING/.test(seed) && !/DO UPDATE/.test(seed) &&
+        keys.every(k => new RegExp("'" + k + "'").test(seed)) &&
+        /const K = ADTOOL_PEAK_PLAN_CONFIG_KEYS, D = ADTOOL_PEAK_PLAN_DEFAULTS;/.test(seed) &&
+        (src.match(/function ensureAdtoolPeakPlanConfig\(env\) \{/g) || []).length === 1 &&
         !/'adtool_job_peakplan', 'off'/.test(src);
+    })(), null);
+  t('§3 config: the planner, the switch job and the probe each SEED BEFORE THEY READ, so a database no page has been opened on still plans tonight (31 Oct finding F1, real source)',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolPeakPlan(env) {'), src.indexOf('async function adtPeakOffWindowsToday(env, acct) {'));
+      const sw = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+      const probe = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  backupStamp: {'));
+      const page = src.slice(src.indexOf('async function ensureAdtoolPhase16Register(env) {'), src.indexOf('/* ---- the campaign map, with the rate strategy where the database has caught up ---- */'));
+      const at = (hay, needle) => hay.indexOf(needle);
+      /* the planner's own stop flag is one of the rows the seed writes, so the ORDER is the fix: the
+         seed call must come before the flag is read, or a blank reads as off and nothing is planned. */
+      const plannerOrder = /await ensureAdtoolPeakPlanConfig\(env\);/.test(job) &&
+        at(job, 'await ensureAdtoolPeakPlanConfig(env);') < at(job, "adtFlag(env, 'adtool_job_peakplan')") &&
+        at(job, "adtFlag(env, 'adtool_job_peakplan')") > 0;
+      /* and the switch job's own gate is untouched: both flags are still read, in that order, before
+         anything starts, and the seed is a line after them rather than anything inside them. */
+      const switchGate = /if \(\(await adtFlag\(env, 'adtool_page_peak'\)\) !== 'on'\) return;\n  if \(\(await adtFlag\(env, 'adtool_job_peakswitch'\)\) !== 'on'\) return;\n/.test(sw) &&
+        at(sw, "adtFlag(env, 'adtool_job_peakswitch')") < at(sw, 'await ensureAdtoolPeakPlanConfig(env);') &&
+        at(sw, 'await ensureAdtoolPeakPlanConfig(env);') < at(sw, "adtJobStart(env, 'adtoolPeakSwitch')");
+      return plannerOrder && switchGate &&
+        /ensureAdtoolPeakPlanConfig\(env\)/.test(probe) && /adtPeakPlanRulesFor\(env\)/.test(probe) &&
+        probe.indexOf('ensureAdtoolPeakPlanConfig(env)') < probe.indexOf('adtPeakPlanRulesFor(env)') &&
+        /await ensureAdtoolPeakPlanConfig\(env\);/.test(page) &&
+        (src.match(/ensureAdtoolPeakPlanConfig\(env\)/g) || []).length >= 5;
     })(), null);
   t('§3 register: the five new entries name the rule, the sources, when they recompute and how they are rechecked, and none of them prints a figure of its own',
     (() => {
@@ -3287,6 +3438,19 @@ function run(argv) {
         /for \(const id of hours\.skipped\) noHours\[id\] = 1;/.test(job) &&
         /if \(noHours\[id\]\) \{ ranOut\+\+; continue; \}/.test(job) &&
         /ADTOOL_PEAK_PLAN_CAP = 60/.test(src) && /ADTOOL_PEAK_PLAN_CHUNK = 10/.test(src) && /ADTOOL_PEAK_PLAN_MS = 20000/.test(src);
+    })(), null);
+  t('§3 planner: the dead rule is handed the listing’s own typed hours, and the hours it gave back are written into the row the page reads (real source)',
+    (() => {
+      const one = src.slice(src.indexOf('async function adtPeakPlanOne(env, row, ctxIn) {'), src.indexOf('function adtPeakScheduleStmt(env, plan) {'));
+      const probe = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  backupStamp: {'));
+      const row = src.slice(src.indexOf('function adtPeakScheduleRow(r) {'), src.indexOf('async function adtPeakSchedulesRead('));
+      return /const dead = adPeakDeadHours\(profile, Object\.assign\(\{\}, c\.rules, \{ typed_ranges: hours\.ranges \}\)\);/.test(one) &&
+        /given_back: sch\.applied \? dead\.given_back : \[\], windows_outside_envelope: dead\.windows_outside_envelope,/.test(one) &&
+        /reasons_json = \?6/.test(src) && /JSON\.stringify\(plan\.reasons\)/.test(src) &&
+        /given_back: Array\.isArray\(dead\.given_back\) \? dead\.given_back : \[\],/.test(row) &&
+        /dead_given_back: schT && schT\.readable \? schT\.given_back : \[\],/.test(src) &&
+        /adPeakDeadHours\(profile, Object\.assign\(\{\}, rules, \{ typed_ranges: hours\.ranges \|\| \[\] \}\)\)/.test(probe) &&
+        /dead_hours: dead,/.test(probe);
     })(), null);
   t('§3 pages: a row nobody set to switch itself is never shown a wanted state, because nothing is touching it (real source)',
     (() => {

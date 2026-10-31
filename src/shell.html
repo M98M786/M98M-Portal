@@ -1362,7 +1362,8 @@ var ADT_REG_MAP = [
   [/held on or off/i, ['PEAK_HOLD']],
   [/listings with video|video cohort/i, ['VIDEO_COHORT', 'VIDEO_ADDED_ON']],
   [/before and after the video/i, ['VIDEO_BEFORE_AFTER']],
-  [/video against no video/i, ['VIDEO_VS_NO_VIDEO']]
+  [/video against no video/i, ['VIDEO_VS_NO_VIDEO']],
+  [/video revisions|sales after the video/i, ['VIDEO_BEFORE_AFTER', 'VIDEO_ADDED_ON', 'VIDEO_COHORT']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
