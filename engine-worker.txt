@@ -4590,6 +4590,31 @@ async function adtFlag(env, key) {
 async function adtJobStart(env, job) { const t = new Date().toISOString(); await env.DB.prepare("INSERT INTO adtool_jobs (job, started_at, status) VALUES (?1, ?2, 'running') ON CONFLICT(job, started_at) DO NOTHING").bind(job, t).run(); return t; }
 async function adtJobEnd(env, job, t, rows, status, note) { await env.DB.prepare("UPDATE adtool_jobs SET finished_at = ?3, rows_written = ?4, status = ?5, note = ?6 WHERE job = ?1 AND started_at = ?2").bind(job, t, new Date().toISOString(), rows || 0, status || 'ok', String(note || '').slice(0, 400)).run(); }
 async function adtBatch(env, stmts) { for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50)); return stmts.length; }
+/* ---- THE ONE FRESHNESS HELPER (owner's brief, 31 Oct, §5) ------------------------------------
+   Every answer that carries an "as of" stamp carries the two thresholds beside it, and this is the
+   only place either figure is read. It lives here, with the helpers every phase shares, rather than
+   inside the phase that happened to need it first: §2's tiles, §3's listing pattern and §4's videos
+   all print the same badge, and three copies of the same pair would be three things to change.
+   One read of portal_config per answer. The figures themselves, their range and what happens to a
+   key nobody has set are adtFreshRules's business, not this function's. */
+let ADTOOL_FRESH_CFG_OK = false;
+async function adtoolFreshnessRules(env) {
+  await ensureAdtoolFreshConfig(env);
+  const cfg = {};
+  for (const r of (((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_fresh_%'").all().catch(() => ({ results: [] }))) || {}).results || [])) cfg[String(r.key)] = r.value;
+  return adtFreshRules(cfg);
+}
+async function ensureAdtoolFreshConfig(env) {
+  /* SEEDED BEFORE IT IS READ, the way the pattern engine's own figures are, so a manager opening the
+     settings meets the figures in force instead of a blank and can see what he is changing from.
+     DO NOTHING on conflict, so a figure somebody has already set is never written back over, and once
+     per isolate, so the hourly sweep is not two writes an hour for the life of the worker. */
+  if (ADTOOL_FRESH_CFG_OK) return;
+  const K = ADTOOL_FRESH_CONFIG_KEYS, D = ADTOOL_FRESH_DEFAULTS;
+  const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, String(value));
+  try { await adtBatch(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min)]); ADTOOL_FRESH_CFG_OK = true; }
+  catch (e) { /* the defaults already answer for an unseeded key; try again on the next call */ }
+}
 
 /* ---- job: listings (facts + margins + taxonomy) ---- */
 /* ---- primary category fill (Phase 1 open item; read-only, one nullable column) ----
@@ -5540,7 +5565,11 @@ const ADTOOL_ACTIONS = {
         await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_FLAG', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), String(p.set.key), v).run();
         return { ok: true, key: String(p.set.key), value: v };
       }
-      return { flags: rows, computed_at: new Date().toISOString() };
+      /* §5 of the 31 Oct brief: the two freshness figures the engine is actually judging on, beside
+         the rows that say what is stored. A key nobody has set still has a figure in force and only
+         the engine knows it, so a settings screen that showed the rows alone would show a blank where
+         there is really a figure. The keys are sent too, so the page need not know their spelling. */
+      return { flags: rows, freshness_rules: await adtoolFreshnessRules(ctx.env), freshness_keys: ADTOOL_FRESH_CONFIG_KEYS, freshness_every_min: ADTOOL_SAMPLER_EVERY_MIN, computed_at: new Date().toISOString() };
     },
   },
   adtoolSearch: {
@@ -6886,6 +6915,13 @@ const ADTOOL_ALERT_RULES = {
      an account that only writes down what it would have sent the finding is still the right one to fix
      before that switch is ever turned on. */
   A22: { sev: 'medium', cool: 1, text: 'peak hours: the ad was off through an hour this listing would normally sell in', action: 'check', why_matters: 'The pattern says this listing sells in that hour and the schedule, or a hold somebody set, had the ad off through it, so a sale that would have come was paid for with a saving nobody wanted.' },
+  /* 31 Oct, §5. The five-minute reading of today's figures, going quiet. Every figure on this tool
+     that says "today" stands on it, and nothing else in the portal would ever have said so: a page
+     whose stamp quietly stopped moving reads exactly like a quiet trading hour. High, because while
+     it is quiet nobody is looking at today at all, and the switching is deciding on a stale picture.
+     The limit is the red one from the freshness settings, so the alert and every badge on every page
+     cross at the same minute and the figure is never written into these words. */
+  A23: { sev: 'high', cool: 1, text: 'today\'s figures: the five-minute reading of eBay\'s running total has gone past its own limit without a single sample landing', action: 'check', why_matters: 'Everything this tool says about today is that reading, so while none is landing the spend, the hour curve, the peak figures and the switching are all deciding on a picture older than the clock printed beside it, and nobody is being told.' },
 };
 function adtAlertUrgency(sev, hoursOpen) {
   /* how loudly the card should read: a high alert open more than 24 h is 'overdue'; otherwise urgency is derived
@@ -7009,7 +7045,7 @@ async function ensureAdtoolPhase5Schema(env) {
   ADTOOL_P5_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P5 = [
-  ['ALERT_RULES', 'The alert rules', 'Twenty-two things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, adtool_peak_schedule, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
+  ['ALERT_RULES', 'The alert rules', 'Twenty-three things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, adtool_peak_schedule, adtool_intraday_ticks, validation_runs, ad_report_tasks, portal_config', 'Every hour', 'Tested against three known cases, held privately in the settings'],
   ['REPORT_YESTERDAY', 'Yesterday\'s report', 'For the company and for each account: spend, sales from ads, ROAS and the expected gain from the ads against the last seven days and against the same weekday a week ago, with orders and profit, how the hours compared with the usual shape, the best and worst listings, and a short list of what changed.', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'Every morning, and caught up through the day if it falls behind', 'Three mornings running with no help by hand'],
   ['ROAS_LADDER', 'ROAS target, and what you can change to reach it', 'The gap between the ROAS you have and the ROAS you want, and the five things you could change to close it, each worked out on the last 30 days with its assumptions printed beside it. Cuts only, never raises.', 'adtool_listing_day, adtool_listings', 'Every morning', 'The numbers were checked by hand over a fixed past period'],
   ['BUDGET_CAPPED_DAY', 'Days a listing ran out of budget', 'A day whose first reading already showed the campaign\'s whole daily budget spent, with clicks flat after it. The ad stopped early.', 'adtool_ads_intraday, campaigns', 'Every morning, for yesterday', 'Counted on the Data health page'],
@@ -7135,6 +7171,39 @@ async function adtoolAlerts(env) {
         }
       }
     } catch (e) { /* no schedule table yet: nothing has been planned, so nothing can have been off wrongly */ }
+    /* A23: the five-minute sampler going quiet. The only thing that writes adtool_intraday_ticks is a
+       sample landing, so the one question worth asking is how long it has been since the last one, and
+       it is asked against THE SAME red figure every "as of" badge on every page is judged against. A
+       page showing red while the alerts screen shows nothing is then impossible.
+       ONLY INSIDE THE SAMPLING WINDOW, AND ONLY AFTER THE FIRST TASK HAS HAD TIME TO BUILD. eBay dates
+       a same-day report task on its own Pacific clock and refuses one filed before midnight there, so
+       no sample can land through the small hours: an alert raised then would be a false alarm every
+       night of the year, which is how an alerts screen stops being read. The window and the grace are
+       the ones the today-freshness check already keeps, not a second pair beside them.
+       Behind its own try, because the ticks table belongs to the intraday phase and this job does not
+       create it: a database without it must still show every other rule. */
+    try {
+      const FRa = await adtoolFreshnessRules(env);
+      const nowD = new Date(), nowMins = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
+      if (adtInSamplingWindow(nowD) && nowMins >= adtSamplingFromMin(nowD) + 15) {
+        const tk = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first();
+        const lastS = tk && tk.t ? String(tk.t) : '';
+        const ageS = adtFreshAgeMin(lastS, nowD.getTime());
+        /* no sample AT ALL inside the window, after the grace, is the same fault and the worse one:
+           null is not nought here either, and it must not read as a sample that landed this minute. */
+        if (ageS == null || ageS > Number(FRa.red_min)) {
+          put('A23', 'all', {
+            last_sample: lastS || null, age_min: ageS,
+            limit_min: Number(FRa.red_min), amber_min: Number(FRa.amber_min),
+            every_min: ADTOOL_SAMPLER_EVERY_MIN, sampling_window: adtSamplingWindowText(nowD),
+            note: lastS
+              ? 'the newest reading landed ' + ageS + ' minutes ago, and the sampler is asked for one every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes'
+              : 'no reading has ever landed, so there is no figure for today behind anything on the pages',
+            where_to_look: 'Data health, under Sampler runs',
+          });
+        }
+      }
+    } catch (e) { /* no ticks table yet: nothing has ever been sampled, so there is no silence to judge */ }
     /* reconcile with the open set: open / keep / clear; respect cool-downs and snoozes */
     const open = {}; for (const r of ((await env.DB.prepare("SELECT alert_id, rule_id, fired_at, cleared_at, snoozed_until FROM adtool_alerts WHERE cleared_at = '' OR cleared_at >= ?1").bind(adtAddDays(today, -30)).all()).results || [])) open[r.alert_id] = r;
     const stmts = []; let fired = 0, kept = 0, cleared = 0; const highNew = [];
@@ -7525,6 +7594,8 @@ const ADTOOL_ACTIONS_P5 = {
         rollup: await env.DB.prepare("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND status = 'ok'").first(),
         profiles: await adtFlag(env, 'adtool_profiles_cursor'), forecast: await adtFlag(env, 'adtool_forecast_cursor'),
       };
+      /* the two thresholds every badge on this answer ages its stamp against, read once */
+      const FR = await adtoolFreshnessRules(env);
       /* THE COHORT'S OWN FOUR FIGURES, and the check the page prints under them. Both are worked out
          here, on the answer that already holds the tiles and the per-listing rows they stand on, so the
          page never has to add anything up for itself. Nothing below reaches eBay. */
@@ -7577,7 +7648,7 @@ const ADTOOL_ACTIONS_P5 = {
         /* the cohort answer and nothing else carries these three. On the whole-fleet answer they are
            null, so one shape serves both and an older page cannot be confused by them. */
         cohort: cohort || null, peak_extras: peakExtras, reconcile: reconcile,
-        freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+        freshness_rules: FR,
         source: 'adtool_listing_today (sampled, provisional) + adtool_listing_day, orders, adtool_ads_intraday (hour curve), adtool_reports, adtool_alerts, sync_state' + (CO ? ', narrowed to adtool_peak_items' : ''),
       };
     },
@@ -7746,7 +7817,49 @@ const ADTOOL_ACTIONS_P5 = {
         { family: 'price clock', cadence: 'daily (first rollup of the day)', last_at: await maxOf('SELECT MAX(day) AS t FROM adtool_price_day') },
         { family: 'page cache (KV)', cadence: 'Live figures update every minute. Other pages update every few minutes.', hits: (await env.DB.prepare("SELECT account AS action, cursor AS hits_misses, last_ok FROM sync_state WHERE job = 'adtoolCache' ORDER BY account").all().catch(() => ({ results: [] }))).results || [] },
       ];
-      return { fresh: await adtFresh(env, 'today'), jobs, schedules, gaps, truth, truth_summary: truthSummary, profit_vs_sheet: profitVsSheet, sheet_law_check: adtSheetLawVerdict(profitVsSheet), profit_law: ADTOOL_PROFIT_LAW, freshness_map: freshnessMap, today_freshness: todayFresh, flags, register, cursors, runnable: ['adtoolRollups', 'adtoolProfiles', 'adtoolForecast', 'adtoolAlerts', 'adtoolReport', 'adtoolRoas', 'adtoolTruth', 'adtoolListingsRefresh'], computed_at: new Date().toISOString() };
+      /* ── §5 of the 31 Oct brief: the sampler's own runs, and a stamp on every tile ──────────────
+         SAMPLER RUNS. adsIntraday keeps no job row of its own, so there is nothing in adtool_jobs or
+         sync_state to list: what it leaves behind is one adtool_intraday_ticks row per account per
+         family for every sample that landed, which is the very record freshness is judged on. The
+         runs are grouped out of those ticks by adtSamplerRuns, so this panel and the A23 alert stand
+         on one source and cannot disagree about whether a sample landed. A run that landed nothing
+         wrote no tick and shows here as a longer gap, which is the honest answer: the question is not
+         whether the timer fired, it is whether anything arrived.
+         Enough ticks are read to cover one run more than the panel shows, so the oldest row on it has
+         a real gap rather than a blank: at most a couple of dozen ticks belong to one run (a handful
+         of accounts in two families), and the figure is worked out from the number shown rather than
+         typed, so widening the panel widens the read with it. */
+      const FRh = await adtoolFreshnessRules(env);
+      const lastSample = await maxOf('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks');
+      const tickRows = ((await env.DB.prepare('SELECT account, family, report_day, sampled_at, rows_total, rows_changed, rows_corrected FROM adtool_intraday_ticks ORDER BY sampled_at DESC LIMIT ?1')
+        .bind((ADTOOL_SAMPLER_RUNS_SHOWN + 1) * 24).all().catch(() => ({ results: [] }))).results) || [];
+      const samplerRuns = adtSamplerRuns(tickRows, { limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: FRh });
+      const nowH = new Date();
+      const sampler = Object.assign({
+        runs: samplerRuns, runs_shown: ADTOOL_SAMPLER_RUNS_SHOWN, every_min: ADTOOL_SAMPLER_EVERY_MIN,
+        ticks_read: tickRows.length, last_sample: lastSample,
+        /* the page badge's own verdict, which goes amber before the alert goes red: amber is a page
+           telling somebody who is already looking, red is the point at which somebody is told. */
+        verdict: adtFreshVerdict(lastSample, FRh, nowH.getTime()).verdict,
+        age_min: adtFreshAgeMin(lastSample, nowH.getTime()),
+        /* outside this window no sample CAN land, so neither the badge nor A23 judges it late there */
+        in_sampling_window: adtInSamplingWindow(nowH), sampling_window: adtSamplingWindowText(nowH),
+        alert_rule: 'A23', source: 'adtool_intraday_ticks', sent_to_ebay: false,
+      }, adtFreshStamp(lastSample));
+      /* A STAMP ON EVERY TILE. Each figure on this page is as old as the thing that last wrote it, and
+         until now not one of them said so: a count of jobs with errors read the same whether it was
+         worked out a minute or a day ago. The stamps come from the cursors and the tables themselves,
+         one per tile, and a tile with nothing behind it carries null rather than a time. */
+      const jobsLast = jobs.reduce((t, j) => { const s = String(j.last_end || j.last_start || ''); return (s && s > t) ? s : t; }, '');
+      const tile_stamps = {
+        number_checks: adtFreshStamp(await maxOf("SELECT MAX(ran_at) AS t FROM validation_runs WHERE metric_id LIKE 'ADTOOL_%'")),
+        jobs: adtFreshStamp(jobsLast),
+        campaigns_unnamed: adtFreshStamp(await lastOk('adsItems')),
+        orders_not_costed: adtFreshStamp(await lastOk('orderSync')),
+        categories: adtFreshStamp(await lastOk('listingSync')),
+        sampler: adtFreshStamp(lastSample),
+      };
+      return { fresh: await adtFresh(env, 'today'), jobs, schedules, gaps, truth, truth_summary: truthSummary, profit_vs_sheet: profitVsSheet, sheet_law_check: adtSheetLawVerdict(profitVsSheet), profit_law: ADTOOL_PROFIT_LAW, freshness_map: freshnessMap, today_freshness: todayFresh, flags, register, cursors, freshness_rules: FRh, freshness_keys: ADTOOL_FRESH_CONFIG_KEYS, sampler, tile_stamps, runnable: ['adtoolRollups', 'adtoolProfiles', 'adtoolForecast', 'adtoolAlerts', 'adtoolReport', 'adtoolRoas', 'adtoolTruth', 'adtoolListingsRefresh'], computed_at: new Date().toISOString() };
     },
   },
 };
@@ -9065,7 +9178,7 @@ const ADTOOL_ACTIONS_P9 = {
         /* the cohort answer and nothing else carries these. Null on the whole-fleet answer, so one
            shape serves both. */
         cohort: cohort || null, cohort_listings: CO ? CO.entries.length : null,
-        freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+        freshness_rules: await adtoolFreshnessRules(env),
         hero, by_account, by_day, weekday,
         frontier: Object.assign(frontier, { note: w.includes_today ? 'today\'s rows are sampled and provisional; an order placed today is unpriced until its fees and cost land' : null }),
         verdict,
@@ -11602,7 +11715,7 @@ async function adPeakOverviewExtras(env, opts) {
     },
     listings: listings, hours_today: hoursToday,
     spend_avoided_off_hours: avoided, sales_in_vs_out: sales,
-    freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+    freshness_rules: await adtoolFreshnessRules(env),
     not_from_ebay: [
       'eBay publishes no ad spend by hour at all: the hourly figures here are the portal’s own readings of eBay’s running total, taken every few minutes, with the difference booked to the hour it arrived in.',
       'eBay does not say which hour a click or an ad-attributed sale happened in, so orders inside and outside the hours are counted by the hour the order arrived in, not the hour of the click.',
@@ -12637,9 +12750,136 @@ function adPeakReadingDisagree(input) {
    the tests assert the same functions, so the cohort cannot come to mean two different things on
    two screens. */
 const ADTOOL_PEAK_COHORT_CAP = 500;
-/* how old an "as of" stamp may be before a tile says so, in minutes. The page reads these off the
-   answer rather than carrying them, so one change here moves every badge at once. */
-const ADTOOL_PEAK_FRESHNESS_RULES = { amber_min: 15, red_min: 60 };
+/* ---- pure: THE ONE FRESHNESS LAW (owner's brief, 31 Oct, §5) --------------------------------
+   How old an "as of" stamp may be before the tile beside it says so, in minutes. Amber is a badge on
+   a page and nothing more; red is the point at which a person is told, through the alert rule A23.
+
+   TWO FIGURES, ONE PLACE, AND NOT ONE OF THEM IS TYPED ANYWHERE ELSE. Every page reads both off the
+   answer it is drawing rather than carrying them, and every answer reads them out of here, so a
+   manager changing one in Management moves every badge and the alert together. Until this block
+   existed the pair were a fixed constant repeated on five payloads, which is the same fault in
+   slower motion: the day somebody changed the figure, five answers would have gone on sending the
+   old one.
+
+   A figure nobody has set falls back to the owner's own, and the defaults are the figures the seed
+   writes, so a database that has never been written to and a database set to the defaults behave
+   the same way. Amber is never allowed past red: a tile cannot be amber and red at once, and a
+   mistyped pair must not be the thing that stops a badge from reading. */
+const ADTOOL_FRESH_DEFAULTS = { amber_min: 15, red_min: 60 };
+const ADTOOL_FRESH_CONFIG_KEYS = { amber_min: 'adtool_fresh_amber_min', red_min: 'adtool_fresh_red_min' };
+/* the sampler's own cadence, from the five-minute cron slot it actually sits on, so every sentence
+   about it is written from the timer rather than typed beside it. */
+const ADTOOL_SAMPLER_EVERY_MIN = 5;
+/* WHAT MAKES TWO SAMPLES ONE RUN. The sampler writes one tick per account per family, seconds apart
+   inside the one invocation, and the invocations themselves are five minutes apart. So a tick more
+   than half the cadence after the one before it begins a new run, and everything closer belongs to
+   the run already open. Half, because that is the only split that cannot put two invocations into
+   one run or one invocation into two. */
+const ADTOOL_SAMPLER_RUN_SPLIT_S = Math.round(ADTOOL_SAMPLER_EVERY_MIN * 60 / 2);
+const ADTOOL_SAMPLER_RUNS_SHOWN = 12;
+function adtFreshRules(cfg) {
+  /* the two figures as the engine will actually judge on them. Held to a range they mean something
+     in rather than refused, for the same reason the pattern engine holds its own: a figure somebody
+     mistyped must not be what stops a badge or an alert from working. */
+  const c = cfg || {}, K = ADTOOL_FRESH_CONFIG_KEYS, D = ADTOOL_FRESH_DEFAULTS;
+  const num = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) || n <= 0 ? d : n; };
+  const amber = Math.min(1440, Math.max(1, Math.round(num(c[K.amber_min], D.amber_min))));
+  const red = Math.min(1440, Math.max(1, Math.round(num(c[K.red_min], D.red_min))));
+  /* amber past red would make the badge amber where the alert is already red. Red wins, because red
+     is the figure a person is told on and the one that must not move under them. */
+  return { amber_min: Math.min(amber, red), red_min: red };
+}
+function adtFreshAgeMin(stamp, nowMs) {
+  /* how many minutes old a stamp is, or NULL where there is no stamp or none that could be read.
+     NULL IS NOT NOUGHT. A tile with nothing behind it would otherwise read as having been read this
+     very minute, which is the one answer a freshness badge must never give. */
+  const ms = adPeakStampMs(stamp);
+  if (!isFinite(ms)) return null;
+  const now = Number(nowMs);
+  return Math.round(((isFinite(now) ? now : Date.now()) - ms) / 60000);
+}
+function adtFreshVerdict(stamp, rules, nowMs) {
+  /* what the badge beside a stamp should say: 'none' with nothing behind it, then 'ok', 'amber' or
+     'red' by the two figures in force. The thresholds are crossed when the age goes PAST them, not
+     when it reaches them, which is the same comparison the pages have always drawn. */
+  const age = adtFreshAgeMin(stamp, nowMs);
+  if (age == null) return { verdict: 'none', age_min: null };
+  const R = adtFreshRules(null), r = rules && rules.red_min != null ? rules : R;
+  const red = Number(r.red_min), amber = Number(r.amber_min);
+  if (isFinite(red) && age > red) return { verdict: 'red', age_min: age };
+  if (isFinite(amber) && age > amber) return { verdict: 'amber', age_min: age };
+  return { verdict: 'ok', age_min: age };
+}
+function adtFreshStamp(stamp) {
+  /* ONE SHAPE FOR EVERY "as of" ON THIS TOOL: the UK clock a reader sees, and the instant itself for
+     the badge to age. Both null where the stamp could not be read, so a tile says it has no reading
+     rather than printing midnight. */
+  const ms = adPeakStampMs(stamp);
+  if (!isFinite(ms)) return { as_of: null, as_of_at: null };
+  return { as_of: adPeakUkClock(stamp), as_of_at: new Date(ms).toISOString() };
+}
+function adtSamplerRuns(ticks, opts) {
+  /* THE FIVE-MINUTE SAMPLER'S OWN RUNS, read back out of what it actually writes.
+     adsIntraday keeps no job row of its own: what it leaves behind is one adtool_intraday_ticks row
+     per account per family for every sample that landed, which is the very thing freshness is judged
+     on. So the runs are grouped from those ticks and not from a second record beside them, and the
+     panel and the alert can never disagree about whether a sample landed.
+     A run that landed nothing writes no tick and so appears here as a GAP, which is exactly what it
+     is: the question this panel answers is not whether the timer fired but whether anything arrived.
+     Returns newest first, each run with the gap to the run before it. The oldest run returned has a
+     gap only where an older run was actually in the rows read; otherwise it is null and never nought. */
+  const o = opts || {};
+  const limit = Math.max(1, Math.round(Number(o.limit) || ADTOOL_SAMPLER_RUNS_SHOWN));
+  const splitMs = Math.max(1000, Math.round(Number(o.split_s) || ADTOOL_SAMPLER_RUN_SPLIT_S) * 1000);
+  /* the thresholds the gap is judged against: the caller's, and the law's own where none was passed */
+  const R = (o.rules && o.rules.red_min != null) ? o.rules : adtFreshRules(null);
+  const rows = [];
+  for (const t of (ticks || [])) {
+    const ms = adPeakStampMs(t && t.sampled_at);
+    if (!isFinite(ms)) continue;                 /* a stamp nobody could read dates no run */
+    rows.push({ ms: ms, r: t });
+  }
+  rows.sort((a, b) => a.ms - b.ms);              /* oldest first to group, reversed at the end */
+  const runs = [];
+  for (const x of rows) {
+    const cur = runs.length ? runs[runs.length - 1] : null;
+    if (!cur || x.ms - cur.last_ms > splitMs) {
+      runs.push({ first_ms: x.ms, last_ms: x.ms, ticks: [x.r] });
+    } else {
+      cur.last_ms = x.ms; cur.ticks.push(x.r);
+    }
+  }
+  const out = runs.map((g, i) => {
+    const prev = i > 0 ? runs[i - 1] : null;
+    const n0 = v => { const n = Number(v); return isFinite(n) ? n : 0; };
+    let rowsTotal = 0, changed = 0, corrected = 0;
+    const accts = {}, fams = {}, days = {};
+    for (const t of g.ticks) {
+      rowsTotal += n0(t.rows_total); changed += n0(t.rows_changed); corrected += n0(t.rows_corrected);
+      if (t.account != null && String(t.account) !== '') accts[String(t.account)] = 1;
+      if (t.family != null && String(t.family) !== '') fams[String(t.family)] = 1;
+      if (t.report_day != null && String(t.report_day) !== '') days[String(t.report_day)] = 1;
+    }
+    /* THE GAP IS MEASURED START TO START, which is what "five minutes apart" means for a timer. */
+    const gap = prev ? Math.round((g.first_ms - prev.first_ms) / 60000) : null;
+    const gv = gap == null ? null : (Number(R.red_min) > 0 && gap > Number(R.red_min) ? 'red' : (Number(R.amber_min) > 0 && gap > Number(R.amber_min) ? 'amber' : 'ok'));
+    return {
+      at: new Date(g.first_ms).toISOString(), at_uk: adPeakUkClock(new Date(g.first_ms).toISOString()),
+      /* the spread from the run's first landed sample to its last, which is as near its length as the
+         record can go: the sampler stamps each sample as it lands and nothing marks the run's end. */
+      duration_s: Math.round((g.last_ms - g.first_ms) / 1000),
+      samples: g.ticks.length, accounts: Object.keys(accts).length, families: Object.keys(fams).sort(),
+      report_days: Object.keys(days).sort(),
+      rows: rowsTotal, rows_changed: changed, rows_corrected: corrected,
+      /* 'empty' is a report that arrived carrying no listing at all, which is a different thing from
+         a report whose figures had not moved: that one is 'ok' with nothing changed. */
+      status: rowsTotal > 0 ? 'ok' : 'empty',
+      gap_min: gap, gap_verdict: gv,
+    };
+  });
+  out.reverse();
+  return out.slice(0, limit);
+}
 function adPeakUkDayOf(stamp) {
   /* the UK day a stored stamp fell in. adtool_peak_items stamps with datetime('now'), which is UTC
      with no zone on it, and through a British summer 23:30 UTC is already half past midnight the
@@ -13983,6 +14223,10 @@ const ADTOOL_REGISTER_P16 = [
   ['VIDEO_COHORT', 'Which listings carry a video', 'eBay’s own answer, asked listing by listing: GetItem carries the video IDs on a listing, and a listing with at least one is in. The sweep works through the fleet active listings first and longest-unchecked first, so every live listing is asked about within a day and again every ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days. Beside eBay’s answer sits the portal’s own record, where a lister marks the video stage done, and the two differences are listed rather than reconciled away: a video nobody recorded, and a record with no video. A listing counts from the day we can prove it carried the video, which is its upload day where that decoded and otherwise the first day the sweep saw it.', 'items_api, adtool_listing_video, listing_ladder', 'Every hour, up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account, and each live listing again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after it was last asked about', 'The sweep’s own count read back against the 102 listings the 18 October study found, and unit tests on the two difference lists'],
   ['VIDEO_ADDED_ON', 'The day a video went on a listing', 'eBay publishes no upload date for a video, so it is recovered from the video thumbnail’s picture address: sixteen characters that decode to twelve bytes whose ninth to twelfth, read as one number, are the second the file was uploaded. Verified on 1,246 listing photos and on all 102 video thumbnails of the 18 October study. The item page’s own uploadDate is NOT this: it matched the listing’s start time on all 102, to the minute, so it is the listing date and is never read. Where the thumbnail cannot be reached the lister’s own record date is used and marked as such, and where there is neither the day is blank, never a guess.', 'adtool_listing_video, listing_ladder', 'With the sweep, and only for a listing whose day is not known yet', 'The decoded day read back against the 102 dates the 18 October study recovered, and unit tests on the decode itself'],
   ['VIDEO_BEFORE_AFTER', 'Sales before and after the video', 'Equal windows each side of the upload day, with that day itself in neither of them because the video went on part way through it. The window is the shorter of three: the days since the video, the history before it, and the ceiling asked for, which is ' + ADTOOL_VIDEO_WINDOWS.join(' days and then ') + ' days once that many exist either side. Units and takings come from the order book, cancelled and lost orders left out, on London dates; the ad spend is the click fee already booked against the listing’s day. Beside each listing sits the rest of its account over the same dates, so a fortnight when the whole account fell is not read as the video’s doing.', 'adtool_listing_day, orders, adtool_listing_video, adtool_listings', 'Worked out when the page is opened, over finished days only', 'The same arithmetic as the 18 October workbook, unit tested against three of its own listings'],
+  /* the 31 Oct brief, §5: how old a figure may be before the tile beside it says so, and the
+     five-minute reading everything about today stands on */
+  ['FRESHNESS', 'How old a figure is allowed to be before the tile says so', 'Every tile carrying an “as of” time ages it against two figures a manager sets: the first turns the badge beside it amber, the second turns it red and raises an alert. Both are read off the answer the tile is drawn from, and every answer reads them out of one place, so changing either in Management moves every badge and the alert together. A figure nobody has set falls back to the owner’s own, both are held to a range they mean something in, and amber is never allowed past red, because a tile cannot be both at once. A tile with no reading behind it says so rather than printing a time.', 'portal_config', 'Read with every answer that carries a stamp', 'Unit tests on a key nobody has set, on a mistyped figure, on amber past red, and on a stamp nobody could read'],
+  ['SAMPLER_RUNS', 'The five-minute reading of today\'s figures, run by run', 'eBay publishes no hourly ad figures, so the portal reads its running total every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes, and every figure about today stands on that reading. The sampler keeps no run record of its own: what it writes is one row per account per family for each sample that LANDED, and the runs are grouped back out of those rows, the same record the badges and the stale alert are judged on. Each run shows when it started, how long its samples spread over, how many rows it carried and the gap back to the one before it, so a stall reads as one long gap. A run that landed nothing wrote nothing and is part of that gap.', 'adtool_intraday_ticks, portal_config', 'Read every time the Data health page is opened', 'Unit tests on samples seconds apart counting as one run, on a missed run showing as a longer gap, on the oldest run shown carrying no gap it cannot know, and the gaps read back against the five-minute timer'],
   ['VIDEO_VS_NO_VIDEO', 'With a video against without one', 'The same aggregate twice over the same dates, once over the listings that carry a video and once over the listings of the same account that do not, per account and per case type. Views and the click-through rate come from eBay’s traffic report, which is per listing over a 7-day and a 30-day window and never per video play; everything else is daily. Each side is divided by its own number of listings, because an account with four videos and four hundred other listings would otherwise read as a collapse. A group with nothing on one side is blank and says so, because a comparison against nought is not a comparison.', 'traffic_listing, adtool_listing_day, adtool_listings, adtool_listing_video', 'Worked out when the page is opened', 'Unit tests on the per-listing division, on a group with one side empty, and the figures read back against the Overview for the same window'],
 ];
 let ADTOOL_P16_REG_OK = false;
@@ -14840,7 +15084,7 @@ const ADTOOL_ACTIONS_P16 = {
         asked: { item_id: item, days: days, day: lastDay },
         uk_now: { date: uk.date, hour: uk.hour, minute: uk.minute, weekday: ADTOOL_DOW[uk.weekday] },
         hours_read_for: hourRead.read || [], hours_not_read_for: hourRead.skipped || [],
-        rules: rules, freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+        rules: rules, freshness_rules: await adtoolFreshnessRules(env),
         source: 'adtool_listing_hour (our own readings of eBay\'s running total, the reconciled column where the day has been settled) and adtool_listing_day for the day eBay published',
         note: 'eBay publishes no ad figures by hour. Every hourly figure here is the portal\'s own reading of eBay\'s running total every few minutes, each difference booked to the hour it arrived in. A day\'s first reading belongs to no hour of trading and is left out.',
         computed_at: new Date().toISOString(),
@@ -15140,7 +15384,28 @@ async function adtoolVideoBoardCompute(env, p, ctx) {
     "SELECT COALESCE(NULLIF(date_source, ''), 'not looked up yet') AS date_source, COUNT(*) AS n FROM adtool_listing_video WHERE video_count > 0" +
     (acct ? ' AND account = ?1' : '') + ' GROUP BY 1 ORDER BY n DESC'
   ).bind(...(acct ? [acct] : [])).all().catch(() => ({ results: [] }))).results || [];
-  cohort.as_of = CO.as_of;
+  /* §5 of the 31 Oct brief: A STAMP ON EVERY TILE, IN ONE SHAPE.
+     `as_of` was the cohort read's own ISO instant, which is not what a tile prints: §2's tiles print
+     a UK clock and age the instant beside it, and an answer carrying the same field name in a second
+     shape is how the two pages come to disagree about what "as of" means. So it is the house shape
+     here too, and each of the four figures on this panel carries the stamp of the thing that actually
+     wrote it rather than sharing the sweep's: eBay's answer is as old as the sweep's last check, the
+     lister record is as old as the last row a lister saved, and the two together are as old as the
+     younger of them. A figure with nothing behind it carries null and never a time. */
+  const ladderAt = ladder.reduce((t, r) => { const s = String((r && r.updated_at) || ''); return (s && s > t) ? s : t; }, '');
+  const sweepAt = cover ? String(cover.last_checked || '') : '';
+  const bothAt = (sweepAt && ladderAt) ? (sweepAt < ladderAt ? sweepAt : ladderAt) : '';
+  cohort.stamps = {
+    on_ebay: adtFreshStamp(sweepAt),
+    recorded: adtFreshStamp(ladderAt),
+    both: adtFreshStamp(bothAt),
+    coverage: adtFreshStamp(sweepAt),
+  };
+  /* the panel's own stamp is the SWEEP's and nothing else. Standing it on the moment this answer was
+     worked out would print a clock for a check that has never run, which is the fault the whole §5
+     exists to stop: `read_at` keeps the moment of the read, where it says what it is. */
+  Object.assign(cohort, adtFreshStamp(sweepAt));
+  cohort.read_at = CO.as_of;
 
   /* ── the Overview's own blocks, over this cohort ────────────────────────────────────────────
      Through the Overview's OWN two actions, asked for cohort 'video'. Not a copy of their
@@ -15316,7 +15581,7 @@ async function adtoolVideoBoardCompute(env, p, ctx) {
     before_after: before_after, before_after_windows: ADTOOL_VIDEO_WINDOWS, control_note: control_note,
     video_vs_no_video: video_vs_no_video,
     cohort_meta: { listings: CO.entries.length, rows_read: CO.rows_read, cap: CO.cap, held_back: CO.held_back, as_of: CO.as_of },
-    freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+    freshness_rules: await adtoolFreshnessRules(env),
     where_the_per_listing_record_lives: 'adtoolRunToday',
     computed_at: new Date().toISOString(),
     source: 'eBay Trading GetItem for the videos, the ads report and the order book for the money, eBay\'s traffic report for views',

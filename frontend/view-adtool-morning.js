@@ -20,7 +20,16 @@
     '.mo-urg.overdue{color:#fff;background:#e0563f;border-color:#e0563f}.mo-urg.now{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}.mo-urg.soon{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.1)}.mo-urg.watch{color:var(--text-2)}' +
     '.mo-line{display:grid;grid-template-columns:104px 1fr;gap:8px;font-size:12px;margin-top:5px;align-items:start}' +
     '.mo-line .lb{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding-top:1px}.mo-line .vl{color:var(--text-2)}' +
-    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}'
+    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}' +
+    /* §5 of the 31 Oct brief: the "as of" stamp under a tile and the badge that ages it. THIS FILE'S
+       OWN PREFIX. The peak page draws the same badge under its own prefix: a class borrowed across two
+       spliced files resolves differently in the two portals, which is the fault the shared-view law
+       was written for. */
+    '.mo-asof{font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:5px;letter-spacing:.02em}' +
+    '.mo-fresh{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;border:1px solid var(--gold-line);font-size:10px;font-weight:800;color:var(--text-2);white-space:nowrap}' +
+    '.mo-fresh.amber{color:var(--gold-a);border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.1)}' +
+    '.mo-fresh.red{color:#fff;background:#e0563f;border-color:#e0563f}' +
+    '.mo-srun{font-variant-numeric:tabular-nums}.mo-srun .gap{font-weight:800}.mo-srun .gap.amber{color:var(--gold-a)}.mo-srun .gap.red{color:#ffb3a6}'
   );
   /* ONE money format across the four advertising view files: thousands separated, two decimals
      unless the caller asks for fewer. The same figure must not read £1,234 on one page and
@@ -44,6 +53,33 @@
   function fail(id, e) { $(id).innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'failed') + '</div></div>'; }
   function kpi(k, v, d, c) { return '<div class="an-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   function ago(t) { if (!t) return 'never'; var ms = Date.now() - new Date(String(t).replace(' ', 'T') + (String(t).endsWith('Z') ? '' : 'Z')).getTime(); if (isNaN(ms)) return esc(String(t).slice(0, 16)); var m = Math.round(ms / 60000); return m < 60 ? m + ' min ago' : (m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'); }
+  /* ── §5 of the 31 Oct brief: "as of HH:MM" under every tile ────────────────────────────────
+     THE TWO THRESHOLDS ARE READ OFF THE ANSWER, NEVER TYPED HERE. The engine sends them beside the
+     stamps as `freshness_rules`, from the one place they are stored, so the day somebody changes
+     either figure in Management every badge on this page follows and nothing has to be edited. A
+     page that typed 15 and 60 would go on drawing amber and red at 15 and 60 for ever. */
+  function moMins(at) {
+    if (!at) return null;
+    var s = String(at);
+    var d = new Date(s.replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
+    return isNaN(d.getTime()) ? null : Math.round((Date.now() - d.getTime()) / 60000);
+  }
+  function moFreshBadge(at, rules) {
+    if (!at) return '';
+    var mins = moMins(at);
+    if (mins == null) return '<span class="mo-fresh">reading time not understood</span>';
+    var amber = num(rules && rules.amber_min), red = num(rules && rules.red_min);
+    if (red != null && mins > red) return '<span class="mo-fresh red">' + mins + ' min old</span>';
+    if (amber != null && mins > amber) return '<span class="mo-fresh amber">' + mins + ' min old</span>';
+    return '';
+  }
+  /* `st` is the engine's own {as_of, as_of_at} pair. NO STAMP IS NOT MIDNIGHT: a tile with nothing
+     behind it says it has no reading rather than printing a time nobody could stand on. */
+  function moStamp(st, rules) {
+    var S = st || {};
+    if (!S.as_of) return '<div class="mo-asof">no reading yet</div>';
+    return '<div class="mo-asof">as of ' + esc(String(S.as_of)) + ' UK' + moFreshBadge(S.as_of_at, rules) + '</div>';
+  }
 
   /* ── Phase 4 alert pieces ──────────────────────────────────────────────────────────────────
      Each alert reads as five plain lines — what happened, where, why it matters, what to do, how
@@ -250,6 +286,60 @@
   }
 
 
+  /* ══ SAMPLER RUNS (owner's brief, 31 Oct, §5) ══════════════════════════════════════════════
+     eBay publishes no hourly ad figures, so the portal reads its running total for today every few
+     minutes, and every figure on this tool that says "today" stands on that reading. The sampler
+     keeps no run record of its own: what it leaves behind is one row per account per family for each
+     sample that LANDED, and the engine groups the runs back out of those rows. A run that landed
+     nothing wrote nothing, so it shows here as a longer gap, which is the honest answer and the
+     whole point: the question is not whether the timer fired, it is whether anything arrived.
+     NOTHING IS TYPED. The cadence, the window and both thresholds come off the answer. ══ */
+  function samplerPanel(SM, RU) {
+    var S = SM || {}, runs = S.runs || [];
+    var every = num(S.every_min);
+    var h = '<div class="an-panel"><h3>Sampler runs' + src('SAMPLER_RUNS', 'how') + '</h3><div class="an-sub">' +
+      'The portal reads eBay\'s running total for today' + (every != null ? ' every ' + every + ' minutes' : ' every few minutes') +
+      ', and that reading is what every figure here about today stands on. ' +
+      '<b>Each run below should start' + (every != null ? ' ' + every + ' minutes' : '') + ' after the one before it.</b> ' +
+      'A longer gap is a run that landed nothing, so a stall reads as one long gap rather than as something anybody has to work out. ' +
+      'Nothing can land through the small hours, because eBay dates a same-day report on its own Pacific clock and refuses one filed before midnight there' +
+      (S.sampling_window ? ', so ' + esc(String(S.sampling_window)) + ' is the only part of the day a gap means anything in' : '') + '.' +
+      (S.source ? ' Read from ' + esc(String(S.source)) + ', which is the same record the badges above and the stale alert are judged on, so this panel and that alert cannot disagree.' : '') +
+      '</div>';
+    if (!runs.length) {
+      return h + '<div class="an-empty">No reading has landed yet, so there is no run to show.</div></div>';
+    }
+    h += '<div class="an-scroll"><table class="an-tbl mo-srun"><thead><tr><th>Started (UK)</th><th class="r">Gap before it</th>' +
+      '<th class="r">Samples</th><th class="r">Accounts</th><th class="r">Rows</th><th class="r">Changed</th><th class="r">Spread over</th><th>What landed</th></tr></thead><tbody>';
+    h += runs.map(function (r) {
+      var gap = num(r.gap_min);
+      /* NO GAP IS NOT NOUGHT: the oldest run shown has nothing before it in what was read, and
+         printing nought there would read as two runs at the very same minute. */
+      var gapCell = gap == null
+        ? '<span class="an-sub">none on record</span>'
+        : '<span class="gap ' + esc(String(r.gap_verdict === 'red' ? 'red' : (r.gap_verdict === 'amber' ? 'amber' : ''))) + '">' + gap + ' min</span>';
+      var dur = num(r.duration_s);
+      var corrected = num(r.rows_corrected);
+      return '<tr><td>' + esc(String(r.at_uk || '—')) + (r.report_days && r.report_days.length ? '<div class="an-sub" style="margin:2px 0 0">for ' + esc(r.report_days.join(', ')) + '</div>' : '') + '</td>' +
+        '<td class="r">' + gapCell + '</td>' +
+        '<td class="r">' + (num(r.samples) == null ? '—' : r.samples) + '</td>' +
+        '<td class="r">' + (num(r.accounts) == null ? '—' : r.accounts) + '</td>' +
+        '<td class="r">' + (num(r.rows) == null ? '—' : r.rows) + '</td>' +
+        '<td class="r">' + (num(r.rows_changed) == null ? '—' : r.rows_changed) +
+          (corrected ? '<div class="an-sub" style="margin:2px 0 0">' + corrected + ' put right by eBay</div>' : '') + '</td>' +
+        '<td class="r">' + (dur == null ? '—' : dur + ' s') + '</td>' +
+        '<td' + (r.status === 'empty' ? ' class="an-neg"' : '') + '>' +
+          esc(r.status === 'empty' ? 'the report carried no listing' : 'samples landed') + '</td></tr>';
+    }).join('');
+    h += '</tbody></table></div>';
+    h += '<div class="an-sub" style="margin-top:8px">' +
+      'The spread is from a run\'s first landed sample to its last, which is as near its length as the record goes: ' +
+      'each sample is stamped as it arrives and nothing marks a run\'s end. ' +
+      (num(S.ticks_read) != null ? 'Grouped from the last ' + S.ticks_read + ' samples on record. ' : '') +
+      '<b>Nothing on this panel reaches eBay.</b></div>';
+    return h + '</div>';
+  }
+
   /* ---------------- Data health ---------------- */
   VIEWS.adtoolHealth = {
     label: 'Data health (ads)', hidden: true, order: 94, roles: ROLES, icon: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
@@ -260,7 +350,25 @@
         adtFreshShow('moHeFresh', D.fresh);
         D.truth = D.truth || []; D.jobs = D.jobs || []; D.gaps = D.gaps || {}; D.schedules = D.schedules || {}; D.cursors = D.cursors || {}; D.truth_summary = D.truth_summary || []; D.flags = D.flags || []; D.register = D.register || [];
         var pass = D.truth.filter(function (t) { return t.status === 'PASS'; }).length, failn = D.truth.filter(function (t) { return t.status === 'FAIL'; }).length;
-        var h = '<div class="an-kpis">' + kpi('Number checks', failn ? failn + ' FAIL' : pass + ' PASS', failn ? 'a mismatch holds this page back' : 'every checked number adds up', failn ? 'an-neg' : 'an-pos') + kpi('Jobs with errors', String(D.jobs.filter(function (j) { return j.last_status === 'error'; }).length), D.jobs.length + ' jobs watched') + kpi('Campaigns we cannot name', String((D.gaps.unresolved_campaign_ids && D.gaps.unresolved_campaign_ids.n) || 0), 'we have no name for these yet') + kpi('Orders not costed yet (30 days)', String((D.gaps.pending_cost_orders_30d && D.gaps.pending_cost_orders_30d.n) || 0), 'counted, never guessed') + kpi('Categories filled in', ((D.gaps.categories && D.gaps.categories.filled) || 0) + ' / ' + ((D.gaps.categories && D.gaps.categories.total) || 0), 'active listings, still filling') + '</div>';
+        /* §5: the two thresholds and the per-tile stamps, both off this answer. An older cached
+           payload carries neither, and then every tile reads "no reading yet", which is the honest
+           answer for a payload that does not say when it was read. */
+        var RU = D.freshness_rules || null, TS = D.tile_stamps || {}, SM = D.sampler || {};
+        /* OUTSIDE THE SAMPLING WINDOW NOTHING IS LATE. eBay dates a same-day report task on its own
+           Pacific clock and refuses one filed before midnight there, so no reading can land through
+           the small hours and a red badge then would be this page crying wolf every night. */
+        var smVerdict = SM.in_sampling_window === false ? 'window' : String(SM.verdict || '');
+        var h = '<div class="an-kpis">' + kpi('Number checks', failn ? failn + ' FAIL' : pass + ' PASS', (failn ? 'a mismatch holds this page back' : 'every checked number adds up') + moStamp(TS.number_checks, RU), failn ? 'an-neg' : 'an-pos') + kpi('Jobs with errors', String(D.jobs.filter(function (j) { return j.last_status === 'error'; }).length), D.jobs.length + ' jobs watched' + moStamp(TS.jobs, RU)) + kpi('Campaigns we cannot name', String((D.gaps.unresolved_campaign_ids && D.gaps.unresolved_campaign_ids.n) || 0), 'we have no name for these yet' + moStamp(TS.campaigns_unnamed, RU)) + kpi('Orders not costed yet (30 days)', String((D.gaps.pending_cost_orders_30d && D.gaps.pending_cost_orders_30d.n) || 0), 'counted, never guessed' + moStamp(TS.orders_not_costed, RU)) + kpi('Categories filled in', ((D.gaps.categories && D.gaps.categories.filled) || 0) + ' / ' + ((D.gaps.categories && D.gaps.categories.total) || 0), 'active listings, still filling' + moStamp(TS.categories, RU)) +
+          /* the sampler's own tile, beside the five it makes the rest of this page possible for */
+          kpi('Today\'s readings', SM.age_min == null ? 'none yet' : SM.age_min + ' min ago',
+            (smVerdict === 'window'
+              ? 'the part of the day eBay will give us a reading in has not started yet'
+              : (smVerdict === 'red'
+                ? 'past the limit set for it, and the alert ' + esc(String(SM.alert_rule || 'A23')) + ' has been raised'
+                : (smVerdict === 'amber' ? 'older than the first limit set for it' : 'landing on time'))) +
+            moStamp(SM, RU),
+            smVerdict === 'red' ? 'an-neg' : (smVerdict === 'amber' || smVerdict === 'window' ? '' : 'an-pos')) + '</div>';
+        h += samplerPanel(SM, RU);
         h += '<div class="an-panel"><h3>Jobs</h3><table class="an-tbl"><thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th class="r">Rows</th><th>Status</th><th>Note</th></tr></thead><tbody>' + D.jobs.map(function (j) { return '<tr><td>' + esc(j.job) + '</td><td>' + esc(D.schedules[j.job] || '—') + '</td><td>' + esc(String(j.last_end || j.last_start || '').slice(0, 16)) + '</td><td class="r">' + (j.last_rows == null ? '—' : j.last_rows) + '</td><td class="' + (j.last_status === 'error' || j.last_status === 'FAIL' ? 'an-neg' : 'an-pos') + '">' + esc(j.last_status || '') + '</td><td>' + esc(String(j.last_note || '').slice(0, 120)) + '</td></tr>'; }).join('') + '</tbody></table><div class="an-sub" style="margin-top:8px">Worked out up to: daily totals ' + esc(D.cursors.rollup || '—') + ' · patterns ' + esc(D.cursors.profiles || '—') + ' · forecast ' + esc(D.cursors.forecast || '—') + '</div></div>';
         /* Phase 1B: the freshness map (§5 of the plan) — one row per data family, its cadence, last update and age —
            and the ADTOOL_TODAY_FRESHNESS verdict (tick age < 10 min inside the 07:05–23:59 UTC sampling window) */

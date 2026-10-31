@@ -560,18 +560,22 @@
   function vidCohortPanel(D) {
     var C = D.cohort || {}, RU = D.freshness_rules || null;
     var cov = C.coverage || {};
+    /* every tile carries the stamp of whatever wrote its figure (31 Oct brief §5): the engine sends one per
+       tile in the house shape, and a tile with no stamp says so rather than reading as fresh */
+    var ST = C.stamps || {};
+    function stampLine(st) { return st && st.as_of ? '<br>as of ' + esc(String(st.as_of)) + ' UK ' + vidFresh(st.as_of_at, RU) : '<br>' + vidFresh('', RU); }
     var h = '<div class="ov-panel"><h3>The videos on our listings' + src('which listings carry a video', 'how') + '</h3>' +
       '<div class="ov-sub">' + esc(String(C.note || '')) + '</div>' +
       '<div class="ov-kpis">' +
       kpi('Carrying a video on eBay', cnt(C.on_ebay),
         'eBay\'s own answer, listing by listing' + (cov.last_checked_at ? '<br>last asked ' + esc(ago(cov.last_checked_at)) + vidFresh(cov.last_checked_at, RU) : '<br>the sweep has not run yet')) +
-      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage') +
-      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one') +
+      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage' + stampLine(ST.recorded)) +
+      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one' + stampLine(ST.both)) +
       kpi('Listings asked about', cnt(cov.listings_asked_about),
         (cov.active_listings == null ? 'out of a number of active listings we do not have' : 'out of ' + cnt(cov.active_listings) + ' active') +
         (num(cov.still_to_ask_about) > 0 ? '<br>' + cnt(cov.still_to_ask_about) + ' still to ask about' : '') +
         (num(cov.without_a_date) > 0 ? '<br>' + cnt(cov.without_a_date) + ' with no date eBay would give us' : '') +
-        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '')) +
+        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '') + stampLine(ST.coverage)) +
       '</div>';
     h += '<div class="vid-diff">' + esc(String(cov.note || '')) + '</div>';
     /* the two differences, each behind its own button: these are the lists somebody acts on, and

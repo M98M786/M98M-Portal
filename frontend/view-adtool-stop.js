@@ -279,17 +279,96 @@
       toast((e && e.message) || 'That could not be saved.');
     });
   }
+  /* ══ HOW OLD A FIGURE MAY BE BEFORE THE PAGE SAYS SO (owner's brief, 31 Oct, §5) ════════════
+     Two figures, and they are the only two: the first turns the badge beside an "as of" time amber,
+     the second turns it red and raises the stale alert. They are settings and so they live here,
+     beside the pattern engine's own, on the one page where Management changes what this tool does.
+     NEITHER IS TYPED. "In force" is what the engine says it is judging on, and "Stored" is the
+     settings store itself, so a key nobody has set reads as the engine's own figure rather than as
+     nought. A page that printed the figures would go on printing the old ones. ══ */
+  var FRESH_KEYS = [
+    ['amber_min', 'When a tile says its figure is getting old',
+      'The number of minutes after which the badge beside an "as of" time turns amber, on every page that carries one. It is a note to somebody who is already looking: no alert is raised and nobody is told. Set it to the age at which a figure stops being worth deciding on.', 'minutes'],
+    ['red_min', 'When somebody is told the figures have stopped arriving',
+      'The number of minutes after which the badge turns red AND the stale alert is raised, because the reading everything about today stands on has stopped landing. This is the figure that decides when a person hears about it rather than having to notice, so it is the one that matters. The amber figure is never allowed past this one: a tile cannot be amber and red at once.', 'minutes']
+  ];
+  function freshRules() { return (ST.flags && ST.flags.freshness_rules) || null; }
+  function freshKey(f) { var K = (ST.flags && ST.flags.freshness_keys) || null; return (K && K[f]) || ('adtool_fresh_' + f); }
+  function freshBlock() {
+    var R = freshRules(), every = num(ST.flags && ST.flags.freshness_every_min);
+    var h = '<div class="an-panel"><h3>How old a figure may be before the page says so' + src('FRESHNESS', 'how') + '</h3>' +
+      '<div class="an-sub">Every tile on this tool that carries an "as of" time ages it against these two. ' +
+      'They move every badge on every page together, because each page reads them off the answer it is drawing rather than carrying them. ' +
+      'The red one also decides when the stale alert is raised: the reading of eBay\'s running total for today' +
+      (every != null ? ', which the portal asks for every ' + every + ' minutes' : '') +
+      ', has stopped landing, and every figure here about today stands on it. ' +
+      '<b>Changing either sends nothing to eBay.</b> They decide when this portal says a figure is old.</div>';
+    if (!R) {
+      h += '<div class="an-note">The figures the engine is judging on could not be read' +
+        (ST.flagsErr ? ': ' + esc(ST.flagsErr) : '') + ', so none is shown. What is stored is still listed below.</div>';
+    }
+    h += '<table class="st-cfg"><thead><tr><th>Setting</th><th>In force</th><th>Stored</th><th>What it means</th>' +
+      (mayEditCfg() ? '<th></th>' : '') + '</tr></thead><tbody>';
+    h += FRESH_KEYS.map(function (k) {
+      var key = freshKey(k[0]), row = flagRow(key);
+      var live = R && R[k[0]] != null && R[k[0]] !== '' ? String(R[k[0]]) : '';
+      return '<tr><td><b>' + esc(k[1]) + '</b><div><code>' + esc(key) + '</code></div></td>' +
+        '<td class="v">' + (live ? esc(live) + ' ' + esc(k[3]) : '<span class="st-unset">not available yet</span>') + '</td>' +
+        '<td class="v">' + (row && row.value !== '' && row.value != null
+          ? esc(String(row.value)) + (row.updated_at ? '<div class="an-sub" style="margin:2px 0 0;font-weight:400">set ' + esc(String(row.updated_at).slice(0, 16)) + '</div>' : '')
+          : '<span class="st-unset">not set, so the engine stands on its own figure</span>') + '</td>' +
+        '<td class="w">' + esc(k[2]) + '</td>' +
+        (mayEditCfg() ? '<td><button class="an-btn" style="padding:3px 9px;font-size:11px" data-stfresh="' + esc(k[0]) + '"' +
+          (ST.busy === key ? ' disabled' : '') + '>Change</button></td>' : '') + '</tr>';
+    }).join('');
+    h += '</tbody></table><div class="an-sub" style="margin-top:8px">' +
+      (mayEditCfg()
+        ? 'A change is written to the portal\'s own settings with who made it, and every page picks it up on its next read. Where the amber figure is set past the red one the engine holds it at the red one, so a tile is never both.'
+        : 'These are read-only for your role. Changing one is for Management and the Ops Head.') +
+      ' The run-by-run record of the reading itself is on <a href="#adtoolHealth" style="color:var(--gold-a);font-weight:800">Data health</a>, under <b>Sampler runs</b>.</div>';
+    return h + '</div>';
+  }
+  function setFresh(f, el) {
+    if (ST.busy) return;
+    var spec = null;
+    for (var i = 0; i < FRESH_KEYS.length; i++) { if (FRESH_KEYS[i][0] === f) spec = FRESH_KEYS[i]; }
+    if (!spec) { toast('That is not a setting this page can change.'); return; }
+    var key = freshKey(f), row = flagRow(key);
+    var now = (row && row.value !== '' && row.value != null) ? String(row.value) : 'nothing stored';
+    var typed = prompt(spec[1] + '\n\nStored now: ' + now + '\n\nType a whole number of minutes.', '');
+    if (typed == null) return;
+    var v = String(typed).trim();
+    if (!v) { toast('Nothing typed, so nothing was changed.'); return; }
+    if (!/^\d{1,4}$/.test(v) || Number(v) < 1) { toast('That is not a whole number of minutes.'); return; }
+    if (!confirm('Change "' + spec[1] + '" to ' + v + ' minutes?\n\n' + spec[2] +
+      '\n\nEvery badge on every page follows on its next read. Nothing is sent to eBay by this.')) return;
+    ST.busy = key;
+    if (el) el.disabled = true;
+    api('adtoolFlags', { set: { key: key, value: v } }).then(function () {
+      ST.busy = '';
+      toast('Saved: ' + spec[1] + ' is now ' + v + ' minutes');
+      ST.flags = null; ST.plan = null;
+      loadCfg();
+    })['catch'](function (e) {
+      ST.busy = '';
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That could not be saved.');
+    });
+  }
   function paintCfg() {
     var el = $('stCfg'); if (!el) return;
-    el.innerHTML = cfgBlock();
+    el.innerHTML = cfgBlock() + freshBlock();
     var bs = el.querySelectorAll('[data-stcfg]');
     for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { setCfg(this.getAttribute('data-stcfg'), this); };
     var xs = el.querySelectorAll('[data-stcfgx]');
     for (var j = 0; j < xs.length; j++) xs[j].onclick = function () { setCfg(this.getAttribute('data-stcfgx'), this); };
+    var fs = el.querySelectorAll('[data-stfresh]');
+    for (var k = 0; k < fs.length; k++) fs[k].onclick = function () { setFresh(this.getAttribute('data-stfresh'), this); };
   }
   function loadCfg() {
     if (!$('stCfg')) return;
-    $('stCfg').innerHTML = '<div class="an-panel"><h3>Pattern engine settings</h3><div class="an-empty">Loading…</div></div>';
+    $('stCfg').innerHTML = '<div class="an-panel"><h3>Pattern engine settings</h3><div class="an-empty">Loading…</div></div>' +
+      '<div class="an-panel"><h3>How old a figure may be before the page says so</h3><div class="an-empty">Loading…</div></div>';
     var a = api('adtoolFlags', {}).then(function (D) { ST.flags = D || {}; ST.flagsErr = ''; })
       ['catch'](function (e) { ST.flags = null; ST.flagsErr = (e && e.message) || 'the settings could not be read'; });
     /* the peak page's own answer, for the figures the engine is really deciding on. It can refuse

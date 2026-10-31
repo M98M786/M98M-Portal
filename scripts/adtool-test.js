@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -241,9 +241,9 @@ function run(argv) {
   const dr = F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.7 }, { week: 2, spend_day: 500, roas: 3.5 }, { week: 3, spend_day: 620, roas: 3.4 }]);
   t('alerts: A18 fires when spend/day rose 15 % and ROAS fell, twice running', !!dr, dr);
   t('alerts: A18 silent when ROAS held', !F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.5 }, { week: 2, spend_day: 500, roas: 3.6 }, { week: 3, spend_day: 620, roas: 3.7 }]), null);
-  t('alerts: every rule A01–A22 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 22 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
+  t('alerts: every rule A01–A23 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 23 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
   /* Phase 4 big update: every one of the 19 rules carries a why_matters sentence, and no rule text says 'est. ad profit' */
-  t('alerts: all 22 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 22 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
+  t('alerts: all 23 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 23 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
   t('alerts: no rule text says "est. ad profit" any more', Object.keys(F.ADTOOL_ALERT_RULES).every(k => !/est\. ad profit/i.test(F.ADTOOL_ALERT_RULES[k].text)), null);
   t('alerts: urgency is overdue for a high alert past 24 h, else severity-derived now/soon/watch', F.adtAlertUrgency('high', 30) === 'overdue' && F.adtAlertUrgency('high', 10) === 'now' && F.adtAlertUrgency('medium', 100) === 'soon' && F.adtAlertUrgency('low', 100) === 'watch' && F.adtAlertUrgency('high', 24) === 'now', [F.adtAlertUrgency('high', 30), F.adtAlertUrgency('high', 10), F.adtAlertUrgency('medium', 100), F.adtAlertUrgency('low', 100)]);
   const lvIn = [
@@ -932,7 +932,7 @@ function run(argv) {
          (the house rule: no config value typed into copy), so the settings an entry may name are in
          scope here exactly as they are in the engine. A register row is prose and never arithmetic,
          so only plain numbers are ever handed in. */
-      const rgConsts = ['ADTOOL_VIDEO_RECHECK_DAYS', 'ADTOOL_VIDEO_SWEEP_PER_ACCOUNT', 'ADTOOL_VIDEO_SWEEP_DATES', 'ADTOOL_VIDEO_WINDOW_CAP', 'ADTOOL_VIDEO_WINDOWS'];
+      const rgConsts = ['ADTOOL_VIDEO_RECHECK_DAYS', 'ADTOOL_VIDEO_SWEEP_PER_ACCOUNT', 'ADTOOL_VIDEO_SWEEP_DATES', 'ADTOOL_VIDEO_WINDOW_CAP', 'ADTOOL_VIDEO_WINDOWS', 'ADTOOL_SAMPLER_EVERY_MIN'];
       const rgVals = rgConsts.map(k => F[k]);
       for (const row of new Function(...rgConsts, 'return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))(...rgVals)) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
     } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
@@ -2069,7 +2069,7 @@ function run(argv) {
   /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
      Overview prints as a tile of its own and which had stood at a hard nought since the Command
      centre was written. */
-  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 24 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT', 'PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING', 'VIDEO_COHORT', 'VIDEO_ADDED_ON', 'VIDEO_BEFORE_AFTER', 'VIDEO_VS_NO_VIDEO'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 26 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT', 'PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING', 'VIDEO_COHORT', 'VIDEO_ADDED_ON', 'VIDEO_BEFORE_AFTER', 'VIDEO_VS_NO_VIDEO'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
   t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
   t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
   t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
@@ -2511,7 +2511,7 @@ function run(argv) {
 
   t('alerts: A20 and A21 join the rules with a severity, a waiting time, a suggested action and a why', (() => {
     const R = F.ADTOOL_ALERT_RULES;
-    return !!R.A20 && !!R.A21 && Object.keys(R).length === 22
+    return !!R.A20 && !!R.A21 && Object.keys(R).length === 23
       && ['A20', 'A21'].every(k => R[k].sev && R[k].cool >= 1 && R[k].action && R[k].why_matters.length >= 20 && /peak hours/.test(R[k].text));
   })(), Object.keys(F.ADTOOL_ALERT_RULES).length);
   t('alerts: neither peak rule prints a figure of its own, so a grace or a settling time cannot be changed in one place and stated in another', ['A20', 'A21'].every(k => !/\d/.test(F.ADTOOL_ALERT_RULES[k].text) && !/—/.test(F.ADTOOL_ALERT_RULES[k].text + F.ADTOOL_ALERT_RULES[k].why_matters)), [F.ADTOOL_ALERT_RULES.A20.text, F.ADTOOL_ALERT_RULES.A21.text]);
@@ -2771,8 +2771,11 @@ function run(argv) {
     const pk = readFile('frontend/view-adtool-peak.js');
     const reads = /var amber = num\(rules && rules\.amber_min\), red = num\(rules && rules\.red_min\);/.test(pk);
     const fromPayload = /X\.freshness_rules \|\| D\.freshness_rules \|\| null/.test(pk);
-    const engineHasThem = /const ADTOOL_PEAK_FRESHNESS_RULES = \{ amber_min: 15, red_min: 60 \};/.test(src) &&
-      F.ADTOOL_PEAK_FRESHNESS_RULES.amber_min === 15 && F.ADTOOL_PEAK_FRESHNESS_RULES.red_min === 60;
+    /* 31 Oct §5: the pair is no longer a constant repeated on five payloads. One law, one helper,
+       and the figures themselves live in the settings store. */
+    const engineHasThem = /const ADTOOL_FRESH_DEFAULTS = \{ amber_min: 15, red_min: 60 \};/.test(src) &&
+      F.ADTOOL_FRESH_DEFAULTS.amber_min === 15 && F.ADTOOL_FRESH_DEFAULTS.red_min === 60 &&
+      !/ADTOOL_PEAK_FRESHNESS_RULES/.test(src);
     const notTyped = !/amber_min: *\d/.test(pk) && !/red_min: *\d/.test(pk);
     return reads && fromPayload && engineHasThem && notTyped;
   })(), null);
@@ -3918,6 +3921,264 @@ function run(argv) {
         /ADTOOL_VIDEO_WINDOWS\.join\(' days and then '\)/.test(src) &&
         !/a hundred and twenty/.test(src) && !/asks again a week after/.test(src) &&
         /ADTOOL_VIDEO_SWEEP_PER_ACCOUNT \+ ' listings an account each hour/.test(board);
+    })(), null);
+
+  /* ══════════════════════════════════════════════════════════════════════════════════════════
+     §5 of the owner's 31 Oct brief: one freshness law, a stamp on every tile, the stale alert A23
+     and the sampler's own runs on Data health.
+     ══════════════════════════════════════════════════════════════════════════════════════════ */
+  const K5 = F.ADTOOL_FRESH_CONFIG_KEYS;
+  const cfg5 = (a, r) => { const o = {}; if (a !== undefined) o[K5.amber_min] = a; if (r !== undefined) o[K5.red_min] = r; return o; };
+
+  t('§5 freshness: the two figures are the owner\u2019s own, and they are the ones the keys are named for',
+    F.ADTOOL_FRESH_DEFAULTS.amber_min === 15 && F.ADTOOL_FRESH_DEFAULTS.red_min === 60 &&
+    K5.amber_min === 'adtool_fresh_amber_min' && K5.red_min === 'adtool_fresh_red_min', [F.ADTOOL_FRESH_DEFAULTS, K5]);
+  t('§5 freshness: a key nobody has set falls back to the default, so an unwritten database and one set to the defaults behave the same',
+    (() => {
+      const none = F.adtFreshRules(null), empty = F.adtFreshRules({});
+      return none.amber_min === 15 && none.red_min === 60 && empty.amber_min === 15 && empty.red_min === 60;
+    })(), null);
+  t('§5 freshness: the stored figures are read through the two named keys and nothing else',
+    (() => {
+      const r = F.adtFreshRules(cfg5('20', '90'));
+      const wrongName = F.adtFreshRules({ adtool_fresh_amber: '20', fresh_red_min: '90' });
+      return r.amber_min === 20 && r.red_min === 90 && wrongName.amber_min === 15 && wrongName.red_min === 60;
+    })(), null);
+  t('§5 freshness: a figure somebody mistyped falls back rather than stopping the badge working',
+    (() => {
+      const bad = ['', 'soon', null, undefined, '0', '-5'];
+      return bad.every(v => { const r = F.adtFreshRules(cfg5(v, v)); return r.amber_min === 15 && r.red_min === 60; });
+    })(), null);
+  t('§5 freshness: amber is never allowed past red \u2014 a tile cannot be amber and red at once, and red is the figure that must not move',
+    (() => {
+      const r = F.adtFreshRules(cfg5('120', '30'));
+      return r.red_min === 30 && r.amber_min === 30;
+    })(), null);
+  t('§5 freshness: both figures are held to a range they mean something in, rather than refused',
+    (() => {
+      const big = F.adtFreshRules(cfg5('99999', '99999'));
+      const frac = F.adtFreshRules(cfg5('14.6', '59.4'));
+      return big.amber_min === 1440 && big.red_min === 1440 && frac.amber_min === 15 && frac.red_min === 59;
+    })(), null);
+  t('§5 freshness: a stamp nobody could read is NULL minutes old and never nought, which is the one answer a badge must not get wrong',
+    F.adtFreshAgeMin('', Date.parse('2026-10-31T09:00:00Z')) === null &&
+    F.adtFreshAgeMin(null, Date.parse('2026-10-31T09:00:00Z')) === null &&
+    F.adtFreshAgeMin('not a time', Date.parse('2026-10-31T09:00:00Z')) === null, null);
+  t('§5 freshness: a D1 stamp with no zone on it is read as UTC, and an ISO stamp is left alone',
+    (() => {
+      const now = Date.parse('2026-10-31T09:00:00Z');
+      return F.adtFreshAgeMin('2026-10-31 08:30:00', now) === 30 && F.adtFreshAgeMin('2026-10-31T08:30:00.000Z', now) === 30;
+    })(), [F.adtFreshAgeMin('2026-10-31 08:30:00', Date.parse('2026-10-31T09:00:00Z'))]);
+  t('§5 freshness: the badge turns at the minute the age goes PAST a figure, not the minute it reaches it',
+    (() => {
+      const R = F.adtFreshRules(cfg5('15', '60')), now = Date.parse('2026-10-31T12:00:00Z');
+      const at = m => F.adtFreshVerdict(new Date(now - m * 60000).toISOString(), R, now).verdict;
+      return at(5) === 'ok' && at(15) === 'ok' && at(16) === 'amber' && at(60) === 'amber' && at(61) === 'red';
+    })(), null);
+  t('§5 freshness: no stamp is \u2018none\u2019 and not \u2018red\u2019, because nothing behind a tile is a different thing from an old reading',
+    F.adtFreshVerdict('', F.adtFreshRules(null), Date.now()).verdict === 'none' &&
+    F.adtFreshVerdict('', F.adtFreshRules(null), Date.now()).age_min === null, null);
+  t('§5 freshness: a verdict asked for with no figures stands on the law\u2019s own, so a caller cannot judge on nothing',
+    (() => {
+      const now = Date.parse('2026-10-31T12:00:00Z');
+      const old = new Date(now - 61 * 60000).toISOString();
+      return F.adtFreshVerdict(old, null, now).verdict === 'red' && F.adtFreshVerdict(old, {}, now).verdict === 'red';
+    })(), null);
+  t('§5 freshness: one stamp shape for the whole tool \u2014 the UK clock a reader sees and the instant the badge ages, both null where it could not be read',
+    (() => {
+      const s = F.adtFreshStamp('2026-10-31T08:05:00.000Z');
+      const n = F.adtFreshStamp('rubbish');
+      return s.as_of === '08:05' && s.as_of_at === '2026-10-31T08:05:00.000Z' && n.as_of === null && n.as_of_at === null;
+    })(), [F.adtFreshStamp('2026-10-31T08:05:00.000Z')]);
+  t('§5 freshness: the clock on a stamp is the UK one, so a summer reading does not print an hour early',
+    F.adtFreshStamp('2026-07-15T08:05:00.000Z').as_of === '09:05' &&
+    F.adtFreshStamp('2026-12-15T08:05:00.000Z').as_of === '08:05', [F.adtFreshStamp('2026-07-15T08:05:00.000Z')]);
+
+  /* the sampler's runs */
+  const tick5 = (iso, acct, fam, total, changed, corrected) => ({ account: acct, family: fam, report_day: '2026-10-31', sampled_at: iso, rows_total: total, rows_changed: changed == null ? 0 : changed, rows_corrected: corrected == null ? 0 : corrected });
+  const runSet = () => [
+    tick5('2026-10-31T08:00:02.000Z', 'A', 'cpc', 100, 4), tick5('2026-10-31T08:00:09.000Z', 'A', 'std', 90, 1),
+    tick5('2026-10-31T08:00:14.000Z', 'B', 'cpc', 60, 2),
+    /* 08:05 never landed anything: no tick at all, which is what a missed run looks like */
+    tick5('2026-10-31T08:10:03.000Z', 'A', 'cpc', 101, 3, 1), tick5('2026-10-31T08:10:11.000Z', 'B', 'cpc', 61, 0),
+    tick5('2026-10-31T08:15:01.000Z', 'A', 'cpc', 102, 1),
+  ];
+  t('§5 sampler: the ticks of one invocation are ONE run, however many accounts and families they cover',
+    (() => {
+      const runs = F.adtSamplerRuns(runSet(), { limit: 12, rules: F.adtFreshRules(null) });
+      return runs.length === 3 && runs[2].samples === 3 && runs[2].accounts === 2 &&
+        JSON.stringify(runs[2].families) === JSON.stringify(['cpc', 'std']);
+    })(), (() => { const r = F.adtSamplerRuns(runSet(), { limit: 12 }); return [r.length, r.map(x => x.samples)]; })());
+  t('§5 sampler: a run that landed nothing wrote nothing, so it shows as a longer gap and never as a row',
+    (() => {
+      const runs = F.adtSamplerRuns(runSet(), { limit: 12, rules: F.adtFreshRules(null) });
+      /* newest first: 08:15 five minutes after 08:10, 08:10 TEN minutes after 08:00 */
+      return runs[0].at_uk === '08:15' && runs[0].gap_min === 5 && runs[1].at_uk === '08:10' && runs[1].gap_min === 10;
+    })(), (() => F.adtSamplerRuns(runSet(), { limit: 12 }).map(r => [r.at_uk, r.gap_min]))());
+  t('§5 sampler: the oldest run shown carries NO gap it cannot know, and null is not nought',
+    (() => {
+      const runs = F.adtSamplerRuns(runSet(), { limit: 12, rules: F.adtFreshRules(null) });
+      return runs[runs.length - 1].gap_min === null && runs[runs.length - 1].gap_verdict === null;
+    })(), null);
+  t('§5 sampler: a run\u2019s rows, changes and eBay\u2019s own corrections are summed across its samples',
+    (() => {
+      const runs = F.adtSamplerRuns(runSet(), { limit: 12, rules: F.adtFreshRules(null) });
+      const first = runs[runs.length - 1], mid = runs[1];
+      return first.rows === 250 && first.rows_changed === 7 && first.rows_corrected === 0 &&
+        mid.rows === 162 && mid.rows_changed === 3 && mid.rows_corrected === 1;
+    })(), null);
+  t('§5 sampler: the spread is from a run\u2019s first landed sample to its last, which is as near its length as the record goes',
+    (() => {
+      const runs = F.adtSamplerRuns(runSet(), { limit: 12, rules: F.adtFreshRules(null) });
+      return runs[runs.length - 1].duration_s === 12 && runs[0].duration_s === 0;
+    })(), null);
+  t('§5 sampler: a report that arrived carrying no listing reads as empty, which is not the same as figures that had not moved',
+    (() => {
+      const runs = F.adtSamplerRuns([
+        tick5('2026-10-31T08:00:00.000Z', 'A', 'cpc', 0, 0),
+        tick5('2026-10-31T08:05:00.000Z', 'A', 'cpc', 80, 0),
+      ], { limit: 12, rules: F.adtFreshRules(null) });
+      return runs[1].status === 'empty' && runs[0].status === 'ok' && runs[0].rows_changed === 0;
+    })(), null);
+  t('§5 sampler: the gap is judged against the very figures the badges are, so a stall is amber then red on one law',
+    (() => {
+      const rows = [tick5('2026-10-31T08:00:00.000Z', 'A', 'cpc', 10, 0), tick5('2026-10-31T08:20:00.000Z', 'A', 'cpc', 11, 1), tick5('2026-10-31T09:40:00.000Z', 'A', 'cpc', 12, 1)];
+      const runs = F.adtSamplerRuns(rows, { limit: 12, rules: F.adtFreshRules(cfg5('15', '60')) });
+      return runs[1].gap_min === 20 && runs[1].gap_verdict === 'amber' && runs[0].gap_min === 80 && runs[0].gap_verdict === 'red';
+    })(), null);
+  t('§5 sampler: a tick whose stamp nobody could read dates no run at all, rather than being guessed into one',
+    (() => {
+      const rows = runSet().concat([tick5('', 'C', 'cpc', 5, 0), tick5('not a time', 'C', 'std', 5, 0)]);
+      const runs = F.adtSamplerRuns(rows, { limit: 12, rules: F.adtFreshRules(null) });
+      return runs.length === 3 && runs.every(r => r.at_uk && r.at_uk.length === 5);
+    })(), null);
+  t('§5 sampler: only the last runs asked for come back, newest first',
+    (() => {
+      const rows = [];
+      for (let i = 0; i < 30; i++) rows.push(tick5(new Date(Date.parse('2026-10-31T08:00:00.000Z') + i * 300000).toISOString(), 'A', 'cpc', 10 + i, 1));
+      const runs = F.adtSamplerRuns(rows, { limit: 12, rules: F.adtFreshRules(null) });
+      return runs.length === 12 && runs[0].rows === 39 && runs[11].rows === 28 && runs.every(r => r.gap_min === 5);
+    })(), (() => { const rows = []; for (let i = 0; i < 30; i++) rows.push(tick5(new Date(Date.parse('2026-10-31T08:00:00.000Z') + i * 300000).toISOString(), 'A', 'cpc', 10 + i, 1)); return F.adtSamplerRuns(rows, { limit: 12 }).length; })());
+  t('§5 sampler: the panel shows the last twelve runs, and what makes two samples one run is half the cadence \u2014 written from the timer, never typed',
+    F.ADTOOL_SAMPLER_RUNS_SHOWN === 12 && F.ADTOOL_SAMPLER_EVERY_MIN === 5 && F.ADTOOL_SAMPLER_RUN_SPLIT_S === 150 &&
+    /const ADTOOL_SAMPLER_RUN_SPLIT_S = Math\.round\(ADTOOL_SAMPLER_EVERY_MIN \* 60 \/ 2\);/.test(src),
+    [F.ADTOOL_SAMPLER_RUNS_SHOWN, F.ADTOOL_SAMPLER_RUN_SPLIT_S]);
+
+  /* the wiring, over the real source */
+  t('§5 engine: every payload that carries the thresholds goes through the ONE helper, and the old per-phase constant is gone',
+    (() => {
+      const uses = src.split('freshness_rules:').slice(1).map(s => s.slice(0, 48).trim());
+      const ok = uses.length >= 6 && uses.every(u => /^await adtoolFreshnessRules\((env|ctx\.env)\)/.test(u) || /^FRh?,/.test(u));
+      const one = (src.match(/async function adtoolFreshnessRules\(env\) \{/g) || []).length === 1;
+      return ok && one && !/ADTOOL_PEAK_FRESHNESS_RULES/.test(src);
+    })(), src.split('freshness_rules:').slice(1).map(s => s.slice(0, 36).trim()));
+  t('§5 engine: the helper reads the two named keys out of the settings store, and seeds them before it reads so a blank is never shown for a figure that is in force',
+    (() => {
+      const i = src.indexOf('async function adtoolFreshnessRules(env) {');
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('\n}', src.indexOf('async function ensureAdtoolFreshConfig(env) {')));
+      return /await ensureAdtoolFreshConfig\(env\);/.test(blk) &&
+        /WHERE key LIKE 'adtool_fresh_%'/.test(blk) && /return adtFreshRules\(cfg\);/.test(blk) &&
+        /ON CONFLICT\(key\) DO NOTHING/.test(blk) && /ADTOOL_FRESH_CFG_OK/.test(blk);
+    })(), null);
+  t('§5 alert: A23 is the stale rule, it reads high, and its own words name no figure \u2014 the limit is the settings\u2019 and not the sentence\u2019s',
+    (() => {
+      const A = F.ADTOOL_ALERT_RULES.A23;
+      return !!A && A.sev === 'high' && A.action === 'check' && Object.keys(F.ADTOOL_ALERT_RULES).length === 23 &&
+        /five-minute/.test(A.text) && !/\d/.test(A.text) && !/\d/.test(A.why_matters) && !/\u2014/.test(A.text + A.why_matters);
+    })(), F.ADTOOL_ALERT_RULES.A23);
+  t('§5 alert: A23 is judged on the SAME red figure the badges are, and only inside the window a reading can land in, after the day\u2019s first task has had time to build',
+    (() => {
+      const i = src.indexOf("    /* A23: the five-minute sampler going quiet.");
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('/* reconcile with the open set', i));
+      return /const FRa = await adtoolFreshnessRules\(env\);/.test(blk) &&
+        /adtInSamplingWindow\(nowD\) && nowMins >= adtSamplingFromMin\(nowD\) \+ 15/.test(blk) &&
+        /ageS == null \|\| ageS > Number\(FRa\.red_min\)/.test(blk) &&
+        /MAX\(sampled_at\) AS t FROM adtool_intraday_ticks/.test(blk) &&
+        /put\('A23', 'all',/.test(blk) && !/\bred_min: *\d/.test(blk);
+    })(), null);
+  t('§5 Data health: the Sampler runs panel stands on what the sampler actually writes \u2014 the ticks, not a job row and not a sync cursor',
+    (() => {
+      const i = src.indexOf('const FRh = await adtoolFreshnessRules(env);');
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('const tile_stamps = {', i));
+      return /FROM adtool_intraday_ticks ORDER BY sampled_at DESC LIMIT \?1/.test(blk) &&
+        /adtSamplerRuns\(tickRows, \{ limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: FRh \}\)/.test(blk) &&
+        /\(ADTOOL_SAMPLER_RUNS_SHOWN \+ 1\) \* 24/.test(blk) &&
+        /sent_to_ebay: false/.test(blk) && /in_sampling_window: adtInSamplingWindow\(nowH\)/.test(blk) &&
+        !/adtool_jobs/.test(blk) && !/FROM sync_state/.test(blk) && !/fetch\(/.test(blk);
+    })(), null);
+  t('§5 Data health: the engine sends a stamp for every tile the page draws, each from the thing that last wrote that figure',
+    (() => {
+      const i = src.indexOf('const tile_stamps = {');
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('\n      return { fresh: await adtFresh', i));
+      const keys = ['number_checks', 'jobs', 'campaigns_unnamed', 'orders_not_costed', 'categories', 'sampler'];
+      return keys.every(k => new RegExp(k + ': adtFreshStamp\\(').test(blk)) &&
+        /validation_runs WHERE metric_id LIKE 'ADTOOL_%'/.test(blk) && /lastOk\('adsItems'\)/.test(blk) &&
+        /lastOk\('orderSync'\)/.test(blk) && /lastOk\('listingSync'\)/.test(blk) &&
+        /tile_stamps,/.test(src);
+    })(), null);
+  t('§5 page: every tile on Data health prints \u201cas of HH:MM UK\u201d, and a tile with nothing behind it says so instead of printing a time',
+    (() => {
+      const mo = readFile('frontend/view-adtool-morning.js');
+      const stamped = ['TS.number_checks', 'TS.jobs', 'TS.campaigns_unnamed', 'TS.orders_not_costed', 'TS.categories']
+        .every(k => mo.indexOf('moStamp(' + k + ', RU)') >= 0);
+      return stamped && /moStamp\(SM, RU\)/.test(mo) &&
+        /as of ' \+ esc\(String\(S\.as_of\)\) \+ ' UK'/.test(mo) &&
+        /if \(!S\.as_of\) return '<div class="mo-asof">no reading yet<\/div>';/.test(mo);
+    })(), null);
+  t('§5 page: both thresholds are read off the answer on Data health, and neither figure is typed into the page',
+    (() => {
+      const mo = readFile('frontend/view-adtool-morning.js');
+      return /var amber = num\(rules && rules\.amber_min\), red = num\(rules && rules\.red_min\);/.test(mo) &&
+        /var RU = D\.freshness_rules \|\| null/.test(mo) &&
+        !/amber_min: *\d/.test(mo) && !/red_min: *\d/.test(mo) && !/15 min/.test(mo) && !/60 min/.test(mo);
+    })(), null);
+  t('§5 page: the Sampler runs panel writes its cadence and its window from the answer, says in plain words how far apart the runs should be, and never prints nought for a gap it does not know',
+    (() => {
+      const mo = readFile('frontend/view-adtool-morning.js');
+      const i = mo.indexOf('function samplerPanel(SM, RU) {');
+      const blk = i < 0 ? '' : mo.slice(i, mo.indexOf('\n  /* ---------------- Data health ----------------', i));
+      return /var every = num\(S\.every_min\);/.test(blk) &&
+        /every \+ ' minutes' : ' every few minutes'/.test(blk) &&
+        /should start/.test(blk) && /after the one before it/.test(blk) &&
+        /esc\(String\(S\.sampling_window\)\)/.test(blk) &&
+        /none on record/.test(blk) && !/\bevery 5 minutes\b/.test(blk) &&
+        /Nothing on this panel reaches eBay/.test(blk);
+    })(), null);
+  t('§5 page: Live apply is where the two figures are changed, through the portal\u2019s own settings write, and it prints neither of them from itself',
+    (() => {
+      const st = readFile('frontend/view-adtool-stop.js');
+      return /var FRESH_KEYS = \[/.test(st) && /\['amber_min',/.test(st) && /\['red_min',/.test(st) &&
+        /ST\.flags && ST\.flags\.freshness_rules/.test(st) && /data-stfresh=/.test(st) &&
+        /api\('adtoolFlags', \{ set: \{ key: key, value: v \} \}\)/.test(st) &&
+        /Nothing is sent to eBay by this/.test(st) &&
+        !/amber_min: *\d/.test(st) && !/red_min: *\d/.test(st);
+    })(), null);
+  t('§5 register: the freshness law and the sampler\u2019s runs each have a row, the rules row counts twenty-three, and the cadence in the words is written from the setting',
+    (() => {
+      const fr = rgAll.filter(r => r.id === 'FRESHNESS')[0], sr = rgAll.filter(r => r.id === 'SAMPLER_RUNS')[0];
+      const ar = rgAll.filter(r => r.id === 'ALERT_RULES')[0];
+      return !!fr && !!sr && !!ar && !/\d/.test(fr.formula) &&
+        /Twenty-three things/.test(ar.formula) && /adtool_intraday_ticks/.test(ar.sources) &&
+        /every 5 minutes/.test(sr.formula) && /' \+ ADTOOL_SAMPLER_EVERY_MIN \+ ' minutes/.test(src) &&
+        /adtool_intraday_ticks/.test(sr.sources) && /portal_config/.test(fr.sources);
+    })(), null);
+  t('§5 videos: each of the four figures on the video panel carries the stamp of the thing that wrote it, in the one stamp shape, and the panel\u2019s own stamp is the sweep\u2019s and never the moment of the read',
+    (() => {
+      const i = src.indexOf('  const ladderAt = ladder.reduce');
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('let overview = { plan: null', i));
+      return /on_ebay: adtFreshStamp\(sweepAt\)/.test(blk) && /recorded: adtFreshStamp\(ladderAt\)/.test(blk) &&
+        /both: adtFreshStamp\(bothAt\)/.test(blk) && /coverage: adtFreshStamp\(sweepAt\)/.test(blk) &&
+        /Object\.assign\(cohort, adtFreshStamp\(sweepAt\)\);/.test(blk) &&
+        /cohort\.read_at = CO\.as_of;/.test(blk) && !/cohort\.as_of = CO\.as_of;/.test(src);
+    })(), null);
+  t('§5: nothing this section added can reach eBay \u2014 it reads the record of samples already taken and writes two settings rows',
+    (() => {
+      const i = src.indexOf('async function adtoolFreshnessRules(env) {');
+      const helper = i < 0 ? '' : src.slice(i, src.indexOf('/* ---- job: listings', i));
+      const j = src.indexOf('function adtSamplerRuns(ticks, opts) {');
+      const pureBlk = j < 0 ? '' : src.slice(j, src.indexOf('\nfunction adPeakUkDayOf(stamp) {', j));
+      return !/fetch\(/.test(helper) && !/fetch\(/.test(pureBlk) && !/ebay/i.test(pureBlk) &&
+        /INSERT INTO portal_config/.test(helper) && !/UPDATE /.test(helper);
     })(), null);
 
   const passed = results.filter(r => r.ok).length;

@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261031-0323';
+var BUILD = '20261031-0351';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1363,7 +1363,10 @@ var ADT_REG_MAP = [
   [/listings with video|video cohort/i, ['VIDEO_COHORT', 'VIDEO_ADDED_ON']],
   [/before and after the video/i, ['VIDEO_BEFORE_AFTER']],
   [/video against no video/i, ['VIDEO_VS_NO_VIDEO']],
-  [/video revisions|sales after the video/i, ['VIDEO_BEFORE_AFTER', 'VIDEO_ADDED_ON', 'VIDEO_COHORT']]
+  [/video revisions|sales after the video/i, ['VIDEO_BEFORE_AFTER', 'VIDEO_ADDED_ON', 'VIDEO_COHORT']],
+  /* 31 Oct brief §5 */
+  [/how old a figure may be|freshness|as of/i, ['FRESHNESS']],
+  [/sampler runs|five-minute reading/i, ['SAMPLER_RUNS', 'adtool_intraday_ticks']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -5861,7 +5864,16 @@ VIEW_CSS.push(
     '.mo-urg.overdue{color:#fff;background:#e0563f;border-color:#e0563f}.mo-urg.now{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}.mo-urg.soon{color:var(--gold-a);border-color:rgba(242,176,53,.45);background:rgba(242,176,53,.1)}.mo-urg.watch{color:var(--text-2)}' +
     '.mo-line{display:grid;grid-template-columns:104px 1fr;gap:8px;font-size:12px;margin-top:5px;align-items:start}' +
     '.mo-line .lb{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding-top:1px}.mo-line .vl{color:var(--text-2)}' +
-    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}'
+    '.mo-nums{display:flex;gap:5px;flex-wrap:wrap}.mo-nums .n{font-size:10.5px;color:var(--text-2);background:var(--panel-2);border:1px solid var(--gold-line);border-radius:6px;padding:1px 7px}.mo-nums .n b{color:var(--text);font-weight:800}' +
+    /* §5 of the 31 Oct brief: the "as of" stamp under a tile and the badge that ages it. THIS FILE'S
+       OWN PREFIX. The peak page draws the same badge under its own prefix: a class borrowed across two
+       spliced files resolves differently in the two portals, which is the fault the shared-view law
+       was written for. */
+    '.mo-asof{font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:5px;letter-spacing:.02em}' +
+    '.mo-fresh{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;border:1px solid var(--gold-line);font-size:10px;font-weight:800;color:var(--text-2);white-space:nowrap}' +
+    '.mo-fresh.amber{color:var(--gold-a);border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.1)}' +
+    '.mo-fresh.red{color:#fff;background:#e0563f;border-color:#e0563f}' +
+    '.mo-srun{font-variant-numeric:tabular-nums}.mo-srun .gap{font-weight:800}.mo-srun .gap.amber{color:var(--gold-a)}.mo-srun .gap.red{color:#ffb3a6}'
   );
   /* ONE money format across the four advertising view files: thousands separated, two decimals
      unless the caller asks for fewer. The same figure must not read £1,234 on one page and
@@ -5885,6 +5897,33 @@ VIEW_CSS.push(
   function fail(id, e) { $(id).innerHTML = '<div class="an-panel"><h3>Not available</h3><div class="an-sub">' + esc(e && e.message || 'failed') + '</div></div>'; }
   function kpi(k, v, d, c) { return '<div class="an-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   function ago(t) { if (!t) return 'never'; var ms = Date.now() - new Date(String(t).replace(' ', 'T') + (String(t).endsWith('Z') ? '' : 'Z')).getTime(); if (isNaN(ms)) return esc(String(t).slice(0, 16)); var m = Math.round(ms / 60000); return m < 60 ? m + ' min ago' : (m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'); }
+  /* ── §5 of the 31 Oct brief: "as of HH:MM" under every tile ────────────────────────────────
+     THE TWO THRESHOLDS ARE READ OFF THE ANSWER, NEVER TYPED HERE. The engine sends them beside the
+     stamps as `freshness_rules`, from the one place they are stored, so the day somebody changes
+     either figure in Management every badge on this page follows and nothing has to be edited. A
+     page that typed 15 and 60 would go on drawing amber and red at 15 and 60 for ever. */
+  function moMins(at) {
+    if (!at) return null;
+    var s = String(at);
+    var d = new Date(s.replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
+    return isNaN(d.getTime()) ? null : Math.round((Date.now() - d.getTime()) / 60000);
+  }
+  function moFreshBadge(at, rules) {
+    if (!at) return '';
+    var mins = moMins(at);
+    if (mins == null) return '<span class="mo-fresh">reading time not understood</span>';
+    var amber = num(rules && rules.amber_min), red = num(rules && rules.red_min);
+    if (red != null && mins > red) return '<span class="mo-fresh red">' + mins + ' min old</span>';
+    if (amber != null && mins > amber) return '<span class="mo-fresh amber">' + mins + ' min old</span>';
+    return '';
+  }
+  /* `st` is the engine's own {as_of, as_of_at} pair. NO STAMP IS NOT MIDNIGHT: a tile with nothing
+     behind it says it has no reading rather than printing a time nobody could stand on. */
+  function moStamp(st, rules) {
+    var S = st || {};
+    if (!S.as_of) return '<div class="mo-asof">no reading yet</div>';
+    return '<div class="mo-asof">as of ' + esc(String(S.as_of)) + ' UK' + moFreshBadge(S.as_of_at, rules) + '</div>';
+  }
 
   /* ── Phase 4 alert pieces ──────────────────────────────────────────────────────────────────
      Each alert reads as five plain lines — what happened, where, why it matters, what to do, how
@@ -6091,6 +6130,60 @@ VIEW_CSS.push(
   }
 
 
+  /* ══ SAMPLER RUNS (owner's brief, 31 Oct, §5) ══════════════════════════════════════════════
+     eBay publishes no hourly ad figures, so the portal reads its running total for today every few
+     minutes, and every figure on this tool that says "today" stands on that reading. The sampler
+     keeps no run record of its own: what it leaves behind is one row per account per family for each
+     sample that LANDED, and the engine groups the runs back out of those rows. A run that landed
+     nothing wrote nothing, so it shows here as a longer gap, which is the honest answer and the
+     whole point: the question is not whether the timer fired, it is whether anything arrived.
+     NOTHING IS TYPED. The cadence, the window and both thresholds come off the answer. ══ */
+  function samplerPanel(SM, RU) {
+    var S = SM || {}, runs = S.runs || [];
+    var every = num(S.every_min);
+    var h = '<div class="an-panel"><h3>Sampler runs' + src('SAMPLER_RUNS', 'how') + '</h3><div class="an-sub">' +
+      'The portal reads eBay\'s running total for today' + (every != null ? ' every ' + every + ' minutes' : ' every few minutes') +
+      ', and that reading is what every figure here about today stands on. ' +
+      '<b>Each run below should start' + (every != null ? ' ' + every + ' minutes' : '') + ' after the one before it.</b> ' +
+      'A longer gap is a run that landed nothing, so a stall reads as one long gap rather than as something anybody has to work out. ' +
+      'Nothing can land through the small hours, because eBay dates a same-day report on its own Pacific clock and refuses one filed before midnight there' +
+      (S.sampling_window ? ', so ' + esc(String(S.sampling_window)) + ' is the only part of the day a gap means anything in' : '') + '.' +
+      (S.source ? ' Read from ' + esc(String(S.source)) + ', which is the same record the badges above and the stale alert are judged on, so this panel and that alert cannot disagree.' : '') +
+      '</div>';
+    if (!runs.length) {
+      return h + '<div class="an-empty">No reading has landed yet, so there is no run to show.</div></div>';
+    }
+    h += '<div class="an-scroll"><table class="an-tbl mo-srun"><thead><tr><th>Started (UK)</th><th class="r">Gap before it</th>' +
+      '<th class="r">Samples</th><th class="r">Accounts</th><th class="r">Rows</th><th class="r">Changed</th><th class="r">Spread over</th><th>What landed</th></tr></thead><tbody>';
+    h += runs.map(function (r) {
+      var gap = num(r.gap_min);
+      /* NO GAP IS NOT NOUGHT: the oldest run shown has nothing before it in what was read, and
+         printing nought there would read as two runs at the very same minute. */
+      var gapCell = gap == null
+        ? '<span class="an-sub">none on record</span>'
+        : '<span class="gap ' + esc(String(r.gap_verdict === 'red' ? 'red' : (r.gap_verdict === 'amber' ? 'amber' : ''))) + '">' + gap + ' min</span>';
+      var dur = num(r.duration_s);
+      var corrected = num(r.rows_corrected);
+      return '<tr><td>' + esc(String(r.at_uk || '—')) + (r.report_days && r.report_days.length ? '<div class="an-sub" style="margin:2px 0 0">for ' + esc(r.report_days.join(', ')) + '</div>' : '') + '</td>' +
+        '<td class="r">' + gapCell + '</td>' +
+        '<td class="r">' + (num(r.samples) == null ? '—' : r.samples) + '</td>' +
+        '<td class="r">' + (num(r.accounts) == null ? '—' : r.accounts) + '</td>' +
+        '<td class="r">' + (num(r.rows) == null ? '—' : r.rows) + '</td>' +
+        '<td class="r">' + (num(r.rows_changed) == null ? '—' : r.rows_changed) +
+          (corrected ? '<div class="an-sub" style="margin:2px 0 0">' + corrected + ' put right by eBay</div>' : '') + '</td>' +
+        '<td class="r">' + (dur == null ? '—' : dur + ' s') + '</td>' +
+        '<td' + (r.status === 'empty' ? ' class="an-neg"' : '') + '>' +
+          esc(r.status === 'empty' ? 'the report carried no listing' : 'samples landed') + '</td></tr>';
+    }).join('');
+    h += '</tbody></table></div>';
+    h += '<div class="an-sub" style="margin-top:8px">' +
+      'The spread is from a run\'s first landed sample to its last, which is as near its length as the record goes: ' +
+      'each sample is stamped as it arrives and nothing marks a run\'s end. ' +
+      (num(S.ticks_read) != null ? 'Grouped from the last ' + S.ticks_read + ' samples on record. ' : '') +
+      '<b>Nothing on this panel reaches eBay.</b></div>';
+    return h + '</div>';
+  }
+
   /* ---------------- Data health ---------------- */
   VIEWS.adtoolHealth = {
     label: 'Data health (ads)', hidden: true, order: 94, roles: ROLES, icon: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
@@ -6101,7 +6194,25 @@ VIEW_CSS.push(
         adtFreshShow('moHeFresh', D.fresh);
         D.truth = D.truth || []; D.jobs = D.jobs || []; D.gaps = D.gaps || {}; D.schedules = D.schedules || {}; D.cursors = D.cursors || {}; D.truth_summary = D.truth_summary || []; D.flags = D.flags || []; D.register = D.register || [];
         var pass = D.truth.filter(function (t) { return t.status === 'PASS'; }).length, failn = D.truth.filter(function (t) { return t.status === 'FAIL'; }).length;
-        var h = '<div class="an-kpis">' + kpi('Number checks', failn ? failn + ' FAIL' : pass + ' PASS', failn ? 'a mismatch holds this page back' : 'every checked number adds up', failn ? 'an-neg' : 'an-pos') + kpi('Jobs with errors', String(D.jobs.filter(function (j) { return j.last_status === 'error'; }).length), D.jobs.length + ' jobs watched') + kpi('Campaigns we cannot name', String((D.gaps.unresolved_campaign_ids && D.gaps.unresolved_campaign_ids.n) || 0), 'we have no name for these yet') + kpi('Orders not costed yet (30 days)', String((D.gaps.pending_cost_orders_30d && D.gaps.pending_cost_orders_30d.n) || 0), 'counted, never guessed') + kpi('Categories filled in', ((D.gaps.categories && D.gaps.categories.filled) || 0) + ' / ' + ((D.gaps.categories && D.gaps.categories.total) || 0), 'active listings, still filling') + '</div>';
+        /* §5: the two thresholds and the per-tile stamps, both off this answer. An older cached
+           payload carries neither, and then every tile reads "no reading yet", which is the honest
+           answer for a payload that does not say when it was read. */
+        var RU = D.freshness_rules || null, TS = D.tile_stamps || {}, SM = D.sampler || {};
+        /* OUTSIDE THE SAMPLING WINDOW NOTHING IS LATE. eBay dates a same-day report task on its own
+           Pacific clock and refuses one filed before midnight there, so no reading can land through
+           the small hours and a red badge then would be this page crying wolf every night. */
+        var smVerdict = SM.in_sampling_window === false ? 'window' : String(SM.verdict || '');
+        var h = '<div class="an-kpis">' + kpi('Number checks', failn ? failn + ' FAIL' : pass + ' PASS', (failn ? 'a mismatch holds this page back' : 'every checked number adds up') + moStamp(TS.number_checks, RU), failn ? 'an-neg' : 'an-pos') + kpi('Jobs with errors', String(D.jobs.filter(function (j) { return j.last_status === 'error'; }).length), D.jobs.length + ' jobs watched' + moStamp(TS.jobs, RU)) + kpi('Campaigns we cannot name', String((D.gaps.unresolved_campaign_ids && D.gaps.unresolved_campaign_ids.n) || 0), 'we have no name for these yet' + moStamp(TS.campaigns_unnamed, RU)) + kpi('Orders not costed yet (30 days)', String((D.gaps.pending_cost_orders_30d && D.gaps.pending_cost_orders_30d.n) || 0), 'counted, never guessed' + moStamp(TS.orders_not_costed, RU)) + kpi('Categories filled in', ((D.gaps.categories && D.gaps.categories.filled) || 0) + ' / ' + ((D.gaps.categories && D.gaps.categories.total) || 0), 'active listings, still filling' + moStamp(TS.categories, RU)) +
+          /* the sampler's own tile, beside the five it makes the rest of this page possible for */
+          kpi('Today\'s readings', SM.age_min == null ? 'none yet' : SM.age_min + ' min ago',
+            (smVerdict === 'window'
+              ? 'the part of the day eBay will give us a reading in has not started yet'
+              : (smVerdict === 'red'
+                ? 'past the limit set for it, and the alert ' + esc(String(SM.alert_rule || 'A23')) + ' has been raised'
+                : (smVerdict === 'amber' ? 'older than the first limit set for it' : 'landing on time'))) +
+            moStamp(SM, RU),
+            smVerdict === 'red' ? 'an-neg' : (smVerdict === 'amber' || smVerdict === 'window' ? '' : 'an-pos')) + '</div>';
+        h += samplerPanel(SM, RU);
         h += '<div class="an-panel"><h3>Jobs</h3><table class="an-tbl"><thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th class="r">Rows</th><th>Status</th><th>Note</th></tr></thead><tbody>' + D.jobs.map(function (j) { return '<tr><td>' + esc(j.job) + '</td><td>' + esc(D.schedules[j.job] || '—') + '</td><td>' + esc(String(j.last_end || j.last_start || '').slice(0, 16)) + '</td><td class="r">' + (j.last_rows == null ? '—' : j.last_rows) + '</td><td class="' + (j.last_status === 'error' || j.last_status === 'FAIL' ? 'an-neg' : 'an-pos') + '">' + esc(j.last_status || '') + '</td><td>' + esc(String(j.last_note || '').slice(0, 120)) + '</td></tr>'; }).join('') + '</tbody></table><div class="an-sub" style="margin-top:8px">Worked out up to: daily totals ' + esc(D.cursors.rollup || '—') + ' · patterns ' + esc(D.cursors.profiles || '—') + ' · forecast ' + esc(D.cursors.forecast || '—') + '</div></div>';
         /* Phase 1B: the freshness map (§5 of the plan) — one row per data family, its cadence, last update and age —
            and the ADTOOL_TODAY_FRESHNESS verdict (tick age < 10 min inside the 07:05–23:59 UTC sampling window) */
@@ -7054,18 +7165,22 @@ VIEW_CSS.push(
   function vidCohortPanel(D) {
     var C = D.cohort || {}, RU = D.freshness_rules || null;
     var cov = C.coverage || {};
+    /* every tile carries the stamp of whatever wrote its figure (31 Oct brief §5): the engine sends one per
+       tile in the house shape, and a tile with no stamp says so rather than reading as fresh */
+    var ST = C.stamps || {};
+    function stampLine(st) { return st && st.as_of ? '<br>as of ' + esc(String(st.as_of)) + ' UK ' + vidFresh(st.as_of_at, RU) : '<br>' + vidFresh('', RU); }
     var h = '<div class="ov-panel"><h3>The videos on our listings' + src('which listings carry a video', 'how') + '</h3>' +
       '<div class="ov-sub">' + esc(String(C.note || '')) + '</div>' +
       '<div class="ov-kpis">' +
       kpi('Carrying a video on eBay', cnt(C.on_ebay),
         'eBay\'s own answer, listing by listing' + (cov.last_checked_at ? '<br>last asked ' + esc(ago(cov.last_checked_at)) + vidFresh(cov.last_checked_at, RU) : '<br>the sweep has not run yet')) +
-      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage') +
-      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one') +
+      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage' + stampLine(ST.recorded)) +
+      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one' + stampLine(ST.both)) +
       kpi('Listings asked about', cnt(cov.listings_asked_about),
         (cov.active_listings == null ? 'out of a number of active listings we do not have' : 'out of ' + cnt(cov.active_listings) + ' active') +
         (num(cov.still_to_ask_about) > 0 ? '<br>' + cnt(cov.still_to_ask_about) + ' still to ask about' : '') +
         (num(cov.without_a_date) > 0 ? '<br>' + cnt(cov.without_a_date) + ' with no date eBay would give us' : '') +
-        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '')) +
+        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '') + stampLine(ST.coverage)) +
       '</div>';
     h += '<div class="vid-diff">' + esc(String(cov.note || '')) + '</div>';
     /* the two differences, each behind its own button: these are the lists somebody acts on, and
@@ -10623,17 +10738,96 @@ VIEW_CSS.push(
       toast((e && e.message) || 'That could not be saved.');
     });
   }
+  /* ══ HOW OLD A FIGURE MAY BE BEFORE THE PAGE SAYS SO (owner's brief, 31 Oct, §5) ════════════
+     Two figures, and they are the only two: the first turns the badge beside an "as of" time amber,
+     the second turns it red and raises the stale alert. They are settings and so they live here,
+     beside the pattern engine's own, on the one page where Management changes what this tool does.
+     NEITHER IS TYPED. "In force" is what the engine says it is judging on, and "Stored" is the
+     settings store itself, so a key nobody has set reads as the engine's own figure rather than as
+     nought. A page that printed the figures would go on printing the old ones. ══ */
+  var FRESH_KEYS = [
+    ['amber_min', 'When a tile says its figure is getting old',
+      'The number of minutes after which the badge beside an "as of" time turns amber, on every page that carries one. It is a note to somebody who is already looking: no alert is raised and nobody is told. Set it to the age at which a figure stops being worth deciding on.', 'minutes'],
+    ['red_min', 'When somebody is told the figures have stopped arriving',
+      'The number of minutes after which the badge turns red AND the stale alert is raised, because the reading everything about today stands on has stopped landing. This is the figure that decides when a person hears about it rather than having to notice, so it is the one that matters. The amber figure is never allowed past this one: a tile cannot be amber and red at once.', 'minutes']
+  ];
+  function freshRules() { return (ST.flags && ST.flags.freshness_rules) || null; }
+  function freshKey(f) { var K = (ST.flags && ST.flags.freshness_keys) || null; return (K && K[f]) || ('adtool_fresh_' + f); }
+  function freshBlock() {
+    var R = freshRules(), every = num(ST.flags && ST.flags.freshness_every_min);
+    var h = '<div class="an-panel"><h3>How old a figure may be before the page says so' + src('FRESHNESS', 'how') + '</h3>' +
+      '<div class="an-sub">Every tile on this tool that carries an "as of" time ages it against these two. ' +
+      'They move every badge on every page together, because each page reads them off the answer it is drawing rather than carrying them. ' +
+      'The red one also decides when the stale alert is raised: the reading of eBay\'s running total for today' +
+      (every != null ? ', which the portal asks for every ' + every + ' minutes' : '') +
+      ', has stopped landing, and every figure here about today stands on it. ' +
+      '<b>Changing either sends nothing to eBay.</b> They decide when this portal says a figure is old.</div>';
+    if (!R) {
+      h += '<div class="an-note">The figures the engine is judging on could not be read' +
+        (ST.flagsErr ? ': ' + esc(ST.flagsErr) : '') + ', so none is shown. What is stored is still listed below.</div>';
+    }
+    h += '<table class="st-cfg"><thead><tr><th>Setting</th><th>In force</th><th>Stored</th><th>What it means</th>' +
+      (mayEditCfg() ? '<th></th>' : '') + '</tr></thead><tbody>';
+    h += FRESH_KEYS.map(function (k) {
+      var key = freshKey(k[0]), row = flagRow(key);
+      var live = R && R[k[0]] != null && R[k[0]] !== '' ? String(R[k[0]]) : '';
+      return '<tr><td><b>' + esc(k[1]) + '</b><div><code>' + esc(key) + '</code></div></td>' +
+        '<td class="v">' + (live ? esc(live) + ' ' + esc(k[3]) : '<span class="st-unset">not available yet</span>') + '</td>' +
+        '<td class="v">' + (row && row.value !== '' && row.value != null
+          ? esc(String(row.value)) + (row.updated_at ? '<div class="an-sub" style="margin:2px 0 0;font-weight:400">set ' + esc(String(row.updated_at).slice(0, 16)) + '</div>' : '')
+          : '<span class="st-unset">not set, so the engine stands on its own figure</span>') + '</td>' +
+        '<td class="w">' + esc(k[2]) + '</td>' +
+        (mayEditCfg() ? '<td><button class="an-btn" style="padding:3px 9px;font-size:11px" data-stfresh="' + esc(k[0]) + '"' +
+          (ST.busy === key ? ' disabled' : '') + '>Change</button></td>' : '') + '</tr>';
+    }).join('');
+    h += '</tbody></table><div class="an-sub" style="margin-top:8px">' +
+      (mayEditCfg()
+        ? 'A change is written to the portal\'s own settings with who made it, and every page picks it up on its next read. Where the amber figure is set past the red one the engine holds it at the red one, so a tile is never both.'
+        : 'These are read-only for your role. Changing one is for Management and the Ops Head.') +
+      ' The run-by-run record of the reading itself is on <a href="#adtoolHealth" style="color:var(--gold-a);font-weight:800">Data health</a>, under <b>Sampler runs</b>.</div>';
+    return h + '</div>';
+  }
+  function setFresh(f, el) {
+    if (ST.busy) return;
+    var spec = null;
+    for (var i = 0; i < FRESH_KEYS.length; i++) { if (FRESH_KEYS[i][0] === f) spec = FRESH_KEYS[i]; }
+    if (!spec) { toast('That is not a setting this page can change.'); return; }
+    var key = freshKey(f), row = flagRow(key);
+    var now = (row && row.value !== '' && row.value != null) ? String(row.value) : 'nothing stored';
+    var typed = prompt(spec[1] + '\n\nStored now: ' + now + '\n\nType a whole number of minutes.', '');
+    if (typed == null) return;
+    var v = String(typed).trim();
+    if (!v) { toast('Nothing typed, so nothing was changed.'); return; }
+    if (!/^\d{1,4}$/.test(v) || Number(v) < 1) { toast('That is not a whole number of minutes.'); return; }
+    if (!confirm('Change "' + spec[1] + '" to ' + v + ' minutes?\n\n' + spec[2] +
+      '\n\nEvery badge on every page follows on its next read. Nothing is sent to eBay by this.')) return;
+    ST.busy = key;
+    if (el) el.disabled = true;
+    api('adtoolFlags', { set: { key: key, value: v } }).then(function () {
+      ST.busy = '';
+      toast('Saved: ' + spec[1] + ' is now ' + v + ' minutes');
+      ST.flags = null; ST.plan = null;
+      loadCfg();
+    })['catch'](function (e) {
+      ST.busy = '';
+      if (el) el.disabled = false;
+      toast((e && e.message) || 'That could not be saved.');
+    });
+  }
   function paintCfg() {
     var el = $('stCfg'); if (!el) return;
-    el.innerHTML = cfgBlock();
+    el.innerHTML = cfgBlock() + freshBlock();
     var bs = el.querySelectorAll('[data-stcfg]');
     for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { setCfg(this.getAttribute('data-stcfg'), this); };
     var xs = el.querySelectorAll('[data-stcfgx]');
     for (var j = 0; j < xs.length; j++) xs[j].onclick = function () { setCfg(this.getAttribute('data-stcfgx'), this); };
+    var fs = el.querySelectorAll('[data-stfresh]');
+    for (var k = 0; k < fs.length; k++) fs[k].onclick = function () { setFresh(this.getAttribute('data-stfresh'), this); };
   }
   function loadCfg() {
     if (!$('stCfg')) return;
-    $('stCfg').innerHTML = '<div class="an-panel"><h3>Pattern engine settings</h3><div class="an-empty">Loading…</div></div>';
+    $('stCfg').innerHTML = '<div class="an-panel"><h3>Pattern engine settings</h3><div class="an-empty">Loading…</div></div>' +
+      '<div class="an-panel"><h3>How old a figure may be before the page says so</h3><div class="an-empty">Loading…</div></div>';
     var a = api('adtoolFlags', {}).then(function (D) { ST.flags = D || {}; ST.flagsErr = ''; })
       ['catch'](function (e) { ST.flags = null; ST.flagsErr = (e && e.message) || 'the settings could not be read'; });
     /* the peak page's own answer, for the figures the engine is really deciding on. It can refuse
