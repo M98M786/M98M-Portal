@@ -20078,6 +20078,35 @@ const ROUTES = {
           const a = byItem[r.item_id];
           if (a) { r.ad_spend_14d = a.ad_spend_14d; r.ad_units_14d = a.ad_units_14d; }
         }
+        /* 31 Oct (owner): "which product is live in CPC right now, which in Dynamic, which in
+           General — and the active campaign's name and link". Live membership by the portal's own
+           rule (liveMembershipRow, the same one the split and the dup feed use); the kind: CPC =
+           cost-per-click, Dynamic = cost-per-sale with eBay's DYNAMIC rate or the owner's "dynamic"
+           naming (adDynamicRate's rule), General = the rest. A paused CPC ad in a running campaign
+           rides along as not-live so the row can say "paused", never "live". The sheet's own
+           campaign label still travels (campaign_type / campaign_name) — this is eBay's answer. */
+        const cm = await ctx.env.DB.prepare(
+          "SELECT ca.listing_id, ca.campaign_id, COALESCE(ca.ad_status, '') AS ad_status, COALESCE(ca.bid_pct, '') AS ad_bid, c.name, c.status AS c_status, " +
+          "COALESCE(c.funding_model, '') AS funding_model, COALESCE(c.bid_pct, '') AS c_bid, COALESCE(c.ad_rate_strategy, '') AS strategy " +
+          'FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+          "WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON')" + (account ? ' AND ca.account = ?1' : '')
+        ).bind(...(account ? [account] : [])).all().catch(() => ({ results: [] }));
+        const byListing = {};
+        for (const m of (cm.results || [])) (byListing[m.listing_id] = byListing[m.listing_id] || []).push(m);
+        const KIND_RANK = { CPC: 3, Dynamic: 2, General: 1 };
+        for (const r of rows) {
+          const live = (byListing[r.item_id] || []).map((m) => {
+            const fund = String(m.funding_model || '');
+            const kind = fund === 'COST_PER_CLICK' ? 'CPC'
+              : (String(m.strategy || '').toUpperCase() === 'DYNAMIC' || /dynamic/i.test(String(m.name || ''))) ? 'Dynamic' : 'General';
+            const isLive = liveMembershipRow({ c_status: m.c_status, l_status: 'ACTIVE', funding_model: fund, ad_status: m.ad_status });
+            return { campaign_id: String(m.campaign_id), name: String(m.name || ''), kind, campaign_status: String(m.c_status || ''),
+              ad_status: String(m.ad_status || ''), live: isLive, rate: String(m.ad_bid || m.c_bid || '') };
+          }).sort((a, b) => ((b.live ? 1 : 0) - (a.live ? 1 : 0)) || (KIND_RANK[b.kind] - KIND_RANK[a.kind]) || a.name.localeCompare(b.name));
+          r.live_campaigns = live;
+          const top = live.filter((x) => x.live)[0] || null;
+          r.live_kind = top ? top.kind : (live.length ? 'paused' : 'none');
+        }
       }
       return { rows, source_note: 'API rows join sheet facts; SHEET rows are the bridge for the no-API account' };
     },

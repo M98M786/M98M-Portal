@@ -30,13 +30,73 @@
     '.alx-suprow{display:flex;gap:4px;margin-top:3px}' +
     '.alx-sup{font-size:10px;font-weight:800;padding:1px 7px;border-radius:99px;background:var(--panel-2);color:var(--text-3);border:1px solid var(--gold-line)}' +
     '.alx-suplink{color:var(--gold-a);border-color:var(--gold-line-hi);text-decoration:none}' +
-    '.alx-suplink:hover{background:var(--gold-soft, var(--blue-soft))}'
+    '.alx-suplink:hover{background:var(--gold-soft, var(--blue-soft))}' +
+    /* 31 Oct (owner): the campaign column — live in CPC / Dynamic / General, the campaign's name
+       as its eBay link — and the item-ID campaign finder above the table */
+    '.alx-kind{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}' +
+    '.alx-kind.cpc{border-color:var(--gold-a);color:var(--gold-a)}.alx-kind.dyn{border-color:rgba(155,106,230,.6);color:#9B6AE6}.alx-kind.gen{border-color:rgba(72,199,142,.5);color:var(--ok)}' +
+    '.alx-kind.paused{border-color:rgba(255,159,67,.55);color:var(--warn)}.alx-kind.none{color:var(--text-3)}' +
+    '.alx-camp{font-size:11.5px;font-weight:700;margin-top:3px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}.alx-camp .adt-camplink{color:var(--gold-a)}' +
+    '.alx-camp.off{color:var(--text-3)}.alx-camp.off .adt-camplink{color:var(--text-3)}' +
+    '.alx-sheetlbl{font-size:10px;color:var(--text-3);font-weight:600;margin-top:2px}' +
+    '.alx-finder{border:1px solid var(--gold-a);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel-2)}' +
+    '.alx-finder h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin:0 0 8px;font-weight:800}' +
+    '.alx-finder .row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--gold-line)}.alx-finder .row:first-of-type{border-top:0}' +
+    '.alx-finder .camps{flex:1 1 320px;font-size:12.5px;font-weight:700;line-height:1.7}' +
+    '.alx-finder .camps .adt-camplink{color:var(--gold-a);font-weight:800}' +
+    '.alx-finder .hint{font-size:10.5px;color:var(--text-3);font-weight:600;margin-top:6px;line-height:1.5}'
   );
+
+  /* The campaign cell: eBay's own answer (live membership, every 15 minutes) first, the sheet's
+     label underneath when there is one. The campaign name IS its eBay link (the shell's
+     adtCampaignLink → sh/ads/dashboard/campaign/<id>): open it in that account's browser, pull the
+     search-query report and download the keywords — the owner's workflow. */
+  function alxKindTag(kind) {
+    var k = axStr(kind);
+    var cls = k === 'CPC' ? 'cpc' : k === 'Dynamic' ? 'dyn' : k === 'General' ? 'gen' : k === 'paused' ? 'paused' : 'none';
+    var lbl = k === 'paused' ? 'PAUSED' : k === 'none' || !k ? 'NOT ADVERTISED' : k.toUpperCase();
+    return '<span class="alx-kind ' + cls + '">' + esc(lbl) + '</span>';
+  }
+  function alxCampLink(c) {
+    var name = axStr(c.name) || axStr(c.campaign_id);
+    return typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id, name) : esc(name);
+  }
+  function alxCampaignCell(r) {
+    if (r.live_kind === undefined) {
+      return esc(axStr(r.campaign_type) || '—') + (axStr(r.campaign_name) ? '<div class="alx-sheetlbl">' + esc(axStr(r.campaign_name)) + '</div>' : '');
+    }
+    var camps = r.live_campaigns || [];
+    var h = alxKindTag(r.live_kind);
+    camps.slice(0, 3).forEach(function (c) {
+      h += '<div class="alx-camp' + (c.live ? '' : ' off') + '" title="' + esc(c.kind + ' campaign · ' + (c.live ? 'this ad is live' : 'this ad is ' + (axStr(c.ad_status).toLowerCase() || 'not live')) + ' · ' + axStr(c.campaign_status)) + '">' +
+        alxCampLink(c) + ' <span style="color:var(--text-3);font-weight:600">· ' + esc(c.kind) + (c.rate ? ' ' + esc(c.rate) + '%' : '') + (c.live ? '' : ' · ' + esc(axStr(c.ad_status).toLowerCase() || 'not live')) + ' ↗</span></div>';
+    });
+    if (camps.length > 3) { h += '<div class="alx-sheetlbl">+ ' + (camps.length - 3) + ' more</div>'; }
+    if (axStr(r.campaign_type) || axStr(r.campaign_name)) { h += '<div class="alx-sheetlbl">sheet: ' + esc([axStr(r.campaign_type), axStr(r.campaign_name)].filter(Boolean).join(' · ')) + '</div>'; }
+    return h;
+  }
+  /* Update 1 — "they enter the item ID and the system tells them which campaign the product sits
+     in, with the campaign's link": an item-number search answers with this card above the table. */
+  function alxFinder(rows) {
+    var h = '<div class="alx-finder"><h3>Where this listing is advertised</h3>';
+    rows.forEach(function (r) {
+      var camps = r.live_campaigns || [], live = camps.filter(function (c) { return c.live; }), off = camps.filter(function (c) { return !c.live; });
+      h += '<div class="row"><div style="flex:0 1 360px">' + (typeof adtProductCell === 'function'
+          ? adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: axStr(r.image) }, { open: alxCanHistory() })
+          : esc(axStr(r.title)) + ' · ' + esc(axStr(r.item_id))) + '</div>' +
+        '<div class="camps">' + alxKindTag(r.live_kind) + ' ' +
+        (live.length ? live.map(function (c) { return 'live in <b>' + esc(c.kind) + '</b> campaign ' + alxCampLink(c) + ' ↗' + (c.rate ? ' <span style="color:var(--text-3)">· ' + esc(c.rate) + '%</span>' : ''); }).join('<br>')
+          : (r.live_kind === undefined ? '<span style="color:var(--text-3)">campaign membership is not shown for your role</span>' : '<span style="color:var(--text-3)">not in any running campaign right now</span>')) +
+        (off.length ? '<br><span style="color:var(--text-3);font-weight:600">also in ' + off.map(function (c) { return alxCampLink(c) + ' (' + esc(c.kind) + ' · ' + esc(axStr(c.ad_status).toLowerCase() || 'not live') + ')'; }).join(', ') + '</span>' : '') +
+        (camps.length ? '<div class="hint">Open the campaign in the <b>' + esc(axStr(r.account)) + '</b> eBay browser session (the link follows whichever account is signed in), then Search query report → download the keywords.</div>' : '') + '</div></div>';
+    });
+    return h + '</div>';
+  }
 
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [], q: '', tab: 'all' };
+  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '' };
 
   /* 31 Oct (owner, showing the ad tool's row): "I need these kind of listings page" — every row is the
      portal's standard listing cell (image, title → Product history, item number, account, eBay ↗,
@@ -129,19 +189,33 @@
   function alxPaint(d) {
     var box = $('alxBody');
     if (!box) { return; }
-    if (d) { ALX.rows = d.rows || []; }
+    if (d) {
+      ALX.rows = d.rows || [];
+      ALX.rows.forEach(function (r) {
+        if (r.live_campaigns) { r.live_campaign_names = r.live_campaigns.map(function (c) { return c.kind + ': ' + c.name + (c.live ? '' : ' (' + (axStr(c.ad_status).toLowerCase() || 'not live') + ')'); }).join(' | '); }
+      });
+    }
+    var hasLive = ALX.rows.some(function (r) { return r.live_kind !== undefined; });
     var chips = $('alxTabs');
     if (chips) {
+      var kindN = function (k) { return ALX.rows.filter(function (r) { return r.live_kind === k; }).length; };
       chips.innerHTML = ALX_TABS.map(function (t) {
         var n = alxTabFilter(ALX.rows, t.key).length;
         return '<button class="minibtn' + (ALX.tab === t.key ? ' on' : '') + '" data-alx-tab="' + t.key + '">' +
           esc(t.label) + ' <span style="opacity:.7">' + n + '</span></button>';
-      }).join('');
+      }).join('') +
+      (hasLive ? '<span style="width:100%"></span>' + [['CPC', 'Live in CPC'], ['Dynamic', 'Live in Dynamic'], ['General', 'Live in General'], ['paused', 'Paused'], ['none', 'Not advertised']].map(function (k) {
+        return '<button class="minibtn' + (ALX.kind === k[0] ? ' on' : '') + '" data-alx-kind="' + k[0] + '">' + esc(k[1]) + ' <span style="opacity:.7">' + kindN(k[0]) + '</span></button>';
+      }).join('') : '');
       Array.prototype.forEach.call(chips.querySelectorAll('[data-alx-tab]'), function (b) {
         b.onclick = function () { ALX.tab = this.getAttribute('data-alx-tab'); alxPaint(); };
       });
+      Array.prototype.forEach.call(chips.querySelectorAll('[data-alx-kind]'), function (b) {
+        b.onclick = function () { var k = this.getAttribute('data-alx-kind'); ALX.kind = ALX.kind === k ? '' : k; alxPaint(); };
+      });
     }
     var all = alxTabFilter(ALX.rows, ALX.tab);
+    if (ALX.kind) { all = all.filter(function (r) { return r.live_kind === ALX.kind; }); }
     var q = axStr(ALX.q).toLowerCase();
     if (q) {
       all = all.filter(function (r) {
@@ -149,7 +223,8 @@
       });
     }
     var cnt = $('alxCount');
-    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' ? ' of ' + ALX.rows.length : '') + ' listing(s)'; }
+    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' || ALX.kind ? ' of ' + ALX.rows.length : '') + ' listing(s)'; }
+    var finder = (/^\d{9,14}$/.test(axStr(ALX.q)) && all.length && all.length <= 5) ? alxFinder(all) : '';
     if (!all.length) {
       box.innerHTML = q
         ? '<div class="alx-empty">No listing matches “' + esc(ALX.q) + '”.<span>Item numbers, titles and campaign names are all searched, across every account you can see.</span></div>'
@@ -159,7 +234,7 @@
     }
     // Optional columns exist only when the server sent them for this role (§6).
     var hasProfit = ALX.rows.some(function (r) { return r.profit !== undefined; });
-    var hasCampaign = ALX.rows.some(function (r) { return r.campaign_type !== undefined; });
+    var hasCampaign = ALX.rows.some(function (r) { return r.campaign_type !== undefined || r.live_kind !== undefined; });
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var canHistory = alxCanHistory();
@@ -191,12 +266,12 @@
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
-        (hasCampaign ? '<td>' + esc(axStr(r.campaign_type) || '—') + (axStr(r.campaign_name) ? '<div style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.campaign_name)) + '</div>' : '') + '</td>' : '') +
+        (hasCampaign ? '<td>' + alxCampaignCell(r) + '</td>' : '') +
         '<td>' + alxSuppliers(r) + '</td>' +
         '<td><span class="alx-src ' + (src === 'API' ? 'api' : 'sheet') + '">' + src + '</span></td>' +
       '</tr>';
     });
-    box.innerHTML = h + '</tbody></table></div>';
+    box.innerHTML = finder + h + '</tbody></table></div>';
   }
 
   function alxLoad() {
@@ -226,7 +301,7 @@
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
           '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
-          '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Search item number, title or campaign…">' +
+          '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Item ID → its campaign · or search title / campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
           '<button class="minibtn" id="alxExport">⬇ Export CSV</button>' +
           '<span class="alx-count" id="alxCount"></span></div>' +
@@ -269,7 +344,7 @@
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'live_kind', 'live_campaign_names', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';
