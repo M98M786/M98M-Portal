@@ -64,6 +64,103 @@ function officeGate(env, req, email) {
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
+/* THE CRON MAP, lifted out of the scheduled handler so there is exactly one of it. Three readers
+   need the same list and must never be able to disagree about it: the handler below fans a tick
+   out through it, the key-authed adsPeakTrail prints its keys as evidence that the peak slot is
+   still in the build, and a unit test pins those keys to engine/crons.json, which is the list the
+   deploy guard registers on Cloudflare. A slot written here and never registered there never
+   fires, and nothing but that test can see the difference.
+   It is a function and not a const because it is CALLED, never evaluated at module load: the job
+   names below are read when a tick or a request arrives, so the order the jobs are declared in
+   this file cannot matter. */
+function cronMap() {
+  return {
+    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
+    /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
+       carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
+    /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
+       left a RUNNING campaign unread for 2.6 to 7 hours and an ad status wrong for most of a day.
+       At 14 a tick it costs roughly 84 ad-list GETs fleet-wide, and this slot already runs twelve
+       jobs on ONE invocation’s subrequest budget, so it was given the quarter-hour slot of its own
+       at :08 below. What stays here is only the safety net: a cron string has to be registered on
+       the Cloudflare side as well as written here, and a slot nobody registered never fires.
+       adsItemsNet is one D1 read on a normal tick and runs the job only if no account has had a
+       tick for 40 minutes. */
+    '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
+    /* adtoolPeakSwitch has an INVOCATION OF ITS OWN, at :01 :16 :31 :46. It is one of the two jobs
+       in this file that can write to eBay, and riding first in the twelve-job quarter-hour slot
+       above was not enough: every job in a slot shares one invocation's subrequest budget, this one
+       fetches a token and a bulk ad-status write per change, and a peak that quietly stopped being
+       switched because a sync ahead of it ate the budget would be worse than one nobody automated.
+       Its own slot has its own budget and nothing else can touch it.
+       One minute after each quarter hour, not on it: the hours it switches at are whole hours, so
+       the only boundary that matters is the top of an hour and :01 honours it within a minute,
+       while :00 is the busiest minute in this map. A tick that never fires costs nothing either
+       way, because the job compares the state it wants with the state it believes and puts the ad
+       right on the next tick rather than replaying a missed boundary. */
+    '1-59/15 * * * *': [adtoolPeakSwitch],
+    '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
+    /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
+       orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
+       the five-minute order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
+       and sends. Worst case ~7 min from purchase to message, regardless of volume — instead of
+       an HOURLY scan + a 15-minute drip that let a busy day back up for a day. Own invocation =
+       own subrequest budget, so a packed sync slot can never starve it. */
+    '2-59/5 * * * *': [autoMsgScan, autoMsgSend],
+    /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
+       invocation's subrequest budget, and anything queued after them silently never runs —
+       processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
+    /* FREE-PLAN LAW (24 Aug, the Cloudflare limit mail): one invocation carries ~50 subrequests
+       and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
+       accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
+       fresh budget; watcher fan-outs are capped inside the watchers themselves. */
+    '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, nightlyCatchup, standardsSync],
+    /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
+       budget died with the upgrade. Each heavy family still keeps its own invocation. */
+    '40 * * * *': [listingSync, trafficSync],
+    /* signalsPull (computeSignals + alertsRefresh — up to ~8 min of heavy AS workbook scans)
+       moved OFF the :00 slot (8 Sept overload work): at :00 it collided with the pushSheetRowsHot
+       :00 AS trigger AND peak top-of-hour /exec traffic. :50 is clear of the :00/:15/:30/:45
+       mirror ticks and off-peak. Both jobs are idempotent + time-budgeted, so nothing changes but
+       the timing. */
+    '50 * * * *': [marketingSync, feedbackSync, alertsPull, policyScan, adtoolWarmRide],
+    /* ADTOOL (Advertising Tool): its own invocations so its D1 work can never starve a sync slot.
+       :20 hourly = rollups (spec §10); 05:20 UTC = the morning chain (06:20 BST): truth check now,
+       profiles / forecast / report / decisions / analyst as their phases land. Every job is
+       flag-gated in portal_config (adtool_*); flags off = the invocation returns at once. */
+    '20 * * * *': [adtoolRollups],
+    '25 * * * *': [adtoolAlerts],
+    '20 5 * * *': [adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas],
+    /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
+       then the apply job (which sends nothing unless an account's own switch is on) */
+    '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApplyPreflight, adtoolApply],
+    /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything */
+    '30 23 * * *': [adtoolDecisionsBoundary],
+    /* today-only pauses come back at 00:05 UK */
+    '5 0 * * *': [adtoolResume],
+    /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
+       quarter-hour trigger (:05/:20/:35/:50). The Apps Script side fingerprints its inputs and
+       skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
+       quarter-hour and reacts within 15 minutes when staff edit a day tab. */
+    '5-59/15 * * * *': [signalsPull],
+    /* Item-level ad membership and the money-beats-status repair, on an invocation of their own
+       (:08, :23, :38, :53) so their fetches can never eat another slot’s subrequest budget, and
+       the other way about. The minute is three past the 5-minute campaign sync, so the campaign
+       list this job rotates through is at most 3 minutes old, and it is clear of every other
+       entry in this map: the five-minute slots occupy minutes ending 0 or 5 and 2 or 7, the hourly jobs
+       sit at :20 :25 :30 :40 :50, and 5-59/15 sits at :05 :20 :35 :50. */
+    '8-59/15 * * * *': [adsItems],
+    /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
+       Aug; registration present, tick never delivered, all other slots fine). Moved to a
+       fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
+    /* 27 Sept: truthAlertSweep was written as the remedy for letter build-up and then left on
+       NO cron slot — an on-demand lever nobody pulled, while the backlog grew ~90 letters a
+       week. It is idempotent and only ever closes stale event/snapshot letters, so it belongs
+       on the nightly slot; it runs BEFORE selfTestJob so the battery counts the tidied total. */
+    '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, truthAlertSweep, selfTestJob, securitySweep],
+  };
+}
+
 export default {
   async fetch(req, env, ctx) {
     /* ALLOWED_ORIGIN is a comma-separated LIST since the custom domain (portal.m98mltd.co.uk)
@@ -212,91 +309,7 @@ export default {
        the half-past slot (its every-quarter-hour full upserts alone were ~72k of D1's 100k
        rows-written/day), trafficSync moved off financeSync's slot, violationsSync off the
        5-minute treadmill. */
-    const jobs = {
-      '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
-      /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
-         carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
-      /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
-         left a RUNNING campaign unread for 2.6 to 7 hours and an ad status wrong for most of a day.
-         At 14 a tick it costs roughly 84 ad-list GETs fleet-wide, and this slot already runs twelve
-         jobs on ONE invocation’s subrequest budget, so it was given the quarter-hour slot of its own
-         at :08 below. What stays here is only the safety net: a cron string has to be registered on
-         the Cloudflare side as well as written here, and a slot nobody registered never fires.
-         adsItemsNet is one D1 read on a normal tick and runs the job only if no account has had a
-         tick for 40 minutes. */
-      '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
-      /* adtoolPeakSwitch has an INVOCATION OF ITS OWN, at :01 :16 :31 :46. It is one of the two jobs
-         in this file that can write to eBay, and riding first in the twelve-job quarter-hour slot
-         above was not enough: every job in a slot shares one invocation's subrequest budget, this one
-         fetches a token and a bulk ad-status write per change, and a peak that quietly stopped being
-         switched because a sync ahead of it ate the budget would be worse than one nobody automated.
-         Its own slot has its own budget and nothing else can touch it.
-         One minute after each quarter hour, not on it: the hours it switches at are whole hours, so
-         the only boundary that matters is the top of an hour and :01 honours it within a minute,
-         while :00 is the busiest minute in this map. A tick that never fires costs nothing either
-         way, because the job compares the state it wants with the state it believes and puts the ad
-         right on the next tick rather than replaying a missed boundary. */
-      '1-59/15 * * * *': [adtoolPeakSwitch],
-      '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
-      /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
-         orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
-         the five-minute order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
-         and sends. Worst case ~7 min from purchase to message, regardless of volume — instead of
-         an HOURLY scan + a 15-minute drip that let a busy day back up for a day. Own invocation =
-         own subrequest budget, so a packed sync slot can never starve it. */
-      '2-59/5 * * * *': [autoMsgScan, autoMsgSend],
-      /* Cheap D1-only work runs FIRST: the heavy API syncs at the tail can (and do) exhaust the
-         invocation's subrequest budget, and anything queued after them silently never runs —
-         processWatch starved exactly that way on its first armed tick (00:30, 21 Aug). */
-      /* FREE-PLAN LAW (24 Aug, the Cloudflare limit mail): one invocation carries ~50 subrequests
-         and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
-         accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
-         fresh budget; watcher fan-outs are capped inside the watchers themselves. */
-      '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, nightlyCatchup, standardsSync],
-      /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
-         budget died with the upgrade. Each heavy family still keeps its own invocation. */
-      '40 * * * *': [listingSync, trafficSync],
-      /* signalsPull (computeSignals + alertsRefresh — up to ~8 min of heavy AS workbook scans)
-         moved OFF the :00 slot (8 Sept overload work): at :00 it collided with the pushSheetRowsHot
-         :00 AS trigger AND peak top-of-hour /exec traffic. :50 is clear of the :00/:15/:30/:45
-         mirror ticks and off-peak. Both jobs are idempotent + time-budgeted, so nothing changes but
-         the timing. */
-      '50 * * * *': [marketingSync, feedbackSync, alertsPull, policyScan, adtoolWarmRide],
-      /* ADTOOL (Advertising Tool): its own invocations so its D1 work can never starve a sync slot.
-         :20 hourly = rollups (spec §10); 05:20 UTC = the morning chain (06:20 BST): truth check now,
-         profiles / forecast / report / decisions / analyst as their phases land. Every job is
-         flag-gated in portal_config (adtool_*); flags off = the invocation returns at once. */
-      '20 * * * *': [adtoolRollups],
-      '25 * * * *': [adtoolAlerts],
-      '20 5 * * *': [adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas],
-      /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
-         then the apply job (which sends nothing unless an account's own switch is on) */
-      '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApplyPreflight, adtoolApply],
-      /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything */
-      '30 23 * * *': [adtoolDecisionsBoundary],
-      /* today-only pauses come back at 00:05 UK */
-      '5 0 * * *': [adtoolResume],
-      /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
-         quarter-hour trigger (:05/:20/:35/:50). The Apps Script side fingerprints its inputs and
-         skips the heavy scan when no workbook changed, so this costs almost nothing on a quiet
-         quarter-hour and reacts within 15 minutes when staff edit a day tab. */
-      '5-59/15 * * * *': [signalsPull],
-      /* Item-level ad membership and the money-beats-status repair, on an invocation of their own
-         (:08, :23, :38, :53) so their fetches can never eat another slot’s subrequest budget, and
-         the other way about. The minute is three past the 5-minute campaign sync, so the campaign
-         list this job rotates through is at most 3 minutes old, and it is clear of every other
-         entry in this map: the five-minute slots occupy minutes ending 0 or 5 and 2 or 7, the hourly jobs
-         sit at :20 :25 :30 :40 :50, and 5-59/15 sits at :05 :20 :35 :50. */
-      '8-59/15 * * * *': [adsItems],
-      /* Was '0 2 * * *' — Cloudflare skipped that exact tick THREE consecutive nights (20–22
-         Aug; registration present, tick never delivered, all other slots fine). Moved to a
-         fresh minute + re-registered; the anchored nightlyCatchup remains the safety net. */
-      /* 27 Sept: truthAlertSweep was written as the remedy for letter build-up and then left on
-         NO cron slot — an on-demand lever nobody pulled, while the backlog grew ~90 letters a
-         week. It is idempotent and only ever closes stale event/snapshot letters, so it belongs
-         on the nightly slot; it runs BEFORE selfTestJob so the battery counts the tidied total. */
-      '10 2 * * *': [rollups, backup, adsReportKick, standardsSync, itemStats, truthAlertSweep, selfTestJob, securitySweep],
-    };
+    const jobs = cronMap();
     const fns = jobs[event.cron] || [];
     ctx.waitUntil((async () => {
       try {
@@ -6787,7 +6800,7 @@ async function adtNotify(env, audience, type, message, ref) {
 }
 /* ADTOOL-P5-PURE-BEGIN */
 /* why_matters (Phase 4 big update): a plain sentence per rule on why it costs or makes money, shown on the Alerts
-   card beside what / where / do / urgency. A unit test asserts all 19 rules carry one. The profit-based rules read
+   card beside what / where / do / urgency. A unit test asserts all 21 rules carry one. The profit-based rules read
    real profit (Sales Analysis law) — A02 is the item-profit rule; no rule text says 'est. ad profit' any more. */
 const ADTOOL_ALERT_RULES = {
   A01: { sev: 'high', cool: 3, text: 'ROAS below break-even on 5 consecutive days with spend ≥ £2/day', action: 'stop', why_matters: 'Five straight days paying more for clicks than the sales are worth — every extra day burns cash with no path to profit.' },
@@ -6809,6 +6822,15 @@ const ADTOOL_ALERT_RULES = {
   A17: { sev: 'low', cool: 21, text: 'pattern changed: hourly / slot / weekday shape diverged for 3 days', action: 'check', why_matters: "The listing's hourly and weekday shape has shifted — the schedule and bids tuned to the old pattern may now be wrong." },
   A18: { sev: 'medium', cool: 7, text: 'diminishing returns: spend/day up ≥ 15 % while ROAS fell, two weeks running', action: 'reduce', why_matters: 'Each extra pound is buying less back two weeks running — spend is scaling past the point where it pays.' },
   A19: { sev: 'medium', cool: 7, text: 'ROAS target at risk: 30-day ROAS more than 0.5× below target with under 14 days to the checkpoint', action: 'check', why_matters: 'The account is drifting below its ROAS target with little time left to correct before the checkpoint.' },
+  /* 31 Oct, the two the peak switch could not raise for itself. The job runs every quarter hour and
+     writes only to its own apply log, so until now the two ways it can fail quietly had no reader at
+     all: an hour it was meant to switch at that came and went with nothing written down, and a change
+     eBay took and then went on reading the other way round. Severity is decided per finding rather
+     than per rule: on an account whose own live switch is on these are real ads in the wrong state and
+     real money, so they read high; on every other account nothing was ever sent and the finding is a
+     fault in the record, so it reads medium. */
+  A20: { sev: 'medium', cool: 1, text: 'peak hours: an hour this listing switches at passed with nothing sent and nothing written down', action: 'check', why_matters: 'The hours only do their work if something happens at each one, so a boundary that passed in silence means the ad very likely ran, or stayed off, through hours nobody chose for it.' },
+  A21: { sev: 'medium', cool: 1, text: 'peak hours: eBay goes on reading the ad the other way round after the switch was sent and accepted', action: 'check', why_matters: 'The change was accepted and the ad is still in the old state, so the spend is running against a state nobody asked for and the next switch will be decided from a belief that is wrong.' },
 };
 function adtAlertUrgency(sev, hoursOpen) {
   /* how loudly the card should read: a high alert open more than 24 h is 'overdue'; otherwise urgency is derived
@@ -6932,7 +6954,7 @@ async function ensureAdtoolPhase5Schema(env) {
   ADTOOL_P5_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P5 = [
-  ['ALERT_RULES', 'The alert rules', 'Nineteen things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
+  ['ALERT_RULES', 'The alert rules', 'Twenty-one things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
   ['REPORT_YESTERDAY', 'Yesterday\'s report', 'For the company and for each account: spend, sales from ads, ROAS and the expected gain from the ads against the last seven days and against the same weekday a week ago, with orders and profit, how the hours compared with the usual shape, the best and worst listings, and a short list of what changed.', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'Every morning, and caught up through the day if it falls behind', 'Three mornings running with no help by hand'],
   ['ROAS_LADDER', 'ROAS target, and what you can change to reach it', 'The gap between the ROAS you have and the ROAS you want, and the five things you could change to close it, each worked out on the last 30 days with its assumptions printed beside it. Cuts only, never raises.', 'adtool_listing_day, adtool_listings', 'Every morning', 'The numbers were checked by hand over a fixed past period'],
   ['BUDGET_CAPPED_DAY', 'Days a listing ran out of budget', 'A day whose first reading already showed the campaign\'s whole daily budget spent, with clicks flat after it. The ad stopped early.', 'adtool_ads_intraday, campaigns', 'Every morning, for yesterday', 'Counted on the Data health page'],
@@ -7003,6 +7025,44 @@ async function adtoolAlerts(env) {
     const targetF = Number(await adtFlag(env, 'adtool_roas_target')) || 5;
     const checkpoint = '2026-10-15'; const daysLeft = Math.round((new Date(checkpoint + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000);
     if (daysLeft >= 0 && daysLeft < 14) { for (const r of ((await env.DB.prepare('SELECT l.account, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS revenue FROM adtool_listing_day d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day >= ?1 AND d.day <= ?2 GROUP BY l.account').bind(adtAddDays(yday, -29), yday).all()).results || [])) { const target = Number(await adtFlag(env, 'adtool_roas_target_' + r.account)) || targetF; const roas = Number(r.spend) > 0 ? Number(r.revenue) / Number(r.spend) : 0; if (roas < target - 0.5) put('A19', r.account, { roas_30d: Math.round(roas * 100) / 100, target, days_left: daysLeft }, { account: r.account }); } }
+    /* A20 / A21: the quarter-hourly peak switch, which can raise nothing for itself. Everything it
+       does it writes to its own apply log and nowhere else, so these two read that log back: once
+       against the hours the list promised to switch at, and once against eBay's own ad reading.
+       Behind a try because the peak list and the apply log are another phase's tables and this job
+       does not create them: a database without them must still show the other rules.
+       SEVERITY IS DECIDED PER FINDING, not per rule. On an account whose own live switch is on these
+       are real ads in the wrong state and real money going out, so they read high; on every other
+       account nothing was ever sent and what is wrong is the record, so they read medium. */
+    try {
+      const peakRows = (await env.DB.prepare("SELECT account, item_id, hours, COALESCE(auto, 0) AS auto, added_at FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT 500").all()).results || [];
+      if (peakRows.length) {
+        const peakIds = peakRows.map(r => String(r.item_id));
+        const peakSwitchable = await adtPeakSwitchable(env, peakIds);
+        const peakSwitches = await adtPeakLiveSwitches(env);
+        const peakSev = a => (peakSwitches[String(a || '')] ? 'high' : 'medium');
+        /* today and yesterday, which is the same window adtPeakLastSwitch reads and enough for both:
+           every stretch of hours has a start and a stop, and the 24 hours A20 judges fall inside it. */
+        const peakLog = (await env.DB.prepare("SELECT item_id, campaign_id, account, mode, http_status, payload_json, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 ORDER BY id DESC LIMIT 4000").bind(adtAddDays(today, -1)).all()).results || [];
+        const nowMs = Date.now();
+        for (const m of adPeakMissedSends({ rows: peakRows, log: peakLog, switchable: peakSwitchable, now_uk: Object.assign({ now_ms: nowMs }, adtUkParts(nowMs)), grace_min: ADTOOL_PEAK_GRACE_MIN })) {
+          put('A20', m.item_id + '|' + m.boundary_iso, { title: (L[m.item_id] || {}).title, hour_uk: adtUkClockOf(m.boundary_iso), wanted: m.want, note: m.note, account_live_switch: !!peakSwitches[String(m.account || '')] }, { account: m.account, item_id: m.item_id, sev: peakSev(m.account) });
+        }
+        const peakSends = peakLog.map(r => {
+          let pj = {}; try { pj = JSON.parse(String(r.payload_json || '{}')); } catch (e) { pj = {}; }
+          return { item_id: String(r.item_id || ''), campaign_id: String(r.campaign_id || ''), account: String(r.account || ''), mode: String(r.mode || ''), http_status: Number(r.http_status) || 0, to: String(pj.to || ''), at: String(r.at || '') };
+        });
+        /* eBay's readings come out of the read the job itself decides on (adtPeakSwitchable) rather
+           than a second trip to campaign_ads: the same ads, one D1 read instead of two, and the same
+           rule about which ad counts. An ad that has since been archived, or whose campaign has
+           stopped running, or whose listing has ended, is not in that read and raises nothing — which
+           is right, because the job would not switch it either, so there is no disagreement to act on. */
+        const peakReadings = [];
+        for (const iid of Object.keys(peakSwitchable)) for (const r of (peakSwitchable[iid] || [])) peakReadings.push({ item_id: iid, campaign_id: String(r.campaign_id || ''), ad_status: String(r.ad_status || ''), synced_at: String(r.ad_synced_at || '') });
+        for (const dis of adPeakReadingDisagree({ last_sends: peakSends, readings: peakReadings, settle_min: ADTOOL_PEAK_SETTLE_MIN })) {
+          put('A21', dis.item_id + '|' + dis.campaign_id, { title: (L[dis.item_id] || {}).title, sent: dis.sent, sent_at_uk: adtUkClockOf(dis.sent_at), read: dis.read, read_at_uk: adtUkClockOf(dis.read_at), note: 'the switch sent ' + dis.sent + ' and eBay accepted it; its own reading of the ad afterwards still says ' + dis.read, account_live_switch: !!peakSwitches[String(dis.account || '')] }, { account: dis.account, item_id: dis.item_id, campaign_id: dis.campaign_id, sev: peakSev(dis.account) });
+        }
+      }
+    } catch (e) { /* no peak list or no apply log yet: there is nothing to judge, and the other rules stand */ }
     /* reconcile with the open set: open / keep / clear; respect cool-downs and snoozes */
     const open = {}; for (const r of ((await env.DB.prepare("SELECT alert_id, rule_id, fired_at, cleared_at, snoozed_until FROM adtool_alerts WHERE cleared_at = '' OR cleared_at >= ?1").bind(adtAddDays(today, -30)).all()).results || [])) open[r.alert_id] = r;
     const stmts = []; let fired = 0, kept = 0, cleared = 0; const highNew = [];
@@ -11878,6 +11938,153 @@ function adtReportSentLive(rows) {
   if (morning) by.push(morning + ' by the morning apply');
   if (peak) by.push(peak + ' by peak switching');
   return { total: total, morning: morning, peak: peak, sentence: total + (total === 1 ? ' change was' : ' changes were') + ' sent to eBay that day (' + by.join(', ') + ')' };
+}
+/* ---- pure: the two ways the quarter-hourly peak switch can fail quietly ---- */
+/* Both of these judge the SWITCH, not the ads: one asks whether the job did anything at an hour it
+   was meant to act on, the other whether eBay ended up where the job was told to put it. They are
+   pure so that the two failures can be written down as fixtures and checked, which is the only way
+   to be sure an alarm about a job that sends real changes is right before it wakes anybody. */
+const ADTOOL_PEAK_GRACE_MIN = 20;        // how long after an hour boundary the job still counts as having acted
+const ADTOOL_PEAK_SETTLE_MIN = 10;       // how long eBay is given to settle before a reading is read as disagreement
+function adPeakStampMs(stamp) {
+  /* a stored stamp as an instant. D1 writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' in UTC with no
+     zone on it, and an ISO string carries its own: a stamp without a zone is read as UTC, because that
+     is what wrote it, and one with a zone is left alone. Unreadable is NaN and never a moment: a
+     comparison against a guessed instant is how a quiet job gets a clean bill of health. */
+  const s = String(stamp == null ? '' : stamp).trim().replace(' ', 'T');
+  if (!s) return NaN;
+  return Date.parse(/([zZ]|[+-]\d{2}:?\d{2})$/.test(s) ? s : s + 'Z');
+}
+function adPeakBoundaryMs(day, hour) {
+  /* the instant a UK hour boundary falls on. UK midnight plus the hour is an hour out on the two days
+     a year the clocks move, so the candidate is read back on the UK clock and shifted by an hour where
+     it does not say the hour that was asked for. An hour that does not exist on that day at all (the
+     spring forward skips one) is NaN, and the caller passes over it rather than inventing a boundary
+     nobody could have switched at. */
+  const base = adtUkMidnightUtcMs(String(day || ''));
+  const h = Number(hour);
+  if (isNaN(base) || !isFinite(h)) return NaN;
+  const want = ((Math.trunc(h) % 24) + 24) % 24;
+  for (const shift of [0, -3600000, 3600000]) {
+    const ms = base + want * 3600000 + shift;
+    const p = adtUkParts(ms);
+    if (p.date === String(day) && p.hour === want && p.minute === 0) return ms;
+  }
+  return NaN;
+}
+function adPeakMissedSends(input) {
+  /* A20. Every hour the peak list switches at is a promise that something will happen at it, and the
+     job's own apply log is the only place that something is ever written down: live, would-send or
+     held back by a cap, one of the three is always written when a boundary is honoured. So a boundary
+     that passed with NOTHING against it is the one shape of failure the job cannot report about
+     itself, whether the worker was asleep, the tick never arrived, or eBay refused the change and the
+     job stopped asking.
+     input: { rows (the open peak rows), log (this job's apply rows), switchable (item -> switchable
+     ads, as adtPeakSwitchable returns), now_uk, grace_min }.
+     `now_uk` is the UK clock reading of this moment with the instant it was read at in `now_ms`: the
+     clock half says which UK days the last 24 hours span, and the instant half is what every
+     comparison is actually made against, so the hour the clocks go back is never read as two.
+     A boundary is judged only once it is `grace_min` old, because the job runs a minute past each
+     quarter hour and a boundary that has just passed is not late yet. A row with no switchable ad is
+     passed over: there was nothing on it to switch, so nothing was owed. So is a boundary older than
+     the row itself, because the row did not exist then. A map that is not passed filters nothing. */
+  const i = input || {};
+  const grace = Number(i.grace_min) > 0 ? Number(i.grace_min) : ADTOOL_PEAK_GRACE_MIN;
+  const graceMs = grace * 60000;
+  const now = Number(i.now_uk && i.now_uk.now_ms);
+  const today = String((i.now_uk && i.now_uk.date) || '');
+  if (!isFinite(now) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return [];
+  const from = now - 86400000, until = now - graceMs;
+  if (until <= from) return [];
+  const stamps = {};
+  for (const r of (i.log || [])) {
+    const item = String((r && r.item_id) || '');
+    if (!item) continue;
+    const ms = adPeakStampMs(r && r.at);
+    if (!isFinite(ms)) continue;
+    (stamps[item] = stamps[item] || []).push(ms);
+  }
+  const days = [adtAddDays(today, -1), today];
+  const out = [];
+  for (const row of (i.rows || [])) {
+    const item = String((row && row.item_id) || '');
+    if (!item) continue;
+    if (!Number(row.auto)) continue;                        // nobody asked for this row to switch itself
+    const parsed = adPeakHoursParse(row.hours);
+    if (!parsed.ranges || !parsed.ranges.length) continue;  // refused when it was typed; not guessed at here
+    if (i.switchable && !((i.switchable[item] || []).length)) continue;
+    const addedMs = adPeakStampMs(row.added_at);
+    const seen = stamps[item] || [];
+    for (const day of days) {
+      for (const range of parsed.ranges) {
+        for (const hour of [range[0], range[1]]) {
+          const ms = adPeakBoundaryMs(day, hour);
+          if (!isFinite(ms) || ms < from || ms > until) continue;
+          if (isFinite(addedMs) && ms < addedMs) continue;
+          if (seen.some(x => x >= ms && x <= ms + graceMs)) continue;
+          const want = adInPeakRanges(hour, parsed.ranges) ? 'ACTIVE' : 'PAUSED';
+          out.push({
+            item_id: item, account: String((row && row.account) || ''), boundary_iso: new Date(ms).toISOString(), want: want,
+            note: 'the hours on the list turn this listing ' + (want === 'ACTIVE' ? 'on' : 'off') + ' at ' +
+              String(((Math.trunc(Number(hour)) % 24) + 24) % 24).padStart(2, '0') + ':00 UK and nothing was written down for it',
+          });
+          if (out.length >= 200) return out;
+        }
+      }
+    }
+  }
+  out.sort((a, b) => a.boundary_iso < b.boundary_iso ? -1 : a.boundary_iso > b.boundary_iso ? 1 : (a.item_id < b.item_id ? -1 : 1));
+  return out;
+}
+function adPeakReadingDisagree(input) {
+  /* A21. The job sent a change, eBay answered that it took it, and eBay's own ad reading afterwards
+     still says the other thing. That is worse than a send that failed, because a failure is on the
+     record and this is not: the believed state is taken from the newer of the two, so a reading that
+     never moved will also decide the next boundary wrongly.
+     input: { last_sends (this job's apply rows), readings (campaign_ads rows), settle_min }.
+     Only a LIVE row eBay answered 2xx counts, and only the newest per listing and campaign, because
+     the state is set per campaign and the newest send is the only one still claimed. The reading has
+     to be stamped more than `settle_min` after that send: the ad read lags a campaign, and a reading
+     taken in the same breath as the change is evidence of nothing. A reading with no state on it is
+     not evidence either, and is never read as ACTIVE here. Clears by going away: once the two agree
+     the finding is not made, and the sweep's own clear path closes the alert. */
+  const i = input || {};
+  const settleMs = (Number(i.settle_min) > 0 ? Number(i.settle_min) : ADTOOL_PEAK_SETTLE_MIN) * 60000;
+  const sent = {};
+  for (const r of (i.last_sends || [])) {
+    const item = String((r && r.item_id) || ''), cid = String((r && r.campaign_id) || '');
+    if (!item || !cid) continue;
+    if (String((r && r.mode) || '') !== 'live') continue;
+    const st = Number(r && r.http_status) || 0;
+    if (st < 200 || st >= 300) continue;
+    const to = String((r && r.to) || '').toUpperCase();
+    if (to !== 'ACTIVE' && to !== 'PAUSED') continue;
+    const ms = adPeakStampMs(r && r.at);
+    if (!isFinite(ms)) continue;
+    const k = item + '|' + cid, ex = sent[k];
+    if (!ex || ms > ex.at_ms) sent[k] = { to: to, at_ms: ms, at: String((r && r.at) || ''), account: String((r && r.account) || '') };
+  }
+  const newest = {};
+  for (const r of (i.readings || [])) {
+    const item = String((r && (r.item_id || r.listing_id)) || ''), cid = String((r && r.campaign_id) || '');
+    if (!item || !cid) continue;
+    const k = item + '|' + cid;
+    if (!sent[k]) continue;
+    const ms = adPeakStampMs(r && r.synced_at);
+    if (!isFinite(ms)) continue;
+    const ex = newest[k];
+    if (!ex || ms > ex.at_ms) newest[k] = { item_id: item, campaign_id: cid, status: String((r && r.ad_status) || '').toUpperCase(), at_ms: ms, at: String((r && r.synced_at) || '') };
+  }
+  const out = [];
+  for (const k of Object.keys(newest)) {
+    const read = newest[k], s = sent[k];
+    if (read.status !== 'ACTIVE' && read.status !== 'PAUSED') continue;
+    if (read.at_ms - s.at_ms <= settleMs) continue;
+    if (read.status === s.to) continue;
+    out.push({ item_id: read.item_id, campaign_id: read.campaign_id, sent: s.to, read: read.status, read_at: read.at, sent_at: s.at, account: s.account });
+  }
+  out.sort((a, b) => (a.item_id + a.campaign_id) < (b.item_id + b.campaign_id) ? -1 : 1);
+  return out.slice(0, 200);
 }
 /* ADTOOL-P16-PURE-END */
 
@@ -20715,6 +20922,116 @@ const ROUTES = {
       const rows = rs.results || [];
       const header = rows.length ? Object.keys(rows[0]) : [];
       return { table: t, offset, header, rows: rows.map((r) => header.map((h) => r[h])), n: rows.length, done: rows.length < limit };
+    },
+  },
+
+  /* THE PEAK SWITCH'S TRAIL, readable with the sync key alone (31 Oct, the owner's brief). The one
+     job in this file that sends changes to eBay all day sends them from a cron, so there is no
+     screen anybody was looking at when it did, and its whole record lives in tables a portal session
+     reaches through role-gated pages. This answers the only question worth asking from outside: is
+     the job still in the build, which accounts is it allowed to send for, what is on its list, what
+     did it actually do, and what does eBay say the ads are now.
+     Authenticated exactly as backupDump is — auth 'sync', so the SYNC_KEY and nothing else — and
+     deliberately NOT named adtool*, because the router role-gates that prefix before it has a user
+     to judge and a key-authed call has none.
+     IT NEVER WRITES. No schema is made here either: every read is behind one try, so a database
+     missing a table answers with that list empty instead of refusing the whole trail. */
+  adsPeakTrail: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const days = Math.min(Math.max(Math.round(Number((p && p.days)) || 3), 1), 14);
+      const item = String((p && p.item_id) || '').trim().slice(0, 24);
+      const today = ukDate(''), fromDay = adtAddDays(today, -days);
+      /* every read behind one try, and a read that FAILS says so rather than answering with an empty
+         list: on an evidence route the difference between "nothing happened" and "I could not look"
+         is the whole point, and a missing table or a column a migration never took reads identical
+         to a quiet day otherwise. */
+      const readErrors = [];
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return []; }
+      };
+      /* the cron map itself, not a copy of it: a peak slot that quietly left the build is the one
+         fault that would make every other list here read as healthy while nothing ran at all. */
+      const map = cronMap();
+      let peakSlot = '';
+      for (const k of Object.keys(map)) if ((map[k] || []).indexOf(adtoolPeakSwitch) >= 0) peakSlot = k;
+      const jsonOf = (s) => { try { const v = JSON.parse(String(s || '{}')); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } };
+
+      /* the list, open rows first, the removed ones kept with the stamp that removed them */
+      const listSql = (cols) =>
+        'SELECT p.item_id, p.account, p.hours, p.added_by, p.added_at, ' +
+        "COALESCE(p.removed_at, '') AS removed_at, COALESCE(ia.title, '') AS title" + cols +
+        ' FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id' +
+        (item ? ' WHERE p.item_id = ?1' : '') +
+        " ORDER BY CASE WHEN COALESCE(p.removed_at, '') = '' THEN 0 ELSE 1 END, p.added_at DESC LIMIT 600";
+      const binds = item ? [item] : [];
+      let listRows = await q('list', listSql(", p.auto, COALESCE(p.campaign_id, '') AS campaign_id"), binds);
+      /* a database that has not taken the two columns the 28 Oct batch added answers nothing at all to
+         the query above, and an empty list would read as an empty peak list. Ask again without them,
+         and say the two unknowns are unknown: an `auto` nobody could read is null and never 0. */
+      if (!listRows.length) listRows = await q('list (without the two columns the 28 Oct batch added)', listSql(''), binds);
+      const list = listRows.map((r) => ({
+        item_id: String(r.item_id || ''), account: String(r.account || ''), title: String(r.title || ''),
+        hours: String(r.hours || ''), auto: r.auto == null ? null : (Number(r.auto) ? 1 : 0),
+        campaign_id: r.campaign_id == null ? null : String(r.campaign_id),
+        added_by: String(r.added_by || ''), added_at: String(r.added_at || ''), removed_at: String(r.removed_at || ''),
+      }));
+
+      /* what it did: its own apply rows, newest first, over the UK days asked for */
+      const logRows = await q('log',
+        'SELECT item_id, campaign_id, account, day, mode, op, http_status, ' +
+        "substr(COALESCE(response, ''), 1, 200) AS response, payload_json, at FROM adtool_apply_log " +
+        "WHERE decision_id = 'peak' AND day >= ?1" + (item ? ' AND item_id = ?2' : '') + ' ORDER BY id DESC LIMIT 2000',
+        item ? [fromDay, item] : [fromDay]);
+      const log = logRows.map((r) => {
+        const pj = jsonOf(r.payload_json);
+        return {
+          item_id: String(r.item_id || ''), campaign_id: String(r.campaign_id || ''), account: String(r.account || ''),
+          day: String(r.day || ''), mode: String(r.mode || ''), op: String(r.op || ''),
+          http_status: r.http_status == null ? null : Number(r.http_status),
+          response: String(r.response || ''), to: String(pj.to || ''), why: String(pj.why || ''), at: String(r.at || ''),
+        };
+      });
+
+      /* every run of the job, whatever it found to do */
+      const jobs = (await q('jobs', "SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolPeakSwitch' ORDER BY started_at DESC LIMIT 60"))
+        .map((r) => ({ started_at: String(r.started_at || ''), finished_at: String(r.finished_at || ''), rows_written: r.rows_written == null ? null : Number(r.rows_written), status: String(r.status || ''), note: String(r.note || '') }));
+
+      /* what eBay says the ads are now, for the listings on the list */
+      const ids = list.map((r) => r.item_id);
+      const readings = [];
+      for (const ch of adtChunks(ids)) {
+        if (readings.length >= 3000) break;
+        for (const r of await q('readings',
+          'SELECT ca.listing_id AS item_id, ca.campaign_id, ca.ad_status, ca.synced_at, ' +
+          'c.name AS campaign_name, c.status AS campaign_status, c.funding_model FROM campaign_ads ca ' +
+          'LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id ' +
+          'WHERE ca.listing_id IN ' + adtInList(ch, 0) + ' ORDER BY ca.listing_id, ca.campaign_id LIMIT 3000', ch)) {
+          if (readings.length >= 3000) break;
+          readings.push({
+            item_id: String(r.item_id || ''), campaign_id: String(r.campaign_id || ''),
+            ad_status: String(r.ad_status == null ? '' : r.ad_status), synced_at: String(r.synced_at || ''),
+            campaign_name: String(r.campaign_name == null ? '' : r.campaign_name),
+            campaign_status: String(r.campaign_status == null ? '' : r.campaign_status),
+            funding_model: String(r.funding_model == null ? '' : r.funding_model),
+          });
+        }
+      }
+
+      let switches = {};
+      try { switches = await adtPeakLiveSwitches(env); } catch (e) { switches = {}; readErrors.push('switches: ' + String((e && e.message) || e).slice(0, 160)); }
+      return {
+        now: new Date().toISOString(),
+        build: { crons: Object.keys(map), has_peak_job: !!peakSlot, peak_slot: peakSlot },
+        window: { days, from_uk_day: fromDay, to_uk_day: today, item_id: item },
+        switches, list, log, jobs, readings,
+        read_errors: readErrors,
+        sent_to_ebay: false,
+      };
     },
   },
 

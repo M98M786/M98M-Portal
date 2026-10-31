@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -241,9 +241,9 @@ function run(argv) {
   const dr = F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.7 }, { week: 2, spend_day: 500, roas: 3.5 }, { week: 3, spend_day: 620, roas: 3.4 }]);
   t('alerts: A18 fires when spend/day rose 15 % and ROAS fell, twice running', !!dr, dr);
   t('alerts: A18 silent when ROAS held', !F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.5 }, { week: 2, spend_day: 500, roas: 3.6 }, { week: 3, spend_day: 620, roas: 3.7 }]), null);
-  t('alerts: every rule A01–A19 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 19 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
+  t('alerts: every rule A01–A21 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 21 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
   /* Phase 4 big update: every one of the 19 rules carries a why_matters sentence, and no rule text says 'est. ad profit' */
-  t('alerts: all 19 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 19 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
+  t('alerts: all 21 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 21 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
   t('alerts: no rule text says "est. ad profit" any more', Object.keys(F.ADTOOL_ALERT_RULES).every(k => !/est\. ad profit/i.test(F.ADTOOL_ALERT_RULES[k].text)), null);
   t('alerts: urgency is overdue for a high alert past 24 h, else severity-derived now/soon/watch', F.adtAlertUrgency('high', 30) === 'overdue' && F.adtAlertUrgency('high', 10) === 'now' && F.adtAlertUrgency('medium', 100) === 'soon' && F.adtAlertUrgency('low', 100) === 'watch' && F.adtAlertUrgency('high', 24) === 'now', [F.adtAlertUrgency('high', 30), F.adtAlertUrgency('high', 10), F.adtAlertUrgency('medium', 100), F.adtAlertUrgency('low', 100)]);
   const lvIn = [
@@ -2407,6 +2407,164 @@ function run(argv) {
       && /shorter than 7 days/.test(line)
       && !/14 days/.test(line);
   })(), null);
+
+  /* ============ 31 Oct: the peak switch's own two alarms, and the cron slots it rides on ============
+     The job sends real changes to eBay from a cron, so nobody is watching when it works and nobody is
+     watching when it stops. Everything below is the pure half of the two ways it can fail quietly,
+     plus the one test that can tell whether the slot it rides on is still registered at all. */
+  const pkNow = (iso) => { const ms = Date.parse(iso); const p = F.adtUkParts(ms); return { now_ms: ms, date: p.date, hour: p.hour, minute: p.minute }; };
+  const pkRow = (extra) => Object.assign({ item_id: 'I1', account: 'AZHAR ABRT', hours: '09-11', auto: 1, added_at: '2026-10-01 00:00:00' }, extra || {});
+  const pkSw = { I1: [{ campaign_id: 'C1', account: 'AZHAR ABRT' }] };
+  const pkMissed = (over) => F.adPeakMissedSends(Object.assign({ rows: [pkRow()], log: [], switchable: pkSw, now_uk: pkNow('2026-10-30T12:40:00Z'), grace_min: 20 }, over || {}));
+
+  t('A20: both boundaries of a stretch are judged, and each says which state the hours asked for', (() => {
+    const m = pkMissed();
+    return m.length === 2
+      && m[0].boundary_iso === '2026-10-30T09:00:00.000Z' && m[0].want === 'ACTIVE'
+      && m[1].boundary_iso === '2026-10-30T11:00:00.000Z' && m[1].want === 'PAUSED'
+      && m[0].item_id === 'I1' && m[0].account === 'AZHAR ABRT' && /09:00 UK/.test(m[0].note);
+  })(), pkMissed());
+  t('A20: one row of ANY mode inside the grace clears that boundary, and a row for another listing does not', (() => {
+    const one = pkMissed({ log: [{ item_id: 'I1', at: '2026-10-30 09:05:00', mode: 'would-send' }] });
+    const both = pkMissed({ log: [{ item_id: 'I1', at: '2026-10-30 09:05:00', mode: 'blocked' }, { item_id: 'I1', at: '2026-10-30 11:19:00', mode: 'live' }] });
+    const other = pkMissed({ log: [{ item_id: 'I2', at: '2026-10-30 09:05:00', mode: 'live' }] });
+    return one.length === 1 && one[0].want === 'PAUSED' && both.length === 0 && other.length === 2;
+  })(), null);
+  t('A20: a row that lands AFTER the grace has run out does not clear the boundary it was owed to', pkMissed({ log: [{ item_id: 'I1', at: '2026-10-30 09:05:00' }, { item_id: 'I1', at: '2026-10-30 11:21:00' }] }).length === 1, null);
+  t('A20: a boundary younger than the grace is not late yet', (() => {
+    const m = F.adPeakMissedSends({ rows: [pkRow()], log: [], switchable: pkSw, now_uk: pkNow('2026-10-30T11:10:00Z'), grace_min: 20 });
+    return m.length === 1 && m[0].boundary_iso === '2026-10-30T09:00:00.000Z';
+  })(), null);
+  t('A20: silent for a row nobody armed, for hours that cannot be read, and for a listing with no ad to switch', (() => {
+    const off = pkMissed({ rows: [pkRow({ auto: 0 })] });
+    const bad = pkMissed({ rows: [pkRow({ hours: 'evenings' })] });
+    const noAd = pkMissed({ switchable: {} });
+    const unarmedNull = pkMissed({ rows: [pkRow({ auto: null })] });
+    return off.length === 0 && bad.length === 0 && noAd.length === 0 && unarmedNull.length === 0;
+  })(), null);
+  t('A20: a boundary older than the row itself is not a missed send, because the row did not exist to be switched', (() => {
+    const m = pkMissed({ rows: [pkRow({ added_at: '2026-10-30 10:00:00' })] });
+    return m.length === 1 && m[0].boundary_iso === '2026-10-30T11:00:00.000Z';
+  })(), null);
+  t('A20: only the last 24 hours are judged, so yesterday morning is not reported for ever', (() => {
+    /* 09:00 and 11:00 yesterday are both older than 24 h at 12:40 today, and both of today's are inside it */
+    const m = pkMissed();
+    return m.every(x => x.boundary_iso.slice(0, 10) === '2026-10-30');
+  })(), null);
+  t('A20: an hour boundary is resolved on the UK clock, not assumed — BST, GMT, and an hour the spring forward skips', (() => {
+    const bst = F.adPeakBoundaryMs('2026-10-24', 17);     // BST: 17:00 UK = 16:00Z
+    const gmt = F.adPeakBoundaryMs('2026-10-30', 17);     // GMT: 17:00 UK = 17:00Z
+    const gone = F.adPeakBoundaryMs('2026-03-29', 1);     // 01:00 does not happen on the day the clocks go forward
+    return new Date(bst).toISOString() === '2026-10-24T16:00:00.000Z'
+      && new Date(gmt).toISOString() === '2026-10-30T17:00:00.000Z'
+      && isNaN(gone);
+  })(), [new Date(F.adPeakBoundaryMs('2026-10-24', 17)).toISOString(), new Date(F.adPeakBoundaryMs('2026-10-30', 17)).toISOString()]);
+  t('A20: an unreadable stamp is never read as a moment, so a log nobody can date cannot clear a boundary', pkMissed({ log: [{ item_id: 'I1', at: '' }, { item_id: 'I1', at: 'yesterday' }] }).length === 2 && isNaN(F.adPeakStampMs('')) && F.adPeakStampMs('2026-10-30 09:05:00') === Date.parse('2026-10-30T09:05:00Z'), null);
+
+  const pkSend = (extra) => Object.assign({ item_id: 'I1', campaign_id: 'C1', account: 'AZHAR ABRT', mode: 'live', http_status: 200, to: 'PAUSED', at: '2026-10-30 11:00:05' }, extra || {});
+  const pkRead = (extra) => Object.assign({ item_id: 'I1', campaign_id: 'C1', ad_status: 'ACTIVE', synced_at: '2026-10-30 11:30:00' }, extra || {});
+  const pkDis = (sends, reads) => F.adPeakReadingDisagree({ last_sends: sends, readings: reads, settle_min: 10 });
+
+  t('A21: eBay took the change, then went on reading the ad the other way round', (() => {
+    const d = pkDis([pkSend()], [pkRead()]);
+    return d.length === 1 && d[0].item_id === 'I1' && d[0].campaign_id === 'C1' && d[0].sent === 'PAUSED' && d[0].read === 'ACTIVE' && d[0].read_at === '2026-10-30 11:30:00';
+  })(), pkDis([pkSend()], [pkRead()]));
+  t('A21: a reading taken before eBay has had time to settle is evidence of nothing', pkDis([pkSend()], [pkRead({ synced_at: '2026-10-30 11:05:00' })]).length === 0 && pkDis([pkSend()], [pkRead({ synced_at: '2026-10-30 11:10:05' })]).length === 0, null);
+  t('A21: they agree, so nothing is found, which is how the alert clears', pkDis([pkSend()], [pkRead({ ad_status: 'PAUSED' })]).length === 0, null);
+  t('A21: a reading with no state on it is never read as ACTIVE', pkDis([pkSend({ to: 'ACTIVE' })], [pkRead({ ad_status: '' })]).length === 0 && pkDis([pkSend({ to: 'ACTIVE' })], [pkRead({ ad_status: 'ARCHIVED' })]).length === 0, null);
+  t('A21: only a live row eBay accepted counts — a refusal, a would-send and a held-back row are not claims about the ad', (() => {
+    const refused = pkDis([pkSend({ http_status: 404 })], [pkRead()]);
+    const shadow = pkDis([pkSend({ mode: 'would-send', http_status: 0 })], [pkRead()]);
+    const blocked = pkDis([pkSend({ mode: 'blocked', http_status: 0 })], [pkRead()]);
+    return refused.length === 0 && shadow.length === 0 && blocked.length === 0;
+  })(), null);
+  t('A21: the NEWEST accepted send per listing and campaign is the one still claimed', (() => {
+    const two = [pkSend(), pkSend({ to: 'ACTIVE', at: '2026-10-30 11:40:00' })];
+    const agree = pkDis(two, [pkRead({ synced_at: '2026-10-30 12:00:00' })]);
+    const differ = pkDis(two, [pkRead({ ad_status: 'PAUSED', synced_at: '2026-10-30 12:00:00' })]);
+    return agree.length === 0 && differ.length === 1 && differ[0].sent === 'ACTIVE' && differ[0].read === 'PAUSED';
+  })(), null);
+  t('A21: another campaign\'s send says nothing about this one, and the newest reading of a pair is the one judged', (() => {
+    const wrongCamp = pkDis([pkSend({ campaign_id: 'C2' })], [pkRead()]);
+    const newestRead = pkDis([pkSend()], [pkRead({ ad_status: 'PAUSED', synced_at: '2026-10-30 11:20:00' }), pkRead({ synced_at: '2026-10-30 12:00:00' })]);
+    return wrongCamp.length === 0 && newestRead.length === 1 && newestRead[0].read === 'ACTIVE';
+  })(), null);
+
+  t('alerts: A20 and A21 join the rules with a severity, a waiting time, a suggested action and a why', (() => {
+    const R = F.ADTOOL_ALERT_RULES;
+    return !!R.A20 && !!R.A21 && Object.keys(R).length === 21
+      && ['A20', 'A21'].every(k => R[k].sev && R[k].cool >= 1 && R[k].action && R[k].why_matters.length >= 20 && /peak hours/.test(R[k].text));
+  })(), Object.keys(F.ADTOOL_ALERT_RULES).length);
+  t('alerts: neither peak rule prints a figure of its own, so a grace or a settling time cannot be changed in one place and stated in another', ['A20', 'A21'].every(k => !/\d/.test(F.ADTOOL_ALERT_RULES[k].text) && !/—/.test(F.ADTOOL_ALERT_RULES[k].text + F.ADTOOL_ALERT_RULES[k].why_matters)), [F.ADTOOL_ALERT_RULES.A20.text, F.ADTOOL_ALERT_RULES.A21.text]);
+  t('alerts: the two peak rules are raised by the hourly sweep itself, scoped per boundary and per campaign, with the severity decided per finding (regex over the real source)', (() => {
+    const sw = src.slice(src.indexOf('async function adtoolAlerts(env) {'), src.indexOf('async function adtoolAlertsFixtureCheck'));
+    const raised = /adPeakMissedSends\(\{ rows: peakRows, log: peakLog, switchable: peakSwitchable/.test(sw) && /adPeakReadingDisagree\(\{ last_sends: peakSends, readings: peakReadings/.test(sw);
+    const scoped = /put\('A20', m\.item_id \+ '\|' \+ m\.boundary_iso/.test(sw) && /put\('A21', dis\.item_id \+ '\|' \+ dis\.campaign_id/.test(sw);
+    /* high where the account really sends, medium where nothing ever left the portal; meta is merged
+       over the rule's own severity by put(), which is what lets one rule read two ways. */
+    const perFinding = /const peakSev = a => \(peakSwitches\[String\(a \|\| ''\)\] \? 'high' : 'medium'\);/.test(sw)
+      && (sw.match(/sev: peakSev\(/g) || []).length === 2
+      && /found\[id\] = Object\.assign\(\{ rule, sev: ADTOOL_ALERT_RULES\[rule\]\.sev, payload[\s\S]{0,200}\}, meta \|\| \{\}\)/.test(sw);
+    /* the switches are read in the one place the jobs read them, never from a second copy */
+    const oneSwitch = /await adtPeakLiveSwitches\(env\)/.test(sw) && !/adtool_apply_live_/.test(sw);
+    /* and eBay's readings come out of the switchable read the job itself decides on, not a second
+       trip to campaign_ads: the same ads, one D1 read, and the same rule about which ad counts */
+    const oneRead = /for \(const iid of Object\.keys\(peakSwitchable\)\)/.test(sw) && !/FROM campaign_ads ca WHERE ca\.listing_id IN/.test(sw);
+    return raised && scoped && perFinding && oneSwitch && oneRead;
+  })(), null);
+
+  t('trail: adsPeakTrail is key-authed exactly as backupDump is, never writes, and says nothing was sent (regex over the real source)', (() => {
+    const i = src.indexOf('  adsPeakTrail: {');
+    const r = i < 0 ? '' : src.slice(i, src.indexOf('\n  },\n', i));
+    const sameGate = /^  adsPeakTrail: \{\n    auth: 'sync',/m.test(src) && /^  backupDump: \{\n    auth: 'sync',/m.test(src);
+    /* the router role-gates every action whose name starts with adtool before it has a user to judge,
+       and a key-authed call has none, so this one deliberately does not carry that prefix */
+    const notPrefixed = r.length > 2000 && !/adtool[A-Z]/.test('adsPeakTrail');
+    const readOnly = !/\b(INSERT|UPDATE|DELETE|ALTER|CREATE|ensureAdtool)/.test(r);
+    const answers = /sent_to_ebay: false/.test(r) && /build: \{ crons: Object\.keys\(map\), has_peak_job: !!peakSlot, peak_slot: peakSlot \}/.test(r)
+      && /switches, list, log, jobs, readings,/.test(r) && /LIMIT 600/.test(r) && /LIMIT 2000/.test(r) && /LIMIT 60/.test(r) && /LIMIT 3000/.test(r);
+    const bounded = /Math\.min\(Math\.max\(Math\.round\(Number\(\(p && p\.days\)\) \|\| 3\), 1\), 14\)/.test(r);
+    const nullKept = /auto: r\.auto == null \? null : \(Number\(r\.auto\) \? 1 : 0\)/.test(r);
+    return sameGate && notPrefixed && readOnly && answers && bounded && nullKept;
+  })(), null);
+
+  t('trail: a read that fails says so, because on an evidence route a refused look and a quiet day must not read the same (regex over the real source)', (() => {
+    const i = src.indexOf('  adsPeakTrail: {');
+    const r = i < 0 ? '' : src.slice(i, src.indexOf('\n  },\n', i));
+    /* and the one case it is written for: a database that never took the two columns the 28 Oct batch
+       added answers nothing to the full query, and the second attempt leaves those two unknown. */
+    return /const readErrors = \[\]/.test(r) && /readErrors\.push\(what \+ ': '/.test(r)
+      && /read_errors: readErrors,/.test(r) && /q\('list \(without the two columns the 28 Oct batch added\)'/.test(r);
+  })(), null);
+
+  /* THE CRON PIN. A slot written in the worker and never registered on Cloudflare never fires, and
+     nothing in the build can see the difference: engine/crons.json is the list the engine guard
+     registers, and this is the only place the two are ever compared. */
+  t('crons: engine/crons.json holds exactly the slots of the worker\'s own cron map (real source, real file)', (() => {
+    let file = null;
+    try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) { file = null; }
+    const i = src.indexOf('function cronMap() {');
+    const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+    const keys = (block.match(/'[^']+':\s*\[/g) || []).map(s => s.slice(1, s.indexOf("':")));
+    const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : null;
+    if (!inFile || keys.length < 15) return false;
+    const missing = keys.filter(k => inFile.indexOf(k) < 0), extra = inFile.filter(k => keys.indexOf(k) < 0);
+    const dupe = inFile.length !== new Set(inFile).size || keys.length !== new Set(keys).size;
+    return !missing.length && !extra.length && !dupe && keys.length === inFile.length;
+  })(), (() => {
+    let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
+    const i = src.indexOf('function cronMap() {');
+    const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+    const keys = (block.match(/'[^']+':\s*\[/g) || []).map(s => s.slice(1, s.indexOf("':")));
+    return { in_worker: keys.length, in_file: file && file.crons ? file.crons.length : null };
+  })());
+  t('crons: the peak switch has one slot of its own, and it is the quarter-hour slot a minute past (real source)', (() => {
+    const i = src.indexOf('function cronMap() {');
+    const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+    const slots = (block.match(/'[^']+':\s*\[[^\]]*adtoolPeakSwitch[^\]]*\]/g) || []);
+    return slots.length === 1 && slots[0].indexOf("'1-59/15 * * * *'") === 0 && /\[adtoolPeakSwitch\]/.test(slots[0]);
+  })(), null);
+  t('crons: the map has ONE home, read by the handler and by the trail route rather than copied (real source)', /const jobs = cronMap\(\);/.test(src) && (src.match(/function cronMap\(\) \{/g) || []).length === 1 && /const map = cronMap\(\);/.test(src), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
