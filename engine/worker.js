@@ -25273,6 +25273,20 @@ const ROUTES = {
      IT WRITES NOTHING AND IT SENDS NOTHING. Four reads of the portal's own tables, no eBay call of
      any kind, and no statement that changes a row: the runs are grouped out of the ticks the sampler
      already left behind, and the A23 state is read from the alert table as the alerts job wrote it. */
+  adsJobsProbe: {
+    /* READ-ONLY, sync key: the engine's own job trail (adtool_jobs) for one job, newest first, with the
+       database clock beside it, so a job that starts and never finishes can be seen without a session
+       (31 Oct: adtoolRollups had not completed since 07:27 and nothing readable said why). */
+    auth: 'sync',
+    fn: async (p, ctx) => {
+      const job = String((p && p.job) || '').slice(0, 60); const limit = Math.max(1, Math.min(200, Number((p && p.limit) || 40)));
+      if (!/^[A-Za-z0-9_]+$/.test(job)) throw new Error('SAY: job name wanted');
+      const now = await ctx.env.DB.prepare("SELECT datetime('now') AS now").first().catch(() => null);
+      const rows = (await ctx.env.DB.prepare('SELECT job, started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = ?1 ORDER BY started_at DESC LIMIT ?2').bind(job, limit).all()).results || [];
+      const st = (await ctx.env.DB.prepare("SELECT account, cursor, last_ok, last_error FROM sync_state WHERE job = ?1").bind(job).all()).results || [];
+      return { job, db_now: now ? now.now : null, runs: rows, sync_state: st, sent_to_ebay: false };
+    },
+  },
   adsFreshnessProbe: {
     auth: 'sync', fn: async (p, ctx) => {
       const env = ctx.env;
