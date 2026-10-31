@@ -94,6 +94,7 @@ a.adt-pc-t:hover{color:var(--gold-a)}
 .adt-fresh{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;border:1px solid var(--gold-line);background:var(--panel);font-size:11px;font-weight:700;color:var(--text-2);white-space:nowrap;vertical-align:middle}
 .adt-fresh::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--gold-b)}
 .adt-fresh.stale{color:#ffb3a6;border-color:rgba(224,86,63,.5)}.adt-fresh.stale::before{background:#e0563f}
+.adt-fresh.amber{color:#e8b54b;border-color:rgba(232,181,75,.55)}.adt-fresh.amber::before{background:#e8b54b}
 .adt-fresh .p{color:var(--text-3);font-weight:600}
 /* Campaign name as a link into eBay (adtCampaignLink) */
 .adt-camplink{color:inherit;text-decoration:none;border-bottom:1px dotted var(--gold-line-hi)}
@@ -2094,8 +2095,13 @@ function adtFreshTag(fresh){
   var outWin = fresh.in_window === false;
   if (fresh.note) parts.push(String(fresh.note)); else if (outWin) parts.push('no samples until ' + (fresh.next_sample_at || 'the first same-day report'));
   var stale = !outWin && cadMin != null && !isNaN(ms) && ms > cadMin * 3 * 60000;
+  /* 31 Oct brief §5: an engine that has judged its own freshness (verdict ok / amber / red by the law's thresholds
+     scaled to the job's cadence) wins over the one-size three-cadences rule above */
+  var verdict = String(fresh.verdict || '').toLowerCase();
+  if (verdict === 'red') stale = true; else if (verdict === 'ok') stale = false;
+  var amber = verdict === 'amber';
   var title = (at ? 'last update ' + at : 'no update time') + (stale ? ' · not updated for a while' : '');
-  return '<span class="adt-fresh' + (stale ? ' stale' : '') + '" title="' + esc(title) + '">' + parts.map(function (p, i) { return (i ? '<span class="p">·</span>' : '') + esc(p); }).join('') + '</span>';
+  return '<span class="adt-fresh' + (stale ? ' stale' : (amber ? ' amber' : '')) + '" title="' + esc(title) + '">' + parts.map(function (p, i) { return (i ? '<span class="p">·</span>' : '') + esc(p); }).join('') + '</span>';
 }
 /* page header with a slot the fresh tag drops into once the data has answered */
 function adtHgroup(title, sub, slotId){

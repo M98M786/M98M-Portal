@@ -26,18 +26,23 @@ function run(argv) {
   const i14 = src.indexOf('/* ADTOOL-P14-PURE-BEGIN */'); const j14 = src.indexOf('/* ADTOOL-P14-PURE-END */');
   const i15 = src.indexOf('/* ADTOOL-P15-PURE-BEGIN */'); const j15 = src.indexOf('/* ADTOOL-P15-PURE-END */');
   const i16 = src.indexOf('/* ADTOOL-P16-PURE-BEGIN */'); const j16 = src.indexOf('/* ADTOOL-P16-PURE-END */');
+  /* 1 Nov: the hourly roll-up's own budget, its step order, its hour cursor and the print that
+     decides whether a settled hour has moved. Pure on purpose, so "today first, and nothing begun
+     that cannot finish" is a test and not a hope. */
+  const i17 = src.indexOf('/* ADTOOL-P17-PURE-BEGIN */'); const j17 = src.indexOf('/* ADTOOL-P17-PURE-END */');
+  if (i17 < 0 || j17 < 0) return 'FAIL: roll-up budget block markers not found';
   /* 24 Oct: the duplicate-safe ad merge, the truncation guard, the money-beats-status repair and the
      money-first rotation. Pure on purpose, so "an archived record must never win" is a test and not
      a hope. */
   const iAS = src.indexOf('/* ADSTATUS-PURE-BEGIN */'); const jAS = src.indexOf('/* ADSTATUS-PURE-END */');
   if (iAS < 0 || jAS < 0) return 'FAIL: ad-status block markers not found';
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(i17, j17) + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1284,7 +1289,10 @@ function run(argv) {
      own. One number cannot answer both questions, and a page saying "across 0 campaigns" under
      ninety paused ads reads as broken, so both are counted and the page names each. */
   t('change pages: how many changes were at campaign level and how many campaigns were touched are counted apart', /campaigns: campN, campaigns_touched: Object\.keys\(campSeen\)\.length/.test(p15Src) && /campaigns_touched: Object\.keys\(accs\[k\]\.camps\)\.length/.test(p15Src) && /if \(ck\) campSeen\[r\.account \+ '\|' \+ ck\] = 1/.test(p15Src), null);
-  t('change and peak pages: both carry a freshness tag, and the change pages name the slower of the two syncs behind them', /fresh: await adtChangeFresh\(env\)/.test(p15Src) && /fresh: await adtFresh\(env, 'day'\)/.test(p15Src) && /cadence: 'every 15 min'/.test(p15Src) && /job IN \('adsItems', 'adsSync'\)/.test(p15Src), null);
+  /* 1 Nov: the peak page's half of this moved to the roll-up's own stamp. It read the roll-up's last
+     SUCCESSFUL finish, so through thirty hours of killed runs it read "updated 07:26 UK" all day with
+     the figures beside it standing still, and the one thing it must never be is reassuring. */
+  t('change and peak pages: both carry a freshness tag, and the change pages name the slower of the two syncs behind them', /fresh: await adtChangeFresh\(env\)/.test(p15Src) && /fresh: await adtRollupFresh\(env\)/.test(p15Src) && /cadence: 'every 15 min'/.test(p15Src) && /job IN \('adsItems', 'adsSync'\)/.test(p15Src), null);
   t('change pages: the suggested list says what it held back, so two hundred is never read as all of them', /suggested_held_back: Math\.max\(0, first\.length - suggested\.length\)/.test(p15Src) && /ADTOOL_PEAK_SUGGEST_CAP = 200/.test(p15Src), null);
   t('both page switches are born on and left alone if somebody has already set them', /'adtool_page_changes', 'adtool_page_peak'/.test(p15Src) && /VALUES \(\?1, 'on', datetime\('now'\)\) ON CONFLICT\(key\) DO NOTHING/.test(p15Src), null);
   t('the two new actions are wired into the router beside the others', /Object\.assign\(ROUTES, ADTOOL_ACTIONS_P15\)/.test(src) && /adtoolChangeDay: \{/.test(p15Src) && /adtoolPeak: \{/.test(p15Src) && /adtoolPeakAdd: \{/.test(p15Src) && /adtoolPeakRemove: \{/.test(p15Src), null);
@@ -4363,9 +4371,12 @@ function run(argv) {
   t('§5 engine: every payload that carries the thresholds goes through the ONE helper, and the old per-phase constant is gone',
     (() => {
       const uses = src.split('freshness_rules:').slice(1).map(s => s.slice(0, 48).trim());
-      const ok = uses.length >= 6 && uses.every(u => /^await adtoolFreshnessRules\((env|ctx\.env)\)/.test(u) || /^FRh?,/.test(u));
+      const ok = uses.length >= 6 && uses.every(u => /^await adtoolFreshnessRules\((env|ctx\.env)\)/.test(u) || /^FRh?,/.test(u) || /^R,/.test(u));
       const one = (src.match(/async function adtoolFreshnessRules\(env\) \{/g) || []).length === 1;
-      return ok && one && !/ADTOOL_PEAK_FRESHNESS_RULES/.test(src);
+      /* the one payload that carries its pair as `R` carries the SAME pair, held to the cadence of the
+         job it is judging: that is still one read and one law, not a second opinion. */
+      const held = /const R = adtRollupFreshRules\(await adtoolFreshnessRules\(env\), 60\);/.test(src);
+      return ok && one && held && !/ADTOOL_PEAK_FRESHNESS_RULES/.test(src);
     })(), src.split('freshness_rules:').slice(1).map(s => s.slice(0, 36).trim()));
   t('§5 engine: the helper reads the two named keys out of the settings store, and seeds them before it reads so a blank is never shown for a figure that is in force',
     (() => {
@@ -4555,6 +4566,284 @@ function run(argv) {
           return !/\d/.test(words) && !/\u2014/.test(words) && /silence/.test(words);
         })();
     })(), null);
+
+  /* ---- 1 Nov: THE HOURLY ROLL-UP'S OWN BUDGET -------------------------------------------------
+     The job was started every hour at :20 and finished twice in thirty hours: the invocation was
+     ended by the platform ('exceededResources') and the row was left reading 'running', so the hour
+     table, the day rows and every "every hour" stamp on the Peak time page stood still at 07:26 all
+     day. These tests are the three rules that replace that: the order the pages need, a gate every
+     step passes before it starts, and a job row that is honest about a run which stopped itself. */
+  const rbSteps = (costs, due) => F.ADTOOL_ROLLUP_ORDER.slice(0, 7).map(n => ({ name: n, words: n, cost_ms: (costs || F.ADTOOL_ROLLUP_STEP_MS)[n], due: due && due[n] === false ? false : undefined }));
+  const rbPlan = (o) => F.adtRollupPlan(o);
+
+  t('roll-up budget: the whole run is planned inside 180 s of wall clock, with time held back for the last commit and the job row',
+    F.ADTOOL_ROLLUP_BUDGET_MS === 180000 && F.ADTOOL_ROLLUP_RESERVE_MS > 0 && F.ADTOOL_ROLLUP_RESERVE_MS < 20000 &&
+    rbPlan({ now_ms: 0, t0: 0, steps: [] }).left_ms === F.ADTOOL_ROLLUP_BUDGET_MS - F.ADTOOL_ROLLUP_RESERVE_MS,
+    [F.ADTOOL_ROLLUP_BUDGET_MS, F.ADTOOL_ROLLUP_RESERVE_MS]);
+  t('roll-up budget: today comes before yesterday, and both before the day beyond it and the tail — the owner’s "update every hour" is about today',
+    (() => {
+      const o = F.ADTOOL_ROLLUP_ORDER;
+      return o.indexOf('today') < o.indexOf('yesterday') && o.indexOf('yesterday') < o.indexOf('day2') && o.indexOf('day2') < o.indexOf('tail') &&
+        o.indexOf('orders') < o.indexOf('today') && o.indexOf('warm') === o.length - 1 &&
+        o.indexOf('periods') < o.indexOf('day2');
+    })(), F.ADTOOL_ROLLUP_ORDER);
+  /* the first run after a deploy has measured nothing, so it works off the first guesses: a whole
+     day of today at 70 s and a whole day of yesterday at 97 s do not both fit, and the honest answer
+     is to do today and say where it stopped — not to begin yesterday and be killed inside it. */
+  t('roll-up budget: on a first run, with nothing measured, the gate does the order roll and today and leaves the rest — not one step is begun that cannot finish',
+    (() => {
+      const pl = rbPlan({ now_ms: 0, t0: 0, steps: rbSteps() });
+      return pl.run.join(',') === 'orders,today' && pl.cut === true && pl.cut_at === 'yesterday' &&
+        pl.skipped.every(s => /next hour/.test(s.reason)) && pl.run_steps.reduce((a, b) => a + b.cost_ms, 0) <= pl.budget_ms - pl.reserve_ms;
+    })(), rbPlan({ now_ms: 0, t0: 0, steps: rbSteps() }).run);
+  t('roll-up budget: once a step is left for the next hour everything after it is left too — a cheap step never jumps the queue the order exists for',
+    (() => {
+      const pl = rbPlan({ now_ms: 0, t0: 0, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 40000 }, { name: 'b', cost_ms: 90000 }, { name: 'c', cost_ms: 1000 }] });
+      return pl.run.join(',') === 'a' && pl.cut_at === 'b' && pl.skipped.length === 2 && pl.skipped[1].step === 'c' && /budget ran out at b/.test(pl.skipped[1].reason);
+    })(), rbPlan({ now_ms: 0, t0: 0, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 40000 }, { name: 'b', cost_ms: 90000 }, { name: 'c', cost_ms: 1000 }] }));
+  t('roll-up budget: a step that is not due this hour is skipped on its own terms and does not stop the ones below it — "not due" and "no time" are different facts and the trail says which',
+    (() => {
+      const pl = rbPlan({ now_ms: 0, t0: 0, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 10000, due: false, note: 'already done today' }, { name: 'b', cost_ms: 10000 }] });
+      return pl.run.join(',') === 'b' && pl.cut === false && pl.skipped.length === 1 && pl.skipped[0].reason === 'already done today' && !/next hour/.test(pl.skipped[0].reason);
+    })(), null);
+  t('roll-up budget: the time already spent is charged against the budget, so a step late in a slow run is judged on the clock and not on the plan',
+    (() => {
+      const fresh = rbPlan({ now_ms: 1000, t0: 1000, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 60000 }] });
+      const late = rbPlan({ now_ms: 51000, t0: 1000, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 60000 }] });
+      return fresh.run.length === 1 && late.run.length === 0 && late.elapsed_ms === 50000 && /it needs 60 s and 50 s is left/.test(late.skipped[0].reason);
+    })(), null);
+  t('roll-up budget: a clock that cannot be read spends the whole budget and never borrows time it has not got',
+    (() => {
+      const pl = rbPlan({ budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 100000 }] });
+      const neg = rbPlan({ now_ms: 500, t0: 1000, budget_ms: 100000, reserve_ms: 0, steps: [{ name: 'a', cost_ms: 100000 }] });
+      return pl.elapsed_ms === 0 && pl.run.length === 1 && neg.elapsed_ms === 0;
+    })(), null);
+  t('roll-up budget: the measured rate is the two runs that finished (190 rows a second), and a size nobody can read costs null rather than nothing',
+    F.ADTOOL_ROLLUP_ROWS_PER_S === 190 && F.adtRollupCostMs(190, 190) === 1000 && F.adtRollupCostMs(19000, 190) === 100000 &&
+    F.adtRollupCostMs(null, 190) === null && F.adtRollupCostMs('x', 190) === null && F.adtRollupCostMs(-1, 190) === null,
+    [F.adtRollupCostMs(190, 190), F.adtRollupCostMs(null, 190)]);
+  t('roll-up budget: what a whole day is expected to cost is WORKED OUT from the rows that run wrote and the measured rate, not typed beside them, so the figure and its evidence cannot drift apart',
+    F.ADTOOL_ROLLUP_WHOLE_DAY_MS === F.adtRollupCostMs(F.ADTOOL_ROLLUP_DAY_ROWS, F.ADTOOL_ROLLUP_ROWS_PER_S) &&
+    F.ADTOOL_ROLLUP_DAY_ROWS === Math.round(53365 / 3) &&
+    ['yesterday', 'day2', 'tail', 'catchup'].every(k => F.ADTOOL_ROLLUP_STEP_MS[k] === F.ADTOOL_ROLLUP_WHOLE_DAY_MS) &&
+    F.ADTOOL_ROLLUP_WHOLE_DAY_MS < F.ADTOOL_ROLLUP_BUDGET_MS - F.ADTOOL_ROLLUP_RESERVE_MS,
+    [F.ADTOOL_ROLLUP_DAY_ROWS, F.ADTOOL_ROLLUP_WHOLE_DAY_MS]);
+  t('roll-up budget: the evidence itself — the three whole days the run used to rebuild every hour cannot fit one run at the measured rate, and today on its own can',
+    (() => {
+      const threeDays = F.adtRollupCostMs(53365, F.ADTOOL_ROLLUP_ROWS_PER_S);     // the 31 Oct 07:20 run
+      const oneDay = F.adtRollupCostMs(Math.round(53365 / 3), F.ADTOOL_ROLLUP_ROWS_PER_S);
+      return threeDays > F.ADTOOL_ROLLUP_BUDGET_MS && oneDay < F.ADTOOL_ROLLUP_BUDGET_MS - F.ADTOOL_ROLLUP_RESERVE_MS;
+    })(), [F.adtRollupCostMs(53365, 190), F.adtRollupCostMs(17788, 190)]);
+  t('roll-up budget: a measured step is budgeted at what it took plus the margin, a step never run keeps its first guess, and a freak measurement cannot lock a step out for good',
+    (() => {
+      const c = F.adtRollupStepCosts({ today: 20000, yesterday: 9999999 }, F.ADTOOL_ROLLUP_STEP_MS, F.ADTOOL_ROLLUP_COST_MARGIN);
+      return c.today === 25000 && c.yesterday === F.ADTOOL_ROLLUP_BUDGET_MS && c.tail === F.ADTOOL_ROLLUP_STEP_MS.tail &&
+        F.adtRollupStepCosts('not json', F.ADTOOL_ROLLUP_STEP_MS).today === F.ADTOOL_ROLLUP_STEP_MS.today &&
+        F.adtRollupStepCosts(null, F.ADTOOL_ROLLUP_STEP_MS).orders === F.ADTOOL_ROLLUP_STEP_MS.orders &&
+        F.adtRollupStepCosts({ today: 0 }, F.ADTOOL_ROLLUP_STEP_MS).today === F.ADTOOL_ROLLUP_STEP_MS.today;
+    })(), F.adtRollupStepCosts({ today: 20000, yesterday: 9999999 }, F.ADTOOL_ROLLUP_STEP_MS, F.ADTOOL_ROLLUP_COST_MARGIN));
+  t('roll-up budget: what a step is remembered costing jumps to its worst run at once and comes down only slowly — yesterday is cheap at the day flip and dear again when eBay’s report lands, and it must be budgeted at the dear price',
+    (() => {
+      const dear = F.adtRollupStepBlend(20000, 97000, F.ADTOOL_ROLLUP_COST_DECAY);
+      const cheap = F.adtRollupStepBlend(97000, 20000, F.ADTOOL_ROLLUP_COST_DECAY);
+      return dear === 97000 && cheap === 77600 && F.ADTOOL_ROLLUP_COST_DECAY > 0.5 && F.ADTOOL_ROLLUP_COST_DECAY < 1;
+    })(), [F.adtRollupStepBlend(20000, 97000), F.adtRollupStepBlend(97000, 20000)]);
+  t('roll-up budget: a step that did not run this hour is left exactly as it was, not decayed, and a step with neither a reading nor a figure held is null and never nought',
+    F.adtRollupStepBlend(50000, undefined) === 50000 && F.adtRollupStepBlend(50000, null) === 50000 &&
+    F.adtRollupStepBlend(undefined, 7000) === 7000 && F.adtRollupStepBlend(undefined, undefined) === null && F.adtRollupStepBlend(null, null) === null,
+    [F.adtRollupStepBlend(50000, undefined), F.adtRollupStepBlend(undefined, undefined)]);
+  t('roll-up budget: the job note says where the run stopped FIRST, because the note is cut at four hundred characters and that is the fact a reader needs',
+    (() => {
+      const n = F.adtRollupStepNote({ run_steps: [{ words: 'today' }, { words: 'yesterday' }], skipped: [{ words: 'the week and month sums', reason: 'left for the next hour: it needs 12 s and 3 s is left' }, { words: 'the page cache', reason: 'left for the next hour: the budget ran out at the week and month sums' }, { words: 'the tail day', reason: 'the tail round for today is already done' }] });
+      return n.indexOf('left the week and month sums for the next hour') === 0 && /with the 1 step after it/.test(n) && /did today, yesterday/.test(n) && /not due: the tail day/.test(n);
+    })(), F.adtRollupStepNote({ run_steps: [{ words: 'today' }], skipped: [{ words: 'x', reason: 'left for the next hour: no' }] }));
+  t('roll-up budget: a run where nothing fitted says so rather than reading as a run with nothing to do',
+    /nothing fitted the budget/.test(F.adtRollupStepNote({ run_steps: [], skipped: [{ words: 'today', reason: 'left for the next hour: it needs 70 s and 2 s is left' }] })) &&
+    /did today/.test(F.adtRollupStepNote({ run_steps: [{ words: 'today' }], skipped: [] })), null);
+
+  /* the hour cursor (item 3): the hours of today that are still filling, and nothing else */
+  t('hour cursor: with no cursor, or one for another day, or one nobody can read, the whole of today is rebuilt — and that is "no cursor", never "hour nought"',
+    (() => {
+      const none = F.adtRollupHourCursor('', '2026-11-01', 14);
+      const other = F.adtRollupHourCursor('2026-10-31|20', '2026-11-01', 14);
+      const junk = F.adtRollupHourCursor('rubbish', '2026-11-01', 14);
+      return none.from === 0 && none.whole_day === true && none.last_settled === null &&
+        other.from === 0 && other.whole_day === true && /another day/.test(other.source) &&
+        junk.from === 0 && junk.whole_day === true && junk.last_settled === null;
+    })(), F.adtRollupHourCursor('2026-10-31|20', '2026-11-01', 14));
+  t('hour cursor: a run rebuilds from the hour after the last settled one, and the hour it is standing in is rebuilt again next time because it is still filling',
+    (() => {
+      const at11 = F.adtRollupHourCursor('2026-11-01|10', '2026-11-01', 11);
+      const at12 = F.adtRollupHourCursor(at11.next, '2026-11-01', 12);
+      return at11.from === 11 && at11.next === '2026-11-01|10' && at12.from === 11 && at12.next === '2026-11-01|11';
+    })(), [F.adtRollupHourCursor('2026-11-01|10', '2026-11-01', 11), F.adtRollupHourCursor('2026-11-01|10', '2026-11-01', 12)]);
+  t('hour cursor: every hour is therefore written twice at most — once while it fills and once when it is done — where the old roll wrote all twenty-four of them every hour',
+    (() => {
+      let cur = '', writes = 0;
+      for (let h = 0; h < 24; h++) { const c = F.adtRollupHourCursor(cur, '2026-11-01', h); for (let x = c.from; x <= h; x++) writes++; cur = c.next; }
+      return writes === 47;      /* hour 0 once, every later hour twice */
+    })(), (() => { let cur = '', w = 0; for (let h = 0; h < 24; h++) { const c = F.adtRollupHourCursor(cur, '2026-11-01', h); for (let x = c.from; x <= h; x++) w++; cur = c.next; } return w; })());
+  t('hour cursor: at midnight nothing of today is settled yet, and the cursor says so instead of claiming hour nought',
+    (() => { const c = F.adtRollupHourCursor('', '2026-11-01', 0); return c.from === 0 && c.next === '2026-11-01|-1' && F.adtRollupHourCursor(c.next, '2026-11-01', 0).from === 0; })(),
+    F.adtRollupHourCursor('', '2026-11-01', 0));
+  t('hour cursor: it only ever moves on, so a forced run at an earlier hour cannot make the next run rebuild hours it has already settled',
+    F.adtRollupHourCursor('2026-11-01|18', '2026-11-01', 3).next === '2026-11-01|18' &&
+    F.adtRollupHourCursor('2026-11-01|18', '2026-11-01', 3).from === 3,
+    F.adtRollupHourCursor('2026-11-01|18', '2026-11-01', 3));
+  t('hour cursor: an hour outside the day is held to it rather than refused, so a figure nobody understands can never stop the roll-up',
+    F.adtRollupHourCursor('2026-11-01|99', '2026-11-01', 40).from === 23 && F.adtRollupHourCursor('2026-11-01|5', '2026-11-01', -3).from === 0,
+    [F.adtRollupHourCursor('2026-11-01|99', '2026-11-01', 40).from, F.adtRollupHourCursor('2026-11-01|5', '2026-11-01', -3).from]);
+
+  /* what a settled hour costs: nothing, unless something about it has really moved */
+  t('settled hours: an hour whose figures have not moved prints the same and earns no write, and one with a sale cancelled inside it prints differently and earns one',
+    (() => {
+      const held = { orders: 2, units: 3, revenue: 29.97, impressions_s: 100, clicks_s: 4, spend_s: 1.2, attr_units_s: 1, clicks_r: 4, spend_r: 1.25, attr_units_r: 1, samples: 12, hourly_status: 'reconciled', carry_spend: 0.4 };
+      const same = Object.assign({}, held);
+      const cancelled = Object.assign({}, held, { orders: 1, units: 2, revenue: 19.98 });
+      return F.adtHourPrint(held) === F.adtHourPrint(same) && F.adtHourPrint(held) !== F.adtHourPrint(cancelled);
+    })(), null);
+  t('settled hours: a null is not a nought — an hour with no reconciled spend and one reconciled to nought must never compare equal',
+    (() => {
+      const base = { orders: 1, units: 1, revenue: 9.99, impressions_s: 0, clicks_s: 0, spend_s: 0, attr_units_s: 0, samples: 0, hourly_status: 'none' };
+      const noRec = Object.assign({}, base, { spend_r: null, clicks_r: null, attr_units_r: null, carry_spend: null });
+      const zeroRec = Object.assign({}, base, { spend_r: 0, clicks_r: 0, attr_units_r: 0, carry_spend: 0 });
+      return F.adtHourPrint(noRec) !== F.adtHourPrint(zeroRec) && /~/.test(F.adtHourPrint(noRec)) && F.adtHourPrint(undefined) === F.adtHourPrint(null);
+    })(), [F.adtHourPrint({ spend_r: null }), F.adtHourPrint({ spend_r: 0 })]);
+  t('settled hours: what the database hands back and what the upsert would write are printed the same way, money to the penny, so "unchanged" means unchanged and not "close enough"',
+    F.adtHourPrint({ revenue: 29.97, spend_s: 1.2 }) === F.adtHourPrint({ revenue: 29.970000000000002, spend_s: 1.2000001 }) &&
+    F.adtHourPrint({ revenue: 29.97 }) !== F.adtHourPrint({ revenue: 29.98 }), null);
+
+  /* the week and month sums a run owes, carried so a cut can never lose them */
+  t('owed sums: the span widens and is never replaced, so a run cut off before the re-sum leaves the days it rolled for the next run to re-sum',
+    (() => {
+      const a = F.adtRollupOwed('', ['2026-10-30']);
+      const b = F.adtRollupOwed(a.text, ['2026-10-23']);
+      const c = F.adtRollupOwed(b.text, ['2026-10-31']);
+      return a.text === '2026-10-30|2026-10-30' && b.from === '2026-10-23' && b.to === '2026-10-30' && c.from === '2026-10-23' && c.to === '2026-10-31' && c.owed === true;
+    })(), F.adtRollupOwed(F.adtRollupOwed('', ['2026-10-30']).text, ['2026-10-23']));
+  t('owed sums: nothing owed is null and never a span of nought days, and a stored span nobody can read is nothing owed rather than a date invented for it',
+    (() => {
+      const none = F.adtRollupOwed('', []);
+      const junk = F.adtRollupOwed('off', []);
+      return none.owed === false && none.from === null && none.to === null && none.text === '' && junk.owed === false && junk.from === null &&
+        F.adtRollupOwed('', ['not a day']).owed === false;
+    })(), F.adtRollupOwed('off', []));
+
+  /* item 5: the stamp the Peak time page prints, and the two thresholds behind it */
+  t('roll-up freshness: nothing that runs once an hour is amber at fifteen minutes — amber is one missed slot and red is two, off the law’s own pair',
+    (() => {
+      const R = F.adtRollupFreshRules({ amber_min: 15, red_min: 60 }, 60);
+      return R.amber_min === 60 && R.red_min === 120 && R.cadence_min === 60 &&
+        F.adtFreshVerdict(new Date(Date.now() - 30 * 60000).toISOString(), R, Date.now()).verdict === 'ok' &&
+        F.adtFreshVerdict(new Date(Date.now() - 75 * 60000).toISOString(), R, Date.now()).verdict === 'amber' &&
+        F.adtFreshVerdict(new Date(Date.now() - 200 * 60000).toISOString(), R, Date.now()).verdict === 'red';
+    })(), F.adtRollupFreshRules({ amber_min: 15, red_min: 60 }, 60));
+  t('roll-up freshness: a manager who sets the figures higher keeps his own, amber never passes red, and a pair nobody set falls back to the law and not to nothing',
+    (() => {
+      const high = F.adtRollupFreshRules({ amber_min: 180, red_min: 360 }, 60);
+      const odd = F.adtRollupFreshRules({ amber_min: 500, red_min: 90 }, 60);
+      const none = F.adtRollupFreshRules(null, 60);
+      return high.amber_min === 180 && high.red_min === 360 && odd.amber_min <= odd.red_min && none.red_min === 120 && none.amber_min === 60;
+    })(), [F.adtRollupFreshRules({ amber_min: 180, red_min: 360 }, 60), F.adtRollupFreshRules(null, 60)]);
+  t('roll-up freshness: the stall is said in a reader’s words, and an age nobody can work out is null and never "0 minutes"',
+    F.adtRollupAgeWords(1) === 'a minute' && F.adtRollupAgeWords(75) === '75 minutes' && F.adtRollupAgeWords(100) === 'an hour' &&
+    F.adtRollupAgeWords(300) === '5 hours' && F.adtRollupAgeWords(1500) === 'a day' && F.adtRollupAgeWords(4320) === '3 days' &&
+    F.adtRollupAgeWords(null) === null && F.adtRollupAgeWords(-1) === null && F.adtRollupAgeWords('x') === null,
+    [F.adtRollupAgeWords(100), F.adtRollupAgeWords(null)]);
+
+  /* ---- the same rules, read off the source: the wiring, not a second copy of the arithmetic --- */
+  const rbSrc = src.slice(src.indexOf('/* ADTOOL-P17-PURE-BEGIN */'), src.indexOf('async function adtoolRollupsFull(env) {'));
+  const rbDrv = src.slice(src.indexOf('async function adtoolRollups(env) {'), src.indexOf('async function adtoolRollupsFull(env) {'));
+  t('roll-up engine: a run that stops itself writes its own row with status ‘cut’ — the trail never shows ‘running’ for a run that is over',
+    /await adtJobEnd\(env, 'adtoolRollups', t, rows, coreCut \? 'cut' : 'ok', note\);/.test(rbDrv) &&
+    (rbDrv.match(/adtJobEnd\(env, 'adtoolRollups', t, rows, coreCut \? 'cut' : 'ok', note\)/g) || []).length === 2 &&
+    /const coreCut = leftOver\.length > 0;/.test(rbDrv) && /await adtJobEnd\(env, 'adtoolRollups', t, rows, 'error'/.test(rbDrv), null);
+  t('roll-up engine: the note on that row names the step the run reached, through the one function that writes it',
+    /adtRollupStepNote\(\{ run_steps: ran, skipped: leftOver\.concat\(notDue\) \}\)/.test(rbDrv) && /'left ' \+ left\[0\] \+ ' for the next hour'/.test(rbSrc), null);
+  t('roll-up engine: a row the platform left reading ‘running’ is closed by the next run as ‘killed’, before that run has a row of its own to catch',
+    (() => {
+      const wd = src.slice(src.indexOf('async function adtRollupWatchdog(env, job, deadMin) {'), src.indexOf('async function adtRollupFresh(env) {'));
+      return /SET status = 'killed'/.test(wd) && /status = 'running'/.test(wd) && /started_at < \?2/.test(wd) &&
+        F.ADTOOL_ROLLUP_DEAD_MIN === 20 && rbDrv.indexOf('adtRollupWatchdog(env') < rbDrv.indexOf("adtJobStart(env, 'adtoolRollups')");
+    })(), null);
+  t('roll-up engine: the watchdog invents no finishing time for a run nobody watched end, and says in the row why there is none',
+    (() => {
+      const wd = src.slice(src.indexOf('async function adtRollupWatchdog(env, job, deadMin) {'), src.indexOf('async function adtRollupFresh(env) {'));
+      return !/SET status = 'killed', finished_at/.test(wd) && /no finish was ever written/.test(wd) && /no finishing time to record/.test(wd);
+    })(), null);
+  t('roll-up engine: every long step goes through the gate, and the old invocation-cap gates that let one slow run take the slot down are gone',
+    (() => {
+      const gated = (rbDrv.match(/await step\(/g) || []).length;
+      return gated >= 12 && /adtRollupPlan\(\{ now_ms: Date\.now\(\), t0: t0, budget_ms: BUDGET_MS/.test(rbDrv) &&
+        !/Date\.now\(\) - t0 < 810000/.test(rbDrv) && !/Date\.now\(\) - t0 < 200000/.test(rbDrv) && !/BUDGET_MS = 240000/.test(rbDrv) &&
+        /const BUDGET_MS = ADTOOL_ROLLUP_BUDGET_MS;/.test(rbDrv);
+    })(), (rbDrv.match(/await step\(/g) || []).length);
+  t('roll-up engine: today is rolled first and committed on its own, its cursor and its hour cursor in the one write',
+    (() => {
+      const iToday = rbDrv.indexOf("await step('today'"), iYday = rbDrv.indexOf("await step('yesterday'"), iDay2 = rbDrv.indexOf("await step('day2'");
+      return iToday > 0 && iToday < iYday && iYday < iDay2 &&
+        /adtoolRollupDays\(env, today, today, \{ hours_from: hc\.from, hours_from_day: today, periods: false, stats: st \}\)/.test(rbDrv) &&
+        /cfgPut\('adtool_rollup_cursor', today\), cfgPut\('adtool_rollup_hour_cursor', hc\.next\)/.test(rbDrv);
+    })(), null);
+  t('roll-up engine: the hour cursor is kept under the name the brief gives it, and read through the one pure rule',
+    /adtRollupHourCursor\(await adtFlag\(env, 'adtool_rollup_hour_cursor'\), today, ukH\)/.test(rbDrv) && /const ukH = adtUkParts\(Date\.now\(\)\)\.hour;/.test(rbDrv), null);
+  t('roll-up engine: yesterday is rebuilt when its day closes and again when eBay’s report for it lands, and left alone the other twenty-two runs',
+    /const ydayKey = yday \+ '\|' \+ repState;/.test(rbDrv) && /const ydayDue = \(await adtFlag\(env, 'adtool_rollup_yday'\)\) !== ydayKey;/.test(rbDrv) &&
+    /await adtReportStatus\(env, yday\)/.test(rbDrv) && /cfgPut\('adtool_rollup_yday', ydayKey\)/.test(rbDrv), null);
+  t('roll-up engine: every finished day is rolled with its hours settled, so a day that closed last week costs a write only where something about it really changed',
+    (rbDrv.match(/hours_from: 24, hours_from_day: /g) || []).length === 4 && /hours_from: hc\.from, hours_from_day: today/.test(rbDrv), (rbDrv.match(/hours_from: 24/g) || []).length);
+  t('roll-up engine: the tail round is a day per run on its own cursor, and the day stamp is set only when the round completes, so partial progress is kept',
+    /const tailNext = tailMid \? adtAddDays\(tailCur, 1\) : tailFrom;/.test(rbDrv) &&
+    /if \(tailNext >= tailTo\) \{ puts\.push\(cfgPut\('adtool_tail_reroll_day', today\)\); puts\.push\(cfgPut\('adtool_rollup_tail_day', 'off'\)\); \}/.test(rbDrv) &&
+    /else puts\.push\(cfgPut\('adtool_rollup_tail_day', tailNext\)\);/.test(rbDrv), null);
+  t('roll-up engine: the history catch-up is a day at a time, not six — a six-day chunk could never finish inside any budget worth having',
+    /const dayN = adtAddDays\(cursor, 1\);/.test(rbDrv) && !/adtAddDays\(from, 5\)/.test(rbDrv) && /if \(!went\) break;/.test(rbDrv) &&
+    /cfgPut\('adtool_rollup_cursor', dayN\)/.test(rbDrv), null);
+  t('roll-up engine: the week and month sums are a step of their own, paid before another finished day is taken on, and what is owed survives a run that is cut',
+    /if \(O\.periods !== false\) written \+= await adtoolRollupPeriods\(env, fromDay, toDay\);/.test(src) &&
+    /async function adtoolRollupPeriods\(env, fromDay, toDay\) \{/.test(src) &&
+    (rbDrv.match(/periods: false/g) || []).length === 5 && /adtRollupOwed\(await adtFlag\(env, 'adtool_rollup_periods_owed'\), ownedDays\)/.test(rbDrv) &&
+    rbDrv.indexOf('await doPeriods();\n      /* (d) the listing facts') < rbDrv.indexOf("await step('day2'"), null);
+  t('roll-up engine: the hour rows carry when they were last rebuilt, and the Peak time page’s stamp reads that for today with the job’s own last finish behind it',
+    (() => {
+      const fr = src.slice(src.indexOf('async function adtRollupFresh(env) {'), src.indexOf('/* ---- job: rollups driver'));
+      return /ALTER TABLE adtool_listing_hour ADD COLUMN computed_at TEXT/.test(src) && /computed_at = datetime\('now'\)/.test(src) &&
+        /SELECT MAX\(computed_at\) AS t FROM adtool_listing_hour WHERE day = \?1/.test(fr) &&
+        /job = 'adtoolRollups' AND \(status = 'ok' OR status = 'cut'\)/.test(fr) &&
+        /cadence: 'every hour'/.test(fr) && /fresh: await adtRollupFresh\(env\)/.test(src);
+    })(), null);
+  t('roll-up engine: the stall is printed beside the stamp rather than only recorded, and a page with nothing rebuilt yet says so instead of reading as fresh',
+    (() => {
+      const fr = src.slice(src.indexOf('async function adtRollupFresh(env) {'), src.indexOf('/* ---- job: rollups driver'));
+      /* the words themselves, sliced rather than matched out of the file: the sentences a reader
+         sees must name no figure (the pair is the settings' business, not the sentence's) and carry
+         no em-dash, and a test that read the comments around them would be testing the comments. */
+      const say = fr.slice(fr.indexOf('note: at == null'), fr.indexOf('sent_to_ebay: false'));
+      return /note: at == null \? 'the hourly roll-up has not written an hour for today yet'/.test(say) &&
+        /is behind: these figures were last rebuilt/.test(say) && /has missed a slot/.test(say) &&
+        say.length > 200 && !/\u2014/.test(say) && !/\d/.test(say);
+    })(), null);
+  /* THE DEADLOCK THIS NEARLY SHIPPED WITH. A rebuild resumes by re-entering its own branch with the
+     cursor already back at the first ad day. Had its prerequisites been re-done every run they would
+     have eaten the budget the first history day needs, the day would have been left for the next hour
+     every hour, and the rebuild would never have moved a single day. That is a gate working perfectly
+     and a job that never finishes, which is the exact failure this whole change is about. */
+  t('roll-up engine: a rebuild does its prerequisites once and not once an hour for ever, so a resumed rebuild spends its budget moving a history day',
+    /const beginning = cursor !== want;/.test(rbDrv) &&
+    /if \(beginning\) puts\.push\(cfgPut\('adtool_rollup_rebuild_prep', 'off'\)\);/.test(rbDrv) &&
+    /const done = \(await adtFlag\(env, 'adtool_rollup_rebuild_prep'\)\) === 'done';/.test(rbDrv) &&
+    (rbDrv.match(/await startRebuild\(\);\n      await rebuildPrep\(\);/g) || []).length === 2 &&
+    /await commit\('adtool_rollup_rebuild_prep', 'done'\);/.test(rbDrv), null);
+  t('roll-up engine: the whole order book is a step of its own, never budgeted off the four-day roll’s measurement — the same name for both would gate the dear one on the cheap one’s time',
+    /await step\('ordersall', 'the whole order book'/.test(rbDrv) && !/await step\('orders', 'the whole order book'/.test(rbDrv) &&
+    F.ADTOOL_ROLLUP_STEP_MS.ordersall > F.ADTOOL_ROLLUP_STEP_MS.orders && F.ADTOOL_ROLLUP_ORDER.indexOf('ordersall') < 0, null);
+  t('roll-up engine: what every step took is written back under one key, so the next run’s gate is arithmetic on measurement and not a figure somebody typed',
+    /adtRollupStepBlend\(storedMs && storedMs\[k\], took\[k\], ADTOOL_ROLLUP_COST_DECAY\)/.test(rbDrv) &&
+    /await commit\('adtool_rollup_step_ms', JSON\.stringify\(blended\)\);/.test(rbDrv) &&
+    /adtRollupStepCosts\(storedRaw, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_COST_MARGIN\)/.test(rbDrv) &&
+    /cost\[name\] = Math\.min\(BUDGET_MS, Math\.round\(took\[name\] \* ADTOOL_ROLLUP_COST_MARGIN\)\);/.test(rbDrv), null);
+  t('roll-up engine: nothing in any of it reaches eBay — the whole slot reads the engine’s own tables and writes the engine’s own tables',
+    !/api\.ebay\.com/.test(rbSrc) && !/apiz?\.ebay/.test(rbSrc) && !/fetch\(/.test(rbSrc) && /sent_to_ebay: false/.test(rbSrc), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
