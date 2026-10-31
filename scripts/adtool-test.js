@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -241,9 +241,9 @@ function run(argv) {
   const dr = F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.7 }, { week: 2, spend_day: 500, roas: 3.5 }, { week: 3, spend_day: 620, roas: 3.4 }]);
   t('alerts: A18 fires when spend/day rose 15 % and ROAS fell, twice running', !!dr, dr);
   t('alerts: A18 silent when ROAS held', !F.adtDiminishingReturns([{ week: 1, spend_day: 400, roas: 3.5 }, { week: 2, spend_day: 500, roas: 3.6 }, { week: 3, spend_day: 620, roas: 3.7 }]), null);
-  t('alerts: every rule A01–A21 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 21 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
+  t('alerts: every rule A01–A22 has severity, cool-down and a suggested action', Object.keys(F.ADTOOL_ALERT_RULES).length === 22 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => F.ADTOOL_ALERT_RULES[k].sev && F.ADTOOL_ALERT_RULES[k].cool >= 1 && F.ADTOOL_ALERT_RULES[k].action), Object.keys(F.ADTOOL_ALERT_RULES).length);
   /* Phase 4 big update: every one of the 19 rules carries a why_matters sentence, and no rule text says 'est. ad profit' */
-  t('alerts: all 21 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 21 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
+  t('alerts: all 22 rules carry a why_matters sentence (a real sentence, not blank)', Object.keys(F.ADTOOL_ALERT_RULES).length === 22 && Object.keys(F.ADTOOL_ALERT_RULES).every(k => typeof F.ADTOOL_ALERT_RULES[k].why_matters === 'string' && F.ADTOOL_ALERT_RULES[k].why_matters.length >= 20), Object.keys(F.ADTOOL_ALERT_RULES).filter(k => !F.ADTOOL_ALERT_RULES[k].why_matters));
   t('alerts: no rule text says "est. ad profit" any more', Object.keys(F.ADTOOL_ALERT_RULES).every(k => !/est\. ad profit/i.test(F.ADTOOL_ALERT_RULES[k].text)), null);
   t('alerts: urgency is overdue for a high alert past 24 h, else severity-derived now/soon/watch', F.adtAlertUrgency('high', 30) === 'overdue' && F.adtAlertUrgency('high', 10) === 'now' && F.adtAlertUrgency('medium', 100) === 'soon' && F.adtAlertUrgency('low', 100) === 'watch' && F.adtAlertUrgency('high', 24) === 'now', [F.adtAlertUrgency('high', 30), F.adtAlertUrgency('high', 10), F.adtAlertUrgency('medium', 100), F.adtAlertUrgency('low', 100)]);
   const lvIn = [
@@ -1262,8 +1262,9 @@ function run(argv) {
   t('change and peak pages: both actions name their own time to live, and neither outlives the ceiling the gate states', /adtoolChangeDay: 60000, adtoolPeak: 120000/.test(src) && /ADTOOL_KV_TTL_MS\.adtoolChangeDay/.test(p15Src) && /ADTOOL_KV_TTL_MS\.adtoolPeak/.test(p15Src), null);
   t('peak list: a write drops the cached page for BOTH profit classes, for all accounts and for the listing\'s own', (p15Src.match(/adtKvKey\('adtoolPeak', cls/g) || []).length === 2 && /for \(const cls of \['p', 'np'\]\)/.test(p15Src) && /HOT\.delete/.test(p15Src), (p15Src.match(/adtKvKey\('adtoolPeak', cls/g) || []).length);
   t('peak list: taking a listing off KEEPS its row with who took it off and when, and deletes nothing', /UPDATE adtool_peak_items SET removed_by = \?2, removed_at = datetime\('now'\)/.test(p15Src) && !/DELETE FROM/.test(p15Src) && /WHERE p\.removed_at = ''/.test(p15Src), null);
-  t('peak list: every write stamps the person who made it', (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length === 2, (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length);
-  t('change and peak pages: the pages themselves send nothing to eBay (the job does, elsewhere); their only writes are the documentation, the switches, the by-hand list and the audit trail of who armed what', !/fetch\(/.test(p15Src) && !/api\.ebay\.com/.test(p15Src) && !/ebayAccessToken/.test(p15Src) && (p15Src.match(/INSERT INTO/g) || []).length === (p15Src.match(/INSERT INTO (adtool_peak_items|adtool_number_register|portal_config|audit)/g) || []).length && p15Src.replace(/DO UPDATE SET/g, '').match(/UPDATE\s+([A-Za-z_]+)/g).join(',') === 'UPDATE adtool_peak_items', (p15Src.match(/INSERT INTO/g) || []).length);
+  /* three writes now: adding a listing, taking one off, and holding one on or off by hand (31 Oct, §3) */
+  t('peak list: every write stamps the person who made it', (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length === 3, (p15Src.match(/String\(\(ctx\.user \|\| \{\}\)\.email \|\| ''\)/g) || []).length);
+  t('change and peak pages: the pages themselves send nothing to eBay (the job does, elsewhere); their only writes are the documentation, the switches, the by-hand list and the audit trail of who armed what', !/fetch\(/.test(p15Src) && !/api\.ebay\.com/.test(p15Src) && !/ebayAccessToken/.test(p15Src) && (p15Src.match(/INSERT INTO/g) || []).length === (p15Src.match(/INSERT INTO (adtool_peak_items|adtool_number_register|portal_config|audit)/g) || []).length && p15Src.replace(/DO UPDATE SET/g, '').match(/UPDATE\s+([A-Za-z_]+)/g).every(x => x === 'UPDATE adtool_peak_items'), [(p15Src.match(/INSERT INTO/g) || []).length, p15Src.replace(/DO UPDATE SET/g, '').match(/UPDATE\s+([A-Za-z_]+)/g)]);
   t('change and peak pages: exactly one column is added, nullable, guarded, and the campaign change carries the id from then on', (p15Src.match(/ALTER TABLE/g) || []).length === 1 && /ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''/.test(p15Src) && /INSERT INTO campaign_events \(account, campaign, campaign_id, item_id, change_type, old, new, actor, at\)/.test(src) && /ensureCampaignEventsCampaignId\(env\)/.test(src), null);
   t('change pages: an older campaign change with no id resolves its name and SAYS the link is a name match', /campaign_id_source/.test(p15Src) && /'matched by name'/.test(p15Src) && /'recorded'/.test(p15Src) && /'unknown'/.test(p15Src), null);
   t('peak page: the one membership rule the tool shares is reused, never written a second time', /ADTOOL_LIVE_AD_SQL/.test(p15Src) && /adtCampaignStmt\(/.test(p15Src) && !/c\.status LIKE/.test(p15Src), null);
@@ -2056,7 +2057,7 @@ function run(argv) {
   /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
      Overview prints as a tile of its own and which had stood at a hard nought since the Command
      centre was written. */
-  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 15 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 20 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT', 'PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
   t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
   t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
   t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
@@ -2498,7 +2499,7 @@ function run(argv) {
 
   t('alerts: A20 and A21 join the rules with a severity, a waiting time, a suggested action and a why', (() => {
     const R = F.ADTOOL_ALERT_RULES;
-    return !!R.A20 && !!R.A21 && Object.keys(R).length === 21
+    return !!R.A20 && !!R.A21 && Object.keys(R).length === 22
       && ['A20', 'A21'].every(k => R[k].sev && R[k].cool >= 1 && R[k].action && R[k].why_matters.length >= 20 && /peak hours/.test(R[k].text));
   })(), Object.keys(F.ADTOOL_ALERT_RULES).length);
   t('alerts: neither peak rule prints a figure of its own, so a grace or a settling time cannot be changed in one place and stated in another', ['A20', 'A21'].every(k => !/\d/.test(F.ADTOOL_ALERT_RULES[k].text) && !/—/.test(F.ADTOOL_ALERT_RULES[k].text + F.ADTOOL_ALERT_RULES[k].why_matters)), [F.ADTOOL_ALERT_RULES.A20.text, F.ADTOOL_ALERT_RULES.A21.text]);
@@ -2818,6 +2819,484 @@ function run(argv) {
     return slots.length === 1 && slots[0].indexOf("'1-59/15 * * * *'") === 0 && /\[adtoolPeakSwitch\]/.test(slots[0]);
   })(), null);
   t('crons: the map has ONE home, read by the handler and by the trail route rather than copied (real source)', /const jobs = cronMap\(\);/.test(src) && (src.match(/function cronMap\(\) \{/g) || []).length === 1 && /const map = cronMap\(\);/.test(src), null);
+
+  /* ===== §3 of the 31 Oct brief: the 24-hour pattern engine and the dead-hour switch-off =====
+     The owner: "take the 24-hour span of the day and what happened in it; if the listing is playing on
+     the same methodology today, keep it on the same 24-hour pattern; at the times where it is not
+     driving any sales at all, switch it off."
+     Every rule below is a pure function, so the two things that could cost real money — an hour switched
+     off that sells, and an ad sent for a listing nobody armed — are fixtures rather than hopes. */
+  const pkToday = '2026-10-30';                       // a Friday; 2026-10-31 is the Saturday after it
+  const pkDay = (n) => F.adtAddDays(pkToday, -n);
+  /* one listing's hourly rows: typed hours 09-23, selling in the evening and in the nine o'clock hour,
+     spending and never selling through the afternoon. The afternoon is the dead stretch, and it is a
+     different part of the day from the evening its sales come from, which is what lets it be dead at
+     all: an hour inside a proven slot is never switched off. */
+  const pkRows = (nDays, opts) => {
+    const o = opts || {}, out = [];
+    for (let d = 1; d <= nDays; d++) {
+      const day = pkDay(d);
+      for (const h of [9]) out.push({ day: day, hour: h, orders: 1, units: 1, revenue: 10, spend: 0.4, clicks: 3, impressions: 90 });
+      for (const h of [12, 13, 14, 15, 16]) out.push({ day: day, hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4, impressions: 120 });
+      for (const h of (o.evening || [17, 18, 19, 20, 21, 22])) out.push({ day: day, hour: h, orders: 3, units: 3, revenue: 30, spend: 0.6, clicks: 5, impressions: 140 });
+      for (const h of (o.quiet_evening || [])) out.push({ day: day, hour: h, orders: 0, units: 0, revenue: 0, spend: 0.6, clicks: 5, impressions: 140 });
+    }
+    return out;
+  };
+  const pkRules = F.adPeakPlanRules({});
+  t('§3 defaults: the six figures are the owner’s own, and each is read from portal_config and never typed into a sentence',
+    pkRules.lookback_days === 28 && pkRules.min_days === 14 && pkRules.dead_min_clicks === 5 && pkRules.proven_share === 60 &&
+    pkRules.min_block_h === 2 && pkRules.plan_time === '23:30' && pkRules.proven_share_of_one === 0.6 &&
+    F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.lookback_days === 'adtool_peak_lookback_days' && F.ADTOOL_PEAK_PLAN_CONFIG_KEYS.plan_time === 'adtool_peak_plan_time', pkRules);
+  t('§3 defaults: a manager’s own figures are taken, a mistyped share is held to the range it means something in, and a plan time that is not a time falls back',
+    (() => {
+      const r = F.adPeakPlanRules({ adtool_peak_lookback_days: '14', adtool_peak_min_days: '7', adtool_peak_dead_min_clicks: '0', adtool_peak_proven_share: '140', adtool_peak_min_block_h: '3', adtool_peak_plan_time: 'half eleven' });
+      return r.lookback_days === 14 && r.min_days === 7 && r.dead_min_clicks === 0 && r.proven_share === 100 && r.min_block_h === 3 && r.plan_time === '23:30';
+    })(), F.adPeakPlanRules({ adtool_peak_proven_share: '140', adtool_peak_plan_time: 'half eleven' }));
+
+  const pk20 = F.adPeakProfile(pkRows(20), { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
+  t('§3 profile: the 24-hour span is read per hour, with the days behind each hour counted as real days',
+    pk20.hours.length === 24 && pk20.days_observed === 20 && pk20.hours[13].days_observed === 20 &&
+    pk20.hours[13].days_with_spend === 20 && pk20.hours[13].days_with_sales === 0 &&
+    pk20.hours[18].days_with_sales === 20 && pk20.hours[2].days_observed === 0,
+    [pk20.days_observed, pk20.hours[13].days_with_sales, pk20.hours[18].days_with_sales]);
+  t('§3 profile: today is kept OUT of the pattern and answered on its own, because a part day reads as quiet in every hour the clock has not reached',
+    (() => {
+      const withToday = F.adPeakProfile(pkRows(20).concat([{ day: pkToday, hour: 18, orders: 9, units: 9, revenue: 90, spend: 1, clicks: 9 }]), { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
+      return withToday.days_observed === 20 && withToday.hours[18].orders_raw === pk20.hours[18].orders_raw &&
+        withToday.today[18].orders_raw === 9 && withToday.today_day === pkToday && pk20.today_day === null;
+    })(), null);
+  t('§3 profile: the weekday weighting is the owner’s own — the same weekday’s last four occurrences count double, the last seven days count double, and a day that is both counts four times',
+    (() => {
+      const rows = [
+        { day: '2026-10-03', hour: 10, orders: 1, units: 1, revenue: 9, spend: 0.2, clicks: 1 },   // Sat
+        { day: '2026-10-10', hour: 10, orders: 1, units: 1, revenue: 9, spend: 0.2, clicks: 1 },   // Sat
+        { day: '2026-10-17', hour: 10, orders: 1, units: 1, revenue: 9, spend: 0.2, clicks: 1 },   // Sat
+        { day: '2026-10-24', hour: 10, orders: 1, units: 1, revenue: 9, spend: 0.2, clicks: 1 },   // Sat, and inside the last 7 days
+        { day: '2026-10-20', hour: 10, orders: 1, units: 1, revenue: 9, spend: 0.2, clicks: 1 },   // Tue, neither
+      ];
+      const p = F.adPeakProfile(rows, { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
+      return p.for_weekday === 'Sat' && p.weekday_weighting_used === true &&
+        p.weekday_days_doubled.join(',') === '2026-10-03,2026-10-10,2026-10-17,2026-10-24' &&
+        p.hours[10].orders_raw === 5 && p.hours[10].orders === 11 && p.hours[10].days_observed === 5 && p.hours[10].weight === 11;
+    })(), (() => { const p = F.adPeakProfile([{ day: '2026-10-24', hour: 10, orders: 1 }], { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 }); return [p.hours[10].orders, p.hours[10].orders_raw, p.weekday_days_doubled]; })());
+  t('§3 profile: a day outside the window is not read at all, however many rows are handed over',
+    (() => {
+      const p = F.adPeakProfile([{ day: '2026-01-01', hour: 10, orders: 50 }, { day: pkDay(1), hour: 10, orders: 1 }], { today: pkToday, for_day: pkToday, lookback_days: 28 });
+      return p.days_observed === 1 && p.hours[10].orders_raw === 1;
+    })(), null);
+
+  const pkDead20 = F.adPeakDeadHours(pk20, pkRules);
+  t('§3 dead hours: the afternoon it spends in and never sells in is dead, as one stretch, and the hours with no reading at all are not',
+    pkDead20.dead.join(',') === '12,13,14,15,16' && pkDead20.windows.length === 1 &&
+    pkDead20.windows[0].from === 12 && pkDead20.windows[0].to === 17 && pkDead20.windows[0].hours === 5 &&
+    pkDead20.dead.indexOf(2) < 0 && /no reading for this hour/.test(pkDead20.why[2]), [pkDead20.dead, pkDead20.windows]);
+  t('§3 dead hours: the part of the day its sales come from is PROVEN and never switched off, however quiet one hour inside it looks',
+    (() => {
+      /* the same listing, with eight o'clock in the evening spending and selling nothing. The evening
+         still holds nearly all of its sales, so that hour is kept and the reason says why. */
+      const p = F.adPeakProfile(pkRows(20, { evening: [17, 18, 19, 21, 22], quiet_evening: [20] }), { today: pkToday, for_day: '2026-10-31', lookback_days: 28, recent_days: 7 });
+      const d = F.adPeakDeadHours(p, pkRules);
+      return p.hours[20].days_with_sales === 0 && p.hours[20].days_with_spend === 20 &&
+        d.proven_slots.join(',') === '3' && d.proven_slot_names.join(',') === 'evening' &&
+        d.dead.indexOf(20) < 0 && /never switched off/.test(d.why[20]) && d.dead.join(',') === '12,13,14,15,16';
+    })(), null);
+  t('§3 dead hours: a stretch shorter than the minimum block is left running, because switching twice for one hour costs a send and buys nothing',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        const day = pkDay(d);
+        rows.push({ day: day, hour: 13, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });   // the only dead hour
+        for (const h of [9, 12, 14, 15, 16]) rows.push({ day: day, hour: h, orders: 1, units: 1, revenue: 10, spend: 0.4, clicks: 3 });
+        for (const h of [17, 18, 19]) rows.push({ day: day, hour: h, orders: 1, units: 1, revenue: 10, spend: 0.4, clicks: 3 });
+      }
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
+      return d.dead.join(',') === '13' && d.windows.length === 0 && d.windows_found.length === 1 &&
+        d.windows_dropped.length === 1 && d.windows_dropped[0].hours === 1 && /too short a stretch/.test(d.adjustments.join(' '));
+    })(), null);
+  t('§3 dead hours: one order in one hour on one day of the window keeps that hour, because an hour that sells occasionally is an hour that sells',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        const day = pkDay(d);
+        for (const h of [13, 14]) rows.push({ day: day, hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });
+        for (const h of [17, 18]) rows.push({ day: day, hour: h, orders: 2, units: 2, revenue: 20, spend: 0.5, clicks: 4 });
+      }
+      rows.push({ day: pkDay(11), hour: 14, orders: 1, units: 1, revenue: 9, spend: 0.5, clicks: 4 });
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
+      return d.dead.indexOf(14) < 0 && d.dead.indexOf(13) >= 0 && /has sold in this hour/.test(d.why[14]);
+    })(), null);
+  t('§3 dead hours: an hour that never spent anything and drew too few clicks is not dead either, having no waste to cut',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        rows.push({ day: pkDay(d), hour: 3, orders: 0, units: 0, revenue: 0, spend: 0, clicks: 0 });
+        for (const h of [17, 18]) rows.push({ day: pkDay(d), hour: h, orders: 2, units: 2, revenue: 20, spend: 0.5, clicks: 4 });
+      }
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
+      return d.dead.indexOf(3) < 0 && /no waste in it to cut/.test(d.why[3]);
+    })(), null);
+  t('§3 dead hours: a dead stretch over midnight is ONE stretch and not two halves each too short to count',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        for (const h of [23, 0]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });
+        for (const h of [12, 13]) rows.push({ day: pkDay(d), hour: h, orders: 2, units: 2, revenue: 20, spend: 0.5, clicks: 4 });
+      }
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
+      return d.windows.length === 1 && d.windows[0].from === 23 && d.windows[0].to === 1 && d.windows[0].hours === 2;
+    })(), null);
+  t('§3 dead hours: a running gap too short to stand between two dead stretches is swallowed only where nothing in it has ever sold; where it sells, neither stretch either side of it is applied',
+    (() => {
+      /* two dead stretches of four hours with a three-hour gap between them and a minimum block of four.
+         The gap is not DEAD, because touching dead hours are already one window: its hours have simply
+         never sold, for one of the other reasons. Switching the ad on through them buys nothing. */
+      const build = gap => {
+        const rows = [];
+        for (let d = 1; d <= 20; d++) {
+          for (const h of [0, 1, 2, 3, 7, 8, 9, 10]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });
+          if (gap === 'sells') for (const h of [4, 5, 6]) rows.push({ day: pkDay(d), hour: h, orders: 1, units: 1, revenue: 9, spend: 0.5, clicks: 4 });
+          if (gap === 'free') for (const h of [4, 5, 6]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0, clicks: 0 });
+          /* 'unread' leaves the gap with no row at all */
+          for (const h of [18, 19]) rows.push({ day: pkDay(d), hour: h, orders: 40, units: 40, revenue: 400, spend: 0.5, clicks: 4 });
+        }
+        return F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), { dead_min_clicks: 5, proven_share: 60, min_block_h: 4 });
+      };
+      const unread = build('unread'), free = build('free'), sells = build('sells');
+      const one = d => d.windows.length === 1 && d.windows[0].from === 0 && d.windows[0].to === 11 && d.windows[0].hours === 11 && /run as one/.test(d.adjustments.join(' '));
+      return one(unread) && one(free) && unread.dead.join(',') === '0,1,2,3,7,8,9,10' &&
+        sells.windows.length === 0 && /neither stretch either side/.test(sells.adjustments.join(' '));
+    })(), null);
+  t('§3 dead hours: a quiet hour inside the part of the day its sales come from is never swallowed into a dead stretch either, the same as it is never dead',
+    (() => {
+      /* the gap sits inside the evening, which holds every sale this listing makes, so the two dead
+         stretches either side of it are not applied: the proven slot wins over the gap rule too. */
+      const rows = [];
+      for (let d = 1; d <= 20; d++) {
+        for (const h of [13, 14, 15, 16]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });
+        for (const h of [20, 21, 22, 23]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.5, clicks: 4 });
+        for (const h of [17, 19]) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0, clicks: 0 });
+        rows.push({ day: pkDay(d), hour: 18, orders: 40, units: 40, revenue: 400, spend: 0.5, clicks: 4 });
+      }
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), { dead_min_clicks: 5, proven_share: 60, min_block_h: 4 });
+      return d.proven_slots.join(',') === '3' && d.dead.join(',') === '13,14,15,16' && d.windows.length === 1 &&
+        d.windows[0].from === 13 && d.windows[0].to === 17 && d.dead.indexOf(20) < 0 && /never switched off/.test(d.why[20]);
+    })(), null);
+  t('§3 dead hours: a listing that spends all day and never sells is dead all day, which is the case the owner asked about',
+    (() => {
+      const rows = [];
+      for (let d = 1; d <= 20; d++) for (let h = 0; h < 24; h++) rows.push({ day: pkDay(d), hour: h, orders: 0, units: 0, revenue: 0, spend: 0.3, clicks: 4 });
+      const d = F.adPeakDeadHours(F.adPeakProfile(rows, { today: pkToday, for_day: pkToday, lookback_days: 28 }), pkRules);
+      return d.dead.length === 24 && d.proven_slots.length === 0 && d.windows.length === 1 && d.windows[0].from === 0 && d.windows[0].to === 24;
+    })(), null);
+
+  /* the schedule itself */
+  const pkSchPattern = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('09-23').ranges, dead_windows: pkDead20.windows, hold: 'auto', min_days_ok: true, tracking: true });
+  t('§3 schedule: the typed hours are the ENVELOPE — outside them the ad is off as before, inside them the dead stretch takes it off, and nothing can put an ad into an hour nobody asked for',
+    pkSchPattern.source === 'pattern' && pkSchPattern.states.length === 24 &&
+    pkSchPattern.states.slice(0, 9).every(s => s === 'OFF') && pkSchPattern.states[23] === 'OFF' &&
+    pkSchPattern.states.slice(9, 12).every(s => s === 'ON') &&
+    pkSchPattern.states.slice(12, 17).every(s => s === 'OFF') &&
+    pkSchPattern.states.slice(17, 23).every(s => s === 'ON') &&
+    pkSchPattern.reasons[2] === 'outside its hours' && pkSchPattern.reasons[13] === 'dead window 12-17' && pkSchPattern.reasons[18] === 'inside its hours' &&
+    pkSchPattern.off_windows.length === 1 && pkSchPattern.off_windows[0].from === 12 && pkSchPattern.off_windows[0].to === 17,
+    [pkSchPattern.source, pkSchPattern.states.join('')]);
+  t('§3 schedule: with fewer than the days the rule asks for, the schedule IS the typed hours and the dead stretches come back only as a suggestion',
+    (() => {
+      const p10 = F.adPeakProfile(pkRows(10), { today: pkToday, for_day: pkToday, lookback_days: 28 });
+      const d10 = F.adPeakDeadHours(p10, pkRules);
+      const s = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('09-23').ranges, dead_windows: d10.windows, hold: 'auto', min_days_ok: p10.days_observed >= pkRules.min_days, tracking: true });
+      return p10.days_observed === 10 && d10.windows.length === 1 && s.source === 'proposal' && s.applied === false &&
+        s.states.slice(9, 23).every(x => x === 'ON') && s.proposal.length === 1 && s.proposal[0].from === 12 &&
+        s.off_windows.length === 0 && /put forward as a suggestion/.test(s.why);
+    })(), null);
+  t('§3 schedule: a listing that has stopped playing on its pattern falls back to the typed hours for the day, and says why',
+    (() => {
+      const s = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('09-23').ranges, dead_windows: pkDead20.windows, hold: 'auto', min_days_ok: true, tracking: false });
+      return s.source === 'typed' && s.applied === false && s.states.slice(9, 23).every(x => x === 'ON') &&
+        s.proposal.length === 1 && /no longer playing on the pattern/.test(s.why);
+    })(), null);
+  t('§3 schedule: a hold wins over the hours and the pattern both, on and off',
+    (() => {
+      const on = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('09-23').ranges, dead_windows: pkDead20.windows, hold: 'on', min_days_ok: true, tracking: true });
+      const off = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('09-23').ranges, dead_windows: pkDead20.windows, hold: 'off', min_days_ok: true, tracking: true });
+      return on.source === 'hold' && on.states.every(x => x === 'ON') && on.reasons[3] === 'held on by hand' &&
+        off.source === 'hold' && off.states.every(x => x === 'OFF') && off.reasons[3] === 'held off by hand' &&
+        F.ADTOOL_PEAK_HOLDS.join(',') === 'auto,on,off';
+    })(), null);
+  t('§3 schedule: nothing in the pattern can switch an ad ON outside the hours somebody typed, whatever the dead stretches say',
+    (() => {
+      /* a dead window handed in that reaches outside the typed hours cannot widen them: the envelope is
+         read first and the window only ever narrows what is left. */
+      const s = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('17-23').ranges, dead_windows: [{ from: 2, to: 8 }], hold: 'auto', min_days_ok: true, tracking: true });
+      return s.states.filter(x => x === 'ON').length === 6 && s.states.slice(17, 23).every(x => x === 'ON') &&
+        s.states.slice(0, 17).every(x => x === 'OFF') && s.states[23] === 'OFF';
+    })(), null);
+  t('§3 schedule: a listing whose hours cannot be read is scheduled as nothing at all, never as all day off',
+    (() => {
+      const s = F.adPeakSchedule({ typed_ranges: [], dead_windows: pkDead20.windows, hold: 'auto', min_days_ok: true, tracking: true });
+      return s.source === 'none' && s.off_windows.length === 0 && s.proposal.length === 0 && s.states.every(x => x === 'OFF');
+    })(), null);
+
+  /* tracking: the SAME rule A17 uses, not a second one */
+  t('§3 tracking: the thresholds are A17’s own, named once, and the drift rule still reads them',
+    F.ADTOOL_REGIME_JSD === 0.05 && F.ADTOOL_REGIME_CONSEC === 3 && F.ADTOOL_REGIME_MIN_ORDERS === 20 &&
+    /const th = threshold == null \? ADTOOL_REGIME_JSD : threshold, C = consecutive \|\| ADTOOL_REGIME_CONSEC, minN = minCount == null \? ADTOOL_REGIME_MIN_ORDERS : minCount;/.test(src), null);
+  t('§3 tracking: a drift the pattern check has already written down IS the answer, and the day is named',
+    (() => {
+      const r = F.adPeakTracking(pk20.today, pk20.hours, { drift_detected_day: '2026-10-28' });
+      return r.tracking === false && r.drift_detected_day === '2026-10-28' && /2026-10-28/.test(r.note) && r.same_rule_as === 'A17';
+    })(), null);
+  t('§3 tracking: too few orders either side is still TRACKING, which is the answer the drift rule gives for the same reason',
+    (() => {
+      const today = new Array(24).fill(0); today[18] = 2;
+      const pat = new Array(24).fill(0); pat[18] = 3;
+      const r = F.adPeakTracking(today, pat, {});
+      return r.tracking === true && r.orders_today === 2 && r.orders_pattern === 3 && /too few orders/.test(r.note);
+    })(), null);
+  t('§3 tracking: two shapes that differ above A17’s own threshold are not tracking, and two that agree are',
+    (() => {
+      const evening = new Array(24).fill(0); for (const h of [17, 18, 19, 20, 21, 22]) evening[h] = 10;
+      const morning = new Array(24).fill(0); for (const h of [6, 7, 8, 9, 10, 11]) morning[h] = 10;
+      const moved = F.adPeakTracking(morning, evening, {});
+      const same = F.adPeakTracking(evening, evening, {});
+      return moved.tracking === false && moved.jsd > F.ADTOOL_REGIME_JSD && same.tracking === true && same.jsd === 0;
+    })(), null);
+  t('§3 tracking: the SHAPE compared is the weighted one and the floor of orders is not, because a day counted twice has not happened twice',
+    (() => {
+      const hrs = h => { const l = []; for (let i = 0; i < 24; i++) l.push({ hour: i, orders: 0, orders_raw: 0 }); for (const k of Object.keys(h)) { l[Number(k)].orders = h[k][0]; l[Number(k)].orders_raw = h[k][1]; } return l; };
+      /* raw says 30 orders either side, so the floor is met; weighted says the pattern leans evening */
+      const today = hrs({ 9: [30, 30] });
+      const pattern = hrs({ 9: [5, 30] , 18: [60, 0] });
+      const r = F.adPeakTracking(today, pattern, {});
+      return r.orders_today === 30 && r.orders_pattern === 30 && r.tracking === false && r.shape_compared === true;
+    })(), null);
+  t('§3 tracking: a caller with no hourly shape to spare asks on the drift record alone, and then the order counts are NULL and never nought',
+    (() => {
+      const r = F.adPeakTracking([], [], {});
+      return r.tracking === true && r.orders_today === null && r.orders_pattern === null && r.jsd === null &&
+        r.shape_compared === false && /no hourly shape was handed/.test(r.note);
+    })(), null);
+
+  /* the override the switch is handed, and THE PROMISE: no schedule row behaves exactly as today */
+  t('§3 switch: a listing with NO schedule row and no hold is handed no override at all, so the decision is the one this job has always taken, word for word',
+    (() => {
+      const w = F.adPeakWantFor({ hold: 'auto', schedule: null, hour: 20 });
+      const before = F.adPeakSwitchDecide({ auto: 1, ranges: F.adPeakHoursParse('17-23').ranges, hour: 20, live_cpc_ad: true, believed_state: 'PAUSED', account_live_switch: false, account_switches_today: 0 });
+      const after = F.adPeakSwitchDecide({ auto: 1, ranges: F.adPeakHoursParse('17-23').ranges, hour: 20, live_cpc_ad: true, believed_state: 'PAUSED', account_live_switch: false, account_switches_today: 0, want_override: w.want_override, want_source: w.want_source });
+      return w.want_override === '' && w.want_source === '' && w.from === 'hours' &&
+        before.send === after.send && before.mode === after.mode && before.why === after.why &&
+        before.why === 'inside its peak hours, written down and not sent: this account’s live switch is off';
+    })(), null);
+  t('§3 switch: a hold wins over the schedule and over the hours, and the log row says which',
+    (() => {
+      const sch = F.adPeakSchedule({ typed_ranges: F.adPeakHoursParse('17-23').ranges, dead_windows: [], hold: 'auto', min_days_ok: true, tracking: true });
+      const on = F.adPeakWantFor({ hold: 'on', schedule: sch, hour: 3 });
+      const off = F.adPeakWantFor({ hold: 'off', schedule: sch, hour: 20 });
+      const d = F.adPeakSwitchDecide({ auto: 1, ranges: F.adPeakHoursParse('17-23').ranges, hour: 3, live_cpc_ad: true, believed_state: 'PAUSED', account_live_switch: false, account_switches_today: 0, want_override: on.want_override, want_source: on.want_source });
+      return on.want_override === 'ACTIVE' && on.want_source === 'hold on' && on.from === 'hold' &&
+        off.want_override === 'PAUSED' && off.want_source === 'hold off' &&
+        d.send === 'ACTIVE' && /^hold on/.test(d.why);
+    })(), null);
+  t('§3 switch: inside a dead stretch the wanted state comes from the schedule and the log row names the stretch',
+    (() => {
+      const w = F.adPeakWantFor({ hold: 'auto', schedule: Object.assign({ day: pkToday }, pkSchPattern), hour: 13 });
+      const d = F.adPeakSwitchDecide({ auto: 1, ranges: F.adPeakHoursParse('09-23').ranges, hour: 13, live_cpc_ad: true, believed_state: 'ACTIVE', account_live_switch: false, account_switches_today: 0, want_override: w.want_override, want_source: w.want_source });
+      return w.want_override === 'PAUSED' && w.want_source === 'pattern: dead window 12-17' && w.from === 'schedule' &&
+        d.send === 'PAUSED' && d.why === 'pattern: dead window 12-17, written down and not sent: this account’s live switch is off' && d.want_from === 'schedule';
+    })(), null);
+  t('§3 switch: an hour the schedule only repeats the typed hours for says so rather than claiming a pattern',
+    (() => {
+      const w = F.adPeakWantFor({ hold: 'auto', schedule: Object.assign({ day: pkToday }, pkSchPattern), hour: 18 });
+      return w.want_override === 'ACTIVE' && w.want_source === 'typed hours';
+    })(), null);
+  t('§3 switch: a schedule for a listing whose hours could not be read is the ABSENCE of a wanted state, never an instruction to pause',
+    (() => {
+      const bad = F.adPeakSchedule({ typed_ranges: [], dead_windows: [], hold: 'auto', min_days_ok: true, tracking: true });
+      const w = F.adPeakWantFor({ hold: 'auto', schedule: Object.assign({ day: pkToday }, bad), hour: 13 });
+      return bad.source === 'none' && w.want_override === '' && w.from === 'hours';
+    })(), null);
+  t('§3 switch: the override decides WHAT is wanted and never whether it may be sent — the gate, the ceiling and the refusal rule are the same lines in the same order (real source)',
+    (() => {
+      const fn = src.slice(src.indexOf('function adPeakSwitchDecide(input) {'), src.indexOf('function adPeakCampaignPick('));
+      const order = [
+        "if (!i.auto) return nothing('switching is off for this listing');",
+        "if (!ranges.length) return nothing('no hours to read');",
+        "if (!i.live_cpc_ad) return nothing('no pay-per-click ad to switch');",
+        "if (String(i.believed_state || '').toUpperCase() === want) return nothing('already '",
+        'if (i.refused_to && String(i.refused_to).toUpperCase() === want) return nothing(',
+        'const on = !!i.account_live_switch;',
+        'const cap = adPeakApplyCaps({ account_switches_today: i.account_switches_today });',
+        "const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');",
+      ];
+      let at = -1;
+      for (const line of order) { const k = fn.indexOf(line); if (k <= at) return false; at = k; }
+      return !/fetch\(/.test(fn) && /ADTOOL_PEAK_SWITCH_CAP = 20/.test(src);
+    })(), null);
+  t('§3 switch: the job reads today’s schedule and the hold through the one pure function, and hands them in as an override rather than deciding twice (real source)',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolPeakSwitch(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+      return /const schedToday = await adtPeakSchedulesRead\(env, ids, \[today\]\);/.test(job) &&
+        /const wantFor = adPeakWantFor\(\{ hold: row\.hold, schedule: schedToday\[id \+ '\|' \+ today\] \|\| null, hour: uk\.hour \}\);/.test(job) &&
+        /want_override: wantFor\.want_override, want_source: wantFor\.want_source,/.test(job) &&
+        /ADTOOL_APPLY_ENDPOINTS\.bulk_status_by_listing/.test(job) && (job.match(/await fetch\(/g) || []).length === 1;
+    })(), null);
+
+  /* the planner's tick, read off the UK clock */
+  t('§3 planner: the planning tick is the half-hour slot and the three cuts between the parts of the day are the only hours the hourly slot does anything at',
+    (() => {
+      const m = (h, mi, pt) => F.adPeakPlanTick({ hour: h, minute: mi }, pt).mode;
+      return m(23, 30) === 'nightly' && m(0, 30) === 'nightly' &&
+        m(6, 0) === 'boundary' && m(12, 0) === 'boundary' && m(17, 0) === 'boundary' &&
+        m(9, 0) === 'none' && m(0, 0) === 'none' && m(23, 0) === 'none' &&
+        m(6, 0, '06:00') === 'nightly' &&
+        F.ADTOOL_PEAK_PLAN_BOUNDARY_HOURS.join(',') === '6,12,17' &&
+        [0, 5, 6, 11, 12, 16, 17, 23].map(F.adtSlot).join(',') === '0,0,1,1,2,2,3,3';
+    })(), [F.adPeakPlanTick({ hour: 23, minute: 30 }), F.adPeakPlanTick({ hour: 9, minute: 0 })]);
+  t('§3 planner: a UK clock that cannot be read plans nothing off it',
+    F.adPeakPlanTick({}, '23:30').mode === 'none' && F.adPeakPlanTick({ hour: 99, minute: 0 }).mode === 'none', null);
+  t('§3 planner: it writes rows and sends nothing — no token, no endpoint, no fetch anywhere in it (real source)',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolPeakPlan(env) {'), src.indexOf('async function adtPeakOffWindowsToday(env, acct) {'));
+      return !/fetch\(/.test(job) && !/ebayAccessToken/.test(job) && !/ADTOOL_APPLY_ENDPOINTS/.test(job) && !/api\.ebay\.com/.test(job) &&
+        /adtJobStart\(env, 'adtoolPeakPlan'\)/.test(job) && /adtJobEnd\(env, 'adtoolPeakPlan'/.test(job) &&
+        /adtFlag\(env, 'adtool_job_peakplan'\)/.test(job) && /adtFlag\(env, 'adtool_page_peak'\)/.test(job) &&
+        /INSERT INTO adtool_peak_schedule/.test(src);
+    })(), null);
+  t('§3 planner: only a row somebody armed is ever scheduled, and only one with hours the system can read (real source)',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolPeakPlan(env) {'), src.indexOf('async function adtPeakOffWindowsToday(env, acct) {'));
+      return /const armed = all\.filter\(r => Number\(r\.auto \|\| 0\) === 1 && adPeakHoursParse\(r\.hours\)\.ranges\);/.test(job) &&
+        /tick\.mode === 'nightly'/.test(job) && /else if \(drift\[id\]\)/.test(job);
+    })(), null);
+  t('§3 planner: it rides the half-hour boundary slot and the hourly slot, and crons.json is untouched (real source, real file)', (() => {
+    let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
+    const i = src.indexOf('function cronMap() {');
+    const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+    const slots = (block.match(/'[^']+':\s*\[[^\]]*adtoolPeakPlan[^\]]*\]/g) || []).map(s => s.slice(1, s.indexOf("':")));
+    const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : [];
+    return slots.length === 2 && slots.indexOf('30 23 * * *') >= 0 && slots.indexOf('0 * * * *') >= 0 &&
+      slots.every(s => inFile.indexOf(s) >= 0) && inFile.length === 17 &&
+      /'0 \* \* \* \*': \[adtoolPeakPlan, financeSync/.test(block);
+  })(), null);
+
+  /* the next switch, across midnight */
+  t('§3 next switch: the next change the SCHEDULE makes, walked into tomorrow where today has none left',
+    (() => {
+      const today = Object.assign({ day: pkToday }, pkSchPattern);
+      const tomorrow = Object.assign({ day: '2026-10-31' }, pkSchPattern);
+      const a = F.adPeakNextSwitch({ today: today, tomorrow: tomorrow, uk: { date: pkToday, hour: 10 } });
+      const b = F.adPeakNextSwitch({ today: today, tomorrow: tomorrow, uk: { date: pkToday, hour: 13 } });
+      const c = F.adPeakNextSwitch({ today: today, tomorrow: tomorrow, uk: { date: pkToday, hour: 23 } });
+      return a.at === pkToday + ' 12:00' && a.to === 'OFF' && a.reason === 'dead window 12-17' &&
+        b.at === pkToday + ' 17:00' && b.to === 'ON' &&
+        c.at === '2026-10-31 09:00' && c.to === 'ON' && c.source === 'pattern';
+    })(), null);
+  t('§3 next switch: no schedule is null and never a time, because "there is no schedule here" and "nothing happens" are different claims',
+    F.adPeakNextSwitch({ today: null, uk: { hour: 10 } }) === null &&
+    F.adPeakNextSwitch({ today: { states: ['ON'] }, uk: { hour: 10 } }) === null, null);
+
+  /* A22 */
+  t('§3 alert A22: an hour the pattern calls productive that the schedule or a hold had the ad off through, once it has passed',
+    (() => {
+      const row = { account: 'A', item_id: '1', day: pkToday, states: pkSchPattern.states, reasons: pkSchPattern.reasons, source: 'pattern', productive_hours: [13, 18] };
+      const past = F.adPeakOffWhenProductive({ rows: [row], now_uk: { date: pkToday, hour: 20 } });
+      const notYet = F.adPeakOffWhenProductive({ rows: [row], now_uk: { date: pkToday, hour: 12 } });
+      const held = F.adPeakOffWhenProductive({ rows: [{ account: 'A', item_id: '1', day: pkToday, states: new Array(24).fill('OFF'), reasons: new Array(24).fill('held off by hand'), source: 'hold', productive_hours: [18] }], now_uk: { date: pkToday, hour: 20 } });
+      const outside = F.adPeakOffWhenProductive({ rows: [{ account: 'A', item_id: '1', day: pkToday, states: new Array(24).fill('OFF'), reasons: new Array(24).fill('outside its hours'), source: 'typed', productive_hours: [3] }], now_uk: { date: pkToday, hour: 20 } });
+      return past.length === 1 && past[0].hour === 13 && past[0].day === pkToday && /has sold in the 13:00 hour/.test(past[0].note) &&
+        notYet.length === 0 && held.length === 1 && /a hold somebody set/.test(held[0].note) && outside.length === 0;
+    })(), null);
+  t('§3 alert A22: it joins the rules with a severity, a waiting time, an action and a why, prints no figure of its own, and is scoped per listing per day per hour (real source)',
+    (() => {
+      const R = F.ADTOOL_ALERT_RULES;
+      const sw = src.slice(src.indexOf('async function adtoolAlerts(env) {'), src.indexOf('async function adtoolAlertsFixtureCheck'));
+      return !!R.A22 && R.A22.sev === 'medium' && R.A22.cool >= 1 && R.A22.action && R.A22.why_matters.length >= 20 &&
+        /peak hours/.test(R.A22.text) && !/\d/.test(R.A22.text) && !/—/.test(R.A22.text + R.A22.why_matters) &&
+        /adPeakOffWhenProductive\(\{ rows: schRows\.map\(adtPeakScheduleRow\), now_uk: nowUkA \}\)/.test(sw) &&
+        /put\('A22', f\.item_id \+ '\|' \+ f\.day \+ '\|' \+ String\(f\.hour\)/.test(sw);
+    })(), null);
+
+  /* automatic or by hand */
+  t('§3 changes: `by` is the attribution’s own answer in the owner’s two words, with how long before the change the portal’s send went out beside it',
+    (() => {
+      const ebay = F.adChangeBy({ who: 'ebay', tool: null }, '2026-10-30 18:00:00', 5);
+      const close = F.adChangeBy({ who: 'tool', tool: { op: 'status', mode: 'live', decision_id: 'peak', at: '2026-10-30 17:58:00' } }, '2026-10-30 18:00:00', 5);
+      const far = F.adChangeBy({ who: 'tool', tool: { op: 'status', mode: 'live', decision_id: 'morning', at: '2026-10-30 07:00:00' } }, '2026-10-30 18:00:00', 5);
+      const blind = F.adChangeBy({ who: 'tool', tool: { op: 'status', mode: 'live', decision_id: 'peak', at: '' } }, '2026-10-30 18:00:00', 5);
+      return ebay.by === 'manual' && ebay.minutes_before === null &&
+        close.by === 'automatic' && close.minutes_before === 2 && close.close === true && close.sender === 'peak switching' &&
+        far.by === 'automatic' && far.minutes_before === 660 && far.close === false && far.sender === 'the morning apply' &&
+        blind.by === 'automatic' && blind.minutes_before === null && blind.close === null &&
+        F.ADTOOL_CHANGE_AUTOMATIC_MIN === 5;
+    })(), null);
+  t('§3 changes: the stamp of the row that matched is carried out of the attribution, and the match itself is unchanged (real source)',
+    /return \{ who: 'tool', tool: \{ op: String\(r\.op \|\| ''\), mode: String\(r\.mode \|\| ''\), decision_id: String\(r\.decision_id \|\| ''\), at: String\(r\.at \|\| ''\) \} \};/.test(src) &&
+    /const by = adChangeBy\(who, r\.at_utc, ADTOOL_CHANGE_AUTOMATIC_MIN\);/.test(src) &&
+    /r\.by = by\.by;/.test(src), null);
+
+  /* the table, the column, the config and the register */
+  t('§3 tables: the schedule table holds exactly the columns the brief names, one row per listing per UK day, and the hold column is added guarded (real source)',
+    /CREATE TABLE IF NOT EXISTS adtool_peak_schedule \(account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY \(account, item_id, day\)\)/.test(src) &&
+    /try \{ await env\.DB\.prepare\("ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'"\)\.run\(\); \} catch \(e\) \{/.test(src), null);
+  t('§3 config: the planner’s stop flag and the six figures are seeded, and a figure somebody has already set is never written back over (real source)',
+    (() => {
+      const seed = src.slice(src.indexOf('async function ensureAdtoolPhase16Register(env) {'), src.indexOf('/* ---- the campaign map, with the rate strategy where the database has caught up ---- */'));
+      const keys = ['adtool_peak_lookback_days', 'adtool_peak_min_days', 'adtool_peak_dead_min_clicks', 'adtool_peak_proven_share', 'adtool_peak_min_block_h', 'adtool_peak_plan_time'];
+      return /'adtool_job_peakplan', 'on'/.test(seed) && (seed.match(/ON CONFLICT\(key\) DO NOTHING/g) || []).length >= 3 &&
+        keys.every(k => seed.indexOf('ADTOOL_PEAK_PLAN_CONFIG_KEYS.' + k.replace('adtool_peak_', '')) >= 0 || seed.indexOf(k) >= 0) &&
+        !/'adtool_job_peakplan', 'off'/.test(src);
+    })(), null);
+  t('§3 register: the five new entries name the rule, the sources, when they recompute and how they are rechecked, and none of them prints a figure of its own',
+    (() => {
+      const want = ['PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING'];
+      const got = rgAll.filter(r => want.indexOf(r.id) >= 0);
+      return got.length === 5 && got.every(r => r.name && r.formula && r.sources && r.recompute && r.recheck &&
+        String(r.formula).split(/\s+/).length <= 120 && !/\d+ ?%/.test(String(r.formula)) && !/—/.test(String(r.formula)));
+    })(), rgAll.filter(r => ['PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING'].indexOf(r.id) >= 0).map(r => [r.id, String(r.formula).split(/\s+/).length]));
+  t('§3 hold: the write is gated by the advertising roles and the page flag, refuses a word that is not a hold, refuses a listing that is not on the list, and sends nothing (real source)',
+    (() => {
+      const route = src.slice(src.indexOf('  adtoolPeakHold: {'), src.indexOf('};\n/* ADTOOL-P15-END'));
+      return /await adtGate\(ctx, null\);/.test(route) && /await adtGate\(ctx, 'adtool_page_peak'\);/.test(route) &&
+        /ADTOOL_PEAK_HOLDS\.indexOf\(asked\) < 0/.test(route) && /that listing is not on the peak hours list/.test(route) &&
+        /'ADTOOL_PEAK_HOLD'/.test(route) && /sent_to_ebay: false/.test(route) && !/fetch\(/.test(route) &&
+        F.ADTOOL_ROLES.join(',') === 'Management,Ops Head,Advertising Manager';
+    })(), null);
+  t('§3 probe: the evidence route is key-gated like backupDump, is not adtool-prefixed, reaches no eBay endpoint, and says what cannot reconcile and why (real source)',
+    (() => {
+      const route = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  backupStamp: {'));
+      return /adsPeakPlanProbe: \{\n\s*auth: 'sync'/.test(src) && !/fetch\(/.test(route) && !/ebayAccessToken/.test(route) &&
+        /reconcile_note:/.test(route) && /daily_totals: perDay/.test(route) && /envelope_note:/.test(route) &&
+        /read_errors: readErrors/.test(route) && /sent_to_ebay: false/.test(route) &&
+        /adPeakProfile\(/.test(route) && /adPeakDeadHours\(/.test(route) && /adPeakSchedule\(/.test(route) && /adPeakWantFor\(/.test(route);
+    })(), null);
+  t('§3 pages: the peak page, the Decision page and the campaigns-per-listing page all read the schedule the planner wrote rather than working it out again (real source)',
+    /schedule_today: showSch\(schT\), schedule_tomorrow: showSch\(schM\),/.test(src) &&
+    /peak_off_windows_today: peakOff,/.test(src) &&
+    /peak: peakNow\[id\] \|\| null,/.test(src) &&
+    /state_now: want\.want_override \? \(want\.want_override === 'ACTIVE' \? 'ON' : 'OFF'\)/.test(src) &&
+    (src.match(/function adPeakProfile\(/g) || []).length === 1 &&
+    (src.match(/function adPeakDeadHours\(/g) || []).length === 1, null);
+
+  t('§3 planner: a listing whose hours the run’s clock never reached is LEFT EXACTLY AS IT IS, rather than having a good schedule written over with one that only repeats the typed hours (real source)',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolPeakPlan(env) {'), src.indexOf('async function adtPeakOffWindowsToday(env, acct) {'));
+      const read = src.slice(src.indexOf('async function adtPeakHourRows(env, ids, today, lookbackDays, deadlineMs) {'), src.indexOf('async function adtPeakDriftDays('));
+      return /if \(deadlineMs && Date\.now\(\) > deadlineMs\) \{ for \(const id of ch\) skipped\.push\(String\(id\)\); continue; \}/.test(read) &&
+        /return \{ by_item: out, read: read, skipped: skipped \};/.test(read) &&
+        /for \(const id of hours\.skipped\) noHours\[id\] = 1;/.test(job) &&
+        /if \(noHours\[id\]\) \{ ranOut\+\+; continue; \}/.test(job) &&
+        /ADTOOL_PEAK_PLAN_CAP = 60/.test(src) && /ADTOOL_PEAK_PLAN_CHUNK = 10/.test(src) && /ADTOOL_PEAK_PLAN_MS = 20000/.test(src);
+    })(), null);
+  t('§3 pages: a row nobody set to switch itself is never shown a wanted state, because nothing is touching it (real source)',
+    (() => {
+      const ic = src.slice(src.indexOf('async function adtoolItemCampaignsCompute(env, p) {'), src.indexOf('const ADTOOL_ACTIONS_P14 = {'));
+      const off = src.slice(src.indexOf('async function adtPeakOffWindowsToday(env, acct) {'), src.indexOf('async function adtoolPeakSwitch(env) {'));
+      const hold = src.slice(src.indexOf('  adtoolPeakHold: {'), src.indexOf('};\n/* ADTOOL-P15-END'));
+      return /const parm = plist\.filter\(r => Number\(r\.auto \|\| 0\) === 1\);/.test(ic) &&
+        /const ids = rows\.filter\(r => Number\(r\.auto \|\| 0\) === 1\)\.map\(r => String\(r\.item_id\)\);/.test(off) &&
+        /takes_effect_note:/.test(hold) && /this listing is not set to switch itself/.test(hold);
+    })(), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));

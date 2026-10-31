@@ -99,7 +99,14 @@ function cronMap() {
        way, because the job compares the state it wants with the state it believes and puts the ad
        right on the next tick rather than replaying a missed boundary. */
     '1-59/15 * * * *': [adtoolPeakSwitch],
-    '0 * * * *': [financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
+    /* adtoolPeakPlan rides FIRST in this slot, and it is here only for the three cuts between the parts
+       of the day (06:00, noon and 17:00 UK), where it works out today again for the listings the drift
+       check flagged that day. On every other tick it reads the UK clock and returns without starting a
+       job at all. First because it is D1-only work and this file's own law is that the cheap reads go
+       ahead of the API syncs, which are what exhaust an invocation's subrequest budget; and in this slot
+       rather than one of its own because it fetches nothing and needs no budget to protect. Its nightly
+       run is on the 23:30 slot below. */
+    '0 * * * *': [adtoolPeakPlan, financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
     /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
        orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
        the five-minute order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
@@ -134,8 +141,14 @@ function cronMap() {
     /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
        then the apply job (which sends nothing unless an account's own switch is on) */
     '55 5 * * *': [adtoolDecisionScore, adtoolDecisions, adtoolCarry, adtoolAnalyst, adtoolApplyPreflight, adtoolApply],
-    /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything */
-    '30 23 * * *': [adtoolDecisionsBoundary],
+    /* the boundary batch for the report day that starts at 01:00 UK (BST); it never stops anything.
+       adtoolPeakPlan joins it as the PLANNING tick: the only slot in this whole map that falls on a half
+       hour, which is how the planner tells this tick from the hourly one it also rides, and the slot the
+       owner's own plan time of 23:30 names. It writes the next UK day's schedule for every listing on the
+       peak list that switches itself, and fills today's in where today has none. It sends nothing: the
+       only thing that ever reaches eBay is the quarter-hourly switch, under the gate it has always had.
+       crons.json is untouched: both of the planner's slots were already registered. */
+    '30 23 * * *': [adtoolDecisionsBoundary, adtoolPeakPlan],
     /* today-only pauses come back at 00:05 UK */
     '5 0 * * *': [adtoolResume],
     /* 12 Sept (owner: "make detection also every 15 minutes"): signal detection gets its own
@@ -6011,10 +6024,18 @@ function adtJsd(p, q) {
   let d = 0; for (let i = 0; i < n; i++) { const a = (p[i] || 0) / sp, b = (q[i] || 0) / sq, m = (a + b) / 2; if (a > 0) d += 0.5 * a * Math.log2(a / m); if (b > 0) d += 0.5 * b * Math.log2(b / m); }
   return d;
 }
+/* the A17 drift rule's own three numbers, named once. They were written as literals in the defaults
+   below and are read now by the 24-hour pattern engine as well (owner, 31 Oct: "use the existing
+   §6.3a drift rules to decide when a pattern is no longer valid; do not invent a second drift
+   mechanism"). Naming them is the only way that promise can be kept rather than restated: there is
+   one threshold and one floor of orders in this file, and both halves read these. */
+const ADTOOL_REGIME_JSD = 0.05;          // how far two hour shapes may diverge before it is a drift
+const ADTOOL_REGIME_CONSEC = 3;          // how many days running it has to diverge
+const ADTOOL_REGIME_MIN_ORDERS = 20;     // below this on either side, the rule declines to call it
 function adtRegime(dailyShapes, threshold, consecutive, minCount) {
   /* dailyShapes: oldest → newest, each {day, counts:[24]}; compares the last 7 days' shape with the prior 28 days',
      on each of the last `consecutive` days. A new regime when every one of those days diverges above threshold. */
-  const th = threshold == null ? 0.05 : threshold, C = consecutive || 3, minN = minCount == null ? 20 : minCount;
+  const th = threshold == null ? ADTOOL_REGIME_JSD : threshold, C = consecutive || ADTOOL_REGIME_CONSEC, minN = minCount == null ? ADTOOL_REGIME_MIN_ORDERS : minCount;
   const n = dailyShapes.length; if (n < 35) return { regime_change: false, reason: 'fewer than 35 days', divergences: [] };
   const sum = arr => arr.reduce((t, c) => { for (let h = 0; h < 24; h++) t[h] += c.counts[h] || 0; return t; }, new Array(24).fill(0));
   const divs = [];
@@ -6849,6 +6870,11 @@ const ADTOOL_ALERT_RULES = {
      fault in the record, so it reads medium. */
   A20: { sev: 'medium', cool: 1, text: 'peak hours: an hour this listing switches at passed with nothing sent and nothing written down', action: 'check', why_matters: 'The hours only do their work if something happens at each one, so a boundary that passed in silence means the ad very likely ran, or stayed off, through hours nobody chose for it.' },
   A21: { sev: 'medium', cool: 1, text: 'peak hours: eBay goes on reading the ad the other way round after the switch was sent and accepted', action: 'check', why_matters: 'The change was accepted and the ad is still in the old state, so the spend is running against a state nobody asked for and the next switch will be decided from a belief that is wrong.' },
+  /* 31 Oct, §3. The pattern engine's own way of being wrong, and the only one it cannot see for itself:
+     it wrote the schedule, so it believes it. Medium whatever the account's live switch says, because on
+     an account that only writes down what it would have sent the finding is still the right one to fix
+     before that switch is ever turned on. */
+  A22: { sev: 'medium', cool: 1, text: 'peak hours: the ad was off through an hour this listing would normally sell in', action: 'check', why_matters: 'The pattern says this listing sells in that hour and the schedule, or a hold somebody set, had the ad off through it, so a sale that would have come was paid for with a saving nobody wanted.' },
 };
 function adtAlertUrgency(sev, hoursOpen) {
   /* how loudly the card should read: a high alert open more than 24 h is 'overdue'; otherwise urgency is derived
@@ -6972,7 +6998,7 @@ async function ensureAdtoolPhase5Schema(env) {
   ADTOOL_P5_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P5 = [
-  ['ALERT_RULES', 'The alert rules', 'Twenty-one things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
+  ['ALERT_RULES', 'The alert rules', 'Twenty-two things worth telling someone about, each with how serious it is and how long it has to wait before saying it again. An alert stays open while it is still true, closes when it stops being true, and cannot repeat inside its waiting time.', 'adtool_listing_day, campaigns, campaign_ads, adtool_stages, adtool_regimes, adtool_peak_schedule, validation_runs, ad_report_tasks', 'Every hour', 'Tested against three known cases, held privately in the settings'],
   ['REPORT_YESTERDAY', 'Yesterday\'s report', 'For the company and for each account: spend, sales from ads, ROAS and the expected gain from the ads against the last seven days and against the same weekday a week ago, with orders and profit, how the hours compared with the usual shape, the best and worst listings, and a short list of what changed.', 'adtool_listing_day, adtool_listing_hour, adtool_profiles, adtool_campaign_ad_events', 'Every morning, and caught up through the day if it falls behind', 'Three mornings running with no help by hand'],
   ['ROAS_LADDER', 'ROAS target, and what you can change to reach it', 'The gap between the ROAS you have and the ROAS you want, and the five things you could change to close it, each worked out on the last 30 days with its assumptions printed beside it. Cuts only, never raises.', 'adtool_listing_day, adtool_listings', 'Every morning', 'The numbers were checked by hand over a fixed past period'],
   ['BUDGET_CAPPED_DAY', 'Days a listing ran out of budget', 'A day whose first reading already showed the campaign\'s whole daily budget spent, with clicks flat after it. The ad stopped early.', 'adtool_ads_intraday, campaigns', 'Every morning, for yesterday', 'Counted on the Data health page'],
@@ -7081,6 +7107,23 @@ async function adtoolAlerts(env) {
         }
       }
     } catch (e) { /* no peak list or no apply log yet: there is nothing to judge, and the other rules stand */ }
+    /* A22: the pattern engine's own way of being wrong. The schedule rows carry the hours the pattern
+       calls productive beside the states themselves, so the finding is read back off the very row it is
+       about rather than from a second pass over the hourly table, and an hour still running is never
+       judged. Behind its own try, because the schedule table is the pattern engine's and this job does
+       not create it: a database without it must still show every other rule. */
+    try {
+      const schRows = (await env.DB.prepare('SELECT account, item_id, day, states_json, source, reasons_json, dead_json, profile_days, computed_at FROM adtool_peak_schedule WHERE day >= ?1 AND day <= ?2 ORDER BY day DESC LIMIT 1200').bind(adtAddDays(today, -1), today).all()).results || [];
+      if (schRows.length) {
+        const nowUkA = adtUkParts(Date.now());
+        for (const f of adPeakOffWhenProductive({ rows: schRows.map(adtPeakScheduleRow), now_uk: nowUkA })) {
+          put('A22', f.item_id + '|' + f.day + '|' + String(f.hour), {
+            title: (L[f.item_id] || {}).title, day: f.day, hour_uk: String(f.hour).padStart(2, '0') + ':00',
+            schedule_source: f.source, reason: f.reason, note: f.note,
+          }, { account: f.account || ((L[f.item_id] || {}).account || ''), item_id: f.item_id });
+        }
+      }
+    } catch (e) { /* no schedule table yet: nothing has been planned, so nothing can have been off wrongly */ }
     /* reconcile with the open set: open / keep / clear; respect cool-downs and snoozes */
     const open = {}; for (const r of ((await env.DB.prepare("SELECT alert_id, rule_id, fired_at, cleared_at, snoozed_until FROM adtool_alerts WHERE cleared_at = '' OR cleared_at >= ?1").bind(adtAddDays(today, -30)).all()).results || [])) open[r.alert_id] = r;
     const stmts = []; let fired = 0, kept = 0, cleared = 0; const highNew = [];
@@ -8880,9 +8923,21 @@ async function adtoolRunTodayCompute(env, acct) {
   const order = { stop: 0, run: 1, watch: 2 };
   rows.sort((a, b) => order[a.verdict] - order[b.verdict] || (Number(b.today.spend) || 0) - (Number(a.today.spend) || 0) || (Number(b.d7.spend) || 0) - (Number(a.d7.spend) || 0));
   const counts = { run: 0, stop: 0, watch: 0 }; for (const r of rows) counts[r.verdict]++;
+  /* THE STOP TODAY TILE'S OWN LIST (owner's brief, 31 Oct, §3): the listings whose ad today's schedule
+     takes off inside their own hours, and the stretches it takes it off for. It is not a verdict and it
+     is not a decision for anybody to act on, which is why it sits beside the rows rather than in them:
+     the system has already stopped these, and the tile exists so somebody can see what it stopped.
+     Behind a try, because the schedule table belongs to the pattern engine and this page must open for a
+     database that has not taken it. */
+  let peakOff = [];
+  try { peakOff = await adtPeakOffWindowsToday(env, acct); } catch (e) { peakOff = []; }
   return {
     period: adtPeriod({ period: 'today' }, today), fresh: await adtFresh(env, 'today'), account: acct || 'all', accounts, day: today, weekday: wdName, weekday_days: wdays, d7: { from: d7from, to: yday },
     rows, counts, listings: rows.length,
+    peak_off_windows_today: peakOff,
+    peak_off_note: peakOff.length
+      ? 'the system is holding these listings off through these stretches of today, inside the hours somebody typed for them, because they have never sold in them'
+      : 'no listing on the peak hours list is being held off inside its own hours today',
     rules: { stop: 'law profit < 0 on ≥ 3 of the last 4 priced ' + adtWeekdayLong(wdName) + 's with ≥ £2 spend each AND the last 7 days < 0 with every order in them priced (a negative 7 days holding an unpriced order is watch until the costs land)', run: 'law profit > 0 on ≥ 3 of 4 with a confident ' + adtWeekdayLong(wdName) + ' index ≥ 1.1, OR the last 7 days > 0 with own ROAS ≥ break-even (1× when the margin is an estimate)', watch: 'everything else, and any listing with fewer than 2 priced ' + adtWeekdayLong(wdName) + 's (a ' + adtWeekdayLong(wdName) + ' with no row does not count as priced)', advertised: 'spend in the last 7 days, spend today, or a cost-per-click ad (ACTIVE, or status not yet stamped) in a RUNNING campaign on an ACTIVE listing — liveMembershipRow\'s rule', hours: 'over ' + ADTOOL_HOUR_BASIS + ' (carry excluded; ' + ADTOOL_HOUR_EXCLUDED_NOTE + '): avoid = no unit and spend ≥ 15 % of the mean hour; run = units per £ ≥ the listing\'s median' },
     profit_label: 'Profit (Sales Analysis law)', note: 'ads by eBay report day (UTC), orders by UK day; today\'s figures are sampled and provisional; hour bands are advisory — eBay cannot schedule ads by hour',
     computed_at: new Date().toISOString(), source: 'adtool_listing_day (last 4 ' + adtWeekdayLong(wdName) + 's, last 7 days), adtool_listing_today (sampled, provisional), adtool_profiles (weekday index + p), adtool_listing_hour (' + ADTOOL_HOUR_BASIS + '), adtool_listing_week, adtool_decisions, campaigns + campaign_ads, adtool_listings',
@@ -10729,6 +10784,40 @@ async function adtoolItemCampaignsCompute(env, p) {
   }
   const day = {};
   for (const r of (B[3].results || [])) day[String(r.item_id)] = r;
+  /* WHERE A LISTING IS ON THE PEAK LIST (owner's brief, 31 Oct, §3): what state its ad should be in at
+     this hour and when that next changes, so the card that lists a listing's campaigns does not have to
+     be read alongside the peak page to know whether the system is holding it off right now. Only for the
+     listings actually on the list; every other row carries null, which is not "it is off" but "nothing
+     here is switching it". Behind a try, because the schedule is the pattern engine's own table. */
+  const peakNow = {};
+  try {
+    const todayUk = ukDate('');
+    const plist = await adtPeakListRows(env, acct);
+    /* only a row somebody armed. A row left to a person switches nothing, and printing a wanted state
+       against it would tell a reader the system is holding an ad off when nothing is touching it. */
+    const parm = plist.filter(r => Number(r.auto || 0) === 1);
+    const psch = parm.length ? await adtPeakSchedulesRead(env, parm.map(r => String(r.item_id)), [todayUk, adtAddDays(todayUk, 1)]) : {};
+    const ukNowP = adtUkParts(Date.now());
+    for (const r of parm) {
+      const id = String(r.item_id);
+      const td = psch[id + '|' + todayUk] || null, tm = psch[id + '|' + adtAddDays(todayUk, 1)] || null;
+      const hold = adtPeakHoldOf(r);
+      const want = adPeakWantFor({ hold: hold, schedule: td, hour: ukNowP.hour });
+      const nx = adPeakNextSwitch({ today: td && td.readable ? Object.assign({ day: todayUk }, td) : null, tomorrow: tm && tm.readable ? Object.assign({ day: adtAddDays(todayUk, 1) }, tm) : null, uk: ukNowP });
+      const parsedP = adPeakHoursParse(r.hours);
+      peakNow[id] = {
+        on_list: true, hours: String(r.hours || ''), auto: Number(r.auto || 0) ? 1 : 0, hold: hold,
+        /* the state it SHOULD be in now, which is not a reading of eBay: eBay's own answer about an ad
+           lives on the campaign cards above this. Null where nothing is deciding it. */
+        state_now: want.want_override ? (want.want_override === 'ACTIVE' ? 'ON' : 'OFF')
+          : (parsedP.ranges ? (adInPeakRanges(ukNowP.hour, parsedP.ranges) ? 'ON' : 'OFF') : null),
+        state_from: want.from === 'hours' && !parsedP.ranges ? '' : want.from,
+        next_switch_at: nx ? nx.at : (parsedP.ranges ? adPeakNextChange(parsedP.ranges, ukNowP.hour) : ''),
+        next_switch_to: nx ? nx.to : '',
+        schedule_source: td && td.readable ? td.source : '',
+      };
+    }
+  } catch (e) { /* no peak list or no schedule table: every row carries null and the page is unchanged */ }
   const rows = items.map(it => {
     const id = String(it.item_id), cs = (camps[id] || []).slice().sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
     const d = day[id] || {};
@@ -10738,6 +10827,7 @@ async function adtoolItemCampaignsCompute(env, p) {
       sold_30d: Number(d.units_30d) || 0,
       campaigns: cs, live_count: cs.filter(c => c.live).length, campaign_count: cs.length,
       spend_7d: round2(d.spend_7d), spend_3d: round2(d.spend_3d),
+      peak: peakNow[id] || null,
     };
   });
   const counts = { active: rows.length, in_one: rows.filter(r => r.live_count === 1).length, in_many: rows.filter(r => r.live_count > 1).length, in_none: rows.filter(r => r.live_count === 0).length };
@@ -10752,8 +10842,10 @@ async function adtoolItemCampaignsCompute(env, p) {
     counts, active_counted: Number((((B[5] || {}).results || [])[0] || {}).n) || null,
     windows: { spend_7d: { from: d7.from, to: d7.to }, spend_3d: { from: d3.from, to: d3.to }, sold_30d: { from: adtAddDays(today, -30), to: yday } },
     items: keep.slice(0, 600), items_total: keep.length, items_held_back: Math.max(0, keep.length - 600),
-    rules: { live: 'Being advertised means a running campaign, an active listing, and an ad that is neither stopped nor put away. It is the same test every other advertising page uses.' },
-    source: 'campaign_ads, campaigns, items_api, adtool_listing_day',
+    rules: { live: 'Being advertised means a running campaign, an active listing, and an ad that is neither stopped nor put away. It is the same test every other advertising page uses.',
+      peak: 'Where a listing is on the peak hours list, the state beside it is the one the system wants its ad in at this hour and not a reading of eBay, which is what the campaign rows above it carry. A listing that is not on the list has none of this, which means nothing is switching it rather than that it is off.' },
+    peak_listings: Object.keys(peakNow).length,
+    source: 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_peak_items, adtool_peak_schedule',
   };
 }
 const ADTOOL_ACTIONS_P14 = {
@@ -10957,7 +11049,10 @@ function adtChangeAttribution(ev, applyRows) {
     else if (cid) { if (rcid !== cid) continue; }
     else continue;
     if (adtApplyTargetState(r) !== want) continue;
-    return { who: 'tool', tool: { op: String(r.op || ''), mode: String(r.mode || ''), decision_id: String(r.decision_id || '') } };
+    /* `at` is the stamp on the row that matched, carried out so a reader can be told HOW CLOSE the
+       portal's own send was to the change eBay reported. It decides nothing here: the match above is
+       the whole rule and is untouched by it. Left out where the row has no stamp, never guessed. */
+    return { who: 'tool', tool: { op: String(r.op || ''), mode: String(r.mode || ''), decision_id: String(r.decision_id || ''), at: String(r.at || '') } };
   }
   return { who: 'ebay', tool: null };
 }
@@ -11221,7 +11316,10 @@ async function adtoolChangeDayCompute(env, pay) {
   /* only what was actually SENT can explain a change eBay reports, so the rows the switch or the caps
      held back never take up room under the cap either. adtChangeAttribution refuses them again on the
      row, so the rule is the same whether or not this query is the one that narrowed it. */
-  const applyRows = (await env.DB.prepare("SELECT day, account, item_id, campaign_id, decision_id, op, mode, payload_json FROM adtool_apply_log WHERE day = ?1 AND mode = 'live'" + (acct ? ' AND account = ?2' : '') + ' ORDER BY id DESC LIMIT 600').bind(...[day].concat(ab)).all()).results || [];
+  /* `at` joins this read for the 31 Oct brief's `by` column: it decides nothing about whether a change
+     was the portal's own, which is adtChangeAttribution's rule and unchanged, but it is what lets the
+     row say how long before the change the portal's own send went out. */
+  const applyRows = (await env.DB.prepare("SELECT day, account, item_id, campaign_id, decision_id, op, mode, payload_json, at FROM adtool_apply_log WHERE day = ?1 AND mode = 'live'" + (acct ? ' AND account = ?2' : '') + ' ORDER BY id DESC LIMIT 600').bind(...[day].concat(ab)).all()).results || [];
 
   for (const r of rowsAll) {
     const key = r.account + '|' + r.campaign_id;
@@ -11235,6 +11333,11 @@ async function adtoolChangeDayCompute(env, pay) {
     }
     const who = adtChangeAttribution({ account: r.account, item_id: r.item_id, campaign_id: r.campaign_id, day: day, direction: dir }, applyRows);
     r.who = who.who; r.tool = who.tool;
+    /* AUTOMATIC OR BY HAND (owner's brief, 31 Oct, §3), in the two words the page prints. The same
+       answer `who` already gives, in the owner's own words, with how long before the change the
+       portal's own send went out beside it. One rule, read twice, not two rules. */
+    const by = adChangeBy(who, r.at_utc, ADTOOL_CHANGE_AUTOMATIC_MIN);
+    r.by = by.by; r.by_minutes_before = by.minutes_before; r.by_close = by.close; r.by_sender = by.sender; r.by_note = by.note;
     r.decision = r.item_id && decision[r.item_id] ? decision[r.item_id] : null;
     r.before = r.item_id ? (before[r.item_id] || { spend_day: 0, units_day: 0, roas: null, days: 0 }) : null;
   }
@@ -11291,6 +11394,7 @@ async function adtoolChangeDayCompute(env, pay) {
     campaign_id_column: cidColumn,
     before_window: { from: b7[0], to: b7[1], days: 7 },
     who_note: 'a change is the portal’s own only where its own record of what it sent matches it; everything else was changed on eBay and the portal cannot see who',
+    by_note: 'automatic means the portal’s own record of what it sent matches this change, by the same rule as the column beside it; the minutes say how long before the change that send went out, and a send inside ' + ADTOOL_CHANGE_AUTOMATIC_MIN + ' minutes is plainly the same event rather than only the same day',
     sent_to_ebay: false,
     sources: ['ad state changes seen by the sync', 'campaign changes seen by the sync', 'the portal’s own record of what it sent', 'the seven finished days before this one'],
   };
@@ -11510,13 +11614,16 @@ async function adtoolPeakCompute(env, acct) {
      that has not caught up with the ALTER shows the list rather than an error. */
   const manualSql = cols => "SELECT p.account, p.item_id, p.hours, p.note, p.added_by, p.added_at" + cols + ", ia.title, ia.image FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id WHERE p.removed_at = ''" + (acct ? ' AND p.account = ?1' : '') + ' ORDER BY p.added_at DESC LIMIT 500';
   let manualRows = [];
-  try { manualRows = (await env.DB.prepare(manualSql(", COALESCE(p.auto, 1) AS auto, COALESCE(p.campaign_id, '') AS campaign_id")).bind(...ab).all()).results || []; }
+  try { manualRows = (await env.DB.prepare(manualSql(", COALESCE(p.auto, 1) AS auto, COALESCE(p.campaign_id, '') AS campaign_id, COALESCE(p.hold, 'auto') AS hold")).bind(...ab).all()).results || []; }
   catch (e) {
+  try { manualRows = ((await env.DB.prepare(manualSql(", COALESCE(p.auto, 1) AS auto, COALESCE(p.campaign_id, '') AS campaign_id")).bind(...ab).all()).results || []).map(r => Object.assign({ hold: 'auto' }, r)); }
+  catch (e0) {
     /* 31 Oct: and now its own campaign as well. Same shape as the switch above it: each added column
        is asked for, and a database that has not taken the ALTER answers from the list before it
        rather than showing a reader an error where their list should be. */
-    try { manualRows = ((await env.DB.prepare(manualSql(', COALESCE(p.auto, 1) AS auto')).bind(...ab).all()).results || []).map(r => Object.assign({ campaign_id: '' }, r)); }
-    catch (e2) { manualRows = ((await env.DB.prepare(manualSql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: 1, campaign_id: '' }, r)); }
+    try { manualRows = ((await env.DB.prepare(manualSql(', COALESCE(p.auto, 1) AS auto')).bind(...ab).all()).results || []).map(r => Object.assign({ campaign_id: '', hold: 'auto' }, r)); }
+    catch (e2) { manualRows = ((await env.DB.prepare(manualSql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: 1, campaign_id: '', hold: 'auto' }, r)); }
+  }
   }
   const manualSet = {};
   for (const r of manualRows) manualSet[String(r.item_id)] = r;
@@ -11623,6 +11730,16 @@ async function adtoolPeakCompute(env, acct) {
   try {
     for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) peakDoneToday[String(r.account)] = Number(r.n) || 0;
   } catch (e) { /* no log table yet: nothing has ever been sent, so nought is the true answer */ }
+  /* THE PATTERN ENGINE'S OWN ANSWERS for these rows (owner's brief, 31 Oct, §3): today's schedule and
+     tomorrow's, as the planner wrote them, and what the drift check has said about each listing. The page
+     shows WHAT THE PLANNER WORKED OUT rather than working it out again: reading twenty eight days of
+     hours for five hundred listings on a page open is not a page, and two answers to one question is how
+     a screen comes to disagree with the job. Both reads behind a try, in the way every added table in
+     this file is read. */
+  const tomorrowUk = adtAddDays(today, 1);
+  let schedBy = {}, driftBy = {};
+  try { schedBy = await adtPeakSchedulesRead(env, manualRows.map(r => String(r.item_id)), [today, tomorrowUk]); } catch (e) { schedBy = {}; }
+  try { driftBy = await adtPeakDriftDays(env, manualRows.map(r => String(r.item_id)), today); } catch (e) { driftBy = {}; }
   const manual = manualRows.map(r => {
     const id = String(r.item_id), u = slots[id] || [0, 0, 0, 0];
     const a = String(r.account || '');
@@ -11645,13 +11762,30 @@ async function adtoolPeakCompute(env, acct) {
     const onSw = !!liveSwitch[a], doneA = peakDoneToday[a] || 0;
     const swByCamp = {};
     for (const m of pickC.rows) (swByCamp[String(m.campaign_id || '')] = swByCamp[String(m.campaign_id || '')] || []).push(m);
-    let d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: false, believed_state: '', account_live_switch: onSw, account_switches_today: doneA });
+    /* the same override the job is handed, worked out by the same pure function: the page cannot show one
+       wanted state while the job sends another. */
+    const schT = schedBy[id + '|' + today] || null, schM = schedBy[id + '|' + tomorrowUk] || null;
+    const hold = adtPeakHoldOf(r);
+    const wantFor = adPeakWantFor({ hold: hold, schedule: schT, hour: nowUk.hour });
+    let d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: false, believed_state: '', account_live_switch: onSw, account_switches_today: doneA, want_override: wantFor.want_override, want_source: wantFor.want_source });
     for (const cid of Object.keys(swByCamp)) {
       const hist = lastSwitch.by_key[id + '|' + cid] || { newest: null, live: null, shadow: null, refused: null };
       const believed = onSw ? adtPeakBelieved(swByCamp[cid], hist.live).state : (hist.shadow ? hist.shadow.to : '');
-      d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: true, believed_state: believed, account_live_switch: onSw, account_switches_today: doneA, refused_to: hist.refused ? hist.refused.to : '', refused_status: hist.refused ? hist.refused.http_status : 0 });
+      d = adPeakSwitchDecide({ auto: auto, ranges: parsed.ranges || [], hour: nowUk.hour, live_cpc_ad: true, believed_state: believed, account_live_switch: onSw, account_switches_today: doneA, refused_to: hist.refused ? hist.refused.to : '', refused_status: hist.refused ? hist.refused.http_status : 0, want_override: wantFor.want_override, want_source: wantFor.want_source });
       if (d.send) break;
     }
+    const nextSw = adPeakNextSwitch({
+      today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
+      tomorrow: schM && schM.readable ? Object.assign({ day: tomorrowUk }, schM) : null, uk: nowUk,
+    });
+    const showSch = s => !s || !s.readable ? null : { day: s.day, states: s.states, source: s.source, reasons: s.reasons, dead_windows: s.dead_windows, proposal: s.proposal, profile_days: s.profile_days, computed_at: s.computed_at, note: s.dead_note };
+    /* TRACKING comes off the schedule row the planner decided it on, so this page and that job give one
+       answer to one question. Where there is no row for today, it falls back to the drift record alone
+       and says so: the full comparison needs the listing's own four weeks of hours, which belongs to the
+       planner and to the probe rather than to a page listing hundreds of rows. */
+    const track = schT && schT.readable && schT.tracking != null
+      ? { tracking: !!schT.tracking, note: schT.tracking_note, drift_detected_day: schT.drift_detected_day, from: 'the schedule the planner wrote for today', shape_compared: true, same_rule_as: 'A17' }
+      : Object.assign({ from: 'the drift record, there being no schedule for today' }, adPeakTracking([], [], { drift_detected_day: driftBy[id] || '' }));
     return {
       item_id: id, account: a, title: r.title ? String(r.title) : '', image: r.image ? String(r.image) : null,
       live_now: !!liveBy[id], hours: String(r.hours || ''), note: String(r.note || ''), added_by: String(r.added_by || ''), added_at: String(r.added_at || ''),
@@ -11671,6 +11805,25 @@ async function adtoolPeakCompute(env, acct) {
          by the account's daily ceiling reads as blocked instead of as a change about to go. */
       switch_state: d.send ? d.mode : '', switch_to: d.send || '', switch_note: d.why,
       switches_today: doneA,
+      /* ---- the 24-hour pattern engine (owner's brief, 31 Oct, §3) ----
+         `hold` is the person's overrule. The two schedules are what the planner wrote, null where it has
+         written nothing for that day, which is a listing running on its typed hours exactly as it did
+         before any of this existed. `dead_windows` are the stretches today's schedule actually switches
+         off; `dead_proposal` are the ones it found and did NOT act on, for want of days behind them or
+         because the listing has stopped playing on its pattern. `profile_days` is how many days of hours
+         the pattern was read over, which is the figure to judge the rest by. */
+      hold: hold,
+      schedule_today: showSch(schT), schedule_tomorrow: showSch(schM),
+      dead_windows: schT && schT.readable ? schT.dead_windows : [],
+      dead_proposal: schT && schT.readable ? schT.proposal : [],
+      profile_days: schT && schT.readable ? schT.profile_days : null,
+      tracking: track,
+      /* the next time the SCHEDULE changes this listing's state, which is not the same question as the
+         next time its typed hours do: a dead stretch inside those hours changes state where the hours
+         alone would not. `next_change` above stays the hours' own answer, so both are readable. */
+      next_switch: nextSw,
+      want_now: wantFor.want_override ? (wantFor.want_override === 'ACTIVE' ? 'ON' : 'OFF') : '',
+      want_from: wantFor.from, want_why: wantFor.want_source,
       spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((a2, b) => a2 + b, 0), already_suggested: !!sugSet[id],
     };
   });
@@ -11687,7 +11840,22 @@ async function adtoolPeakCompute(env, acct) {
     counts: { suggested: suggested.length, manual: manual.length, both: manual.filter(m => m.already_suggested).length,
       switching: manual.filter(m => m.auto && m.hours_parsed && m.switchable).length,
       switching_live: manual.filter(m => m.auto && m.hours_parsed && m.switchable && m.live_switch_on).length,
-      hours_unreadable: manual.filter(m => m.hours && !m.hours_parsed).length },
+      hours_unreadable: manual.filter(m => m.hours && !m.hours_parsed).length,
+      /* the pattern engine's own tally over the same rows: how many are on a schedule at all, how many of
+         those are narrowed by the pattern rather than only repeating the typed hours, how many have dead
+         hours found but not acted on, how many a person is holding, and how many have stopped playing on
+         their own pattern. */
+      on_schedule: manual.filter(m => m.schedule_today).length,
+      on_pattern: manual.filter(m => m.schedule_today && m.schedule_today.source === 'pattern').length,
+      pattern_proposed: manual.filter(m => (m.dead_proposal || []).length > 0).length,
+      held: manual.filter(m => m.hold === 'on' || m.hold === 'off').length,
+      not_tracking: manual.filter(m => m.tracking && m.tracking.tracking === false).length },
+    plan_rules: adPeakPlanRules(cfg),
+    plan_rules_text: 'the pattern is read over the last ' + adPeakPlanRules(cfg).lookback_days + ' days and only acted on from ' + adPeakPlanRules(cfg).min_days +
+      ' days of hours onwards; an hour counts as dead only after it has spent money or drawn ' + adPeakPlanRules(cfg).dead_min_clicks +
+      ' clicks and sold nothing on every day watched; the part of the day holding ' + adPeakPlanRules(cfg).proven_share +
+      '% of a listing’s sales is never switched off; and nothing is switched for a stretch under ' + adPeakPlanRules(cfg).min_block_h + ' hours',
+    plan_note: 'the hours somebody typed are the envelope: the pattern can only switch a listing off inside them, never on outside them',
     live_listings: Object.keys(liveBy).length,
     /* 28 Oct, and the one line on this page that changed meaning: the system now switches the by-hand
        list on and off at its own hours. It is no longer true that nothing here reaches eBay, but it
@@ -11903,6 +12071,58 @@ const ADTOOL_ACTIONS_P15 = {
       const a = String(row.account || '');
       await adtPeakCacheClear(env, a);
       return { ok: true, item_id: iid, account: a, removed_by: by, kept: true, sent_to_ebay: false };
+    },
+  },
+  adtoolPeakHold: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* HOLD A LISTING ON OR OFF BY HAND (owner's brief, 31 Oct, §3). A person overruling the pattern for
+         one listing, so it is gated exactly like every other write on this page — the advertising roles,
+         then the page flag — never cached, and written to the audit trail with who did it.
+         It sends nothing. A hold is a wanted state in a column: the only thing that reaches eBay is the
+         quarter-hourly switch, for an account whose own live switch is on, under the ceiling and the
+         refusal rule it has always had. */
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase15Register(ctx.env);
+      await adtGate(ctx, 'adtool_page_peak');
+      await ensureAdtoolPhase16Schema(ctx.env);
+      const env = ctx.env, iid = String((p && p.item_id) || '').replace(/\D/g, '');
+      if (!iid) throw new Error('SAY: give a listing number');
+      const asked = String((p && p.hold) == null ? '' : p.hold).trim().toLowerCase();
+      if (ADTOOL_PEAK_HOLDS.indexOf(asked) < 0) throw new Error('SAY: a hold is one of ' + ADTOOL_PEAK_HOLDS.join(', ') + ': auto leaves it to the schedule, on keeps the ad running all day, off keeps it paused all day');
+      const by = String((ctx.user || {}).email || '');
+      /* the row has to exist. Minting one here would put a listing on the peak list by holding it, which
+         is not what was asked for and would arm it without anybody choosing its hours. */
+      let row = null;
+      try { row = await env.DB.prepare("SELECT account, hours, COALESCE(auto, 0) AS auto, COALESCE(hold, 'auto') AS hold FROM adtool_peak_items WHERE item_id = ?1 AND removed_at = ''").bind(iid).first(); }
+      catch (e) { row = await env.DB.prepare("SELECT account, hours FROM adtool_peak_items WHERE item_id = ?1 AND removed_at = ''").bind(iid).first(); }
+      if (!row) throw new Error('SAY: that listing is not on the peak hours list');
+      const was = adtPeakHoldOf(row);
+      try { await env.DB.prepare('UPDATE adtool_peak_items SET hold = ?2 WHERE item_id = ?1').bind(iid, asked).run(); }
+      catch (e) { throw new Error('SAY: this database cannot record a hold against a peak listing yet. Try again in a minute'); }
+      const a = String(row.account || '');
+      await adtPeakCacheClear(env, a);
+      try { await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_PEAK_HOLD', ?2, ?3, ?4, datetime('now'))").bind(by, iid, was, asked).run(); } catch (e) { /* the trail must never block the hold */ }
+      const sw = await adtPeakLiveSwitches(env);
+      const nowUkH = adtUkParts(Date.now());
+      const want = adPeakWantFor({ hold: asked, schedule: null, hour: nowUkH.hour });
+      return {
+        ok: true, item_id: iid, account: a, hold: asked, hold_was: was, set_by: by, hours: String(row.hours || ''),
+        auto: Number(row.auto == null ? 0 : row.auto) ? 1 : 0,
+        live_switch_on: !!sw[a], sent_to_ebay: false,
+        /* a row nobody has set to switch itself is not switched by a hold either: a hold overrules the
+           pattern, it does not arm a listing the page has never armed. Said plainly rather than left for
+           somebody to wonder why nothing happened. */
+        takes_effect: Number(row.auto == null ? 0 : row.auto) ? true : false,
+        takes_effect_note: Number(row.auto == null ? 0 : row.auto) ? '' : 'this listing is not set to switch itself, so the hold is recorded and nothing switches it until somebody saves it with hours that switch themselves',
+        note_to_reader: (asked === 'auto'
+          ? 'this listing goes back to the schedule: its own hours, with the hours it never sells in switched off'
+          : asked === 'on'
+            ? 'this listing will be kept running all day, whatever its hours and its pattern say'
+            : 'this listing will be kept paused all day, whatever its hours and its pattern say') +
+          (asked === 'auto' ? '' : ', until somebody puts it back on the schedule') +
+          (sw[a] ? '. This account’s live switch is on, so the next quarter-hourly tick will put the ad right on eBay' : '. This account’s live switch is off, so the change is written down and nothing is sent to eBay'),
+        want_now: want.want_override ? (want.want_override === 'ACTIVE' ? 'ON' : 'OFF') : '',
+      };
     },
   },
 };
@@ -12150,7 +12370,17 @@ function adPeakSwitchDecide(input) {
      makes no request. */
   const i = input || {};
   const ranges = i.ranges || [];
-  const want = adInPeakRanges(i.hour, ranges) ? 'ACTIVE' : 'PAUSED';
+  /* THE WANTED STATE, and from 31 Oct it may be handed in rather than read off the hours.
+     `want_override` is the day's schedule or a hold, worked out by the planner and stored against this
+     listing and this UK day: the states array says what this hour should be. Handed nothing, this reads
+     the hours exactly as it always has, so a listing with no schedule row behaves identically to the day
+     before any of this existed. `want_source` is the phrase the log row prints, and left out the row
+     reads word for word as it did yesterday.
+     NOTHING BELOW THIS LINE CHANGED. The refusal rule, the ceiling and the account's own live switch are
+     the same lines in the same order: an override decides WHAT is wanted, never whether it may be sent. */
+  const ov = String(i.want_override == null ? '' : i.want_override).toUpperCase();
+  const want = (ov === 'ACTIVE' || ov === 'PAUSED') ? ov : (adInPeakRanges(i.hour, ranges) ? 'ACTIVE' : 'PAUSED');
+  const src = String(i.want_source == null ? '' : i.want_source);
   const nothing = why => ({ send: null, want: '', mode: '', why: why });
   if (!i.auto) return nothing('switching is off for this listing');
   if (!ranges.length) return nothing('no hours to read');
@@ -12163,9 +12393,11 @@ function adPeakSwitchDecide(input) {
   const on = !!i.account_live_switch;
   const cap = adPeakApplyCaps({ account_switches_today: i.account_switches_today });
   const mode = (on && cap.allowed) ? 'live' : (on ? 'blocked' : 'would-send');
-  const base = want === 'ACTIVE' ? 'inside its peak hours' : 'outside its peak hours';
+  /* WHERE THE WANTED STATE CAME FROM, in the words the log row carries: 'pattern: dead window 13-15',
+     'typed hours', 'hold on'. Handed nothing, the sentence is the one this job has always written. */
+  const base = src || (want === 'ACTIVE' ? 'inside its peak hours' : 'outside its peak hours');
   return {
-    send: want, want: want, mode: mode,
+    send: want, want: want, mode: mode, want_from: src ? 'schedule' : 'hours',
     why: base + (mode === 'live' ? '' : mode === 'would-send' ? ', written down and not sent: this account’s live switch is off' : ', held back: ' + cap.reason),
   };
 }
@@ -12613,6 +12845,519 @@ function adPeakReconcile(input) {
     note: 'The tile and the listings under it are two reads of the same days, so they must come to the same money to the penny.',
   };
 }
+/* ---- pure: the 24-hour pattern engine, and switching the dead hours off (owner's brief, 31 Oct, §3) ----
+   His own words: "take the 24-hour span of the day and what happened in it; if the listing is playing
+   on the same methodology today, keep it on the same 24-hour pattern; at the times where it is not
+   driving any sales at all, switch it off, so wastage is cut and the budget gets optimal, efficient
+   use; this must run in automation."
+
+   ONE DATA PATH. The 24-hour profile is read from adtool_listing_hour, the table the roll-ups already
+   fill from the intraday samples and from the order stamps. Nothing here re-derives an hour from a raw
+   reading, and nothing here invents a second drift rule: whether a listing is still playing on its own
+   pattern is decided by the comparison A17 already makes, against the same threshold and the same floor
+   of orders.
+
+   THE TYPED HOURS STAY THE ENVELOPE. Everything below can only switch a listing OFF inside hours
+   somebody already chose for it, never ON outside them. So the worst a wrong pattern can do is leave an
+   ad paused through an hour that has never sold anything, which is the thing the owner asked for, and it
+   can never put an ad into an hour nobody asked for.
+
+   AND NOTHING NEW REACHES EBAY. Every function here decides a WANTED STATE and writes it down. The one
+   place a state leaves this worker is the quarter-hourly switch job, through the account's own live
+   switch, the daily caps and the refusal rule it has always had, none of which this section touches. */
+const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, min_block_h: 2, plan_time: '23:30' };
+const ADTOOL_PEAK_PLAN_CONFIG_KEYS = {
+  lookback_days: 'adtool_peak_lookback_days', min_days: 'adtool_peak_min_days', dead_min_clicks: 'adtool_peak_dead_min_clicks',
+  proven_share: 'adtool_peak_proven_share', min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time',
+};
+/* the three cuts between the four parts of the day, which are adtSlot's own cuts and not a second set:
+   the re-evaluation happens where the shape of the day changes. */
+const ADTOOL_PEAK_PLAN_BOUNDARY_HOURS = [6, 12, 17];
+/* how a person overrules the pattern for a listing. 'auto' is the schedule, and every row born before
+   this column existed is 'auto', which is exactly how it behaved the day before. */
+const ADTOOL_PEAK_HOLDS = ['auto', 'on', 'off'];
+const ADTOOL_PEAK_SCHEDULE_STATES = ['ON', 'OFF'];
+function adPeakPad(h) { return String(Math.round(Number(h) || 0)).padStart(2, '0'); }
+function adPeakPlanRules(cfg) {
+  /* the six figures a manager can set, with the owner's own numbers standing in for anything he has not
+     set. NOTHING PRINTS A FIXED FIGURE ANYWHERE: every sentence this section writes reads its numbers
+     back out of here, so changing one in Management changes the words beside it too. */
+  const c = cfg || {}, K = ADTOOL_PEAK_PLAN_CONFIG_KEYS, D = ADTOOL_PEAK_PLAN_DEFAULTS;
+  const num = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) || n <= 0 ? d : n; };
+  const pt = String(c[K.plan_time] == null ? '' : c[K.plan_time]).trim();
+  /* a share above a hundred would make every slot proven and nothing dead; below nought, none. Held to
+     the range it means something in rather than refused, because a mistyped figure must not be the thing
+     that stops a job that saves money. */
+  const share = Math.min(100, Math.max(0, Math.round(num(c[K.proven_share], D.proven_share))));
+  return {
+    lookback_days: Math.min(120, Math.max(1, Math.round(num(c[K.lookback_days], D.lookback_days)))),
+    min_days: Math.max(1, Math.round(num(c[K.min_days], D.min_days))),
+    dead_min_clicks: Math.max(0, Math.round(c[K.dead_min_clicks] === undefined || c[K.dead_min_clicks] === null || c[K.dead_min_clicks] === '' || isNaN(Number(c[K.dead_min_clicks])) ? D.dead_min_clicks : Number(c[K.dead_min_clicks]))),
+    proven_share: share, proven_share_of_one: Math.round(share) / 100,
+    min_block_h: Math.min(12, Math.max(1, Math.round(num(c[K.min_block_h], D.min_block_h)))),
+    plan_time: /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(pt) ? pt : D.plan_time,
+    recent_days: 7,
+  };
+}
+function adPeakProfile(rows, opts) {
+  /* ONE LISTING'S 24-HOUR SPAN, as the lookback saw it.
+     rows: adtool_listing_hour rows for this listing — { day, hour, orders, units, revenue, spend, clicks,
+     impressions }. The caller has already chosen between eBay's reconciled column and our own sampled
+     one, once, so that choice is never made twice in two places.
+     opts: { today, for_day, lookback_days, recent_days }. `for_day` is the day being planned, because the
+     weekday weighting is about THAT day's weekday and not about today's.
+
+     TODAY IS OUT OF THE PATTERN AND IN ITS OWN ANSWER. A part day would read as a quiet one in every
+     hour the clock has not reached, which would make the shape of the day look like whatever time it
+     happens to be. Today comes back separately as `today`, which is what the tracking check compares.
+
+     THE WEIGHTING, in the owner's words: the same weekday's last four occurrences count double, and the
+     last seven days count double. A day that is both counts four times, because the two reasons are
+     different reasons and a Saturday last week is twice as much like tomorrow as a Saturday three weeks
+     ago in both of them. Weights are whole numbers, so a weighted count of orders is still a count.
+
+     THE MONEY AND THE SALES COME BACK TWICE, and the difference matters. The six named figures are the
+     WEIGHTED ones, because they are the pattern. Beside each sits its `_raw` twin, the real sum over the
+     real days, because every THRESHOLD below is a threshold on real money and real clicks and a weighted
+     figure has counted a day twice. The three day counts are counts of real days for the same reason:
+     "it sold in this hour on none of the days we watched" is a statement about days. */
+  const o = opts || {};
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(o.today || '')) ? String(o.today) : '';
+  const look = Math.max(1, Math.round(Number(o.lookback_days) || ADTOOL_PEAK_PLAN_DEFAULTS.lookback_days));
+  const recentN = Math.max(0, Math.round(o.recent_days == null ? 7 : Number(o.recent_days) || 0));
+  const forDay = /^\d{4}-\d{2}-\d{2}$/.test(String(o.for_day || '')) ? String(o.for_day) : today;
+  const from = today ? adtAddDays(today, -look) : '';
+  const wd = forDay ? adtWeekdayOf(forDay) : null;
+  const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
+  /* one cell per day and hour. The table is already at that grain, but a caller may hand over two rows
+     for one cell (two accounts on one listing id, a repair re-read) and they are the same hour. */
+  const cells = {};
+  for (const r of (rows || [])) {
+    const d = String((r && r.day) || ''), h = Math.round(Number(r && r.hour));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !isFinite(h) || h < 0 || h > 23) continue;
+    if (today && (d > today || (from && d < from))) continue;
+    const k = d + '|' + h;
+    const c = cells[k] = cells[k] || { day: d, hour: h, spend: 0, clicks: 0, impressions: 0, orders: 0, units: 0, revenue: 0 };
+    c.spend += num(r.spend); c.clicks += num(r.clicks); c.impressions += num(r.impressions);
+    c.orders += num(r.orders); c.units += num(r.units); c.revenue += num(r.revenue);
+  }
+  const keys = Object.keys(cells);
+  const patternDays = {}, todayDays = {};
+  for (const k of keys) { const d = cells[k].day; if (today && d === today) todayDays[d] = 1; else patternDays[d] = 1; }
+  const days = Object.keys(patternDays).sort();
+  /* the same weekday's last four occurrences INSIDE THE LOOKBACK, taken from the days we actually have a
+     reading for. A weekday with fewer than four of them doubles the ones there are and says so, rather
+     than reaching outside the window for a fourth. */
+  const sameWd = {};
+  if (wd != null) for (const d of days.filter(x => adtWeekdayOf(x) === wd).slice(-4)) sameWd[d] = 1;
+  const recentFrom = today && recentN > 0 ? adtAddDays(today, -recentN) : '';
+  const weightOf = d => (sameWd[d] ? 2 : 1) * (recentFrom && d >= recentFrom ? 2 : 1);
+  const blank = h => ({
+    hour: h, spend: 0, clicks: 0, impressions: 0, orders: 0, units: 0, revenue: 0,
+    spend_raw: 0, clicks_raw: 0, impressions_raw: 0, orders_raw: 0, units_raw: 0, revenue_raw: 0,
+    weight: 0, days_observed: 0, days_with_spend: 0, days_with_sales: 0,
+  });
+  const hours = [], todayHours = [];
+  for (let h = 0; h < 24; h++) { hours.push(blank(h)); todayHours.push(blank(h)); }
+  for (const k of keys) {
+    const c = cells[k], isToday = !!(today && c.day === today);
+    const b = isToday ? todayHours[c.hour] : hours[c.hour];
+    const w = isToday ? 1 : weightOf(c.day);
+    b.spend += c.spend * w; b.clicks += c.clicks * w; b.impressions += c.impressions * w;
+    b.orders += c.orders * w; b.units += c.units * w; b.revenue += c.revenue * w;
+    b.spend_raw += c.spend; b.clicks_raw += c.clicks; b.impressions_raw += c.impressions;
+    b.orders_raw += c.orders; b.units_raw += c.units; b.revenue_raw += c.revenue;
+    b.weight += w; b.days_observed++;
+    if (c.spend > 0) b.days_with_spend++;
+    if (c.orders > 0) b.days_with_sales++;
+  }
+  const tidy = b => { b.spend = round2(b.spend); b.revenue = round2(b.revenue); b.spend_raw = round2(b.spend_raw); b.revenue_raw = round2(b.revenue_raw); return b; };
+  hours.forEach(tidy); todayHours.forEach(tidy);
+  const sum = (list, k) => list.reduce((t, b) => t + (Number(b[k]) || 0), 0);
+  return {
+    hours: hours, today: todayHours,
+    days_observed: days.length, days: days,
+    today_day: today && todayDays[today] ? today : null,
+    lookback: { from: from, to: today ? adtAddDays(today, -1) : '', days: look },
+    for_day: forDay || null, for_weekday: wd == null ? null : ADTOOL_DOW[wd],
+    weekday_weighting_used: Object.keys(sameWd).length > 0,
+    weekday_days_doubled: Object.keys(sameWd).sort(),
+    recent_days_doubled: recentN,
+    orders_total: sum(hours, 'orders_raw'), units_total: sum(hours, 'units_raw'), spend_total: round2(sum(hours, 'spend_raw')),
+    orders_total_weighted: sum(hours, 'orders'),
+    orders_today: sum(todayHours, 'orders_raw'), spend_today: round2(sum(todayHours, 'spend_raw')),
+    note: !days.length
+      ? 'No finished hour of this listing is on record inside the window, so there is no pattern to read.'
+      : 'Read over the ' + days.length + ' day' + (days.length === 1 ? '' : 's') + ' we hold an hour for inside the window' +
+        (Object.keys(sameWd).length ? ', with the last ' + Object.keys(sameWd).length + ' ' + (wd == null ? 'matching day' : ADTOOL_DOW[wd]) + (Object.keys(sameWd).length === 1 ? '' : 's') + ' and the last ' + recentN + ' days counted double' : '') + '.',
+  };
+}
+function adPeakDeadHours(profile, opts) {
+  /* THE HOURS TO SWITCH OFF, and the hours that are never switched off whatever they look like.
+     A DEAD HOUR: money went out in it on at least one of the days we watched, and not one order came
+     back in it on ANY of them. "On any of them" is the strict half and it is deliberate: one order in
+     one hour on one day of the window is enough to keep that hour on, because an hour that sells
+     occasionally is an hour that sells.
+     A PROVEN SLOT is never dead. The part of the day a listing's sales really come from is read by the
+     same four cuts adtSlot makes everywhere else, on REAL orders, and a slot holding at least the share
+     asked for is left alone hour by hour. That is the one guard against a quiet hour in the middle of a
+     listing's best stretch being read as waste.
+     A WINDOW is a run of touching dead hours, and it is formed on the RING: hours 23 and 00 touch, in the
+     same way the typed hours already cross midnight, so a dead stretch over midnight is one window and
+     not two halves each too short to count.
+     TOO SHORT TO STAND is dropped. A window under the minimum block would switch the ad twice for an
+     hour or two and flap, which costs a send, costs an account's daily ceiling and buys nothing. And an
+     ON stretch left shorter than the minimum block BETWEEN TWO windows is swallowed into the OFF only
+     where NOTHING IN IT HAS EVER SOLD; where it sells, neither window either side of it is applied,
+     because switching on for one hour and off again is the same flapping seen from the other side.
+     "Nothing in it has ever sold" and not "every hour of it is dead", because touching dead hours are
+     already one window, so a gap between two windows always holds an hour that is not dead. What it
+     holds is an hour that has never sold for one of the OTHER reasons: no reading at all, or nothing
+     ever spent in it. Running the ad through one of those buys nothing either, so the gap goes. The
+     proven slot still wins: a quiet hour inside the part of the day a listing's sales come from is never
+     swallowed, the same as it is never dead. */
+  const D = ADTOOL_PEAK_PLAN_DEFAULTS, o = opts || {};
+  const pick = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || isNaN(n) ? d : n; };
+  const minClicks = Math.max(0, Math.round(pick(o.dead_min_clicks, D.dead_min_clicks)));
+  const sharePct = Math.min(100, Math.max(0, Math.round(pick(o.proven_share, D.proven_share))));
+  const minBlock = Math.min(12, Math.max(1, Math.round(pick(o.min_block_h, D.min_block_h))));
+  const hrs = (profile && profile.hours) || [];
+  const H = h => hrs[((h % 24) + 24) % 24] || {};
+  const n = (c, k) => Number(c[k]) || 0;
+  const slotOrders = [0, 0, 0, 0];
+  let total = 0;
+  for (let h = 0; h < 24; h++) { const v = n(H(h), 'orders_raw'); slotOrders[adtSlot(h)] += v; total += v; }
+  const proven = [];
+  for (let s = 0; s < 4; s++) if (total > 0 && slotOrders[s] / total >= sharePct / 100) proven.push(s);
+  const inProven = h => proven.indexOf(adtSlot(((h % 24) + 24) % 24)) >= 0;
+  const dead = [], productive = [], why = {};
+  for (let h = 0; h < 24; h++) {
+    const c = H(h), obs = n(c, 'days_observed');
+    if (n(c, 'days_with_sales') > 0) { productive.push(h); why[h] = 'it has sold in this hour on ' + n(c, 'days_with_sales') + ' of the ' + obs + ' day' + (obs === 1 ? '' : 's') + ' we watched'; continue; }
+    if (!obs) { why[h] = 'no reading for this hour on any day in the window, so nothing is claimed about it'; continue; }
+    const spent = n(c, 'days_with_spend') > 0, clicks = n(c, 'clicks_raw');
+    if (!spent && clicks < minClicks) { why[h] = 'nothing was spent in this hour and it drew fewer than ' + minClicks + ' click' + (minClicks === 1 ? '' : 's') + ', so there is no waste in it to cut'; continue; }
+    if (inProven(h)) { why[h] = 'this hour sits inside the ' + ADTOOL_SLOT_NAMES[adtSlot(h)] + ', the part of the day at least ' + sharePct + '% of its sales come from, which is never switched off'; continue; }
+    dead.push(h);
+    why[h] = 'money went out in this hour on ' + n(c, 'days_with_spend') + ' of the ' + obs + ' day' + (obs === 1 ? '' : 's') + ' we watched and not one order came back in it on any of them';
+  }
+  const isDead = h => dead.indexOf(((h % 24) + 24) % 24) >= 0;
+  const neverSold = h => n(H(h), 'days_with_sales') === 0;
+  const raw = [];
+  if (dead.length >= 24) raw.push({ from: 0, to: 24, hours: 24 });   // the whole day: it spends and never sells
+  else for (let h = 0; h < 24; h++) {
+    if (!isDead(h) || isDead(h - 1)) continue;                        // only the first hour of a run starts one
+    let end = h, len = 0;
+    while (isDead(end) && len < 24) { end = (end + 1) % 24; len++; }
+    raw.push({ from: h, to: end, hours: len });
+  }
+  const kept = raw.filter(w => w.hours >= minBlock);
+  const tooShort = raw.filter(w => w.hours < minBlock);
+  const notes = [];
+  for (const w of tooShort) notes.push('the ' + w.hours + ' dead hour' + (w.hours === 1 ? '' : 's') + ' from ' + adPeakPad(w.from) + ':00 is too short a stretch to switch for, so it is left running');
+  /* the gap between two kept windows, walked forward on the ring: the hours the ad would be ON for */
+  const gapHours = (a, b) => { const out = []; let h = ((a % 24) + 24) % 24; const stop = ((b % 24) + 24) % 24; let g = 0; while (h !== stop && g < 24) { out.push(h); h = (h + 1) % 24; g++; } return out; };
+  let list = kept.slice().sort((x, y) => x.from - y.from);
+  for (let guard = 0; guard < 24; guard++) {
+    if (list.length < 2) break;
+    let changed = false;
+    for (let i = 0; i < list.length; i++) {
+      const w = list[i], j = (i + 1) % list.length, nx = list[j];
+      if (j === i) continue;
+      const gap = gapHours(w.to, nx.from);
+      if (!gap.length || gap.length >= minBlock) continue;
+      const rest = list.filter((_, k) => k !== i && k !== j);
+      if (gap.every(h => neverSold(h) && !inProven(h))) {
+        notes.push('nothing has ever sold in the ' + gap.length + ' hour' + (gap.length === 1 ? '' : 's') + ' from ' + adPeakPad(w.to) + ':00 either, and they are too few to switch for on their own, so the two stretches either side run as one');
+        rest.push({ from: w.from, to: nx.to, hours: w.hours + gap.length + nx.hours, merged: true });
+      } else {
+        notes.push('leaving the ad on for only ' + gap.length + ' hour' + (gap.length === 1 ? '' : 's') + ' from ' + adPeakPad(w.to) + ':00 would switch it twice for nothing, so neither stretch either side of it is applied');
+      }
+      list = rest.sort((x, y) => x.from - y.from);
+      changed = true; break;
+    }
+    if (!changed) break;
+  }
+  const words = w => adPeakPad(w.from) + '-' + adPeakPad(w.to);
+  return {
+    dead: dead.slice(), productive_hours: productive.slice(),
+    windows: list.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    windows_found: raw.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    windows_dropped: tooShort.map(w => ({ from: w.from, to: w.to, hours: w.hours })),
+    proven_slots: proven.slice(), proven_slot_names: proven.map(s => ADTOOL_SLOT_NAMES[s]),
+    slot_orders: slotOrders.slice(), orders_total: total,
+    days_observed: Number(profile && profile.days_observed) || 0,
+    rules: { dead_min_clicks: minClicks, proven_share: sharePct, min_block_h: minBlock },
+    why: why, adjustments: notes,
+    note: !hrs.length ? 'There is no hourly reading for this listing at all, so no hour can be called dead.'
+      : !dead.length ? 'Every hour this listing spends in has sold in it at some point in the window, or sits inside the part of the day its sales come from, so there is nothing to switch off.'
+        : (list.length
+          ? 'Dead: ' + list.map(words).join(', ') + (proven.length ? '. Never switched off: the ' + proven.map(s => ADTOOL_SLOT_NAMES[s]).join(' and the ') : '') + '.'
+          : 'There are dead hours, but no stretch of them long enough to switch for.'),
+  };
+}
+function adPeakSchedule(input) {
+  /* THE DAY, HOUR BY HOUR, and where each hour's answer came from.
+     input: { typed_ranges, dead_windows, hold, min_days_ok, tracking }.
+     THE TYPED HOURS ARE THE ENVELOPE. Outside them the ad is OFF, exactly as it is today. Inside them
+     it is ON unless a dead window takes it off, and a dead window is only ever applied once there are
+     enough days behind it and the listing is still playing on its own pattern. Short of that the
+     schedule IS the typed hours and the windows come back as a proposal for somebody to look at: a
+     pattern read off a fortnight nobody has yet is a guess, and a guess must not pause an ad.
+     A HOLD WINS OVER ALL OF IT. 'on' is all day on, 'off' is all day off, and the pattern is set aside
+     with a reason beside every hour saying so. */
+  const i = input || {};
+  const ranges = (i.typed_ranges || []).filter(r => r && r.length >= 2);
+  const hold = ADTOOL_PEAK_HOLDS.indexOf(String(i.hold == null ? 'auto' : i.hold)) >= 0 ? String(i.hold == null ? 'auto' : i.hold) : 'auto';
+  const wins = (i.dead_windows || []).filter(w => w && isFinite(Number(w.from)) && isFinite(Number(w.to)) && Number(w.from) !== Number(w.to));
+  const ok = !!i.min_days_ok, tracking = i.tracking === undefined || i.tracking === null ? true : !!i.tracking;
+  const states = [], reasons = [];
+  const all = (st, text) => { for (let h = 0; h < 24; h++) { states.push(st); reasons.push(text); } };
+  const runs = pickFn => {
+    const out = [];
+    for (let h = 0; h < 24; h++) {
+      if (!pickFn(h) || (h > 0 && pickFn(h - 1))) continue;
+      let end = h; while (end < 24 && pickFn(end)) end++;
+      out.push({ from: h, to: end, hours: end - h });
+    }
+    return out;
+  };
+  if (hold === 'on' || hold === 'off') {
+    const st = hold === 'on' ? 'ON' : 'OFF';
+    all(st, 'held ' + hold + ' by hand');
+    return {
+      states: states, source: 'hold', reasons: reasons, hold: hold, applied: false, proposal: wins,
+      off_windows: hold === 'off' ? [{ from: 0, to: 24, hours: 24 }] : [],
+      why: 'somebody has held this listing ' + hold + ', so neither its hours nor its pattern decides anything today',
+    };
+  }
+  if (!ranges.length) {
+    all('OFF', 'no hours on the list the system can read');
+    return { states: states, source: 'none', reasons: reasons, hold: hold, applied: false, proposal: [], off_windows: [], why: 'this listing has no hours the system can read, so there is nothing to schedule and nothing is switched' };
+  }
+  const applied = ok && tracking && wins.length > 0;
+  const deadAt = h => applied ? wins.filter(w => adInPeakRanges(h, [[Number(w.from), Number(w.to)]]))[0] || null : null;
+  for (let h = 0; h < 24; h++) {
+    if (!adInPeakRanges(h, ranges)) { states.push('OFF'); reasons.push('outside its hours'); continue; }
+    const w = deadAt(h);
+    if (w) { states.push('OFF'); reasons.push('dead window ' + adPeakPad(w.from) + '-' + adPeakPad(w.to)); continue; }
+    states.push('ON'); reasons.push('inside its hours');
+  }
+  const source = !ok ? 'proposal' : (!tracking ? 'typed' : (wins.length ? 'pattern' : 'typed'));
+  const why = source === 'pattern'
+    ? 'inside its own hours, with the hours it has never sold in switched off'
+    : source === 'proposal'
+      ? 'too few days behind the pattern to act on it yet, so today runs on the hours somebody typed and the dead hours are put forward as a suggestion'
+      : wins.length
+        ? 'the listing is no longer playing on the pattern those dead hours were read from, so today runs on the hours somebody typed'
+        : 'its own hours, with nothing in them the pattern says to switch off';
+  return {
+    states: states, source: source, reasons: reasons, hold: hold, applied: applied,
+    proposal: applied ? [] : wins,
+    /* the OFF stretches the PATTERN caused, which is the only part of a schedule a reader has not seen
+       before: outside-its-hours was already true yesterday. Not wrapped, because a day's schedule is a
+       day's schedule and a window over midnight is one stretch at each end of it. */
+    off_windows: runs(h => states[h] === 'OFF' && reasons[h].indexOf('dead window') === 0),
+    why: why,
+  };
+}
+function adPeakWantFor(input) {
+  /* WHAT THE SWITCH SHOULD WANT for this listing at this hour, and the phrase its log row prints.
+     input: { hold, schedule: { states, source, reasons }, hour }.
+     A hold wins over everything, which is the whole point of a hold. A readable schedule for the day
+     decides the hour from its own states and names what put it there. And NO schedule and NO hold leaves
+     both empty, so the switch reads the typed hours exactly as it did before any of this existed: that
+     is the one promise this section makes about every listing it has not scheduled, and it is kept here
+     rather than hoped for, because the override is the only thing the switch is handed. */
+  const i = input || {};
+  const asked = String(i.hold == null ? 'auto' : i.hold);
+  const hold = ADTOOL_PEAK_HOLDS.indexOf(asked) >= 0 ? asked : 'auto';
+  const none = { want_override: '', want_source: '', from: 'hours', schedule_source: '', reason: '' };
+  if (hold === 'on') return { want_override: 'ACTIVE', want_source: 'hold on', from: 'hold', schedule_source: '', reason: 'held on by hand' };
+  if (hold === 'off') return { want_override: 'PAUSED', want_source: 'hold off', from: 'hold', schedule_source: '', reason: 'held off by hand' };
+  const s = i.schedule || null;
+  const states = s && s.states;
+  const h = Math.round(Number(i.hour));
+  if (!isFinite(h) || h < 0 || h > 23 || !states || states.length !== 24) return none;
+  const source = String(s.source || '');
+  /* 'none' is a schedule for a listing whose hours could not be read, which is all OFF: that is not a
+     wanted state, it is the absence of one, and acting on it would pause an ad nobody asked to pause. */
+  if (source === 'none') return none;
+  const st = String(states[h]);
+  if (ADTOOL_PEAK_SCHEDULE_STATES.indexOf(st) < 0) return none;
+  const reason = String((s.reasons || [])[h] || '');
+  const text = reason.indexOf('dead window') === 0 ? 'pattern: ' + reason
+    : source === 'hold' ? (st === 'ON' ? 'hold on' : 'hold off')
+      : 'typed hours';
+  return { want_override: st === 'ON' ? 'ACTIVE' : 'PAUSED', want_source: text, from: 'schedule', schedule_source: source, reason: reason };
+}
+function adPeakTracking(profileToday, profilePattern, opts) {
+  /* IS THIS LISTING STILL PLAYING ON THE SAME METHODOLOGY. The owner's own condition for keeping a
+     listing on its 24-hour pattern, and it is NOT a second drift mechanism: the comparison is the one
+     A17 already makes — the divergence between two hour shapes against ADTOOL_REGIME_JSD, and the same
+     floor of orders either side below which that rule itself declines to call a drift.
+     Where the regimes job has already written a detection for this listing, THAT row is the answer and
+     `drift_detected_day` names the day it was written, because the job that owns the rule has spoken and
+     this must not second-guess it.
+     Too few orders on either side is TRACKING, not drifted: A17 answers "no regime change" there for the
+     same reason, and a pattern must not be thrown away because a quiet morning has not reached the floor.
+     THE SHAPES ARE WEIGHTED AND THE FLOOR IS NOT, and that is where the owner's weighting does its work.
+     The shape compared is the weighted one, so the pattern leans towards the days most like the day being
+     planned; the floor of orders is counted on real orders, because A17's floor is a floor on orders that
+     happened and a day counted twice has not happened twice. */
+  const o = opts || {};
+  const vec = (p, key, other) => {
+    const out = new Array(24).fill(0);
+    const list = Array.isArray(p) ? p : ((p && (p.hours || p.today)) || []);
+    for (let h = 0; h < 24; h++) {
+      const c = list[h];
+      if (c == null) continue;
+      if (typeof c === 'number') { out[h] = isFinite(c) ? c : 0; continue; }
+      const v = Number(c[key] == null ? c[other] : c[key]);
+      out[h] = isFinite(v) ? v : 0;
+    }
+    return out;
+  };
+  const shape = p => vec(p, 'orders', 'orders_raw'), real = p => vec(p, 'orders_raw', 'orders');
+  const a = shape(profileToday), b = shape(profilePattern);
+  const na = real(profileToday).reduce((t, v) => t + v, 0), nb = real(profilePattern).reduce((t, v) => t + v, 0);
+  const th = o.threshold == null ? ADTOOL_REGIME_JSD : Number(o.threshold);
+  const minN = o.min_orders == null ? ADTOOL_REGIME_MIN_ORDERS : Math.max(0, Math.round(Number(o.min_orders) || 0));
+  const drift = String(o.drift_detected_day == null ? '' : o.drift_detected_day).trim();
+  /* null and never nought: a divergence nobody could work out must not read as two shapes that agree */
+  const jsd = (na > 0 && nb > 0) ? Math.round(adtJsd(a, b) * 10000) / 10000 : null;
+  /* was a shape handed in at all. A caller with no hourly profile to spare — a page listing hundreds of
+     rows, where reading four weeks of hours per listing is not a page — asks this with the drift record
+     alone, and then the order counts are NULL and never nought: "nobody counted" and "none" are
+     different claims and only one of them is true. */
+  const given = p => { const l = Array.isArray(p) ? p : ((p && (p.hours || p.today)) || []); return l.length >= 24; };
+  const any = given(profileToday) || given(profilePattern);
+  const base = { jsd: any ? jsd : null, orders_today: any ? na : null, orders_pattern: any ? nb : null, threshold: th, min_orders: minN, drift_detected_day: drift || null, shape_compared: any, same_rule_as: 'A17' };
+  if (drift) return Object.assign({ tracking: false, note: 'the pattern check wrote a change of shape for this listing on ' + drift + ', so today runs on the hours somebody typed rather than on a pattern that has moved' }, base);
+  if (!any) return Object.assign({ tracking: true, note: 'no hourly shape was handed to this check, so it stands on the drift record alone, and nothing has been written there for this listing' }, base);
+  if (na < minN || nb < minN) return Object.assign({ tracking: true, note: 'too few orders either side to say the shape has moved (' + na + ' today against ' + nb + ' over the pattern, where the rule asks for ' + minN + '), so the pattern stands, which is the answer the drift check gives as well' }, base);
+  if (jsd != null && jsd > th) return Object.assign({ tracking: false, note: 'today’s hours are a different shape from the pattern’s by the measure the drift check uses, so today runs on the hours somebody typed' }, base);
+  return Object.assign({ tracking: true, note: 'today’s hours are the same shape as the pattern’s by the measure the drift check uses, so the pattern stands' }, base);
+}
+function adPeakPlanTick(uk, planTime) {
+  /* WHICH TICK THIS IS, read off the UK clock and not off a flag.
+     The planner rides two slots it does not own. The nightly one is the only slot in the whole map that
+     falls on a half hour, so a tick whose minute is not nought is the planning tick; every tick on the
+     hour is the hourly slot, where the planner does nothing except at the three cuts between the parts
+     of the day, and there it works out again only the listings the drift check flagged today.
+     Reading the clock rather than trusting the slot means a slot that is re-registered somewhere else,
+     or a clock that has gone back an hour, cannot turn the planner into something that runs at a time
+     nobody chose. The configured plan time is honoured as well, so a manager who moves it to a time on
+     the hour still gets a nightly run rather than silence. */
+  const u = uk || {};
+  const h = Math.round(Number(u.hour)), m = Math.round(Number(u.minute));
+  const pt = /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(String(planTime || '')) ? String(planTime) : ADTOOL_PEAK_PLAN_DEFAULTS.plan_time;
+  if (!isFinite(h) || !isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) return { mode: 'none', plan_time: pt, uk_clock: '', why: 'the UK clock could not be read, so nothing is planned off it' };
+  const clock = adPeakPad(h) + ':' + adPeakPad(m);
+  if (m !== 0 || clock === pt) return { mode: 'nightly', plan_time: pt, uk_clock: clock, why: 'the planning tick: the next day’s schedule is written now, and today’s is filled in if it is missing' };
+  if (ADTOOL_PEAK_PLAN_BOUNDARY_HOURS.indexOf(h) >= 0) return { mode: 'boundary', plan_time: pt, uk_clock: clock, why: 'a cut between two parts of the day: only the listings the drift check flagged today are worked out again' };
+  return { mode: 'none', plan_time: pt, uk_clock: clock, why: 'neither the planning tick nor a cut between two parts of the day' };
+}
+function adPeakNextSwitch(input) {
+  /* THE NEXT THING THAT HAPPENS to this listing under its schedule, and what put it there.
+     input: { today: { day, states, source, reasons }, tomorrow: { … }, uk: { date, hour } }.
+     Walked forward through the rest of today and then through tomorrow, so a change that falls after
+     midnight answers as a time tomorrow rather than as nothing at all. Null where there is no schedule
+     to read, or where nothing changes in the next two days of it: null is not "nothing happens", it is
+     "there is no schedule here to answer from", and the caller says which. */
+  const i = input || {}, u = i.uk || {};
+  const td = i.today || null;
+  const states = td && td.states;
+  if (!states || states.length < 24) return null;
+  const h0 = Math.max(0, Math.min(23, Math.round(Number(u.hour) || 0)));
+  const now = states[h0];
+  if (ADTOOL_PEAK_SCHEDULE_STATES.indexOf(now) < 0) return null;
+  const tm = i.tomorrow || null;
+  const seq = [];
+  for (let h = h0 + 1; h < 24; h++) seq.push({ row: td, hour: h });
+  if (tm && tm.states && tm.states.length >= 24) for (let h = 0; h < 24; h++) seq.push({ row: tm, hour: h });
+  for (const s of seq) {
+    const st = s.row.states[s.hour];
+    if (ADTOOL_PEAK_SCHEDULE_STATES.indexOf(st) < 0 || st === now) continue;
+    const day = String(s.row.day || (s.row === td ? (u.date || '') : ''));
+    return {
+      at: (day ? day + ' ' : '') + adPeakPad(s.hour) + ':00', day: day || null, hour: s.hour,
+      from: now, to: st, source: String(s.row.source || ''), reason: String((s.row.reasons || [])[s.hour] || ''),
+      hours_from_now: seq.indexOf(s) + 1,
+    };
+  }
+  return null;
+}
+function adPeakOffWhenProductive(input) {
+  /* A22. The pattern says this listing sells in that hour, the schedule or a hold had the ad OFF through
+     it, and the hour has been and gone. The one way this section can cost money instead of saving it, and
+     the one thing the planner cannot raise for itself: it wrote the schedule, so it believes it.
+     Only an hour that has PASSED is judged, because an hour still running has not failed to sell yet.
+     Only an hour the schedule itself calls productive counts, and that list is the one the planner wrote
+     down beside the schedule, so the finding is read back off the same row it is about.
+     input: { rows (schedule rows: { account, item_id, day, states, reasons, source, productive_hours }),
+     now_uk { date, hour } }. */
+  const i = input || {}, u = i.now_uk || {};
+  const today = String(u.date || ''), h0 = Math.round(Number(u.hour));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !isFinite(h0)) return [];
+  const out = [];
+  for (const r of (i.rows || [])) {
+    const day = String((r && r.day) || ''), item = String((r && r.item_id) || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !item) continue;
+    if (day > today) continue;                                    // tomorrow's schedule has not happened
+    const states = (r && r.states) || [], reasons = (r && r.reasons) || [];
+    const prod = (r && r.productive_hours) || [];
+    if (!states.length || !prod.length) continue;
+    for (const hx of prod) {
+      const h = Math.round(Number(hx));
+      if (!isFinite(h) || h < 0 || h > 23) continue;
+      if (day === today && h >= h0) continue;                     // not been and gone yet
+      if (states[h] !== 'OFF') continue;
+      const reason = String(reasons[h] || '');
+      /* outside its own hours is not a finding: nobody ever asked for the ad to run then, and saying so
+         every day for every listing on the list would bury the hours this section really did switch off. */
+      if (reason.indexOf('dead window') !== 0 && reason.indexOf('held ') !== 0) continue;
+      out.push({
+        account: String((r && r.account) || ''), item_id: item, day: day, hour: h,
+        source: String((r && r.source) || ''), reason: reason,
+        note: 'this listing has sold in the ' + adPeakPad(h) + ':00 hour inside the window the pattern was read over, and ' +
+          (reason.indexOf('held ') === 0 ? 'a hold somebody set' : 'the schedule') + ' had the ad off through it on ' + day,
+      });
+      if (out.length >= 200) return out;
+    }
+  }
+  out.sort((a, b) => (a.day + adPeakPad(a.hour) + a.item_id) < (b.day + adPeakPad(b.hour) + b.item_id) ? -1 : 1);
+  return out;
+}
+/* how close the portal's own send has to be to the change eBay reported for the two to read as one event */
+const ADTOOL_CHANGE_AUTOMATIC_MIN = 5;
+function adChangeBy(attribution, changeAt, withinMin) {
+  /* AUTOMATIC OR BY HAND, in the two words the page prints. It does not decide this a second time:
+     adtChangeAttribution has already matched the change against the portal's own record of what it sent,
+     and `by` is that answer in those words. What this adds is HOW LONG BEFORE the change the portal's own
+     send went out, because a send five minutes earlier is plainly the same event and a send eleven hours
+     earlier is only the same day, and a reader deserves to be told which of the two they are looking at.
+     A stamp that cannot be read leaves the gap null and never nought. */
+  const a = attribution || {};
+  const within = Math.max(1, Math.round(Number(withinMin) || ADTOOL_CHANGE_AUTOMATIC_MIN));
+  if (String(a.who || '') !== 'tool') {
+    return { by: 'manual', minutes_before: null, within_minutes: within, close: null, decision_id: '', sender: '', note: 'nothing the portal sent matches this change, so it was made on eBay by somebody the portal cannot see' };
+  }
+  const t = a.tool || {};
+  const did = String(t.decision_id || '');
+  const sender = did === 'peak' ? 'peak switching' : did ? 'the morning apply' : 'the portal';
+  const sendMs = adPeakStampMs(t.at), chMs = adPeakStampMs(changeAt);
+  const gap = (isFinite(sendMs) && isFinite(chMs)) ? Math.round((chMs - sendMs) / 60000) : null;
+  const close = gap == null ? null : (gap >= 0 && gap <= within);
+  return {
+    by: 'automatic', minutes_before: gap, within_minutes: within, close: close, decision_id: did, sender: sender,
+    note: gap == null
+      ? sender + ' sent this change the same day, and one of the two stamps cannot be read, so how long before it went out is not known'
+      : close
+        ? sender + ' sent this change ' + (gap <= 0 ? 'in the same minute' : gap + ' minute' + (gap === 1 ? '' : 's') + ' before eBay reported it') + ''
+        : sender + ' sent the matching change ' + Math.abs(gap) + ' minutes ' + (gap < 0 ? 'after' : 'before') + ' eBay reported this one, which is the same day rather than the same moment',
+  };
+}
 /* ADTOOL-P16-PURE-END */
 
 /* ---- schema: the peak list's own switch, and the campaign columns the sync now fills ---- */
@@ -12638,6 +13383,23 @@ async function ensureAdtoolPhase16Schema(env) {
      always done: the column lands on months of existing rows and not one of them behaves
      differently the day after. Guarded, beside the switch it belongs with. */
   try { await env.DB.prepare("ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  /* THE HOLD (owner, 31 Oct, §3): 'auto' is the schedule, 'on' is all day on, 'off' is all day off.
+     Born 'auto', which is what every row on this list did the day before this column existed: the
+     schedule only ever takes an hour OFF inside the hours somebody already typed, so a row that has
+     never been near the planner behaves identically either way. A hold is a person overruling the
+     pattern for a listing, so it is written to the audit trail with who set it. Guarded, beside the
+     two columns above it. */
+  try { await env.DB.prepare("ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'").run(); } catch (e) { /* already there */ }
+  /* THE DAY'S SCHEDULE, one row per listing per UK day, written by the planner and read by the switch.
+     Separate from adtool_peak_items on purpose: the list is what a person keeps and this is what the
+     system worked out, so a schedule can be rewritten at a slot boundary without touching anybody's row,
+     and a day with no row here means the listing runs on its typed hours exactly as it did before any
+     of this existed. states_json is 24 of 'ON' / 'OFF'; reasons_json is 24 short lines saying why each
+     hour reads the way it does; dead_json is what the pattern found, applied or only proposed. */
+  await adtBatch(env, [
+    'CREATE TABLE IF NOT EXISTS adtool_peak_schedule (account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY (account, item_id, day))',
+    'CREATE INDEX IF NOT EXISTS idx_adtpksch_day ON adtool_peak_schedule(day, item_id)',
+  ].map(s => env.DB.prepare(s)));
   ADTOOL_P16_SCHEMA_OK = true;
 }
 const ADTOOL_REGISTER_P16 = [
@@ -12655,6 +13417,12 @@ const ADTOOL_REGISTER_P16 = [
   ['PEAK_HOURS_ON_OFF', 'Hours on and off peak today', 'For every listing set to switch itself whose hours can be read, the part of today already gone is counted against its own hours and the part still to come is counted the same way, and the four figures are listing-hours: one listing for one hour is one. The hour the clock is in is split at the minute, so nothing is claimed for a minute that has not happened yet. A listing left to a person and a listing whose hours cannot be read are both left out and counted apart, because neither of them is being switched.', 'adtool_peak_items', 'Read against the London clock every time the section is opened', 'The hours on and the hours off add back up to the whole of today across the listings counted'],
   ['PEAK_SPEND_AVOIDED', 'Money no longer spent outside the peak hours', 'What a listing spends in a day in the hours outside its own stretches now, against what it spent in a day in those same hours over the twenty eight days before it joined. eBay publishes no ad spend by hour, so the hourly figures are our own readings of its running total every few minutes, each difference booked to the hour it arrived in; a day’s first reading belongs to no hour of trading and is left out. Before and after are compared only over the listings we hold readings for on both sides, each counted as its own money per day. With nothing from before, the answer is blank and says so.', 'adtool_peak_items, adtool_listing_hour, adtool_ads_intraday', 'Worked out when the section is opened, from the hourly roll-up', 'Unit tests on the per-day arithmetic, on a listing with no before-data being left out of the comparison, and the hours read back against the listing’s own page'],
   ['PEAK_SALES_IN_OUT', 'Orders inside and outside the peak hours', 'Every order for a listing on the list is placed in the London hour it arrived in and judged against that listing’s own hours: inside them or outside them, for today, the last seven days and the last twenty eight. An order only counts for a day the listing was actually on the list. eBay does not say which hour a click or a sale it credits to an ad happened in, so this is the hour the ORDER arrived and not the hour of the click, and the page says so. A listing whose hours cannot be read is left out rather than having all of its orders read as landing outside hours it never had.', 'adtool_peak_items, orders', 'Worked out when the section is opened, within a minute of the last order sync', 'Unit tests on an order either side of both boundaries and on a listing’s day before it joined the list not counting'],
+  /* the 31 Oct brief, §3: the 24-hour pattern engine and the dead-hour switch-off */
+  ['PEAK_PROFILE', 'A listing’s own 24-hour span', 'What each hour of the day did for one listing over the lookback: the money spent in it, the clicks, the orders, the units and the takings, with how many days we hold a reading for that hour, on how many it spent, and on how many it sold. Read from the hourly roll-up alone, so the portal has one hourly figure and not two. Today is kept out of the pattern, because a part day reads as quiet in every hour the clock has not reached. Days are weighted as the owner asked: the same weekday’s last four occurrences count double, and so do the last seven.', 'adtool_listing_hour, adtool_ads_intraday, orders', 'Every night at the planning tick, and again at a cut between two parts of the day for a listing the drift check flagged', 'Unit tests on the weighting, on today being out of the pattern, and on a day counted twice by both reasons'],
+  ['PEAK_DEAD_HOURS', 'The hours a listing never sells in', 'An hour is dead when money went out in it on at least one day we hold a reading for, and not one order came back in it on any of them: one sale, in one hour, on one day keeps the hour. An hour that never spent and drew too few clicks is not dead either, having no waste to cut. And the part of the day a listing’s sales come from is never switched off hour by hour, however quiet one hour inside it looks. Touching dead hours join into one stretch, counted round midnight. A stretch too short to switch for is left running.', 'adtool_listing_hour, adtool_listing_slot, portal_config', 'With the profile', 'Unit tests on a dead window inside the hours, on a stretch too short being dropped, on a quiet hour inside a proven slot never being dead, and on the running gap being swallowed only when it was dead itself'],
+  ['PEAK_SCHEDULE', 'The day a listing will actually run', 'Twenty four states, one for each UK hour, each with a short line saying why it reads that way. The hours somebody typed are the envelope and this can only narrow them: outside them the ad is off as before, inside them it is on unless a dead stretch takes it off, and nothing here can put an ad into an hour nobody asked for. A dead stretch is applied only once there are enough days behind the pattern and the listing is still playing on it; short of either, the day runs on the typed hours and the dead stretches come back as a suggestion. A day with no row runs on its typed hours.', 'adtool_peak_schedule, adtool_peak_items, adtool_listing_hour, adtool_regimes, portal_config', 'Every night at the planning tick, and at 06:00, noon and 17:00 for a listing the drift check flagged', 'Unit tests on the envelope never widening, on too few days giving a suggestion rather than a schedule, and on a hold overruling both'],
+  ['PEAK_HOLD', 'Holding a listing on or off by hand', 'A listing on the peak list can be held on for the whole day or off for the whole day, and a hold overrules both its typed hours and its pattern, with a reason printed against every hour. Only Management, an Ops Head or an Advertising Manager may set one, and who set it and when is written to the audit trail. Every row is born on the schedule, which is what the list did before holds existed. A hold decides a wanted state and nothing more: it reaches eBay only through the quarter-hourly switch, for an account whose live switch is on, under the same ceiling and refusal rule as every other change.', 'adtool_peak_items, audit, adtool_apply_log', 'As soon as somebody sets one, and every quarter hour for the switching', 'Unit tests on a hold on and a hold off beating the schedule, and the audit row read back against the actor'],
+  ['PEAK_TRACKING', 'Whether a listing is still playing on its pattern', 'The owner’s own condition for keeping a listing on its 24-hour pattern, answered by the drift rule the portal already has rather than a second one beside it: today’s hours are compared with the pattern’s by the same measure, against the same threshold, with the same floor of orders either side below which that rule declines to call a drift. Where the pattern check has already written a change of shape for the listing, that record is the answer and the day it was written is named. Too few orders either side is still tracking. A listing no longer tracking falls back to its typed hours, and the schedule says so.', 'adtool_regimes, adtool_listing_hour, adtool_profiles', 'With the schedule', 'Unit tests on a drift record deciding it, on the order floor, and on the two shapes agreeing'],
   ['SPEND_BACK_WINDOWS', 'What a listing spent over the last three, seven and fourteen days', 'The listing’s own ad spend over the last three, seven and fourteen FINISHED days, beside what it has spent today. Every window ends yesterday, because eBay publishes a day’s ad report the day after and a window reaching into today would read every listing as having had a cheap day. The spend already carries the fee charged on clicks, so nothing is added on top of it. A day with no row simply does not count.', 'adtool_listing_day', 'Worked out when you open the page, and held for a minute', 'Unit tests on the three windows never being out of order, and the figures read back against the listing’s own page'],
 ];
 let ADTOOL_P16_REG_OK = false;
@@ -12667,6 +13435,25 @@ async function ensureAdtoolPhase16Register(env) {
      switch somebody has already set is left exactly as it stands. */
   for (const key of ['adtool_page_livesplit', 'adtool_page_potential']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
+  }
+  /* the planner's own stop flag, beside the switch job's. Born on, because the owner asked for this to
+     run in automation; off and the peak list goes back to running on typed hours alone, with every
+     schedule row still readable. The pair answer two different questions: adtool_page_peak takes the
+     page away from everybody, adtool_job_peakplan stops the PLANNING while the switching carries on from
+     whatever rows are already there. */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_job_peakplan', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  /* the six figures the pattern engine runs on, seeded at the owner's own numbers and settable from
+     Management afterwards. Seeded rather than left unset so a manager opening the settings sees what is
+     in force instead of a blank, and DO NOTHING so a figure somebody has already changed is never
+     written back over. Nothing prints a fixed figure anywhere: adPeakPlanRules is what every sentence in
+     this section reads its numbers out of. */
+  for (const pair of [[ADTOOL_PEAK_PLAN_CONFIG_KEYS.lookback_days, String(ADTOOL_PEAK_PLAN_DEFAULTS.lookback_days)],
+    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.min_days, String(ADTOOL_PEAK_PLAN_DEFAULTS.min_days)],
+    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.dead_min_clicks, String(ADTOOL_PEAK_PLAN_DEFAULTS.dead_min_clicks)],
+    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.proven_share, String(ADTOOL_PEAK_PLAN_DEFAULTS.proven_share)],
+    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.min_block_h, String(ADTOOL_PEAK_PLAN_DEFAULTS.min_block_h)],
+    [ADTOOL_PEAK_PLAN_CONFIG_KEYS.plan_time, String(ADTOOL_PEAK_PLAN_DEFAULTS.plan_time)]]) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(pair[0], pair[1]));
   }
   try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
   ADTOOL_P16_REG_OK = true;
@@ -12959,6 +13746,290 @@ async function adtPeakLastSwitch(env, today) {
   }
   return { by_key: byKey, by_item: byItem };
 }
+/* ---- the 24-hour pattern engine: the reads, and the planner that writes the day down ----
+   NOTHING IN HERE SENDS ANYTHING. The planner reads hours, works out a schedule and writes rows. The
+   one place a state leaves this worker is still adtoolPeakSwitch below, through the account's own live
+   switch, the daily ceiling and the refusal rule, none of which this changes. */
+const ADTOOL_PEAK_PLAN_CAP = 60;           // listings worked out in one run; the rest keep their typed hours
+const ADTOOL_PEAK_PLAN_CHUNK = 10;         // listings per hourly read, so one statement never returns a day's fleet
+const ADTOOL_PEAK_PLAN_MS = 20000;         // the run's own clock, so a long list ends tidily rather than being cut off
+async function adtPeakPlanRulesFor(env) {
+  /* the six figures in force, read the same way the peak page reads its own two: one query over the
+     adtool_peak_ keys, resolved by the pure function so the engine and the page can never disagree
+     about what is set. */
+  const cfg = {};
+  try {
+    for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_peak_%'").all()).results || [])) cfg[String(r.key)] = r.value;
+  } catch (e) { /* nothing set: the owner's own numbers stand in, which is what the pure function does */ }
+  return adPeakPlanRules(cfg);
+}
+async function adtPeakHourRows(env, ids, today, lookbackDays, deadlineMs) {
+  /* THE 24-HOUR SPAN, for a handful of listings at a time, out of the one hourly table.
+     The spend and the attributed figures are chosen HERE and once: eBay's reconciled column where the
+     day has been settled against the report it finally published, our own sampled reading where it has
+     not. The pure profile is handed one number per hour and never makes that choice a second time.
+     UK hour 8 is dropped for days before the carry fix, exactly as every other hourly read in this file
+     drops it: those rows still carry the whole morning's built-up spend inside that one hour, and a
+     pattern read off them would call eight in the morning the most expensive hour of every day.
+     ORDERS COME FROM THE SAME TABLE and not from the order book: the roll-up has already counted each
+     order into the UK hour it arrived in, and reading them twice in two ways is how two screens come to
+     disagree about one listing. */
+  const out = {}, read = [], skipped = [];
+  const from = adtAddDays(today, -Math.max(1, Math.round(Number(lookbackDays) || ADTOOL_PEAK_PLAN_DEFAULTS.lookback_days)));
+  for (const ch of adtChunks(ids, ADTOOL_PEAK_PLAN_CHUNK)) {
+    /* THE CLOCK IS CHECKED BEFORE EACH CHUNK, and a listing whose hours were never read is reported as
+       skipped rather than handed on with nothing. A profile over no days reads as "too few days behind
+       the pattern", which would write a schedule saying the typed hours over the top of a good one: safe,
+       but a quiet loosening of a correct answer, and that is worse than not writing at all. */
+    if (deadlineMs && Date.now() > deadlineMs) { for (const id of ch) skipped.push(String(id)); continue; }
+    for (const id of ch) { out[String(id)] = out[String(id)] || []; read.push(String(id)); }
+    const rows = (await env.DB.prepare(
+      'SELECT item_id, day, hour, SUM(orders) AS orders, SUM(units) AS units, SUM(revenue) AS revenue,' +
+      ' SUM(COALESCE(spend_r, spend_s)) AS spend, SUM(COALESCE(clicks_r, clicks_s)) AS clicks, SUM(COALESCE(impressions_r, impressions_s)) AS impressions' +
+      ' FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2 AND NOT (day < ?3 AND hour = 8) AND item_id IN ' + adtInList(ch, 3) +
+      ' GROUP BY item_id, day, hour').bind(from, today, ADTOOL_CARRY_FIX_DAY, ...ch).all()).results || [];
+    for (const r of rows) (out[String(r.item_id)] = out[String(r.item_id)] || []).push(r);
+  }
+  return { by_item: out, read: read, skipped: skipped };
+}
+async function adtPeakDriftDays(env, ids, day) {
+  /* WHICH LISTINGS THE DRIFT CHECK FLAGGED, straight off the rows A17 fires from. The newest detection
+     on or before the day asked about, inside the cool-down the alert rule itself uses, so a detection
+     from the spring is not still deciding today's schedule. One read, behind a try, because the regimes
+     table belongs to the profiles job and this one does not create it. */
+  const out = {};
+  const from = adtAddDays(String(day || ''), -Math.max(1, Math.round(ADTOOL_ALERT_RULES.A17.cool)));
+  for (const ch of adtChunks(ids)) {
+    let rows = [];
+    try {
+      rows = (await env.DB.prepare("SELECT scope_id, MAX(detected_day) AS detected_day FROM adtool_regimes WHERE scope = 'listing' AND detected_day >= ?1 AND detected_day <= ?2 AND scope_id IN " + adtInList(ch, 2) + ' GROUP BY scope_id').bind(from, String(day || ''), ...ch).all()).results || [];
+    } catch (e) { rows = []; }
+    for (const r of rows) if (r.detected_day) out[String(r.scope_id)] = String(r.detected_day);
+  }
+  return out;
+}
+function adtPeakScheduleRow(r) {
+  /* one stored schedule row as everything above it reads it. A row whose JSON cannot be parsed is not a
+     schedule: it comes back with no states, and every caller treats that as a listing with no row,
+     which runs on its typed hours exactly as it always did. */
+  const parse = (v, d) => { try { const x = JSON.parse(String(v == null ? '' : v)); return x == null ? d : x; } catch (e) { return d; } };
+  const states = parse(r && r.states_json, null);
+  const ok = Array.isArray(states) && states.length === 24 && states.every(s => ADTOOL_PEAK_SCHEDULE_STATES.indexOf(String(s)) >= 0);
+  const dead = parse(r && r.dead_json, null) || {};
+  return {
+    account: String((r && r.account) || ''), item_id: String((r && r.item_id) || ''), day: String((r && r.day) || ''),
+    states: ok ? states.map(String) : null, source: String((r && r.source) || ''),
+    reasons: parse(r && r.reasons_json, null) || [],
+    dead_windows: Array.isArray(dead.windows) ? dead.windows : [],
+    proposal: Array.isArray(dead.proposal) ? dead.proposal : [],
+    proven_slots: Array.isArray(dead.proven_slots) ? dead.proven_slots : [],
+    productive_hours: Array.isArray(dead.productive_hours) ? dead.productive_hours : [],
+    dead_note: String(dead.note || ''),
+    adjustments: Array.isArray(dead.adjustments) ? dead.adjustments : [],
+    /* the planner's own tracking answer, carried on the row it decided. Read back rather than worked out
+       again, so the page and the job give one answer to one question. Null where the row predates it. */
+    tracking: dead.tracking == null ? null : !!dead.tracking,
+    tracking_note: String(dead.tracking_note || ''),
+    drift_detected_day: dead.drift_detected_day ? String(dead.drift_detected_day) : null,
+    min_days: dead.min_days == null ? null : Number(dead.min_days),
+    rules: dead.rules || null,
+    profile_days: r && r.profile_days == null ? null : Number(r.profile_days),
+    computed_at: String((r && r.computed_at) || ''),
+    readable: ok,
+  };
+}
+async function adtPeakSchedulesRead(env, ids, days) {
+  /* the schedule rows for these listings over these UK days, keyed listing and day. Behind a try: the
+     table is this section's own and a database that has not taken the CREATE must still show every page
+     that mentions a schedule, with no schedule beside each row. */
+  const out = {};
+  const dayList = (days || []).map(String).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (!dayList.length) return out;
+  for (const ch of adtChunks(ids, 60)) {
+    let rows = [];
+    try {
+      rows = (await env.DB.prepare('SELECT account, item_id, day, states_json, source, reasons_json, dead_json, profile_days, computed_at FROM adtool_peak_schedule WHERE day IN ' +
+        adtInList(dayList, 0) + ' AND item_id IN ' + adtInList(ch, dayList.length)).bind(...dayList.concat(ch)).all()).results || [];
+    } catch (e) { rows = []; }
+    /* the row is keyed by listing and day here, while the table is keyed by account as well: a listing
+       moved between accounts can leave an old row behind, and the NEWER one is the schedule. Whichever
+       row happened to be read last is not an answer. */
+    for (const r of rows) {
+      const k = String(r.item_id) + '|' + String(r.day), row = adtPeakScheduleRow(r);
+      if (!out[k] || String(row.computed_at) >= String(out[k].computed_at)) out[k] = row;
+    }
+  }
+  return out;
+}
+async function adtPeakListRows(env, acct) {
+  /* the open peak rows with the three columns this section added, read the way every added column in
+     this file is read: asked for, then without, so a database that has not taken an ALTER answers with
+     that column unknown rather than refusing the job. A hold nobody can read is 'auto', which is the
+     behaviour the list had before holds existed. */
+  const ab = acct ? [acct] : [];
+  const sql = cols => "SELECT account, item_id, hours, added_at" + cols + " FROM adtool_peak_items WHERE removed_at = ''" +
+    (acct ? ' AND account = ?1' : '') + ' ORDER BY added_at DESC LIMIT ' + ADTOOL_PEAK_MANUAL_CAP;
+  try { return (await env.DB.prepare(sql(", COALESCE(auto, 0) AS auto, COALESCE(campaign_id, '') AS campaign_id, COALESCE(hold, 'auto') AS hold")).bind(...ab).all()).results || []; }
+  catch (e) {
+    try { return ((await env.DB.prepare(sql(", COALESCE(auto, 0) AS auto, COALESCE(campaign_id, '') AS campaign_id")).bind(...ab).all()).results || []).map(r => Object.assign({ hold: 'auto' }, r)); }
+    catch (e2) {
+      try { return ((await env.DB.prepare(sql(', COALESCE(auto, 0) AS auto')).bind(...ab).all()).results || []).map(r => Object.assign({ campaign_id: '', hold: 'auto' }, r)); }
+      catch (e3) { return ((await env.DB.prepare(sql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: 0, campaign_id: '', hold: 'auto' }, r)); }
+    }
+  }
+}
+function adtPeakHoldOf(row) { const h = String((row && row.hold) == null ? 'auto' : row.hold); return ADTOOL_PEAK_HOLDS.indexOf(h) >= 0 ? h : 'auto'; }
+async function adtPeakPlanOne(env, row, ctxIn) {
+  /* ONE LISTING, ONE DAY: profile, dead hours, tracking, schedule. Pure functions do all four; this
+     only hands them what they need and gives back the row to store. */
+  const c = ctxIn || {};
+  const id = String(row.item_id || '');
+  const hours = adPeakHoursParse(row.hours);
+  if (!hours.ranges) return null;                     // refused when it was typed; never guessed at here
+  const profile = adPeakProfile(c.hour_rows || [], { today: c.today, for_day: c.day, lookback_days: c.rules.lookback_days, recent_days: c.rules.recent_days });
+  /* ONE profile, and the dead rule reads only its unweighted half. That is by construction rather than
+     by care: every figure adPeakDeadHours looks at is a count of real days or a sum of real money, so
+     the weighting cannot move a dead hour. "It has never sold in this hour" is a statement about days
+     and must not lean towards some of them. The weighting does its work in the tracking check, where
+     the shape of the pattern is what today is compared against. */
+  const dead = adPeakDeadHours(profile, c.rules);
+  const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: c.drift || '' });
+  const sch = adPeakSchedule({
+    typed_ranges: hours.ranges, dead_windows: dead.windows, hold: adtPeakHoldOf(row),
+    min_days_ok: profile.days_observed >= c.rules.min_days, tracking: track.tracking,
+  });
+  return {
+    account: String(row.account || ''), item_id: id, day: c.day,
+    states: sch.states, source: sch.source, reasons: sch.reasons,
+    profile_days: profile.days_observed,
+    hours_text: adPeakHoursText(hours.ranges),
+    schedule: sch, dead: dead, tracking: track, profile: profile,
+    dead_json: {
+      windows: sch.applied ? dead.windows : [], proposal: sch.proposal,
+      proven_slots: dead.proven_slots, productive_hours: dead.productive_hours,
+      days_observed: profile.days_observed, min_days: c.rules.min_days,
+      tracking: track.tracking, tracking_note: track.note, drift_detected_day: track.drift_detected_day,
+      note: dead.note, adjustments: dead.adjustments, rules: dead.rules,
+    },
+  };
+}
+function adtPeakScheduleStmt(env, plan) {
+  return env.DB.prepare('INSERT INTO adtool_peak_schedule (account, item_id, day, states_json, source, reasons_json, dead_json, profile_days, computed_at)' +
+    " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) ON CONFLICT(account, item_id, day) DO UPDATE SET" +
+    " states_json = ?4, source = ?5, reasons_json = ?6, dead_json = ?7, profile_days = ?8, computed_at = datetime('now')")
+    .bind(plan.account, plan.item_id, plan.day, JSON.stringify(plan.states), plan.source, JSON.stringify(plan.reasons), JSON.stringify(plan.dead_json), plan.profile_days);
+}
+async function adtoolPeakPlan(env) {
+  /* THE PLANNER (owner's brief, 31 Oct, §3). It writes the next day's schedule for every listing on the
+     peak list that switches itself, and at a cut between two parts of the day it works out the rest of
+     TODAY again for the listings the drift check flagged that day.
+     It sends nothing. Everything it writes is a wanted state in a table, and the only thing that ever
+     leaves this worker is the quarter-hourly switch below, under the gate it has always had. */
+  await ensureAdtoolPhase16Schema(env);
+  /* the same pair of switches the switch job answers to, and for the same reason: the page flag takes
+     the whole feature away from everybody, and the job flag stops the PLANNING while every schedule
+     already written stays readable and the switching carries on from it. Both are seeded on. */
+  if ((await adtFlag(env, 'adtool_page_peak')) !== 'on') return;
+  if ((await adtFlag(env, 'adtool_job_peakplan')) !== 'on') return;
+  const rules = await adtPeakPlanRulesFor(env);
+  const uk = adtUkParts(Date.now());
+  const tick = adPeakPlanTick(uk, rules.plan_time);
+  if (tick.mode === 'none') return;                   // not a planning tick: nothing started, nothing logged
+  const t = await adtJobStart(env, 'adtoolPeakPlan');
+  let written = 0;
+  try {
+    const t0 = Date.now();
+    const today = uk.date, tomorrow = adtAddDays(today, 1);
+    const all = await adtPeakListRows(env, '');
+    /* a row that does not switch itself is not scheduled: nobody has consented to the system deciding
+       its hours, and a schedule row for it would be read by the switch as a wanted state. A row whose
+       hours cannot be read is not scheduled either, for the reason the switch itself gives: the hours
+       were refused when they were typed and are never guessed at afterwards. */
+    const armed = all.filter(r => Number(r.auto || 0) === 1 && adPeakHoursParse(r.hours).ranges);
+    const ids = armed.map(r => String(r.item_id));
+    const drift = ids.length ? await adtPeakDriftDays(env, ids, today) : {};
+    /* WHICH LISTINGS AND WHICH DAYS this tick owes a row for.
+       Nightly: tomorrow for every armed row, and today as well where today has no row at all, which is
+       the first deploy, a tick that never fired, and a listing somebody armed this afternoon.
+       At a boundary: today, and only for the listings the drift check flagged today, which is the
+       re-evaluation the owner asked for and not a second full plan. */
+    const have = await adtPeakSchedulesRead(env, ids, [today, tomorrow]);
+    const work = [];
+    for (const r of armed) {
+      const id = String(r.item_id);
+      if (tick.mode === 'nightly') {
+        work.push({ row: r, day: tomorrow });
+        const h = have[id + '|' + today];
+        if (!h || !h.readable) work.push({ row: r, day: today });
+      } else if (drift[id]) {
+        work.push({ row: r, day: today });
+      }
+    }
+    if (!work.length) {
+      await adtJobEnd(env, 'adtoolPeakPlan', t, 0, 'ok', tick.mode === 'nightly'
+        ? 'nothing on the peak hours list is set to switch itself with hours that can be read'
+        : 'no listing on the peak hours list had a change of shape written for it today, so nothing is worked out again');
+      return;
+    }
+    const cut = work.slice(0, ADTOOL_PEAK_PLAN_CAP);
+    const hours = await adtPeakHourRows(env, Array.from(new Set(cut.map(w => String(w.row.item_id)))), today, rules.lookback_days, t0 + ADTOOL_PEAK_PLAN_MS);
+    const noHours = {};
+    for (const id of hours.skipped) noHours[id] = 1;
+    const stmts = [];
+    let done = 0, patterned = 0, proposed = 0, typed = 0, heldRows = 0, offHours = 0, ranOut = 0;
+    for (const w of cut) {
+      const id = String(w.row.item_id);
+      /* a listing whose hours the clock ran out on is LEFT ALONE: its schedule row stays as it is, and
+         with no row at all it runs on its typed hours, which is the behaviour this section promises. */
+      if (noHours[id]) { ranOut++; continue; }
+      const plan = await adtPeakPlanOne(env, w.row, { today: today, day: w.day, rules: rules, hour_rows: hours.by_item[id] || [], drift: drift[id] || '' });
+      if (!plan) continue;
+      done++;
+      if (plan.source === 'pattern') patterned++; else if (plan.source === 'proposal') proposed++; else if (plan.source === 'hold') heldRows++; else typed++;
+      for (const s of plan.states) if (s === 'OFF') offHours++;
+      stmts.push(adtPeakScheduleStmt(env, plan));
+    }
+    await adtBatch(env, stmts); written = stmts.length;
+    await adtJobEnd(env, 'adtoolPeakPlan', t, written, 'ok',
+      (tick.mode === 'nightly' ? 'planning tick at ' + tick.uk_clock + ' UK: ' : 'cut between two parts of the day at ' + tick.uk_clock + ' UK: ') +
+      done + ' schedule' + (done === 1 ? '' : 's') + ' written (' + patterned + ' on the pattern, ' + proposed + ' with the dead hours only put forward, ' +
+      typed + ' on the typed hours, ' + heldRows + ' held by hand)' +
+      (work.length > cut.length ? ', ' + (work.length - cut.length) + ' over the run\'s ceiling and left on their typed hours' : '') +
+      (ranOut ? ', ' + ranOut + ' left exactly as they are after the run\'s own clock ran out before their hours were read' : ''));
+  } catch (e) { await adtJobEnd(env, 'adtoolPeakPlan', t, written, 'error', String(e && e.message || e)); throw e; }
+}
+async function adtPeakOffWindowsToday(env, acct) {
+  /* THE STOP TODAY TILE'S OWN LIST: the listings whose ad the schedule takes off inside their own hours
+     today, and the stretches it takes it off for. Only the OFF the PATTERN caused, or a hold: outside
+     its own hours was already true yesterday and is nobody's news. */
+  await ensureAdtoolPhase16Schema(env);
+  const today = ukDate('');
+  const rows = await adtPeakListRows(env, acct);
+  const ids = rows.filter(r => Number(r.auto || 0) === 1).map(r => String(r.item_id));
+  if (!ids.length) return [];
+  const sch = await adtPeakSchedulesRead(env, ids, [today]);
+  const out = [];
+  for (const r of rows) {
+    const id = String(r.item_id), s = sch[id + '|' + today];
+    if (!s || !s.readable) continue;
+    const runs = [];
+    for (let h = 0; h < 24; h++) {
+      const reason = String((s.reasons || [])[h] || '');
+      if (!(s.states[h] === 'OFF' && (reason.indexOf('dead window') === 0 || reason.indexOf('held ') === 0))) continue;
+      const last = runs[runs.length - 1];
+      if (last && last.to === h) last.to = h + 1; else runs.push({ from: h, to: h + 1 });
+    }
+    if (!runs.length) continue;
+    out.push({
+      item_id: id, account: String(r.account || ''), title: '', hours: String(r.hours || ''),
+      windows: runs.map(x => ({ from: x.from, to: x.to, hours: x.to - x.from })),
+      source: s.source, hold: adtPeakHoldOf(r), reason: s.dead_note || '',
+    });
+    if (out.length >= 200) break;
+  }
+  await adtProductCells(env, out);
+  return out;
+}
 async function adtoolPeakSwitch(env) {
   /* The second job in the tool that can write to eBay, and it writes nothing unless an account's own
      switch is on. Everything about how it sends is adtoolApply's: the same switch key, the same log
@@ -12978,17 +14049,25 @@ async function adtoolPeakSwitch(env) {
     const today = ukDate(''), uk = adtUkParts(Date.now());
     let manual = [];
     try {
-      manual = (await env.DB.prepare("SELECT account, item_id, hours, auto, campaign_id FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
+      manual = (await env.DB.prepare("SELECT account, item_id, hours, auto, campaign_id, COALESCE(hold, 'auto') AS hold FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
     } catch (e) {
+      try {
+        manual = (await env.DB.prepare("SELECT account, item_id, hours, auto, campaign_id FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
+      } catch (e0) {
       try {
         manual = (await env.DB.prepare("SELECT account, item_id, hours, auto FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(auto, 0) = 1 ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
       } catch (e2) {
         manual = (await env.DB.prepare("SELECT account, item_id, hours FROM adtool_peak_items WHERE removed_at = '' ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
       }
+      }
     }
     if (!manual.length) { await adtJobEnd(env, 'adtoolPeakSwitch', t, 0, 'ok', 'nothing on the peak hours list is set to switch itself'); return; }
     const ids = manual.map(r => String(r.item_id));
     const switchable = await adtPeakSwitchable(env, ids);
+    /* TODAY'S SCHEDULE, where the planner wrote one. A listing with no readable row here is handed no
+       override at all and the decision below reads its typed hours exactly as it did before any of this
+       existed, which is the promise this section makes and the reason the read is behind a try. */
+    const schedToday = await adtPeakSchedulesRead(env, ids, [today]);
     const switches = await adtPeakLiveSwitches(env);
     const last = await adtPeakLastSwitch(env, today);
     const doneToday = {};
@@ -13003,7 +14082,7 @@ async function adtoolPeakSwitch(env) {
       for (const r of ((await env.DB.prepare("SELECT item_id, campaign_id FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'blocked' AND day = ?1 LIMIT 2000").bind(today).all()).results || [])) blockedToday[String(r.item_id) + '|' + String(r.campaign_id)] = 1;
     } catch (e) { /* no log table yet: nothing has been written down, so nothing is a repeat */ }
     const stmts = [];
-    let sent = 0, shadow = 0, held = 0, unparseable = 0, idle = 0, mismatched = 0, campaignGone = 0;
+    let sent = 0, shadow = 0, held = 0, unparseable = 0, idle = 0, mismatched = 0, campaignGone = 0, bySchedule = 0, byHold = 0;
     for (const row of manual) {
       const id = String(row.item_id), acct = String(row.account || '');
       const parsed = adPeakHoursParse(row.hours);
@@ -13013,8 +14092,16 @@ async function adtoolPeakSwitch(env) {
          has never been saved against a switch has never been consented to. */
       const auto = Number(row.auto == null ? 0 : row.auto) ? 1 : 0;
       if (!auto) { idle++; continue; }
+      /* THE WANTED STATE FOR THIS HOUR: a hold somebody set, or today's schedule, or neither — and
+         neither is the common case and the safe one, because it leaves the typed hours deciding exactly
+         as they did yesterday. Worked out once per listing, because a hold and a schedule are about the
+         listing and not about one of its campaigns. */
+      const wantFor = adPeakWantFor({ hold: row.hold, schedule: schedToday[id + '|' + today] || null, hour: uk.hour });
       const rows = switchable[id] || [];
       if (!rows.length) { idle++; continue; }               // no pay-per-click ad on it to switch
+      /* counted only once there is an ad this row could act on, so the note says how many listings the
+         schedule and the holds really decided rather than how many carried one */
+      if (wantFor.from === 'hold') byHold++; else if (wantFor.from === 'schedule') bySchedule++;
       /* THE CAMPAIGN THE ROW NAMES, and only that one. The ads this row may touch are narrowed here,
          once, by the one filter the page shows the reader the same answer from: a row naming no
          campaign still touches every pay-per-click ad the listing has, which is what this list has
@@ -13076,6 +14163,11 @@ async function adtoolPeakSwitch(env) {
           believed_state: believed, account_live_switch: on,
           account_switches_today: doneToday[macct] || 0,
           refused_to: hist.refused ? hist.refused.to : '', refused_status: hist.refused ? hist.refused.http_status : 0,
+          /* the day's schedule, or a hold, instead of the typed hours. Worked out by a pure function so
+             "no schedule row means the hours decide, exactly as before" is a unit test and not a hope.
+             It decides WHAT is wanted; the account's own live switch, the ceiling and the refusal rule
+             inside that function decide whether anything leaves here, and those did not change. */
+          want_override: wantFor.want_override, want_source: wantFor.want_source,
         });
         if (!d.send) { idle++; continue; }
         const cap = adPeakApplyCaps({ account_switches_today: doneToday[macct] || 0 });
@@ -13116,7 +14208,9 @@ async function adtoolPeakSwitch(env) {
       (accountsOn.length ? 'live for ' + accountsOn.join(', ') + ': ' + sent + ' sent' + (held ? ', ' + held + ' held by a cap' : '') + '; ' : 'no account is switched on: ') +
       shadow + ' written as would-send, ' + idle + ' already in the right state' + (unparseable ? ', ' + unparseable + ' with hours that cannot be read' : '') +
       (mismatched ? ', ' + mismatched + ' blocked because the list and the ad name different accounts' : '') +
-      (campaignGone ? ', ' + campaignGone + ' blocked because the campaign the list names has no ad to switch' : ''));
+      (campaignGone ? ', ' + campaignGone + ' blocked because the campaign the list names has no ad to switch' : '') +
+      (bySchedule ? '; ' + bySchedule + ' read their hour off today\'s schedule' : '') +
+      (byHold ? (bySchedule ? ' and ' : '; ') + byHold + ' off a hold somebody set' : ''));
   } catch (e) { await adtJobEnd(env, 'adtoolPeakSwitch', t, written, 'error', String(e && e.message || e)); throw e; }
 }
 
@@ -22198,6 +23292,150 @@ const ROUTES = {
     },
   },
 
+  /* §3 of the 31 Oct brief, read-only and by key: the 24-hour pattern engine's own evidence.
+     It exists so the acceptance checks can be PRINTED rather than asserted: §6.3 the hourly profile
+     against eBay's own daily totals for a few listings over a few days, §6.4 the schedule explained hour
+     by hour, §6.5 a hold or a schedule respected by the switch. Deliberately NOT adtool-prefixed, and
+     gated like backupDump: it reaches no eBay endpoint, writes nothing and decides nothing. */
+  adsPeakPlanProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const item = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
+      const asked = String((p && p.day) || '').trim();
+      const days = Math.min(Math.max(Math.round(Number((p && p.days)) || 3), 1), 14);
+      const readErrors = [];
+      /* a read that FAILS says so rather than answering with an empty list: on an evidence route the
+         difference between "nothing happened" and "I could not look" is the whole point, and a table a
+         migration never took reads identical to a quiet week otherwise. */
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return null; }
+      };
+      try { await ensureAdtoolPhase16Schema(env); } catch (e) { readErrors.push('schema: ' + String((e && e.message) || e).slice(0, 160)); }
+      const rules = await adtPeakPlanRulesFor(env).catch(e => { readErrors.push('config: ' + String((e && e.message) || e).slice(0, 160)); return adPeakPlanRules({}); });
+      const uk = adtUkParts(Date.now());
+      const today = uk.date, tomorrow = adtAddDays(today, 1);
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : today;
+      /* WHICH LISTINGS. One named, or the first few on the list that switch themselves, which is what the
+         acceptance check asks for: a few listings over a few days rather than the whole fleet. */
+      let list = [];
+      try { list = await adtPeakListRows(env, ''); } catch (e) { readErrors.push('peak list: ' + String((e && e.message) || e).slice(0, 160)); }
+      const armed = list.filter(r => Number(r.auto || 0) === 1 && adPeakHoursParse(r.hours).ranges);
+      const chosen = item ? list.filter(r => String(r.item_id) === item) : armed.slice(0, 3);
+      const ids = chosen.map(r => String(r.item_id));
+      const hourRead = ids.length ? await adtPeakHourRows(env, ids, today, rules.lookback_days).catch(e => { readErrors.push('hours: ' + String((e && e.message) || e).slice(0, 160)); return { by_item: {}, read: [], skipped: ids }; }) : { by_item: {}, read: [], skipped: [] };
+      const hourRows = hourRead.by_item || {};
+      const drift = ids.length ? await adtPeakDriftDays(env, ids, day).catch(() => ({})) : {};
+      const sched = ids.length ? await adtPeakSchedulesRead(env, ids, [adtAddDays(today, -1), today, tomorrow]).catch(() => ({})) : {};
+      /* §6.3: THE HOURLY PROFILE AGAINST THE DAY EBAY PUBLISHED. The 24 hourly figures of a day summed
+         and set beside the same day's row in the finished-day table, per listing per day, so a reader can
+         add them up themselves. */
+      const dayFrom = adtAddDays(day, -(days - 1));
+      const dailyRows = ids.length ? await q('daily totals', 'SELECT item_id, day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ids, 2) + ' GROUP BY item_id, day', [dayFrom, day].concat(ids)) : [];
+      const dailyBy = {};
+      for (const r of (dailyRows || [])) dailyBy[String(r.item_id) + '|' + String(r.day)] = r;
+      const listings = [];
+      for (const row of chosen) {
+        const id = String(row.item_id);
+        const rows = hourRows[id] || [];
+        const hours = adPeakHoursParse(row.hours);
+        const profile = adPeakProfile(rows, { today: today, for_day: day, lookback_days: rules.lookback_days, recent_days: rules.recent_days });
+        const dead = adPeakDeadHours(profile, rules);
+        const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: drift[id] || '' });
+        const hold = adtPeakHoldOf(row);
+        const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking });
+        /* the day's own hours, summed, beside the day eBay finally published for it */
+        const perDay = [];
+        for (let k = days - 1; k >= 0; k--) {
+          const d = adtAddDays(day, -k);
+          const own = { spend: 0, clicks: 0, orders: 0, units: 0, revenue: 0, hours_with_a_reading: 0 };
+          for (const r of rows) {
+            if (String(r.day) !== d) continue;
+            own.hours_with_a_reading++;
+            own.spend += Number(r.spend) || 0; own.clicks += Number(r.clicks) || 0;
+            own.orders += Number(r.orders) || 0; own.units += Number(r.units) || 0; own.revenue += Number(r.revenue) || 0;
+          }
+          const tot = dailyBy[id + '|' + d] || null;
+          const n = v => (v == null || v === '' || isNaN(Number(v))) ? null : round2(Number(v));
+          perDay.push({
+            day: d, hours_with_a_reading: own.hours_with_a_reading,
+            hours_sum: { spend: round2(own.spend), clicks: own.clicks, orders: own.orders, units: own.units, revenue: round2(own.revenue) },
+            daily_total: tot ? { spend: n(tot.spend), clicks: Number(tot.clicks) || 0, orders: Number(tot.orders) || 0, units: Number(tot.units) || 0, revenue: n(tot.revenue) } : null,
+            /* orders and units are counted into the hour the order arrived in, from the same roll-up the
+               day row is counted from, so those two must agree exactly. Spend cannot, and the note says
+               why rather than the probe calling a known difference a fault. */
+            orders_equal: tot ? (own.orders === (Number(tot.orders) || 0)) : null,
+            units_equal: tot ? (own.units === (Number(tot.units) || 0)) : null,
+            spend_difference: tot && n(tot.spend) != null ? round2(round2(own.spend) - n(tot.spend)) : null,
+          });
+        }
+        const schT = sched[id + '|' + today] || null, schM = sched[id + '|' + tomorrow] || null, schAsked = sched[id + '|' + day] || null;
+        const want = adPeakWantFor({ hold: hold, schedule: schT, hour: uk.hour });
+        listings.push({
+          item_id: id, account: String(row.account || ''), hours: String(row.hours || ''),
+          hours_parsed: hours.ranges, hours_problem: hours.reason || '', auto: Number(row.auto || 0) ? 1 : 0, hold: hold,
+          /* §6.3 */
+          profile: { hours: profile.hours, today: profile.today, days_observed: profile.days_observed, days: profile.days,
+            lookback: profile.lookback, for_day: profile.for_day, for_weekday: profile.for_weekday,
+            weekday_weighting_used: profile.weekday_weighting_used, weekday_days_doubled: profile.weekday_days_doubled,
+            recent_days_doubled: profile.recent_days_doubled, note: profile.note },
+          daily_totals: perDay,
+          /* §6.4 */
+          dead_hours: dead, tracking: track,
+          schedule_worked_out_now: { day: day, states: plan.states, source: plan.source, reasons: plan.reasons, off_windows: plan.off_windows, proposal: plan.proposal, why: plan.why },
+          schedule_stored: { today: schT, tomorrow: schM, asked_for: schAsked },
+          /* a stored schedule that disagrees with what the same pure functions work out from the same
+             rows right now is the one thing worth seeing on this route: either the figures moved since
+             the planner ran, which is normal and dated by computed_at, or the planner and the page are
+             not reading the same rule, which is not. */
+          stored_matches_now: schAsked && schAsked.readable ? JSON.stringify(schAsked.states) === JSON.stringify(plan.states) : null,
+          /* §6.5: the override the switch is handed for this very hour, from the same pure function the
+             job calls, so a hold or a schedule being respected is readable rather than inferred. */
+          switch_override_now: { uk_hour: uk.hour, want: want.want_override || null, source: want.want_source || null, from: want.from, schedule_source: want.schedule_source },
+          next_switch: adPeakNextSwitch({
+            today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
+            tomorrow: schM && schM.readable ? Object.assign({ day: tomorrow }, schM) : null, uk: uk,
+          }),
+        });
+      }
+      /* the switch's own rows for these listings over the window, so §6.5 can be read end to end: what
+         the override wanted, and what the job then wrote down or sent. */
+      const applyRows = ids.length ? await q('apply log', "SELECT day, account, item_id, campaign_id, mode, http_status, payload_json, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 AND day <= ?2 AND item_id IN " + adtInList(ids, 2) + ' ORDER BY id DESC LIMIT 400', [dayFrom, day].concat(ids)) : [];
+      const planJobs = await q('planner runs', "SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolPeakPlan' ORDER BY started_at DESC LIMIT 20");
+      const switchJobs = await q('switch runs', "SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolPeakSwitch' ORDER BY started_at DESC LIMIT 10");
+      /* the cron map itself and not a copy of it: a planner that quietly left the build is the one fault
+         that would make every other list here read as healthy while nothing was ever planned. */
+      const map = cronMap();
+      const planSlots = Object.keys(map).filter(k => (map[k] || []).indexOf(adtoolPeakPlan) >= 0);
+      const switchSlots = Object.keys(map).filter(k => (map[k] || []).indexOf(adtoolPeakSwitch) >= 0);
+      const cfgRows = await q('config', "SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_peak_%' OR key IN ('adtool_page_peak', 'adtool_job_peakswitch', 'adtool_job_peakplan') ORDER BY key");
+      return {
+        asked: { item_id: item || null, day: day, days: days },
+        uk_now: { date: uk.date, hour: uk.hour, minute: uk.minute, weekday: ADTOOL_DOW[uk.weekday] },
+        /* what THIS tick of the hourly slot would do, from the same pure function the job uses */
+        tick_now: adPeakPlanTick(uk, rules.plan_time),
+        rules: rules, config_rows: cfgRows,
+        flags: {
+          page: await adtFlag(env, 'adtool_page_peak'),
+          planner: await adtFlag(env, 'adtool_job_peakplan'),
+          switching: await adtFlag(env, 'adtool_job_peakswitch'),
+        },
+        live_switches: await adtPeakLiveSwitches(env).catch(() => ({})),
+        cron: { planner_slots: planSlots, switch_slots: switchSlots },
+        peak_list: { rows: list.length, set_to_switch_itself: armed.length, examined: ids },
+        listings: listings,
+        apply_log: applyRows, planner_runs: planJobs, switch_runs: switchJobs,
+        reconcile_note: 'Orders and units by hour come from the same roll-up the day row comes from, so those two must add up exactly; a difference there is a fault. SPEND CANNOT, and a difference is not one: eBay publishes no ad spend by hour, so the hourly figures are our own readings of its running total every few minutes with each difference booked to the hour it arrived in, while the day figure is the one eBay finally publishes in its report. A day whose first reading arrived mid-morning has the spend before it in no hour of trading at all, and the hours of today are a part day, so today will always sum short of a finished day. The hour of 08:00 on days before the carry fix is left out of the hours and is still inside the day figure.',
+        envelope_note: 'The hours somebody typed are the envelope: a schedule can only switch a listing off inside them and can never switch one on outside them, so the worst a wrong pattern can do is leave an ad paused in an hour that has never sold.',
+        sent_to_ebay: false,
+        read_errors: readErrors,
+      };
+    },
+  },
+
   /* The night trigger reports back here when the Sheets copy is done — KV carries the stamp the
      battery's freshness check reads, and a failed night letters Management the same morning. */
   backupStamp: {
@@ -22793,7 +24031,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
